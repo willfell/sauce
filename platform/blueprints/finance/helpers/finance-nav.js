@@ -227,7 +227,7 @@ class FinanceNav {
 
         const subAreaConfig = {
             "entity-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md",     sub: "budgets",   sortKey: "month",            dir: "ASC"  },
-            "entity-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md", sub: "paychecks", sortKey: "pay_period_start", dir: "ASC"  },
+            "entity-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md", sub: "paychecks", sortKey: "month",            dir: "ASC"  },
             "entity-invoice":  { hubLabel: "Invoices Hub",  hubIcon: this._icon("file-text"),   hubPath: "spice/finance/invoices/Invoices.md",   sub: "invoices",  sortKey: "month",            dir: "ASC"  },
             "entity-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md",         sub: "debts",     sortKey: "current_balance",  dir: "DESC" },
             "entity-month":    { hubLabel: "Months Hub",    hubIcon: this._icon("calendar"),    hubPath: "spice/finance/months/Months.md",       sub: "months",    sortKey: "month",            dir: "DESC" },
@@ -260,7 +260,12 @@ class FinanceNav {
             });
             const siblings = allFiles.map((f) => {
                 const fm = app.metadataCache.getFileCache(f)?.frontmatter || {};
-                return { path: f.path, sortVal: fm[sortKey] };
+                // Month-keyed entities sort by `month`; legacy paycheck notes lack
+                // it, so fall back to pay_period_start (harmless for budgets/months
+                // whose `month` is always present).
+                let sortVal = fm[sortKey];
+                if ((sortVal === undefined || sortVal === null) && sortKey === "month") sortVal = fm.pay_period_start;
+                return { path: f.path, sortVal };
             }).filter((s) => s.sortVal !== undefined && s.sortVal !== null);
             siblings.sort((a, b) => {
                 const av = String(a.sortVal);

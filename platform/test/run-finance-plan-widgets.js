@@ -257,6 +257,54 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         ok("HC-V0630-WIDGET-MONTH-PLANNED-2 debt row shows planned (budget) figure + paydown",
             /planned \$350\.00/.test(md2Txt) && /paydown \$400\.00/.test(md2Txt), md2Txt.slice(0, 800));
 
+        // ===== HC-V0PAY-WIDGET-MDASH-DEPOSIT-* — month-keyed paycheck renders one row PER DEPOSIT =====
+        // A single month-keyed paycheck with two deposits ($4500 + $4500) tagged
+        // Rent→deposit1 / Apple→deposit2. MonthDashboard Paycheck Totals should
+        // render one row per DEPOSIT (its date + income), income total = Σ deposits.
+        const MD3 = loadClass("month-dashboard.js", "MonthDashboard", env);
+        const monthlyPaycheck = {
+            type: "paycheck", month: NOW_MONTH,
+            deposits: [{ date: `${NOW_MONTH}-01`, amount: 4500 }, { date: `${NOW_MONTH}-15`, amount: 4500 }],
+            expenses: [
+                { item: "Rent", amount: 2200, category: "Rent", deposit: 1, paid: false },
+                { item: "Apple", amount: 950, category: "Credit Payment", debt: "[[Debt-Apple-Card]]", deposit: 2, paid: true },
+            ],
+            file: { path: `spice/finance/paychecks/${NOW_MONTH}/Paycheck-${NOW_MONTH}.md`, name: `Paycheck-${NOW_MONTH}` },
+        };
+        const monthPage3 = { type: "month", month: NOW_MONTH, file: { path: `spice/finance/months/Month-${NOW_MONTH}.md`, name: `Month-${NOW_MONTH}` } };
+        const md3Dv = makeDv([PLAN, ...DEBTS, BUDGET, monthlyPaycheck, monthPage3], monthPage3);
+        let md3Err = null;
+        try { await new MD3().render(md3Dv); } catch (e) { md3Err = e; }
+        ok("HC-V0PAY-WIDGET-MDASH-DEPOSIT-1 MonthDashboard renders monthly paycheck without throwing", md3Err === null, md3Err && md3Err.message);
+        const md3Txt = treeText(md3Dv.container);
+        // income total = Σ deposits = $9,000.00
+        ok("HC-V0PAY-WIDGET-MDASH-DEPOSIT-2 income total sums deposits ($9,000.00)", /Income \$9,000\.00/.test(md3Txt), md3Txt.slice(0, 800));
+        // one row per deposit → both deposit dates present
+        ok("HC-V0PAY-WIDGET-MDASH-DEPOSIT-3 renders a row for deposit 1's date + amount",
+            new RegExp(`${NOW_MONTH}-01 — \\$4,500\\.00`).test(md3Txt), md3Txt.slice(0, 800));
+        ok("HC-V0PAY-WIDGET-MDASH-DEPOSIT-4 renders a row for deposit 2's date + amount",
+            new RegExp(`${NOW_MONTH}-15 — \\$4,500\\.00`).test(md3Txt), md3Txt.slice(0, 800));
+        // pluralization counts deposits (2), not notes (1)
+        ok("HC-V0PAY-WIDGET-MDASH-DEPOSIT-5 header pluralizes on deposit count (2 deposits)",
+            /2 deposits/.test(md3Txt), md3Txt.slice(0, 800));
+
+        // ===== HC-V0PAY-WIDGET-MDASH-LEGACY-* — a legacy per-check note keeps its single-row label =====
+        const MD4 = loadClass("month-dashboard.js", "MonthDashboard", env);
+        const legacyPaycheck = {
+            type: "paycheck", pay_period_start: `${NOW_MONTH}-10`, pay_period_end: `${NOW_MONTH}-10`, paycheck_amount: 3200,
+            expenses: [], file: { path: `spice/finance/paychecks/${NOW_MONTH}-10/Paycheck-${NOW_MONTH}-10.md`, name: `Paycheck-${NOW_MONTH}-10` },
+        };
+        const monthPage4 = { type: "month", month: NOW_MONTH, file: { path: `spice/finance/months/Month-${NOW_MONTH}.md`, name: `Month-${NOW_MONTH}` } };
+        const md4Dv = makeDv([PLAN, ...DEBTS, BUDGET, legacyPaycheck, monthPage4], monthPage4);
+        let md4Err = null;
+        try { await new MD4().render(md4Dv); } catch (e) { md4Err = e; }
+        ok("HC-V0PAY-WIDGET-MDASH-LEGACY-1 MonthDashboard renders legacy paycheck without throwing", md4Err === null, md4Err && md4Err.message);
+        const md4Txt = treeText(md4Dv.container);
+        ok("HC-V0PAY-WIDGET-MDASH-LEGACY-2 legacy note keeps single-row label (pay date + amount)",
+            new RegExp(`${NOW_MONTH}-10 — \\$3,200\\.00`).test(md4Txt), md4Txt.slice(0, 800));
+        ok("HC-V0PAY-WIDGET-MDASH-LEGACY-3 legacy header pluralizes on note count (1 paycheck)",
+            /1 paycheck\b/.test(md4Txt), md4Txt.slice(0, 800));
+
         // FinanceHubSummary Budget tile
         const FHS = loadClass("finance-hub-summary.js", "FinanceHubSummary", env);
         const finPage = { type: "finance-hub", file: { path: "spice/finance/Finance.md", name: "Finance" } };

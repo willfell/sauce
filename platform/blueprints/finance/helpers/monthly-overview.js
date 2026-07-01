@@ -98,16 +98,22 @@ class MonthlyOverview {
             for (const p of pages) {
                 if (!p) continue;
                 if (p.type !== "paycheck") continue;
-                // v0.114.0: Dataview parses unquoted YYYY-MM-DD frontmatter
-                // scalars as Date objects (Luxon DateTime under the hood). The
-                // pre-v0.114.0 filter required `typeof === "string"`, silently
-                // dropping all such paychecks — observed on production headspace
-                // where May paychecks (unquoted dates) were excluded and Income
-                // rendered as $0. Accept both forms via _coerceDateString.
-                // Attribute to the month the check is PAID (pay_period_end),
-                // falling back to pay_period_start for legacy checks lacking an
-                // end. Mirrors FinanceMath.readPaychecksForMonth so budget-note
-                // income agrees with the rest of the finance model.
+                // Archived legacy notes are never part of the live monthly rollup.
+                if (p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")) continue;
+                // Prefer the month-keyed shape: attribute by `p.month`. Fall back
+                // to the legacy pay_period_* window (attribute to the month PAID:
+                // pay_period_end, then pay_period_start) so pre-cutover per-check
+                // notes still attribute until the archive heal runs. Mirrors
+                // FinanceMath.readPaychecksForMonth so budget-note income agrees
+                // with the rest of the finance model.
+                // v0.114.0: Dataview parses unquoted YYYY-MM-DD scalars as Date
+                // objects (Luxon), so _coerceDateString normalizes either form.
+                const monthStr = this._coerceMonthString(p.month);
+                if (monthStr) {
+                    if (monthStr !== monthKey) continue;
+                    out.push(p);
+                    continue;
+                }
                 const keyStr = this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start);
                 if (!keyStr) continue;
                 if (!keyStr.startsWith(monthKey)) continue;
@@ -117,6 +123,11 @@ class MonthlyOverview {
         } catch (_e) {
             return [];
         }
+    }
+
+    _coerceMonthString(v) {
+        const s = this._coerceDateString(v);
+        return s ? s.slice(0, 7) : null;
     }
 
     _coerceDateString(v) {
@@ -160,6 +171,12 @@ class MonthlyOverview {
     _sumIncome(paychecks) {
         let total = 0;
         for (const p of paychecks) {
+            // Prefer the new deposits[] shape (Σ each deposit's amount); fall back
+            // to the legacy scalar paycheck_amount for pre-cutover per-check notes.
+            if (Array.isArray(p?.deposits) && p.deposits.length) {
+                for (const d of p.deposits) total += (Number(d && d.amount) || 0);
+                continue;
+            }
             if (typeof p?.paycheck_amount === "number") total += p.paycheck_amount;
         }
         return total;

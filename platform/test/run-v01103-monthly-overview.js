@@ -172,6 +172,18 @@ function fxPaycheck(payPeriodStart, paycheckAmount, expenses, payPeriodEnd) {
   };
 }
 
+// Month-keyed paycheck (new shape): `month` + `deposits[]` + tagged expenses.
+// Income for the month = Σ deposits[].amount (paycheck_amount absent).
+function fxMonthlyPaycheck(monthKey, deposits, expenses) {
+  return {
+    file: { name: `Paycheck-${monthKey}`, path: `spice/finance/paychecks/${monthKey}/Paycheck-${monthKey}.md` },
+    type: "paycheck",
+    month: monthKey,
+    deposits: deposits || [],
+    expenses: expenses || [],
+  };
+}
+
 function fxDebt(name, currentBalance, balanceHistory) {
   return {
     file: { name: `Debt-${name}`, path: `spice/finance/debts/Debt-${name}.md` },
@@ -559,6 +571,51 @@ console.log("\n=== Section 1 — MonthlyOverview behavioral ===");
   ok("MO-B-15.1 straddling check income lands in July ($4,500.00)", /\$4,500\.00/.test(text));
   ok("MO-B-15.2 wholly-June check excluded from July income", !/\$9,999\.00/.test(text));
   ok("MO-B-15.3 audit footer counts exactly 1 July paycheck", /From\s+1\s+paycheck/.test(text));
+})();
+
+// ---------------------------------------------------------------------------
+// MO-B-16: month-keyed paycheck — income = Σ deposits[].amount for the month.
+// A single monthly note ($4500 + $4500) attributes $9,000 to July.
+// ---------------------------------------------------------------------------
+(async function MO_B_16() {
+  console.log("\n--- Case MO-B-16: month-keyed paycheck income = Σ deposits ---");
+  const mo = new MonthlyOverview();
+  const dv = makeDv({
+    current: fxBudget("2026-07", []),
+    pagesByScope: {
+      "spice/finance/paychecks": [
+        fxMonthlyPaycheck("2026-07",
+          [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+          [{ item: "Rent", amount: 2200, category: "Rent", deposit: 1, paid: false }]),
+      ],
+      "spice/finance/debts": [],
+    },
+  });
+  await mo.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  const text = collectText(root);
+  ok("MO-B-16.1 income sums deposits ($9,000.00)", /Income[\s\S]{0,200}\$9,000\.00/.test(text));
+  ok("MO-B-16.2 monthly note counted as 1 paycheck", /From\s+1\s+paycheck/.test(text));
+})();
+
+// ---------------------------------------------------------------------------
+// MO-B-17: backward-compat — a LEGACY per-check note (no deposits[], only
+// paycheck_amount) still contributes its single amount to month income.
+// ---------------------------------------------------------------------------
+(async function MO_B_17() {
+  console.log("\n--- Case MO-B-17: legacy per-check note income = paycheck_amount ---");
+  const mo = new MonthlyOverview();
+  const dv = makeDv({
+    current: fxBudget("2026-08", []),
+    pagesByScope: {
+      "spice/finance/paychecks": [fxPaycheck("2026-08-01", 3200, [], "2026-08-01")],
+      "spice/finance/debts": [],
+    },
+  });
+  await mo.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  const text = collectText(root);
+  ok("MO-B-17.1 legacy note income = paycheck_amount ($3,200.00)", /Income[\s\S]{0,200}\$3,200\.00/.test(text));
 })();
 
 // ===========================================================================

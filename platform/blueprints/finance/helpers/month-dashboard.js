@@ -151,32 +151,50 @@ class MonthDashboard {
 
         const income = customJS.FinanceMath.monthIncome(paychecks);
         const expenses = customJS.FinanceMath.monthExpensesTotal(paychecks);
-        const count = paychecks.length;
 
+        // Build the row set: one row PER DEPOSIT for month-keyed notes (each check
+        // that landed this month), or a single row for a legacy per-check note.
+        // Each row carries its own income figure so the deposit dates line up with
+        // the schedule the paycheck editor materialized.
+        const rows = [];
+        for (const p of paychecks) {
+            if (Array.isArray(p.deposits) && p.deposits.length) {
+                for (const d of p.deposits) {
+                    const dateStr = customJS.FinanceMath._coerceDateString(d && d.date) || String((d && d.date) || "");
+                    rows.push({ label: dateStr, amount: Number(d && d.amount) || 0, page: p });
+                }
+            } else {
+                // Legacy per-check note: label by the pay date (pay_period_end, the
+                // month-attribution anchor), falling back to pay_period_start.
+                const payDate = (p.pay_period_end != null) ? p.pay_period_end : p.pay_period_start;
+                const dateStr = customJS.FinanceMath._coerceDateString(payDate) || String(payDate || "");
+                const amount = typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0;
+                rows.push({ label: dateStr, amount, page: p });
+            }
+        }
+
+        // Pluralize on the number of income events (deposits + legacy checks),
+        // not the number of notes — a single monthly note holds multiple deposits.
+        const eventCount = rows.length;
+        const anyMonthly = paychecks.some(p => Array.isArray(p.deposits) && p.deposits.length);
+        const eventNoun = anyMonthly ? "deposit" : "paycheck";
         const headerEl = section.createEl("div", { cls: "mdash-paychecks-header" });
-        headerEl.textContent = `Income ${this._fmtMoney(income)} · Expenses ${this._fmtMoney(expenses)} · ${count} paycheck${count === 1 ? "" : "s"}`;
+        headerEl.textContent = `Income ${this._fmtMoney(income)} · Expenses ${this._fmtMoney(expenses)} · ${eventCount} ${eventNoun}${eventCount === 1 ? "" : "s"}`;
         headerEl.style.cssText = "font-size: 0.9em; font-variant-numeric: tabular-nums; margin-bottom: 10px;";
 
-        if (count === 0) {
+        if (eventCount === 0) {
             this._muted(section, "No paychecks for this month.");
             return;
         }
 
         const rowWrap = section.createEl("div", { cls: "mdash-paychecks-rows" });
         rowWrap.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
-        for (const p of paychecks) {
-            // Label by the pay date (pay_period_end, the month-attribution anchor),
-            // falling back to pay_period_start for legacy checks.
-            const payDate = (p.pay_period_end != null) ? p.pay_period_end : p.pay_period_start;
-            const startStr = (typeof payDate === "string") ? payDate
-                : (payDate && typeof payDate.toISODate === "function")
-                    ? payDate.toISODate() : String(payDate || "");
-            const amount = typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0;
+        for (const r of rows) {
             const row = rowWrap.createEl("div", { cls: "mdash-paycheck-row" });
             row.style.cssText = "font-size: 0.82em; font-variant-numeric: tabular-nums; cursor: pointer; color: var(--text-normal);";
-            row.textContent = `${startStr} — ${this._fmtMoney(amount)}`;
+            row.textContent = `${r.label} — ${this._fmtMoney(r.amount)}`;
             row.addEventListener("click", () => {
-                if (p.file && p.file.name) app.workspace.openLinkText(p.file.name, "");
+                if (r.page && r.page.file && r.page.file.name) app.workspace.openLinkText(r.page.file.name, "");
             });
         }
     }

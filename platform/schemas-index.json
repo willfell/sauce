@@ -239,7 +239,7 @@
       "consumers": [
         "platform/blueprints/finance/templates/Budget Template.md"
       ],
-      "notes": "MonthlyOverview (v0.110.3) reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && (p.pay_period_end || p.pay_period_start).startsWith(monthKey)) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Paychecks attribute to the month they are paid (pay_period_end, start fallback). Paycheck expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+      "notes": "MonthlyOverview reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && !p.file.path.includes('/_archive/') && p.month === monthKey) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Month-keyed paychecks attribute by `month`; legacy per-check notes (no `month`) fall back to the pay_period_end (start fallback) window; archived legacy notes under /_archive/ are excluded. Income = Σ deposits[].amount for the month-keyed shape, falling back to the scalar paycheck_amount for legacy notes. Paycheck expenses[*] carry a per-expense `deposit` (1-based index into deposits[]); expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
     },
     {
       "id": "finance-plan-state-read",

@@ -334,6 +334,8 @@ function loadFinanceClass(className, app, customJsOverrides) {
     : className === 'BudgetDefaultsEditor' ? 'budget-defaults-editor.js'
     : className === 'BudgetAllocationsEditor' ? 'budget-allocations-editor.js'
     : className === 'PaycheckExpensesEditor' ? 'paycheck-expenses-editor.js'
+    : className === 'PaycheckSummary' ? 'paycheck-summary.js'
+    : className === 'PaycheckDefaultsEditor' ? 'paycheck-defaults-editor.js'
     : className === 'InvoiceTimeLogEditor' ? 'invoice-time-log-editor.js'
     : className === 'InvoiceControls' ? 'invoice-controls.js'
     : null;
@@ -1898,6 +1900,95 @@ async function testFF20PaycheckLegacyFlatRender() {
   return pass;
 }
 
+// FF21 — PaycheckSummary per-deposit line: a MONTHLY paycheck (deposits[] +
+// tagged expenses) renders a per-deposit income/assigned/leftover line (from
+// stubbed depositTotals), while Band 1's Pay = Σ deposits (not paycheck_amount).
+async function testFF21PaycheckSummaryPerDeposit() {
+  console.log('\n=== FF21 — PaycheckSummary renders per-deposit income line for a monthly paycheck ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const restoreWin = (() => {
+    const prior = global.window;
+    // minimal moment: moment() and moment(str, fmt) → objects with isBefore/isValid.
+    global.window = { moment: () => ({ isBefore: () => false, isValid: () => true }) };
+    return () => { global.window = prior; };
+  })();
+  const overrides = {
+    FinanceMath: {
+      depositTotals: (pg) => [
+        { date: '2026-07-01', amount: 4500, assigned: 2200, leftover: 2300 },
+        { date: '2026-07-15', amount: 4500, assigned: 950, leftover: 3550 },
+      ],
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckSummary', app, overrides);
+  const inst = new Cls();
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 4500 }],
+    expenses: [
+      { item: 'Rent', amount: 2200, category: 'Rent', deposit: 1, paid: false },
+      { item: 'Apple', amount: 950, category: 'Credit Payment', deposit: 2, paid: true },
+    ],
+  };
+  const dv = makeDvWithCurrent(page);
+  let threw = null;
+  try { await inst.render(dv); } catch (e) { threw = e; }
+  restoreWin();
+  const root = findClass(dv.container, 'ps-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  // Pay band totals Σ deposits ($9,000), NOT a scalar paycheck_amount.
+  const showsPayTotal = joined.includes('$9,000.00');
+  // Per-deposit line surfaces each deposit date + its assigned/leftover.
+  const showsDate1 = joined.includes('2026-07-01');
+  const showsDate15 = joined.includes('2026-07-15');
+  const showsPerDepositAmounts = joined.includes('$2,300.00') || joined.includes('$3,550.00');
+  console.log(`  pay Σ deposits ($9,000): ${showsPayTotal} ; dates: ${showsDate1}/${showsDate15} ; per-deposit leftover: ${showsPerDepositAmounts}${threw ? ' (threw: ' + threw.message + ')' : ''}`);
+  const pass = !threw && !!root && showsPayTotal && showsDate1 && showsDate15 && showsPerDepositAmounts;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF22 — PaycheckSummary backward-compat: a LEGACY note (no deposits[], only
+// paycheck_amount) still renders its single Pay amount, and depositTotals is
+// never called (no per-deposit line).
+async function testFF22PaycheckSummaryLegacy() {
+  console.log('\n=== FF22 — PaycheckSummary legacy note renders single paycheck_amount (no per-deposit line) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const restoreWin = (() => {
+    const prior = global.window;
+    global.window = { moment: () => ({ isBefore: () => false, isValid: () => true }) };
+    return () => { global.window = prior; };
+  })();
+  const overrides = {
+    FinanceMath: {
+      depositTotals: () => { throw new Error('depositTotals must not be called for a legacy note'); },
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckSummary', app, overrides);
+  const inst = new Cls();
+  const page = {
+    file: { name: 'Paycheck-2026-05-15', path: 'spice/finance/paychecks/2026-05-15/Paycheck-2026-05-15.md' },
+    pay_period_start: '2026-05-15',
+    pay_period_end: '2026-05-31',
+    paycheck_amount: 4500,
+    expenses: [{ item: 'Rent', amount: 2200, category: 'Rent', paid: false }],
+  };
+  const dv = makeDvWithCurrent(page);
+  let threw = null;
+  try { await inst.render(dv); } catch (e) { threw = e; }
+  restoreWin();
+  const root = findClass(dv.container, 'ps-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const showsLegacyPay = joined.includes('$4,500.00');
+  console.log(`  legacy pay ($4,500): ${showsLegacyPay} ; no throw: ${!threw}${threw ? ' (threw: ' + threw.message + ')' : ''}`);
+  const pass = !threw && !!root && showsLegacyPay;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF11 — BudgetCategoriesEditor delete re-renders from the authoritative array,
 // not the frozen dv.current(). Same render-from-authoritative proof as FF9.
 async function testFF11BudgetCategoriesDeleteRendersAuthoritative() {
@@ -2817,6 +2908,8 @@ async function testRendHasNotes() {
       results.push(['FF18 paycheck-editor-per-deposit-render', await testFF18PaycheckPerDepositRender()]);
       results.push(['FF19 paycheck-editor-move-between-deposits', await testFF19PaycheckMoveBetweenDeposits()]);
       results.push(['FF20 paycheck-editor-legacy-flat-render', await testFF20PaycheckLegacyFlatRender()]);
+      results.push(['FF21 paycheck-summary-per-deposit-line', await testFF21PaycheckSummaryPerDeposit()]);
+      results.push(['FF22 paycheck-summary-legacy-single-amount', await testFF22PaycheckSummaryLegacy()]);
       results.push(['FF11 budget-categories-editor-delete-renders-authoritative', await testFF11BudgetCategoriesDeleteRendersAuthoritative()]);
       results.push(['FF12 budget-categories-editor-edit-preserves-extra', await testFF12BudgetCategoriesEditPreservesExtra()]);
       results.push(['FF13 budget-defaults-editor-delete-renders-authoritative', await testFF13BudgetDefaultsDeleteRendersAuthoritative()]);
