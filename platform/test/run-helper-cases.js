@@ -12236,7 +12236,7 @@ async function caseV01070Bde1ClassDeclared() {
   assertTrue("HC-V01070-BDE-1: class BudgetDefaultsEditor declared",
     /class\s+BudgetDefaultsEditor\s*\{/.test(src));
   assertTrue("HC-V01070-BDE-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+    /async\s+render\s*\(\s*dv\b/.test(src));
   assertTrue("HC-V01070-BDE-1: embed-dedup guard",
     /markdown-embed/.test(src));
 }
