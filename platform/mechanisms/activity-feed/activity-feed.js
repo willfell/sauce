@@ -238,6 +238,7 @@ class ActivityFeed {
         groupOrder: Array.isArray(safeOpts.groupOrder) ? safeOpts.groupOrder : null,
         groupOrderBottom: Array.isArray(safeOpts.groupOrderBottom) ? safeOpts.groupOrderBottom : null,
         defaultClosed: Array.isArray(safeOpts.defaultClosed) ? safeOpts.defaultClosed : null,
+        ascendingGroups: Array.isArray(safeOpts.ascendingGroups) ? safeOpts.ascendingGroups : null,
         // v0.5.0 additive opts
         groupLabels: (safeOpts.groupLabels && typeof safeOpts.groupLabels === "object" && !Array.isArray(safeOpts.groupLabels)) ? safeOpts.groupLabels : null,
         groupPreviewBuilder: (typeof safeOpts.groupPreviewBuilder === "function") ? safeOpts.groupPreviewBuilder : null,
@@ -504,6 +505,12 @@ class ActivityFeed {
     const groupOrder = Array.isArray(safe.groupOrder) ? safe.groupOrder.map(String) : [];     // NEW v0.4.0
     const groupOrderBottom = Array.isArray(safe.groupOrderBottom) ? safe.groupOrderBottom.map(String) : [];  // NEW v0.4.0
     const defaultClosed = new Set(Array.isArray(safe.defaultClosed) ? safe.defaultClosed.map(String) : []);  // NEW v0.4.0
+    // NEW additive opt — group keys whose rows render OLDEST-first (ascending
+    // created_at) instead of inheriting the global newest-first sort. Opt-in:
+    // default empty preserves the descending order for every existing caller.
+    // Used by the daily dashboard so today's scratch notes read in the order
+    // they were taken through the day (first-made first).
+    const ascendingGroups = new Set(Array.isArray(safe.ascendingGroups) ? safe.ascendingGroups.map(String) : []);
     // NEW v0.5.0 additive opts
     const groupLabels = (safe.groupLabels && typeof safe.groupLabels === "object" && !Array.isArray(safe.groupLabels)) ? safe.groupLabels : {};
     const groupPreviewBuilder = (typeof safe.groupPreviewBuilder === "function") ? safe.groupPreviewBuilder : null;
@@ -544,6 +551,22 @@ class ActivityFeed {
         });
         groups.set(bucketKey, bucketPages);
         for (const k of consumed) groups.delete(k);
+      }
+    }
+
+    // Pass B.5 — per-group ascending order (NEW). For any group key listed in
+    // `ascendingGroups`, render its rows oldest-first by created_at instead of
+    // the global newest-first order. Runs after bucketing so bucketed groups
+    // (e.g. cowork) can also opt in. Purely opt-in: skipped entirely when no
+    // group is listed, so all other consumers keep descending order.
+    if (ascendingGroups.size > 0) {
+      for (const [k, list] of groups) {
+        if (!ascendingGroups.has(k) || !Array.isArray(list)) continue;
+        list.sort((a, b) => {
+          const av = (a && a.created_at) ? String(a.created_at) : "";
+          const bv = (b && b.created_at) ? String(b.created_at) : "";
+          return av.localeCompare(bv);  // ascending — oldest first
+        });
       }
     }
 

@@ -15531,7 +15531,12 @@ async function caseHCV0128FinancePlanning() {
     assertTrue("HC-V070-1b: passes bucketRules with cowork bucketKey",        /bucketKey:\s*"cowork"/.test(src));
     assertTrue("HC-V070-1c: passes groupOrder array starting with cowork",    /groupOrder:\s*\[\s*"cowork"/.test(src));
     assertTrue("HC-V070-1d: passes groupOrderBottom containing scratch",      /groupOrderBottom:\s*\[\s*"scratch"\s*\]/.test(src));
-    assertTrue("HC-V070-1e: passes defaultClosed containing scratch",         /defaultClosed:\s*\[\s*"scratch"\s*\]/.test(src));
+    // "Daily Hub Scratch Notes" card: the scratch section now OPENS by default
+    // (no longer defaultClosed) and renders oldest-first via ascendingGroups.
+    assertTrue("HC-V070-1e: no longer defaultCloses the scratch group (opens by default)",
+      !/defaultClosed:\s*\[[^\]]*"scratch"[^\]]*\]/.test(src));
+    assertTrue("HC-V070-1i: passes ascendingGroups: [\"scratch\"] (oldest-first)",
+      /ascendingGroups:\s*\[\s*"scratch"\s*\]/.test(src));
     assertTrue("HC-V070-1f: _BLUEPRINT_COLORS contains cowork entry",         /cowork:\s*"var\(--color-blue\)"/.test(src));
     assertTrue("HC-V070-1g: flatGrouped:true no longer present",              !/flatGrouped:\s*true/.test(src));
     assertTrue("HC-V070-1h: _buildAccentSegments helper removed",             !/_buildAccentSegments\s*\(/.test(src));
