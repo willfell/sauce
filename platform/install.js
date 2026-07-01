@@ -1810,10 +1810,12 @@ async function applyBreadcrumb(tp, manifest, variables, history, git) {
     return;
   }
 
-  // Per-entry validation. Each types[<t>] must have an `ancestors` array
-  // (may be empty) and an optional `current` object that has at least a
-  // `label` string when present. Bad entries are dropped + logged; do not
-  // take the whole contribution down.
+  // Per-entry validation. Each types[<t>] must have either an `ancestors` array
+  // (may be empty) OR a `path_walk` object (additive path-walk mode added with
+  // the wiki blueprint — breadcrumb.js builds the trail from the file's folder
+  // path at render time; no static ancestors needed). An optional `current`
+  // object with at least a `label` string is accepted on both forms.
+  // Bad entries are dropped + logged; do not take the whole contribution down.
   const validated = {};
   for (const [typeName, entry] of Object.entries(typesBlock)) {
     if (!entry || typeof entry !== "object") {
@@ -1832,7 +1834,9 @@ async function applyBreadcrumb(tp, manifest, variables, history, git) {
       }
       continue;
     }
-    if (!Array.isArray(entry.ancestors)) {
+    // Accept path_walk entries (no ancestors needed — trail derived at render time).
+    const hasPathWalk = entry.path_walk && typeof entry.path_walk === "object";
+    if (!hasPathWalk && !Array.isArray(entry.ancestors)) {
       if (history) {
         history.push({
           event: "error",

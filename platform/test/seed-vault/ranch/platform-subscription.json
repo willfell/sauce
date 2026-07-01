@@ -92,6 +92,10 @@
     {
       "name": "render-safe",
       "version": "0.2.0"
+    },
+    {
+      "name": "doc-search",
+      "version": "0.1.0"
     }
   ],
   "blueprints": [
@@ -146,6 +150,10 @@
     {
       "name": "teams",
       "version": "0.3.0"
+    },
+    {
+      "name": "wiki",
+      "version": "0.1.0"
     }
   ]
 }

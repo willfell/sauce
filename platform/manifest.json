@@ -228,6 +228,11 @@
       "name": "teams",
       "version": "0.3.0",
       "path": "blueprints/teams"
+    },
+    {
+      "name": "wiki",
+      "version": "0.1.0",
+      "path": "blueprints/wiki"
     }
   ]
 }

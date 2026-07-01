@@ -1,0 +1,18 @@
+{
+  "contributions": {
+    "wiki": [
+      {
+        "scope": {
+          "path_glob": "spice/wiki/Wiki.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "equals": "wiki-hub"
+          }
+        }
+      }
+    ]
+  }
+}

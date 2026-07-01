@@ -19,6 +19,17 @@
             }
           ]
         },
+        "links-hub": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ],
+          "current": {
+            "label": "lit:Links"
+          }
+        },
         "docs-hub": {
           "ancestors": [
             {
