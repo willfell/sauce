@@ -151,6 +151,11 @@
       "name": "render-safe",
       "version": "0.2.0",
       "path": "mechanisms/render-safe"
+    },
+    {
+      "name": "task-entity",
+      "version": "0.1.0",
+      "path": "mechanisms/task-entity"
     }
   ],
   "blueprints": [

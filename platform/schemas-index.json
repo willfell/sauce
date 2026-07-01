@@ -305,6 +305,16 @@
         "platform/mechanisms/entity-create/entity-create.js"
       ],
       "notes": "Aggregated at install from per-blueprint manifest new_entity_buttons[] specs via applyNewEntityButtons in install.js. Schema: { schema_version:1, contributions:{ <bp>:[...] }, entries:[...] } with a flattened top-level entries[] view. EntityCreate reads it at render time."
+    },
+    {
+      "id": "task-entity-frontmatter",
+      "kind": "contract",
+      "owner": { "type": "mechanism", "name": "task-entity" },
+      "source": "platform/mechanisms/task-entity/manifest.json",
+      "consumers": [
+        "platform/mechanisms/task-entity/task-entity.js"
+      ],
+      "notes": "v0.1.0 — Note-per-task frontmatter (type: task). One tiny note per task under spice/tasks/task-<id>.md (path_glob 'spice/tasks/**', which also covers the _trash/ and _done/ sub-areas — trashed/done notes keep type:task so the same branch validates them). Required keys: type / title / status. Optional keys: scheduled / due / priority / project / project_slug / source / source_note / created_at / completed_at. composeNote writes schema-exact frontmatter (empty-string, not omitted, for blank dates); parseNote normalizes status→open + blank dates→null. Contract encoded in TaskEntity.validatePayload (task-entity.js)."
     }
   ]
 }

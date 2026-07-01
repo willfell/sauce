@@ -36,6 +36,10 @@
     {
       "name": "task-interactions",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "task-entity",
+      "range": ">=0.1.0"
     }
   ],
   "breadcrumb": {
