@@ -10,12 +10,17 @@
     }
   ],
   "customjs_classes": [
-    "TaskEntity"
+    "TaskEntity",
+    "TaskDialog"
   ],
   "files": [
     {
       "source": "task-entity.js",
       "dest": "{{scripts_path}}/task-entity/task-entity.js"
+    },
+    {
+      "source": "task-dialog.js",
+      "dest": "{{scripts_path}}/task-entity/task-dialog.js"
     }
   ],
   "post_install": [],

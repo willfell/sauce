@@ -29,6 +29,15 @@ function loadClass(relPath, className) {
 const TaskEntityClass = loadClass('mechanisms/task-entity/task-entity.js', 'TaskEntity');
 const TaskEntity = new TaskEntityClass();
 
+// TaskDialog is the browser-side create/edit/done/delete dialog for a task note.
+// Its static helpers (defaultsForSurface / trashPath / donePath) are PURE and
+// Node-testable; the instance open() is browser-only and exercised in-vault. We
+// load the class the same bare-class way (new Function(src + "; return X;")) and
+// call the statics through an INSTANCE so a regression to instance-less statics
+// (undefined on the stored customJS instance) fails loudly.
+const TaskDialogClass = loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog');
+const TaskDialog = new TaskDialogClass();
+
 // Fake moment-like object (deterministic — no wall clock).
 const fixedMoment = {
   format: (f) =>
@@ -107,6 +116,42 @@ ok('TE-6 validatePayload requires title + validates date shape', () => {
   assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-7-1' }).valid === false, 'bad scheduled shape invalid');
   assert(TaskEntity.validatePayload({ title: 'ok', due: 'nope' }).valid === false, 'bad due shape invalid');
   assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-07-01', due: '2026-06-30' }).valid === true, 'good dates valid');
+});
+
+function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+// ---------- TaskDialog static helpers (pure) ----------
+
+// TD-1. defaultsForSurface daily → { scheduled: today, source: "daily" }.
+ok('TD-1 defaultsForSurface daily seeds scheduled + source', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'daily', today: '2026-07-01' });
+  assert(deepEq(d, { scheduled: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
+});
+
+// TD-2. defaultsForSurface project → { project, source: "project" }, no scheduled.
+ok('TD-2 defaultsForSurface project seeds project + source (no scheduled)', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'project', project: { name: 'Sauce', slug: 'sauce' } });
+  assert(deepEq(d, { project: { name: 'Sauce', slug: 'sauce' }, source: 'project' }), 'got ' + JSON.stringify(d));
+});
+
+// TD-3. defaultsForSurface meeting → source meeting + source_note + project.
+ok('TD-3 defaultsForSurface meeting seeds source_note + project + source', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'meeting', sourceNote: '[[M]]', project: { name: 'P', slug: 'p' } });
+  assert(d.source === 'meeting', 'source meeting: ' + d.source);
+  assert(d.source_note === '[[M]]', 'source_note: ' + d.source_note);
+  assert(deepEq(d.project, { name: 'P', slug: 'p' }), 'project: ' + JSON.stringify(d.project));
+});
+
+// TD-4. trashPath rewrites spice/tasks/ prefix → spice/tasks/_trash/.
+ok('TD-4 trashPath rewrites prefix into _trash', () => {
+  assert(TaskDialog.trashPath('spice/tasks/task-a.md') === 'spice/tasks/_trash/task-a.md',
+    'got ' + TaskDialog.trashPath('spice/tasks/task-a.md'));
+});
+
+// TD-5. donePath rewrites spice/tasks/ prefix → spice/tasks/_done/.
+ok('TD-5 donePath rewrites prefix into _done', () => {
+  assert(TaskDialog.donePath('spice/tasks/task-a.md') === 'spice/tasks/_done/task-a.md',
+    'got ' + TaskDialog.donePath('spice/tasks/task-a.md'));
 });
 
 console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
