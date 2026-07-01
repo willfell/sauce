@@ -138,12 +138,36 @@ class ProjectNavButtons {
             return { context: "project-todo", pathParts, planningIdx, projectSlug, projectDir };
         }
 
+        // Project Links, PR1 — Link Hub note: "Links Hub.md" directly under the
+        // project dir. Basename-based (mirrors the map/board detection above) so
+        // it does not depend on the metadata cache being warm; the nav row +
+        // breadcrumb render on the hub note, and the "Helpful Links" button
+        // self-hides here.
+        if (basename === "Links Hub" && pathParts.length === planningIdx + 3) {
+            return { context: "links-hub", pathParts, planningIdx, projectSlug, projectDir };
+        }
+
         // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
         if (pathParts.length === planningIdx + 2 && basename === "Projects") {
             return { context: "projects-hub", pathParts, planningIdx };
         }
 
         return { context: "unknown", pathParts, planningIdx, projectSlug, projectDir };
+    }
+
+    // Project Links, PR1 — pure helper for the "Helpful Links" nav button.
+    // Returns { label, path } for the per-project Link Hub note, or null when the
+    // button must be hidden: on the Link Hub note itself (self-hide) or when the
+    // hub note does not exist yet (exists(path) is false). Kept pure + separate
+    // from render() so the path string + both gates are unit-testable (see
+    // run-project-links.js PLB-D4/D5) without stubbing the full Obsidian render.
+    // The "Links Hub.md" basename MUST match detectContext's links-hub branch and
+    // the entity-create extra_files filename_pattern.
+    _linksHubButton(projectDir, ctx, exists) {
+        if (!projectDir || !ctx || ctx.context === "links-hub") return null;
+        const path = `${projectDir}/Links Hub.md`;
+        if (typeof exists === "function" && !exists(path)) return null;
+        return { label: "Helpful Links", path };
     }
 
     async _promptForTitle(notesFolder) {
@@ -378,7 +402,8 @@ class ProjectNavButtons {
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
             docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`,
-            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`
+            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+            links: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`
         };
 
         const filePath = page.file.path;
@@ -469,6 +494,14 @@ class ProjectNavButtons {
                 buttons.push({ label: "To-Do", icon: icons.todo, path: toDoPath });
             }
         }
+        // Project Links, PR1 — "Helpful Links" button opens the per-project Link
+        // Hub note. Logic lives in the pure, unit-tested _linksHubButton: shown on
+        // every project context EXCEPT the Link Hub itself, and only when the hub
+        // note exists (new projects scaffold it via entity-create; existing
+        // projects get it via the PR3 backfill heal) — so it never dangles on a
+        // project without a hub yet.
+        const linksHubBtn = this._linksHubButton(projectDir, ctx, (p) => !!app.vault.getAbstractFileByPath(p));
+        if (linksHubBtn) buttons.push({ ...linksHubBtn, icon: icons.links });
 
         // Task-note context: ensure a Task: <X> button leads back to the parent task hub.
         // Legacy code already handles this for legacy sub-notes via the regex; task-note is
