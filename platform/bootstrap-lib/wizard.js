@@ -62,6 +62,12 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // release; pre-include so fresh-vault bootstrap doesn't
                      // skip them. Same class of bug as the section-label entry
                      // above.
+    "doc-search",    // <this release> — project blueprint (in the default
+                     // blueprint set) depends on doc-search since this release
+                     // (DocSearch graduated to a mechanism); pre-include so
+                     // fresh-vault bootstrap doesn't skip project with
+                     // "depends on doc-search ... not subscribed". Same class
+                     // of bug as the breadcrumb entry above.
     "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
                      // blueprint set) gains a depends_on task-entity >=0.1.0 in
                      // this release to render the daily surface via TaskTodayList
