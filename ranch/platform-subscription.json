@@ -35,6 +35,10 @@
       "version": "0.2.0"
     },
     {
+      "name": "task-entity",
+      "version": "0.1.0"
+    },
+    {
       "name": "breadcrumb",
       "version": "0.1.0"
     },

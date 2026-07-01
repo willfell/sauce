@@ -522,6 +522,19 @@ module.exports = async function (tp) {
     // into the FINAL note shape, so a second install is a true no-op (idempotent).
     await applyNoteChromeHeal(tp, installedNow.history, git);
 
+    // 6a4. task-entity — convert the MOST-RECENT daily's open `- [ ]` lines into
+    // note-per-task files under spice/tasks/ and swap the legacy capture/carryover
+    // dataviewjs blocks for a single TaskTodayList render. MUST run HERE (post-loop,
+    // after applyNoteChromeHeal) — NOT in the per-item to-do heals block — because
+    // applyToDoBlueprintMigration (inside installItem, which runs once per item)
+    // reshapes v0.3.3/v0.4.0 daily bodies from a hardcoded block list, re-injecting
+    // a TodayCaptureEditableList block on every item. Running post-loop lets this
+    // heal operate on the FINAL note shape so the swap is complete + a second
+    // install is a true no-op (idempotent via the TaskTodayList/<!-- tasks-migrated -->
+    // sentinel skip). Ungated, backup-first, non-destructive (done lines +
+    // historical dailies untouched).
+    await applyDailyTasksToEntityMigration(tp, installedNow.history, git);
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -4570,7 +4583,15 @@ function _healNoteChromeBody(body, type) {
   // together. Idempotent guards: skip marker insert if marker present; skip
   // renderer insert if block already present (independent guards so a
   // partially-healed note from v0.127.0 still gets the renderer added).
-  if (type === 'to-do') {
+  if (type === 'to-do'
+      // task-entity model: once a daily has been migrated to note-per-task (it
+      // carries a TaskTodayList render and/or the <!-- tasks-migrated --> sentinel),
+      // the legacy TodayCaptureEditableList back-injection is obsolete and would
+      // fight applyDailyTasksToEntityMigration (which strips that block) — each
+      // install would re-add it, breaking idempotency. Skip step 6 entirely for
+      // already-migrated dailies so the two heals cooperate.
+      && !/class:\s*"TaskTodayList"/.test(out)
+      && !out.includes('<!-- tasks-migrated -->')) {
     const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Today", top: true }]';
     const slIdx = out.indexOf(sectionLabelStr);
     if (slIdx !== -1) {
@@ -7689,6 +7710,487 @@ function _healProjectTodoOwnedTasksBody(body) {
     .concat(rebuilt)
     .concat(lines.slice(sectionEnd))
     .join("\n");
+}
+
+// _parseDailyTaskLine — pure minimal parser for a `- [ ] Title [k:: v]...` task
+// line. Replicates TaskInteractions.parseTaskLine's inline-field grammar (which
+// is a bare customJS class, not requireable in Node) so the migration stays a
+// self-contained install.js function. Returns null for non-task / checked lines
+// (only OPEN `- [ ]`/`- [ ]` etc. lines are parsed). Fields recognised:
+//   project (wikilink brackets stripped: "[[Name]]" -> "Name"), priority, due,
+//   scheduled. Title = everything before the first inline `[key:: value]` field.
+function _parseDailyTaskLine(line) {
+  if (typeof line !== "string") return null;
+  // Open (unchecked) only. Any non-`x` mark inside the box counts as open
+  // (`- [ ]`, `- [/]`, `- [-]`, ...), matching the "open" contract; `- [x]`/
+  // `- [X]` (done) is explicitly excluded.
+  const m = line.match(/^[-*+] \[([^xX\]])\] (.*)$/);
+  if (!m) return null;
+  const body = m[2];
+
+  // Inline fields: [key:: value]. The value alternation matches a wikilink
+  // (`[[...]]`) BEFORE the bare-value branch so `[[Name]]` is not truncated at
+  // the first `]`. First occurrence of a key wins.
+  const fieldRe = /\[(\w+)::\s*(\[\[[^\]]+\]\]|[^\]]+)\]/g;
+  const fields = {};
+  let firstFieldIdx = -1;
+  let mm;
+  while ((mm = fieldRe.exec(body)) !== null) {
+    if (firstFieldIdx === -1) firstFieldIdx = mm.index;
+    const key = mm[1];
+    if (!(key in fields)) fields[key] = mm[2].trim();
+  }
+
+  const title = (firstFieldIdx === -1 ? body : body.slice(0, firstFieldIdx)).trim();
+  if (!title) return null;  // a bracket-only line with no title — leave it raw
+
+  let project = fields.project || null;
+  if (project) {
+    const wm = project.match(/^\[\[(.+?)\]\]$/);
+    if (wm) project = wm[1];
+  }
+
+  return {
+    title,
+    project,                        // display name, brackets stripped, or null
+    priority: fields.priority || null,
+    due: fields.due || null,
+    scheduled: fields.scheduled || null,
+  };
+}
+
+// _dailyTaskHash4 — deterministic 4-hex-char hash (FNV-1a-ish, masked to 16
+// bits), matching TaskEntity._hash4's algorithm. NO Math.random / Date.now, so
+// re-deriving the same input yields the same filename (idempotency + audit).
+// The migration folds a per-note index into the hash input so two tasks composed
+// in the SAME install second with DIFFERENT indices land in different files even
+// if their titles collide.
+function _dailyTaskHash4(str) {
+  let h = 0x811c9dc5;
+  const s = String(str == null ? "" : str);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  const v = (h ^ (h >>> 16)) & 0xffff;
+  return ("0000" + (v >>> 0).toString(16)).slice(-4);
+}
+
+// _composeDailyTaskNote — pure. Builds the { path, body } for one task-note from
+// a parsed open line + context. Mirrors TaskEntity.composeNote's canonical
+// frontmatter key ORDER and empty-string-for-blank convention BYTE-FOR-BYTE so
+// migrated task-notes are indistinguishable from dialog-created ones:
+//   type / title / status / scheduled / due / priority / project /
+//   project_slug / source / source_note / created_at / completed_at
+// Args:
+//   parsed      — _parseDailyTaskLine output
+//   noteDateStr — the daily's date (YYYY-MM-DD from ToDo-<date>.md), or ""
+//   nowIso      — ISO create timestamp (created_at)
+//   ymd/hms     — YYYYMMDD / HHmmss for the filename
+//   index       — per-note ordinal (folded into the filename hash for collision
+//                 resistance across same-second composes)
+function _composeDailyTaskNote(parsed, noteDateStr, nowIso, ymd, hms, index) {
+  const p = parsed || {};
+  // scheduled: parsed.due if present (a due date implies it's live now), else
+  // the daily's own date, else blank (install date is intentionally NOT forced
+  // here — the caller passes noteDateStr, which already falls back to the
+  // install date when the filename carries no date).
+  const scheduled = p.due || noteDateStr || "";
+  const project = p.project ? `[[${p.project}]]` : "";
+  const projectSlug = p.project
+    ? String(p.project).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    : "";
+  const sourceNote = noteDateStr ? `[[ToDo-${noteDateStr}]]` : "";
+
+  const fm = [
+    "---",
+    "type: task",
+    `title: ${p.title || ""}`,
+    "status: open",
+    `scheduled: ${scheduled}`,
+    `due: ${p.due || ""}`,
+    `priority: ${p.priority || ""}`,
+    `project: ${project ? `"${project}"` : ""}`,
+    `project_slug: ${projectSlug}`,
+    "source: daily",
+    `source_note: ${sourceNote ? `"${sourceNote}"` : ""}`,
+    `created_at: ${nowIso}`,
+    "completed_at:",
+    "---",
+    "",
+  ];
+  const hex = _dailyTaskHash4((p.title || "") + "|" + hms + "|" + index);
+  const path = `spice/tasks/task-${ymd}-${hms}-${hex}.md`;
+  return { path, body: fm.join("\n") };
+}
+
+// applyDailyTasksToEntityMigration — v0.14.0 (to-do) / task-entity. Ungated,
+// backup-first, idempotent, NON-DESTRUCTIVE conversion of the MOST-RECENT daily
+// note's raw-markdown open tasks into note-per-task files under spice/tasks/.
+//
+// WHY only the most-recent daily: the carryover mechanism copies unfinished
+// `- [ ]` lines forward each day, so the newest daily holds the current open
+// set. Historical dailies are left COMPLETELY untouched (their raw lines remain
+// as harmless archival markdown; nothing is ever deleted vault-wide).
+//
+// Contract (mirrors applyProjectTodoOwnedTasksHeal's posture):
+//   - Ungated (runs every install) — back-injects NEW content, per the
+//     migration-lifecycle rule.
+//   - .sauce-backup snapshot of the daily BEFORE any write.
+//   - Idempotent: if the target daily already has a TaskTodayList block OR a
+//     `<!-- tasks-migrated -->` sentinel, SKIP entirely (no-op). After a
+//     successful run the daily has both, so re-runs no-op.
+//   - Fail-safe: per-line + whole-heal try/catch. An unparseable line is LEFT as
+//     raw markdown (never dropped). Never throws out of the heal.
+//   - Only OPEN `- [ ]` lines convert; `- [x]` (done) lines are left untouched.
+//   - Extra safety: an equivalent task-note (same title+due, source: daily)
+//     already under spice/tasks/ (incl. _done/_trash) is NOT re-created.
+// Signature matches applyProjectTodoOwnedTasksHeal: (tp, history, git).
+async function applyDailyTasksToEntityMigration(tp, history, git) {
+  // Whole-heal guard: any unexpected failure records a warning + returns; it
+  // NEVER throws out of the installer (loss-averse: a bad heal must not abort
+  // the install or corrupt state).
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const TODO_ROOT = "spice/to-do";
+    if (!(await adapter.exists(TODO_ROOT).catch(() => false))) {
+      history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+        summary: { converted: 0, skipped_reason: "spice/to-do not present" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // (1) Enumerate daily notes (ToDo-YYYY-MM-DD.md, recursive).
+    async function _walkDailies(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) {
+        if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f)) out.push(f);
+      }
+      for (const sub of (listing.folders || [])) {
+        await _walkDailies(sub, out);
+      }
+      return out;
+    }
+    const dailies = await _walkDailies(TODO_ROOT);
+    if (!dailies.length) {
+      history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+        summary: { converted: 0, skipped_reason: "no daily notes found" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // (2) Pick the daily with the greatest YYYY-MM-DD in its filename.
+    const dateOf = (p) => {
+      const mm = p.match(/ToDo-(\d{4}-\d{2}-\d{2})\.md$/);
+      return mm ? mm[1] : "";
+    };
+    let target = dailies[0];
+    for (const d of dailies) {
+      if (dateOf(d) > dateOf(target)) target = d;
+    }
+    const noteDateStr = dateOf(target);
+    const noteBase = target.split("/").pop().replace(/\.md$/, "");
+
+    // (3) Read + idempotency skip.
+    let content;
+    try { content = await adapter.read(target); }
+    catch (e) {
+      history?.push({ event: "warning", step: "daily_tasks_to_entity_migration", name: "to-do",
+        target, reason: `read failed: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+    if (/class:\s*"TaskTodayList"/.test(content) || content.includes("<!-- tasks-migrated -->")) {
+      history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+        target, action: "skipped_already_migrated", converted: 0,
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // (4) Extract OPEN task lines (fence-aware). Dedup by normalized title within
+    // this note (a task duplicated in TODAY_CAPTURE + Carryover → one task-note).
+    const lines = content.split("\n");
+    let inFence = false;
+    const openLineIdxs = [];       // indices of lines to REMOVE from the daily
+    const parsedByIdx = new Map(); // idx -> parsed
+    const seenTitles = new Set();
+    const uniqueParsed = [];       // parsed entries to materialize (dedup'd)
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      if (/^\s*```/.test(ln)) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      let parsed = null;
+      try { parsed = _parseDailyTaskLine(ln); }
+      catch (_e) { parsed = null; }  // per-line fail-safe → leave raw
+      if (!parsed) continue;
+      // This IS an open task line — mark for removal from the daily.
+      openLineIdxs.push(i);
+      parsedByIdx.set(i, parsed);
+      const norm = parsed.title.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seenTitles.has(norm)) continue;  // duplicate title → single task-note
+      seenTitles.add(norm);
+      uniqueParsed.push(parsed);
+    }
+
+    if (!openLineIdxs.length) {
+      // Nothing to convert. Still swap the legacy widget blocks + stamp the
+      // sentinel so a note that only had blocks (no open lines) becomes the
+      // TaskTodayList shape and is a no-op next install.
+      const swapped = _swapDailyToTaskTodayList(content);
+      if (swapped === content) {
+        history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+          target, action: "no_open_tasks", converted: 0,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          completed_at: new Date().toISOString() });
+        return;
+      }
+      await _backupAndWrite(adapter, target, content, swapped);
+      history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+        target, action: "blocks_swapped_no_tasks", converted: 0,
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // (5) Compose + create a task-note per unique open line.
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const hms = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const nowIso = _localIsoNoMillis(now);
+
+    try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
+
+    let created = 0;
+    const createdTitles = [];
+    for (let k = 0; k < uniqueParsed.length; k++) {
+      const parsed = uniqueParsed[k];
+      try {
+        // Extra idempotency safety: skip if an equivalent task-note (same title +
+        // due, source: daily) already exists ANYWHERE under spice/tasks/.
+        if (await _dailyTaskNoteExists(adapter, parsed)) { continue; }
+        const { path: taskPath, body } = _composeDailyTaskNote(parsed, noteDateStr, nowIso, ymd, hms, k);
+        // Do not clobber an existing file at the deterministic path.
+        if (await adapter.exists(taskPath).catch(() => false)) { continue; }
+        await adapter.write(taskPath, body);
+        created += 1;
+        createdTitles.push(parsed.title);
+      } catch (e) {
+        // Per-task fail-safe: record + continue; the raw line stays in the daily
+        // only if we ALSO fail to rewrite — but we still attempt the rewrite for
+        // the tasks that DID materialize. A failed task means its raw line is
+        // preserved below (we only strip lines whose task-note exists).
+        history?.push({ event: "warning", step: "daily_tasks_to_entity_migration", name: "to-do",
+          target, task: parsed && parsed.title, reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    // (6) Rewrite the daily: drop the migrated open lines, swap legacy blocks for
+    // TaskTodayList, stamp the sentinel. Back up first.
+    //
+    // Only strip open lines whose title is now represented by a task-note (either
+    // just-created OR pre-existing). If a task-note failed to materialize AND no
+    // equivalent exists, we KEEP its raw line (never drop it silently).
+    const strippableTitles = new Set();
+    for (const parsed of uniqueParsed) {
+      try {
+        if (createdTitles.includes(parsed.title) || await _dailyTaskNoteExists(adapter, parsed)) {
+          strippableTitles.add(parsed.title.toLowerCase().replace(/\s+/g, " ").trim());
+        }
+      } catch (_e) { /* leave the line raw on error */ }
+    }
+    const keptLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (openLineIdxs.includes(i)) {
+        const parsed = parsedByIdx.get(i);
+        const norm = parsed.title.toLowerCase().replace(/\s+/g, " ").trim();
+        if (strippableTitles.has(norm)) continue;  // migrated → drop the raw line
+      }
+      keptLines.push(lines[i]);
+    }
+    let rewritten = _swapDailyToTaskTodayList(keptLines.join("\n"));
+    // Collapse any 3+ consecutive blank lines the strip may have left.
+    rewritten = rewritten.replace(/\n{3,}/g, "\n\n");
+
+    await _backupAndWrite(adapter, target, content, rewritten);
+
+    history?.push({ event: "info", step: "daily_tasks_to_entity_migration", name: "to-do",
+      target, action: "migrated", converted: created, unique: uniqueParsed.length,
+      raw_lines: openLineIdxs.length,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "daily_tasks_to_entity_migration", name: "to-do",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// _localIsoNoMillis — local-offset ISO timestamp with NO milliseconds
+// (YYYY-MM-DDTHH:mm:ss±HH:mm), matching the canonical created_at vocab the
+// schema validator + seed harness expect (new Date().toISOString() emits `.SSSZ`
+// which the validator rejects).
+function _localIsoNoMillis(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const off = -d.getTimezoneOffset();          // minutes east of UTC
+  const sign = off >= 0 ? "+" : "-";
+  const abs = Math.abs(off);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
+// _dailyTaskNoteExists — true if a task-note with the SAME title (+ same due,
+// when the daily line carries one) and source: daily already exists ANYWHERE
+// under spice/tasks/ (incl. _done/ and _trash/ subfolders). Pure read; tolerant
+// of a missing dir. Extra idempotency guard so a re-run (or a partially-migrated
+// note) never spawns a duplicate.
+async function _dailyTaskNoteExists(adapter, parsed) {
+  const ROOT = "spice/tasks";
+  if (!(await adapter.exists(ROOT).catch(() => false))) return false;
+  const wantTitle = String((parsed && parsed.title) || "").trim();
+  const wantDue = String((parsed && parsed.due) || "").trim();
+  async function _walk(dir, out = []) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return out; }
+    for (const f of (listing.files || [])) {
+      if (f.endsWith(".md")) out.push(f);
+    }
+    for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+    return out;
+  }
+  const files = await _walk(ROOT);
+  for (const f of files) {
+    let body;
+    try { body = await adapter.read(f); } catch (_e) { continue; }
+    const tm = body.match(/^title:\s*(.*)$/m);
+    const sm = body.match(/^source:\s*(.*)$/m);
+    const dm = body.match(/^due:\s*(.*)$/m);
+    const title = tm ? tm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    const source = sm ? sm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    const due = dm ? dm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    if (source !== "daily") continue;
+    if (title !== wantTitle) continue;
+    if (due !== wantDue) continue;
+    return true;
+  }
+  return false;
+}
+
+// _backupAndWrite — write a .sauce-backup snapshot of the ORIGINAL content, then
+// write the new content. Best-effort backup (tolerates mkdir/write failure) but
+// the primary write is awaited. Matches the sibling heals' .sauce-backup idiom.
+async function _backupAndWrite(adapter, targetPath, originalContent, newContent) {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `.sauce-backup/${ts}/${targetPath}`;
+  const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+  if (typeof adapter.mkdir === "function") {
+    try { await adapter.mkdir(backupParent); } catch (_e) { /* tolerate */ }
+  }
+  try { await adapter.write(backupPath, originalContent); } catch (_e) { /* best-effort */ }
+  await adapter.write(targetPath, newContent);
+}
+
+// _swapDailyToTaskTodayList — pure body transform. Replaces the legacy
+// TodayCaptureEditableList + ToDoDailyCarryover dataviewjs blocks (and any
+// "Carryover" SectionLabel block) with a SINGLE TaskTodayList dataviewjs block
+// (materialized `ranch/views/customjs-guard` form, matching an INSTALLED daily),
+// and appends a `<!-- tasks-migrated -->` sentinel. If neither legacy block is
+// present but a "Today" SectionLabel is, injects the TaskTodayList block right
+// after it. Idempotent-friendly: if a TaskTodayList block already exists it is
+// not duplicated; the sentinel is added at most once.
+function _swapDailyToTaskTodayList(content) {
+  const TTL_BLOCK =
+    '```dataviewjs\n' +
+    'await dv.view("ranch/views/customjs-guard", { class: "TaskTodayList" });\n' +
+    '```';
+  const SENTINEL = "<!-- tasks-migrated -->";
+  const hasTTL = /class:\s*"TaskTodayList"/.test(content);
+
+  const lines = content.split("\n");
+  const out = [];
+  let ttlInjected = hasTTL;
+
+  // Helper: is line i the opener of a dataviewjs block whose body (up to the
+  // closing fence) references `className`? Returns the index of the closing
+  // fence, or -1 if not a matching block.
+  const matchBlock = (i, classRe) => {
+    if (!/^\s*```dataviewjs\s*$/.test(lines[i])) return -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s*```\s*$/.test(lines[j])) {
+        // scan body i+1..j-1 for the class
+        for (let k = i + 1; k < j; k++) {
+          if (classRe.test(lines[k])) return j;
+        }
+        return -1;
+      }
+    }
+    return -1;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    // Legacy TodayCaptureEditableList block → replace with TaskTodayList (once).
+    let end = matchBlock(i, /class:\s*"TodayCaptureEditableList"/);
+    if (end !== -1) {
+      if (!ttlInjected) { out.push(...TTL_BLOCK.split("\n")); ttlInjected = true; }
+      i = end;  // skip the whole legacy block
+      continue;
+    }
+    // Legacy ToDoDailyCarryover block → drop (TaskTodayList already covers it).
+    end = matchBlock(i, /class:\s*"ToDoDailyCarryover"/);
+    if (end !== -1) {
+      if (!ttlInjected) { out.push(...TTL_BLOCK.split("\n")); ttlInjected = true; }
+      i = end;
+      continue;
+    }
+    // "Carryover" SectionLabel block → drop (the whole Carryover section is
+    // subsumed by the live TaskTodayList query).
+    end = matchBlock(i, /class:\s*"SectionLabel"[^\n]*text:\s*"Carryover"/);
+    if (end !== -1) { i = end; continue; }
+
+    out.push(lines[i]);
+  }
+
+  let result = out.join("\n");
+
+  // If we never injected the TTL block but a "Today" SectionLabel exists, place
+  // it right after that label's closing fence.
+  if (!ttlInjected) {
+    const rl = result.split("\n");
+    let injAt = -1;
+    for (let i = 0; i < rl.length; i++) {
+      if (/^\s*```dataviewjs\s*$/.test(rl[i])) {
+        // find closing fence + check body for the Today SectionLabel
+        let close = -1, isToday = false;
+        for (let j = i + 1; j < rl.length; j++) {
+          if (/^\s*```\s*$/.test(rl[j])) { close = j; break; }
+          if (/class:\s*"SectionLabel"/.test(rl[j]) && /text:\s*"Today"/.test(rl[j])) isToday = true;
+        }
+        if (isToday && close !== -1) { injAt = close; break; }
+      }
+    }
+    if (injAt !== -1) {
+      rl.splice(injAt + 1, 0, "", ...TTL_BLOCK.split("\n"));
+      result = rl.join("\n");
+      ttlInjected = true;
+    }
+  }
+
+  // Stamp the sentinel exactly once (append at EOF if absent).
+  if (!result.includes(SENTINEL)) {
+    result = result.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+  }
+  return result;
 }
 
 // applyProjectTodoOwnedTasksHeal — ungated backfill (runs every install; NOT
@@ -15460,6 +15962,12 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
+    // task-entity — backup-first daily→note-per-task migration (for
+    // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
+    module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;
+    module.exports._parseDailyTaskLine = _parseDailyTaskLine;
+    module.exports._composeDailyTaskNote = _composeDailyTaskNote;
+    module.exports._swapDailyToTaskTodayList = _swapDailyToTaskTodayList;
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;

@@ -27,14 +27,8 @@ await dv.view("{{views_path}}/customjs-guard", { class: "ToDoLeafActions" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });
 ```
 
-<!-- TODAY_CAPTURE_MARKER -->
-
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "TodayCaptureEditableList" });
-```
-
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyCarryover" });
+await dv.view("{{views_path}}/customjs-guard", { class: "TaskTodayList" });
 ```
 
 ```dataviewjs

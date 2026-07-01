@@ -671,6 +671,108 @@ withTempVault((vault) => {
        !/dv\.current\(\)\.file\.path/.test(aim));
     ok("HC-V01330-SEED-DVGUARD-2 rewritten to optional-chained + active-file fallback",
        aim.includes("dv.current()?.file?.path") && aim.includes("app.workspace.getActiveFile()"));
+
+    // ===== HC-DAILYTASK-SEED-* — applyDailyTasksToEntityMigration =====
+    // The seed's most-recent daily (ToDo-2026-06-17.md) carries the pre-migration
+    // raw-markdown shape: an open capture line with inline fields
+    // (`- [ ] Apply for Credit card [due:: 2026-06-30] [project:: [[Sauce]]] [priority:: high]`),
+    // a done line (`- [x] Feed the dogs`), a Carryover SectionLabel + open carryover
+    // line (`- [ ] Call Shirley Septic`), plus the legacy TodayCaptureEditableList +
+    // ToDoDailyCarryover dataviewjs blocks. The ungated, backup-first
+    // applyDailyTasksToEntityMigration converts each OPEN line into a note-per-task
+    // under spice/tasks/, leaves the done line's raw markdown untouched, swaps the
+    // legacy widget blocks for a single TaskTodayList render, and stamps a
+    // <!-- tasks-migrated --> sentinel. Only the MOST-RECENT daily is converted.
+    //
+    // Asserts run AFTER the idempotency phase (two installs), so DAILYTASK-6
+    // (single task-note per unique title) also proves the migration is idempotent —
+    // the sentinel + TaskTodayList block short-circuit the second install.
+    {
+        // Enumerate task-notes under spice/tasks/ and parse each one's frontmatter.
+        const tasksDir = path.join(vault, "spice/tasks");
+        const taskNotes = [];
+        if (fs.existsSync(tasksDir)) {
+            for (const f of fs.readdirSync(tasksDir)) {
+                if (!f.endsWith(".md")) continue;
+                const body = fs.readFileSync(path.join(tasksDir, f), "utf8");
+                const { frontmatter } = helpers.parseFrontmatter(body);
+                taskNotes.push({ file: f, fm: frontmatter, body });
+            }
+        }
+        const byTitle = (t) => taskNotes.filter((n) => String(n.fm.title || "") === t);
+
+        // 1. "Apply for Credit card" — inline fields carried into frontmatter.
+        const credit = byTitle("Apply for Credit card");
+        ok("HC-DAILYTASK-SEED-1 task-note created for 'Apply for Credit card'",
+           credit.length === 1, `found ${credit.length}`);
+        const creditFm = credit.length ? credit[0].fm : {};
+        ok("HC-DAILYTASK-SEED-1b 'Apply for Credit card' scheduled == due (2026-06-30)",
+           String(creditFm.scheduled || "") === "2026-06-30", `scheduled=${creditFm.scheduled}`);
+        ok("HC-DAILYTASK-SEED-1c 'Apply for Credit card' project == [[Sauce]]",
+           String(creditFm.project || "") === "[[Sauce]]", `project=${creditFm.project}`);
+        ok("HC-DAILYTASK-SEED-1d 'Apply for Credit card' priority == high",
+           String(creditFm.priority || "") === "high", `priority=${creditFm.priority}`);
+        ok("HC-DAILYTASK-SEED-1e 'Apply for Credit card' source == daily",
+           String(creditFm.source || "") === "daily", `source=${creditFm.source}`);
+        ok("HC-DAILYTASK-SEED-1f 'Apply for Credit card' type == task + status open",
+           String(creditFm.type || "") === "task" && String(creditFm.status || "") === "open",
+           `type=${creditFm.type} status=${creditFm.status}`);
+
+        // 2. "Call Shirley Septic" — no due → scheduled falls back to the daily's date.
+        const shirley = byTitle("Call Shirley Septic");
+        ok("HC-DAILYTASK-SEED-2 task-note created for 'Call Shirley Septic'",
+           shirley.length === 1, `found ${shirley.length}`);
+        const shirleyFm = shirley.length ? shirley[0].fm : {};
+        ok("HC-DAILYTASK-SEED-2b 'Call Shirley Septic' scheduled == daily date (2026-06-17)",
+           String(shirleyFm.scheduled || "") === "2026-06-17", `scheduled=${shirleyFm.scheduled}`);
+        ok("HC-DAILYTASK-SEED-2c 'Call Shirley Septic' due blank",
+           String(shirleyFm.due || "") === "", `due=${shirleyFm.due}`);
+
+        // 3. "Feed the dogs" was `- [x]` (done) → NEVER converted.
+        ok("HC-DAILYTASK-SEED-3 no task-note for the DONE line 'Feed the dogs'",
+           byTitle("Feed the dogs").length === 0);
+
+        // 4. .sauce-backup snapshot of the daily exists.
+        let backupOfDaily = false;
+        const backupRoot = path.join(vault, ".sauce-backup");
+        if (fs.existsSync(backupRoot)) {
+            const stack = [backupRoot];
+            while (stack.length) {
+                const dir = stack.pop();
+                for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                    const p = path.join(dir, e.name);
+                    if (e.isDirectory()) stack.push(p);
+                    else if (/ToDo-2026-06-17\.md$/.test(e.name)) backupOfDaily = true;
+                }
+            }
+        }
+        ok("HC-DAILYTASK-SEED-4 .sauce-backup snapshot of the daily exists", backupOfDaily);
+
+        // 5. Healed daily now has a TaskTodayList block + sentinel, and the migrated
+        //    open lines are gone (done line stays).
+        const healedDaily = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
+        ok("HC-DAILYTASK-SEED-5 healed daily has TaskTodayList block",
+           /class:\s*"TaskTodayList"/.test(healedDaily));
+        ok("HC-DAILYTASK-SEED-5b healed daily has <!-- tasks-migrated --> sentinel",
+           healedDaily.includes("<!-- tasks-migrated -->"));
+        ok("HC-DAILYTASK-SEED-5c migrated open lines removed from healed daily",
+           !healedDaily.includes("- [ ] Apply for Credit card") &&
+           !healedDaily.includes("- [ ] Call Shirley Septic"));
+        ok("HC-DAILYTASK-SEED-5d done line 'Feed the dogs' left untouched in the daily",
+           healedDaily.includes("- [x] Feed the dogs"));
+        ok("HC-DAILYTASK-SEED-5e legacy TodayCaptureEditableList/ToDoDailyCarryover blocks swapped out",
+           !/class:\s*"TodayCaptureEditableList"/.test(healedDaily) &&
+           !/class:\s*"ToDoDailyCarryover"/.test(healedDaily));
+
+        // 6. Idempotency (post two-install): exactly one task-note per unique title,
+        //    no duplicates, and exactly one TaskTodayList + one sentinel.
+        ok("HC-DAILYTASK-SEED-6 no duplicate task-notes after two installs",
+           byTitle("Apply for Credit card").length === 1 &&
+           byTitle("Call Shirley Septic").length === 1);
+        ok("HC-DAILYTASK-SEED-6b sentinel + TaskTodayList each present exactly once",
+           (healedDaily.match(/<!-- tasks-migrated -->/g) || []).length === 1 &&
+           (healedDaily.match(/class:\s*"TaskTodayList"/g) || []).length === 1);
+    }
 });
 
 // =============================================================================
