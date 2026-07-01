@@ -1,0 +1,176 @@
+#!/usr/bin/env node
+/**
+ * run-project-links.js — Project Links PR1 regression guard.
+ *
+ * Covers the two behavioral source changes of the "Project Links Wiring" PR1:
+ *   1. ProjectLinksPanel (helpers/project-links-panel.js) — read-only render of a
+ *      note's `links` frontmatter into external anchors (inline, no customJS.Links
+ *      dependency — the Option B decision). Reverting the helper deletes the file,
+ *      so the class fails to load below → red.
+ *   2. ProjectNavButtons.detectContext (helpers/project-nav-buttons.js) — the new
+ *      `links-hub` context branch for a "Links Hub.md" note at the project root.
+ *      Reverting the helper drops the branch → the Links Hub path resolves to
+ *      "unknown" → the PLB-D1 assertion fails → red.
+ *
+ * Both restored → green. This is the red-without-source guard Gate B Layer 1 runs.
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const ROOT = path.resolve(__dirname, '..', '..');
+
+// Obsidian-ish element stub: createEl(tag, {text, href}) + setAttr + style.
+function makeEl(tag) {
+  const el = { tag, textContent: '', href: undefined, attrs: {}, style: { cssText: '' }, children: [] };
+  el.createEl = (t, opts) => {
+    const c = makeEl(t);
+    if (opts && opts.text != null) c.textContent = opts.text;
+    if (opts && opts.href != null) c.href = opts.href;
+    el.children.push(c);
+    return c;
+  };
+  el.setAttr = (k, v) => { el.attrs[k] = v; };
+  return el;
+}
+
+function loadClass(relPath, className) {
+  const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+  return new Function(`${src}\nreturn ${className};`)();
+}
+
+const results = [];
+const ok = (n, c) => { results.push([n, !!c]); console.log(`  ${c ? 'PASS' : 'FAIL'} — ${n}`); };
+
+// Shared globals: real RenderSafe (the blessed cold-load page shim) + a no-op
+// SectionLabel + a minimal `app` (detectContext reads app.metadataCache before
+// reaching the links-hub branch; RenderSafe.page falls through to null when the
+// stub dv has no indexed page and app.workspace is absent).
+const RenderSafe = loadClass('platform/mechanisms/render-safe/render-safe.js', 'RenderSafe');
+global.customJS = Object.assign(global.customJS || {}, {
+  RenderSafe: new RenderSafe(),
+  SectionLabel: { render: () => {} },
+});
+global.app = { metadataCache: { getFileCache: () => ({ frontmatter: {} }) } };
+
+const anchorsOf = (root) => {
+  const out = [];
+  const walk = (el) => { for (const ch of el.children) { if (ch.tag === 'a') out.push(ch); walk(ch); } };
+  walk(root);
+  return out;
+};
+
+// ─── ProjectLinksPanel render ────────────────────────────────────────────────
+const Panel = loadClass('platform/blueprints/project/helpers/project-links-panel.js', 'ProjectLinksPanel');
+ok('PLB-P0 ProjectLinksPanel class loads', !!Panel);
+const panel = Panel ? new Panel() : null;
+const pageWith = (links) => ({ current: () => ({ file: { name: 'Links Hub', path: 'spice/projects/x/Links Hub.md' }, links }) });
+
+// PLB-P1 — renders one external anchor per link (href + text + target/rel).
+{
+  const c = makeEl('div');
+  const dv = Object.assign(pageWith([{ url: 'https://a.com', text: 'A' }, { url: 'https://b.com', text: 'B' }]), { container: c });
+  panel && panel.render(dv);
+  const a = anchorsOf(c);
+  ok('PLB-P1 anchors rendered (per-anchor target/rel/href/text)',
+    a.length === 2 &&
+    a.every(x => x.attrs.target === '_blank' && x.attrs.rel === 'noopener') &&
+    a[0].href === 'https://a.com' && a[0].textContent === 'A' &&
+    a[1].href === 'https://b.com' && a[1].textContent === 'B');
+}
+// PLB-P2 — empty links: no anchors, shows a muted "No links yet." hint.
+{
+  const c = makeEl('div');
+  const dv = Object.assign(pageWith([]), { container: c });
+  panel && panel.render(dv);
+  ok('PLB-P2 empty -> 0 anchors + hint', anchorsOf(c).length === 0 && c.children.some(x => x.textContent === 'No links yet.'));
+}
+// PLB-P3 — cold-load (dv.current() undefined, no active file): no throw, no anchors.
+{
+  const c = makeEl('div');
+  let threw = false;
+  try { panel && panel.render({ current: () => undefined, container: c }); } catch (_e) { threw = true; }
+  ok('PLB-P3 cold-load no throw', !threw && anchorsOf(c).length === 0);
+}
+// PLB-P4 — raw JSON-string frontmatter value is normalized + rendered.
+{
+  const c = makeEl('div');
+  const dv = Object.assign(pageWith('[{"url":"https://a.com","text":"A"}]'), { container: c });
+  panel && panel.render(dv);
+  ok('PLB-P4 raw string value parsed', anchorsOf(c).length === 1 && anchorsOf(c)[0].href === 'https://a.com');
+}
+// PLB-P5 — urlless/garbage dropped + duplicate urls deduped (keep first).
+{
+  const c = makeEl('div');
+  const dv = Object.assign(pageWith([{ text: 'no url' }, null, { url: 'https://a.com', text: 'first' }, { url: 'https://a.com', text: 'second' }]), { container: c });
+  panel && panel.render(dv);
+  const a = anchorsOf(c);
+  ok('PLB-P5 dedup + drop urlless', a.length === 1 && a[0].href === 'https://a.com' && a[0].textContent === 'first');
+}
+
+// ─── ProjectNavButtons.detectContext links-hub branch ────────────────────────
+const Nav = loadClass('platform/blueprints/project/helpers/project-nav-buttons.js', 'ProjectNavButtons');
+ok('PLB-D0 ProjectNavButtons class loads', !!Nav);
+const nav = Nav ? new Nav() : null;
+const dvFor = (name, p) => ({ current: () => ({ file: { name, path: p } }) });
+
+// PLB-D1 — "Links Hub.md" at the project root resolves to the links-hub context.
+{
+  const p = 'spice/projects/x/Links Hub.md';
+  const ctx = nav && nav.detectContext(p, dvFor('Links Hub', p));
+  ok('PLB-D1 Links Hub -> links-hub context',
+    ctx && ctx.context === 'links-hub' && ctx.projectDir === 'spice/projects/x' && ctx.projectSlug === 'x');
+}
+// PLB-D2 — a Map note at the project root is NOT links-hub (branch is specific).
+{
+  const p = 'spice/projects/x/x - Map.md';
+  const ctx = nav && nav.detectContext(p, dvFor('x - Map', p));
+  ok('PLB-D2 Map note -> project-map (not links-hub)', ctx && ctx.context === 'project-map');
+}
+// PLB-D3 — an unrelated root note is NOT mis-detected as links-hub.
+{
+  const p = 'spice/projects/x/Something.md';
+  const ctx = nav && nav.detectContext(p, dvFor('Something', p));
+  ok('PLB-D3 unrelated note not links-hub', ctx && ctx.context !== 'links-hub');
+}
+
+// ─── ProjectNavButtons._linksHubButton (the "Helpful Links" button) ───────────
+// PLB-D4 — on a project (non-hub) context with the hub note present, returns the
+// button pointing at "<projectDir>/Links Hub.md" (pins the exact path string — a
+// typo like "Link Hub.md" would fail here).
+{
+  const btn = nav && nav._linksHubButton('spice/projects/x', { context: 'project-hub' }, () => true);
+  ok('PLB-D4 button path + label', btn && btn.label === 'Helpful Links' && btn.path === 'spice/projects/x/Links Hub.md');
+}
+// PLB-D5 — self-hidden on the links-hub note, and hidden when the hub is absent.
+{
+  const onHub = nav && nav._linksHubButton('spice/projects/x', { context: 'links-hub' }, () => true);
+  const absent = nav && nav._linksHubButton('spice/projects/x', { context: 'project-hub' }, () => false);
+  ok('PLB-D5 self-hide on hub + hide when absent', onHub === null && absent === null);
+}
+
+// ─── Manifest wiring consistency (scaffold + breadcrumb + basename agreement) ──
+// PLB-M1 — the three "Links Hub" references must agree so navigation is not silently
+// broken: the entity-create scaffold filename, the button/detectContext basename,
+// and the registrations (breadcrumb type, customjs class, template + helper files).
+{
+  const man = require(path.join(ROOT, 'platform/blueprints/project/manifest.json'));
+  const projEntity = (man.new_entity_buttons || []).find((b) => b.id === 'project');
+  const linksExtra = projEntity && (projEntity.extra_files || []).find((f) => f.filename_pattern === 'Links Hub.md');
+  const btn = nav && nav._linksHubButton('spice/projects/x', { context: 'project-hub' }, () => true);
+  const btnBasename = btn && btn.path.split('/').pop();
+  const bc = man.breadcrumb && man.breadcrumb.types && man.breadcrumb.types['links-hub'];
+  const files = man.files || [];
+  ok('PLB-M1 links-hub wiring is consistent',
+    !!linksExtra &&
+    linksExtra.frontmatter_template && linksExtra.frontmatter_template.type === 'links-hub' &&
+    btnBasename === linksExtra.filename_pattern &&
+    !!bc && bc.current && bc.current.label === 'lit:Links' &&
+    (man.customjs_classes || []).includes('ProjectLinksPanel') &&
+    files.some((f) => f.source === 'templates/Links Hub.md') &&
+    files.some((f) => f.source === 'helpers/project-links-panel.js'));
+}
+
+const allPass = results.every(([, p]) => p);
+console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
+process.exit(allPass ? 0 : 1);

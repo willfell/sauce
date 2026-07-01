@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.31.0",
+  "version": "1.32.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -59,7 +59,8 @@
     "ProjectDocsIndex",
     "SectionHub",
     "DocSearch",
-    "DocMove"
+    "DocMove",
+    "ProjectLinksPanel"
   ],
   "pre_install": [
     {
@@ -183,6 +184,14 @@
     {
       "source": "helpers/doc-move.js",
       "dest": "{{scripts_path}}/project/doc-move.js"
+    },
+    {
+      "source": "helpers/project-links-panel.js",
+      "dest": "{{scripts_path}}/project/project-links-panel.js"
+    },
+    {
+      "source": "templates/Links Hub.md",
+      "dest": "{{templates_path}}/Template, Links Hub.md"
     }
   ],
   "customjs_startup_scripts": [
@@ -306,6 +315,20 @@
             ]
           },
           "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n<!-- OWNED_TASKS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TodayCaptureEditableList\", args: [{ anchor: \"ownedTasks\" }] });\n```\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+        },
+        {
+          "filename_pattern": "Links Hub.md",
+          "frontmatter_template": {
+            "type": "links-hub",
+            "project": "[[{{prompts.name}}]]",
+            "project_slug": "{{prompts.slug}}",
+            "links": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "links-hub"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksPanel\" });\n```\n"
         }
       ],
       "render_in": {
@@ -474,6 +497,17 @@
             "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
           }
         ]
+      },
+      "links-hub": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Links"
+        }
       },
       "docs-hub": {
         "ancestors": [
