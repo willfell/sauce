@@ -58,7 +58,8 @@
     "ProjectMeetingsPanel",
     "ProjectDocsIndex",
     "SectionHub",
-    "DocSearch"
+    "DocSearch",
+    "DocMove"
   ],
   "pre_install": [
     {
@@ -178,6 +179,10 @@
     {
       "source": "helpers/doc-search.js",
       "dest": "{{scripts_path}}/project/doc-search.js"
+    },
+    {
+      "source": "helpers/doc-move.js",
+      "dest": "{{scripts_path}}/project/doc-move.js"
     }
   ],
   "customjs_startup_scripts": [
