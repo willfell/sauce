@@ -5471,6 +5471,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
+// entity-create:month — installer-managed; do not delete this comment
 await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 \`\`\`
 
@@ -5534,6 +5535,64 @@ async function applyFinanceMonthsScaffolding(tp, manifest, variables, history, g
     summary: { created, preserved },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
+}
+
+// applyFinanceMonthsEntityCreateSentinel — normalizes the `// entity-create:month`
+// marker on the months hub so it LEADS the FinanceNav dataviewjs block (byte-
+// matching the working content/Budgets.md format). When the marker is placed as
+// a TRAILING comment (last line of the block, after the `dv.view` call), it
+// comments out Dataview's injected closing brace and the block throws
+// "Evaluation Error: eval@[native code]" on render. This heal strips ALL
+// existing `// entity-create:month` lines (a leading dup AND/OR a malformed
+// trailing one) and re-inserts the canonical marker immediately BEFORE the
+// FinanceNav call.
+//
+// Target: spice/finance/months/Months.md. UNGATED (no version guard) —
+// idempotent (a canonical file is a no-op with no write; running twice yields
+// identical output). Body-text mutation only; .sauce-backup snapshot before
+// write; failure-loud. Mirrors applyFinanceBudgetGroupSeed's snapshot +
+// history.push + adapter.read/write posture.
+async function applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const monthsHubPath = "spice/finance/months/Months.md";
+  if (!(await adapter.exists(monthsHubPath))) return;
+
+  const SENTINEL = "// entity-create:month — installer-managed; do not delete this comment";
+  // FinanceNav dv.view call line (any quote style / views path).
+  const navRe = /^([ \t]*)await dv\.view\((["'])[^"']*customjs-guard\2\s*,\s*\{\s*class:\s*(["'])FinanceNav\3\s*\}\)\s*;[ \t]*$/m;
+
+  let body;
+  try { body = await adapter.read(monthsHubPath); } catch (_e) { return; }
+  if (!navRe.test(body)) return; // no FinanceNav block → nothing to normalize
+
+  // 1. Strip ALL existing `// entity-create:month` comment lines (removes a
+  //    leading dup AND a malformed trailing one).
+  let out = body.replace(/^[ \t]*\/\/[ \t]*entity-create:month\b[^\n]*\n/gm, "");
+  // 2. Re-insert the canonical marker immediately BEFORE the FinanceNav call.
+  out = out.replace(navRe, (m, indent) => `${indent}${SENTINEL}\n${m}`);
+  if (out === body) return; // already canonical → idempotent no-op (skip write)
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    // .sauce-backup snapshot before write.
+    const backupPath = `.sauce-backup/${ts}/${monthsHubPath}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+    try { await adapter.write(backupPath, body); } catch (_e) { /* snapshot best-effort */ }
+    await adapter.write(monthsHubPath, out);
+    history?.push({ event: "info", step: "finance_months_entity_create_sentinel", name: "finance",
+      action: "normalized", path: monthsHubPath, snapshot: backupPath,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_months_entity_create_sentinel", name: "finance",
+      path: monthsHubPath, reason: e.message,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
 }
 
 // ============================================================================
@@ -5821,6 +5880,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
   await applyFinanceDebtScaffolding(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceMonthsScaffolding(tp, manifest, variables, history, git);            // NEW v0.112.0 — create-if-absent months/ + Months.md
+  await applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);   // NEW — entity-create:month marker must LEAD the FinanceNav block (fixes dataviewjs eval error from a trailing marker)
   await applyFinancePlanScaffolding(tp, manifest, variables, history, git);              // NEW v0.10.0 — create-if-absent Finance Plan.md singleton
   await applyFinanceSavingsScaffolding(tp, manifest, variables, history, git);           // NEW v0.10.0 — create-if-absent savings/ + Savings.md + Savings-Emergency-Fund.md
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
@@ -14797,6 +14857,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceUnifiedNavMigration = applyFinanceUnifiedNavMigration;
     // v0.112.0 S2 — months scaffolding + paycheck-debt-band injection.
     module.exports.applyFinanceMonthsScaffolding = applyFinanceMonthsScaffolding;
+    // entity-create:month marker normalization (leading, not trailing) on the months hub.
+    module.exports.applyFinanceMonthsEntityCreateSentinel = applyFinanceMonthsEntityCreateSentinel;
     module.exports.applyFinancePaycheckDebtBandInjection = applyFinancePaycheckDebtBandInjection;
     module.exports._injectPaycheckDebtBand = _injectPaycheckDebtBand;
     // v0.116.0 — to-do blueprint v0.4.0 migrations.

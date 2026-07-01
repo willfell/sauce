@@ -376,6 +376,54 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-* — applyFinanceMonthsEntityCreateSentinel =====
+    // The seed's months/Months.md is committed in the MALFORMED pre-heal shape
+    // (the `// entity-create:month` marker is the LAST line of the FinanceNav
+    // dataviewjs block, AFTER the dv.view call — which comments out Dataview's
+    // injected closing brace and throws "Evaluation Error: eval@[native code]"
+    // on render). applyFinanceMonthsEntityCreateSentinel must strip that trailing
+    // marker and re-insert it as the LEADING line of the block (byte-matching the
+    // working content/Budgets.md format). (The V0151 prefix is a cosmetic label —
+    // the release pipeline computes the real shipping version; this is not a
+    // version gate.)
+    {
+        let monthsBody = "";
+        try { monthsBody = helpers.readNote(vault, "spice/finance/months/Months.md"); } catch (e) {}
+        const MARKER = "// entity-create:month";
+        // The FinanceNav dv.view call line (materialized views_path == ranch/views).
+        const navIdx = monthsBody.indexOf('class: "FinanceNav"');
+        const markerIdx = monthsBody.indexOf(MARKER);
+        ok(
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-1 months/Months.md still has the FinanceNav dv.view block",
+            navIdx !== -1
+        );
+        ok(
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-2 entity-create:month marker present",
+            markerIdx !== -1
+        );
+        ok(
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-3 marker LEADS the FinanceNav call (marker index < FinanceNav index)",
+            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx,
+            `markerIdx=${markerIdx} navIdx=${navIdx}`
+        );
+        // Everything AFTER the FinanceNav call line must contain NO entity-create:month
+        // line (i.e. the malformed trailing marker was removed).
+        const afterNav = navIdx !== -1
+            ? monthsBody.slice(monthsBody.indexOf("\n", navIdx) + 1)
+            : monthsBody;
+        ok(
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-4 no entity-create:month line trails the FinanceNav call",
+            !afterNav.includes(MARKER),
+            `afterNav still contains marker`
+        );
+        // NOTE: SENTINEL-1..4 assert the END-TO-END post-install contract. The
+        // full-install path re-materializes months/Months.md from content/Months.md
+        // (this dest is not materialize_once), so it cannot ISOLATE the heal on
+        // its own — the direct-invocation family runMonthsSentinelHealFamily()
+        // below proves applyFinanceMonthsEntityCreateSentinel itself repairs a
+        // malformed (trailing-marker) existing hub.
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
@@ -1943,6 +1991,108 @@ async function runSectionHubCleanupFamily() {
     }
 }
 
+// ===== HC-V0151-MONTHS-SENTINEL-HEAL-* — applyFinanceMonthsEntityCreateSentinel =====
+//
+// Direct-invocation isolation of the heal. The committed seed
+// spice/finance/months/Months.md is in the MALFORMED pre-heal shape (the
+// `// entity-create:month` marker TRAILS the FinanceNav dv.view call — which
+// comments out Dataview's injected closing brace and throws
+// "Evaluation Error: eval@[native code]" on render). The full-install family
+// above re-materializes this hub from content/Months.md (dest is not
+// materialize_once), so it cannot isolate the heal. Here we copy the malformed
+// seed fixture into a scratch vault and run ONLY the heal, proving it converts
+// a trailing marker to a leading one — the path that repairs existing consumer
+// hubs — and that it is idempotent.
+async function runMonthsSentinelHealFamily() {
+    const install = require("../install.js");
+    const MARKER = "// entity-create:month";
+    const HUB = "spice/finance/months/Months.md";
+
+    const healRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-months-sentinel-"));
+    try {
+        const seedMalformed = fs.readFileSync(path.join(SEED_DIR, HUB), "utf8");
+        // Sanity: the committed seed fixture really starts from the bug shape
+        // (trailing marker after the FinanceNav call).
+        const sNavIdx = seedMalformed.indexOf('class: "FinanceNav"');
+        const sAfterNav = sNavIdx !== -1
+            ? seedMalformed.slice(seedMalformed.indexOf("\n", sNavIdx) + 1) : "";
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-1 seed fixture starts MALFORMED (marker trails the FinanceNav call)",
+            sNavIdx !== -1 && sAfterNav.includes(MARKER),
+            `navIdx=${sNavIdx} trailingMarker=${sAfterNav.includes(MARKER)}`
+        );
+
+        const adapter = makeFsAdapter(healRoot);
+        await adapter.write(HUB, seedMalformed);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "finance" };
+        const history = [];
+
+        // Pass 1: run ONLY the heal.
+        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
+        const healed = await adapter.read(HUB);
+        const navIdx = healed.indexOf('class: "FinanceNav"');
+        const markerIdx = healed.indexOf(MARKER);
+        const afterNav = navIdx !== -1
+            ? healed.slice(healed.indexOf("\n", navIdx) + 1) : "";
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-2 heal moves the marker to LEAD the FinanceNav call (and none trails)",
+            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx && !afterNav.includes(MARKER),
+            `markerIdx=${markerIdx} navIdx=${navIdx} trailing=${afterNav.includes(MARKER)}`
+        );
+        const markerCount = (healed.match(/^[ \t]*\/\/[ \t]*entity-create:month\b/gm) || []).length;
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-3 heal leaves exactly one entity-create:month marker line (no dup)",
+            markerCount === 1,
+            `count=${markerCount}`
+        );
+        // The healed marker line byte-matches the working content/Budgets.md format.
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-4 healed marker byte-matches the canonical format",
+            healed.includes("// entity-create:month — installer-managed; do not delete this comment")
+        );
+        // .sauce-backup snapshot of the malformed original was written.
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-5 .sauce-backup snapshot of the malformed original written",
+            (() => {
+                const root = path.join(healRoot, ".sauce-backup");
+                if (!fs.existsSync(root)) return false;
+                const stack = [root];
+                while (stack.length) {
+                    const cur = stack.pop();
+                    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+                        const child = path.join(cur, ent.name);
+                        if (ent.isDirectory()) stack.push(child);
+                        else if (ent.name === "Months.md") {
+                            const backed = fs.readFileSync(child, "utf8");
+                            const bNav = backed.indexOf('class: "FinanceNav"');
+                            const bAfter = bNav !== -1 ? backed.slice(backed.indexOf("\n", bNav) + 1) : "";
+                            if (bAfter.includes(MARKER)) return true; // trailing marker preserved in snapshot
+                        }
+                    }
+                }
+                return false;
+            })()
+        );
+
+        // Pass 2: idempotency — already-canonical file is a no-op (byte-identical, no re-write).
+        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
+        const healedTwice = await adapter.read(HUB);
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-6 heal is idempotent (second pass byte-identical)",
+            healedTwice === healed
+        );
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${healRoot}`);
+        } else {
+            try { fs.rmSync(healRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -1974,6 +2124,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01241-SEED-SECHUB-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01241-SEED-SECHUB-FAMILY");
+    })
+    .then(() => runMonthsSentinelHealFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY");
     })
     .finally(() => {
         console.log("");
