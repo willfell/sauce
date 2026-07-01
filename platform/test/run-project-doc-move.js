@@ -101,6 +101,34 @@ const D = Cls ? new Cls() : null;
   ok('D30 infer not-under-docs -> empty', d && d.section === '' && d.subSection === '');
 }
 
+// ---- defensive / fallback branches (Gate B test-adequacy feedback) ----
+{
+  // D31 — pipe-alias wikilink [[Target|Display]] parent strips to the TARGET (not the display)
+  const t = D && D.sectionTargets([
+    { label: 'Sub', path: 'p/docs/knowledge/sub/Sub.md', depth: 2, parent: '[[Knowledge|Kb]]' },
+  ]);
+  ok('D31 pipe-alias parent strips to target', t && t.length === 1 && t[0].section === 'Knowledge' && t[0].subSection === 'Sub');
+  // D32 — rewriteSection strips a pipe-alias wikilink too
+  const r = D && D.rewriteSection({}, '[[Knowledge|Kb]]', '');
+  ok('D32 rewriteSection pipe-alias strip', r && r.section === 'Knowledge');
+  // D33 — _strip drops a trailing .md (hub label given as a filename)
+  const t2 = D && D.sectionTargets([{ label: 'Notes.md', path: 'p/docs/notes/Notes.md', depth: 1, parent: '' }]);
+  ok('D33 label .md stripped', t2 && t2.length === 1 && t2[0].section === 'Notes');
+  // D34 — empty/whitespace-label hub is skipped
+  const t3 = D && D.sectionTargets([
+    { label: '   ', path: 'p/docs/blank/Blank.md', depth: 1, parent: '' },
+    { label: 'Real', path: 'p/docs/real/Real.md', depth: 1, parent: '' },
+  ]);
+  ok('D34 empty-label hub skipped', t3 && t3.length === 1 && t3[0].section === 'Real');
+  // D35 — slugFolder returns "" when the section slugifies to empty (e.g. all punctuation)
+  ok('D35 slugFolder empty-section guard', D && D.slugFolder('p', '!!!', '') === '');
+  // D36 — targetPath with empty folder yields just the filename (no leading slash)
+  ok('D36 targetPath empty folder -> filename only', D && D.targetPath('', 'a/b/Doc.md') === 'Doc.md');
+  // D37 — inferSectionFromPath uses the LAST "docs" segment (a doc inside a section literally named "docs")
+  const inf = D && D.inferSectionFromPath('spice/projects/docs/docs/reference/Note.md');
+  ok('D37 infer last-docs semantics', inf && inf.section === 'reference' && inf.subSection === '');
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);
