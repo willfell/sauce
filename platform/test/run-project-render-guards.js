@@ -30,6 +30,7 @@ const widgets = [
     { name: 'ProjectReferencedByCards',   path: 'platform/blueprints/project/helpers/project-referenced-by-cards.js' },
     { name: 'ProjectActivityPanel',       path: 'platform/blueprints/project/helpers/project-activity-panel.js' },
     { name: 'ProjectOpenTasks',           path: 'platform/blueprints/project/helpers/project-open-tasks.js' },
+    { name: 'ProjectLinksPanel',          path: 'platform/blueprints/project/helpers/project-links-panel.js' },
 ];
 
 // dv stub variants the guards must tolerate.
