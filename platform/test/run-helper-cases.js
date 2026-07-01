@@ -13009,8 +13009,8 @@ async function caseV01103MonthlyOverviewDataReads() {
     /spice\/finance\/paychecks/.test(src));
   assertTrue("V01103-MO-READS-2: queries spice/finance/debts",
     /spice\/finance\/debts/.test(src));
-  assertTrue("V01103-MO-READS-3: filters by pay_period_start month prefix",
-    /pay_period_start[\s\S]{0,400}startsWith/.test(src));
+  assertTrue("V01103-MO-READS-3: filters paychecks by pay_period_end month prefix (start fallback)",
+    /pay_period_end[\s\S]{0,400}startsWith/.test(src));
   assertTrue("V01103-MO-READS-4: sums paycheck_amount + expenses + current_balance + balance_history",
     /paycheck_amount/.test(src) && /\.expenses\b/.test(src) && /current_balance/.test(src) && /balance_history/.test(src));
 }
