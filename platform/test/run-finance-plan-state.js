@@ -300,5 +300,30 @@ function tierCase(balance) {
         fm.readPaychecksForMonth(dvLegacy, "2026-06").length === 1);
 }
 
+// ===== HC-V0630-BA-* — FinanceMath.budgetAllocations merges live plan alloc + per-row overrides =====
+{
+    const dv = makeDv({
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07", categories: [],
+            debt_allocations: [{ slug: "Debt-Apple-Card", planned: 350 }], savings_allocations: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    });
+    const a = fm.budgetAllocations(dv, "2026-07");
+    const apple = a.debt.find(d => d.slug === "Debt-Apple-Card");
+    const disc = a.debt.find(d => d.slug === "Debt-Discover-It");
+    ok("HC-V0630-BA-1 overridden debt row uses the override",
+        apple && apple.planned === 350 && apple.source === "override");
+    ok("HC-V0630-BA-2 non-overridden debt row uses the live plan value",
+        disc && disc.planned > 0 && disc.source === "plan");
+    ok("HC-V0630-BA-3 savings row present with live contribution",
+        a.savings.length >= 1 && a.savings[0].planned > 0);
+    ok("HC-V0630-BA-4 totals expose debt + discretionary",
+        typeof a.totals.debt === "number" && typeof a.totals.discretionary === "number");
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

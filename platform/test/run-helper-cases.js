@@ -13346,7 +13346,7 @@ async function caseV01120FinanceMathStaticApi() {
     "readDebts", "readPaychecksForMonth", "readBudgetForMonth",
     "monthBounds", "debtTotals", "monthIncome", "monthSpending",
     "monthExpensesTotal", "monthDebtPaid", "debtPaidByDebt",
-    "measuredMovement", "reconcile", "fmtMoney",
+    "measuredMovement", "reconcile", "fmtMoney", "budgetAllocations",
   ];
   for (const m of methods) {
     assertTrue(`V01120-FM-API-${m}: instance ${m} declared (not static)`,
