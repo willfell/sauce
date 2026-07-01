@@ -331,6 +331,7 @@ function loadFinanceClass(className, app) {
     : className === 'FinanceHubCards' ? 'finance-hub-cards.js'
     : className === 'BudgetCategoriesEditor' ? 'budget-categories-editor.js'
     : className === 'BudgetDefaultsEditor' ? 'budget-defaults-editor.js'
+    : className === 'BudgetAllocationsEditor' ? 'budget-allocations-editor.js'
     : className === 'PaycheckExpensesEditor' ? 'paycheck-expenses-editor.js'
     : className === 'InvoiceTimeLogEditor' ? 'invoice-time-log-editor.js'
     : className === 'InvoiceControls' ? 'invoice-controls.js'
@@ -1812,6 +1813,93 @@ async function testFF14BudgetDefaultsEditPreservesExtra() {
   return pass;
 }
 
+// FF15 — BudgetAllocationsEditor renders a Debt row + a Savings row + the
+// full-picture (Income → Fixed · Debt · Savings · Discretionary) line, live from
+// customJS.FinanceMath.budgetAllocations. Pure render — no writes.
+async function testFF15BudgetAllocationsRendersSections() {
+  console.log('\n=== FF15 — BudgetAllocationsEditor renders Debt + Savings sections + full-picture line ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const view = {
+    debt: [{ slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: null, planned: 380, source: 'plan' }],
+    savings: [{ name: 'Emergency Fund', plannedLive: 300, override: null, planned: 300, source: 'plan' }],
+    totals: { debt: 380, savings: 300, fixed: 3851, income: 9000, discretionary: 2950 },
+  };
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'budget-allocations-editor.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { budgetAllocations: () => view, fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn BudgetAllocationsEditor;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'bae-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const hasDebtRow = texts.includes('Apple Card');
+  const hasSavingsRow = texts.includes('Emergency Fund');
+  const hasFullPicture = joined.includes('Income $9000.00') && joined.includes('Discretionary $2950.00') && joined.includes('Debt $380.00') && joined.includes('Savings $300.00');
+  const noWrites = app.__captured_writes.length === 0;
+  console.log(`  bae-root: ${!!root} ; debt row: ${hasDebtRow} ; savings row: ${hasSavingsRow} ; full-picture: ${hasFullPicture} ; no writes: ${noWrites}`);
+  const pass = !!root && hasDebtRow && hasSavingsRow && hasFullPicture && noWrites;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF16 — editing a debt row writes a {slug,planned} override into
+// debt_allocations AND the re-render reflects the freshly-recomputed
+// (authoritative) view — showing the adjusted amount + "(adjusted)" — rather
+// than the stale pre-edit dv.current(). Proves render-from-authoritative + merge.
+async function testFF16BudgetAllocationsEditMaterializesOverride() {
+  console.log('\n=== FF16 — BudgetAllocationsEditor edit materializes debt_allocations override + re-renders authoritative ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  // Mutable authoritative state the stubbed budgetAllocations reflects.
+  let plannedApple = 380;
+  let sourceApple = 'plan';
+  let capturedDebtAlloc = [];
+  const makeView = () => ({
+    debt: [{ slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: sourceApple === 'override' ? plannedApple : null, planned: plannedApple, source: sourceApple }],
+    savings: [{ name: 'Emergency Fund', plannedLive: 300, override: null, planned: 300, source: 'plan' }],
+    totals: { debt: plannedApple, savings: 300, fixed: 3851, income: 9000, discretionary: 2950 },
+  });
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'budget-allocations-editor.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { budgetAllocations: () => makeView(), fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
+  // Capture the frontmatter write and reflect it back into the authoritative view.
+  cjs.FinanceFrontmatter = {
+    update: async (file, mut) => {
+      const fm = { debt_allocations: capturedDebtAlloc.slice(), savings_allocations: [] };
+      await mut(fm);
+      capturedDebtAlloc = fm.debt_allocations;
+      const entry = capturedDebtAlloc.find(o => o && o.slug === 'Debt-Apple-Card');
+      if (entry) { plannedApple = entry.planned; sourceApple = 'override'; }
+    },
+    read: () => null,
+    isTruthy: (v) => v === true,
+  };
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn BudgetAllocationsEditor;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  // Stub the row-edit modal to return the user's new planned amount.
+  inst._promptForAmount = async () => 350;
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/budgets/2026-07/Budget-2026-07.md');
+  const appleRow = { slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: null, planned: 380, source: 'plan' };
+  await inst._editFlow(file, dv, 'debt', appleRow);
+  const wroteOverride = capturedDebtAlloc.length === 1 && capturedDebtAlloc[0].slug === 'Debt-Apple-Card' && capturedDebtAlloc[0].planned === 350;
+  const root = findClass(dv.container, 'bae-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const rendersAdjusted = joined.includes('(adjusted)') && joined.includes('$350.00');
+  console.log(`  wrote {slug:Debt-Apple-Card, planned:350} to debt_allocations: ${wroteOverride} ; re-render shows adjusted $350.00 (authoritative): ${rendersAdjusted}`);
+  const pass = wroteOverride && rendersAdjusted;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testFF6InvoiceTimeLogOutOfPath() {
   console.log('\n=== FF6 — InvoiceTimeLogEditor on non-Time-Log path renders nothing ===');
   const app = makeApp();
@@ -2499,6 +2587,8 @@ async function testRendHasNotes() {
       results.push(['FF12 budget-categories-editor-edit-preserves-extra', await testFF12BudgetCategoriesEditPreservesExtra()]);
       results.push(['FF13 budget-defaults-editor-delete-renders-authoritative', await testFF13BudgetDefaultsDeleteRendersAuthoritative()]);
       results.push(['FF14 budget-defaults-editor-edit-preserves-extra', await testFF14BudgetDefaultsEditPreservesExtra()]);
+      results.push(['FF15 budget-allocations-editor-renders-sections', await testFF15BudgetAllocationsRendersSections()]);
+      results.push(['FF16 budget-allocations-editor-edit-materializes-override', await testFF16BudgetAllocationsEditMaterializesOverride()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
