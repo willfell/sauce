@@ -1415,6 +1415,12 @@ async function runDocSectionBackfillFamily() {
             "HC-DOCSEC-BACKFILL-E1 history recorded doc_section_backfill step with empty errors[]",
             eSteps.has("doc_section_backfill") && eNoErrors
         );
+        // E2: a REAL per-doc backfill event was logged (not just the always-present
+        // summary entry) — action backfilled_section + target at a backfilled doc.
+        ok(
+            "HC-DOCSEC-BACKFILL-E2 history has a per-doc backfilled_section event for Depth1 Note",
+            history.some(h => h && h.step === "doc_section_backfill" && h.action === "backfilled_section" && typeof h.target === "string" && /Depth1 Note\.md$/.test(h.target))
+        );
 
         // F: idempotency — a SECOND invocation is a no-op on the backfilled docs.
         const fD1Before = fs.readFileSync(path.join(dsRoot, relDepth1), "utf8");

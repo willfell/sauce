@@ -2,7 +2,7 @@
 type: section-hub
 project: "[[DocSec Project]]"
 project_slug: docsec-project
-section: Advanced
+section: "[[Advanced]]"
 section_slug: advanced
 parent_section: "[[Knowledge]]"
 depth: 2
