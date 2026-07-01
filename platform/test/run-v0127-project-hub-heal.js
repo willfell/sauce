@@ -447,6 +447,133 @@ async function run() {
     ok("HC-V0127-PHLH-E.no-throw", !threw, "empty spice/projects/ threw");
   }
 
+  // ----- applyProjectNavButtonsSeparatorGap (NAV-SEP-*) -----
+  // "Project Card Separator Fix" card: remove the stray blank line between the
+  // ProjectNavButtons row and the `---` below it, on templates + existing notes.
+  {
+    const collapse = install._collapseNavButtonsSeparatorGap;
+    const applyGap = install.applyProjectNavButtonsSeparatorGap;
+    ok("NAV-SEP.exports", typeof collapse === "function" && typeof applyGap === "function",
+      "install.js must export _collapseNavButtonsSeparatorGap + applyProjectNavButtonsSeparatorGap");
+
+    const DVOPEN = "```dataviewjs";
+    const FENCE = "```";
+    const NAV = 'await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });';
+    const SPACE = 'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });';
+    const STATUS = 'await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });';
+
+    const withGap = ["---", "type: project-card", "---", "", DVOPEN, SPACE, FENCE, "",
+      DVOPEN, NAV, FENCE, "", "---", "body text", ""].join("\n");
+    const collapsed = ["---", "type: project-card", "---", "", DVOPEN, SPACE, FENCE, "",
+      DVOPEN, NAV, FENCE, "---", "body text", ""].join("\n");
+    const twoBlanks = ["---", "x", "---", "", DVOPEN, NAV, FENCE, "", "", "---", "b", ""].join("\n");
+    const twoBlanksFixed = ["---", "x", "---", "", DVOPEN, NAV, FENCE, "---", "b", ""].join("\n");
+    // ProjectNavButtons NOT followed by `---` (followed by another widget) → untouched.
+    const notSeparator = ["---", "x", "---", "", DVOPEN, NAV, FENCE, "", DVOPEN, STATUS, FENCE, ""].join("\n");
+
+    // U1 — the stray blank between the ProjectNavButtons fence and `---` is removed.
+    {
+      const r = collapse(withGap);
+      ok("NAV-SEP-U1 blank removed", r.changed === true && r.body === collapsed,
+        "expected the single blank between the ProjectNavButtons fence and `---` to be dropped");
+    }
+    // U2 — idempotent: an already-collapsed body is unchanged.
+    {
+      const r = collapse(collapsed);
+      ok("NAV-SEP-U2 idempotent", r.changed === false && r.body === collapsed,
+        "second pass over collapsed body must be a no-op");
+    }
+    // U3 — multiple blank lines are all collapsed.
+    {
+      const r = collapse(twoBlanks);
+      ok("NAV-SEP-U3 collapses multiple blanks", r.changed === true && r.body === twoBlanksFixed,
+        "two blank lines before the `---` should all be removed");
+    }
+    // U4 — a ProjectNavButtons block NOT followed by `---` is left untouched.
+    {
+      const r = collapse(notSeparator);
+      ok("NAV-SEP-U4 leaves non-separator blank alone", r.changed === false && r.body === notSeparator,
+        "the blank before a following widget block (not `---`) must be preserved");
+    }
+
+    // I1 — integration: a nested card note is healed, backed up, and idempotent.
+    {
+      const notePath = "spice/projects/Demo/tasks/WS/board/Card/Card.md";
+      const adapter = makeAdapter({ [notePath]: withGap });
+      const history = [];
+      await applyGap(makeTp(adapter), {}, {}, history, GIT);
+      ok("NAV-SEP-I1a note healed", adapter._files.get(notePath) === collapsed,
+        "nested card note should have the blank collapsed");
+      const backedUp = Array.from(adapter._files.keys())
+        .some((k) => k.startsWith(".sauce-backup/") && k.endsWith("/" + notePath));
+      ok("NAV-SEP-I1b backup written", backedUp, "a .sauce-backup snapshot of the pre-heal note must exist");
+      const healEvent = history.some((h) => h.step === "project_nav_buttons_separator_gap" && h.action === "healed");
+      ok("NAV-SEP-I1c heal history event", healEvent, "a healed history event must be recorded");
+      // second pass = no-op
+      await applyGap(makeTp(adapter), {}, {}, [], GIT);
+      ok("NAV-SEP-I1d idempotent second pass", adapter._files.get(notePath) === collapsed,
+        "second install pass must not re-touch the already-collapsed note");
+    }
+    // I2 — a note without ProjectNavButtons is untouched.
+    {
+      const other = "spice/projects/Demo/docs/plain.md";
+      const body = ["---", "type: doc-note", "---", "", "just prose", "", "---", "more", ""].join("\n");
+      const adapter = makeAdapter({ [other]: body });
+      await applyGap(makeTp(adapter), {}, {}, [], GIT);
+      ok("NAV-SEP-I2 non-navbuttons note untouched", adapter._files.get(other) === body,
+        "notes without a ProjectNavButtons block must be left byte-identical");
+    }
+    // I3 — empty spice/projects runs without throwing.
+    {
+      const adapter = makeAdapter({});
+      let threw = false;
+      try { await applyGap(makeTp(adapter), {}, {}, [], GIT); } catch (_e) { threw = true; }
+      ok("NAV-SEP-I3 no-throw on empty vault", !threw, "empty spice/projects/ must not throw");
+    }
+
+    // T1..T4 — the shipping templates must NOT keep a blank between the
+    // ProjectNavButtons fence and the `---` below it.
+    const fs = require("fs");
+    const tplDir = path.join(__dirname, "..", "blueprints", "project", "templates");
+    for (const tpl of ["Kanban Card.md", "Doc Note.md", "Project Map.md", "Section Hub.md"]) {
+      let lintOk = false;
+      try {
+        const lines = fs.readFileSync(path.join(tplDir, tpl), "utf8").split("\n");
+        const idx = lines.findIndex((l) => l.includes('class: "ProjectNavButtons"'));
+        lintOk = idx >= 0 &&
+          (lines[idx + 1] || "").trim() === "```" &&
+          (lines[idx + 2] || "").trim() === "---";
+      } catch (_e) { lintOk = false; }
+      ok("NAV-SEP-T:" + tpl + " separator hugs the button row",
+        lintOk, "the `---` must immediately follow the ProjectNavButtons fence (no blank line)");
+    }
+
+    // U5 — a ProjectNavButtons fence followed by a blank then ordinary PROSE
+    // (not `---`, not a widget block) is left untouched.
+    {
+      const prose = ["---", "x", "---", "", DVOPEN, NAV, FENCE, "", "just prose here", ""].join("\n");
+      const r = collapse(prose);
+      ok("NAV-SEP-U5 leaves blank-before-prose alone", r.changed === false && r.body === prose,
+        "a blank before ordinary prose (not a `---` separator) must be preserved");
+    }
+
+    // T5..T8 — the installer-materialized ranch copies must ALSO hug the
+    // separator (blueprint↔ranch parity for the fixed region).
+    const ranchDir = path.join(__dirname, "..", "..", "ranch", "templates");
+    for (const tpl of ["Template, Kanban Card.md", "Template, Doc Note.md", "Template, Project Map.md", "Template, Section Hub.md"]) {
+      let lintOk = false;
+      try {
+        const lines = fs.readFileSync(path.join(ranchDir, tpl), "utf8").split("\n");
+        const idx = lines.findIndex((l) => l.includes('class: "ProjectNavButtons"'));
+        lintOk = idx >= 0 &&
+          (lines[idx + 1] || "").trim() === "```" &&
+          (lines[idx + 2] || "").trim() === "---";
+      } catch (_e) { lintOk = false; }
+      ok("NAV-SEP-Tranch:" + tpl + " separator hugs the button row",
+        lintOk, "the ranch materialized copy must also have `---` immediately after the ProjectNavButtons fence");
+    }
+  }
+
   console.log("");
   if (fail === 0) {
     console.log(`PASS ${pass}/${pass + fail}`);
