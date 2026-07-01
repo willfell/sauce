@@ -1178,6 +1178,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
+  await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
@@ -2724,6 +2725,123 @@ async function applyProjectHubLegacyHeadingCleanup(tp, manifest, variables, hist
     history.push({
       event: "info",
       step: "project_hub_legacy_heading_cleanup",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _collapseNavButtonsSeparatorGap — pure transform. Removes the blank line(s)
+// that sit between the ProjectNavButtons dataviewjs block's closing fence and
+// the `---` separator directly below it, so the separator hugs the button row.
+// Idempotent (no blank → no change). Only touches that exact sequence; every
+// other blank line and every other block is left untouched.
+function _collapseNavButtonsSeparatorGap(body) {
+  const lines = String(body == null ? "" : body).split("\n");
+  const out = [];
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i]);
+    if (lines[i].includes('class: "ProjectNavButtons"') &&
+        i + 1 < lines.length && lines[i + 1].trim() === "```") {
+      out.push(lines[i + 1]);  // keep the closing fence
+      i += 1;
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j > i + 1 && j < lines.length && lines[j].trim() === "---") {
+        changed = true;
+        i = j - 1;  // drop the blank line(s); next iteration pushes the `---`
+      }
+    }
+  }
+  return { changed, body: out.join("\n") };
+}
+
+// applyProjectNavButtonsSeparatorGap — heals pre-existing project/card/doc/map/
+// section notes that shipped with a stray blank line between the ProjectNavButtons
+// button row and the `---` below it (the templates used to emit it). Recursively
+// walks spice/projects, applies _collapseNavButtonsSeparatorGap. Cleanup-type:
+// idempotent (no-op once collapsed), .sauce-backup snapshot, per-note try/catch,
+// history events, never throws. Safe to run every install.
+async function applyProjectNavButtonsSeparatorGap(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  async function collectMd(dir) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    let files = (listing.files || []).filter((p) => p.endsWith(".md"));
+    for (const sub of (listing.folders || [])) {
+      if (sub.includes("/.sauce-backup")) continue;  // never recurse our own backups
+      files = files.concat(await collectMd(sub));
+    }
+    return files;
+  }
+
+  let mdFiles;
+  try {
+    mdFiles = await collectMd(root);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_nav_buttons_separator_gap",
+        reason: `walk failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of mdFiles) {
+    try {
+      const before = await adapter.read(notePath);
+      if (!before.includes('class: "ProjectNavButtons"')) { skipped += 1; continue; }
+      const { changed, body: after } = _collapseNavButtonsSeparatorGap(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_nav_buttons_separator_gap",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_nav_buttons_separator_gap",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_nav_buttons_separator_gap",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -14815,6 +14933,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // frontmatter-type detector / body transform when authoring future cases.
     module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
+    module.exports.applyProjectNavButtonsSeparatorGap = applyProjectNavButtonsSeparatorGap;
+    module.exports._collapseNavButtonsSeparatorGap = _collapseNavButtonsSeparatorGap;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
