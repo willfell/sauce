@@ -280,5 +280,25 @@ function tierCase(balance) {
         ppNone.source === "none" && ppNone.zeroDebtDate === "—", `${ppNone.source}/${ppNone.zeroDebtDate}`);
 }
 
+// ===== HC-V0630-ATTR-* — readPaychecksForMonth attributes by pay_period_end (start fallback) =====
+{
+    // A check straddling the June/July boundary attributes to the month it is PAID (end).
+    const straddling = { type: "paycheck", pay_period_start: "2026-06-28", pay_period_end: "2026-07-02",
+        paycheck_amount: 4500, expenses: [],
+        file: { path: "spice/finance/paychecks/2026-06-28/Paycheck-2026-06-28.md", name: "Paycheck-2026-06-28" } };
+    const dv = makeDv({ paychecks: [straddling] });
+    const july = fm.readPaychecksForMonth(dv, "2026-07");
+    const june = fm.readPaychecksForMonth(dv, "2026-06");
+    ok("HC-V0630-ATTR-1 straddling check attributes to July (by end) not June",
+        july.length === 1 && june.length === 0);
+
+    // Legacy check with only pay_period_start still attributes by start.
+    const legacy = { type: "paycheck", pay_period_start: "2026-06-15", paycheck_amount: 4500, expenses: [],
+        file: { path: "spice/finance/paychecks/2026-06-15/Paycheck-2026-06-15.md", name: "Paycheck-2026-06-15" } };
+    const dvLegacy = makeDv({ paychecks: [legacy] });
+    ok("HC-V0630-ATTR-2 legacy check (no end) falls back to start-month",
+        fm.readPaychecksForMonth(dvLegacy, "2026-06").length === 1);
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

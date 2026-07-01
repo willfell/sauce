@@ -38,8 +38,10 @@ class FinanceMath {
         try {
             return dv.pages('"spice/finance/paychecks"').where(p => {
                 if (!p || p.type !== "paycheck") return false;
-                const s = this._coerceDateString(p.pay_period_start);
-                return typeof s === "string" && s.startsWith(monthKey);
+                // Attribute to the month the check is PAID (pay_period_end),
+                // falling back to pay_period_start for legacy checks lacking an end.
+                const key = this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start);
+                return typeof key === "string" && key.startsWith(monthKey);
             }).array();
         } catch (_e) { return []; }
     }
