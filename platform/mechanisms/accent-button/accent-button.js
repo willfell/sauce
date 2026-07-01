@@ -42,7 +42,13 @@ class AccentButton {
         // Null-guard the icon concat: null + "<span>..." would render the
         // literal string "null" (PersonNavButtons passes icon: null for the
         // icon-less back-link). v0.1.1 fix.
-        btn.innerHTML = (opts.icon || "") + `<span>${opts.label}</span>`;
+        // The label span carries single-line truncation styling (mirrors
+        // SpaceNavButtons' label span): white-space:nowrap keeps every button one
+        // line tall so a long label (e.g. "Project Board") can't wrap and throw
+        // off the row's vertical centering; text-overflow:ellipsis + overflow:hidden
+        // gracefully clip an over-long label instead of spilling; min-width:0 lets
+        // the span shrink inside a flex button so the icon always stays visible.
+        btn.innerHTML = (opts.icon || "") + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${opts.label}</span>`;
         // v0.1.2: + overflow:hidden so a long label can never spill past the
         // button boundary (wrapping across rows is the row container's job).
         const baseCss = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; overflow: hidden;";
