@@ -110,7 +110,36 @@ class PaycheckExpensesEditor {
         // Precompute deposit ordinal labels (e.g. day 1 → "1st") for row tags.
         const depositCount = isMonthly ? page.deposits.length : 0;
 
-        expenses.forEach((exp, index) => {
+        // Display order grouped by check (finance tweak #1): all deposit-1 rows
+        // first, then deposit-2, etc. Array.sort is stable in Node so original
+        // authoring order is preserved within a deposit. Edit/delete/move flows keep
+        // operating on the ORIGINAL expenses[] index (origIndex), never the display
+        // position. For a legacy note (no deposits) every row maps to deposit 1 →
+        // the sort is a stable no-op and the flat order is preserved.
+        const _depIdxOf = (exp) => (customJS && customJS.FinanceMath && typeof customJS.FinanceMath._depositIndex === "function")
+            ? customJS.FinanceMath._depositIndex(exp, depositCount)
+            : this._depositIndex(exp, depositCount);
+        const ordered = expenses
+            .map((exp, origIndex) => ({ exp, origIndex }))
+            .sort((a, b) => _depIdxOf(a.exp) - _depIdxOf(b.exp));
+
+        let _lastDepGroup = null;
+        ordered.forEach(({ exp, origIndex }) => {
+            const index = origIndex;
+
+            // Light per-deposit group label between groups (monthly shape only): the
+            // deposit's clean date. Rendered once when the deposit index changes.
+            if (isMonthly) {
+                const depIdx = _depIdxOf(exp);
+                if (depIdx !== _lastDepGroup) {
+                    _lastDepGroup = depIdx;
+                    const dep = page.deposits[depIdx - 1];
+                    const groupLabel = rows.createEl("div", { cls: "pee-deposit-group" });
+                    groupLabel.textContent = this._depositDateString(dep) || `Check ${depIdx}`;
+                    groupLabel.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.04em; font-weight: 600; text-transform: uppercase; padding: 10px 0 2px;";
+                }
+            }
+
             const row = rows.createEl("div");
             row.style.cssText = "display: flex; gap: 8px; padding: 8px 0; cursor: pointer; border-bottom: 1px solid var(--background-modifier-border); align-items: center;";
 
@@ -221,14 +250,30 @@ class PaycheckExpensesEditor {
     }
 
     // Ordinal label for a deposit's day-of-month: "2026-07-15" → "15th".
-    // Falls back to "#<index>" when the date is unparseable.
+    // Falls back to "#<index>" when the date is unparseable. Coerces first so a
+    // Dataview-parsed Luxon DateTime still yields the day (finance tweak #2).
     _depositTagLabel(deposit, index) {
-        const date = deposit && typeof deposit.date === "string" ? deposit.date : null;
+        const date = this._depositDateString(deposit);
         const m = date && date.match(/^\d{4}-\d{2}-(\d{2})$/);
         if (!m) return `#${index}`;
         const day = Number(m[1]);
         if (!isFinite(day) || day < 1) return `#${index}`;
         return `${day}${this._ordinalSuffix(day)}`;
+    }
+
+    // Coerce a deposit's `date` (string, or a Dataview-parsed Luxon DateTime) to a
+    // clean "YYYY-MM-DD" string. Prefers FinanceMath._coerceDateString; falls back to
+    // a local coercion so the widget is self-contained if the helper is unavailable.
+    _depositDateString(deposit) {
+        const raw = deposit && deposit.date;
+        if (raw == null) return null;
+        if (customJS && customJS.FinanceMath && typeof customJS.FinanceMath._coerceDateString === "function") {
+            return customJS.FinanceMath._coerceDateString(raw);
+        }
+        if (typeof raw === "string") return raw;
+        if (typeof raw.toISODate === "function") { const s = raw.toISODate(); return typeof s === "string" ? s : null; }
+        if (raw instanceof Date && !isNaN(raw.getTime())) return raw.toISOString().slice(0, 10);
+        return null;
     }
 
     _ordinalSuffix(n) {
@@ -291,7 +336,7 @@ class PaycheckExpensesEditor {
     _renderDepositsHeader(root, file, dv, page) {
         const totals = (customJS.FinanceMath && typeof customJS.FinanceMath.depositTotals === "function")
             ? customJS.FinanceMath.depositTotals(page)
-            : page.deposits.map((d) => ({ date: d && d.date, amount: Number(d && d.amount) || 0, assigned: 0, leftover: Number(d && d.amount) || 0 }));
+            : page.deposits.map((d) => ({ date: this._depositDateString(d), amount: Number(d && d.amount) || 0, assigned: 0, leftover: Number(d && d.amount) || 0 }));
 
         const wrap = root.createEl("div", { cls: "pee-deposits" });
         wrap.style.cssText = "display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;";
@@ -302,7 +347,9 @@ class PaycheckExpensesEditor {
             card.style.cssText = "flex: 1; min-width: 140px; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 8px 10px;";
 
             const dateLine = card.createEl("div");
-            dateLine.textContent = (t && t.date) || (page.deposits[i] && page.deposits[i].date) || "";
+            // depositTotals already coerces t.date; the raw-deposit fallback is
+            // coerced too so a Luxon DateTime never renders its ISO timestamp.
+            dateLine.textContent = (t && t.date) || this._depositDateString(page.deposits[i]) || "";
             dateLine.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 4px;";
 
             const amountLine = card.createEl("div");
@@ -544,7 +591,7 @@ class PaycheckExpensesEditor {
                 const oneBased = i + 1;
                 const btn = document.createElement("button");
                 const label = this._depositTagLabel(d, oneBased);
-                btn.textContent = `${label} — ${(d && d.date) || ""} — ${fmt(Number(d && d.amount) || 0)}`;
+                btn.textContent = `${label} — ${this._depositDateString(d) || ""} — ${fmt(Number(d && d.amount) || 0)}`;
                 btn.style.cssText = `display: block; width: 100%; text-align: left; margin-bottom: 6px; padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: ${oneBased === currentIndex ? "var(--background-modifier-hover)" : "var(--background-secondary)"}; color: var(--text-normal);`;
                 btn.onclick = () => { document.body.removeChild(overlay); resolve(oneBased); };
                 dialog.appendChild(btn);

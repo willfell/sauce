@@ -48,6 +48,7 @@ class BudgetAllocationsEditor {
         root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
 
         this._renderFullPicture(root, view);
+        this._renderFixedSection(root, view);
         this._renderSection(root, dv, file, view, "debt");
         this._renderSection(root, dv, file, view, "savings");
     }
@@ -119,6 +120,49 @@ class BudgetAllocationsEditor {
             noteEl.textContent = note;
             noteEl.style.cssText = `font-size: 0.72em; text-align: right; margin-top: 2px; color: ${color};`;
         }
+    }
+
+    // ----- Fixed section (read-only itemized out-of-pocket bills) -----
+
+    // Renders the month's fixed bills (finance tweak #3, Option A) itemized from the
+    // paycheck — the literal out-of-pocket spend the reconcile-to-income waterfall's
+    // Fixed line sums. READ-ONLY: no edit/reset flows, never writes. When there is
+    // nothing to itemize (no paycheck yet) it renders a muted note, not a crash.
+    _renderFixedSection(root, view) {
+        const items = (view && Array.isArray(view.fixed)) ? view.fixed : [];
+        const total = (view && view.totals && typeof view.totals.fixed === "number")
+            ? view.totals.fixed
+            : items.reduce((s, r) => s + (Number(r && r.amount) || 0), 0);
+
+        const section = root.createEl("div", { cls: "bae-section bae-section-fixed" });
+        section.style.cssText = "padding-top: 12px;";
+
+        const head = section.createEl("div");
+        head.textContent = "Fixed";
+        head.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.04em; font-weight: 600; text-transform: uppercase; margin-bottom: 6px;";
+
+        if (items.length === 0) {
+            const empty = section.createEl("div");
+            empty.textContent = "No paycheck yet — fixed bills itemize once the month's paycheck exists.";
+            empty.style.cssText = "font-size: 0.82em; color: var(--text-muted); padding: 6px 0;";
+            return;
+        }
+
+        const rowsWrap = section.createEl("div");
+        items.forEach((r) => {
+            const row = rowsWrap.createEl("div");
+            row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--background-modifier-border);";
+            const nameEl = row.createEl("span");
+            nameEl.textContent = (r && r.item) || "(unnamed)";
+            nameEl.style.cssText = "flex: 2; min-width: 0; font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+            const amtEl = row.createEl("span");
+            amtEl.textContent = this._fmt(r && r.amount);
+            amtEl.style.cssText = "flex: 1; text-align: right; font-size: 0.9em; font-variant-numeric: tabular-nums;";
+        });
+
+        const totalEl = section.createEl("div");
+        totalEl.textContent = `Fixed total ${this._fmt(total)}`;
+        totalEl.style.cssText = "font-size: 0.82em; font-variant-numeric: tabular-nums; color: var(--text-normal); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--background-modifier-border);";
     }
 
     // ----- Debt / Savings section (grouped rows + per-group total) -----

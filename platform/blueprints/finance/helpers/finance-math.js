@@ -50,7 +50,9 @@ class FinanceMath {
             if (idx >= 0 && idx < assigned.length) assigned[idx] += (Number(e && e.amount) || 0);
         }
         return deposits.map((d, i) => ({
-            date: d && d.date,
+            // Coerce to "YYYY-MM-DD" so every consumer renders a clean date, never a
+            // Dataview-parsed Luxon DateTime's raw ISO timestamp (finance tweak #2).
+            date: this._coerceDateString(d && d.date),
             amount: Number(d && d.amount) || 0,
             assigned: assigned[i],
             leftover: (Number(d && d.amount) || 0) - assigned[i],
@@ -496,6 +498,31 @@ class FinanceMath {
         };
     }
 
+    // Itemized out-of-pocket fixed bills for a month (finance tweak #3, display-only).
+    // Reads the month's paycheck(s) and collects the expenses that are NEITHER
+    // debt-linked (paydown routes through the Debt section) NOR savings (its own
+    // section). Returns { items: [{ item, amount }], total }. Empty when no paycheck.
+    // This is a READ for the budget full-picture's Fixed reconciliation — it never
+    // feeds the discretionary envelope (computePlanState keeps using the plan's
+    // fixed_living_monthly).
+    fixedBillsForMonth(dv, monthKey) {
+        const paychecks = this.readPaychecksForMonth(dv, monthKey);
+        const items = [];
+        let total = 0;
+        for (const p of (Array.isArray(paychecks) ? paychecks : [])) {
+            const ex = Array.isArray(p && p.expenses) ? p.expenses : [];
+            for (const e of ex) {
+                if (!e) continue;
+                if (this._debtKey(e.debt)) continue; // debt-linked → Debt section
+                if (String(e.category || "").toLowerCase() === "savings") continue; // savings → Savings section
+                const amount = Number(e.amount) || 0;
+                items.push({ item: (e.item != null ? String(e.item) : ""), amount });
+                total += amount;
+            }
+        }
+        return { items, total };
+    }
+
     // Live-derived budget allocation view (planning layer). Merges the plan's live
     // per-debt allocation + savings contribution with the budget's stored per-row
     // overrides. planned = override ?? plannedLive; source ∈ "override" | "plan".
@@ -545,8 +572,14 @@ class FinanceMath {
         const debtTotal = debt.reduce((s, d) => s + d.planned, 0);
         const savTotal = savings.reduce((s, d) => s + d.planned, 0);
         const income = ps && ps.ok ? num(ps.inputs.incomeFloor) : 0;
-        const fixed = ps && ps.ok ? num(ps.inputs.fixedLiving) : 0;
-        const discretionary = ps && ps.ok ? num(ps.envelope.effective) : Math.max(0, income - fixed - debtTotal - savTotal);
-        return { debt, savings, totals: { debt: debtTotal, savings: savTotal, fixed, income, discretionary } };
+        // Fixed is DISPLAY-ONLY (finance tweak #3, Option A): itemize the month's
+        // out-of-pocket bills from the paycheck when present (the literal spend), else
+        // fall back to the plan's fixed_living_monthly. The discretionary envelope is
+        // UNTOUCHED — computePlanState still uses fixed_living_monthly (see below).
+        const fb = this.fixedBillsForMonth(dv, monthKey);
+        const planFixed = ps && ps.ok ? num(ps.inputs.fixedLiving) : 0;
+        const fixed = fb.items.length > 0 ? fb.total : planFixed;
+        const discretionary = ps && ps.ok ? num(ps.envelope.effective) : Math.max(0, income - planFixed - debtTotal - savTotal);
+        return { fixed: fb.items, debt, savings, totals: { debt: debtTotal, savings: savTotal, fixed, income, discretionary } };
     }
 }
