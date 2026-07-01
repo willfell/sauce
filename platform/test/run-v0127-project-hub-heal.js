@@ -574,6 +574,83 @@ async function run() {
     }
   }
 
+  // ----- Project hub Display tweaks (PHUB-*) -----
+  {
+    const strip = install._stripAllProjectsHeading;
+    const applyHeal = install.applyProjectsHubAllProjectsHeadingCleanup;
+    ok("PHUB.exports", typeof strip === "function" && typeof applyHeal === "function",
+      "install must export _stripAllProjectsHeading + applyProjectsHubAllProjectsHeadingCleanup");
+
+    const DVOPEN = "```dataviewjs";
+    const FENCE = "```";
+    const withH2 = ["---", "type: projects-hub", "---", "", DVOPEN, "x", FENCE, "", "---", "",
+      "## All Projects", "", DVOPEN, "ProjectsHubCards", FENCE, ""].join("\n");
+    const withoutH2 = ["---", "type: projects-hub", "---", "", DVOPEN, "x", FENCE, "", "---", "",
+      DVOPEN, "ProjectsHubCards", FENCE, ""].join("\n");
+
+    // U1 — removes the `## All Projects` heading + one trailing blank.
+    {
+      const r = strip(withH2);
+      ok("PHUB-U1 removes ## All Projects", r.changed === true && r.body === withoutH2,
+        "should drop the H2 line + one trailing blank");
+    }
+    // U2 — idempotent (no heading → no change).
+    {
+      const r = strip(withoutH2);
+      ok("PHUB-U2 idempotent", r.changed === false && r.body === withoutH2, "no-op when the heading is absent");
+    }
+    // U3 — `## All Projects` inside a code fence is NOT stripped.
+    {
+      const fenced = ["---", "type: projects-hub", "---", "", DVOPEN, "## All Projects", FENCE, ""].join("\n");
+      const r = strip(fenced);
+      ok("PHUB-U3 leaves fenced text alone", r.changed === false && r.body === fenced,
+        "a `## All Projects` line inside a code fence must be preserved");
+    }
+    // I1 — integration: the projects-hub note is healed + backed up + idempotent.
+    {
+      const p = "spice/projects/Projects.md";
+      const adapter = makeAdapter({ [p]: withH2 });
+      const history = [];
+      await applyHeal(makeTp(adapter), {}, {}, history, GIT);
+      ok("PHUB-I1a note healed", adapter._files.get(p) === withoutH2, "projects-hub note should lose the ## All Projects H2");
+      const backedUp = Array.from(adapter._files.keys())
+        .some((k) => k.startsWith(".sauce-backup/") && k.endsWith("/" + p));
+      ok("PHUB-I1b backup written", backedUp, "a .sauce-backup snapshot of the pre-heal note must exist");
+      const healEvent = history.some((h) => h.step === "projects_hub_all_projects_heading_cleanup" && h.action === "healed");
+      ok("PHUB-I1c heal history event", healEvent, "a healed history event must be recorded");
+      await applyHeal(makeTp(adapter), {}, {}, [], GIT);
+      ok("PHUB-I1d idempotent second pass", adapter._files.get(p) === withoutH2, "second install pass must be a no-op");
+    }
+    // I2 — a non-projects-hub note is untouched even if it contains the text.
+    {
+      const p = "spice/projects/Demo/Demo.md";
+      const body = ["---", "type: project", "---", "", "## All Projects", "", "x", ""].join("\n");
+      const adapter = makeAdapter({ [p]: body });
+      await applyHeal(makeTp(adapter), {}, {}, [], GIT);
+      ok("PHUB-I2 non-hub note untouched", adapter._files.get(p) === body,
+        "only type:projects-hub notes are healed");
+    }
+
+    // Source lints — renderer + DocSearch opts + template.
+    const fs = require("fs");
+    const bpDir = path.join(__dirname, "..", "blueprints", "project");
+    const phc = fs.readFileSync(path.join(bpDir, "helpers", "projects-hub-cards.js"), "utf8");
+    const ds = fs.readFileSync(path.join(bpDir, "helpers", "doc-search.js"), "utf8");
+    const tpl = fs.readFileSync(path.join(bpDir, "content", "Projects.md"), "utf8");
+    ok("PHUB-L1 group-by defaults to none", /this\._groupBy\s*\|\|\s*"none"/.test(phc) && !/this\._groupBy\s*\|\|\s*"status"/.test(phc),
+      "projects hub group-by must default to none, not status");
+    ok("PHUB-L2 group headers use SectionLabel not <h3>", /SectionLabel\.render/.test(phc) && !/createEl\("h3"/.test(phc),
+      "group headers must render via SectionLabel, not a raw <h3>");
+    ok("PHUB-L3 passes hideTags + persist:false to DocSearch", /hideTags:\s*true/.test(phc) && /persist:\s*false/.test(phc),
+      "projects hub must pass hideTags:true + persist:false to DocSearch");
+    ok("PHUB-L4 doc-search honors hideTags", /hideTags\s*=\s*opts\.hideTags\s*===\s*true/.test(ds) && /hideTags\s*\?\s*\{\}\s*:/.test(ds),
+      "doc-search must gate the tag-chip pool on hideTags");
+    ok("PHUB-L5 doc-search honors persist", /persist\s*=\s*opts\.persist\s*!==\s*false/.test(ds) && /if\s*\(!persist\)\s*return/.test(ds) && /if\s*\(persist\)\s*try/.test(ds),
+      "doc-search must gate both save and restore on persist");
+    ok("PHUB-L6 template has no ## All Projects H2", !/^##\s+All Projects\s*$/m.test(tpl),
+      "the Projects.md template must not carry a `## All Projects` heading");
+  }
+
   console.log("");
   if (fail === 0) {
     console.log(`PASS ${pass}/${pass + fail}`);

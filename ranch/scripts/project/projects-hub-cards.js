@@ -96,7 +96,7 @@ class ProjectsHubCards {
         const select = wrap.createEl("select");
         ["none", "status", "team", "product"].forEach(opt => {
             const o = select.createEl("option", { text: opt, value: opt });
-            if (opt === (this._groupBy || "status")) o.selected = true;
+            if (opt === (this._groupBy || "none")) o.selected = true;
         });
         select.addEventListener("change", async (e) => {
             this._groupBy = e.target.value;
@@ -104,6 +104,30 @@ class ProjectsHubCards {
             dv.container.empty();
             await this._renderInner(dv);
         });
+    }
+
+    _renderRecentStrip(dv, enriched) {
+        if (!enriched || enriched.length === 0) return;   // empty-renders-nothing
+        const sorted = [...enriched].sort((a, b) => {
+            const ma = (a.latestMtime && a.latestMtime.ts) || 0;
+            const mb = (b.latestMtime && b.latestMtime.ts) || 0;
+            return mb - ma;
+        }).slice(0, 4);
+
+        customJS.SectionLabel.render(dv, { text: "Recently active" });
+        const bar = dv.container.createEl("div");
+        bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px 0;";
+        for (const e of sorted) {
+            const p = e.project;
+            const name = p.name || p.file.name;
+            const when = (e.latestMtime && e.latestMtime.ts) ? window.moment(e.latestMtime.ts).fromNow() : "";
+            const chip = bar.createEl("span");
+            chip.textContent = when ? `${name} · ${when}` : name;
+            chip.style.cssText = "cursor:pointer;padding:3px 12px;border-radius:12px;font-size:0.85em;background:var(--background-secondary);color:var(--text-normal);border:1px solid var(--background-modifier-border);";
+            chip.addEventListener("click", () => {
+                try { app.workspace.openLinkText(p.file.path, ""); } catch (_e) {}
+            });
+        }
     }
 
     async render(dv) {
@@ -129,6 +153,8 @@ class ProjectsHubCards {
             scopePath:  "spice/projects",
             recursive:  true,
             placeholder: "Filter projects by name or tag…",
+            hideTags: true,   // projects hub: drop the tag-chip section entirely
+            persist:  false,  // projects hub: search box never remembers text across visits
             onChange: async (ctx) => {
                 this._filterCtx = ctx;
                 ctx.resultsContainer.empty();
@@ -216,7 +242,7 @@ class ProjectsHubCards {
                 const bc = await app.vault.read(boardFile);
                 let lane = "";
                 for (const line of bc.split("\n")) {
-                    if (line.startsWith("## ")) lane = line.replace("## ", "").trim();
+                    if (line.startsWith("## ")) lane = line.replace("## ", "").trim();  // lint-display-markers:allow Kanban board lane parse, not a display marker
                     if (line.match(/^- \[[ x]\] /)) {
                         total++;
                         if (lane === "Completed") done++;
@@ -229,12 +255,16 @@ class ProjectsHubCards {
 
         this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
 
+        // v?: 'Recently active' strip — top-4 by recency from the filtered set,
+        // rendered just above the grouped grid (cross-status recency access).
+        this._renderRecentStrip(dv, enriched);
+
         // v0.39.0 S6.6: dispatch on this._groupBy. "none" renders all
         // projects as a single grid (preserves existing behavior). "status"
         // (default) / "team" / "product" emit an <h3> header per group with
         // a card list below. Status groups are ordered by STATUS_ORDER
         // priority; team/product groups are alphabetical.
-        const groupBy = this._groupBy || "status";
+        const groupBy = this._groupBy || "none";
         const pages = enriched.map(e => e.project);
         if (groupBy === "none" || pages.length === 0) {
             await this._renderCards(dv, pages);
@@ -253,8 +283,9 @@ class ProjectsHubCards {
                 ? STATUS_ORDER.filter(s => groups.has(s))
                 : [...groups.keys()].sort();
             for (const key of sortedKeys) {
-                const header = dv.container.createEl("h3", { text: key });
-                header.style.cssText = "margin-top:16px;margin-bottom:6px;color:var(--text-muted);";
+                // Use the shared SectionLabel primitive (no raw ## / <h3> chrome),
+                // matching the sections pattern used across the blueprints.
+                customJS.SectionLabel.render(dv, { text: key });
                 await this._renderCards(dv, groups.get(key));
             }
         }
