@@ -1,9 +1,9 @@
 {
-  "workshop_version": "0.151.1",
+  "workshop_version": "0.152.0",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.2",
-    "daily": "0.14.0",
+    "daily": "0.15.0",
     "meetings": "0.14.0",
     "people": "0.6.2",
     "products": "0.3.0",
@@ -16,7 +16,7 @@
     "teams": "0.3.0",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
-    "activity-feed": "0.7.1",
+    "activity-feed": "0.8.0",
     "kanban-status-sync": "0.2.0",
     "audit": "0.3.0",
     "backlink-panel": "0.1.1",
