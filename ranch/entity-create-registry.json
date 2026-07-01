@@ -405,13 +405,13 @@
           }
         ],
         "destination": {
-          "folder_prefix": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+          "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
           "filename_prefix": "{{prompts.name|sanitize-filename}}"
         },
         "frontmatter_template": {
           "type": "wiki-section",
           "title": "{{prompts.name}}",
-          "dir": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+          "dir": "{{current_file.folder}}/{{prompts.slug}}",
           "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
           "tags": [
             "wiki-section"
@@ -434,7 +434,7 @@
           }
         ],
         "destination": {
-          "folder_prefix": "{{current_file.frontmatter.dir}}",
+          "folder_prefix": "{{current_file.folder}}",
           "filename_prefix": "{{prompts.title|sanitize-filename}}"
         },
         "frontmatter_template": {
@@ -845,13 +845,13 @@
         }
       ],
       "destination": {
-        "folder_prefix": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+        "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
         "filename_prefix": "{{prompts.name|sanitize-filename}}"
       },
       "frontmatter_template": {
         "type": "wiki-section",
         "title": "{{prompts.name}}",
-        "dir": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+        "dir": "{{current_file.folder}}/{{prompts.slug}}",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "tags": [
           "wiki-section"
@@ -874,7 +874,7 @@
         }
       ],
       "destination": {
-        "folder_prefix": "{{current_file.frontmatter.dir}}",
+        "folder_prefix": "{{current_file.folder}}",
         "filename_prefix": "{{prompts.title|sanitize-filename}}"
       },
       "frontmatter_template": {
