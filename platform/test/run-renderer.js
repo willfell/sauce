@@ -1603,6 +1603,76 @@ async function testFF5PaycheckExpensesAddButton() {
   return pass;
 }
 
+// FF9 — PaycheckExpensesEditor delete re-renders from the authoritative array,
+// not the frozen dv.current() metadata cache. Proves render-from-authoritative +
+// no index cascade: with dv.current() frozen to the pre-delete 2-row array, the
+// re-render must reflect the shorter written array (only the surviving row).
+async function testFF9PaycheckDeleteRendersAuthoritative() {
+  console.log('\n=== FF9 — PaycheckExpensesEditor delete renders from authoritative array (no index cascade) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app);
+  const inst = new Cls();
+  // Authoritative store — the "true" post-write state the metadata cache lags.
+  const store = { expenses: [{ item: 'Alpha', amount: 1 }, { item: 'Bravo', amount: 2 }] };
+  // Bypass customJS.FinanceFrontmatter; mutate the authoritative store directly.
+  inst._mutate = async (file, mutator) => {
+    const fm = { expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+  };
+  // dv.current() is FROZEN to the ORIGINAL 2-row array (the bug's trigger).
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Paycheck-x', path: 'spice/finance/paychecks/x/Paycheck-x.md' },
+    { expenses: store.expenses.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/paychecks/x/Paycheck-x.md');
+  global.window = { confirm: () => true };
+  await inst._deleteFlow(file, dv, 0, store.expenses[0]);
+  const writeOk = store.expenses.length === 1 && store.expenses[0].item === 'Bravo';
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const rendersAlpha = texts.includes('Alpha');
+  const rendersBravo = texts.includes('Bravo');
+  const renderOk = !!root && rendersBravo && !rendersAlpha;
+  console.log(`  write shortened to [Bravo]: ${writeOk} ; render shows Bravo not Alpha (authoritative): ${renderOk}`);
+  const pass = writeOk && renderOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF10 — editing a debt-linked paycheck row preserves its [[Debt-…]] wikilink
+// (merge-on-edit). The modal returns only its editable fields (no debt), so a
+// naive list[index] = result strips the link; Object.assign({}, current, result)
+// keeps it while applying the new fields.
+async function testFF10PaycheckEditPreservesDebt() {
+  console.log('\n=== FF10 — PaycheckExpensesEditor edit preserves debt link (merge-on-edit) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app);
+  const inst = new Cls();
+  const store = { expenses: [{ item: 'Apple', amount: 950, category: 'Credit Payment', url: 'https://card.apple.com', debt: '[[Debt-Apple-Card]]', paid: false }] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+  };
+  // Modal returns edited fields WITHOUT a debt field (the bug's trigger).
+  inst._promptForExpense = async () => ({ item: 'Apple', amount: 950, category: 'Credit Payment', paid: true, url: 'https://card.apple.com' });
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Paycheck-x', path: 'spice/finance/paychecks/x/Paycheck-x.md' },
+    { expenses: store.expenses.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/paychecks/x/Paycheck-x.md');
+  await inst._editFlow(file, dv, 0, store.expenses[0]);
+  const keepsDebt = store.expenses[0].debt === '[[Debt-Apple-Card]]';
+  const appliedPaid = store.expenses[0].paid === true;
+  console.log(`  keeps debt link: ${keepsDebt} ; applied new paid flag: ${appliedPaid}`);
+  const pass = keepsDebt && appliedPaid;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testFF6InvoiceTimeLogOutOfPath() {
   console.log('\n=== FF6 — InvoiceTimeLogEditor on non-Time-Log path renders nothing ===');
   const app = makeApp();
@@ -2284,6 +2354,8 @@ async function testRendHasNotes() {
       results.push(['FF3 hub-area-row-icons', await testFF3HubAreaRowIcons()]);
       results.push(['FF4 budget-categories-editor-add-button', await testFF4BudgetCategoriesAddButton()]);
       results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);
+      results.push(['FF9 paycheck-editor-delete-renders-authoritative', await testFF9PaycheckDeleteRendersAuthoritative()]);
+      results.push(['FF10 paycheck-editor-edit-preserves-debt-link', await testFF10PaycheckEditPreservesDebt()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
