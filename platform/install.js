@@ -5526,6 +5526,9 @@ await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });
 
 const FINANCE_PAYCHECK_DEFAULTS_CONTENT = `---
 type: paycheck-defaults
+deposit_schedule:
+  - { day: 1, amount: 0 }
+  - { day: 15, amount: 0 }
 expenses: []
 cssclasses: [wide]
 ---
