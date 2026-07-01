@@ -5827,6 +5827,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
+  await applyFinanceBudgetAllocationsBandInjection(tp, manifest, variables, history, git); // NEW (month reality WS2) — BudgetAllocationsEditor block after BudgetCategoriesEditor
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
   await applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);    // NEW v0.112.0 — PaycheckDebtBand between PaycheckSummary and PaycheckExpensesEditor
   await applyFinancePlanBandInjection(tp, manifest, variables, history, git);            // NEW v0.10.0 — PlanBand over-envelope flag at top of every Budget
@@ -7864,6 +7865,76 @@ function _injectMonthlyBand(body) {
   }
 
   return { body: out, touched };
+}
+
+// applyFinanceBudgetAllocationsBandInjection — finance "month reality" WS2.
+// Injects the BudgetAllocationsEditor dataviewjs block (editable live/override
+// Debt + Savings sections) into every existing Budget-YYYY-MM.md that lacks it.
+// New budgets get the block from the template/inline_body; this heal covers
+// pre-existing budgets across consumer vaults. UNGATED (no version guard) —
+// idempotent via presence of `class: "BudgetAllocationsEditor"`. Body-text
+// mutation only; .sauce-backup snapshot before write; failure-loud per-file.
+// Mirrors applyFinanceBudgetMonthlyBandInjection posture.
+async function applyFinanceBudgetAllocationsBandInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = await _listBudgetFiles(adapter, budgetsRoot);
+  if (budgetFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touched = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectAllocationsBand(body);
+      if (result.touched) {
+        // .sauce-backup snapshot before write.
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_allocations_band_injection", name: "finance",
+        reason: `body injection failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_budget_allocations_band_injection", name: "finance",
+    reason: `${budgetFiles.length} budgets scanned, ${touched} bodies injected (BudgetAllocationsEditor block after BudgetCategoriesEditor)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _injectAllocationsBand — pure body transform. Idempotent (skips when the
+// BudgetAllocationsEditor block is already present). Anchor priority:
+//   1. After the BudgetCategoriesEditor dataviewjs block.
+//   2. Fallback: append at the end of the dataviewjs stack (end of body).
+function _injectAllocationsBand(body) {
+  let out = body;
+  if (/class:\s*["']BudgetAllocationsEditor["']/.test(out)) return { body: out, touched: false };
+
+  const allocBlock = "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n";
+
+  const catBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']BudgetCategoriesEditor["'][^`]*```[ \t]*\r?\n)/;
+  const cb = out.match(catBlockRe);
+  if (cb) {
+    out = out.replace(catBlockRe, `$1\n${allocBlock}`);
+    return { body: out, touched: true };
+  }
+
+  // Fallback: append at end of the dataviewjs stack.
+  out = out.replace(/\s*$/, "") + "\n\n" + allocBlock;
+  return { body: out, touched: true };
 }
 
 // _backfillBudgetGroupsFromText — pure string transform on Budget-*.md body.
@@ -14711,6 +14782,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
     module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;
     module.exports._injectMonthlyBand = _injectMonthlyBand;
+    // month reality WS2 — BudgetAllocationsEditor band injection on Budget-YYYY-MM.md
+    module.exports.applyFinanceBudgetAllocationsBandInjection = applyFinanceBudgetAllocationsBandInjection;
+    module.exports._injectAllocationsBand = _injectAllocationsBand;
     // Behavioral harness reads _migrateBudgetBody to chain-test migration ordering.
     module.exports._migrateBudgetBody = _migrateBudgetBody;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.

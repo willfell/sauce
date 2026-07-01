@@ -38,8 +38,10 @@ class FinanceMath {
         try {
             return dv.pages('"spice/finance/paychecks"').where(p => {
                 if (!p || p.type !== "paycheck") return false;
-                const s = this._coerceDateString(p.pay_period_start);
-                return typeof s === "string" && s.startsWith(monthKey);
+                // Attribute to the month the check is PAID (pay_period_end),
+                // falling back to pay_period_start for legacy checks lacking an end.
+                const key = this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start);
+                return typeof key === "string" && key.startsWith(monthKey);
             }).array();
         } catch (_e) { return []; }
     }
@@ -450,5 +452,59 @@ class FinanceMath {
             whatIf,
             applyPlan: { debtTargets, savingsContribution: contribution, savingsPerCheck },
         };
+    }
+
+    // Live-derived budget allocation view (planning layer). Merges the plan's live
+    // per-debt allocation + savings contribution with the budget's stored per-row
+    // overrides. planned = override ?? plannedLive; source ∈ "override" | "plan".
+    // Debt/savings planned numbers are a VIEW — never summed into the discretionary
+    // envelope (which stays categories[]-only in computePlanState).
+    budgetAllocations(dv, monthKey) {
+        const budget = this.readBudgetForMonth(dv, monthKey);
+        const overridesDebt = (budget && Array.isArray(budget.debt_allocations)) ? budget.debt_allocations : [];
+        const overridesSav = (budget && Array.isArray(budget.savings_allocations)) ? budget.savings_allocations : [];
+        const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
+        const ovBySlug = new Map();
+        for (const o of overridesDebt) { const s = o && (o.slug || o.name); if (s) ovBySlug.set(String(s), o); }
+
+        let ps = null;
+        try { ps = this.computePlanState(dv, monthKey); } catch (_e) { ps = null; }
+        const debts = this.readDebts(dv);
+        // Live per-debt planned: plan allocation total when available, else entity planned_monthly_payment.
+        const liveBySlug = new Map();
+        if (ps && ps.ok && Array.isArray(ps.allocation)) {
+            for (const a of ps.allocation) liveBySlug.set(String(a.slug), num(a.total));
+        }
+        const debt = debts
+            .filter(d => num(d.current_balance) > 0)
+            .map(d => {
+                const slug = (d.file && d.file.name) ? d.file.name : (d.name || "debt");
+                const plannedLive = liveBySlug.has(slug) ? liveBySlug.get(slug) : num(d.planned_monthly_payment);
+                const ov = ovBySlug.get(slug);
+                const override = ov ? num(ov.planned) : null;
+                return { slug, name: d.name || slug, plannedLive, override, planned: (ov ? override : plannedLive), source: ov ? "override" : "plan" };
+            });
+
+        const savLive = ps && ps.ok && ps.savings ? num(ps.savings.contribution) : 0;
+        // Derive the savings row label from the actual chosen savings entity
+        // (mirrors computePlanState's emergency-fund selection) — no baked-in name.
+        const savEntities = this.readSavings(dv);
+        const savEf = savEntities.find(s => String(s.name || "").toLowerCase() === "emergency fund") || savEntities[0] || null;
+        const savName = (savEf && savEf.name) ? String(savEf.name) : "Emergency Fund";
+        const savOv = overridesSav.find(o => o && String(o.name || "").toLowerCase() === savName.toLowerCase()) || overridesSav[0] || null;
+        const savings = [{
+            name: (savOv && savOv.name) || savName,
+            plannedLive: savLive,
+            override: savOv ? num(savOv.planned) : null,
+            planned: savOv ? num(savOv.planned) : savLive,
+            source: savOv ? "override" : "plan",
+        }];
+
+        const debtTotal = debt.reduce((s, d) => s + d.planned, 0);
+        const savTotal = savings.reduce((s, d) => s + d.planned, 0);
+        const income = ps && ps.ok ? num(ps.inputs.incomeFloor) : 0;
+        const fixed = ps && ps.ok ? num(ps.inputs.fixedLiving) : 0;
+        const discretionary = ps && ps.ok ? num(ps.envelope.effective) : Math.max(0, income - fixed - debtTotal - savTotal);
+        return { debt, savings, totals: { debt: debtTotal, savings: savTotal, fixed, income, discretionary } };
     }
 }

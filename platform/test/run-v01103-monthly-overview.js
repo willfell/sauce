@@ -158,11 +158,15 @@ function fxBudget(monthKey, categories) {
   };
 }
 
-function fxPaycheck(payPeriodStart, paycheckAmount, expenses) {
+function fxPaycheck(payPeriodStart, paycheckAmount, expenses, payPeriodEnd) {
+  // pay_period_end defaults to pay_period_start (single-day period) so existing
+  // fixtures are unaffected by end-first attribution; pass a distinct end to
+  // exercise a check that straddles a month boundary.
   return {
     file: { name: `Paycheck-${payPeriodStart}`, path: `spice/finance/paychecks/${payPeriodStart.slice(0, 7)}/Paycheck-${payPeriodStart}.md` },
     type: "paycheck",
     pay_period_start: payPeriodStart,
+    pay_period_end: payPeriodEnd || payPeriodStart,
     paycheck_amount: paycheckAmount,
     expenses: expenses || [],
   };
@@ -527,6 +531,34 @@ console.log("\n=== Section 1 — MonthlyOverview behavioral ===");
   ok("MO-B-14.1 pill uses up-arrow for debt growth",
     pill && /MoM\s*↑\s*\$300\.00/.test(pill._textContent));
   ok("MO-B-14.2 pill colored red", pill && /#dc2626/.test(pill.style.cssText));
+})();
+
+// ---------------------------------------------------------------------------
+// MO-B-15: attribution by pay_period_end — a check whose period STARTS in June
+// but ENDS (is paid) in July counts as JULY income (matches FinanceMath). A
+// legacy check dated wholly in June is excluded from July.
+// ---------------------------------------------------------------------------
+(async function MO_B_15() {
+  console.log("\n--- Case MO-B-15: straddling check attributes income to end-month ---");
+  const mo = new MonthlyOverview();
+  const dv = makeDv({
+    current: fxBudget("2026-07", []),
+    pagesByScope: {
+      "spice/finance/paychecks": [
+        // paid July 2 (period 6/28→7/2) → belongs to July
+        fxPaycheck("2026-06-28", 4500, [], "2026-07-02"),
+        // legacy wholly-June check → NOT July
+        fxPaycheck("2026-06-15", 9999, []),
+      ],
+      "spice/finance/debts": [],
+    },
+  });
+  await mo.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  const text = collectText(root);
+  ok("MO-B-15.1 straddling check income lands in July ($4,500.00)", /\$4,500\.00/.test(text));
+  ok("MO-B-15.2 wholly-June check excluded from July income", !/\$9,999\.00/.test(text));
+  ok("MO-B-15.3 audit footer counts exactly 1 July paycheck", /From\s+1\s+paycheck/.test(text));
 })();
 
 // ===========================================================================

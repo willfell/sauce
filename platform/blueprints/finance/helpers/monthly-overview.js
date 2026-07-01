@@ -10,7 +10,8 @@
  *
  * Headline math:
  *   income − spending − debtPaid = netCash
- *   income    = Σ paycheck_amount across paychecks with pay_period_start ~ this month
+ *   income    = Σ paycheck_amount across paychecks paid this month
+ *               (pay_period_end ~ this month, start fallback)
  *   spending  = Σ categories[*].actual on this Budget
  *   debtPaid  = Σ expenses[*].amount across paychecks where expenses[*].debt is
  *               a wikilink AND expenses[*].paid === true
@@ -103,9 +104,13 @@ class MonthlyOverview {
                 // dropping all such paychecks — observed on production headspace
                 // where May paychecks (unquoted dates) were excluded and Income
                 // rendered as $0. Accept both forms via _coerceDateString.
-                const startStr = this._coerceDateString(p.pay_period_start);
-                if (!startStr) continue;
-                if (!startStr.startsWith(monthKey)) continue;
+                // Attribute to the month the check is PAID (pay_period_end),
+                // falling back to pay_period_start for legacy checks lacking an
+                // end. Mirrors FinanceMath.readPaychecksForMonth so budget-note
+                // income agrees with the rest of the finance model.
+                const keyStr = this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start);
+                if (!keyStr) continue;
+                if (!keyStr.startsWith(monthKey)) continue;
                 out.push(p);
             }
             return out;
