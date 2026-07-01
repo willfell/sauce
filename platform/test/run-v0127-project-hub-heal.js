@@ -635,7 +635,7 @@ async function run() {
     const fs = require("fs");
     const bpDir = path.join(__dirname, "..", "blueprints", "project");
     const phc = fs.readFileSync(path.join(bpDir, "helpers", "projects-hub-cards.js"), "utf8");
-    const ds = fs.readFileSync(path.join(bpDir, "helpers", "doc-search.js"), "utf8");
+    const ds = fs.readFileSync(path.join(__dirname, "..", "mechanisms", "doc-search", "doc-search.js"), "utf8");
     const tpl = fs.readFileSync(path.join(bpDir, "content", "Projects.md"), "utf8");
     ok("PHUB-L1 group-by defaults to none", /this\._groupBy\s*\|\|\s*"none"/.test(phc) && !/this\._groupBy\s*\|\|\s*"status"/.test(phc),
       "projects hub group-by must default to none, not status");

@@ -7921,7 +7921,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 24, "HC-V0890-VERSION-D: mechanism count = 24 (+task-entity mechanism, note-per-task feature)");
+  assertEqual(mechCount, 25, "HC-V0890-VERSION-D: mechanism count = 25 (+doc-search mechanism, wiki cycle DocSearch graduation)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8474,7 +8474,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 24, "HC-V0891-VERSION-D: mechanism count = 24 (+task-entity mechanism, note-per-task feature)");
+  assertEqual(mechs.length, 25, "HC-V0891-VERSION-D: mechanism count = 25 (+doc-search mechanism, wiki cycle DocSearch graduation)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
@@ -11618,7 +11618,7 @@ async function caseV01030Pshm5InjectsBreadcrumb() {
 // ──────────────────────────────────────────────────────────────────────────────
 // v0.104.0 S1 (Task 1): DocSearch helper — text filter + dynamic tag chips +
 // scoped Obsidian-search button. Static-string regex asserts against the new
-// helper at platform/blueprints/project/helpers/doc-search.js. HC-V01040-DS-1
+// helper at platform/mechanisms/doc-search/doc-search.js. HC-V01040-DS-1
 // covers class + instance render method; HC-V01040-DS-2 the static matches()
 // purity; HC-V01040-DS-3 the doc-note exclusion in _countTags; HC-V01040-DS-4
 // the top-8 chip cap; HC-V01040-DS-5 the scoped Obsidian global-search:open
@@ -11627,14 +11627,14 @@ async function caseV01030Pshm5InjectsBreadcrumb() {
 
 async function caseV01040Ds1ClassDefined() {
   console.log("\n--- Case HC-V01040-DS-1: DocSearch class declared + instance render method ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-1: class DocSearch declared", /class\s+DocSearch\s*\{/.test(src));
   assertTrue("HC-V01040-DS-1: instance render method", /\brender\s*\(\s*dv\s*,\s*opts\s*\)/.test(src));
 }
 
 async function caseV01040Ds2StaticMatches() {
   console.log("\n--- Case HC-V01040-DS-2: instance matches(page, ctx) — v0.104.0.1 PATCH dropped 'static' so customJS instance access works ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-2: matches method present + NOT static (customJS stores instances)",
     /\bmatches\s*\(\s*page\s*,\s*ctx\s*\)/.test(src) && !/static\s+matches\s*\(/.test(src));
   assertTrue("HC-V01040-DS-2: matches returns true when ctx absent/inactive",
@@ -11643,7 +11643,7 @@ async function caseV01040Ds2StaticMatches() {
 
 async function caseV01040Ds3CountTagsExcludesDocNote() {
   console.log("\n--- Case HC-V01040-DS-3: _countTags excludes the universal doc-note tag from the chip pool ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-3: _countTags method present", /_countTags\s*\(/.test(src));
   assertTrue("HC-V01040-DS-3: excludes 'doc-note' tag from chip pool",
     /doc-note/.test(src) && /continue|skip/.test(src));
@@ -11651,14 +11651,14 @@ async function caseV01040Ds3CountTagsExcludesDocNote() {
 
 async function caseV01040Ds4Top8Chips() {
   console.log("\n--- Case HC-V01040-DS-4: top-8 cap on dynamic tag chips ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-4: top-8 cap on chips",
     /\.slice\(\s*0\s*,\s*8\s*\)/.test(src) || /slice\(0,\s*8\)/.test(src));
 }
 
 async function caseV01040Ds5ScopedSearchButton() {
   console.log("\n--- Case HC-V01040-DS-5: scoped Obsidian-search button invokes global-search:open with path: pre-fill ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-5: invokes global-search:open command",
     /global-search:open/.test(src));
   assertTrue("HC-V01040-DS-5: pre-fills `path:` query",
@@ -11667,7 +11667,7 @@ async function caseV01040Ds5ScopedSearchButton() {
 
 async function caseV01040Ds6AndLogicMatches() {
   console.log("\n--- Case HC-V01040-DS-6: matches uses AND logic across text + selected tags ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01040-DS-6: matches uses AND logic across text + tags",
     /return\s+false/.test(src));
   assertTrue("HC-V01040-DS-6: tag match requires ALL selected tags",
@@ -11731,17 +11731,21 @@ async function caseV01040Man1Manifest118() {
   // registered) + the live project blueprint version (bumped to 1.19.0 in
   // v0.105.0 per docs-system-fixes brief; then 1.20.0 in v0.106.0 per the
   // DocSearch persistence + dashboard widgets brief).
-  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.21.0 (v0.109.0) + DocSearch registered + doc-search.js shipped ---");
+  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version matches snapshot + DocSearch graduated to the doc-search mechanism (project depends_on it, no longer ships it) ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
+  // wiki cycle: DocSearch graduated to the shared doc-search mechanism — project
+  // now depends_on doc-search and no longer registers the class / ships the file.
   assertTrue("HC-V01040-MAN-1: project blueprint version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components.project, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
-  assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
-    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
+  assertTrue("HC-V01040-MAN-1: customjs_classes NO LONGER includes DocSearch (graduated to mechanism)",
+    Array.isArray(m.customjs_classes) && !m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
-  assertTrue("HC-V01040-MAN-1: files includes helpers/doc-search.js",
-    sources.includes("helpers/doc-search.js"));
+  assertTrue("HC-V01040-MAN-1: files NO LONGER includes helpers/doc-search.js (graduated to mechanism)",
+    !sources.includes("helpers/doc-search.js"));
+  assertTrue("HC-V01040-MAN-1: project depends_on the doc-search mechanism",
+    Array.isArray(m.depends_on) && m.depends_on.some(d => d.name === "doc-search"));
 }
 
 // =====================================================================
@@ -11899,7 +11903,7 @@ async function caseV01050SectionTpl1NoLeadingFrontmatter() {
 // Issue 6: DocSearch refactored — strip + separate resultsContainer.
 async function caseV01050DsStrip1TwoContainers() {
   console.log("\n--- Case HC-V01050-DS-STRIP-1: DocSearch creates permanent strip + separate resultsContainer ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01050-DS-STRIP-1: stripContainer var declared",
     /\bstripContainer\b/.test(src));
   assertTrue("HC-V01050-DS-STRIP-1: resultsContainer var declared",
@@ -11915,7 +11919,7 @@ async function caseV01050DsStrip1TwoContainers() {
 
 async function caseV01050DsStrip2InputClearsOnlyResults() {
   console.log("\n--- Case HC-V01050-DS-STRIP-2: DocSearch input listener clears ONLY resultsContainer (not dv.container) ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   // No call to dv.container.empty() from the input listener.
   assertTrue("HC-V01050-DS-STRIP-2: dv.container.empty() NOT invoked in doc-search.js",
     !/dv\.container\.empty\s*\(/.test(src));
@@ -11964,7 +11968,7 @@ async function caseV01050Fullwidth1FlexStretch() {
 // Issue 9: DocSearch no longer contains the 🔎 emoji.
 async function caseV01050DsNoEmoji() {
   console.log("\n--- Case HC-V01050-DS-NOEMOJI: doc-search.js does NOT contain the 🔎 emoji ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01050-DS-NOEMOJI: U+1F50E (🔎) absent",
     !/\u{1F50E}/u.test(src));
   // The replacement is an inline SVG <circle ... r="8"> (the lucide search head).
@@ -12011,7 +12015,7 @@ async function caseV01060InstallPosture1HelperScriptOverwrite() {
 // =====================================================================
 async function caseV01060DsPersist1LocalStorageKeyedByScope() {
   console.log("\n--- Case HC-V01060-DS-PERSIST-1: DocSearch persists filter state to localStorage keyed by scopePath ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01060-DS-PERSIST-1: storageKey embeds opts.scopePath",
     /sauce\.doc-search\.\$\{opts\.scopePath\}/.test(src));
   assertTrue("HC-V01060-DS-PERSIST-1: writes JSON to localStorage.setItem",
@@ -12029,7 +12033,7 @@ async function caseV01060DsPersist1LocalStorageKeyedByScope() {
 // =====================================================================
 async function caseV01060DsDebounce1Input150ms() {
   console.log("\n--- Case HC-V01060-DS-DEBOUNCE-1: DocSearch input listener debounced via setTimeout(..., 150) + clearTimeout ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01060-DS-DEBOUNCE-1: inputTimer variable declared",
     /\blet\s+inputTimer\b/.test(src));
   assertTrue("HC-V01060-DS-DEBOUNCE-1: clears prior pending timer before re-scheduling",
@@ -14444,7 +14448,7 @@ async function caseV01090Sl3ManifestRegistered() {
 // S1 — DocSearch parameterization.
 async function caseV01090Ds1EntityTypeOpt() {
   console.log("\n--- Case HC-V01090-DS-1: DocSearch accepts entityType/placeholder/tagExclude opts ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/doc-search/doc-search.js"), "utf8");
   assertTrue("HC-V01090-DS-1: entityType opt referenced",
     /opts\.entityType/.test(src));
   assertTrue("HC-V01090-DS-1: default falls back to doc-note",
