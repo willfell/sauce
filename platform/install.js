@@ -1176,6 +1176,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
+  await applyDocSectionBackfill(tp, mech, variables, history, git);   // PR1 project-doc-updating-wiring — backfill section/sub_section from sibling section-hub (authoritative display name), ungated + idempotent
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
@@ -3297,6 +3298,44 @@ function _titlecaseFromSlug(slug) {
     .join(" ");
 }
 
+// _docNoteDirname — dir portion of a vault-relative path (everything before the
+// last "/"), "" when the path has no slash. Pure string transform (module-local
+// so install.js needn't require doc-move.js's DocMove._dirname class method).
+function _docNoteDirname(p) {
+  const s = String(p == null ? "" : p);
+  const i = s.lastIndexOf("/");
+  return i < 0 ? "" : s.slice(0, i);
+}
+
+// _inferSectionFromDocPath — { section, subSection } = the folder segments
+// strictly BETWEEN the last "docs" path segment and the filename. Mirrors
+// doc-move.js DocMove.inferSectionFromPath (inlined — no require). Returns raw
+// folder names (slug or display); callers reconcile against section-hub labels.
+function _inferSectionFromDocPath(docPath) {
+  const s = String(docPath == null ? "" : docPath);
+  const parts = s.split("/");
+  const di = parts.lastIndexOf("docs");
+  if (di < 0) return { section: "", subSection: "" };
+  const between = parts.slice(di + 1, parts.length - 1);
+  return {
+    section: between.length >= 1 ? between[0] : "",
+    subSection: between.length >= 2 ? between[1] : "",
+  };
+}
+
+// _ensureSubSectionFrontmatter — inject `sub_section: "<label>"` into the leading
+// YAML frontmatter block when absent. Mirrors _ensureSectionFrontmatter exactly
+// but for sub_section. Returns body unchanged if no FM block is present or
+// `sub_section:` already exists. Pure string transform.
+function _ensureSubSectionFrontmatter(body, subLabel) {
+  if (/^sub_section:/m.test(body)) return body;
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return body;
+  const fm = fmMatch[1];
+  const newFm = `${fm}\nsub_section: "${subLabel}"`;
+  return body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+}
+
 // applyProjectSectionsHubMigration — v0.103.0 S4 (Task 6). Heals existing
 // v0.102.0 vaults by upgrading them to the section-hubs layout. For each
 // project under spice/projects/:
@@ -3533,6 +3572,218 @@ async function applyProjectSectionsHubMigration(tp, manifest, variables, history
       step: "project_sections_hub_migration",
       name: "project",
       reason: `migrated ${migrated} project(s); skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// applyDocSectionBackfill — PR1 project-doc-updating-wiring. Backfills MISSING
+// `section` / `sub_section` frontmatter on project doc-notes, sourcing the
+// AUTHORITATIVE section display name from the sibling `section-hub` note in the
+// same folder (its `section:` frontmatter, falling back to the hub's basename).
+//
+// Posture (mirrors applyDocsBackfill): project-gated (manifest.name ===
+// "project"), UNGATED (additive backfill of a missing field — per the
+// migration-lifecycle rule, backfill/ensure heals run every install and are
+// never version-gated), idempotent (skips doc-notes that already carry
+// `section:`), and failure-tolerant per-project (try/catch → warning history
+// entry, never throws).
+//
+// For each doc-note missing `section:`:
+//   - depth-1 (docs/<folder>/Note.md): section = hubLabel(folder); no sub_section.
+//   - depth-2 (docs/<section>/<sub>/Note.md): sub_section = hubLabel(folder)
+//     [the sub-section hub in the doc's own folder]; section = hubLabel(parent)
+//     [the section hub one level up].
+// When no sibling section-hub gives an authoritative display name, the doc is
+// SKIPPED (never guessed from the slug — the user's explicit decision).
+//
+// Runs AFTER applyProjectSectionsHubMigration so section-hubs are materialized
+// before this reads them. install.js cannot use Obsidian's parseYaml (per the
+// top-of-file note); frontmatter is matched via narrow regexes.
+async function applyDocSectionBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "doc_section_backfill",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => {
+    const base = d.split("/").pop();
+    return base !== "All Projects";
+  });
+
+  let backfilledCount = 0;
+  let skippedCount = 0;
+  let warnCount = 0;
+
+  // Resolve the authoritative section display name for a folder: find the first
+  // .md with type: section-hub in that folder, return its `section:` FM value
+  // (surrounding quotes/brackets stripped) if present, else the hub's basename
+  // without ".md". Returns null when the folder has NO section-hub.
+  const hubLabel = async (folder) => {
+    if (!folder) return null;
+    let list;
+    try {
+      list = await adapter.list(folder);
+    } catch (_e) {
+      return null;
+    }
+    for (const fp of (list.files || [])) {
+      if (!fp.endsWith(".md")) continue;
+      let fb;
+      try {
+        fb = await adapter.read(fp);
+      } catch (_e) {
+        continue;
+      }
+      if (!/^type:\s*["']?section-hub["']?\s*$/m.test(fb)) continue;
+      const secMatch = fb.match(/^section:\s*(.+?)\s*$/m);
+      if (secMatch) {
+        const raw = secMatch[1].replace(/^["']|["']$/g, "").replace(/^\[\[|\]\]$/g, "").trim();
+        if (raw) return raw;
+      }
+      return fp.split("/").pop().replace(/\.md$/, "");
+    }
+    return null;
+  };
+
+  for (const projectDir of projectDirs) {
+    const docsDir = `${projectDir}/docs`;
+    try {
+      if (!(await adapter.exists(docsDir))) {
+        continue;
+      }
+
+      // Recursively collect every doc-note under docs/ (mirrors the
+      // adapter.list recursion in applyProjectSectionsMigration/Hub).
+      const docNotePaths = [];
+      const walk = async (dir) => {
+        let list;
+        try {
+          list = await adapter.list(dir);
+        } catch (_e) {
+          return;
+        }
+        for (const fp of (list.files || [])) {
+          if (!fp.endsWith(".md")) continue;
+          let fb;
+          try {
+            fb = await adapter.read(fp);
+          } catch (_e) {
+            continue;
+          }
+          if (/^type:\s*["']?doc-note["']?\s*$/m.test(fb)) {
+            docNotePaths.push(fp);
+          }
+        }
+        for (const sub of (list.folders || [])) {
+          await walk(sub);
+        }
+      };
+      await walk(docsDir);
+
+      for (const docPath of docNotePaths) {
+        const body = await adapter.read(docPath);
+        // Idempotent: already carries section: → leave untouched.
+        if (/^section:/m.test(body)) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const folder = _docNoteDirname(docPath);
+        const seg = _inferSectionFromDocPath(docPath);
+
+        let sectionLabel;
+        let subLabel;
+        if (seg.subSection) {
+          // depth-2: sub-section hub lives in the doc's own folder; the section
+          // hub is one level up.
+          subLabel = await hubLabel(folder);
+          sectionLabel = await hubLabel(_docNoteDirname(folder));
+        } else {
+          // depth-1: section hub lives in the doc's own folder; no sub_section.
+          sectionLabel = await hubLabel(folder);
+          subLabel = "";
+        }
+
+        // No authoritative section display name → SKIP (never guess from slug).
+        if (!sectionLabel) {
+          skippedCount += 1;
+          continue;
+        }
+
+        let newBody = _ensureSectionFrontmatter(body, sectionLabel);
+        if (subLabel) {
+          newBody = _ensureSubSectionFrontmatter(newBody, subLabel);
+        }
+        if (newBody !== body) {
+          await adapter.write(docPath, newBody);
+          backfilledCount += 1;
+          if (history) {
+            history.push({
+              event: "info",
+              step: "doc_section_backfill",
+              name: "project",
+              target: docPath,
+              action: "backfilled_section",
+              reason: `section: "${sectionLabel}"${subLabel ? `; sub_section: "${subLabel}"` : ""}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+        } else {
+          skippedCount += 1;
+        }
+      }
+    } catch (e) {
+      warnCount += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "doc_section_backfill",
+          name: "project",
+          target: docsDir,
+          reason: `backfill failed for ${docsDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "doc_section_backfill",
+      name: "project",
+      reason: `backfilled ${backfilledCount} doc-note(s); skipped ${skippedCount}; ${warnCount} warning(s)`,
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,
@@ -15217,6 +15468,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // HC-V01190-PROJ-SEED-MIGRATE-* direct-invocation family). Pure additive.
     module.exports.applyProjectSectionsMigration = applyProjectSectionsMigration;
     module.exports.applyProjectSectionsHubMigration = applyProjectSectionsHubMigration;
+    // PR1 project-doc-updating-wiring — doc-note section/sub_section backfill
+    // (run-seed-migrations.js HC-DOCSEC-BACKFILL-* family). Pure additive.
+    module.exports.applyDocSectionBackfill = applyDocSectionBackfill;
     module.exports.applyProjectSectionsCloseRepair = applyProjectSectionsCloseRepair;
     module.exports.applyEmptyProjectWikilinkRepair = applyEmptyProjectWikilinkRepair;
     // v0.119.0 impl-2 — finance blueprint installer migrations (for run-seed-migrations.js

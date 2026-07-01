@@ -1319,6 +1319,133 @@ async function runProjectMigrateFamily() {
     }
 }
 
+// ===== HC-DOCSEC-BACKFILL-* — PR1 project-doc-updating-wiring =====
+//
+// applyDocSectionBackfill (ungated, idempotent) backfills MISSING
+// section/sub_section frontmatter on project doc-notes, sourcing the
+// authoritative display name from the sibling section-hub in the same folder.
+//
+// Self-contained: copies the committed docsec-project fixture into a throwaway
+// tmp vault and DIRECTLY INVOKES applyDocSectionBackfill (the seed install
+// short-circuits on project version match, so per-blueprint apply* fns never
+// fire against seed fixtures). Fixtures:
+//   docs/knowledge/Knowledge.md          — section-hub (section: Knowledge)
+//   docs/knowledge/Depth1 Note.md        — doc-note MISSING section (depth 1)
+//   docs/knowledge/advanced/Advanced.md  — sub-section-hub (section: Advanced)
+//   docs/knowledge/advanced/Depth2 Note.md — doc-note MISSING section (depth 2)
+//   docs/notes/No Hub Note.md            — doc-note MISSING section, NO hub → skip
+//   docs/knowledge/Already Sectioned.md  — doc-note WITH section → untouched
+// =============================================================================
+async function runDocSectionBackfillFamily() {
+    const { applyDocSectionBackfill } = require("../install.js");
+
+    const dsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-docsec-"));
+    try {
+        const DS_PROJ_DIR = "spice/projects/docsec-project";
+        const SEED_DS = path.join(SEED_DIR, DS_PROJ_DIR);
+        helpers.copyDir(SEED_DS, path.join(dsRoot, DS_PROJ_DIR));
+
+        const adapter = makeFsAdapter(dsRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        const relDepth1 = path.join(DS_PROJ_DIR, "docs/knowledge/Depth1 Note.md");
+        const relDepth2 = path.join(DS_PROJ_DIR, "docs/knowledge/advanced/Depth2 Note.md");
+        const relNoHub = path.join(DS_PROJ_DIR, "docs/notes/No Hub Note.md");
+        const relAlready = path.join(DS_PROJ_DIR, "docs/knowledge/Already Sectioned.md");
+
+        // Snapshot the already-sectioned + no-hub bodies BEFORE for untouched checks.
+        const alreadyBefore = fs.readFileSync(path.join(dsRoot, relAlready), "utf8");
+        const noHubBefore = fs.readFileSync(path.join(dsRoot, relNoHub), "utf8");
+
+        // ----- First invocation -----
+        await applyDocSectionBackfill(tp, manifest, variables, history, git);
+
+        // A: depth-1 doc backfilled section from its sibling section-hub.
+        const d1Fm = helpers.parseFrontmatter(fs.readFileSync(path.join(dsRoot, relDepth1), "utf8")).frontmatter;
+        ok(
+            "HC-DOCSEC-BACKFILL-A1 depth-1 doc backfilled section == hub display name (Knowledge)",
+            String(d1Fm.section || "") === "Knowledge",
+            `got section=${JSON.stringify(d1Fm.section)}`
+        );
+        ok(
+            "HC-DOCSEC-BACKFILL-A2 depth-1 doc has no sub_section",
+            d1Fm.sub_section === undefined || d1Fm.sub_section === ""
+        );
+
+        // B: depth-2 doc backfilled BOTH section (parent hub) + sub_section (own hub).
+        const d2Fm = helpers.parseFrontmatter(fs.readFileSync(path.join(dsRoot, relDepth2), "utf8")).frontmatter;
+        ok(
+            "HC-DOCSEC-BACKFILL-B1 depth-2 doc backfilled section == parent hub (Knowledge)",
+            String(d2Fm.section || "") === "Knowledge",
+            `got section=${JSON.stringify(d2Fm.section)}`
+        );
+        ok(
+            "HC-DOCSEC-BACKFILL-B2 depth-2 doc backfilled sub_section == own hub (Advanced)",
+            String(d2Fm.sub_section || "") === "Advanced",
+            `got sub_section=${JSON.stringify(d2Fm.sub_section)}`
+        );
+
+        // C: no-section-hub doc is SKIPPED (still missing section, byte-identical).
+        const noHubAfter = fs.readFileSync(path.join(dsRoot, relNoHub), "utf8");
+        const noHubFm = helpers.parseFrontmatter(noHubAfter).frontmatter;
+        ok(
+            "HC-DOCSEC-BACKFILL-C1 no-hub doc still missing section (skipped)",
+            noHubFm.section === undefined
+        );
+        ok(
+            "HC-DOCSEC-BACKFILL-C2 no-hub doc byte-identical (untouched)",
+            noHubBefore === noHubAfter
+        );
+
+        // D: already-sectioned doc is untouched (byte-identical).
+        const alreadyAfter = fs.readFileSync(path.join(dsRoot, relAlready), "utf8");
+        ok(
+            "HC-DOCSEC-BACKFILL-D1 already-sectioned doc byte-identical (untouched)",
+            alreadyBefore === alreadyAfter
+        );
+
+        // E: history recorded a backfill step with empty errors[].
+        const eSteps = new Set(history.map(h => h && h.step).filter(Boolean));
+        const eNoErrors = history.every(h => !h.errors || (Array.isArray(h.errors) && h.errors.length === 0));
+        ok(
+            "HC-DOCSEC-BACKFILL-E1 history recorded doc_section_backfill step with empty errors[]",
+            eSteps.has("doc_section_backfill") && eNoErrors
+        );
+        // E2: a REAL per-doc backfill event was logged (not just the always-present
+        // summary entry) — action backfilled_section + target at a backfilled doc.
+        ok(
+            "HC-DOCSEC-BACKFILL-E2 history has a per-doc backfilled_section event for Depth1 Note",
+            history.some(h => h && h.step === "doc_section_backfill" && h.action === "backfilled_section" && typeof h.target === "string" && /Depth1 Note\.md$/.test(h.target))
+        );
+
+        // F: idempotency — a SECOND invocation is a no-op on the backfilled docs.
+        const fD1Before = fs.readFileSync(path.join(dsRoot, relDepth1), "utf8");
+        const fD2Before = fs.readFileSync(path.join(dsRoot, relDepth2), "utf8");
+        const history2 = [];
+        await applyDocSectionBackfill(tp, manifest, variables, history2, git);
+        const fD1After = fs.readFileSync(path.join(dsRoot, relDepth1), "utf8");
+        const fD2After = fs.readFileSync(path.join(dsRoot, relDepth2), "utf8");
+        ok(
+            "HC-DOCSEC-BACKFILL-F1 second invocation: depth-1 doc byte-identical (idempotent)",
+            fD1Before === fD1After
+        );
+        ok(
+            "HC-DOCSEC-BACKFILL-F2 second invocation: depth-2 doc byte-identical (idempotent)",
+            fD2Before === fD2After
+        );
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${dsRoot}`);
+        } else {
+            try { fs.rmSync(dsRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // ===== HC-V01190-FIN-SEED-MIGRATE-* — finance blueprint installer migrations =====
 //
 // Direct-invocation pattern (mirrors HC-V01190-PROJ family). See impl-2 design doc.
@@ -2144,6 +2271,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01190-PROJ-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01190-PROJ-SEED-MIGRATE-FAMILY");
+    })
+    .then(() => runDocSectionBackfillFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-DOCSEC-BACKFILL-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-DOCSEC-BACKFILL-FAMILY");
     })
     .then(() => runFinanceMigrateFamily())
     .catch((e) => {
