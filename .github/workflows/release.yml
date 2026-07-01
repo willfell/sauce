@@ -13,7 +13,7 @@ permissions:
 jobs:
   # ---- maintain the standing release PR on every main push (skip the bot's own commits) ----
   prepare-release:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):') && !startsWith(github.event.head_commit.message, 'docs(prompts):')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,10 @@ jobs:
       - name: Detect whether anything is releasable
         id: diff
         run: |
-          if git diff --quiet; then
+          # Ignore a lockfile-only diff: `npm install` above can rewrite
+          # package-lock.json even when compute-release bumped no component,
+          # which previously opened duplicate no-op `chore(release)` PRs.
+          if git diff --quiet -- . ':(exclude)package-lock.json'; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No releasable changes since the last tag — nothing to do."
           else
