@@ -1179,6 +1179,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
+  await applyProjectsHubAllProjectsHeadingCleanup(tp, mech, variables, history, git); // strips the legacy `## All Projects` H2 from the all-projects hub so it uses the SectionLabel chrome pattern (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
@@ -2842,6 +2843,106 @@ async function applyProjectNavButtonsSeparatorGap(tp, manifest, variables, histo
     history.push({
       event: "info",
       step: "project_nav_buttons_separator_gap",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _stripAllProjectsHeading — pure transform. Removes a standalone `## All Projects`
+// H2 line (and one trailing blank) from the all-projects hub body, so the hub uses
+// the SectionLabel/no-##-H2 chrome pattern. Fence-aware + idempotent.
+function _stripAllProjectsHeading(body) {
+  const lines = String(body == null ? "" : body).split("\n");
+  const out = [];
+  let changed = false;
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^(```|~~~)/.test(line.trim())) { inFence = !inFence; out.push(line); continue; }
+    if (!inFence && line.trim() === "## All Projects") {
+      changed = true;
+      if (i + 1 < lines.length && lines[i + 1].trim() === "") i++;  // drop one trailing blank
+      continue;
+    }
+    out.push(line);
+  }
+  return { changed, body: out.join("\n") };
+}
+
+// applyProjectsHubAllProjectsHeadingCleanup — strips the legacy `## All Projects`
+// H2 from the existing type:projects-hub note (spice/projects/Projects.md) so the
+// hub matches the SectionLabel chrome pattern. Cleanup-type: idempotent, .sauce-backup
+// snapshot, per-note try/catch, history events, never throws. Runs every install.
+async function applyProjectsHubAllProjectsHeadingCleanup(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try {
+    const listing = await adapter.list(root);
+    files = (listing.files || []).filter((p) => p.endsWith(".md"));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "projects_hub_all_projects_heading_cleanup",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of files) {
+    try {
+      const before = await adapter.read(notePath);
+      if (_noteChromeFrontmatterType(before) !== "projects-hub") { skipped += 1; continue; }
+      const { changed, body: after } = _stripAllProjectsHeading(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "projects_hub_all_projects_heading_cleanup",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "projects_hub_all_projects_heading_cleanup",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "projects_hub_all_projects_heading_cleanup",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -14935,6 +15036,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports.applyProjectNavButtonsSeparatorGap = applyProjectNavButtonsSeparatorGap;
     module.exports._collapseNavButtonsSeparatorGap = _collapseNavButtonsSeparatorGap;
+    module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
+    module.exports._stripAllProjectsHeading = _stripAllProjectsHeading;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;

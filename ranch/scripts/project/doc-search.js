@@ -35,8 +35,14 @@ class DocSearch {
     // up the legacy behavior byte-for-byte.
     const entityType = opts.entityType || "doc-note";
     const entityFilter = opts.entityFilter || ((p) => p.type === entityType);
+    // NEW opts (additive, default = legacy behavior for every existing caller):
+    //   hideTags: true  → suppress the tag-chip section entirely.
+    //   persist:  false → never save/restore the filter to localStorage (search
+    //                     always starts empty; typing is not remembered across visits).
+    const hideTags = opts.hideTags === true;
+    const persist = opts.persist !== false;
     const allDocs = dv.pages(`"${opts.scopePath}"`).where(entityFilter);
-    const tagCounts = this._countTags(allDocs, opts.tagExclude || [], entityType);
+    const tagCounts = hideTags ? {} : this._countTags(allDocs, opts.tagExclude || [], entityType);
     const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
 
     // PERMANENT strip — built once, never rebuilt. Survives keystrokes.
@@ -87,6 +93,7 @@ class DocSearch {
     // each keep their own filter independently.
     const storageKey = `sauce.doc-search.${opts.scopePath}`;
     const persistState = () => {
+      if (!persist) return;   // persistence disabled for this scope (e.g. projects hub)
       try {
         localStorage.setItem(storageKey, JSON.stringify({
           text: ctx.text,
@@ -149,8 +156,9 @@ class DocSearch {
 
     // v0.106.0 S2 — restore saved state for this scope. Runs AFTER all listeners
     // are wired so the chip-restore styling + initial filter render flow through
-    // the same code paths user interactions do.
-    try {
+    // the same code paths user interactions do. Skipped entirely when persist:false
+    // so the search box always starts empty (no remembered text across visits).
+    if (persist) try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
       if (saved.text) {
         ctx.text = saved.text;

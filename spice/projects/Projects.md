@@ -15,8 +15,6 @@ await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ in
 
 ---
 
-## All Projects
-
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectsHubCards" });
 ```

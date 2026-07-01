@@ -96,7 +96,7 @@ class ProjectsHubCards {
         const select = wrap.createEl("select");
         ["none", "status", "team", "product"].forEach(opt => {
             const o = select.createEl("option", { text: opt, value: opt });
-            if (opt === (this._groupBy || "status")) o.selected = true;
+            if (opt === (this._groupBy || "none")) o.selected = true;
         });
         select.addEventListener("change", async (e) => {
             this._groupBy = e.target.value;
@@ -153,6 +153,8 @@ class ProjectsHubCards {
             scopePath:  "spice/projects",
             recursive:  true,
             placeholder: "Filter projects by name or tag…",
+            hideTags: true,   // projects hub: drop the tag-chip section entirely
+            persist:  false,  // projects hub: search box never remembers text across visits
             onChange: async (ctx) => {
                 this._filterCtx = ctx;
                 ctx.resultsContainer.empty();
@@ -262,7 +264,7 @@ class ProjectsHubCards {
         // (default) / "team" / "product" emit an <h3> header per group with
         // a card list below. Status groups are ordered by STATUS_ORDER
         // priority; team/product groups are alphabetical.
-        const groupBy = this._groupBy || "status";
+        const groupBy = this._groupBy || "none";
         const pages = enriched.map(e => e.project);
         if (groupBy === "none" || pages.length === 0) {
             await this._renderCards(dv, pages);
@@ -281,8 +283,9 @@ class ProjectsHubCards {
                 ? STATUS_ORDER.filter(s => groups.has(s))
                 : [...groups.keys()].sort();
             for (const key of sortedKeys) {
-                const header = dv.container.createEl("h3", { text: key });
-                header.style.cssText = "margin-top:16px;margin-bottom:6px;color:var(--text-muted);";
+                // Use the shared SectionLabel primitive (no raw ## / <h3> chrome),
+                // matching the sections pattern used across the blueprints.
+                customJS.SectionLabel.render(dv, { text: key });
                 await this._renderCards(dv, groups.get(key));
             }
         }
