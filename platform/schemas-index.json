@@ -158,7 +158,7 @@
         "platform/blueprints/finance/helpers/monthly-overview.js",
         "platform/blueprints/finance/helpers/finance-math.js"
       ],
-      "notes": "10 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Validates frontmatter on per-blueprint paths via the validator mechanism."
+      "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 — per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
     },
     {
       "id": "cowork-rule-fragments",

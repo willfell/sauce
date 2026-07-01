@@ -41,6 +41,7 @@
     "FinanceFrontmatter",
     "FinanceNavRow",
     "BudgetCategoriesEditor",
+    "BudgetAllocationsEditor",
     "PaycheckExpensesEditor",
     "InvoiceTimeLogEditor",
     "InvoiceControls",
@@ -102,6 +103,10 @@
     {
       "source": "helpers/budget-categories-editor.js",
       "dest": "{{scripts_path}}/finance/budget-categories-editor.js"
+    },
+    {
+      "source": "helpers/budget-allocations-editor.js",
+      "dest": "{{scripts_path}}/finance/budget-allocations-editor.js"
     },
     {
       "source": "helpers/paycheck-expenses-editor.js",
@@ -403,6 +408,8 @@
         "month": "{{prompts.month}}",
         "categories": [],
         "groups": [],
+        "debt_allocations": [],
+        "savings_allocations": [],
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "cssclasses": [
           "wide"
@@ -418,7 +425,7 @@
           "actual": 0
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/budgets/Budgets.md"
@@ -688,6 +695,14 @@
             "matches": "^\\d{4}-\\d{2}$"
           },
           "groups": {
+            "required": false,
+            "type": "array"
+          },
+          "debt_allocations": {
+            "required": false,
+            "type": "array"
+          },
+          "savings_allocations": {
             "required": false,
             "type": "array"
           }
