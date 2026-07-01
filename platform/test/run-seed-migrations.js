@@ -357,6 +357,25 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-* — applyFinanceBudgetAllocationsBandInjection =====
+    // Ungated body injection: adds the BudgetAllocationsEditor dataviewjs block
+    // (after BudgetCategoriesEditor) to existing budgets lacking it. (The
+    // V0149 prefix is a cosmetic label — the release pipeline computes the real
+    // shipping version; this is not a version gate.)
+    {
+        let allocBody = "";
+        try { allocBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
+        ok(
+            "HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-1 BudgetAllocationsEditor block injected into existing budget",
+            allocBody.includes('class: "BudgetAllocationsEditor"')
+        );
+        ok(
+            "HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-2 BudgetAllocationsEditor lands after BudgetCategoriesEditor",
+            allocBody.indexOf('class: "BudgetCategoriesEditor"') !== -1 &&
+            allocBody.indexOf('class: "BudgetAllocationsEditor"') > allocBody.indexOf('class: "BudgetCategoriesEditor"')
+        );
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);

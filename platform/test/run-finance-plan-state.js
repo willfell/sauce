@@ -280,5 +280,74 @@ function tierCase(balance) {
         ppNone.source === "none" && ppNone.zeroDebtDate === "—", `${ppNone.source}/${ppNone.zeroDebtDate}`);
 }
 
+// ===== HC-V0630-ATTR-* — readPaychecksForMonth attributes by pay_period_end (start fallback) =====
+{
+    // A check straddling the June/July boundary attributes to the month it is PAID (end).
+    const straddling = { type: "paycheck", pay_period_start: "2026-06-28", pay_period_end: "2026-07-02",
+        paycheck_amount: 4500, expenses: [],
+        file: { path: "spice/finance/paychecks/2026-06-28/Paycheck-2026-06-28.md", name: "Paycheck-2026-06-28" } };
+    const dv = makeDv({ paychecks: [straddling] });
+    const july = fm.readPaychecksForMonth(dv, "2026-07");
+    const june = fm.readPaychecksForMonth(dv, "2026-06");
+    ok("HC-V0630-ATTR-1 straddling check attributes to July (by end) not June",
+        july.length === 1 && june.length === 0);
+
+    // Legacy check with only pay_period_start still attributes by start.
+    const legacy = { type: "paycheck", pay_period_start: "2026-06-15", paycheck_amount: 4500, expenses: [],
+        file: { path: "spice/finance/paychecks/2026-06-15/Paycheck-2026-06-15.md", name: "Paycheck-2026-06-15" } };
+    const dvLegacy = makeDv({ paychecks: [legacy] });
+    ok("HC-V0630-ATTR-2 legacy check (no end) falls back to start-month",
+        fm.readPaychecksForMonth(dvLegacy, "2026-06").length === 1);
+}
+
+// ===== HC-V0630-BA-* — FinanceMath.budgetAllocations merges live plan alloc + per-row overrides =====
+{
+    const dv = makeDv({
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07", categories: [],
+            debt_allocations: [{ slug: "Debt-Apple-Card", planned: 350 }], savings_allocations: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    });
+    const a = fm.budgetAllocations(dv, "2026-07");
+    const apple = a.debt.find(d => d.slug === "Debt-Apple-Card");
+    const disc = a.debt.find(d => d.slug === "Debt-Discover-It");
+    ok("HC-V0630-BA-1 overridden debt row uses the override",
+        apple && apple.planned === 350 && apple.source === "override");
+    ok("HC-V0630-BA-2 non-overridden debt row uses the live plan value",
+        disc && disc.planned > 0 && disc.source === "plan");
+    ok("HC-V0630-BA-3 savings row present with live contribution",
+        a.savings.length >= 1 && a.savings[0].planned > 0);
+    ok("HC-V0630-BA-4 totals expose debt + discretionary",
+        typeof a.totals.debt === "number" && typeof a.totals.discretionary === "number");
+}
+
+// HC-V0630-BA-ISOLATE — envelope isolation: a debt_allocations override is a VIEW
+// only; it must never move the discretionary envelope (which stays categories[]-only
+// in computePlanState). Design.md §Architecture promised this test.
+{
+    const baseCfg = {
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+    };
+    const noOv = makeDv(Object.assign({}, baseCfg, { budgets: [{
+        type: "budget", month: "2026-07", categories: [],
+        file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+    }] }));
+    const withOv = makeDv(Object.assign({}, baseCfg, { budgets: [{
+        type: "budget", month: "2026-07", categories: [],
+        debt_allocations: [{ slug: "Debt-Apple-Card", planned: 100 }], savings_allocations: [],
+        file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+    }] }));
+    const dNo = fm.budgetAllocations(noOv, "2026-07").totals.discretionary;
+    const dOv = fm.budgetAllocations(withOv, "2026-07").totals.discretionary;
+    ok("HC-V0630-BA-ISOLATE-1 debt override does not change the discretionary envelope",
+        dNo === dOv && typeof dNo === "number");
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

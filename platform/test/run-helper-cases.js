@@ -12236,7 +12236,7 @@ async function caseV01070Bde1ClassDeclared() {
   assertTrue("HC-V01070-BDE-1: class BudgetDefaultsEditor declared",
     /class\s+BudgetDefaultsEditor\s*\{/.test(src));
   assertTrue("HC-V01070-BDE-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+    /async\s+render\s*\(\s*dv\b/.test(src));
   assertTrue("HC-V01070-BDE-1: embed-dedup guard",
     /markdown-embed/.test(src));
 }
@@ -13009,8 +13009,8 @@ async function caseV01103MonthlyOverviewDataReads() {
     /spice\/finance\/paychecks/.test(src));
   assertTrue("V01103-MO-READS-2: queries spice/finance/debts",
     /spice\/finance\/debts/.test(src));
-  assertTrue("V01103-MO-READS-3: filters by pay_period_start month prefix",
-    /pay_period_start[\s\S]{0,400}startsWith/.test(src));
+  assertTrue("V01103-MO-READS-3: filters paychecks by pay_period_end month prefix (start fallback)",
+    /pay_period_end[\s\S]{0,400}startsWith/.test(src));
   assertTrue("V01103-MO-READS-4: sums paycheck_amount + expenses + current_balance + balance_history",
     /paycheck_amount/.test(src) && /\.expenses\b/.test(src) && /current_balance/.test(src) && /balance_history/.test(src));
 }
@@ -13346,7 +13346,7 @@ async function caseV01120FinanceMathStaticApi() {
     "readDebts", "readPaychecksForMonth", "readBudgetForMonth",
     "monthBounds", "debtTotals", "monthIncome", "monthSpending",
     "monthExpensesTotal", "monthDebtPaid", "debtPaidByDebt",
-    "measuredMovement", "reconcile", "fmtMoney",
+    "measuredMovement", "reconcile", "fmtMoney", "budgetAllocations",
   ];
   for (const m of methods) {
     assertTrue(`V01120-FM-API-${m}: instance ${m} declared (not static)`,

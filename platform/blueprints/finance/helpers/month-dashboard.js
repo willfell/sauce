@@ -29,7 +29,7 @@ class MonthDashboard {
 
         this._renderBudgetAnalysis(root, dv, monthKey, budget);
         this._renderPaycheckTotals(root, paychecks);
-        this._renderDebtChanges(root, paychecks, debts, monthKey);
+        this._renderDebtChanges(root, dv, paychecks, debts, monthKey);
     }
 
     // ----------------------------------------------------------------- helpers
@@ -165,9 +165,12 @@ class MonthDashboard {
         const rowWrap = section.createEl("div", { cls: "mdash-paychecks-rows" });
         rowWrap.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
         for (const p of paychecks) {
-            const startStr = (typeof p.pay_period_start === "string") ? p.pay_period_start
-                : (p.pay_period_start && typeof p.pay_period_start.toISODate === "function")
-                    ? p.pay_period_start.toISODate() : String(p.pay_period_start || "");
+            // Label by the pay date (pay_period_end, the month-attribution anchor),
+            // falling back to pay_period_start for legacy checks.
+            const payDate = (p.pay_period_end != null) ? p.pay_period_end : p.pay_period_start;
+            const startStr = (typeof payDate === "string") ? payDate
+                : (payDate && typeof payDate.toISODate === "function")
+                    ? payDate.toISODate() : String(payDate || "");
             const amount = typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0;
             const row = rowWrap.createEl("div", { cls: "mdash-paycheck-row" });
             row.style.cssText = "font-size: 0.82em; font-variant-numeric: tabular-nums; cursor: pointer; color: var(--text-normal);";
@@ -180,13 +183,30 @@ class MonthDashboard {
 
     // ----------------------------------------------------------------- Debt Changes
 
-    _renderDebtChanges(root, paychecks, debts, monthKey) {
+    _renderDebtChanges(root, dv, paychecks, debts, monthKey) {
         const section = this._sectionWrap(root, "mdash-debts");
         this._sectionHeader(section, "Debt Changes");
 
         const paydown = customJS.FinanceMath.monthDebtPaid(paychecks);
         const mv = customJS.FinanceMath.measuredMovement(debts, monthKey);
         const rec = customJS.FinanceMath.reconcile(paydown, mv);
+
+        // Planned (budget) allocation per debt — the third leg of the
+        // planned/paid/measured reconciliation. Keyed by every representation a
+        // Debt Changes row can carry: slug, name, and the [[slug]] wikilink form.
+        const plannedBySlug = new Map();
+        try {
+            const alloc = customJS.FinanceMath.budgetAllocations(dv, monthKey);
+            const rows = (alloc && Array.isArray(alloc.debt)) ? alloc.debt : [];
+            for (const a of rows) {
+                if (!a || typeof a.planned !== "number") continue;
+                if (a.slug != null) {
+                    plannedBySlug.set(String(a.slug), a.planned);
+                    plannedBySlug.set(`[[${a.slug}]]`, a.planned);
+                }
+                if (a.name != null) plannedBySlug.set(String(a.name), a.planned);
+            }
+        } catch (_e) { /* planned column is best-effort; never blocks the section */ }
 
         const headerEl = section.createEl("div", { cls: "mdash-debts-header" });
         headerEl.textContent = `Paydown applied ${this._fmtMoney(rec.paydownApplied)} · Measured drop ${this._fmtMoney(rec.measuredDrop)} · Interest/charges ${this._fmtMoney(rec.interestAndCharges)}`;
@@ -220,9 +240,10 @@ class MonthDashboard {
             const measuredCell = (mvEntry && mvEntry.hasSignal)
                 ? this._fmtMoney(Math.abs(mvEntry.delta))
                 : "snapshot pending";
+            const plannedCell = plannedBySlug.has(key) ? this._fmtMoney(plannedBySlug.get(key)) : "—";
 
             const detailEl = row.createEl("span");
-            detailEl.textContent = `paydown ${paidAmt} · measured drop ${measuredCell}`;
+            detailEl.textContent = `planned ${plannedCell} · paydown ${paidAmt} · measured drop ${measuredCell}`;
         }
     }
 }

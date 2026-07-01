@@ -6,7 +6,7 @@
  * customJS.FinanceFrontmatter.update. Embed-deduped per v0.16.0 lesson.
  */
 class PaycheckExpensesEditor {
-    async render(dv) {
+    async render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .pee-root");
@@ -16,7 +16,12 @@ class PaycheckExpensesEditor {
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
-        const expenses = Array.isArray(page.expenses) ? page.expenses : [];
+        // Render-from-authoritative: prefer the freshly-written array captured by
+        // the mutate flow over Dataview's lagging dv.current() metadata cache.
+        // Kills the stuck-row symptom AND the delete index-cascade.
+        const expenses = Array.isArray(override)
+            ? override
+            : (Array.isArray(page.expenses) ? page.expenses : []);
 
         const root = dv.container.createEl("div", { cls: "pee-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -323,31 +328,39 @@ class PaycheckExpensesEditor {
     async _addFlow(file, dv) {
         const result = await this._promptForExpense(null);
         if (!result) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             fm.expenses = (fm.expenses || []).concat([result]);
+            next = fm.expenses.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _editFlow(file, dv, index, current) {
         const result = await this._promptForExpense(current);
         if (!result) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             const list = (fm.expenses || []).slice();
-            list[index] = result;
+            // Merge-on-edit: keep non-dialog fields (e.g. debt links) that the
+            // modal doesn't surface, instead of replacing the whole row object.
+            list[index] = Object.assign({}, current, result);
             fm.expenses = list;
+            next = list.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _deleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete expense '${current?.item || ""}'?`)) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             const list = (fm.expenses || []).slice();
             list.splice(index, 1);
             fm.expenses = list;
+            next = list.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _mutate(file, mutator) {
