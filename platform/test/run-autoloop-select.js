@@ -12,7 +12,7 @@ const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
 const { reconcileInFlight, slugFromRef } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
-const { lockState } =
+const { lockState, pidAlive } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
 const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
@@ -249,6 +249,24 @@ ok('TL-3 stale lock → not held + stale',
 ok('TL-4 garbage lock → stale (overridable)', lockState('not json', TL_NOW, 30 * TL_MIN).stale === true);
 ok('TL-5 future-skewed lock (negative age) → not held + stale',
   (s => s.held === false && s.stale === true)(lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW + 10 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN)));
+// pid-liveness override (crashed turn that never released must not wedge later turns for staleMs):
+ok('TL-6 recent lock but holder pid KNOWN-dead → overridable',
+  (s => s.held === false && s.stale === true && s.reason === 'holder-pid-dead')(
+    lockState(JSON.stringify({ pid: 50003, startedAt: new Date(TL_NOW - 5 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN, false)));
+ok('TL-7 recent lock + holder alive → still held (never stomp a live turn)',
+  lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 5 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN, true).held === true);
+ok('TL-8 recent lock + liveness unknown (null) → falls back to time (held)',
+  lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 5 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN, null).held === true);
+ok('TL-9 time-stale lock overridable even if holder pid alive (time wins)',
+  lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 31 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN, true).held === false);
+ok('TL-10 backward-compat: 3-arg call unchanged (fresh lock held)',
+  lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 5 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN).held === true);
+ok('TL-11 pidAlive: own pid alive; bad pids → unknown (null)',
+  pidAlive(process.pid) === true && pidAlive(0) === null && pidAlive(-5) === null && pidAlive('x') === null);
+// Pin the helper's core branches so ESRCH→false can't silently mutate to →null (which would re-wedge crashes):
+const TL_DEAD_PID = require('child_process').spawnSync(process.execPath, ['-e', '0']).pid; // spawned, exited, reaped → gone
+ok('TL-12 pidAlive: a reaped (exited) pid reads as KNOWN-dead (false)', pidAlive(TL_DEAD_PID) === false);
+ok('TL-13 pidAlive: pid 1 exists (EPERM/other-owner or signalable) → alive (true)', pidAlive(1) === true);
 
 // ---- bug-hunt (BH-*) ----
 const BH_GOOD = { title: 'Off-by-one in payoff loop', file: 'platform/x.js', symptom: 'last month skipped', repro_hint: 'plan with 1 debt', fix_sketch: 'use <=', test_sketch: 'assert final month included', severity: 'high', confidence: 0.9 };
