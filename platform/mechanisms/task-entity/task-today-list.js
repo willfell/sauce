@@ -49,6 +49,7 @@ class TaskTodayList {
     renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
+    _projectChipText(v) { return TaskTodayList._projectChipText(v); }
 
     // ---------- Static pure helper ----------
 
@@ -229,7 +230,16 @@ class TaskTodayList {
         // change → delegate the write to TaskDialog.markDone(path); revert +
         // notice on failure. Stop propagation so the checkbox doesn't also
         // trigger the row-click editor.
-        const cb = row.createEl('input');
+        //
+        // The row stays align-items:flex-start (so the chips pin top-right and a
+        // long title wraps within its own column), but a bare checkbox then sits
+        // ABOVE the first line of the (line-height:1.5) title. Wrap the checkbox
+        // in a fixed 1.5em-tall flex box that centers it against that first line —
+        // the wrapper height MUST equal the title's first-line line-height so the
+        // math holds for BOTH a short title and a wrapping one.
+        const cbWrap = row.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+        cbWrap.style.cssText = 'display: flex; align-items: center; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
+        const cb = cbWrap.createEl('input');
         cb.type = 'checkbox';
         cb.checked = false;
         cb.style.cssText = 'margin: 0; cursor: pointer; flex-shrink: 0;';
@@ -260,8 +270,10 @@ class TaskTodayList {
         const title = row.createEl('span', { cls: 'sauce-task-today-title' });
         // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
         // column (min-width:0 lets it shrink; break-word wraps long words) so the
-        // chips never get pushed off the row.
-        title.style.cssText = 'flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
+        // chips never get pushed off the row. The EXPLICIT line-height:1.5 must
+        // match the checkbox wrapper's 1.5em height so the checkbox centers on the
+        // first line of the title (see cbWrap above) regardless of theme defaults.
+        title.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
         TaskTodayList._renderTitleMarkdown(title, titleText, path);
 
         const openEditor = () => {
@@ -286,7 +298,7 @@ class TaskTodayList {
             const chip = chips.createEl('span', { text: label });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
-        if (task && task.project) addChip(TaskTodayList._stripWikilink(task.project));
+        if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
         return row;
@@ -355,5 +367,43 @@ class TaskTodayList {
         const s = String(v == null ? '' : v).trim();
         const m = /^\[\[([^\]]+)\]\]$/.exec(s);
         return m ? m[1] : s;
+    }
+
+    /**
+     * Clean project label for the chip. Dataview resolves a `[[Connectors]]`
+     * frontmatter value to a full-path Link (`spice/projects/connectors/
+     * Connectors.md|Connectors`), so `_stripWikilink` alone would show the whole
+     * path. Prefer TaskEntity._linkText (the canonical basename extractor —
+     * handles Link objects + path + `|alias` + `.md`) so the chip reads
+     * `Connectors`. Falls back to a self-contained basename extract when
+     * TaskEntity isn't loaded (cold load / Node), so the chip is always clean.
+     * Never throws.
+     */
+    static _projectChipText(v) {
+        try {
+            const TE = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;
+            if (TE && typeof TE._linkText === 'function') {
+                const out = TE._linkText(v);
+                if (out) return out;
+            }
+        } catch (_e) { /* fall through to local extract */ }
+        // Local fallback: basename of a Link object / wikilink / path string.
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        if (v && typeof v === 'object' && ('path' in v || 'display' in v)) {
+            if (v.path != null && String(v.path).trim() !== '') return baseOf(v.path);
+            if (v.display != null) return String(v.display).trim();
+            return '';
+        }
+        let s = String(v == null ? '' : v).trim();
+        const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+        if (m) s = m[1].trim();
+        const pipe = s.indexOf('|');
+        if (pipe >= 0) s = s.slice(0, pipe).trim();
+        return baseOf(s);
     }
 }
