@@ -111,5 +111,17 @@ const meetTemplate = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/m
 ok('HC-V01330-MLA-DVGUARD-C Meeting.md template has no unguarded dv.current().file.path',
   !/dv\.current\(\)\.file\.path/.test(meetTemplate));
 
+// MTU-1 — the "Agenda" section was removed from the meeting template (card:
+// Meeting Template Update). New meetings go Attendees → Notes → Action Items →
+// Tasks with no Agenda SectionLabel. Template-only per the card — existing
+// meetings keep their Agenda (the H2->SectionLabel heal still recognizes it).
+ok('MTU-1 Meeting.md template no longer renders an "Agenda" SectionLabel',
+  !/class:\s*"SectionLabel"[^`]*text:\s*"Agenda"/.test(meetTemplate));
+ok('MTU-1 Meeting.md template keeps Attendees / Notes / Action Items / Tasks SectionLabels',
+  /class:\s*"SectionLabel"[^`]*text:\s*"Attendees"/.test(meetTemplate) &&
+  /class:\s*"SectionLabel"[^`]*text:\s*"Notes"/.test(meetTemplate) &&
+  /class:\s*"SectionLabel"[^`]*text:\s*"Action Items"/.test(meetTemplate) &&
+  /class:\s*"SectionLabel"[^`]*text:\s*"Tasks"/.test(meetTemplate));
+
 console.log(`\nResult: ${pass} passed, ${fail} failed.`);
 if (fail) { console.log('Failures:'); failures.forEach(f => console.log('  ' + f)); process.exit(1); }
