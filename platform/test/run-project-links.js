@@ -108,6 +108,31 @@ const pageWith = (links) => ({ current: () => ({ file: { name: 'Links Hub', path
   ok('PLB-P5 dedup + drop urlless', a.length === 1 && a[0].href === 'https://a.com' && a[0].textContent === 'first');
 }
 
+// PLB-P6 — PR2 slice 2: on a type:project hub the panel mirrors the SIBLING
+// Link Hub's links read-only (routes through _resolveSiblingLinks, not page.links).
+{
+  const c = makeEl('div');
+  const dv = {
+    current: () => ({ type: 'project', file: { name: 'X', folder: 'spice/projects/x', path: 'spice/projects/x/X.md' } }),
+    pages: () => ({ where: (fn) => ({ array: () => [{ type: 'links-hub', links: [{ url: 'https://a.com', text: 'A' }] }].filter(fn) }) }),
+    container: c,
+  };
+  panel && panel.render(dv);
+  const a = anchorsOf(c);
+  ok('PLB-P6 project-hub mirrors sibling Link Hub links', a.length === 1 && a[0].href === 'https://a.com' && a[0].textContent === 'A');
+}
+// PLB-P7 — project-hub with no sibling links renders NOTHING (no clutter / no hint).
+{
+  const c = makeEl('div');
+  const dv = {
+    current: () => ({ type: 'project', file: { name: 'Y', folder: 'spice/projects/y', path: 'spice/projects/y/Y.md' } }),
+    pages: () => ({ where: () => ({ array: () => [] }) }),
+    container: c,
+  };
+  panel && panel.render(dv);
+  ok('PLB-P7 project-hub silent when no sibling links', c.children.length === 0);
+}
+
 // ─── ProjectNavButtons.detectContext links-hub branch ────────────────────────
 const Nav = loadClass('platform/blueprints/project/helpers/project-nav-buttons.js', 'ProjectNavButtons');
 ok('PLB-D0 ProjectNavButtons class loads', !!Nav);
@@ -169,6 +194,61 @@ const dvFor = (name, p) => ({ current: () => ({ file: { name, path: p } }) });
     (man.customjs_classes || []).includes('ProjectLinksPanel') &&
     files.some((f) => f.source === 'templates/Links Hub.md') &&
     files.some((f) => f.source === 'helpers/project-links-panel.js'));
+}
+
+// ─── ProjectLinksManager pure CRUD ops (PR2 slice 1) ──────────────────────────
+// The add/edit/delete modals + processFrontMatter are dogfood-only; these pin the
+// pure link-mutation logic. Loads the class from source, so reverting the helper
+// fails PLM-0 (Gate B L1 red-without-fix).
+{
+  const PLM = loadClass('platform/blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
+  ok('PLM-0 manager class loads', typeof PLM === 'function');
+
+  let r = PLM.addLink([], { url: 'https://a.com', text: 'A' });
+  ok('PLM-1 addLink appends normalized', r.changed && r.links.length === 1 && r.links[0].url === 'https://a.com' && r.links[0].text === 'A');
+  r = PLM.addLink([{ url: 'https://a.com', text: 'A' }], { url: '  https://a.com  ', text: 'dup' });
+  ok('PLM-2 addLink dedups by trimmed url', !r.changed && r.reason === 'duplicate' && r.links.length === 1);
+  r = PLM.addLink([], { url: '   ', text: 'x' });
+  ok('PLM-3 addLink rejects empty url', !r.changed && r.reason === 'empty-url');
+  r = PLM.addLink([], { url: 'https://b.com' });
+  ok('PLM-4 addLink text defaults to url', r.changed && r.links[0].text === 'https://b.com');
+  const srcArr = [{ url: 'https://a.com', text: 'A' }];
+  PLM.addLink(srcArr, { url: 'https://c.com', text: 'C' });
+  ok('PLM-5 addLink does not mutate source', srcArr.length === 1);
+
+  const two = [{ url: 'https://a.com', text: 'A' }, { url: 'https://b.com', text: 'B' }];
+  r = PLM.updateLink(two, 1, { url: 'https://b2.com', text: 'B2' });
+  ok('PLM-6 updateLink replaces at index', r.changed && r.links[1].url === 'https://b2.com' && r.links[1].text === 'B2' && r.links[0].url === 'https://a.com');
+  r = PLM.updateLink(two, 1, { url: 'https://a.com', text: 'x' });
+  ok('PLM-7 updateLink rejects collision with a DIFFERENT entry', !r.changed && r.reason === 'duplicate');
+  r = PLM.updateLink(two, 0, { url: 'https://a.com', text: 'A-renamed' });
+  ok('PLM-8 updateLink allows same-index same-url (text-only edit)', r.changed && r.links[0].text === 'A-renamed');
+  r = PLM.updateLink(two, 5, { url: 'https://z.com' });
+  ok('PLM-9 updateLink bad index rejected', !r.changed && r.reason === 'bad-index');
+
+  r = PLM.deleteLink(two, 0);
+  ok('PLM-10 deleteLink removes at index', r.changed && r.links.length === 1 && r.links[0].url === 'https://b.com');
+  r = PLM.deleteLink(two, 9);
+  ok('PLM-11 deleteLink bad index rejected', !r.changed && r.reason === 'bad-index');
+  ok('PLM-12 deleteLink does not mutate source', two.length === 2);
+}
+
+// ─── ProjectLinksPanel project-hub sibling mirror (PR2 slice 2) ────────────────
+// On a project hub the panel reads the SIBLING Links Hub.md's links (read-only).
+{
+  const PLP = loadClass('platform/blueprints/project/helpers/project-links-panel.js', 'ProjectLinksPanel');
+  const panel = new PLP();
+  let capturedQuery = null;
+  const mkDv = (pages) => ({ pages: (q) => { capturedQuery = q; return { where: (fn) => ({ array: () => pages.filter(fn) }) }; } });
+  const got = panel._resolveSiblingLinks(
+    mkDv([{ type: 'links-hub', links: [{ url: 'https://a.com', text: 'A' }] }]),
+    { file: { folder: 'spice/projects/x' } });
+  ok('PLP-S1 resolves sibling links + scopes the query to the folder',
+    got.length === 1 && got[0].url === 'https://a.com' && typeof capturedQuery === 'string' && capturedQuery.includes('spice/projects/x'));
+  const none = panel._resolveSiblingLinks(mkDv([]), { file: { folder: 'spice/projects/y' } });
+  ok('PLP-S2 no sibling hub -> []', Array.isArray(none) && none.length === 0);
+  const noFolder = panel._resolveSiblingLinks(mkDv([{ type: 'links-hub', links: [] }]), { file: {} });
+  ok('PLP-S3 no folder -> []', Array.isArray(noFolder) && noFolder.length === 0);
 }
 
 const allPass = results.every(([, p]) => p);
