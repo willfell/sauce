@@ -68,6 +68,47 @@ function parsePlanningChecked(md) {
   return set;
 }
 
+// Parse a card note's `depends_on` frontmatter into an array of predecessor card
+// names. Supports every YAML shape the loop is likely to author:
+//   depends_on: "[[Slice 2]]"          (inline scalar, wikilink)
+//   depends_on: [[Slice 2]]            (inline, unquoted wikilink)
+//   depends_on: Slice 2                (inline, bare name)
+//   depends_on: ["[[A]]", "[[B]]"]     (inline flow list)
+//   depends_on:\n  - "[[A]]"\n  - B    (block list, mixed wikilink/bare)
+// Alias piped links (`[[name|alias]]`) resolve to `name`. Returns [] when the
+// field is absent/empty. PURE — reads the string, no I/O.
+function parseDependsOn(raw) {
+  const fm = String(raw || '').match(/^\s*---\n([\s\S]*?)\n---/);
+  if (!fm) return [];
+  const lines = fm[1].split('\n');
+  const start = lines.findIndex((l) => /^depends_on\s*:/.test(l));
+  if (start === -1) return [];
+  // The field's value = the text after `depends_on:` on its line. If that is
+  // empty, it's a block list → gather the following indented lines (which are
+  // its `- item` entries) until the next top-level key.
+  let block = lines[start].replace(/^depends_on\s*:/, '');
+  if (block.trim() === '') {
+    for (let i = start + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) block += '\n' + lines[i];
+  }
+  const out = [];
+  // 1. Every `[[wikilink]]` anywhere in the value — handles inline, flow-list,
+  //    and block-list wikilink forms, and preserves commas inside a name.
+  for (const w of block.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g) || []) {
+    const m = w.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/);
+    if (m) out.push(m[1].trim());
+  }
+  // 2. Bare names: from the value with wikilinks stripped out, take each
+  //    remaining block-list/flow-list token (dash + quotes/brackets removed).
+  const bareBlock = block.replace(/\[\[[^\]]*\]\]/g, '');
+  for (const line of bareBlock.split('\n')) {
+    for (const tok of line.split(',')) {
+      const name = tok.trim().replace(/^-\s*/, '').replace(/[[\]"']/g, '').trim();
+      if (name) out.push(name);
+    }
+  }
+  return [...new Set(out)];
+}
+
 // Parse autoloop-queue.md into items. Each item starts at a `- id:` line; its
 // indented `key: value` lines become fields. Items without an id are dropped.
 function parseQueue(md) {
@@ -124,18 +165,35 @@ function selectCard(o) {
     : planning.slice();
   const skipped = [];
   const checked = parsePlanningChecked(boardMd);
+  const completed = new Set(cols['Completed']);
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
+    const raw = loadBody ? (loadBody(card) || '') : '';
+    // Dependency gate: a card with `depends_on: [[X]]` frontmatter is skipped
+    // until EVERY predecessor is in the Completed column (the loop's done-signal).
+    // Fail-safe by construction — an unmet, misspelled, or cyclic dependency
+    // leaves the card un-eligible (it never runs prematurely) and surfaces the
+    // reason in `skipped`, rather than guessing. This is what lets a multi-slice
+    // epic self-sequence in order when the whole chain sits in Planning.
+    const deps = parseDependsOn(raw);
+    const unmet = deps.filter((d) => !completed.has(d));
+    if (unmet.length) { skipped.push({ card, reason: `depends_on not complete: ${unmet.join(', ')}` }); continue; }
     // Attempt-anything: do NOT skip on broad scope — pick it and pass a hint so
     // Phase C can scope / block-with-questions if it really is too big.
-    const body = loadBody ? stripCardChrome(loadBody(card) || '') : '';
-    const scope = isBroadScope(`${card}\n${body}`);
+    const scope = isBroadScope(`${card}\n${stripCardChrome(raw)}`);
     return {
       action: 'work', card, skipped, broadHint: scope.broad ? scope.reason : null,
       reason: rec === card ? 'recommended' : 'first Planning card (attempt-anything)',
     };
   }
-  return { action: 'no-eligible-work', reason: 'all Planning cards are [x]-checked', skipped };
+  const blockedByDeps = skipped.some((s) => /depends_on/.test(s.reason));
+  return {
+    action: 'no-eligible-work',
+    reason: blockedByDeps
+      ? 'all Planning cards are [x]-checked or waiting on unmet dependencies'
+      : 'all Planning cards are [x]-checked',
+    skipped,
+  };
 }
 
 function parseArgs(argv) {
@@ -167,7 +225,7 @@ function cliLoadBody(cardsRoot) {
   };
 }
 
-module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseQueue, selectFromQueue, stripCardChrome };
+module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome };
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
