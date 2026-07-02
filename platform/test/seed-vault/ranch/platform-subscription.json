@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     {
       "name": "breadcrumb",
@@ -63,7 +63,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "people-rendering",
