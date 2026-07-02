@@ -51,6 +51,7 @@ class TaskNoteView {
     _priorityMeta(priority) { return TaskNoteView._priorityMeta(priority); }
     _linkEntries(task) { return TaskNoteView._linkEntries(task); }
     _renderInlineMarkdown(el, mdText, sourcePath) { return TaskNoteView._renderInlineMarkdown(el, mdText, sourcePath); }
+    _renderInlineLinksLocal(el, mdText, sourcePath) { return TaskNoteView._renderInlineLinksLocal(el, mdText, sourcePath); }
 
     // ---------- Static pure helpers ----------
 
@@ -237,50 +238,90 @@ class TaskNoteView {
     }
 
     /**
-     * Render `mdText` as INLINE markdown into `el` so a LINKS-section entry
-     * (`[[Note]]` / `[label](url)` / `<url>`) becomes CLICKABLE (FIX 5). Mirrors
-     * TaskTodayList._renderTitleMarkdown: feature-detects Obsidian's
-     * MarkdownRenderer.render(app, md, el, sourcePath, comp) (newer API), falling
-     * back to the older renderMarkdown(md, el, sourcePath, comp); if neither is
-     * reachable (or it throws), falls back to plain text so a link always shows.
-     * Strips block margins on the injected <p> so the link sits inline (no big
-     * vertical gaps). `sourcePath` (the task-note path) resolves relative
-     * `[[wikilink]]` targets. Never throws.
+     * Render a LINKS-section entry (`[[Note]]` / `[label](url)` / bare `http(s)`)
+     * as CLICKABLE (FIX 1). DELEGATES to the shared, deterministic
+     * TaskTodayList.renderInlineLinks (builds REAL <a> anchors, no dependence on
+     * Obsidian's MarkdownRenderer — which is NOT a global in the customJS eval
+     * context, so the old MarkdownRenderer path always fell back to raw text).
+     * When TaskTodayList isn't registered yet (cold load), a self-contained LOCAL
+     * copy renders the same anchors so a link is always clickable. `sourcePath`
+     * (the task-note path) resolves relative `[[wikilink]]` targets. Never throws.
      */
     static _renderInlineMarkdown(el, mdText, sourcePath) {
         if (!el) return;
-        const text = String(mdText == null ? '' : mdText);
-        const plain = () => { try { el.textContent = text; } catch (_e) {} };
-        let MR = null;
         try {
-            MR = (typeof MarkdownRenderer !== 'undefined' && MarkdownRenderer)
-                || (typeof window !== 'undefined' && window.MarkdownRenderer)
-                || null;
-        } catch (_e) { MR = null; }
-        const appRef = (typeof app !== 'undefined' && app)
-            || (typeof window !== 'undefined' && window.app)
-            || null;
-        // Lightweight Component stub — Obsidian's renderer only needs
-        // addChild/register/load; no-ops are fine for a transient card row.
-        const comp = { addChild() {}, register() {}, load() {}, onload() {}, unload() {} };
-        let rendered = false;
-        try {
-            if (MR && typeof MR.render === 'function' && appRef) {
-                MR.render(appRef, text, el, sourcePath || '', comp);
-                rendered = true;
-            } else if (MR && typeof MR.renderMarkdown === 'function') {
-                MR.renderMarkdown(text, el, sourcePath || '', comp);
-                rendered = true;
+            const TTL = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
+            if (TTL && typeof TTL.renderInlineLinks === 'function') {
+                TTL.renderInlineLinks(el, mdText, sourcePath);
+                return;
             }
-        } catch (_e) { rendered = false; }
-        if (!rendered) { plain(); return; }
-        // Strip block margins so the rendered <p> sits inline (no block gaps).
+        } catch (_e) { /* fall through to the local copy */ }
+        TaskNoteView._renderInlineLinksLocal(el, mdText, sourcePath);
+    }
+
+    /**
+     * Self-contained cold-load fallback for _renderInlineMarkdown — a local copy of
+     * TaskTodayList.renderInlineLinks used ONLY when TaskTodayList isn't registered
+     * yet. Clears `el` and rebuilds it as plain-text nodes + real <a> anchors for
+     * `[[wikilink]]` / `[label](url)` / bare `http(s)://…`. Never throws.
+     */
+    static _renderInlineLinksLocal(el, mdText, sourcePath) {
+        if (!el) return;
+        const str = String(mdText == null ? '' : mdText);
+        const appRef = (typeof window !== 'undefined' && window.app)
+            || (typeof app !== 'undefined' && app) || null;
+        const appendText = (value) => {
+            if (!value) return;
+            if (typeof el.appendText === 'function') { el.appendText(value); return; }
+            if (typeof el.createSpan === 'function') { el.createSpan({ text: value }); return; }
+            el.textContent = (el.textContent || '') + value;
+        };
+        // Inline parser (mirror of TaskTodayList._parseInlineLinks).
+        const parse = (s) => {
+            const segs = [];
+            const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]]+)/g;
+            let last = 0; let m;
+            while ((m = re.exec(s)) !== null) {
+                if (m.index > last) segs.push({ type: 'text', value: s.slice(last, m.index) });
+                if (m[1] != null) segs.push({ type: 'wikilink', target: m[1].trim(), alias: (m[2] != null ? m[2].trim() : null) });
+                else if (m[3] != null && m[4] != null) segs.push({ type: 'mdlink', label: m[3], url: m[4] });
+                else if (m[5] != null) segs.push({ type: 'url', url: m[5] });
+                last = re.lastIndex;
+            }
+            if (last < s.length) segs.push({ type: 'text', value: s.slice(last) });
+            return segs.length ? segs : [{ type: 'text', value: s }];
+        };
         try {
-            const ps = el.querySelectorAll ? el.querySelectorAll('p') : [];
-            ps.forEach((p) => { p.style.margin = '0'; p.style.display = 'inline'; });
-            const anchors = el.querySelectorAll ? el.querySelectorAll('a') : [];
-            anchors.forEach((a) => { a.style.cursor = 'pointer'; });
-        } catch (_e) { /* cosmetic — tolerate */ }
+            if (typeof el.empty === 'function') el.empty();
+            else if ('textContent' in el) el.textContent = '';
+            while (el.firstChild) el.removeChild(el.firstChild);
+        } catch (_e) { /* clearing best-effort */ }
+        try {
+            for (const seg of parse(str)) {
+                if (seg.type === 'text') { appendText(seg.value); continue; }
+                if (seg.type === 'wikilink') {
+                    const label = seg.alias || seg.target;
+                    const a = el.createEl ? el.createEl('a', { cls: 'internal-link', text: label, href: '#' }) : null;
+                    if (!a) { appendText(label); continue; }
+                    try { if (a.dataset) a.dataset.href = seg.target; else a.setAttribute('data-href', seg.target); } catch (_e) {}
+                    if (typeof a.addEventListener === 'function') {
+                        a.addEventListener('click', (ev) => {
+                            try { ev.preventDefault(); ev.stopPropagation(); } catch (_e) {}
+                            try { if (appRef && appRef.workspace && appRef.workspace.openLinkText) appRef.workspace.openLinkText(seg.target, sourcePath || '', false); } catch (_e) {}
+                        });
+                    }
+                    continue;
+                }
+                // mdlink / url
+                const url = seg.url;
+                const label = (seg.type === 'mdlink') ? seg.label : url;
+                const a = el.createEl ? el.createEl('a', { text: label, href: url, attr: { target: '_blank', rel: 'noopener' } }) : null;
+                if (!a) { appendText(label); continue; }
+                if (typeof a.addEventListener === 'function') a.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            }
+        } catch (_e) {
+            try { if (typeof el.setText === 'function') el.setText(str); else el.textContent = str; } catch (_e2) {}
+        }
     }
 
     // ---------- Instance / browser render ----------
