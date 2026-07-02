@@ -535,6 +535,15 @@ module.exports = async function (tp) {
     // historical dailies untouched).
     await applyDailyTasksToEntityMigration(tp, installedNow.history, git);
 
+    // 6a5. task-entity — heal EXISTING task notes under spice/tasks/ (top level):
+    // rename ugly `task-YYYYMMDD-HHmmss-hhhh.md` files to the readable
+    // `<title>.md`, and inject the standard chrome (SpaceNavButtons + TaskNoteView
+    // + <!-- TASK_NOTES --> marker) into bare notes (preserving user body below the
+    // marker). Runs AFTER applyDailyTasksToEntityMigration so migration-created
+    // notes get healed the same install. Ungated, backup-first, idempotent
+    // (title-named + marker-present notes are skipped), failure-loud-per-file.
+    await applyTaskNoteHeal(tp, installedNow.history, git);
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -8207,6 +8216,181 @@ async function applyDailyTasksToEntityMigration(tp, history, git) {
       completed_at: new Date().toISOString() });
   } catch (e) {
     history?.push({ event: "warning", step: "daily_tasks_to_entity_migration", name: "to-do",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// _taskNoteChromeBody — the canonical CHROME body a task note gets: a
+// SpaceNavButtons nav block, the TaskNoteView card block, and the
+// `<!-- TASK_NOTES -->` marker that separates the (regenerable) chrome above
+// from the user's own notes below. MUST stay BYTE-IDENTICAL to
+// TaskEntity._chromeBody() (mechanisms/task-entity/task-entity.js) — the heal
+// can't require the customJS class in the headless installer, so the string is
+// replicated here. Any drift breaks the "already has chrome → skip" idempotency.
+function _taskNoteChromeBody() {
+  return "\n" +
+    "```dataviewjs\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n" +
+    "```\n" +
+    "\n" +
+    "```dataviewjs\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteView\" });\n" +
+    "```\n" +
+    "\n" +
+    "<!-- TASK_NOTES -->\n";
+}
+
+// _sanitizeTaskTitleForFilename — the SAME sanitization as
+// TaskEntity._sanitizeTitle (mechanisms/task-entity/task-entity.js). Replicated
+// inline (the heal can't require the customJS class). Strip Obsidian-illegal
+// filename chars, collapse whitespace, trim, cap to 80, empty → "Task".
+function _sanitizeTaskTitleForFilename(title) {
+  const s = String(title == null ? "" : title)
+    .replace(/[/\\:*?"<>|#^[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .trim();
+  return s === "" ? "Task" : s;
+}
+
+// applyTaskNoteHeal — ungated, idempotent, failure-loud-per-file heal for task
+// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Two jobs:
+//
+//   1. RENAME ugly-named notes: a basename matching the old deterministic form
+//      `task-YYYYMMDD-HHmmss-hhhh` is renamed to the readable
+//      `<sanitized title>.md`, deduped against existing top-level task notes
+//      (" 2", " 3", …). copy-content-to-new-path + remove-old (backlinks to task
+//      notes are effectively nil — they're queried, not linked — so copy+remove
+//      is safe; the installer adapter has no rename()).
+//   2. INJECT CHROME into bare notes: a note whose body has NO
+//      `<!-- TASK_NOTES -->` marker gets the standard chrome body, with any
+//      existing user body text preserved BELOW the marker.
+//
+// Idempotent: a note already title-named AND already carrying the marker is
+// skipped (no write). Ungated (runs every install) since it back-injects NEW
+// content into existing notes, per the migration-lifecycle rule. Mirrors
+// applyProjectTodoOwnedTasksHeal / applyDailyTasksToEntityMigration posture:
+// .sauce-backup snapshot before write, per-file try/catch, never throws.
+// Signature matches applyProjectTodoOwnedTasksHeal: (tp, history, git).
+async function applyTaskNoteHeal(tp, history, git) {
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/tasks";
+    if (!(await adapter.exists(ROOT).catch(() => false))) return;
+
+    // Enumerate TOP-LEVEL task notes only (skip _trash/ + _done/ subfolders).
+    let listing;
+    try { listing = await adapter.list(ROOT); }
+    catch (_e) { return; }
+    const topLevel = (listing.files || []).filter((f) => f.endsWith(".md"));
+    if (!topLevel.length) return;
+
+    const OLD_NAME_RE = /^task-\d{8}-\d{6}-[0-9a-f]{4}$/;
+    const MARKER = "<!-- TASK_NOTES -->";
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    let renamed = 0, chromed = 0, warned = 0;
+
+    // Live set of top-level task-note basenames so dedupe sees prior renames in
+    // THIS pass (seeded from the current listing; grows as we rename).
+    const existingNames = new Set(topLevel.map((f) => f.substring(f.lastIndexOf("/") + 1)));
+
+    const _uniqueName = (baseFilename) => {
+      if (!existingNames.has(baseFilename)) return baseFilename;
+      const dot = baseFilename.lastIndexOf(".");
+      const stem = dot > 0 ? baseFilename.slice(0, dot) : baseFilename;
+      const ext = dot > 0 ? baseFilename.slice(dot) : "";
+      for (let n = 2; n < 10000; n++) {
+        const cand = stem + " " + n + ext;
+        if (!existingNames.has(cand)) return cand;
+      }
+      return stem + " " + Date.now() + ext;
+    };
+
+    const _backup = async (relPath, content) => {
+      const backupPath = `.sauce-backup/${ts}/${relPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* tolerate */ }
+      try { await adapter.write(backupPath, content); } catch (_e) { /* best-effort */ }
+    };
+
+    // Inject chrome into a bare body: preserve frontmatter verbatim, insert the
+    // chrome + marker, move any existing user body text BELOW the marker.
+    const _injectChrome = (content) => {
+      const m = /^(---\r?\n[\s\S]*?\r?\n---)\r?\n?/.exec(content);
+      const header = m ? m[1] : "";
+      const bodyBelow = m ? content.slice(m[0].length) : content;
+      const userBody = String(bodyBelow).replace(/\s+$/, "");
+      const chrome = _taskNoteChromeBody();
+      const tail = userBody ? userBody + "\n" : "";
+      if (!header) return chrome + tail;
+      return header + "\n" + chrome + tail;
+    };
+
+    for (const fp of topLevel) {
+      try {
+        const basename = fp.substring(fp.lastIndexOf("/") + 1);
+        const stemNoExt = basename.replace(/\.md$/, "");
+        const before = await adapter.read(fp);
+        // Parse title from frontmatter (strict headless parser).
+        const fm = _parseFrontmatterStrict(before) || {};
+        const rawTitle = fm.title != null ? String(fm.title).replace(/^"(.*)"$/, "$1") : "";
+
+        const needsRename = OLD_NAME_RE.test(stemNoExt);
+        const needsChrome = !before.includes(MARKER);
+        if (!needsRename && !needsChrome) continue;  // idempotent no-op
+
+        // Compute the healed CONTENT (inject chrome if bare) and the healed PATH
+        // (rename if old-pattern). The rename is a copy-to-new + remove-old.
+        let content = needsChrome ? _injectChrome(before) : before;
+
+        if (needsRename) {
+          const desired = _sanitizeTaskTitleForFilename(rawTitle) + ".md";
+          // Never collide with the file we're leaving, nor any existing note.
+          existingNames.delete(basename);  // free the old name for reuse math
+          const finalName = _uniqueName(desired);
+          const newPath = `${ROOT}/${finalName}`;
+          // Snapshot the original before touching it.
+          await _backup(fp, before);
+          // Write the (possibly chromed) content to the new path, remove the old.
+          await adapter.write(newPath, content);
+          await adapter.remove(fp);
+          existingNames.add(finalName);
+          renamed += 1;
+          if (needsChrome) chromed += 1;
+          history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
+            action: needsChrome ? "renamed+chromed" : "renamed", from: fp, to: newPath,
+            git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+            attempted_at: new Date().toISOString() });
+        } else if (needsChrome) {
+          // Chrome-only, in place.
+          await _backup(fp, before);
+          await adapter.write(fp, content);
+          chromed += 1;
+          history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
+            action: "chromed", target: fp,
+            git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+            attempted_at: new Date().toISOString() });
+        }
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "task_note_heal", name: "task-entity",
+          reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
+      summary: { scanned: topLevel.length, renamed, chromed, warned },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "task_note_heal", name: "task-entity",
       reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
       git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
       attempted_at: new Date().toISOString() });
@@ -16148,6 +16332,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // task-entity — backup-first daily→note-per-task migration (for
     // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
     module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;
+    module.exports.applyTaskNoteHeal = applyTaskNoteHeal;
+    module.exports._taskNoteChromeBody = _taskNoteChromeBody;
+    module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;
     module.exports._composeDailyTaskNote = _composeDailyTaskNote;
     module.exports._swapDailyToTaskTodayList = _swapDailyToTaskTodayList;
