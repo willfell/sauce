@@ -132,89 +132,87 @@ class SpaceNavButtons {
 
     // ── Top arrow row (daily-nav prev/next; rendered when daily blueprint installed) ──
     const dailyMeta = await this._readDailyNotesMeta();
+
+    // ── One-line chrome row: [ ‹ prev ]   [ ⧉ Go to… ]   [ next › ] ──
+    const chromeRow = container.createEl("div");
+    chromeRow.style.cssText = `
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    `;
+
+    const arrowBaseStyle = `
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.8em;
+      font-family: inherit;
+      transition: color 0.15s, background 0.15s;
+    `;
+    const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+    const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+
+    // Left slot: prev-day arrow (or an empty spacer to keep the pill centered).
     if (dailyMeta) {
       const currentFile = dv.current && dv.current();
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
       const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-      const currentDate = dm
-        ? window.moment(dm[1], "YYYY-MM-DD", true)
-        : window.moment();
-
-      // Scan daily folder for existing dailies; sort by date.
+      const currentDate = dm ? window.moment(dm[1], "YYYY-MM-DD", true) : window.moment();
       const allDailies = app.vault.getMarkdownFiles()
         .filter(f => f.path.startsWith(dailyMeta.folder + "/"))
-        .map(f => {
-          const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/);
-          return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null;
-        })
+        .map(f => { const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/); return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null; })
         .filter(x => x && x.m.isValid())
         .sort((a, b) => a.m.diff(b.m));
-
       const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
       const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
 
-      const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
-      const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
-
-      const arrowBaseStyle = `
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 10px;
-        border-radius: 6px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 0.8em;
-        font-family: inherit;
-        transition: color 0.15s, background 0.15s;
-      `;
-
-      const topRow = container.createEl("div");
-      topRow.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      `;
-
-      // Prev button
-      const prevBtn = topRow.createEl("button");
-      const prevLabel = earlier ? earlier.m.format("ddd, MMM D") : "—";
-      prevBtn.innerHTML = chevronLeft + `<span>${prevLabel}</span>`;
-      const prevDisabled = !earlier;
-      prevBtn.style.cssText = arrowBaseStyle + (prevDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
-      if (!prevDisabled) {
+      const prevBtn = chromeRow.createEl("button");
+      prevBtn.innerHTML = chevronLeft + `<span>${earlier ? earlier.m.format("ddd, MMM D") : "—"}</span>`;
+      prevBtn.style.cssText = arrowBaseStyle + (earlier ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
+      if (earlier) {
         prevBtn.onmouseenter = () => { prevBtn.style.color = "var(--text-normal)"; prevBtn.style.background = "var(--background-modifier-hover)"; };
         prevBtn.onmouseleave = () => { prevBtn.style.color = "var(--text-muted)"; prevBtn.style.background = "transparent"; };
         prevBtn.onclick = () => app.workspace.openLinkText(earlier.file.path, "");
       }
 
-      // Next button
-      const nextBtn = topRow.createEl("button");
-      const nextLabel = later ? later.m.format("ddd, MMM D") : "—";
-      nextBtn.innerHTML = `<span>${nextLabel}</span>` + chevronRight;
-      const nextDisabled = !later;
-      nextBtn.style.cssText = arrowBaseStyle + (nextDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
-      if (!nextDisabled) {
+      // Pill in the middle.
+      this._renderPill(chromeRow, entries, dv);
+
+      const nextBtn = chromeRow.createEl("button");
+      nextBtn.innerHTML = `<span>${later ? later.m.format("ddd, MMM D") : "—"}</span>` + chevronRight;
+      nextBtn.style.cssText = arrowBaseStyle + (later ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
+      if (later) {
         nextBtn.onmouseenter = () => { nextBtn.style.color = "var(--text-normal)"; nextBtn.style.background = "var(--background-modifier-hover)"; };
         nextBtn.onmouseleave = () => { nextBtn.style.color = "var(--text-muted)"; nextBtn.style.background = "transparent"; };
         nextBtn.onclick = () => app.workspace.openLinkText(later.file.path, "");
       }
+    } else {
+      // No daily blueprint → pill centers alone.
+      chromeRow.style.justifyContent = "center";
+      this._renderPill(chromeRow, entries, dv);
     }
+  }
 
-    const rowStyle = `
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    `;
-
-    const btnBase = `
+  // Render the "Go to…" pill into the given row; wire its click to the launcher.
+  _renderPill(row, entries, dv) {
+    const pill = row.createEl("button");
+    const gridIcon = (customJS.Icons?.resolve?.("layout-grid")) ||
+      `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
+    const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+    pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
+    pill.style.cssText = `
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      justify-content: center;
       gap: 6px;
-      padding: 6px 14px;
+      padding: 6px 16px;
       border-radius: 6px;
       border: 1px solid var(--background-modifier-border);
       background: var(--background-primary);
@@ -224,49 +222,86 @@ class SpaceNavButtons {
       font-family: inherit;
       letter-spacing: 0.01em;
       transition: all 0.15s ease;
-      min-width: 0;
-      flex: 1;
     `;
+    pill.onmouseenter = () => {
+      pill.style.background = "var(--interactive-accent)";
+      pill.style.color = "var(--text-on-accent)";
+      pill.style.borderColor = "var(--interactive-accent)";
+    };
+    pill.onmouseleave = () => {
+      pill.style.background = "var(--background-primary)";
+      pill.style.color = "var(--text-muted)";
+      pill.style.borderColor = "var(--background-modifier-border)";
+    };
+    pill.onclick = (evt) => this._openLauncher(evt, pill, entries, dv);
+  }
 
-    // Mobile splits across more rows; desktop uses 2 rows.
-    const isMobile = app.isMobile;
-    const rowCount = isMobile ? 3 : 2;
-    const baseSize = Math.floor(entries.length / rowCount);
-    const remainder = entries.length % rowCount;
-    const rows = [];
-    let idx = 0;
-    for (let r = 0; r < rowCount; r++) {
-      const size = baseSize + (r < remainder ? 1 : 0);
-      if (size > 0) rows.push(entries.slice(idx, idx + size));
-      idx += size;
-    }
-
-    const btnGrid = container.createEl("div");
-    btnGrid.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-
-    for (const rowButtons of rows) {
-      const row = btnGrid.createEl("div");
-      row.style.cssText = rowStyle;
-
-      for (const btn of rowButtons) {
-        const el = row.createEl("button");
-        const iconHtml = customJS.Icons.resolve(btn.icon) || fallbackIcon(btn.label);
-        el.innerHTML = iconHtml + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${btn.label}</span>`;
-        el.style.cssText = btnBase;
-
-        el.onmouseenter = () => {
-          el.style.background = "var(--interactive-accent)";
-          el.style.color = "var(--text-on-accent)";
-          el.style.borderColor = "var(--interactive-accent)";
-        };
-        el.onmouseleave = () => {
-          el.style.background = "var(--background-primary)";
-          el.style.color = "var(--text-muted)";
-          el.style.borderColor = "var(--background-modifier-border)";
-        };
-
-        el.onclick = () => this._dispatchAction(btn, dv);
+  // Open the launcher: native Menu if available, else inline accordion.
+  _openLauncher(evt, pill, entries, dv) {
+    const MenuCtor = this._getMenuCtor();
+    if (MenuCtor) {
+      const menu = new MenuCtor();
+      this._buildMenu(menu, entries, dv);
+      if (typeof menu.showAtMouseEvent === "function" && evt) menu.showAtMouseEvent(evt);
+      else if (typeof menu.showAtPosition === "function") {
+        const r = pill.getBoundingClientRect();
+        menu.showAtPosition({ x: r.left, y: r.bottom });
       }
+      return;
+    }
+    this._renderAccordion(pill, entries, dv);
+  }
+
+  // Populate a native Menu with one item per entry (icon + label via a
+  // DocumentFragment title so we reuse the exact vendored glyphs).
+  _buildMenu(menu, entries, dv) {
+    for (const btn of entries) {
+      menu.addItem((item) => {
+        const svg = customJS.Icons?.resolve?.(btn.icon);
+        if (svg) {
+          const frag = document.createDocumentFragment();
+          const iconSpan = document.createElement("span");
+          iconSpan.innerHTML = svg;
+          iconSpan.style.cssText = "display:inline-flex;align-items:center;margin-right:8px;vertical-align:middle;";
+          const labelSpan = document.createElement("span");
+          labelSpan.textContent = btn.label;
+          frag.appendChild(iconSpan);
+          frag.appendChild(labelSpan);
+          item.setTitle(frag);
+        } else {
+          item.setTitle(btn.label);
+        }
+        item.onClick(() => this._dispatchAction(btn, dv));
+      });
+    }
+  }
+
+  // Fallback when no Menu constructor: toggle an inline panel below the pill.
+  _renderAccordion(pill, entries, dv) {
+    const container = pill.closest(".vault-nav");
+    if (!container) return;
+    const existing = container.querySelector(".vault-nav-accordion");
+    if (existing) { existing.remove(); return; } // toggle closed
+    const panel = container.createEl("div", { cls: "vault-nav-accordion" });
+    panel.style.cssText = `
+      display: flex; flex-direction: column; gap: 2px;
+      margin-top: 6px; padding: 6px;
+      border: 1px solid var(--background-modifier-border);
+      border-radius: 6px; background: var(--background-primary);
+    `;
+    for (const btn of entries) {
+      const row = panel.createEl("button");
+      const svg = customJS.Icons?.resolve?.(btn.icon) || "";
+      row.innerHTML = `<span style="display:inline-flex;align-items:center;margin-right:8px;">${svg}</span><span>${btn.label}</span>`;
+      row.style.cssText = `
+        cursor: pointer; display: inline-flex; align-items: center;
+        gap: 4px; padding: 8px 10px; border-radius: 4px;
+        border: none; background: transparent; color: var(--text-normal);
+        font-size: 0.85em; font-family: inherit; text-align: left; width: 100%;
+      `;
+      row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+      row.onmouseleave = () => { row.style.background = "transparent"; };
+      row.onclick = () => { panel.remove(); this._dispatchAction(btn, dv); };
     }
   }
 
