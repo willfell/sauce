@@ -16164,6 +16164,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // HC-V01190-FIN-SEED-MIGRATE-* direct-invocation family). Pure additive.
     module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
     module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
+    module.exports._backfillBudgetGroupsFromText = _backfillBudgetGroupsFromText;
     module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
     module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
     module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
