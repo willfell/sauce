@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.171.0",
+  "workshop_version": "0.172.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -79,7 +79,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.10.0",
+      "version": "2.11.0",
       "path": "mechanisms/nav-buttons"
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "path": "mechanisms/task-entity"
     }
   ],
