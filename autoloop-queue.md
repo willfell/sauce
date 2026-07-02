@@ -64,7 +64,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint to-do axis widget_render: 7 uncovered
-  status: proposed
+  status: done
+  note: run-todo-render-guards.js drives all 8 to-do render widgets through the cold-load path (dv.current() undefined/null + empty dv.pages) in normal + .markdown-embed contexts, asserting no-throw. Adds the cold-load/embed dimension; ToDoHubActions + ToDoLeafActions had NO render()-execution test before (others had functional tests in run-todo-*.js). Teeth-verified. Rubric still scores 0/7 until coverage-rubric.js credits this harness + matrix regen (tracked separately).
 
 - id: cov-blueprint-to-do-customjs-behavioral
   title: Add coverage for to-do customjs_behavioral (25/31)
