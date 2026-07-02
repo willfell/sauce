@@ -1,6 +1,6 @@
 {
   "name": "wiki",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "kind": "blueprint",
   "module_directory": "wiki",
   "skills_dir": ".claude/skills/wiki",
