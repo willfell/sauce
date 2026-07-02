@@ -195,6 +195,69 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W7 — WikiHubActions renders "+ New Section" + "+ New Page" in ONE flex row
+// (evenly spaced via AccentButton flex:true), gated to hub/section notes.
+// ---------------------------------------------------------------------------
+{
+  const HUB_SRC = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js');
+  const hubSrc  = fs.readFileSync(HUB_SRC, 'utf8');
+
+  function makeEl() {
+    const el = { children: [], style: { cssText: '' } };
+    el.createEl = (tag, o) => { const c = makeEl(); c.cls = (o && o.cls) || ''; el.children.push(c); return c; };
+    el.querySelector = () => null;
+    el.closest = () => null;
+    el.remove = () => {};
+    return el;
+  }
+  function runRender(curType) {
+    const btnCalls = [];
+    const fakeCustomJS = {
+      AccentButton: { render: (container, opts) => { btnCalls.push(opts); } },
+      EntityCreate: { create: (arg) => { btnCalls._lastCreate = arg; } },
+    };
+    const dv = { container: makeEl(), current: () => ({ type: curType, file: { path: 'spice/wiki/Wiki.md' } }) };
+    const HubCls = new Function('customJS', 'Notice', `${hubSrc}\nreturn WikiHubActions;`)(fakeCustomJS, function () {});
+    new HubCls().render(dv); // async but body is synchronous (no awaits before button render)
+    return { btnCalls, fakeCustomJS };
+  }
+
+  // W7a — hub note: exactly two buttons, both flex:true, correct labels.
+  {
+    const { btnCalls } = runRender('wiki-hub');
+    const labels = btnCalls.map(b => b.label);
+    ok('W7a WikiHubActions renders 2 flex buttons (+ New Section / + New Page) on a hub',
+       btnCalls.length === 2 &&
+       labels.includes('+ New Section') && labels.includes('+ New Page') &&
+       btnCalls.every(b => b.flex === true));
+  }
+  // W7b/W7c — each button delegates to EntityCreate.create with the right instance.
+  {
+    const { btnCalls } = runRender('wiki-section');
+    const sec = btnCalls.find(b => b.label === '+ New Section');
+    const pg  = btnCalls.find(b => b.label === '+ New Page');
+    sec.onClick();
+    ok('W7b + New Section onClick → EntityCreate.create({instance:"wiki-section"})',
+       btnCalls._lastCreate && btnCalls._lastCreate.instance === 'wiki-section');
+    pg.onClick();
+    ok('W7c + New Page onClick → EntityCreate.create({instance:"wiki-page"})',
+       btnCalls._lastCreate && btnCalls._lastCreate.instance === 'wiki-page');
+  }
+  // W7d — leaf page: no buttons (gated).
+  {
+    const { btnCalls } = runRender('wiki-page');
+    ok('W7d WikiHubActions renders nothing on a wiki-page (gated to hub/section)', btnCalls.length === 0);
+  }
+  // W7e — bare class.
+  {
+    const src = fs.readFileSync(HUB_SRC, 'utf8');
+    const stripped = src.replace(/^(\s*(\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)+/, '').trimStart();
+    ok('W7e wiki-hub-actions.js is a bare class (no module.exports)',
+       stripped.startsWith('class ') && !/module\.exports/.test(src));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;
