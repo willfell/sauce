@@ -2,7 +2,6 @@
 // Zero-dep harness for SpaceNavButtons pure logic (order + menu model + Menu ctor acquisition).
 const fs = require('fs');
 const path = require('path');
-const assert = require('assert');
 
 const SRC = fs.readFileSync(
   path.join(__dirname, '..', 'mechanisms', 'nav-buttons', 'space-nav-buttons.js'),

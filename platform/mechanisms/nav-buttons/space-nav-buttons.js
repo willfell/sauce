@@ -1,11 +1,20 @@
 /**
- * SpaceNavButtons (CustomJS) — v2.3.0
+ * SpaceNavButtons (CustomJS) — v2.9.0 (Go-to launcher)
  *
  * Thin renderer over ranch/nav-buttons-registry.json. Each blueprint or
  * mechanism declares nav_buttons[] in its manifest; the installer aggregates
  * declarations into the registry namespaced under contributions.<source>.
- * This class reads the registry at render time, sorts entries by (order,
+ * This class reads the registry at render time, orders entries by (order,
  * source, id), and dispatches click on action.type.
+ *
+ * Layout (v2.9.0): one chrome line. When the daily blueprint is installed the
+ * row is [ ‹ prev-day ]  [ ⧉ Go to… pill ]  [ next-day › ]; otherwise the pill
+ * centers alone. The pill is collapsed by default — tapping it opens a native
+ * Obsidian Menu (bottom sheet on mobile, dropdown on desktop) listing every
+ * blueprint with icon + full label (no truncation). When the Menu constructor
+ * is unobtainable (_getMenuCtor → null) it falls back to an inline accordion
+ * panel below the pill. This replaces the pre-v2.9.0 always-visible multi-row
+ * button grid, which truncated labels to 2–3 chars on mobile.
  *
  * Action types (v0.4.2):
  *   - openLink             { target }
@@ -16,10 +25,8 @@
  *       to-do/meetings/journal files by clicking nav buttons on a future-dated daily note.
  *   - invoke_command       { command_id, args? } (v2.3.0; v2.6.0 adds optional args: {[k:string]:string})
  *
- * v2.3.0 also adds a top arrow row for daily-nav (prev/next-day with
- * skip-to-nearest-existing + grey-out) when daily blueprint installed.
- * Renders ABOVE the registry button list. Reads .obsidian/daily-notes.json
- * at runtime to acquire daily folder + format.
+ * The daily-nav arrows (prev/next-day with skip-to-nearest-existing + grey-out)
+ * read .obsidian/daily-notes.json at runtime to acquire daily folder + format.
  *
  * Usage in DataviewJS:
  *   await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
