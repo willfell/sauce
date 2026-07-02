@@ -9,6 +9,15 @@
 // and the modal are dogfood-only; the decision logic that CAN be tested lives in
 // the static pure helpers groupDocsBySection / planBulkMove / normalizeHubs.
 //
+// WS5 note: the wiki-style DocMoveDialog (indented section tree) replaces the
+// SINGLE-doc flat picker in DocLeafActions. Bulk move stays as-is — it is a
+// multi-select flow (a checkbox list of many docs + one target-section <select>),
+// not a single-file move, so the per-item single-file tree dialog doesn't fit.
+// Its target chooser is already a <select> dropdown (not a flat clickable picker),
+// and it continues to route each selected doc through DocMove.targetPath /
+// rewriteSection. If a bulk tree-select is ever wanted, it would be a distinct
+// multi-select dialog, out of scope for WS5.
+//
 // customJS stores classes as INSTANCES (customJS.DocBulkMoveActions = new …), so
 // render + handlers are instance methods; the pure helpers are static (referenced
 // by class name) so the Node harness can exercise them without a live vault.

@@ -62,7 +62,16 @@ class DocLeafActions {
 
     const row = c.createEl("div");
     row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
-    customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, onClick: () => this._onMove(dv), flex: true });
+    const currentPath = page.file.path;
+    customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => {
+      // Prefer the wiki-style indented Move tree dialog; fall back to the legacy
+      // flat DocMove picker if the newer helper hasn't loaded (cold-load safety).
+      if (customJS?.DocMoveDialog?._openMoveDialog) {
+        customJS.DocMoveDialog._openMoveDialog(dv, currentPath);
+      } else {
+        this._onMove(dv);
+      }
+    } });
   }
 
   // ── data source ──────────────────────────────────────────────────────────

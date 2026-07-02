@@ -63,6 +63,7 @@
     "ProjectDocsIndex",
     "SectionHub",
     "DocMove",
+    "DocMoveDialog",
     "DocLeafActions",
     "DocBulkMoveActions",
     "ProjectLinksPanel",
@@ -187,6 +188,10 @@
     {
       "source": "helpers/doc-move.js",
       "dest": "{{scripts_path}}/project/doc-move.js"
+    },
+    {
+      "source": "helpers/doc-move-dialog.js",
+      "dest": "{{scripts_path}}/project/doc-move-dialog.js"
     },
     {
       "source": "helpers/doc-leaf-actions.js",
