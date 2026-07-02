@@ -56,10 +56,8 @@ class ToDoLeafActions {
 
         const openNewTask = () => {
             // v0.14.0 (task-entity daily wiring, Phase 1): the daily to-do surface
-            // (type: to-do) now creates tasks as one-file-per-task notes via the
-            // task-entity mechanism's TaskDialog. Other surfaces (the recurring
-            // registry, per-project To-Do notes) stay on the legacy ToDoCreateTask
-            // path until their own phases wire task-entity — do NOT reroute them here.
+            // (type: to-do) creates tasks as one-file-per-task notes via the
+            // task-entity mechanism's TaskDialog.
             if (noteType === 'to-do') {
                 try {
                     window.customJS.TaskDialog.open({
@@ -71,6 +69,28 @@ class ToDoLeafActions {
                 }
                 return;
             }
+            // task-entity projects wiring: a per-project To-Do note (type:
+            // project-todo) now creates ONE task-note via TaskDialog with
+            // surface: 'project'. The task lives under spice/tasks/ stamped with
+            // source: project + project_slug; the project's TaskProjectList block
+            // live-queries it by project_slug. No raw markdown is appended.
+            if (noteType === 'project-todo') {
+                const name = cur && cur.project
+                    ? String(cur.project).replace(/^\[\[|\]\]$/g, '')
+                    : '';
+                const slug = (cur && cur.project_slug)
+                    || (name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-') : '');
+                try {
+                    window.customJS.TaskDialog.open({
+                        surface: 'project',
+                        project: { name, slug },
+                    });
+                } catch (e) {
+                    new Notice('Could not open task dialog: ' + (e.message || e), 6000);
+                }
+                return;
+            }
+            // The recurring registry stays on the legacy ToDoCreateTask path.
             try {
                 customJS.ToDoCreateTask.open({
                     preselectTab: noteType === 'to-do-recurring' ? 'recurring' : 'one-shot',
