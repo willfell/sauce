@@ -2796,6 +2796,13 @@ async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history,
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
       if (before.includes('class: "DocBulkMoveActions"')) { skipped += 1; continue; }
+      // WS4 chrome overhaul: the S3 Docs hub renders Move-docs inside the
+      // ProjectDocsIndex.renderActionRow full-width action row (New Doc · New
+      // Section · Move docs), so a standalone DocBulkMoveActions block would
+      // duplicate the button. Skip healing hubs that already carry the action
+      // row. (The DBMH harness feeds a legacy HUB with neither string, so this
+      // guard is inert there.)
+      if (before.includes('method: "renderActionRow"')) { skipped += 1; continue; }
       const after = _injectDocBulkMoveActionsBody(before);
       if (after === before) {
         warned += 1;

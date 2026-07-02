@@ -11255,6 +11255,23 @@ async function caseV01030Pdi1ClassDefined() {
   assertTrue("HC-V01030-PDI-1: async render method", /async\s+render\s*\(/.test(src));
 }
 
+// WS4 chrome overhaul — pure _actionRowSpec builder (Docs hub S3 action row).
+// Behavioral (not just source-text): instantiate ProjectDocsIndex from source
+// and assert the ordered button spec is New Doc → New Section → Move docs.
+async function caseWs4PdiActionRowSpec() {
+  console.log("\n--- Case HC-WS4-PDI-ACTIONROW: ProjectDocsIndex._actionRowSpec is [doc-note, section-hub, move-docs] ---");
+  const src = _readPdiSrc();
+  let inst = null;
+  try { inst = new (new Function(`${src}\nreturn ProjectDocsIndex;`)())(); }
+  catch (e) { assertTrue("HC-WS4-PDI-ACTIONROW: class instantiates", false, e && e.message); return; }
+  const spec = typeof inst._actionRowSpec === "function" ? inst._actionRowSpec() : null;
+  assertTrue("HC-WS4-PDI-ACTIONROW-1: _actionRowSpec returns 3 entries", Array.isArray(spec) && spec.length === 3);
+  assertTrue("HC-WS4-PDI-ACTIONROW-2: order = doc-note, section-hub, move-docs",
+    spec && spec[0].id === "doc-note" && spec[1].id === "section-hub" && spec[2].id === "move-docs");
+  assertTrue("HC-WS4-PDI-ACTIONROW-3: kinds = entity, entity, move",
+    spec && spec[0].kind === "entity" && spec[1].kind === "entity" && spec[2].kind === "move");
+}
+
 async function caseV01030Pdi2ReadsParentProjectSections() {
   console.log("\n--- Case HC-V01030-PDI-2: ProjectDocsIndex reads dv.current() + parent project's sections[] ---");
   const src = _readPdiSrc();
@@ -11299,18 +11316,19 @@ async function caseV01030Pdi5NewSectionButton() {
 }
 
 async function caseV01030Pdi6DashboardChips() {
-  console.log("\n--- Case HC-V01030-PDI-6: emits dashboard chip strip (doc count + open meetings + project status) ---");
+  console.log("\n--- Case HC-V01030-PDI-6: dashboard chip strip REMOVED (WS4 S3 order + simple search) ---");
+  // WS4 chrome overhaul: the Docs hub dropped the dashboard chip strip
+  // (docs/meetings/status chips) — it isn't part of the requested S3 layout.
+  // This case (formerly asserting the meetings query + _projectMatches + status
+  // + chip container) is repurposed to guard the removal, per the WS4 brief's
+  // explicit "Remove the dashboard chip row" directive.
   const src = _readPdiSrc();
-  assertTrue("HC-V01030-PDI-6a: queries spice/meetings/notes",
-    /spice\/meetings\/notes/.test(src));
-  assertTrue("HC-V01030-PDI-6b: filters by p.type === \"meeting\"",
-    /p\.type\s*===\s*["']meeting["']/.test(src));
-  assertTrue("HC-V01030-PDI-6c: _projectMatches helper defined (shared with ProjectMeetingsPanel pattern)",
-    /_projectMatches\s*\(/.test(src));
-  assertTrue("HC-V01030-PDI-6d: reads project.status frontmatter",
-    /\.status\b/.test(src));
-  assertTrue("HC-V01030-PDI-6e: dv.el(\"div\" ...) chip strip container",
-    /dv\.el\s*\(\s*["']div["']/.test(src));
+  assertTrue("HC-V01030-PDI-6a: no meetings-notes query (chip strip retired)",
+    !/spice\/meetings\/notes/.test(src));
+  assertTrue("HC-V01030-PDI-6b: no _projectMatches meeting-chip helper",
+    !/_projectMatches\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-6c: renders the S3 search tier (hideTags + hideNativeSearch + persist:false)",
+    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
 }
 
 // v0.103.0 S2.2 — SectionHub helper (depth-aware section + sub-section render).
@@ -12123,46 +12141,44 @@ async function caseV01060DsDebounce1Input150ms() {
 }
 
 // =====================================================================
-// v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion. Adds three
-// new chips beside the existing docs/meetings/status row:
-//   (a) task-note count under spice/projects/<slug>/tasks/
-//   (b) recent activity — docs touched in last 7 days
-//   (c) top-3 tags as inline #tag chips
-// All share the existing chipStyle pattern for visual consistency.
+// v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion (RETIRED at WS4).
+//
+// WS4 chrome overhaul (S3 order + simple search): the dashboard chip strip
+// (task-note count / recent-7day activity / top-3 tag chips + the base
+// docs/meetings/status chips) was REMOVED — it isn't part of the requested S3
+// Docs-hub layout (Breadcrumb → SpaceNavButtons → ProjectNavButtons → action
+// row → search → sections list). These three cases are repurposed to guard the
+// removal: the chip/widget code MUST be gone, and the S3 tiers MUST be present.
+// Justification: the WS4 brief explicitly directs "Remove the dashboard chip
+// row"; asserting the old chip code would pin retired behavior.
 // =====================================================================
 async function caseV01060PdiWidgets1TaskCount() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-1: ProjectDocsIndex queries task-notes under projects/<slug>/tasks ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-1: ProjectDocsIndex dashboard chip strip REMOVED (WS4 S3) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-1: queries dv.pages tasks subfolder",
-    /dv\.pages\(\s*`"\$\{projectPath\}\/tasks"`/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-1: filters by type === 'task-note'",
-    /p\.type\s*===\s*["']task-note["']/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-1: declares taskCount variable",
-    /\btaskCount\b/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: no _renderChips method (chip strip retired)",
+    !/_renderChips\s*\(/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: no task-note count chip query",
+    !/dv\.pages\(\s*`"\$\{projectPath\}\/tasks"`/.test(src));
 }
 
 async function caseV01060PdiWidgets2RecentActivity() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-2: ProjectDocsIndex computes recent activity (last 7 days) ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-2: ProjectDocsIndex recent-activity + top-tags chips REMOVED (WS4 S3) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-2: computes 7-day window via Date.now() - 7 * 24 * 60 * 60 * 1000",
-    /7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-2: filters allDocs by file.mtime?.ts >= sevenDaysAgo",
-    /file\.mtime\?\.ts[\s\S]{0,40}sevenDaysAgo/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-2: chip label 'updated this week'",
-    /updated this week/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: no 7-day 'updated this week' chip",
+    !/updated this week/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: no _topTags helper (tag chips retired)",
+    !/_topTags\s*\(/.test(src));
 }
 
 async function caseV01060PdiWidgets3TopTags() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-3: ProjectDocsIndex renders top-3 tag chips via _topTags helper ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-3: ProjectDocsIndex renders the S3 tiers (action row + simple search) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-3: _topTags helper declared",
-    /_topTags\s*\(/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: slices top 3",
-    /\.slice\s*\(\s*0\s*,\s*n\s*\)|\.slice\s*\(\s*0\s*,\s*3\s*\)/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: top-tag call site requests 3",
-    /_topTags\s*\(\s*allDocs\s*,\s*3\s*\)/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: excludes doc-note from tag pool",
-    /clean\s*===\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: renderActionRow method declared (marker-dispatched action row)",
+    /renderActionRow\s*\(/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: simple search — hideTags + hideNativeSearch + persist:false",
+    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: uses SectionLabel.divider for helper-owned hairlines",
+    /SectionLabel\.divider/.test(src));
 }
 
 // v0.107.0 — entity-create seed_from_defaults schema field (additive).
@@ -13318,9 +13334,15 @@ async function caseV01101SourceTemplatesUseGuard() {
   // centered row bracketed by SectionLabel dividers. The intent — guard-routed,
   // no raw customJS call in the content file — is unchanged; only the dispatch
   // target moved. Assert per-template on the correct dispatched class.
+  // WS4 chrome overhaul: Docs Hub.md no longer dispatches EntityCreate directly
+  // from the `// entity-create:doc-note` marker block. The marker now guard-
+  // dispatches ProjectDocsIndex.renderActionRow, which renders the full-width
+  // action row (New Doc + New Section via EntityCreate, + Move docs) with
+  // helper-owned dividers — same guard-routed, no-raw-customJS-call intent as
+  // WS1's Projects.md → ProjectsHubCards move; only the dispatch target changed.
   const TEMPLATES = [
     { rel: "platform/blueprints/project/content/Projects.md", dispatch: "ProjectsHubCards" },
-    { rel: "platform/blueprints/project/templates/Docs Hub.md", dispatch: "EntityCreate" },
+    { rel: "platform/blueprints/project/templates/Docs Hub.md", dispatch: "ProjectDocsIndex" },
     { rel: "platform/blueprints/people/content/People.md", dispatch: "EntityCreate" },
     { rel: "platform/blueprints/meetings/templates/Meeting Hub.md", dispatch: "EntityCreate" },
   ];
@@ -15526,6 +15548,7 @@ async function caseHCV0128FinancePlanning() {
 
   // v0.103.0 S2.1 — ProjectDocsIndex helper (Docs.md sections-index landing).
   await caseV01030Pdi1ClassDefined();
+  await caseWs4PdiActionRowSpec();
   await caseV01030Pdi2ReadsParentProjectSections();
   await caseV01030Pdi3DefaultsKnowledgeNotesWikilinks();
   await caseV01030Pdi4SectionCardsBeaconCardsRow();
