@@ -12236,6 +12236,127 @@ async function caseV01070Fcgb5IdempotentSkip() {
     /(let\s+changed\s*=\s*false|needsWrite|let\s+modified\s*=)/.test(src));
 }
 
+// 2026-07-01 finance-stabilize — behavioral cases for the flow-map-aware group
+// backfill (D1) and the malformed-group repair transform/heal (D2).
+
+async function caseFinBgrBackfillSkipsFlowMap() {
+  console.log("\n--- Case HC-FIN-BGR-1: backfill skips inline flow-mapping categories ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const body = [
+    "---",
+    "type: budget",
+    "month: 2026-08",
+    "categories:",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    '  - {"group":"Travel","name":"Travel","planned":100,"actual":0}',
+    "groups:",
+    "  - Lifestyle",
+    "  - Travel",
+    "---",
+    "",
+    "body",
+  ].join("\n");
+  const out = installer._backfillBudgetGroupsFromText(body);
+  assertTrue("HC-FIN-BGR-1: flow-map body is NOT touched", out.touched === false);
+  assertTrue("HC-FIN-BGR-1: no stray 'group: Unassigned' inserted",
+    !/\n    group: Unassigned/.test(out.body));
+  assertTrue("HC-FIN-BGR-1: original flow-map rows intact",
+    /\{"group":"Lifestyle","name":"Golf"/.test(out.body) &&
+    /\{"group":"Travel","name":"Travel"/.test(out.body));
+}
+
+async function caseFinBgrBackfillStillBackfillsBlock() {
+  console.log("\n--- Case HC-FIN-BGR-2: backfill still adds Unassigned to block items lacking a group ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const body = [
+    "---",
+    "type: budget",
+    "month: 2026-08",
+    "categories:",
+    "  - name: Groceries",
+    "    planned: 550",
+    "    actual: 0",
+    "groups: []",
+    "---",
+    "",
+  ].join("\n");
+  const out = installer._backfillBudgetGroupsFromText(body);
+  assertTrue("HC-FIN-BGR-2: block item without group is backfilled", out.touched === true);
+  assertTrue("HC-FIN-BGR-2: 'group: Unassigned' inserted for block item",
+    /\n    group: Unassigned/.test(out.body));
+}
+
+async function caseFinBgrRepairStripsStray() {
+  console.log("\n--- Case HC-FIN-BGR-3: repair strips stray 'group: Unassigned' under a flow-map ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const corrupt = [
+    "---",
+    "type: budget",
+    "month: 2026-07",
+    "categories:",
+    '  - {"group":"Variable Essentials","name":"Groceries","planned":550,"actual":0}',
+    "    group: Unassigned",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    "    group: Unassigned",
+    "groups:",
+    "  - Variable Essentials",
+    "  - Lifestyle",
+    "---",
+    "",
+  ].join("\n");
+  const out = installer._repairMalformedBudgetGroups(corrupt);
+  assertTrue("HC-FIN-BGR-3: repair reports touched", out.touched === true);
+  assertTrue("HC-FIN-BGR-3: stray lines removed", !/\n    group: Unassigned/.test(out.body));
+  assertTrue("HC-FIN-BGR-3: flow-map rows preserved",
+    /\{"group":"Variable Essentials","name":"Groceries"/.test(out.body) &&
+    /\{"group":"Lifestyle","name":"Golf"/.test(out.body));
+  // Idempotent: second pass is a no-op.
+  const out2 = installer._repairMalformedBudgetGroups(out.body);
+  assertTrue("HC-FIN-BGR-3: idempotent (second pass no-op)", out2.touched === false);
+}
+
+async function caseFinBgrRepairLeavesCleanNotes() {
+  console.log("\n--- Case HC-FIN-BGR-4: repair no-ops on clean notes (block + flow) ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const cleanBlock = [
+    "---","type: budget","month: 2026-06","categories:",
+    "  - group: Lifestyle","    name: Golf","    planned: 30","    actual: 0",
+    "---","",
+  ].join("\n");
+  const cleanFlow = [
+    "---","type: budget","month: 2026-08","categories:",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    "---","",
+  ].join("\n");
+  assertTrue("HC-FIN-BGR-4: clean block untouched", installer._repairMalformedBudgetGroups(cleanBlock).touched === false);
+  assertTrue("HC-FIN-BGR-4: clean flow untouched", installer._repairMalformedBudgetGroups(cleanFlow).touched === false);
+  // A legitimately block-Unassigned row (not under a flow-map) must NOT be stripped.
+  const legitBlockUnassigned = [
+    "---","type: budget","month: 2026-03","categories:",
+    "  - name: Mystery","    group: Unassigned","    planned: 10","    actual: 0",
+    "---","",
+  ].join("\n");
+  assertTrue("HC-FIN-BGR-4: legit block Unassigned preserved",
+    installer._repairMalformedBudgetGroups(legitBlockUnassigned).touched === false);
+}
+
+async function caseFinBgrHealWiredAndUngated() {
+  console.log("\n--- Case HC-FIN-BGR-5: repair heal exported, called, ungated, snapshot-first ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-BGR-5: heal exported",
+    typeof installer.applyFinanceBudgetMalformedGroupRepair === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-FIN-BGR-5: heal invoked in applyFinanceMigrations",
+    /await\s+applyFinanceBudgetMalformedGroupRepair\(/.test(src));
+  const m = src.match(/async\s+function\s+applyFinanceBudgetMalformedGroupRepair\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assertTrue("HC-FIN-BGR-5: heal body matched", m !== null);
+  if (m) {
+    assertTrue("HC-FIN-BGR-5: snapshot before write (.sauce-backup)", /\.sauce-backup/.test(m[1]));
+    assertTrue("HC-FIN-BGR-5: marker-guarded", /__budget_malformed_group_repaired/.test(m[1]));
+    assertTrue("HC-FIN-BGR-5: ungated (no version-gate compare)", !/VERSION_SNAPSHOT|semverGte|isVersionAtLeast/.test(m[1]));
+  }
+}
+
 // v0.107.0 — defaults editor classes shipped in finance blueprint.
 
 async function caseV01070Bde1ClassDeclared() {
@@ -15246,6 +15367,11 @@ async function caseHCV0128FinancePlanning() {
   await caseV01070Fcgb3AppendOnlyGuard();
   await caseV01070Fcgb4PerFileFailureLoud();
   await caseV01070Fcgb5IdempotentSkip();
+  await caseFinBgrBackfillSkipsFlowMap();
+  await caseFinBgrBackfillStillBackfillsBlock();
+  await caseFinBgrRepairStripsStray();
+  await caseFinBgrRepairLeavesCleanNotes();
+  await caseFinBgrHealWiredAndUngated();
 
   // v0.107.0 — defaults editor widgets (S3)
   await caseV01070Bde1ClassDeclared();
