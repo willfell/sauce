@@ -71,29 +71,42 @@ class WikiTree {
             });
         }
 
-        // Recently updated — hub only
+        // Recently updated — hub only. Rendered as cards (like sections/pages),
+        // each tagged with the section the page came from.
         if (cur.type === "wiki-hub") {
             const allPages = dv.pages('"spice/wiki"');
             const allArr = allPages.array ? allPages.array() : Array.from(allPages);
             const recent = this._recentPages(allArr, 8).filter(p => customJS.DocSearch.matches(p, ctx));
             if (recent.length) {
                 customJS.SectionLabel.render(proxyDv, { text: "Recently updated" });
-                for (const p of recent) {
-                    const link = p.file.path;
-                    const label = p.title || p.file.name;
-                    const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
-                    const row = container.createEl("div");
-                    row.style.cssText = "margin: 2px 0;";
-                    // A raw <a href> to a vault path does NOT navigate in Obsidian; wire an
-                    // explicit openLinkText click handler (same primitive BeaconCards uses).
-                    const a = row.createEl("a", { text: label });
-                    a.style.cssText = "cursor: pointer; color: var(--link-color, var(--interactive-accent));";
-                    a.addEventListener("click", (ev) => { ev.preventDefault(); app.workspace.openLinkText(link, ""); });
-                    if (ago) {
-                        const s = row.createEl("span", { text: " " + ago });
-                        s.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+                // Map each folder → its section display title (from the wiki-section hub there).
+                const sectionByFolder = {};
+                for (const p of allArr) {
+                    if (p && p.type === "wiki-section" && p.file && p.file.path) {
+                        const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+                        sectionByFolder[f] = (p.title && String(p.title).trim()) || p.file.path.slice(p.file.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
                     }
                 }
+                const sectionOf = (p) => {
+                    if (!p.file || !p.file.path) return "";
+                    const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+                    if (!f || f === scopePath) return "";   // scopePath is "spice/wiki" on the hub → root-level page
+                    return sectionByFolder[f] || f.slice(f.lastIndexOf("/") + 1);
+                };
+                const recentIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`;
+                customJS.BeaconCards.render(proxyDv, {
+                    pages: recent,
+                    layout: "row",
+                    title: (p) => p.title || p.file.name,
+                    icon: () => recentIcon,
+                    target: (p) => p.file.path,
+                    meta: (p) => {
+                        const sec = sectionOf(p);
+                        const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
+                        const where = sec ? ("in " + sec) : "in Wiki";
+                        return ago ? (where + " · " + ago) : where;
+                    },
+                });
             }
         }
     }

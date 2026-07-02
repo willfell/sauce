@@ -134,8 +134,8 @@ class Breadcrumb {
     // ── Root is current? (note IS the root hub) ────────────────────────────
     if (filePath === rootFullPath) {
       segments.push(this._currentLabel(rootLabel));
-      const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
-      wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+      const wrap = dv.el("div", "", { cls: "project-breadcrumb wiki-breadcrumb" });
+      wrap.style.cssText = "font-size: 1em; margin: 2px 0 10px 0; line-height: 1.9;";
       wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
       return;
     }
@@ -201,8 +201,11 @@ class Breadcrumb {
 
     if (segments.length === 0) return;
 
-    const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
-    wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+    const wrap = dv.el("div", "", { cls: "project-breadcrumb wiki-breadcrumb" });
+    // Prominent + mobile-legible: full-size, non-muted, roomy line-height so the
+    // trail is clearly visible (and its crumbs tappable) on a phone. Wiki-only —
+    // ancestors-mode breadcrumbs (project/meetings/…) keep their compact style.
+    wrap.style.cssText = "font-size: 1em; margin: 2px 0 10px 0; line-height: 1.9;";
     wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
   }
 

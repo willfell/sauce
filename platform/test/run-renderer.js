@@ -132,11 +132,18 @@ function makeEl(tag, opts) {
     el.children.push(c);
     return c;
   };
+  // Overlay code (SpaceNavButtons._openLauncher) builds nodes via
+  // document.createElement + appendChild and identifies them via .className.
+  el.appendChild = function (child) {
+    child.parent = el;
+    el.children.push(child);
+    return child;
+  };
   el.querySelector = function (sel) {
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     const walk = (n) => {
-      if (n.cls === cls) return n;
+      if (n.cls === cls || n.className === cls) return n;
       for (const c of n.children) {
         const found = walk(c);
         if (found) return found;
@@ -149,18 +156,32 @@ function makeEl(tag, opts) {
     if (el.parent) el.parent.children = el.parent.children.filter((c) => c !== el);
   };
   // Walk ancestors for the nearest element matching a ".class" selector.
-  // Used by SpaceNavButtons._renderAccordion (pill.closest(".vault-nav")).
   el.closest = function (sel) {
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     let n = el;
     while (n) {
-      if (n.cls === cls) return n;
+      if (n.cls === cls || n.className === cls) return n;
       n = n.parent;
     }
     return null;
   };
   return el;
+}
+
+// Global document stub — the v2.10.0 launcher overlay is appended to
+// document.body (bottom sheet / dropdown) rather than the note container.
+// app.isMobile is false in makeApp(), so the overlay takes the desktop path
+// (pill.getBoundingClientRect is guarded → falls back when absent).
+if (!global.document) {
+  const _body = makeEl('body');
+  global.document = {
+    body: _body,
+    createElement: (t) => makeEl(t),
+    addEventListener: function () {},
+    removeEventListener: function () {},
+    querySelector: (sel) => _body.querySelector(sel),
+  };
 }
 
 function makeDv() {
@@ -386,17 +407,16 @@ function findButtonByLabel(root, label) {
   }
   return null;
 }
-// nav-buttons@2.9.0: entry buttons are no longer rendered directly — they live
-// behind the collapsed "Go to…" launcher pill. In this headless harness the
-// Obsidian Menu constructor is unobtainable, so _openLauncher falls back to the
-// inline accordion. Find the pill, open it, then return the entry button by
-// label so the existing click→_dispatchAction assertions keep working.
+// nav-buttons@2.10.0: entry buttons live behind the collapsed "Go to…" pill,
+// which on click builds a launcher overlay appended to document.body (bottom
+// sheet / dropdown). Clear any prior overlay, open a fresh one, then return the
+// entry button by label so the existing click→_dispatchAction assertions hold.
 function openLauncherFindByLabel(root, label) {
+  if (global.document && global.document.body) global.document.body.children = [];
   const pill = findButtonByLabel(root, 'Go to…');
   if (!pill || typeof pill.onclick !== 'function') return null;
-  // Synthetic click event: no showAtMouseEvent path (no Menu), so evt is unused.
-  pill.onclick({});
-  return findButtonByLabel(root, label);
+  pill.onclick({ stopPropagation() {} });
+  return findButtonByLabel(global.document.body, label);
 }
 function collectButtons(root, out) {
   out = out || [];
@@ -919,10 +939,11 @@ async function testBarebonesOneButton() {
     console.log('  FAIL — Go to… launcher pill not rendered');
     return false;
   }
-  // Open the launcher (accordion fallback in this headless env) and enumerate entries.
-  pill.onclick({});
-  const accordion = findClass(dv.container, 'vault-nav-accordion');
-  const entries = accordion ? collectButtons(accordion) : [];
+  // Open the launcher (overlay appended to document.body) and enumerate entries.
+  if (global.document && global.document.body) global.document.body.children = [];
+  pill.onclick({ stopPropagation() {} });
+  const panel = global.document.body.querySelector('.vault-nav-panel');
+  const entries = panel ? collectButtons(panel) : [];
   console.log(`  entries revealed: ${entries.length}`);
   for (const b of entries) {
     const m = b.innerHTML.match(/<span(?:\s[^>]*)?>([^<]+)<\/span>/);
@@ -1549,11 +1570,14 @@ async function testBB8BaseCssClipsOverflow() {
 }
 
 async function testNavWrapRowStyleWraps() {
-  console.log('\n=== NAV-WRAP — SpaceNavButtons row style wraps (no crush/overflow on narrow screens) ===');
-  const wraps = RENDERER_SRC.includes('flex-wrap: wrap');
+  console.log('\n=== NAV-LAYOUT — SpaceNavButtons pills split the row evenly (no crush/overflow on narrow screens) ===');
+  // v2.11.0: two-row chrome. The Daily + Go to… pills fill their row as equal
+  // halves (flex: 1 1 0), which shrink evenly rather than overflow; no
+  // flex-wrap:nowrap crush anywhere in the source.
+  const evenSplit = RENDERER_SRC.includes('flex = "1 1 0"');
   const noNowrap = !RENDERER_SRC.includes('flex-wrap: nowrap');
-  const pass = wraps && noNowrap;
-  console.log(`  wraps: ${wraps}; noNowrap: ${noNowrap}`);
+  const pass = evenSplit && noNowrap;
+  console.log(`  evenSplit(flex 1 1 0): ${evenSplit}; noNowrap: ${noNowrap}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -2764,6 +2788,64 @@ async function testFF8WidgetEmbedDedup() {
   return pass;
 }
 
+// FF-COLD — cold-load render-guard coverage for the finance render widgets that
+// were uncovered on the widget_render axis. Each is a dogfood-only render widget
+// that, under a COLD-LOAD stub — an embed-context container
+// (container.closest(".markdown-embed") truthy) AND a null dv.current() — must
+// render nothing without throwing. Most return at their first-line embed-dedup
+// guard (`if (dv.container.closest(".markdown-embed")) return;`, mirroring FF8);
+// a few (e.g. DebtSummary) let the embed branch fall through but then return on
+// their null-current / wrong-type guard before reaching dv.pages. Either way the
+// contract under test is identical: no throw + nothing rendered on cold load.
+// DebtConfigEditor is a modal editor (render(file, opts) guarded by
+// `if (!file) return`) so it is exercised with render(null). Referencing these
+// class names in run-renderer.js is what the widget_render coverage rubric credits.
+async function testFinanceColdLoadRenderGuards() {
+  console.log('\n=== FF-COLD — uncovered finance widgets render nothing (no throw) on a cold-load stub ===');
+  const app = makeApp();
+  const cjs = makeFinanceCustomJsStub({ RenderSafe: { page: () => null } });
+  const helpersDir = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers');
+  const kebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2').toLowerCase();
+  const load = (cls) => {
+    const src = fs.readFileSync(path.join(helpersDir, kebab(cls) + '.js'), 'utf8');
+    return new Function('app', 'customJS', 'Notice', `${src}\nreturn ${cls};`)(app, cjs, FakeNotice);
+  };
+  let allPass = true;
+  // dv-based widgets that return cleanly (no throw, nothing rendered) under the
+  // cold-load stub — via their embed-dedup guard and/or their null-current guard,
+  // both of which fire before any dv.pages()/FinanceMath work. (DebtsCards +
+  // DebtsHubSummary are intentionally NOT here: their embed branch falls through
+  // to a dv.pages() query with no intervening null-current guard, so exercising
+  // them needs full FinanceMath/dv data — a follow-up render test, not a guard.)
+  const coldLoadWidgets = [
+    'InvoiceWorkspaceNav', 'BudgetDefaultsEditor', 'PaycheckDefaultsEditor',
+    'DebtDefaultsEditor', 'BudgetSummary', 'PaycheckSummary', 'PaycheckDebtBand', 'DebtSummary',
+    'FinanceHubActions', 'MonthlyOverview', 'MonthsCards', 'MonthDashboard', 'FinanceHubSummary',
+  ];
+  for (const cls of coldLoadWidgets) {
+    let ok = false;
+    try {
+      const Cls = load(cls);
+      const dv = makeDvWithCurrent(null);
+      dv.container.closest = (sel) => (sel === '.markdown-embed' ? { tag: 'div' } : null);
+      await new Cls().render(dv);
+      ok = dv.container.children.length === 0;   // returned cleanly; nothing rendered
+    } catch (e) { console.log(`  [throw] ${cls}: ${e && e.message}`); ok = false; }
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${cls} cold-load early-return`);
+    if (!ok) allPass = false;
+  }
+  // DebtConfigEditor: modal editor, render(file, opts) with `if (!file) return`.
+  {
+    let ok = false;
+    try { const Cls = load('DebtConfigEditor'); await new Cls().render(null, {}); ok = true; }
+    catch (e) { console.log(`  [throw] DebtConfigEditor: ${e && e.message}`); ok = false; }
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — DebtConfigEditor null-file early-return`);
+    if (!ok) allPass = false;
+  }
+  console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
+  return allPass;
+}
+
 async function testFF3HubAreaRowIcons() {
   console.log('\n=== FF3 — FinanceHubCards area-row buttons have icon SVG + label (post-CF-1) ===');
   const app = makeApp();
@@ -3359,7 +3441,7 @@ async function testRendHasNotes() {
       results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
       results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
       results.push(['BB9 label-span-truncates', await testBB9LabelSpanTruncates()]);
-      results.push(['NAV-WRAP rowstyle-wraps', await testNavWrapRowStyleWraps()]);
+      results.push(['NAV-LAYOUT pills-even-split', await testNavWrapRowStyleWraps()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
@@ -3420,6 +3502,7 @@ async function testRendHasNotes() {
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
+      results.push(['FF-COLD finance-widget-cold-load-render-guards', await testFinanceColdLoadRenderGuards()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;

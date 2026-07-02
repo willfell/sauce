@@ -223,6 +223,49 @@ ok('TD-8 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
     'notes below the injected marker');
 });
 
+// ---------- TaskDialog link-inserter static helpers (pure) ----------
+//
+// The edit/create dialog can insert a note-link ([[wikilink]]) or a web link
+// ([label](url) / <url>) into the Notes textarea. The markdown-building and
+// cursor-splice logic is factored into three PURE statics so the browser UI is
+// a thin shell over Node-testable helpers. Called through an INSTANCE (customJS
+// stores instances) so a regression to instance-less statics fails loudly.
+
+// TD-9. _wikilink wraps a note basename; empty/nullish → "".
+ok('TD-9 _wikilink wraps a basename (trims; empty → "")', () => {
+  assert(TaskDialog._wikilink('Note A') === '[[Note A]]', 'got ' + TaskDialog._wikilink('Note A'));
+  assert(TaskDialog._wikilink('  Trimmed  ') === '[[Trimmed]]', 'trims: ' + TaskDialog._wikilink('  Trimmed  '));
+  assert(TaskDialog._wikilink('') === '', 'empty → ""');
+  assert(TaskDialog._wikilink(null) === '', 'null → ""');
+  assert(TaskDialog._wikilink(undefined) === '', 'undefined → ""');
+  assert(TaskDialog._wikilink('   ') === '', 'all-whitespace → ""');
+});
+
+// TD-10. _mdLink builds a markdown link; label optional; no url → "".
+ok('TD-10 _mdLink builds [label](url) / <url> / "" per inputs', () => {
+  assert(TaskDialog._mdLink('site', 'https://x.com') === '[site](https://x.com)', 'labelled: ' + TaskDialog._mdLink('site', 'https://x.com'));
+  assert(TaskDialog._mdLink('', 'https://x.com') === '<https://x.com>', 'no label → autolink: ' + TaskDialog._mdLink('', 'https://x.com'));
+  assert(TaskDialog._mdLink('   ', 'https://x.com') === '<https://x.com>', 'blank label → autolink');
+  assert(TaskDialog._mdLink('site', '') === '', 'no url → ""');
+  assert(TaskDialog._mdLink('', '') === '', 'nothing → ""');
+  assert(TaskDialog._mdLink(null, null) === '', 'null/null → ""');
+  assert(TaskDialog._mdLink('  Docs  ', '  https://x.com  ') === '[Docs](https://x.com)', 'trims both');
+});
+
+// TD-11. _insertAt splices insertion into text at [start,end); invalid → append.
+ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
+  assert(TaskDialog._insertAt('ab', 'X', 1, 1) === 'aXb', 'insert at caret: ' + TaskDialog._insertAt('ab', 'X', 1, 1));
+  assert(TaskDialog._insertAt('abcd', 'X', 1, 3) === 'aXd', 'replaces selection: ' + TaskDialog._insertAt('abcd', 'X', 1, 3));
+  assert(TaskDialog._insertAt('', 'X', 0, 0) === 'X', 'empty text → just insertion');
+  // Invalid range (null / NaN / out of range) → append with a leading space when
+  // text is non-empty and doesn't already end in whitespace.
+  assert(TaskDialog._insertAt('ab', 'X', null, null) === 'ab X', 'null range → space-append: ' + TaskDialog._insertAt('ab', 'X', null, null));
+  assert(TaskDialog._insertAt('ab', 'X', NaN, NaN) === 'ab X', 'NaN range → space-append');
+  assert(TaskDialog._insertAt('ab', 'X', 9, 9) === 'ab X', 'out-of-range → space-append');
+  assert(TaskDialog._insertAt('ab ', 'X', null, null) === 'ab X', 'trailing space kept, no double: ' + TaskDialog._insertAt('ab ', 'X', null, null));
+  assert(TaskDialog._insertAt('', 'X', null, null) === 'X', 'empty text append → just insertion (no leading space)');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
@@ -261,6 +304,67 @@ ok('TNV-1 _fieldRows returns only set fields (project unwrapped)', () => {
 ok('TNV-2 _fieldRows tolerates null / empty task', () => {
   assert(TaskNoteView._fieldRows(null).length === 0, 'null → []');
   assert(TaskNoteView._fieldRows({}).length === 0, 'empty → []');
+});
+
+// TNV-3. _humanDate formats a YYYY-MM-DD into "Ddd, Mon D, YYYY" (pure, no wall clock).
+// Weekdays VERIFIED via `node -e "new Date('<d>T00:00:00Z').toUTCString()"`:
+//   2026-07-02 = Thu, 2026-07-03 = Fri, 2026-06-29 = Mon, 2026-07-10 = Fri,
+//   2024-02-29 = Thu (leap-year), 2026-12-25 = Fri.
+ok('TNV-3 _humanDate formats text with the REAL weekday', () => {
+  assert(TaskNoteView._humanDate('2026-07-02', '2026-07-02').text === 'Thu, Jul 2, 2026',
+    'got ' + TaskNoteView._humanDate('2026-07-02', '2026-07-02').text);
+  assert(TaskNoteView._humanDate('2026-07-10', '2026-07-02').text === 'Fri, Jul 10, 2026',
+    'got ' + TaskNoteView._humanDate('2026-07-10', '2026-07-02').text);
+  assert(TaskNoteView._humanDate('2024-02-29', '2026-07-02').text === 'Thu, Feb 29, 2024',
+    'leap-year weekday: ' + TaskNoteView._humanDate('2024-02-29', '2026-07-02').text);
+  assert(TaskNoteView._humanDate('2026-12-25', '2026-07-02').text === 'Fri, Dec 25, 2026',
+    'got ' + TaskNoteView._humanDate('2026-12-25', '2026-07-02').text);
+});
+
+// TNV-4. _humanDate relative hint is computed from todayStr (pure date math).
+ok('TNV-4 _humanDate relative hint (Today/Tomorrow/Yesterday/in N/N ago)', () => {
+  assert(TaskNoteView._humanDate('2026-07-02', '2026-07-02').relative === 'Today',
+    'same day → Today: ' + TaskNoteView._humanDate('2026-07-02', '2026-07-02').relative);
+  assert(TaskNoteView._humanDate('2026-07-03', '2026-07-02').relative === 'Tomorrow',
+    '+1 → Tomorrow: ' + TaskNoteView._humanDate('2026-07-03', '2026-07-02').relative);
+  assert(TaskNoteView._humanDate('2026-07-01', '2026-07-02').relative === 'Yesterday',
+    '-1 → Yesterday: ' + TaskNoteView._humanDate('2026-07-01', '2026-07-02').relative);
+  assert(TaskNoteView._humanDate('2026-06-29', '2026-07-02').relative === '3 days ago',
+    '-3 → 3 days ago: ' + TaskNoteView._humanDate('2026-06-29', '2026-07-02').relative);
+  assert(TaskNoteView._humanDate('2026-07-10', '2026-07-02').relative === 'in 8 days',
+    '+8 → in 8 days: ' + TaskNoteView._humanDate('2026-07-10', '2026-07-02').relative);
+  // Cross-month / cross-year deltas still count real calendar days.
+  assert(TaskNoteView._humanDate('2026-08-01', '2026-07-02').relative === 'in 30 days',
+    'cross-month +30: ' + TaskNoteView._humanDate('2026-08-01', '2026-07-02').relative);
+});
+
+// TNV-5. _humanDate tolerates ISO / Luxon-ish / blank input (never throws).
+ok('TNV-5 _humanDate coerces ISO + tolerates blank/null', () => {
+  // Full ISO timestamp (what Dataview would surface raw) → coerced to the date.
+  const iso = TaskNoteView._humanDate('2026-07-02T00:00:00.000-06:00', '2026-07-02');
+  assert(iso.text === 'Thu, Jul 2, 2026', 'ISO coerced to date text: ' + iso.text);
+  assert(iso.relative === 'Today', 'ISO coerced relative: ' + iso.relative);
+  // Blank / null → empty text + empty relative, no throw.
+  assert(TaskNoteView._humanDate('', '2026-07-02').text === '', 'blank → empty text');
+  assert(TaskNoteView._humanDate(null, '2026-07-02').relative === '', 'null → empty relative');
+  // No todayStr → text still formats, relative blank (can't compute).
+  assert(TaskNoteView._humanDate('2026-07-02').text === 'Thu, Jul 2, 2026', 'text without todayStr');
+  assert(TaskNoteView._humanDate('2026-07-02').relative === '', 'relative blank without todayStr');
+});
+
+// TNV-6. _priorityMeta maps a priority to { label, color }; unset → null.
+ok('TNV-6 _priorityMeta returns capitalized label + color (unset → null)', () => {
+  assert(TaskNoteView._priorityMeta('high').label === 'High', 'high label: ' + JSON.stringify(TaskNoteView._priorityMeta('high')));
+  assert(typeof TaskNoteView._priorityMeta('high').color === 'string' && TaskNoteView._priorityMeta('high').color.length > 0, 'high has a color');
+  assert(TaskNoteView._priorityMeta('highest').label === 'Highest', 'highest label');
+  assert(TaskNoteView._priorityMeta('medium').label === 'Medium', 'medium label');
+  assert(TaskNoteView._priorityMeta('low').label === 'Low', 'low label');
+  assert(TaskNoteView._priorityMeta('') === null, 'empty → null');
+  assert(TaskNoteView._priorityMeta(null) === null, 'null → null');
+  assert(TaskNoteView._priorityMeta('  ') === null, 'whitespace → null');
+  // Unknown priority is tolerated (capitalized passthrough, non-empty color).
+  const weird = TaskNoteView._priorityMeta('urgent');
+  assert(weird && weird.label === 'Urgent', 'unknown → capitalized: ' + JSON.stringify(weird));
 });
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
