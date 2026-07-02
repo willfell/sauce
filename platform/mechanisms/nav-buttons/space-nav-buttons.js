@@ -7,14 +7,16 @@
  * This class reads the registry at render time, orders entries by (order,
  * source, id), and dispatches click on action.type.
  *
- * Layout (v2.9.0): one chrome line. When the daily blueprint is installed the
- * row is [ ‹ prev-day ]  [ ⧉ Go to… pill ]  [ next-day › ]; otherwise the pill
- * centers alone. The pill is collapsed by default — tapping it opens a native
- * Obsidian Menu (bottom sheet on mobile, dropdown on desktop) listing every
- * blueprint with icon + full label (no truncation). When the Menu constructor
- * is unobtainable (_getMenuCtor → null) it falls back to an inline accordion
- * panel below the pill. This replaces the pre-v2.9.0 always-visible multi-row
- * button grid, which truncated labels to 2–3 chars on mobile.
+ * Layout (v2.10.0): one chrome line. The daily quick-nav is split out of the
+ * menu into an always-present "Daily" pill (jumps to today) that sits beside
+ * the "Go to…" pill; when the daily blueprint is installed prev/next-day arrows
+ * flank them: [ ‹ prev ]  [ ◲ Daily ] [ ⧉ Go to… ]  [ next › ]. Tapping "Go to…"
+ * opens a custom launcher OVERLAY appended to document.body (so it is never
+ * clipped by the note container): a full-width bottom sheet on mobile, an
+ * anchored dropdown on desktop, listing every other blueprint with icon + full
+ * label. Backdrop-tap / Escape / re-tap closes it. This replaces the v2.9.0
+ * native-Menu reveal (which rendered as a cramped, text-truncating popup on
+ * mobile) and the pre-v2.9.0 always-visible multi-row button grid.
  *
  * Action types (v0.4.2):
  *   - openLink             { target }
@@ -81,20 +83,22 @@ class SpaceNavButtons {
     return entries;
   }
 
-  // Acquire the Obsidian Menu constructor. Order: bare global (Obsidian
-  // globalizes several API classes in the customJS/Dataview eval context, e.g.
-  // Notice) → require('obsidian').Menu → null. Never throws. Null → caller
-  // uses the inline-accordion fallback.
-  _getMenuCtor() {
-    try { if (typeof Menu !== "undefined" && Menu) return Menu; } catch (_e) {}
-    try {
-      const req = (typeof require === "function") ? require : null;
-      if (req) {
-        const obs = req("obsidian");
-        if (obs && obs.Menu) return obs.Menu;
+  // Split the daily quick-nav entry (action.command_id 'daily-notes', or
+  // _source 'daily') out of the ordered entries so it can render as an
+  // always-present pill in the chrome row instead of living inside the "Go to…"
+  // menu. Pure; Node-testable. Returns { dailyEntry|null, menuEntries }.
+  _splitDaily(entries) {
+    let dailyEntry = null;
+    const menuEntries = [];
+    for (const e of (entries || [])) {
+      const a = (e && e.action) || {};
+      if (!dailyEntry && (a.command_id === "daily-notes" || e._source === "daily")) {
+        dailyEntry = e;
+      } else {
+        menuEntries.push(e);
       }
-    } catch (_e) {}
-    return null;
+    }
+    return { dailyEntry, menuEntries };
   }
 
   async render(dv) {
@@ -137,10 +141,11 @@ class SpaceNavButtons {
       margin: 4px 0 12px 0;
     `;
 
-    // ── Top arrow row (daily-nav prev/next; rendered when daily blueprint installed) ──
+    // Split the daily quick-nav out into an always-present pill.
+    const { dailyEntry, menuEntries } = this._splitDaily(entries);
     const dailyMeta = await this._readDailyNotesMeta();
 
-    // ── One-line chrome row: [ ‹ prev ]   [ ⧉ Go to… ]   [ next › ] ──
+    // ── One chrome line: [ ‹ prev ] [ ◲ Daily ] [ ⧉ Go to… ] [ next › ] ──
     const chromeRow = container.createEl("div");
     chromeRow.style.cssText = `
       display: flex;
@@ -166,7 +171,8 @@ class SpaceNavButtons {
     const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
     const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
 
-    // Left slot: prev-day arrow (or an empty spacer to keep the pill centered).
+    // Prev-day arrow (left) — only when the daily blueprint is installed.
+    let later = null;
     if (dailyMeta) {
       const currentFile = dv.current && dv.current();
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
@@ -178,7 +184,7 @@ class SpaceNavButtons {
         .filter(x => x && x.m.isValid())
         .sort((a, b) => a.m.diff(b.m));
       const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
-      const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
+      later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
 
       const prevBtn = chromeRow.createEl("button");
       prevBtn.innerHTML = chevronLeft + `<span>${earlier ? earlier.m.format("ddd, MMM D") : "—"}</span>`;
@@ -188,10 +194,16 @@ class SpaceNavButtons {
         prevBtn.onmouseleave = () => { prevBtn.style.color = "var(--text-muted)"; prevBtn.style.background = "transparent"; };
         prevBtn.onclick = () => app.workspace.openLinkText(earlier.file.path, "");
       }
+    }
 
-      // Pill in the middle.
-      this._renderPill(chromeRow, entries, dv);
+    // Center group: Daily + Go to… kept together (wrap as a unit).
+    const centerGroup = chromeRow.createEl("div");
+    centerGroup.style.cssText = `display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;`;
+    if (dailyEntry) this._renderDailyButton(centerGroup, dailyEntry, dv);
+    this._renderPill(centerGroup, menuEntries, dv);
 
+    // Next-day arrow (right).
+    if (dailyMeta) {
       const nextBtn = chromeRow.createEl("button");
       nextBtn.innerHTML = `<span>${later ? later.m.format("ddd, MMM D") : "—"}</span>` + chevronRight;
       nextBtn.style.cssText = arrowBaseStyle + (later ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
@@ -201,25 +213,19 @@ class SpaceNavButtons {
         nextBtn.onclick = () => app.workspace.openLinkText(later.file.path, "");
       }
     } else {
-      // No daily blueprint → pill centers alone.
       chromeRow.style.justifyContent = "center";
-      this._renderPill(chromeRow, entries, dv);
     }
   }
 
-  // Render the "Go to…" pill into the given row; wire its click to the launcher.
-  _renderPill(row, entries, dv) {
-    const pill = row.createEl("button");
-    const gridIcon = (customJS.Icons?.resolve?.("layout-grid")) ||
-      `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
-    const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
-    pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
-    pill.style.cssText = `
+  // Shared pill styling (outline chip, accent on hover) for the Daily + Go to…
+  // chrome buttons.
+  _stylePill(el) {
+    el.style.cssText = `
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 16px;
+      padding: 6px 14px;
       border-radius: 6px;
       border: 1px solid var(--background-modifier-border);
       background: var(--background-primary);
@@ -230,86 +236,122 @@ class SpaceNavButtons {
       letter-spacing: 0.01em;
       transition: all 0.15s ease;
     `;
-    pill.onmouseenter = () => {
-      pill.style.background = "var(--interactive-accent)";
-      pill.style.color = "var(--text-on-accent)";
-      pill.style.borderColor = "var(--interactive-accent)";
+    el.onmouseenter = () => {
+      el.style.background = "var(--interactive-accent)";
+      el.style.color = "var(--text-on-accent)";
+      el.style.borderColor = "var(--interactive-accent)";
     };
-    pill.onmouseleave = () => {
-      pill.style.background = "var(--background-primary)";
-      pill.style.color = "var(--text-muted)";
-      pill.style.borderColor = "var(--background-modifier-border)";
+    el.onmouseleave = () => {
+      el.style.background = "var(--background-primary)";
+      el.style.color = "var(--text-muted)";
+      el.style.borderColor = "var(--background-modifier-border)";
     };
-    pill.onclick = (evt) => this._openLauncher(evt, pill, entries, dv);
   }
 
-  // Open the launcher: native Menu if available, else inline accordion.
-  _openLauncher(evt, pill, entries, dv) {
-    const MenuCtor = this._getMenuCtor();
-    if (MenuCtor) {
-      const menu = new MenuCtor();
-      this._buildMenu(menu, entries, dv);
-      if (typeof menu.showAtMouseEvent === "function" && evt) menu.showAtMouseEvent(evt);
-      else if (typeof menu.showAtPosition === "function") {
-        const r = pill.getBoundingClientRect();
-        menu.showAtPosition({ x: r.left, y: r.bottom });
-      }
-      return;
-    }
-    this._renderAccordion(pill, entries, dv);
+  // Always-present Daily pill (jumps to today's daily note). Dispatches the
+  // daily registry entry's own action via the unchanged _dispatchAction.
+  _renderDailyButton(row, dailyEntry, dv) {
+    const btnEl = row.createEl("button");
+    const icon = (customJS.Icons?.resolve?.(dailyEntry.icon || "daily"))
+      || (customJS.Icons?.resolve?.("calendar-days"))
+      || `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
+    btnEl.innerHTML = icon + `<span>${dailyEntry.label || "Daily"}</span>`;
+    this._stylePill(btnEl);
+    btnEl.onclick = () => this._dispatchAction(dailyEntry, dv);
   }
 
-  // Populate a native Menu with one item per entry (icon + label via a
-  // DocumentFragment title so we reuse the exact vendored glyphs).
-  _buildMenu(menu, entries, dv) {
-    for (const btn of entries) {
-      menu.addItem((item) => {
-        const svg = customJS.Icons?.resolve?.(btn.icon);
-        if (svg) {
-          const frag = document.createDocumentFragment();
-          const iconSpan = document.createElement("span");
-          iconSpan.innerHTML = svg;
-          iconSpan.style.cssText = "display:inline-flex;align-items:center;margin-right:8px;vertical-align:middle;";
-          const labelSpan = document.createElement("span");
-          labelSpan.textContent = btn.label;
-          frag.appendChild(iconSpan);
-          frag.appendChild(labelSpan);
-          item.setTitle(frag);
-        } else {
-          item.setTitle(btn.label);
-        }
-        item.onClick(() => this._dispatchAction(btn, dv));
-      });
-    }
+  // Render the "Go to…" pill; wire its click to the launcher overlay.
+  _renderPill(row, menuEntries, dv) {
+    const pill = row.createEl("button");
+    const gridIcon = (customJS.Icons?.resolve?.("layout-grid")) ||
+      `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
+    const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+    pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
+    this._stylePill(pill);
+    pill.onclick = (evt) => this._openLauncher(evt, pill, menuEntries, dv);
   }
 
-  // Fallback when no Menu constructor: toggle an inline panel below the pill.
-  _renderAccordion(pill, entries, dv) {
-    const container = pill.closest(".vault-nav");
-    if (!container) return;
-    const existing = container.querySelector(".vault-nav-accordion");
-    if (existing) { existing.remove(); return; } // toggle closed
-    const panel = container.createEl("div", { cls: "vault-nav-accordion" });
-    panel.style.cssText = `
-      display: flex; flex-direction: column; gap: 2px;
-      margin-top: 6px; padding: 6px;
-      border: 1px solid var(--background-modifier-border);
-      border-radius: 6px; background: var(--background-primary);
-    `;
-    for (const btn of entries) {
-      const row = panel.createEl("button");
-      const svg = customJS.Icons?.resolve?.(btn.icon) || "";
-      row.innerHTML = `<span style="display:inline-flex;align-items:center;margin-right:8px;">${svg}</span><span>${btn.label}</span>`;
-      row.style.cssText = `
-        cursor: pointer; display: inline-flex; align-items: center;
-        gap: 4px; padding: 8px 10px; border-radius: 4px;
-        border: none; background: transparent; color: var(--text-normal);
-        font-size: 0.85em; font-family: inherit; text-align: left; width: 100%;
-      `;
-      row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
-      row.onmouseleave = () => { row.style.background = "transparent"; };
-      row.onclick = () => { panel.remove(); return this._dispatchAction(btn, dv); };
+  // Open the launcher as a viewport overlay appended to document.body (so it is
+  // never clipped by the note container): a full-width bottom sheet on mobile,
+  // an anchored dropdown on desktop. Backdrop-tap / Escape / re-tap closes it.
+  _openLauncher(evt, pill, menuEntries, dv) {
+    if (evt && evt.stopPropagation) evt.stopPropagation();
+    const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
+    if (!doc || !doc.body) return;
+
+    // Toggle: an already-open overlay means "close".
+    const open = doc.body.querySelector && doc.body.querySelector(".vault-nav-overlay");
+    if (open && open.remove) { open.remove(); return; }
+
+    const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
+
+    const overlay = doc.createElement("div");
+    overlay.className = "vault-nav-overlay";
+    overlay.style.cssText = `position: fixed; inset: 0; z-index: 1000;`
+      + (isMobile
+        ? " background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center;"
+        : " background: transparent;");
+
+    const panel = doc.createElement("div");
+    panel.className = "vault-nav-panel";
+    const panelBase = `box-sizing: border-box; background: var(--background-primary);`
+      + ` border: 1px solid var(--background-modifier-border);`
+      + ` box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;`
+      + ` display: flex; flex-direction: column;`;
+    if (isMobile) {
+      panel.style.cssText = panelBase
+        + ` width: 100%; max-width: 620px; max-height: 72vh;`
+        + ` border-radius: 16px 16px 0 0;`
+        + ` padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));`
+        + ` gap: 2px;`;
+      const handle = doc.createElement("div");
+      handle.style.cssText = `flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;`;
+      panel.appendChild(handle);
+    } else {
+      const rect = (pill && pill.getBoundingClientRect) ? pill.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+      const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
+      const width = Math.max(240, Math.round(rect.width) || 0);
+      let left = Math.round(rect.left || 0);
+      if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+      panel.style.cssText = panelBase
+        + ` position: fixed; top: ${Math.round((rect.bottom || 0) + 6)}px; left: ${left}px;`
+        + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
     }
+
+    for (const btn of menuEntries) {
+      panel.appendChild(this._buildOverlayRow(doc, btn, dv, overlay, isMobile));
+    }
+
+    const close = () => {
+      if (overlay.remove) overlay.remove();
+      if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
+    };
+    const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
+
+    overlay.appendChild(panel);
+    doc.body.appendChild(overlay);
+  }
+
+  // Build a single overlay row (icon + full label). Label lives in a <span> so
+  // it renders identically to the chrome glyphs; label text originates from
+  // installer-validated registry declarations (trusted, same boundary as the
+  // former grid). Full-width rows mean labels never truncate on mobile.
+  _buildOverlayRow(doc, btn, dv, overlay, isMobile) {
+    const row = doc.createElement("button");
+    const svg = customJS.Icons?.resolve?.(btn.icon) || "";
+    row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${svg}</span>`
+      + `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${btn.label}</span>`;
+    row.style.cssText = `cursor: pointer; display: flex; align-items: center; gap: 10px;`
+      + ` width: 100%; text-align: left; box-sizing: border-box; border: none;`
+      + ` border-radius: 8px; background: transparent; color: var(--text-normal);`
+      + ` font-family: inherit; line-height: 1.25;`
+      + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+    row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+    row.onmouseleave = () => { row.style.background = "transparent"; };
+    row.onclick = () => { if (overlay.remove) overlay.remove(); return this._dispatchAction(btn, dv); };
+    return row;
   }
 
   // ── Action dispatcher ──────────────────────────────────────────────────
