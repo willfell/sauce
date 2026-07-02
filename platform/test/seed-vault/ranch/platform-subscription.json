@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.10.0"
+      "version": "2.11.0"
     },
     {
       "name": "cards",
@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.2.3"
+      "version": "0.2.4"
     },
     {
       "name": "breadcrumb",
