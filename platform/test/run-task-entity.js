@@ -223,6 +223,49 @@ ok('TD-8 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
     'notes below the injected marker');
 });
 
+// ---------- TaskDialog link-inserter static helpers (pure) ----------
+//
+// The edit/create dialog can insert a note-link ([[wikilink]]) or a web link
+// ([label](url) / <url>) into the Notes textarea. The markdown-building and
+// cursor-splice logic is factored into three PURE statics so the browser UI is
+// a thin shell over Node-testable helpers. Called through an INSTANCE (customJS
+// stores instances) so a regression to instance-less statics fails loudly.
+
+// TD-9. _wikilink wraps a note basename; empty/nullish → "".
+ok('TD-9 _wikilink wraps a basename (trims; empty → "")', () => {
+  assert(TaskDialog._wikilink('Note A') === '[[Note A]]', 'got ' + TaskDialog._wikilink('Note A'));
+  assert(TaskDialog._wikilink('  Trimmed  ') === '[[Trimmed]]', 'trims: ' + TaskDialog._wikilink('  Trimmed  '));
+  assert(TaskDialog._wikilink('') === '', 'empty → ""');
+  assert(TaskDialog._wikilink(null) === '', 'null → ""');
+  assert(TaskDialog._wikilink(undefined) === '', 'undefined → ""');
+  assert(TaskDialog._wikilink('   ') === '', 'all-whitespace → ""');
+});
+
+// TD-10. _mdLink builds a markdown link; label optional; no url → "".
+ok('TD-10 _mdLink builds [label](url) / <url> / "" per inputs', () => {
+  assert(TaskDialog._mdLink('site', 'https://x.com') === '[site](https://x.com)', 'labelled: ' + TaskDialog._mdLink('site', 'https://x.com'));
+  assert(TaskDialog._mdLink('', 'https://x.com') === '<https://x.com>', 'no label → autolink: ' + TaskDialog._mdLink('', 'https://x.com'));
+  assert(TaskDialog._mdLink('   ', 'https://x.com') === '<https://x.com>', 'blank label → autolink');
+  assert(TaskDialog._mdLink('site', '') === '', 'no url → ""');
+  assert(TaskDialog._mdLink('', '') === '', 'nothing → ""');
+  assert(TaskDialog._mdLink(null, null) === '', 'null/null → ""');
+  assert(TaskDialog._mdLink('  Docs  ', '  https://x.com  ') === '[Docs](https://x.com)', 'trims both');
+});
+
+// TD-11. _insertAt splices insertion into text at [start,end); invalid → append.
+ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
+  assert(TaskDialog._insertAt('ab', 'X', 1, 1) === 'aXb', 'insert at caret: ' + TaskDialog._insertAt('ab', 'X', 1, 1));
+  assert(TaskDialog._insertAt('abcd', 'X', 1, 3) === 'aXd', 'replaces selection: ' + TaskDialog._insertAt('abcd', 'X', 1, 3));
+  assert(TaskDialog._insertAt('', 'X', 0, 0) === 'X', 'empty text → just insertion');
+  // Invalid range (null / NaN / out of range) → append with a leading space when
+  // text is non-empty and doesn't already end in whitespace.
+  assert(TaskDialog._insertAt('ab', 'X', null, null) === 'ab X', 'null range → space-append: ' + TaskDialog._insertAt('ab', 'X', null, null));
+  assert(TaskDialog._insertAt('ab', 'X', NaN, NaN) === 'ab X', 'NaN range → space-append');
+  assert(TaskDialog._insertAt('ab', 'X', 9, 9) === 'ab X', 'out-of-range → space-append');
+  assert(TaskDialog._insertAt('ab ', 'X', null, null) === 'ab X', 'trailing space kept, no double: ' + TaskDialog._insertAt('ab ', 'X', null, null));
+  assert(TaskDialog._insertAt('', 'X', null, null) === 'X', 'empty text append → just insertion (no leading space)');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
