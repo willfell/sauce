@@ -5053,16 +5053,29 @@ function _healWikiChromeBody(body, type) {
   const VP = "ranch/views/customjs-guard";
   const bcBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "Breadcrumb" });\n```';
   const navBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "SpaceNavButtons" });\n```';
-  const actionClass = type === "wiki-page" ? "WikiLeafActions" : "WikiHubActions";
+  // hub/section chrome now ENDS in the WikiTree block: WikiTree renders the
+  // create/nav buttons (+ its own divider), the search bar, and the cards in ONE
+  // dataviewjs block, so the buttons↔search boundary is gap-free. wiki-page still
+  // ends in WikiLeafActions.
+  const actionClass = type === "wiki-page" ? "WikiLeafActions" : "WikiTree";
   const actionBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "' + actionClass + '" });\n```';
   let out = body;
 
-  // 1. hub/section: collapse the two legacy entity-create blocks into WikiHubActions.
-  if (type !== "wiki-page" && !/class:\s*"WikiHubActions"/.test(out)) {
-    const two = /```dataviewjs\n\/\/ entity-create:wiki-section[\s\S]*?instance: "wiki-page" \}\] \}\);\n```\n?/;
-    if (two.test(out)) {
-      out = out.replace(two, '```dataviewjs\nawait dv.view("' + VP + '", { class: "WikiHubActions" });\n```\n');
-    }
+  // 1. hub/section: WikiTree renders the buttons itself now. Collapse everything
+  //    between the SpaceNavButtons block and the WikiTree block — a legacy standalone
+  //    WikiHubActions block, the two legacy stacked entity-create blocks, and the
+  //    "---" divider — down to a single blank line. This removes the cross-block
+  //    line gap AND prevents a duplicate button row. Idempotent: once collapsed the
+  //    span is just one blank line, which re-matches to itself.
+  if (type !== "wiki-page") {
+    // stragglers first, for the rare note that has NO WikiTree block to anchor on:
+    out = out.replace(/```dataviewjs\n\/\/ entity-create:wiki-section[\s\S]*?instance: "wiki-page" \}\] \}\);\n```\n?/, "");
+    out = out.replace(/```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"WikiHubActions"\s*\}\);\n```\n?/, "");
+    // common case: normalize the nav→tree gap in one shot.
+    out = out.replace(
+      /(class:\s*"SpaceNavButtons"\s*\}\);\n```\n)[\s\S]*?(```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"WikiTree"\s*\})/,
+      "$1\n$2"
+    );
   }
 
   // 2. bare note (no nav at all): inject full chrome after the frontmatter. No
@@ -5085,6 +5098,12 @@ function _healWikiChromeBody(body, type) {
   //    template's redundant "---" immediately after that block (idempotent).
   if (type === "wiki-page") {
     out = out.replace(/(class:\s*"WikiLeafActions"[\s\S]*?\n```\n)\s*\n?-{3,}[ \t]*(\r?\n|$)/, "$1");
+  }
+
+  // 5. hub/section safety net: guarantee a WikiTree block (it renders buttons +
+  //    search + cards). Only fires if the above somehow left none.
+  if (type !== "wiki-page" && !/class:\s*"WikiTree"/.test(out)) {
+    out = out.replace(/\s*$/, "") + "\n\n" + actionBlock + "\n";
   }
   return out;
 }

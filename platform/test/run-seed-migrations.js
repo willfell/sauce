@@ -589,23 +589,28 @@ withTempVault((vault) => {
             `mechExists=${fs.existsSync(docSearchMechPath)} projectLocalDocSearch=${hasLocalDocSearch}`
         );
 
-        // WIKI-8: chrome heal swapped the two stacked entity-create blocks in the
-        // seed's section hub for a single WikiHubActions block (one evenly-spaced row).
+        // WIKI-8: chrome heal collapsed the seed section hub's button chrome into the
+        // WikiTree block — WikiTree renders the create/nav buttons + search + cards in
+        // ONE block, so the standalone WikiHubActions block AND the legacy stacked
+        // entity-create blocks are gone (no cross-block gap, no "---" before WikiTree).
         let infraBody = "";
         try { infraBody = helpers.readNote(vault, "spice/wiki/infra/Infra.md"); } catch (e) {}
+        const _navToTree = (b) => b.slice(b.indexOf("SpaceNavButtons"), b.indexOf("WikiTree"));
         ok(
-            "HC-WIKI-SEED-MIGRATE-WIKI-8 section hub healed: WikiHubActions present, stacked entity-create blocks gone",
-            /class:\s*"WikiHubActions"/.test(infraBody) && !/entity-create:wiki-(section|page)/.test(infraBody),
-            `hasWHA=${/WikiHubActions/.test(infraBody)} hasLegacy=${/entity-create:wiki-/.test(infraBody)}`
+            "HC-WIKI-SEED-MIGRATE-WIKI-8 section hub healed: WikiTree renders buttons; no standalone WikiHubActions/entity-create block or '---'",
+            /class:\s*"WikiTree"/.test(infraBody) && !/class:\s*"WikiHubActions"/.test(infraBody) &&
+            !/entity-create:wiki-(section|page)/.test(infraBody) && !/^-{3,}$/m.test(_navToTree(infraBody)),
+            `hasTree=${/WikiTree/.test(infraBody)} hasWHA=${/WikiHubActions/.test(infraBody)} hasLegacy=${/entity-create:wiki-/.test(infraBody)}`
         );
 
-        // WIKI-9: the re-materialized root hub renders the WikiHubActions one-row block.
+        // WIKI-9: the re-materialized root hub also ends in a single WikiTree block.
         let hubBody = "";
         try { hubBody = helpers.readNote(vault, "spice/wiki/Wiki.md"); } catch (e) {}
         ok(
-            "HC-WIKI-SEED-MIGRATE-WIKI-9 root hub renders WikiHubActions (no stacked entity-create blocks)",
-            /class:\s*"WikiHubActions"/.test(hubBody) && !/entity-create:wiki-(section|page)/.test(hubBody),
-            `hasWHA=${/WikiHubActions/.test(hubBody)} hasLegacy=${/entity-create:wiki-/.test(hubBody)}`
+            "HC-WIKI-SEED-MIGRATE-WIKI-9 root hub renders WikiTree only (no standalone WikiHubActions/entity-create block)",
+            /class:\s*"WikiTree"/.test(hubBody) && !/class:\s*"WikiHubActions"/.test(hubBody) &&
+            !/entity-create:wiki-(section|page)/.test(hubBody),
+            `hasTree=${/WikiTree/.test(hubBody)} hasWHA=${/WikiHubActions/.test(hubBody)} hasLegacy=${/entity-create:wiki-/.test(hubBody)}`
         );
 
         // WIKI-10: breadcrumbs guaranteed on EVERY wiki section + page (path_walk chrome
