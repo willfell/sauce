@@ -2969,6 +2969,125 @@ async function runTaskEntityLinksProjectFamily() {
     }
 }
 
+// =============================================================================
+// HC-TE-REORDER-* — applyProjectTodoSectionReorderHeal (v0.179 UI polish).
+// A project To-Do note authored in the OLD section order (Project Tasks →
+// Owned Tasks → From Meetings) must be reordered to Project Tasks → From
+// Meetings → Owned Tasks: the WHOLE Owned Tasks block (its SectionLabel + the
+// OWNED_TASKS_MARKER + the raw `- [x]`/`- [ ]` lines + the ownedTasks editable
+// list) moves BELOW From Meetings as one unit. Idempotent (a second run + an
+// already-ordered note are no-ops), .sauce-backup before write.
+// =============================================================================
+async function runProjectTodoSectionReorderFamily() {
+    const { applyProjectTodoSectionReorderHeal } = require("../install.js");
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-te-reorder-"));
+    const writeFixture = (rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const readVault = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const backupExists = (nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+    const dv = (cls, args) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '"' +
+        (args ? ", args: " + args : "") + " });\n```";
+
+    // (1) Owned-Tasks-IN-THE-MIDDLE note (the pre-fix order):
+    // Project Tasks → Owned Tasks (label + marker + lines + editable list) → From Meetings.
+    const MIDDLE = "spice/projects/connectors/Connectors To-Do.md";
+    writeFixture(MIDDLE, [
+        "---", 'type: "project-todo"', 'project: "[[Connectors]]"',
+        'project_slug: "connectors"', "---", "",
+        dv("ToDoLeafActions"), "",
+        dv("SectionLabel", '[{ text: "Project Tasks", top: true }]'), "",
+        dv("TaskProjectList"), "",
+        dv("SectionLabel", '[{ text: "Owned Tasks" }]'), "",
+        "<!-- OWNED_TASKS_MARKER -->", "",
+        "- [x] Completed legacy thing", "- [ ] Still open legacy thing", "",
+        dv("TodayCaptureEditableList", '[{ anchor: "ownedTasks" }]'), "",
+        dv("SectionLabel", '[{ text: "From Meetings" }]'), "",
+        dv("ToDoDailyProjectGroups", '[{ scope: "project-todo" }]'), "",
+    ].join("\n"));
+
+    // (2) ALREADY-ordered note (Owned Tasks already last) → must be a no-op.
+    const ORDERED = "spice/projects/ordered/Ordered To-Do.md";
+    writeFixture(ORDERED, [
+        "---", "type: project-todo", 'project_slug: "ordered"', "---", "",
+        dv("SectionLabel", '[{ text: "Project Tasks", top: true }]'), "",
+        dv("TaskProjectList"), "",
+        dv("SectionLabel", '[{ text: "From Meetings" }]'), "",
+        dv("ToDoDailyProjectGroups", '[{ scope: "project-todo" }]'), "",
+        dv("SectionLabel", '[{ text: "Owned Tasks" }]'), "",
+        "<!-- OWNED_TASKS_MARKER -->", "",
+    ].join("\n"));
+
+    try {
+        const adapter = makeFsAdapter(root);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const history = [];
+
+        // ----- Pass 1 -----
+        await applyProjectTodoSectionReorderHeal(tp, history, git);
+
+        const middle = readVault(MIDDLE);
+        const idxPT = middle.indexOf('"Project Tasks"');
+        const idxFM = middle.indexOf('"From Meetings"');
+        const idxOT = middle.indexOf('"Owned Tasks"');
+        ok("HC-TE-REORDER-1 sections ordered Project Tasks → From Meetings → Owned Tasks",
+           idxPT !== -1 && idxFM !== -1 && idxOT !== -1 && idxPT < idxFM && idxFM < idxOT,
+           `PT=${idxPT} FM=${idxFM} OT=${idxOT}`);
+        ok("HC-TE-REORDER-2 Owned Tasks marker moved with the block (below From Meetings)",
+           middle.indexOf("<!-- OWNED_TASKS_MARKER -->") > idxFM);
+        ok("HC-TE-REORDER-3 raw owned task lines preserved + moved below From Meetings",
+           middle.includes("- [x] Completed legacy thing") &&
+           middle.includes("- [ ] Still open legacy thing") &&
+           middle.indexOf("- [x] Completed legacy thing") > idxFM);
+        ok("HC-TE-REORDER-4 ownedTasks editable list moved with the block",
+           middle.indexOf('anchor: "ownedTasks"') > idxFM);
+        ok("HC-TE-REORDER-5 From Meetings widget still present",
+           /class:\s*"ToDoDailyProjectGroups"/.test(middle) && /scope: "project-todo"/.test(middle));
+        ok("HC-TE-REORDER-6 .sauce-backup snapshot of the reordered note exists",
+           backupExists(/Connectors To-Do\.md$/));
+
+        // Already-ordered note untouched (no write → no backup).
+        const orderedBefore = readVault(ORDERED);
+        ok("HC-TE-REORDER-7 already-ordered note NOT rewritten (idempotent no-op)",
+           !backupExists(/Ordered To-Do\.md$/));
+
+        // ----- Pass 2: idempotency -----
+        await applyProjectTodoSectionReorderHeal(tp, history, git);
+        const middle2 = readVault(MIDDLE);
+        ok("HC-TE-REORDER-8 second run is a byte-identical no-op on the reordered note",
+           middle2 === middle);
+        ok("HC-TE-REORDER-9 exactly one Owned Tasks label after two runs",
+           (middle2.match(/text:\s*"Owned Tasks"/g) || []).length === 1);
+        const ordered2 = readVault(ORDERED);
+        ok("HC-TE-REORDER-10 already-ordered note still byte-identical after two runs",
+           ordered2 === orderedBefore);
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${root}`);
+        } else {
+            try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -3024,6 +3143,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-TE-LP-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-TE-LP-FAMILY");
+    })
+    .then(() => runProjectTodoSectionReorderFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-TE-REORDER-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-TE-REORDER-FAMILY");
     })
     .finally(() => {
         console.log("");

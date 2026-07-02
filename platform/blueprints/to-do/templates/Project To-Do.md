@@ -34,15 +34,19 @@ await dv.view("{{views_path}}/customjs-guard", { class: "TaskProjectList" });
 ```
 
 ```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });
+```
+
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });
+```
+
+```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });
 ```
 
 <!-- OWNED_TASKS_MARKER -->
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });
-```
-
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });
+await dv.view("{{views_path}}/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });
 ```
