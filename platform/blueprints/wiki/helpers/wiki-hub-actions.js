@@ -73,12 +73,12 @@ class WikiHubActions {
         mk("+ New Section", folderPlus, "wiki-section");
         mk("+ New Page", filePlus, "wiki-page");
 
-        // Bottom divider between the wiki buttons and the search bar. WikiTree renders
-        // this helper directly above its search bar (one block), so this divider owns
-        // the buttons↔search spacing: 12px above + below gives a clear line break so the
-        // buttons and search aren't squished together.
+        // Bottom divider between the wiki buttons and the search bar. 12px ABOVE
+        // (buttons↔divider) matches the top divider. The gap BELOW (divider↔search) is
+        // owned by the search strip's own top margin, which WikiTree normalizes to 12px
+        // — so the divider↔search distance is IDENTICAL to the divider↔buttons one.
         const hrBottom = wrap.createEl("hr");
-        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0 0 0;";
     }
 
     // Mobile-legible sizing: bigger tap target + readable label. Each button takes
