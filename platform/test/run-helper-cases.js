@@ -12236,6 +12236,56 @@ async function caseV01070Fcgb5IdempotentSkip() {
     /(let\s+changed\s*=\s*false|needsWrite|let\s+modified\s*=)/.test(src));
 }
 
+// 2026-07-01 finance-stabilize — behavioral cases for the flow-map-aware group
+// backfill (D1) and the malformed-group repair transform/heal (D2).
+
+async function caseFinBgrBackfillSkipsFlowMap() {
+  console.log("\n--- Case HC-FIN-BGR-1: backfill skips inline flow-mapping categories ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const body = [
+    "---",
+    "type: budget",
+    "month: 2026-08",
+    "categories:",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    '  - {"group":"Travel","name":"Travel","planned":100,"actual":0}',
+    "groups:",
+    "  - Lifestyle",
+    "  - Travel",
+    "---",
+    "",
+    "body",
+  ].join("\n");
+  const out = installer._backfillBudgetGroupsFromText(body);
+  assertTrue("HC-FIN-BGR-1: flow-map body is NOT touched", out.touched === false);
+  assertTrue("HC-FIN-BGR-1: no stray 'group: Unassigned' inserted",
+    !/\n    group: Unassigned/.test(out.body));
+  assertTrue("HC-FIN-BGR-1: original flow-map rows intact",
+    /\{"group":"Lifestyle","name":"Golf"/.test(out.body) &&
+    /\{"group":"Travel","name":"Travel"/.test(out.body));
+}
+
+async function caseFinBgrBackfillStillBackfillsBlock() {
+  console.log("\n--- Case HC-FIN-BGR-2: backfill still adds Unassigned to block items lacking a group ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const body = [
+    "---",
+    "type: budget",
+    "month: 2026-08",
+    "categories:",
+    "  - name: Groceries",
+    "    planned: 550",
+    "    actual: 0",
+    "groups: []",
+    "---",
+    "",
+  ].join("\n");
+  const out = installer._backfillBudgetGroupsFromText(body);
+  assertTrue("HC-FIN-BGR-2: block item without group is backfilled", out.touched === true);
+  assertTrue("HC-FIN-BGR-2: 'group: Unassigned' inserted for block item",
+    /\n    group: Unassigned/.test(out.body));
+}
+
 // v0.107.0 — defaults editor classes shipped in finance blueprint.
 
 async function caseV01070Bde1ClassDeclared() {
@@ -15246,6 +15296,8 @@ async function caseHCV0128FinancePlanning() {
   await caseV01070Fcgb3AppendOnlyGuard();
   await caseV01070Fcgb4PerFileFailureLoud();
   await caseV01070Fcgb5IdempotentSkip();
+  await caseFinBgrBackfillSkipsFlowMap();
+  await caseFinBgrBackfillStillBackfillsBlock();
 
   // v0.107.0 — defaults editor widgets (S3)
   await caseV01070Bde1ClassDeclared();

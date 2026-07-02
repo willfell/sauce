@@ -9199,6 +9199,16 @@ function _backfillBudgetGroupsFromText(body) {
           const itemStartIdx = i;
           let j = i + 1;
           while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+          // Inline flow-mapping items (e.g. `- {"group":"…","name":"…"}`) carry
+          // their group INSIDE the braces; the line-scan below cannot see it and
+          // would splice a stray `    group: Unassigned` beneath the row, producing
+          // malformed frontmatter. Skip flow-map items entirely — the scaffold and
+          // BudgetCategoriesEditor always write `group` inside the flow-map, so
+          // there is nothing to backfill.
+          if (/^  - \{/.test(fmLines[itemStartIdx])) {
+            i = j;
+            continue;
+          }
           // Check if this item has `group:` already.
           let hasGroup = false;
           for (let k = itemStartIdx; k < j; k++) {
