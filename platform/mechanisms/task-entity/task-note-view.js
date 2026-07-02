@@ -49,6 +49,8 @@ class TaskNoteView {
     _fieldRows(task) { return TaskNoteView._fieldRows(task); }
     _humanDate(value, todayStr) { return TaskNoteView._humanDate(value, todayStr); }
     _priorityMeta(priority) { return TaskNoteView._priorityMeta(priority); }
+    _linkEntries(task) { return TaskNoteView._linkEntries(task); }
+    _renderInlineMarkdown(el, mdText, sourcePath) { return TaskNoteView._renderInlineMarkdown(el, mdText, sourcePath); }
 
     // ---------- Static pure helpers ----------
 
@@ -181,6 +183,106 @@ class TaskNoteView {
         return map[key] || { label: cap, color: 'var(--text-normal, #ccc)' };
     }
 
+    /**
+     * Build the LINKS section entries for a task (FIX 5): an array of RENDERABLE
+     * markdown link STRINGS read from the task's `links` frontmatter. Dataview may
+     * hand back an array of plain strings AND/OR Link objects (a `[[wikilink]]`
+     * inside a YAML array resolves to a Link object) — coerce each defensively:
+     *   - a string            → trimmed, as-is (a note link `[[Note]]`, a web link
+     *                           `[label](url)`, or `<url>`)
+     *   - a Dataview Link obj  → `[[basename]]` (prefer TaskEntity._linkText for
+     *                           the basename; local baseOf fallback on cold-load)
+     * Blank / nullish entries are DROPPED; a null / empty / non-array task → [].
+     * Pure + null-tolerant so one bad entry can't throw the card render.
+     */
+    static _linkEntries(task) {
+        const t = task || {};
+        const raw = t.links;
+        if (!Array.isArray(raw)) return [];
+        // Basename of a path-ish string (last `/` segment, trailing `.md` stripped).
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        const out = [];
+        for (const entry of raw) {
+            if (entry == null) continue;
+            let s = '';
+            try {
+                if (typeof entry === 'string') {
+                    s = entry.trim();
+                } else if (typeof entry === 'object'
+                    && ('path' in entry || 'display' in entry || 'subpath' in entry)) {
+                    // Prefer the shared coercion (basename); fall back to local baseOf.
+                    let base = '';
+                    try {
+                        const TE = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;
+                        if (TE && typeof TE._linkText === 'function') base = TE._linkText(entry);
+                    } catch (_e) { base = ''; }
+                    if (!base) {
+                        base = (entry.path != null && String(entry.path).trim() !== '')
+                            ? baseOf(entry.path)
+                            : String(entry.display == null ? '' : entry.display).trim();
+                    }
+                    s = base ? '[[' + base + ']]' : '';
+                } else {
+                    s = String(entry).trim();
+                }
+            } catch (_e) { s = ''; }
+            if (s) out.push(s);
+        }
+        return out;
+    }
+
+    /**
+     * Render `mdText` as INLINE markdown into `el` so a LINKS-section entry
+     * (`[[Note]]` / `[label](url)` / `<url>`) becomes CLICKABLE (FIX 5). Mirrors
+     * TaskTodayList._renderTitleMarkdown: feature-detects Obsidian's
+     * MarkdownRenderer.render(app, md, el, sourcePath, comp) (newer API), falling
+     * back to the older renderMarkdown(md, el, sourcePath, comp); if neither is
+     * reachable (or it throws), falls back to plain text so a link always shows.
+     * Strips block margins on the injected <p> so the link sits inline (no big
+     * vertical gaps). `sourcePath` (the task-note path) resolves relative
+     * `[[wikilink]]` targets. Never throws.
+     */
+    static _renderInlineMarkdown(el, mdText, sourcePath) {
+        if (!el) return;
+        const text = String(mdText == null ? '' : mdText);
+        const plain = () => { try { el.textContent = text; } catch (_e) {} };
+        let MR = null;
+        try {
+            MR = (typeof MarkdownRenderer !== 'undefined' && MarkdownRenderer)
+                || (typeof window !== 'undefined' && window.MarkdownRenderer)
+                || null;
+        } catch (_e) { MR = null; }
+        const appRef = (typeof app !== 'undefined' && app)
+            || (typeof window !== 'undefined' && window.app)
+            || null;
+        // Lightweight Component stub — Obsidian's renderer only needs
+        // addChild/register/load; no-ops are fine for a transient card row.
+        const comp = { addChild() {}, register() {}, load() {}, onload() {}, unload() {} };
+        let rendered = false;
+        try {
+            if (MR && typeof MR.render === 'function' && appRef) {
+                MR.render(appRef, text, el, sourcePath || '', comp);
+                rendered = true;
+            } else if (MR && typeof MR.renderMarkdown === 'function') {
+                MR.renderMarkdown(text, el, sourcePath || '', comp);
+                rendered = true;
+            }
+        } catch (_e) { rendered = false; }
+        if (!rendered) { plain(); return; }
+        // Strip block margins so the rendered <p> sits inline (no block gaps).
+        try {
+            const ps = el.querySelectorAll ? el.querySelectorAll('p') : [];
+            ps.forEach((p) => { p.style.margin = '0'; p.style.display = 'inline'; });
+            const anchors = el.querySelectorAll ? el.querySelectorAll('a') : [];
+            anchors.forEach((a) => { a.style.cursor = 'pointer'; });
+        } catch (_e) { /* cosmetic — tolerate */ }
+    }
+
     // ---------- Instance / browser render ----------
 
     /**
@@ -224,6 +326,10 @@ class TaskNoteView {
                 project: str(parsed ? parsed.project : page.project),
                 source_note: str(parsed ? parsed.source_note : page.source_note),
                 created_at: str(parsed ? parsed.created_at : page.created_at),
+                // Structured card links (FIX 5) — read from the parsed view (already
+                // normalized to a string array) or the raw page frontmatter (which
+                // Dataview may surface as strings and/or Link objects).
+                links: (parsed && Array.isArray(parsed.links)) ? parsed.links : page.links,
             };
             const filePath = (page.file && page.file.path) || (parsed && parsed.path) || null;
             let todayStr = '';
@@ -414,6 +520,29 @@ class TaskNoteView {
                     }
                 } catch (_e) { /* source link best-effort */ }
             }
+
+            // ----- LINKS section (FIX 5) — structured links rendered INSIDE the card -----
+            // Each entry is a markdown link string ([[Note]] / [label](url) / <url>)
+            // rendered as CLICKABLE markdown so the user's added links live neatly in
+            // the card (not as raw text at the bottom of the note). One bad entry
+            // can't throw the card — _linkEntries + the per-entry try/catch guard it.
+            try {
+                const linkEntries = TaskNoteView._linkEntries(task);
+                if (linkEntries.length) {
+                    drawDivider();
+                    const linksLabel = card.createEl('div', { text: 'LINKS' });
+                    linksLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
+                    const linksWrap = card.createEl('div');
+                    linksWrap.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+                    for (const entry of linkEntries) {
+                        try {
+                            const row = linksWrap.createEl('div');
+                            row.style.cssText = 'font-size:0.95em; line-height:1.35; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
+                            TaskNoteView._renderInlineMarkdown(row, entry, filePath || '');
+                        } catch (_e) { /* one bad link must not break the card */ }
+                    }
+                }
+            } catch (_e) { /* LINKS section best-effort */ }
 
             // ----- Full-width primary "Edit task" button -----
             drawDivider();

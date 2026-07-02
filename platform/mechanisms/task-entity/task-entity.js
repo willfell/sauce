@@ -52,6 +52,7 @@ class TaskEntity {
     validatePayload(payload) { return TaskEntity.validatePayload(payload); }
     _toDateStr(v) { return TaskEntity._toDateStr(v); }
     _linkText(v) { return TaskEntity._linkText(v); }
+    _normLinks(v) { return TaskEntity._normLinks(v); }
     _sanitizeTitle(title) { return TaskEntity._sanitizeTitle(title); }
     _uniqueName(baseFilename, existsFn) { return TaskEntity._uniqueName(baseFilename, existsFn); }
     _chromeBody() { return TaskEntity._chromeBody(); }
@@ -179,6 +180,36 @@ class TaskEntity {
     }
 
     /**
+     * Normalize a `links` frontmatter value into a clean array of markdown link
+     * STRINGS (FIX 5). Each entry is expected to be a markdown link — a note link
+     * `"[[Note]]"`, a web link `"[label](url)"`, or `"<url>"`. Coerces each entry
+     * to a trimmed string and DROPS blanks; a Dataview Link OBJECT (which Dataview
+     * surfaces for a `[[wikilink]]` inside a YAML array) is coerced back to
+     * `[[basename]]` via _linkText so it stays a renderable wikilink. A non-array
+     * / nullish input yields []. Pure + null-tolerant; never throws.
+     */
+    static _normLinks(v) {
+        if (!Array.isArray(v)) return [];
+        const out = [];
+        for (const entry of v) {
+            if (entry == null) continue;
+            let s;
+            if (typeof entry === 'string') {
+                s = entry.trim();
+            } else if (typeof entry === 'object'
+                && ('path' in entry || 'display' in entry || 'subpath' in entry)) {
+                // A Dataview Link object → a renderable `[[basename]]` wikilink.
+                const base = TaskEntity._linkText(entry);
+                s = base ? '[[' + base + ']]' : '';
+            } else {
+                s = String(entry).trim();
+            }
+            if (s) out.push(s);
+        }
+        return out;
+    }
+
+    /**
      * Human-readable per-task filename: the sanitized TITLE + ".md"
      * (e.g. "Go through mail.md") — NO timestamp, NO hash. Titles can collide,
      * so the CALLER dedupes the returned base against the vault via
@@ -250,6 +281,13 @@ class TaskEntity {
             || (moment && moment.format ? moment.format('YYYY-MM-DDTHH:mm:ssZ') : '');
         const project = (p.project && p.project.name) ? `[[${p.project.name}]]` : '';
         const projectSlug = (p.project && p.project.slug) ? p.project.slug : '';
+        // Structured links (FIX 5) — an array of markdown link STRINGS that
+        // TaskNoteView renders INSIDE the card (a note link `[[Note]]`, a web link
+        // `[label](url)` / `<url>`). Normalized to a clean string array: coerce
+        // each entry to a string, trim, and drop blanks; a non-array / nullish
+        // `links` becomes []. Kept empty (not omitted) so it round-trips as an
+        // empty flow array and a later edit is a simple field write.
+        const links = TaskEntity._normLinks(p.links);
         // Canonical key order — keep in lockstep with the schema in the README.
         const frontmatter = {
             type: 'task',
@@ -262,6 +300,7 @@ class TaskEntity {
             project_slug: projectSlug,
             source: p.source || '',
             source_note: p.source_note || '',
+            links: links,
             created_at: createdAt,
             completed_at: p.completed_at || '',
         };
@@ -296,6 +335,10 @@ class TaskEntity {
             // left as-is (TaskNoteView strips its brackets); the reliable project
             // filter uses project_slug (a plain string) above.
             source_note: p.source_note != null ? TaskEntity._linkText(p.source_note) : null,
+            // Structured card links (FIX 5) — normalized to a clean string array so
+            // TaskNoteView can render them inside the card. Dataview may hand back an
+            // array of strings and/or Link objects; _normLinks coerces both.
+            links: TaskEntity._normLinks(p.links),
             created_at: p.created_at != null ? p.created_at : null,
             completed_at: blankToNull(p.completed_at),
             path: path,

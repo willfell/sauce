@@ -26,7 +26,11 @@ await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Project Tasks", top: true }] });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TaskProjectList" });
 ```
 
 ```dataviewjs
@@ -35,4 +39,14 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });
+```
+
+<!-- OWNED_TASKS_MARKER -->
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });
 ```
