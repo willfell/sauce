@@ -1,0 +1,112 @@
+{
+  "name": "wiki",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "wiki",
+  "skills_dir": ".claude/skills/wiki",
+  "description": "Standalone, project-independent, arbitrary-depth knowledge base. spice/wiki/ root hub (wiki-hub) → section hubs (wiki-section) nested to any depth → wiki-page leaves. Folder-is-truth: the folder path IS the hierarchy; frontmatter carries identity only. Reuses nav-buttons, entity-create, section-label, breadcrumb (path_walk mode), cards, accent-button, render-safe, open-helpers, doc-search. WikiTree renders hub + section views recursively; WikiMove relocates pages/sections between folders; WikiLeafActions renders the Move action. Routing: child entities route by the {{current_file.folder}} token (the active note real folder) so nesting is robust to a missing frontmatter field. Icon: journal (book-open absent from the icons registry).",
+  "depends_on": [
+    { "name": "nav-buttons", "range": ">=2.8.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "cards", "range": ">=0.2.6" },
+    { "name": "accent-button", "range": ">=0.1.3" },
+    { "name": "entity-create", "range": ">=0.7.4" },
+    { "name": "section-label", "range": ">=0.1.0" },
+    { "name": "breadcrumb", "range": ">=0.1.0" },
+    { "name": "doc-search", "range": ">=0.1.0" },
+    { "name": "render-safe", "range": ">=0.2.0" },
+    { "name": "open-helpers", "range": ">=0.1.1" },
+    { "name": "platform-claude", "range": ">=0.1.3" }
+  ],
+  "breadcrumb": {
+    "types": {
+      "wiki-hub":     { "path_walk": { "root_label": "Wiki", "root_dir": "spice/wiki", "root_file": "Wiki.md" }, "current": { "label": "lit:Wiki" } },
+      "wiki-section": { "path_walk": { "root_label": "Wiki", "root_dir": "spice/wiki", "root_file": "Wiki.md" }, "current": { "label": "fm:title|file:basename" } },
+      "wiki-page":    { "path_walk": { "root_label": "Wiki", "root_dir": "spice/wiki", "root_file": "Wiki.md" }, "current": { "label": "fm:title|file:basename" } }
+    }
+  },
+  "customjs_classes": ["WikiTree", "WikiMove", "WikiLeafActions"],
+  "files": [
+    { "source": "templates/Wiki.md", "dest": "{{templates_path}}/Wiki.md" },
+    { "source": "templates/Section Hub.md", "dest": "{{templates_path}}/Wiki Section Hub.md" },
+    { "source": "templates/Wiki Page.md", "dest": "{{templates_path}}/Wiki Page.md" },
+    { "source": "content/Wiki Hub.md", "dest": "{{module_directory}}/Wiki.md" },
+    { "source": "helpers/wiki-tree.js", "dest": "{{scripts_path}}/wiki/wiki-tree.js" },
+    { "source": "helpers/wiki-move.js", "dest": "{{scripts_path}}/wiki/wiki-move.js" },
+    { "source": "helpers/wiki-leaf-actions.js", "dest": "{{scripts_path}}/wiki/wiki-leaf-actions.js" }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/wiki.md", "dest": ".claude/commands/wiki.md" },
+    { "kind": "skill", "source": "skills/new-wiki-page/SKILL.md", "dest": "{{skills_dir}}/new-wiki-page/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Wiki", "path": "{{module_directory}}", "command": "/wiki" } }
+  ],
+  "nav_buttons": [
+    {
+      "id": "wiki-hub",
+      "label": "Wiki",
+      "icon": "journal",
+      "order": 135,
+      "action": { "type": "openLink", "target": "{{module_directory}}/Wiki.md" }
+    }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "wiki-section",
+      "label": "+ New Section",
+      "icon": "folder-plus",
+      "prompts": [
+        { "key": "name", "label": "Section name", "type": "string", "required": true, "validate": "safe-filename" },
+        { "key": "slug", "label": "(derived from name)", "type": "string", "derive": "slugify(prompts.name)" }
+      ],
+      "destination": {
+        "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
+        "filename_prefix": "{{prompts.name|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-section",
+        "title": "{{prompts.name}}",
+        "dir": "{{current_file.folder}}/{{prompts.slug}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": ["wiki-section"]
+      },
+      "body_template": "Wiki Section Hub.md"
+    },
+    {
+      "id": "wiki-page",
+      "label": "+ New Page",
+      "icon": "file-plus",
+      "prompts": [
+        { "key": "title", "label": "Page title", "type": "string", "required": true, "validate": "safe-filename" }
+      ],
+      "destination": {
+        "folder_prefix": "{{current_file.folder}}",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-page",
+        "title": "{{prompts.title}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": ["wiki-page"]
+      },
+      "body_template": "Wiki Page.md"
+    }
+  ],
+  "rule_fragments": [
+    {
+      "target": "wiki-hub",
+      "fragment": {
+        "scope": { "path_glob": "spice/wiki/Wiki.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": { "type": { "required": true, "equals": "wiki-hub" } }
+      }
+    },
+    {
+      "target": "wiki-section",
+      "fragment": {
+        "scope": { "path_glob": "spice/wiki/**/*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": { "type": { "required": true, "type": "string" } }
+      }
+    }
+  ]
+}

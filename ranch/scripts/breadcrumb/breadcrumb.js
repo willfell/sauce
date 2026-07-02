@@ -43,6 +43,9 @@ class Breadcrumb {
     const entry = this._findTypeEntry(registry, cur);
     if (!entry) return;
 
+    // path_walk mode — arbitrary-depth trail derived from the file's vault path.
+    if (entry.path_walk) return this._renderPathWalk(dv, entry.path_walk);
+
     const segments = [];
 
     // Ancestors — render in order, skip when-gated entries that fail predicates.
@@ -78,6 +81,123 @@ class Breadcrumb {
         }
       }
     }
+
+    if (segments.length === 0) return;
+
+    const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
+    wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+    wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
+  }
+
+  // ── path_walk renderer ─────────────────────────────────────────────────
+  // Called when entry.path_walk is present. Builds the breadcrumb trail from
+  // the current file's vault path instead of a fixed ancestors[] list.
+  //
+  // pw = { root_label, root_dir, root_file }
+  //
+  // Trail shape:
+  //   root crumb  (linked to root_dir/root_file)
+  //   one crumb per intermediate folder segment between root_dir and the file's
+  //     own folder — each links to <accumulated_path>/<Segment>.md
+  //   current page crumb — unlinked (plain bold)
+  //
+  // Edge cases:
+  //   • Note IS the root hub (path === root_dir/root_file) → single crumb, current
+  //   • Note IS a section hub (basename without .md === its own folder name) → skip
+  //     self-crumb (the folder segment already IS the current page label)
+  _renderPathWalk(dv, pw) {
+    const cur = dv.current();
+    if (!cur || !cur.file) return;
+
+    const filePath = cur.file.path;
+    if (!filePath) return;
+
+    const rootDir  = pw.root_dir;   // e.g. "spice/wiki"
+    const rootFile = pw.root_file;  // e.g. "Wiki.md"
+    const rootLabel = pw.root_label; // e.g. "Wiki"
+    const rootFullPath = rootDir + "/" + rootFile;
+
+    const segments = [];
+
+    // Determine current page's folder (everything before the last "/").
+    const lastSlash = filePath.lastIndexOf("/");
+    const fileFolder = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
+    // Basename without extension.
+    const fileBasename = lastSlash >= 0 ? filePath.slice(lastSlash + 1) : filePath;
+    const fileStem = fileBasename.endsWith(".md")
+      ? fileBasename.slice(0, -3)
+      : fileBasename;
+
+    // Current page label: prefer fm:title, fall back to stem.
+    const pageLabel = (cur.title && String(cur.title).trim()) || fileStem;
+
+    // ── Root is current? (note IS the root hub) ────────────────────────────
+    if (filePath === rootFullPath) {
+      segments.push(this._currentLabel(rootLabel));
+      const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
+      wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+      wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
+      return;
+    }
+
+    // ── Root crumb — always linked ─────────────────────────────────────────
+    segments.push(this._link(rootLabel, rootFullPath));
+
+    // ── Intermediate folder segments ────────────────────────────────────────
+    // Strip the root_dir prefix (+1 for the "/") to get the relative folder path.
+    // e.g. fileFolder="spice/wiki/infra/aws" → relative="infra/aws"
+    let relFolder = "";
+    if (fileFolder.startsWith(rootDir + "/")) {
+      relFolder = fileFolder.slice(rootDir.length + 1); // "infra/aws" or "infra" or ""
+    } else if (fileFolder === rootDir) {
+      relFolder = "";
+    }
+
+    // Determine whether the current note IS a section hub:
+    // that happens when the file's stem equals its own immediate folder's name.
+    // e.g. "spice/wiki/infra/Infra.md" → stem="Infra", immediate folder seg="infra"
+    // (case-insensitive comparison since folder names are slugified but file titles are Display Case)
+    const immediateFolder = relFolder
+      ? relFolder.split("/").slice(-1)[0]  // last segment of the relative folder path
+      : null;
+    const isSectionHub = immediateFolder !== null
+      && fileStem.toLowerCase() === immediateFolder.toLowerCase();
+
+    if (relFolder) {
+      const relSegs = relFolder.split("/");
+      let accumulated = rootDir;
+      for (let i = 0; i < relSegs.length; i++) {
+        const seg = relSegs[i];
+        accumulated = accumulated + "/" + seg;
+        // Skip the final folder segment when the current note IS the section hub
+        // (it would be a self-crumb — e.g. "infra" → "Infra.md" which IS this note).
+        const isLastSeg = i === relSegs.length - 1;
+        if (isLastSeg && isSectionHub) continue;
+        // Resolve the section-hub note living DIRECTLY in `accumulated` so the crumb
+        // shows its display title + links to its real path. Folder names are slugified
+        // (lower-case, e.g. "infra"/"aws") but hub notes are Display-Case ("Infra.md"/
+        // "AWS.md") — using the raw segment would render lower-case labels and produce
+        // links that only resolve on a case-insensitive filesystem. Fall back to the
+        // segment when no hub is found (defensive; e.g. a folder with pages but no hub).
+        let segLabel = seg;
+        let segLink = accumulated + "/" + seg + ".md";
+        try {
+          const raw = dv.pages('"' + accumulated + '"');
+          const list = raw && typeof raw.array === "function" ? raw.array() : Array.from(raw || []);
+          const hub = list.find((p) => p && p.type === "wiki-section" && p.file && p.file.folder === accumulated);
+          if (hub && hub.file) {
+            segLabel = (hub.title && String(hub.title).trim()) || (hub.file.name ? String(hub.file.name).replace(/\.md$/, "") : seg);
+            segLink = hub.file.path;
+          }
+        } catch (_e) { /* keep the folder-segment fallback */ }
+        segments.push(this._link(segLabel, segLink));
+      }
+    }
+
+    // ── Current page crumb — always unlinked ───────────────────────────────
+    // For a section hub the label is the fm:title (e.g. "Infra"), not the folder
+    // slug ("infra"). For a page it is also fm:title.
+    segments.push(this._currentLabel(pageLabel));
 
     if (segments.length === 0) return;
 

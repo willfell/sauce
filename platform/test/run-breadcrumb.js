@@ -34,12 +34,15 @@ function makeEl(tag, txt, opts) {
 
 // Stub dv: dv.current() returns the provided cur object; dv.el captures elements;
 // dv.pages returns an empty Dataview-like proxy (legacy code calls it from _resolveProjectFromPath).
-function makeDv(cur) {
+function makeDv(cur, pagesData) {
   const els = [];
+  const data = Array.isArray(pagesData) ? pagesData : [];
+  // Array-like + Dataview-like: supports .where(fn), .array(), Array.from(), and .length.
+  const result = { where: (fn) => data.filter(fn), array: () => data, length: data.length };
   return {
     current: () => cur,
     el: (tag, txt, opts) => { const e = makeEl(tag, txt, opts); els.push(e); return e; },
-    pages: () => ({ where: () => [], length: 0 }),
+    pages: () => result,
     _els: els
   };
 }
@@ -206,13 +209,21 @@ const TODO_TYPES = {
   }
 };
 
+// ── Wiki types — path_walk entries (BC-WIKI-1 through BC-WIKI-3) ─────────────
+const WIKI_TYPES = {
+  "wiki-hub":     { path_walk: { root_label: "Wiki", root_dir: "spice/wiki", root_file: "Wiki.md" } },
+  "wiki-section": { path_walk: { root_label: "Wiki", root_dir: "spice/wiki", root_file: "Wiki.md" } },
+  "wiki-page":    { path_walk: { root_label: "Wiki", root_dir: "spice/wiki", root_file: "Wiki.md" } },
+};
+
 const REGISTRY = {
   schema_version: 1,
   contributions: {
     project:  { types: PROJECT_TYPES },
     meetings: { types: MEETINGS_TYPES },
     scratch:  { types: SCRATCH_TYPES },
-    "to-do":  { types: TODO_TYPES }
+    "to-do":  { types: TODO_TYPES },
+    wiki:     { types: WIKI_TYPES }
   }
 };
 
@@ -418,6 +429,110 @@ async function runAsync(fn) { return await fn(); }
     const all = fx.expect.every((seg) => html.includes(seg));
     ok(fx.name + ' trail contains ' + fx.expect.join(' / '), !!wrap && all);
     if (!all) console.log(`    HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-1: deep wiki-page — intermediate crumbs resolve section-hub TITLE + real path ──
+  {
+    // Section hubs present in the vault: folders are slugified (infra/aws), hubs Display-Case.
+    const sectionHubs = [
+      { type: 'wiki-section', title: 'Infra', file: { folder: 'spice/wiki/infra', path: 'spice/wiki/infra/Infra.md', name: 'Infra.md' } },
+      { type: 'wiki-section', title: 'AWS', file: { folder: 'spice/wiki/infra/aws', path: 'spice/wiki/infra/aws/AWS.md', name: 'AWS.md' } },
+    ];
+    const dv = makeDv({
+      type: 'wiki-page',
+      title: 'VPC Peering',
+      file: { path: 'spice/wiki/infra/aws/VPC Peering.md', name: 'VPC Peering.md' }
+    }, sectionHubs);
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    // Root crumb: linked to spice/wiki/Wiki.md with label "Wiki"
+    const hasRoot = html.includes('href="spice/wiki/Wiki.md"') && html.includes('>Wiki<');
+    // infra crumb: linked to the REAL hub path, label is the display TITLE "Infra"
+    const hasInfra = html.includes('href="spice/wiki/infra/Infra.md"') && html.includes('>Infra<');
+    // aws crumb: linked to the REAL hub path, label is the display TITLE "AWS"
+    const hasAws = html.includes('href="spice/wiki/infra/aws/AWS.md"') && html.includes('>AWS<');
+    // current crumb: not linked (span), label "VPC Peering"
+    const hasCurrent = html.includes('>VPC Peering<') && !html.includes('href="spice/wiki/infra/aws/VPC Peering.md"');
+    ok('BC-WIKI-1 deep page: root+Infra+AWS(title+realpath)+current', !!wrap && hasRoot && hasInfra && hasAws && hasCurrent);
+    if (!wrap || !hasRoot || !hasInfra || !hasAws || !hasCurrent)
+      console.log(`    BC-WIKI-1 HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-1b: fallback — no section hub found → uses folder segment + <seg>.md link ──
+  {
+    const dv = makeDv({
+      type: 'wiki-page',
+      title: 'Orphan',
+      file: { path: 'spice/wiki/loosedir/Orphan.md', name: 'Orphan.md' }
+    }); // no pagesData → no hub resolvable
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const html = dv._els[0] ? dv._els[0].innerHTML : '';
+    const fallbackCrumb = html.includes('href="spice/wiki/loosedir/loosedir.md"') && html.includes('>loosedir<');
+    const hasCurrent = html.includes('>Orphan<');
+    ok('BC-WIKI-1b fallback: segment label + <seg>.md link when no hub found', fallbackCrumb && hasCurrent);
+    if (!fallbackCrumb || !hasCurrent) console.log(`    BC-WIKI-1b HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-2: section hub (root + current, no self-crumb for folder) ───
+  {
+    const dv = makeDv({
+      type: 'wiki-section',
+      title: 'Infra',
+      file: { path: 'spice/wiki/infra/Infra.md', name: 'Infra.md' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    // Root linked
+    const hasRoot = html.includes('href="spice/wiki/Wiki.md"') && html.includes('>Wiki<');
+    // Current "Infra" unlinked (span)
+    const hasCurrent = html.includes('>Infra<') && !html.includes('href="spice/wiki/infra/infra.md"');
+    // No self-crumb link for the "infra" folder
+    const noSelfCrumb = !html.includes('href="spice/wiki/infra/infra.md"');
+    ok('BC-WIKI-2 section hub: root+current no self-crumb', !!wrap && hasRoot && hasCurrent && noSelfCrumb);
+    if (!wrap || !hasRoot || !hasCurrent || !noSelfCrumb)
+      console.log(`    BC-WIKI-2 HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-3: root hub — single unlinked crumb ──────────────────────────
+  {
+    const dv = makeDv({
+      type: 'wiki-hub',
+      title: 'Wiki',
+      file: { path: 'spice/wiki/Wiki.md', name: 'Wiki.md' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    // Single "Wiki" span (not linked)
+    const hasWikiSpan = html.includes('>Wiki<') && !html.includes('href="spice/wiki/Wiki.md"');
+    // No separator (only one segment)
+    const onlyOneSeg = !html.includes(' / ');
+    ok('BC-WIKI-3 root hub: single unlinked Wiki crumb', !!wrap && hasWikiSpan && onlyOneSeg);
+    if (!wrap || !hasWikiSpan || !onlyOneSeg)
+      console.log(`    BC-WIKI-3 HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-4: pre-existing project types still pass ────────────────────
+  // (All BR15–BR27 asserts above already ran; this is a named sentinel confirming
+  // the path_walk branch is truly additive and doesn't break existing types.)
+  {
+    // Quick smoke: render a "project" type and confirm it still produces a link
+    const dv = makeDv({
+      type: 'project',
+      project_name: 'test-project',
+      file: { path: 'spice/projects/test-project/test-project.md', name: 'test-project' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    ok('BC-WIKI-4 existing project type unaffected by path_walk', !!wrap && html.includes('test-project'));
   }
 
   finish();

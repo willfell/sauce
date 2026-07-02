@@ -41,6 +41,10 @@
     {
       "name": "render-safe",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "doc-search",
+      "range": ">=0.1.0"
     }
   ],
   "customjs_classes": [
@@ -58,7 +62,6 @@
     "ProjectMeetingsPanel",
     "ProjectDocsIndex",
     "SectionHub",
-    "DocSearch",
     "DocMove",
     "ProjectLinksPanel",
     "WorkstreamSource"
@@ -177,10 +180,6 @@
     {
       "source": "templates/Section Hub.md",
       "dest": "{{templates_path}}/Template, Section Hub.md"
-    },
-    {
-      "source": "helpers/doc-search.js",
-      "dest": "{{scripts_path}}/project/doc-search.js"
     },
     {
       "source": "helpers/doc-move.js",

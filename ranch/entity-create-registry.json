@@ -176,7 +176,21 @@
                 "wide"
               ]
             },
-            "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+            "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n<!-- OWNED_TASKS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TodayCaptureEditableList\", args: [{ anchor: \"ownedTasks\" }] });\n```\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+          },
+          {
+            "filename_pattern": "Links Hub.md",
+            "frontmatter_template": {
+              "type": "links-hub",
+              "project": "[[{{prompts.name}}]]",
+              "project_slug": "{{prompts.slug}}",
+              "links": [],
+              "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+              "tags": [
+                "links-hub"
+              ]
+            },
+            "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksPanel\" });\n```\n"
           }
         ],
         "render_in": {
@@ -362,11 +376,76 @@
           "phone": "",
           "tags": []
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "spice/people/People.md"
         }
+      }
+    ],
+    "wiki": [
+      {
+        "blueprint": "wiki",
+        "id": "wiki-section",
+        "label": "+ New Section",
+        "icon": "folder-plus",
+        "prompts": [
+          {
+            "key": "name",
+            "label": "Section name",
+            "type": "string",
+            "required": true,
+            "validate": "safe-filename"
+          },
+          {
+            "key": "slug",
+            "label": "(derived from name)",
+            "type": "string",
+            "derive": "slugify(prompts.name)"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
+          "filename_prefix": "{{prompts.name|sanitize-filename}}"
+        },
+        "frontmatter_template": {
+          "type": "wiki-section",
+          "title": "{{prompts.name}}",
+          "dir": "{{current_file.folder}}/{{prompts.slug}}",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "tags": [
+            "wiki-section"
+          ]
+        },
+        "body_template": "ranch/templates/Wiki Section Hub.md"
+      },
+      {
+        "blueprint": "wiki",
+        "id": "wiki-page",
+        "label": "+ New Page",
+        "icon": "file-plus",
+        "prompts": [
+          {
+            "key": "title",
+            "label": "Page title",
+            "type": "string",
+            "required": true,
+            "validate": "safe-filename"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "{{current_file.folder}}",
+          "filename_prefix": "{{prompts.title|sanitize-filename}}"
+        },
+        "frontmatter_template": {
+          "type": "wiki-page",
+          "title": "{{prompts.title}}",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "tags": [
+            "wiki-page"
+          ]
+        },
+        "body_template": "ranch/templates/Wiki Page.md"
       }
     ]
   },
@@ -541,7 +620,21 @@
               "wide"
             ]
           },
-          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n<!-- OWNED_TASKS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TodayCaptureEditableList\", args: [{ anchor: \"ownedTasks\" }] });\n```\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+        },
+        {
+          "filename_pattern": "Links Hub.md",
+          "frontmatter_template": {
+            "type": "links-hub",
+            "project": "[[{{prompts.name}}]]",
+            "project_slug": "{{prompts.slug}}",
+            "links": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "links-hub"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksPanel\" });\n```\n"
         }
       ],
       "render_in": {
@@ -725,11 +818,74 @@
         "phone": "",
         "tags": []
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "spice/people/People.md"
       }
+    },
+    {
+      "blueprint": "wiki",
+      "id": "wiki-section",
+      "label": "+ New Section",
+      "icon": "folder-plus",
+      "prompts": [
+        {
+          "key": "name",
+          "label": "Section name",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        },
+        {
+          "key": "slug",
+          "label": "(derived from name)",
+          "type": "string",
+          "derive": "slugify(prompts.name)"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
+        "filename_prefix": "{{prompts.name|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-section",
+        "title": "{{prompts.name}}",
+        "dir": "{{current_file.folder}}/{{prompts.slug}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": [
+          "wiki-section"
+        ]
+      },
+      "body_template": "ranch/templates/Wiki Section Hub.md"
+    },
+    {
+      "blueprint": "wiki",
+      "id": "wiki-page",
+      "label": "+ New Page",
+      "icon": "file-plus",
+      "prompts": [
+        {
+          "key": "title",
+          "label": "Page title",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "{{current_file.folder}}",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-page",
+        "title": "{{prompts.title}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": [
+          "wiki-page"
+        ]
+      },
+      "body_template": "ranch/templates/Wiki Page.md"
     }
   ]
 }

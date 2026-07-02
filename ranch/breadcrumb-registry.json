@@ -19,6 +19,17 @@
             }
           ]
         },
+        "links-hub": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ],
+          "current": {
+            "label": "lit:Links"
+          }
+        },
         "docs-hub": {
           "ancestors": [
             {
@@ -184,6 +195,40 @@
           ],
           "current": {
             "label": "file:basename"
+          }
+        }
+      }
+    },
+    "wiki": {
+      "types": {
+        "wiki-hub": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "lit:Wiki"
+          }
+        },
+        "wiki-section": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "fm:title|file:basename"
+          }
+        },
+        "wiki-page": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "fm:title|file:basename"
           }
         }
       }

@@ -315,6 +315,19 @@
         "platform/mechanisms/task-entity/task-entity.js"
       ],
       "notes": "v0.1.0 — Note-per-task frontmatter (type: task). One tiny note per task under spice/tasks/task-<id>.md (path_glob 'spice/tasks/**', which also covers the _trash/ and _done/ sub-areas — trashed/done notes keep type:task so the same branch validates them). Required keys: type / title / status. Optional keys: scheduled / due / priority / project / project_slug / source / source_note / created_at / completed_at. composeNote writes schema-exact frontmatter (empty-string, not omitted, for blank dates); parseNote normalizes status→open + blank dates→null. Contract encoded in TaskEntity.validatePayload (task-entity.js)."
+    },
+    {
+      "id": "doc-search-mechanism",
+      "kind": "helper-read-contract",
+      "owner": { "type": "mechanism", "name": "doc-search" },
+      "source": "platform/mechanisms/doc-search/doc-search.js",
+      "consumers": [
+        "platform/blueprints/project/helpers/project-docs-index.js",
+        "platform/blueprints/project/helpers/section-hub.js",
+        "platform/blueprints/project/helpers/projects-hub-cards.js",
+        "platform/blueprints/wiki/helpers/wiki-tree.js"
+      ],
+      "notes": "DocSearch.render(dv, opts) → filterContext { text, tags:Set, hasActiveFilter, resultsContainer }; DocSearch.matches(page, ctx) pure predicate. opts: scopePath, recursive, entityType (default doc-note), onChange, hideTags, persist, placeholder, tagExclude. Graduated verbatim from the project blueprint helper at this release."
     }
   ]
 }

@@ -51,6 +51,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | Projects | spice/projects | /project |
 | Scratch | spice/scratch | /scratch |
 | Upgrade | .claude/commands/upgrade.md | /upgrade |
+| Wiki | spice/wiki | /wiki |
 <!-- @claude-surface:resolvers END -->
 
 ## Directory map (managed by `claude_surface[]`)

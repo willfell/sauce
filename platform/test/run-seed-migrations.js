@@ -462,6 +462,104 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-WIKI-SEED-MIGRATE-WIKI-* — wiki blueprint seed coverage =====
+    // The seed now carries a small wiki tree: a wiki-hub (Wiki.md), two nested
+    // wiki-sections (infra/Infra.md, infra/aws/AWS.md), one deep wiki-page
+    // (infra/aws/VPC Peering.md), and one root-level wiki-page (Loose Note.md).
+    // These asserts verify that after install:
+    //   1. The hub + pages exist with correct frontmatter types.
+    //   2. The entity-create-registry has wiki-section + wiki-page contributions.
+    //   3. The nav-buttons-registry has the wiki-hub button.
+    //   4. The breadcrumb-registry has the wiki contribution including wiki-page.
+    //   5. The doc-search mechanism is the single source of truth (WIKI-7).
+    {
+        // WIKI-1: hub note present with type: wiki-hub
+        let wikiHubFm = {};
+        try {
+            const wikiHubNote = helpers.readNote(vault, "spice/wiki/Wiki.md");
+            wikiHubFm = helpers.parseFrontmatter(wikiHubNote).frontmatter;
+        } catch (e) {}
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-1 spice/wiki/Wiki.md exists with type: wiki-hub",
+            helpers.fileExists(vault, "spice/wiki/Wiki.md") && wikiHubFm.type === "wiki-hub",
+            `type=${wikiHubFm.type}`
+        );
+
+        // WIKI-2: infra section present with type: wiki-section
+        let infraFm = {};
+        try {
+            const infraNote = helpers.readNote(vault, "spice/wiki/infra/Infra.md");
+            infraFm = helpers.parseFrontmatter(infraNote).frontmatter;
+        } catch (e) {}
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-2 spice/wiki/infra/Infra.md exists with type: wiki-section",
+            helpers.fileExists(vault, "spice/wiki/infra/Infra.md") && infraFm.type === "wiki-section",
+            `type=${infraFm.type}`
+        );
+
+        // WIKI-3: deep wiki-page preserved with type: wiki-page
+        let vpcFm = {};
+        try {
+            const vpcNote = helpers.readNote(vault, "spice/wiki/infra/aws/VPC Peering.md");
+            vpcFm = helpers.parseFrontmatter(vpcNote).frontmatter;
+        } catch (e) {}
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-3 spice/wiki/infra/aws/VPC Peering.md exists with type: wiki-page",
+            helpers.fileExists(vault, "spice/wiki/infra/aws/VPC Peering.md") && vpcFm.type === "wiki-page",
+            `type=${vpcFm.type}`
+        );
+
+        // WIKI-4: entity-create-registry has wiki-section + wiki-page contributions
+        let ecReg = null;
+        try { ecReg = helpers.readJson(vault, "ranch/entity-create-registry.json"); } catch (e) {}
+        const wikiEc = ecReg && ecReg.contributions && ecReg.contributions.wiki;
+        const wikiEcIds = wikiEc ? wikiEc.map((e) => e.id) : [];
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-4 entity-create-registry has wiki-section and wiki-page contributions",
+            wikiEcIds.includes("wiki-section") && wikiEcIds.includes("wiki-page"),
+            `wiki contributions=${JSON.stringify(wikiEcIds)}`
+        );
+
+        // WIKI-5: nav-buttons-registry has the wiki-hub button
+        let navReg = null;
+        try { navReg = helpers.readJson(vault, "ranch/nav-buttons-registry.json"); } catch (e) {}
+        const wikiNav = navReg && navReg.contributions && navReg.contributions.wiki;
+        const wikiNavIds = wikiNav ? wikiNav.map((e) => e.id) : [];
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-5 nav-buttons-registry has wiki-hub button",
+            wikiNavIds.includes("wiki-hub"),
+            `wiki nav buttons=${JSON.stringify(wikiNavIds)}`
+        );
+
+        // WIKI-6: breadcrumb-registry has wiki contribution with wiki-page type
+        const bcRegPath = path.join(vault, "ranch/breadcrumb-registry.json");
+        let bcReg = null;
+        try { bcReg = JSON.parse(fs.readFileSync(bcRegPath, "utf8")); } catch (e) {}
+        const wikiBc = bcReg && bcReg.contributions && bcReg.contributions.wiki;
+        const wikiBcTypes = wikiBc && wikiBc.types ? Object.keys(wikiBc.types) : [];
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-6 breadcrumb-registry has wiki contribution including wiki-page type",
+            wikiBcTypes.includes("wiki-page") && wikiBcTypes.includes("wiki-hub"),
+            `wiki breadcrumb types=${JSON.stringify(wikiBcTypes)}`
+        );
+
+        // WIKI-7: doc-search is the single source of truth — mechanism file exists at
+        // REPO_ROOT and the project manifest no longer lists helpers/doc-search.js.
+        // This is a repo-level check (not the installed vault), reflecting the graduation
+        // from project-local helper to shared mechanism performed in Stage A.
+        const docSearchMechPath = path.join(REPO_ROOT, "platform/mechanisms/doc-search/doc-search.js");
+        const projectManifestPath = path.join(REPO_ROOT, "platform/blueprints/project/manifest.json");
+        let projectManifest = null;
+        try { projectManifest = JSON.parse(fs.readFileSync(projectManifestPath, "utf8")); } catch (e) {}
+        const projectFiles = (projectManifest && projectManifest.files) ? projectManifest.files : [];
+        const hasLocalDocSearch = projectFiles.some((f) => f.source === "helpers/doc-search.js");
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-7 doc-search mechanism exists at REPO_ROOT and project manifest no longer lists helpers/doc-search.js",
+            fs.existsSync(docSearchMechPath) && !hasLocalDocSearch,
+            `mechExists=${fs.existsSync(docSearchMechPath)} projectLocalDocSearch=${hasLocalDocSearch}`
+        );
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
