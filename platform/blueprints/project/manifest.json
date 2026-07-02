@@ -631,6 +631,36 @@
         "current": {
           "label": "file:basename"
         }
+      },
+      "task-hub": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          },
+          {
+            "label": "lit:Board",
+            "link": "spice/projects/{path:2}/{path:2}-board.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "task-board-card": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          },
+          {
+            "label": "path:4",
+            "link": "spice/projects/{path:2}/tasks/{path:4}/{path:4}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
       }
     }
   },
