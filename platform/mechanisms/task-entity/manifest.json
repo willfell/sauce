@@ -15,8 +15,7 @@
     "TaskTodayList",
     "TaskNoteView",
     "TaskMeetingList",
-    "TaskProjectList",
-    "TaskNoteToDoNav"
+    "TaskProjectList"
   ],
   "files": [
     {
@@ -42,10 +41,6 @@
     {
       "source": "task-project-list.js",
       "dest": "{{scripts_path}}/task-entity/task-project-list.js"
-    },
-    {
-      "source": "task-note-todo-nav.js",
-      "dest": "{{scripts_path}}/task-entity/task-note-todo-nav.js"
     }
   ],
   "post_install": [],

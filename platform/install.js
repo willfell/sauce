@@ -553,6 +553,22 @@ module.exports = async function (tp) {
     // (title-named + marker-present notes are skipped), failure-loud-per-file.
     await applyTaskNoteHeal(tp, installedNow.history, git);
 
+    // 6a6. task-entity B1 — un-mangle existing task-notes whose project/project_slug
+    // was written from a RESOLVED Dataview Link path (project:
+    // "[[spice/projects/connectors/Connectors.md|Connectors]]" +
+    // project_slug: spice-projects-connectors-connectors-md-connectors). Re-derive
+    // the CLEAN basename + REAL project slug. Ungated, idempotent (clean notes
+    // skipped), .sauce-backup, per-note try/catch.
+    await applyTaskNoteProjectSlugHeal(tp, installedNow.history, git);
+
+    // 6a7. task-entity B2 — inject the live task-list render blocks into EXISTING
+    // notes that predate them (only NEW notes get the block from the template):
+    //   - project-todo notes gain a "Project Tasks" SectionLabel + TaskProjectList
+    //   - meeting notes gain a "Tasks" SectionLabel + TaskMeetingList
+    // Ungated, idempotent (skip if the block is already present), .sauce-backup.
+    await applyProjectTodoTaskListHeal(tp, installedNow.history, git);
+    await applyMeetingTaskListHeal(tp, installedNow.history, git);
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -8970,12 +8986,13 @@ async function applyProjectTasksToEntityMigration(tp, history, git) {
 }
 
 // _taskNoteChromeBody — the canonical CHROME body a task note gets: a
-// SpaceNavButtons nav block, the TaskNoteView card block, and the
-// `<!-- TASK_NOTES -->` marker that separates the (regenerable) chrome above
-// from the user's own notes below. MUST stay BYTE-IDENTICAL to
-// TaskEntity._chromeBody() (mechanisms/task-entity/task-entity.js) — the heal
-// can't require the customJS class in the headless installer, so the string is
-// replicated here. Any drift breaks the "already has chrome → skip" idempotency.
+// SpaceNavButtons nav block, a `---` HR, the TaskNoteView card block, a second
+// `---` HR, and the `<!-- TASK_NOTES -->` marker that separates the (regenerable)
+// chrome above from the user's own notes below (nav → HR → card → HR → notes).
+// MUST stay BYTE-IDENTICAL to TaskEntity._chromeBody()
+// (mechanisms/task-entity/task-entity.js) — the heal can't require the customJS
+// class in the headless installer, so the string is replicated here. Any drift
+// breaks the "already has chrome → skip" idempotency.
 function _taskNoteChromeBody() {
   return "\n" +
     "```dataviewjs\n" +
@@ -8985,12 +9002,10 @@ function _taskNoteChromeBody() {
     "---\n" +
     "\n" +
     "```dataviewjs\n" +
-    "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteToDoNav\" });\n" +
-    "```\n" +
-    "\n" +
-    "```dataviewjs\n" +
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteView\" });\n" +
     "```\n" +
+    "\n" +
+    "---\n" +
     "\n" +
     "<!-- TASK_NOTES -->\n";
 }
@@ -9083,12 +9098,14 @@ async function applyTaskNoteHeal(tp, history, git) {
       return header + "\n" + chrome + tail;
     };
 
-    // UPGRADE old chrome (has the marker but the above-marker region is the
-    // legacy shape — no TaskNoteToDoNav / no `---`): rebuild the WHOLE region
-    // above (and including) the marker as frontmatter + the current chrome body,
-    // PRESERVING everything the user wrote BELOW the marker verbatim. Idempotent
-    // because the new chrome already carries TaskNoteToDoNav, so the caller's
-    // needsChromeUpgrade guard is false on the next pass.
+    // UPGRADE old chrome (has the marker but the above-marker region is a legacy
+    // shape — the v0.178 chrome that carried a TaskNoteToDoNav block, or an even
+    // older chrome lacking the second `---` HR before the marker): rebuild the
+    // WHOLE region above (and including) the marker as frontmatter + the current
+    // chrome body, PRESERVING everything the user wrote BELOW the marker verbatim.
+    // Idempotent because the new chrome drops TaskNoteToDoNav AND ends with a
+    // `---` HR right before the marker, so the caller's needsChromeUpgrade guard
+    // is false on the next pass.
     const _upgradeChrome = (content) => {
       const idx = content.indexOf(MARKER);
       if (idx < 0) return content;                 // no marker → not our case
@@ -9117,18 +9134,23 @@ async function applyTaskNoteHeal(tp, history, git) {
         const needsRename = OLD_NAME_RE.test(stemNoExt);
         const needsChrome = !before.includes(MARKER);
         // Old-chrome upgrade: the note HAS the marker but its above-marker region
-        // predates TaskNoteToDoNav (the marker is present but the nav class isn't
-        // in the chrome above it). Only inspect the region ABOVE the marker so a
-        // user who happens to mention the class in their notes below doesn't
-        // suppress the upgrade.
+        // is a LEGACY chrome — either the v0.178 shape that still carries a
+        // TaskNoteToDoNav block, or an older shape that lacks the second `---` HR
+        // right before the marker. The NEW chrome has NEITHER a TaskNoteToDoNav
+        // block NOR a missing pre-marker HR, so both conditions being false ⇒
+        // already-new ⇒ skip (idempotent). Only inspect the region ABOVE the
+        // marker so a user who happens to mention the class / a `---` in their
+        // notes below doesn't perturb the decision.
         const _aboveMarker = needsChrome ? "" : before.slice(0, before.indexOf(MARKER));
-        const needsChromeUpgrade = !needsChrome
-          && !/class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
+        const _hasToDoNav = /class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
+        const _endsWithHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
+        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || !_endsWithHr);
         if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
 
         // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
-        // old chrome region (add TaskNoteToDoNav + `---`) preserving user notes;
-        // and the healed PATH (rename if old-pattern; copy-to-new + remove-old).
+        // old chrome region (drop TaskNoteToDoNav, add the second `---` HR)
+        // preserving user notes; and the healed PATH (rename if old-pattern;
+        // copy-to-new + remove-old).
         let content = needsChrome ? _injectChrome(before)
           : (needsChromeUpgrade ? _upgradeChrome(before) : before);
 
@@ -9185,6 +9207,363 @@ async function applyTaskNoteHeal(tp, history, git) {
       completed_at: new Date().toISOString() });
   } catch (e) {
     history?.push({ event: "warning", step: "task_note_heal", name: "task-entity",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// _cleanProjectLinkName — extract the CLEAN project basename from a raw
+// frontmatter `project:` value string (as read from the note text). The value
+// may be MANGLED — a full resolved path inside `[[...]]` with a `|alias`, e.g.
+// `[[spice/projects/connectors/Connectors.md|Connectors]]` — or a clean
+// `[[Connectors]]`, or a quoted variant. Returns the basename (last `/` segment,
+// `.md` + `|alias` + `[[ ]]` + surrounding quotes stripped): "Connectors". Pure.
+function _cleanProjectLinkName(raw) {
+  let s = String(raw == null ? "" : raw).trim();
+  // Strip surrounding YAML quotes.
+  s = s.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1").trim();
+  // Strip surrounding [[ ]].
+  const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+  if (m) s = m[1].trim();
+  // Drop a trailing |alias → keep the target (before the pipe).
+  const pipe = s.indexOf("|");
+  if (pipe >= 0) s = s.slice(0, pipe).trim();
+  // Basename: last `/` segment, drop trailing `.md`.
+  const slash = s.lastIndexOf("/");
+  if (slash >= 0) s = s.slice(slash + 1);
+  return s.replace(/\.md$/i, "").trim();
+}
+
+// _isMangledProjectField — true when a task-note's project/project_slug pair looks
+// like the B1 mangle: `project` carries a `/` (a PATH inside `[[...]]`, not a bare
+// basename) OR `project_slug` contains `-md-` / has the path-slug shape
+// (starts with `spice-projects-`). A clean note (`project: "[[Connectors]]"`,
+// `project_slug: connectors`) is NOT mangled → skipped (idempotent). Pure.
+function _isMangledProjectField(projectRaw, slugRaw) {
+  const proj = String(projectRaw == null ? "" : projectRaw);
+  const slug = String(slugRaw == null ? "" : slugRaw).replace(/^"(.*)"$/, "$1").trim();
+  // A path inside the project link (a `/` between the `[[` and `]]`).
+  const inner = /\[\[([^\]]*)\]\]/.exec(proj);
+  const linkPathish = inner ? inner[1].includes("/") : proj.includes("/");
+  const slugPathish = /-md-/.test(slug) || /^spice-projects-/.test(slug);
+  return linkPathish || slugPathish;
+}
+
+// _projectSlugByName — map a clean project NAME to its REAL slug by scanning the
+// vault's `type: project` hub notes under spice/projects/<dir>/. Returns the
+// matching project's slug (its own `project_slug` frontmatter, else the dir
+// basename) when the hub's basename OR project_slug matches the clean name
+// (case-insensitively / slug-equal); else "" so the caller sanitizes the name.
+async function _projectSlugByName(adapter, cleanName) {
+  const want = String(cleanName == null ? "" : cleanName).trim();
+  if (!want) return "";
+  const wantLc = want.toLowerCase();
+  const wantSlug = _sanitizeProjectSlug(want);
+  const PROJ_ROOT = "spice/projects";
+  let listing;
+  try { listing = await adapter.list(PROJ_ROOT); } catch (_e) { return ""; }
+  for (const projDir of (listing.folders || [])) {
+    let sub;
+    try { sub = await adapter.list(projDir); } catch (_e) { continue; }
+    for (const file of (sub.files || [])) {
+      if (!file.endsWith(".md")) continue;
+      if (/ To-Do\.md$/.test(file) || /Project Map\.md$/.test(file) ||
+          /-board\.md$/.test(file) || /Links Hub\.md$/.test(file)) continue;
+      let content;
+      try { content = await adapter.read(file); } catch (_e) { continue; }
+      const fm = _parseFrontmatterStrict(content) || {};
+      if (fm.type !== "project" && !/^type:\s*"?project"?\s*$/m.test(content)) continue;
+      const hubName = file.split("/").pop().replace(/\.md$/, "");
+      const dirSlug = projDir.split("/").pop();
+      const fmSlug = fm.project_slug != null
+        ? String(fm.project_slug).replace(/^"(.*)"$/, "$1").trim()
+        : "";
+      const slug = fmSlug || dirSlug || "";
+      if (hubName.toLowerCase() === wantLc || _sanitizeProjectSlug(hubName) === wantSlug
+        || (slug && slug === wantSlug)) {
+        return slug;
+      }
+    }
+  }
+  return "";
+}
+
+// _sanitizeProjectSlug — the canonical project-slug shape (lowercase, non-alnum
+// runs → "-", trimmed) used everywhere a slug is derived from a name. Pure.
+function _sanitizeProjectSlug(name) {
+  return String(name == null ? "" : name)
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// applyTaskNoteProjectSlugHeal — B1 heal. Ungated, idempotent, .sauce-backup,
+// per-note try/catch. For each TOP-LEVEL task-note under spice/tasks/ (skip
+// _trash/ + _done/): when its `project`/`project_slug` looks MANGLED (a resolved
+// PATH inside `[[...]]`, or a `-md-` / `spice-projects-` path-slug), re-derive:
+//   - cleanName = basename of the project link (path + `.md` + `|alias` stripped)
+//   - slug      = the REAL project slug (looked up in the vault's type: project
+//                 notes by cleanName), else the sanitized cleanName
+// then rewrite ONLY `project: "[[<cleanName>]]"` + `project_slug: <slug>` in the
+// frontmatter, preserving everything else. A NON-mangled note is skipped (no
+// write) → idempotent. Never throws. Signature: (tp, history, git).
+async function applyTaskNoteProjectSlugHeal(tp, history, git) {
+  const STEP = "task_note_project_slug_heal";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/tasks";
+    if (!(await adapter.exists(ROOT).catch(() => false))) return;
+
+    let listing;
+    try { listing = await adapter.list(ROOT); } catch (_e) { return; }
+    const topLevel = (listing.files || []).filter((f) => f.endsWith(".md"));
+    if (!topLevel.length) return;
+
+    let scanned = 0, healed = 0, warned = 0;
+    for (const fp of topLevel) {
+      scanned += 1;
+      try {
+        const before = await adapter.read(fp);
+        const fm = _parseFrontmatterStrict(before) || {};
+        if (fm.type !== "task") continue;                 // not a task note
+        const projectRaw = fm.project != null ? String(fm.project) : "";
+        const slugRaw = fm.project_slug != null ? String(fm.project_slug) : "";
+        // Only act on a NON-empty project field (a blank project isn't mangled).
+        if (!projectRaw.trim() && !slugRaw.trim()) continue;
+        if (!_isMangledProjectField(projectRaw, slugRaw)) continue;  // idempotent skip
+
+        const cleanName = _cleanProjectLinkName(projectRaw)
+          || _cleanProjectLinkName(slugRaw);
+        if (!cleanName) continue;                          // nothing to re-derive
+        const realSlug = await _projectSlugByName(adapter, cleanName);
+        const slug = realSlug || _sanitizeProjectSlug(cleanName);
+
+        // Rewrite ONLY the two lines in the frontmatter block; preserve the rest.
+        const fmMatch = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(before);
+        if (!fmMatch) continue;                            // no frontmatter → skip
+        let block = fmMatch[2];
+        const projLineRe = /^project:.*$/m;
+        const slugLineRe = /^project_slug:.*$/m;
+        if (projLineRe.test(block)) block = block.replace(projLineRe, `project: "[[${cleanName}]]"`);
+        if (slugLineRe.test(block)) block = block.replace(slugLineRe, `project_slug: ${slug}`);
+        const after = before.slice(0, fmMatch.index)
+          + fmMatch[1] + block + fmMatch[3]
+          + before.slice(fmMatch.index + fmMatch[0].length);
+        if (after === before) continue;                    // no-op (defensive)
+
+        await _backupAndWrite(adapter, fp, before, after);
+        healed += 1;
+        history?.push({ event: "info", step: STEP, name: "task-entity",
+          action: "unmangled", target: fp, project: cleanName, project_slug: slug,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: STEP, name: "task-entity",
+          reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "task-entity",
+      summary: { scanned, healed, warned },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "task-entity",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// _projectTasksListBlock — the EXACT block pair a NEW project-todo template
+// emits for the live task list: a "Project Tasks" SectionLabel (top: true, since
+// it's the first section) + the TaskProjectList dataviewjs block. Materialized
+// `ranch/views/customjs-guard` form (heals write INSTALLED notes, not templates).
+// MUST stay in lockstep with platform/blueprints/to-do/templates/Project To-Do.md.
+function _projectTasksListBlock() {
+  return '```dataviewjs\n' +
+    'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Project Tasks", top: true }] });\n' +
+    '```\n' +
+    '\n' +
+    '```dataviewjs\n' +
+    'await dv.view("ranch/views/customjs-guard", { class: "TaskProjectList" });\n' +
+    '```\n';
+}
+
+// _meetingTasksListBlock — the EXACT block pair a NEW meeting template emits: a
+// "Tasks" SectionLabel + the TaskMeetingList dataviewjs block. Materialized
+// customjs-guard form. MUST stay in lockstep with
+// platform/blueprints/meetings/templates/Meeting.md.
+function _meetingTasksListBlock() {
+  return '```dataviewjs\n' +
+    'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Tasks" }] });\n' +
+    '```\n' +
+    '\n' +
+    '```dataviewjs\n' +
+    'await dv.view("ranch/views/customjs-guard", { class: "TaskMeetingList" });\n' +
+    '```\n';
+}
+
+// applyProjectTodoTaskListHeal — B2 heal. For each per-project To-Do note
+// (spice/projects/*/* To-Do.md, type: project-todo) that lacks a TaskProjectList
+// block, inject the "Project Tasks" SectionLabel + TaskProjectList block so the
+// live task list renders (only NEW notes got it from the template). Injected just
+// BEFORE the "Owned Tasks" SectionLabel (mirrors template ordering); falls back to
+// just before the OWNED_TASKS_MARKER, else appended. Ungated, idempotent (skip if
+// the block is already present), .sauce-backup before write, per-note try/catch.
+async function applyProjectTodoTaskListHeal(tp, history, git) {
+  const STEP = "project_todo_task_list_heal";
+  const MARKER = "<!-- OWNED_TASKS_MARKER -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/projects";
+    if (!(await adapter.exists(ROOT).catch(() => false))) return;
+
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const files = await _walk(ROOT);
+    const todos = files.filter((f) => / To-Do\.md$/.test(f));
+    if (!todos.length) return;
+
+    const block = _projectTasksListBlock();
+    let scanned = 0, injected = 0, warned = 0;
+    for (const fp of todos) {
+      scanned += 1;
+      try {
+        const before = await adapter.read(fp);
+        const fm = _parseFrontmatterStrict(before) || {};
+        if (fm.type !== "project-todo") continue;             // only project-todo notes
+        if (/class:\s*"TaskProjectList"/.test(before)) continue;  // idempotent skip
+
+        let after;
+        // Prefer inserting before the "Owned Tasks" SectionLabel block so the
+        // Project Tasks list sits where the template puts it (above Owned Tasks).
+        const ownedLabelRe = /```dataviewjs\r?\n[^`]*class:\s*"SectionLabel"[^`]*text:\s*"Owned Tasks"[\s\S]*?```\r?\n?/;
+        const om = ownedLabelRe.exec(before);
+        if (om) {
+          after = before.slice(0, om.index) + block + "\n" + before.slice(om.index);
+        } else {
+          const mi = before.indexOf(MARKER);
+          if (mi >= 0) {
+            // Insert the block just before the marker line.
+            const lineStart = before.lastIndexOf("\n", mi) + 1;
+            after = before.slice(0, lineStart) + block + "\n" + before.slice(lineStart);
+          } else {
+            // No marker/label — append the block at the end.
+            after = before.replace(/\s*$/, "") + "\n\n" + block;
+          }
+        }
+        if (after === before) continue;
+        await _backupAndWrite(adapter, fp, before, after);
+        injected += 1;
+        history?.push({ event: "info", step: STEP, name: "project",
+          action: "injected", target: fp,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: STEP, name: "project",
+          reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "project",
+      summary: { scanned, injected, warned },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "project",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// applyMeetingTaskListHeal — B2 heal. For each meeting note under
+// spice/meetings/notes/** (type: meeting) that lacks a TaskMeetingList block,
+// inject the "Tasks" SectionLabel + TaskMeetingList block near the
+// ACTION_ITEMS_MARKER (only NEW notes got it from the template). Injected AFTER
+// the marker line (matching the template, where the Tasks block follows the
+// marker); falls back to appended at end. Ungated, idempotent (skip if present),
+// .sauce-backup, per-note try/catch.
+async function applyMeetingTaskListHeal(tp, history, git) {
+  const STEP = "meeting_task_list_heal";
+  const MARKER = "<!-- ACTION_ITEMS_MARKER -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/meetings/notes";
+    if (!(await adapter.exists(ROOT).catch(() => false))) return;
+
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const meetings = await _walk(ROOT);
+    if (!meetings.length) return;
+
+    const block = _meetingTasksListBlock();
+    let scanned = 0, injected = 0, warned = 0;
+    for (const fp of meetings) {
+      scanned += 1;
+      try {
+        const before = await adapter.read(fp);
+        const fm = _parseFrontmatterStrict(before) || {};
+        if (fm.type !== "meeting") continue;                  // only meeting notes
+        if (/class:\s*"TaskMeetingList"/.test(before)) continue;  // idempotent skip
+
+        let after;
+        const mi = before.indexOf(MARKER);
+        if (mi >= 0) {
+          // Insert AFTER the marker line (template order: Tasks block follows it).
+          const lineEnd = before.indexOf("\n", mi);
+          const cut = lineEnd >= 0 ? lineEnd + 1 : before.length;
+          const sep = before.slice(cut).startsWith("\n") ? "" : "\n";
+          after = before.slice(0, cut) + sep + "\n" + block + before.slice(cut);
+        } else {
+          after = before.replace(/\s*$/, "") + "\n\n" + block;
+        }
+        if (after === before) continue;
+        await _backupAndWrite(adapter, fp, before, after);
+        injected += 1;
+        history?.push({ event: "info", step: STEP, name: "meetings",
+          action: "injected", target: fp,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: STEP, name: "meetings",
+          reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "meetings",
+      summary: { scanned, injected, warned },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "meetings",
       reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
       git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
       attempted_at: new Date().toISOString() });
@@ -17512,6 +17891,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyMeetingTasksToEntityMigration = applyMeetingTasksToEntityMigration;
     module.exports.applyProjectTasksToEntityMigration = applyProjectTasksToEntityMigration;
     module.exports.applyTaskNoteHeal = applyTaskNoteHeal;
+    module.exports.applyTaskNoteProjectSlugHeal = applyTaskNoteProjectSlugHeal;
+    module.exports.applyProjectTodoTaskListHeal = applyProjectTodoTaskListHeal;
+    module.exports.applyMeetingTaskListHeal = applyMeetingTaskListHeal;
+    module.exports._cleanProjectLinkName = _cleanProjectLinkName;
+    module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;

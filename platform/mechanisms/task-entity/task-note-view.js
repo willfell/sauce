@@ -277,9 +277,24 @@ class TaskNoteView {
             const hasScheduled = !!task.scheduled;
             const hasDue = !!task.due;
             const prioMeta = TaskNoteView._priorityMeta(task.priority);
-            let projName = task.project.trim();
-            const pm = /^\[\[([^\]]+)\]\]$/.exec(projName);
-            if (pm) projName = pm[1];
+            // Clean, comparable link target for the Project row. Prefer
+            // TaskEntity._linkText (coerces a Dataview Link object, a
+            // `[[path/to/Note.md|alias]]`, or a bare string to the note BASENAME);
+            // optional-chained so a TDZ'd customJS never throws, with the local
+            // `^[[…]]$` strip as the cold-load fallback.
+            let projName = '';
+            try {
+                const TE = window.customJS && window.customJS.TaskEntity;
+                if (TE && typeof TE._linkText === 'function') {
+                    projName = TE._linkText(parsed ? parsed.project : page.project);
+                }
+            } catch (_e) { projName = ''; }
+            if (!projName) {
+                projName = task.project.trim();
+                const pm = /^\[\[([^\]]+)\]\]$/.exec(projName);
+                if (pm) projName = pm[1];
+            }
+            projName = String(projName || '').trim();
             const hasProject = !!projName;
             const createdHuman = task.created_at ? TaskNoteView._humanDate(task.created_at, todayStr) : { text: '' };
             const hasCreated = !!createdHuman.text;
@@ -370,7 +385,16 @@ class TaskNoteView {
             // ----- SOURCE line ("From <link>") -----
             if (task.source_note) {
                 try {
-                    const target = this._stripWikilink(task.source_note);
+                    // Clean, comparable link target for the source meeting. Prefer
+                    // TaskEntity._linkText (Link object / path / `[[…|alias]]` →
+                    // BASENAME); optional-chained for cold-load, with the local
+                    // wikilink strip as the fallback.
+                    let target = '';
+                    try {
+                        const TE = window.customJS && window.customJS.TaskEntity;
+                        if (TE && typeof TE._linkText === 'function') target = TE._linkText(task.source_note);
+                    } catch (_e) { target = ''; }
+                    if (!target) target = this._stripWikilink(task.source_note);
                     if (target) {
                         drawDivider();
                         const fromRow = card.createEl('div');

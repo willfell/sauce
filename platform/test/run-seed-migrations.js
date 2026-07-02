@@ -2585,13 +2585,14 @@ async function runMonthsSentinelHealFamily() {
 //
 // Direct-invocation family (mirrors runMigrateFamily): builds a throwaway tmp
 // vault with (1) a meeting note carrying an OPEN Action Items line, (2) a
-// project-todo note carrying an OPEN Owned Tasks line, and (3) an OLD-CHROME
-// task-note (has <!-- TASK_NOTES --> but no TaskNoteToDoNav) with user notes
-// below the marker. Then runs applyMeetingTasksToEntityMigration +
-// applyProjectTasksToEntityMigration + applyTaskNoteHeal and asserts the real
-// end-state: task-notes created with the right source/link fields, backups
-// written, migrations idempotent on a second run, and the old-chrome note
-// upgraded (gains TaskNoteToDoNav) with its user notes preserved.
+// project-todo note carrying an OPEN Owned Tasks line, and (3) a v0.178-CHROME
+// task-note (has <!-- TASK_NOTES --> AND a TaskNoteToDoNav block, no second
+// `---`) with user notes below the marker. Then runs
+// applyMeetingTasksToEntityMigration + applyProjectTasksToEntityMigration +
+// applyTaskNoteHeal and asserts the real end-state: task-notes created with the
+// right source/link fields, backups written, migrations idempotent on a second
+// run, and the v0.178-chrome note upgraded to the NEW chrome (LOSES
+// TaskNoteToDoNav, GAINS the second `---` HR) with its user notes preserved.
 // =============================================================================
 async function runTaskEntitySurfacesFamily() {
     const {
@@ -2667,7 +2668,8 @@ async function runTaskEntitySurfacesFamily() {
         "- [ ] Provision the cluster", "",
     ].join("\n"));
 
-    // (3) Old-chrome task note (marker present, NO TaskNoteToDoNav) + user notes.
+    // (3) v0.178-chrome task note (marker present, HAS a TaskNoteToDoNav block,
+    //     no second `---` HR before the marker) + user notes below the marker.
     const OLD_TASK = "spice/tasks/Buy milk.md";
     writeFixture(OLD_TASK, [
         "---", "type: task", "title: Buy milk", "status: open",
@@ -2675,6 +2677,8 @@ async function runTaskEntitySurfacesFamily() {
         "source: manual", "source_note:", "created_at: 2026-06-01T09:00:00-06:00",
         "completed_at:", "---", "",
         dv("SpaceNavButtons"), "",
+        "---", "",
+        dv("TaskNoteToDoNav"), "",
         dv("TaskNoteView"), "",
         "<!-- TASK_NOTES -->",
         "",
@@ -2738,10 +2742,12 @@ async function runTaskEntitySurfacesFamily() {
         ok("HC-TE-SURF-2g .sauce-backup snapshot of the project-todo exists",
            backupExists(/Global K8s To-Do\.md$/));
 
-        // === Old-chrome upgrade ===
+        // === v0.178-chrome upgrade → new chrome ===
         const upgraded = readVault(OLD_TASK);
-        ok("HC-TE-SURF-3 old-chrome task upgraded — gains TaskNoteToDoNav",
-           /class:\s*"TaskNoteToDoNav"/.test(upgraded));
+        ok("HC-TE-SURF-3 v0.178-chrome task upgraded — TaskNoteToDoNav removed",
+           !/class:\s*"TaskNoteToDoNav"/.test(upgraded));
+        ok("HC-TE-SURF-3a upgraded note gains the second `---` HR before the marker",
+           /```\r?\n\r?\n---\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
         ok("HC-TE-SURF-3b upgraded note keeps SpaceNavButtons + TaskNoteView chrome",
            /class:\s*"SpaceNavButtons"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
         ok("HC-TE-SURF-3c user notes below the marker preserved",
@@ -2767,6 +2773,191 @@ async function runTaskEntitySurfacesFamily() {
         ok("HC-TE-SURF-4d meeting/project sentinels present exactly once each",
            (readVault(MEETING).match(/<!-- meeting-tasks-migrated -->/g) || []).length === 1 &&
            (readVault(PROJ_TODO).match(/<!-- project-tasks-migrated -->/g) || []).length === 1);
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${root}`);
+        } else {
+            try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
+// =============================================================================
+// HC-TE-LP-* — task-entity links/project heals (bug fixes B1 + B2).
+//
+// Direct-invocation family. Builds a throwaway tmp vault with:
+//   (1) a real project hub note (type: project, slug=connectors) so the slug
+//       lookup can resolve the clean name → the REAL slug;
+//   (2) a MANGLED task-note (project: "[[spice/projects/connectors/Connectors.md
+//       |Connectors]]", project_slug: spice-projects-connectors-connectors-md-
+//       connectors) → B1 heal must un-mangle it to project: "[[Connectors]]" +
+//       project_slug: connectors;
+//   (3) a CLEAN task-note (project: "[[Connectors]]", project_slug: connectors)
+//       → B1 heal must LEAVE it untouched (idempotent);
+//   (4) a project-todo note WITHOUT a TaskProjectList block → B2 heal injects it;
+//   (5) a meeting note WITHOUT a TaskMeetingList block → B2 heal injects it.
+// Asserts the healed end-state, backups written, and a second run is a no-op.
+// =============================================================================
+async function runTaskEntityLinksProjectFamily() {
+    const {
+        applyTaskNoteProjectSlugHeal,
+        applyProjectTodoTaskListHeal,
+        applyMeetingTaskListHeal,
+    } = require("../install.js");
+
+    const dv = (cls) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '" });\n```';
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-te-lp-"));
+    const writeFixture = (rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const readVault = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const fmVal = (body, key) => {
+        const m = body.match(new RegExp("^" + key + ":\\s*(.*)$", "m"));
+        return m ? m[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    };
+    const backupExists = (nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+
+    // (1) Real project hub so the slug lookup can resolve `Connectors` → connectors.
+    const PROJ_HUB = "spice/projects/connectors/Connectors.md";
+    writeFixture(PROJ_HUB, [
+        "---", "type: project", "project_slug: connectors", "name: Connectors", "---", "",
+        "# Connectors", "",
+    ].join("\n"));
+
+    // (2) MANGLED task-note (the B1 bug output).
+    const MANGLED = "spice/tasks/Wire up the webhook.md";
+    writeFixture(MANGLED, [
+        "---", "type: task", "title: Wire up the webhook", "status: open",
+        "scheduled:", "due:", "priority:",
+        'project: "[[spice/projects/connectors/Connectors.md|Connectors]]"',
+        "project_slug: spice-projects-connectors-connectors-md-connectors",
+        "source: meeting", "source_note: \"[[Standup]]\"",
+        "created_at: 2026-07-01T09:00:00-06:00", "completed_at:", "---", "",
+        dv("SpaceNavButtons"), "", "<!-- TASK_NOTES -->", "",
+        "My notes about the webhook.", "",
+    ].join("\n"));
+
+    // (3) CLEAN task-note (must NOT be touched by B1).
+    const CLEAN = "spice/tasks/Draft the readme.md";
+    writeFixture(CLEAN, [
+        "---", "type: task", "title: Draft the readme", "status: open",
+        "scheduled:", "due:", "priority:",
+        'project: "[[Connectors]]"', "project_slug: connectors",
+        "source: project", "source_note:",
+        "created_at: 2026-07-01T09:00:00-06:00", "completed_at:", "---", "",
+        dv("SpaceNavButtons"), "", "<!-- TASK_NOTES -->", "",
+    ].join("\n"));
+
+    // (4) project-todo note WITHOUT a TaskProjectList block (predates B2).
+    const PROJ_TODO = "spice/projects/connectors/Connectors To-Do.md";
+    writeFixture(PROJ_TODO, [
+        "---", "type: project-todo", 'project: "[[Connectors]]"',
+        "project_slug: connectors", "---", "",
+        dv("ToDoLeafActions"), "",
+        dv("SectionLabel"), "  <!-- (Owned Tasks label, args elided) -->", "",
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });\n```', "",
+        "<!-- OWNED_TASKS_MARKER -->", "",
+        "- [ ] Some legacy owned task", "",
+    ].join("\n"));
+
+    // (5) meeting note WITHOUT a TaskMeetingList block (predates B2).
+    const MEETING = "spice/meetings/notes/2026/07-July/Kickoff-2026-07-02.md";
+    writeFixture(MEETING, [
+        "---", "type: meeting", 'project: "[[Connectors]]"', "---", "",
+        dv("MeetingLeafActions"), "",
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });\n```', "",
+        "<!-- ACTION_ITEMS_MARKER -->", "",
+        "- [ ] Some legacy action item", "",
+    ].join("\n"));
+
+    try {
+        const adapter = makeFsAdapter(root);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const history = [];
+
+        // ----- Pass 1 -----
+        await applyTaskNoteProjectSlugHeal(tp, history, git);
+        await applyProjectTodoTaskListHeal(tp, history, git);
+        await applyMeetingTaskListHeal(tp, history, git);
+
+        // === B1: mangled task un-mangled ===
+        const mangled = readVault(MANGLED);
+        ok("HC-TE-LP-1 mangled task project → clean [[Connectors]]",
+           fmVal(mangled, "project") === "[[Connectors]]", `project=${fmVal(mangled, "project")}`);
+        ok("HC-TE-LP-1b mangled task project_slug → real slug connectors",
+           fmVal(mangled, "project_slug") === "connectors", `slug=${fmVal(mangled, "project_slug")}`);
+        ok("HC-TE-LP-1c B1 preserves other frontmatter (title/source/source_note)",
+           fmVal(mangled, "title") === "Wire up the webhook" &&
+           fmVal(mangled, "source") === "meeting" &&
+           fmVal(mangled, "source_note") === "[[Standup]]",
+           `title=${fmVal(mangled, "title")} source=${fmVal(mangled, "source")} sn=${fmVal(mangled, "source_note")}`);
+        ok("HC-TE-LP-1d B1 preserves the body below the marker",
+           mangled.includes("My notes about the webhook."));
+        ok("HC-TE-LP-1e B1 .sauce-backup snapshot of the mangled task exists",
+           backupExists(/Wire up the webhook\.md$/));
+
+        // === B1: clean task untouched (idempotent skip) ===
+        const clean = readVault(CLEAN);
+        ok("HC-TE-LP-2 clean task project unchanged",
+           fmVal(clean, "project") === "[[Connectors]]" && fmVal(clean, "project_slug") === "connectors",
+           `project=${fmVal(clean, "project")} slug=${fmVal(clean, "project_slug")}`);
+        ok("HC-TE-LP-2b clean task NOT backed up (no write on a clean note)",
+           !backupExists(/Draft the readme\.md$/));
+
+        // === B2: project-todo gains a TaskProjectList block ===
+        const projTodo = readVault(PROJ_TODO);
+        ok("HC-TE-LP-3 project-todo gains a TaskProjectList block",
+           /class:\s*"TaskProjectList"/.test(projTodo));
+        ok("HC-TE-LP-3b project-todo gains the 'Project Tasks' SectionLabel",
+           /text:\s*"Project Tasks"/.test(projTodo));
+        ok("HC-TE-LP-3c Project Tasks block sits BEFORE Owned Tasks",
+           projTodo.indexOf('"Project Tasks"') < projTodo.indexOf('"Owned Tasks"'));
+        ok("HC-TE-LP-3d project-todo .sauce-backup exists",
+           backupExists(/Connectors To-Do\.md$/));
+
+        // === B2: meeting gains a TaskMeetingList block ===
+        const meeting = readVault(MEETING);
+        ok("HC-TE-LP-4 meeting gains a TaskMeetingList block",
+           /class:\s*"TaskMeetingList"/.test(meeting));
+        ok("HC-TE-LP-4b meeting gains the 'Tasks' SectionLabel",
+           /text:\s*"Tasks"/.test(meeting));
+        ok("HC-TE-LP-4c TaskMeetingList sits AFTER the ACTION_ITEMS_MARKER",
+           meeting.indexOf("<!-- ACTION_ITEMS_MARKER -->") < meeting.indexOf("TaskMeetingList"));
+        ok("HC-TE-LP-4d meeting .sauce-backup exists",
+           backupExists(/Kickoff-2026-07-02\.md$/));
+
+        // ----- Pass 2: idempotency -----
+        await applyTaskNoteProjectSlugHeal(tp, history, git);
+        await applyProjectTodoTaskListHeal(tp, history, git);
+        await applyMeetingTaskListHeal(tp, history, git);
+
+        const mangled2 = readVault(MANGLED);
+        ok("HC-TE-LP-5 B1 idempotent (project still clean after 2nd run)",
+           fmVal(mangled2, "project") === "[[Connectors]]" && fmVal(mangled2, "project_slug") === "connectors");
+        const projTodo2 = readVault(PROJ_TODO);
+        ok("HC-TE-LP-5b B2 project-todo idempotent (exactly one TaskProjectList)",
+           (projTodo2.match(/class:\s*"TaskProjectList"/g) || []).length === 1);
+        const meeting2 = readVault(MEETING);
+        ok("HC-TE-LP-5c B2 meeting idempotent (exactly one TaskMeetingList)",
+           (meeting2.match(/class:\s*"TaskMeetingList"/g) || []).length === 1);
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${root}`);
@@ -2825,6 +3016,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-TE-SURF-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-TE-SURF-FAMILY");
+    })
+    .then(() => runTaskEntityLinksProjectFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-TE-LP-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-TE-LP-FAMILY");
     })
     .finally(() => {
         console.log("");

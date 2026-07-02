@@ -928,12 +928,10 @@ class TaskDialog {
             '---\n' +
             '\n' +
             '```dataviewjs\n' +
-            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteToDoNav" });\n' +
-            '```\n' +
-            '\n' +
-            '```dataviewjs\n' +
             'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n' +
             '```\n' +
+            '\n' +
+            '---\n' +
             '\n' +
             '<!-- TASK_NOTES -->\n';
     }

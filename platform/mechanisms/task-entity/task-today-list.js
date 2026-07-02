@@ -47,6 +47,7 @@ class TaskTodayList {
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
     renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
+    _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
 
     // ---------- Static pure helper ----------
@@ -250,12 +251,18 @@ class TaskTodayList {
             }
         });
 
-        // Title — clicking the row (not the checkbox) opens the editor.
-        const title = row.createEl('span', { cls: 'sauce-task-today-title', text: (task && task.title) || '(untitled)' });
+        // Title — clicking the row (not the checkbox) opens the editor. The title
+        // text is rendered as MARKDOWN so `[Chat](url)` + `[[wikilink]]` become
+        // clickable links (was plain text → they showed literally). Renders inline
+        // (block margins stripped) and falls back to plain text where the
+        // MarkdownRenderer API is unavailable.
+        const titleText = (task && task.title) || '(untitled)';
+        const title = row.createEl('span', { cls: 'sauce-task-today-title' });
         // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
         // column (min-width:0 lets it shrink; break-word wraps long words) so the
         // chips never get pushed off the row.
         title.style.cssText = 'flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
+        TaskTodayList._renderTitleMarkdown(title, titleText, path);
 
         const openEditor = () => {
             const TD = getTD();
@@ -266,6 +273,9 @@ class TaskTodayList {
                 try { new Notice('Could not open task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         };
+        // Row/title click → open the editor, EXCEPT a click on a real `<a>` link
+        // inside the title (handled by _renderTitleMarkdown's stopPropagation), so
+        // opening a link doesn't ALSO pop the edit dialog.
         title.addEventListener('click', openEditor);
 
         // Metadata chips (only when set): project / priority / due. flex-shrink:0
@@ -280,6 +290,64 @@ class TaskTodayList {
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
         return row;
+    }
+
+    /**
+     * Render `mdText` as inline MARKDOWN into `titleEl` so `[label](url)` +
+     * `[[wikilink]]` in a task title become CLICKABLE links (was plain text →
+     * they showed literally). SELF-CONTAINED + feature-guarded:
+     *   - Uses Obsidian's MarkdownRenderer.render(app, md, el, sourcePath, comp)
+     *     when present (newer API), falling back to the older
+     *     MarkdownRenderer.renderMarkdown(md, el, sourcePath, comp). `component`
+     *     is a lightweight no-op stub (Obsidian only needs addChild/register).
+     *   - If neither API is reachable (or the render throws), falls back to plain
+     *     text (titleEl.textContent = mdText) so a title always shows.
+     *   - Strips block margins on the injected <p> so the title stays on ONE row.
+     *   - Stops propagation on `<a>` clicks inside the title so following a real
+     *     link doesn't ALSO trigger the row-click edit dialog.
+     * `sourcePath` (the task-note path) resolves relative `[[wikilink]]` targets.
+     * Never throws.
+     */
+    static _renderTitleMarkdown(titleEl, mdText, sourcePath) {
+        if (!titleEl) return;
+        const text = String(mdText == null ? '' : mdText);
+        const plain = () => { try { titleEl.textContent = text || '(untitled)'; } catch (_e) {} };
+        let MR = null;
+        try {
+            MR = (typeof MarkdownRenderer !== 'undefined' && MarkdownRenderer)
+                || (typeof window !== 'undefined' && window.MarkdownRenderer)
+                || null;
+        } catch (_e) { MR = null; }
+        const appRef = (typeof app !== 'undefined' && app)
+            || (typeof window !== 'undefined' && window.app)
+            || null;
+        // Lightweight Component stub — Obsidian's renderer only calls
+        // addChild/register/load on it; no-ops are fine for a transient row.
+        const comp = { addChild() {}, register() {}, load() {}, onload() {}, unload() {} };
+        let rendered = false;
+        try {
+            if (MR && typeof MR.render === 'function' && appRef) {
+                // Newer signature: render(app, markdown, el, sourcePath, component).
+                MR.render(appRef, text, titleEl, sourcePath || '', comp);
+                rendered = true;
+            } else if (MR && typeof MR.renderMarkdown === 'function') {
+                // Older signature: renderMarkdown(markdown, el, sourcePath, component).
+                MR.renderMarkdown(text, titleEl, sourcePath || '', comp);
+                rendered = true;
+            }
+        } catch (_e) { rendered = false; }
+        if (!rendered) { plain(); return; }
+        // Strip block margins so the rendered <p> sits inline on the row, and
+        // stop `<a>` click bubbling so a link click doesn't open the editor too.
+        try {
+            const kids = titleEl.querySelectorAll ? titleEl.querySelectorAll('p') : [];
+            kids.forEach((p) => { p.style.margin = '0'; p.style.display = 'inline'; });
+            const anchors = titleEl.querySelectorAll ? titleEl.querySelectorAll('a') : [];
+            anchors.forEach((a) => {
+                a.style.cursor = 'pointer';
+                a.addEventListener('click', (ev) => { ev.stopPropagation(); });
+            });
+        } catch (_e) { /* cosmetic — tolerate */ }
     }
 
     /** Strip surrounding `[[ ]]` from a wikilink for chip display (static). */

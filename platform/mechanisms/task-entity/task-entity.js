@@ -196,9 +196,16 @@ class TaskEntity {
      * are written at RUNTIME (app.vault.create), not through the template
      * installer, so the customjs-guard refs are MATERIALIZED here rather than
      * left as installer tokens. SpaceNavButtons gives vault-global nav; the
-     * TaskNoteView widget renders the clean task card. The `<!-- TASK_NOTES -->`
-     * marker separates the (regenerable) chrome above from the user's own notes
-     * below — the edit dialog + the install heal both key off this marker.
+     * TaskNoteView widget renders the clean task card. The two `---` thematic
+     * breaks fence the card: nav → HR → card → HR → notes. The
+     * `<!-- TASK_NOTES -->` marker separates the (regenerable) chrome above from
+     * the user's own notes below — the edit dialog + the install heal both key
+     * off this marker.
+     *
+     * RENDER NOTE: each `---` sits on its OWN line with a BLANK line above + below
+     * so Obsidian renders it as a horizontal rule (not swallowed as a setext
+     * heading under the preceding code fence / paragraph); the dataviewjs fences
+     * still close on their own ``` line, so both blocks keep executing.
      * Keep this string BYTE-IDENTICAL to the heal's inline copy in install.js.
      */
     static _chromeBody() {
@@ -210,12 +217,10 @@ class TaskEntity {
             '---\n' +
             '\n' +
             '```dataviewjs\n' +
-            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteToDoNav" });\n' +
-            '```\n' +
-            '\n' +
-            '```dataviewjs\n' +
             'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n' +
             '```\n' +
+            '\n' +
+            '---\n' +
             '\n' +
             '<!-- TASK_NOTES -->\n';
     }
