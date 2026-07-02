@@ -90,3 +90,38 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   rationale: blueprint trips axis customjs_behavioral: 4 uncovered
   status: done
   note: NEW run-trips.js (trips had NO test harness). Unit-tests TripNavButtons.detectContext across every path branch (non-trip/trips-hub/trip-atlas vs trip-section by frontmatter/trip-board/trip-card/folder-style) — the genuine behavioral method — plus cold-load render guards for all 3 trips widgets. Both teeth-verified (detectContext mutation → TC fails; render throw → TRIPGUARD fails). This is REAL coverage (detectContext), not a grep-artifact dismissal.
+
+- id: cov-mechanism-people-identity-customjs-behavioral
+  title: Add coverage for people-identity customjs_behavioral (0/4)
+  category: test
+  source: coverage-matrix
+  rationale: mechanism people-identity axis customjs_behavioral: 4 uncovered
+  status: proposed
+
+- id: cov-blueprint-scratch-customjs-behavioral
+  title: Add coverage for scratch customjs_behavioral (5/8)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint scratch axis customjs_behavioral: 3 uncovered
+  status: proposed
+
+- id: cov-blueprint-to-do-installer-migration
+  title: Add coverage for to-do installer_migration (3/6)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint to-do axis installer_migration: 3 uncovered
+  status: proposed
+
+- id: cov-blueprint-finance-installer-migration
+  title: Add coverage for finance installer_migration (20/23)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint finance axis installer_migration: 3 uncovered
+  status: proposed
+
+- id: cov-blueprint-products-widget-render
+  title: Add coverage for products widget_render (0/3)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint products axis widget_render: 3 uncovered
+  status: proposed
