@@ -6430,6 +6430,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinancePlanScaffolding(tp, manifest, variables, history, git);              // NEW v0.10.0 — create-if-absent Finance Plan.md singleton
   await applyFinanceSavingsScaffolding(tp, manifest, variables, history, git);           // NEW v0.10.0 — create-if-absent savings/ + Savings.md + Savings-Emergency-Fund.md
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+  await applyFinanceBudgetMalformedGroupRepair(tp, manifest, variables, history, git);   // NEW — repairs pre-fix stray Unassigned
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
@@ -9423,6 +9424,78 @@ async function applyFinanceCategoriesGroupBackfill(tp, manifest, variables, hist
     reason: `${budgetFiles.length} budgets scanned, ${snapshots} snapshotted, ${touched} touched, ${backfilled} categories backfilled to "Unassigned"; 0 categories modified beyond add; snapshot at ${backupRoot}`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     attempted_at: new Date().toISOString() });
+}
+
+// applyFinanceBudgetMalformedGroupRepair — ungated, snapshot-first, marker-guarded,
+// idempotent repair of the pre-fix corruption (stray `    group: Unassigned` spliced
+// under inline flow-mapping category items). Runs on every install so every vault
+// self-heals; per-file failure-loud. Mirrors applyFinanceCategoriesGroupBackfill.
+async function applyFinanceBudgetMalformedGroupRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+      reason: `list failed: ${e.message}`, git_commit: git.commit, git_tag: git.tag,
+      git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  if (budgetFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = `.sauce-backup/${ts}/spice/finance/budgets`;
+  let touchedFiles = 0, repairedRows = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      if (/__budget_malformed_group_repaired:/.test(body)) continue; // idempotency marker
+      const result = _repairMalformedBudgetGroups(body);
+      if (!result.touched) continue;
+      // Snapshot before write.
+      try {
+        const rel = fp.substring(budgetsRoot.length);
+        const backupPath = backupRoot + rel;
+        const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+        await adapter.write(backupPath, body);
+      } catch (e) {
+        history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+          path: fp, reason: `snapshot failed: ${e.message}`, git_commit: git.commit,
+          git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+      // Append the marker so the repair is one-shot per file.
+      let out = result.body;
+      out = out.replace(/^(---\n[\s\S]*?)\n---/, `$1\n__budget_malformed_group_repaired: v0.16\n---`);
+      await adapter.write(fp, out);
+      touchedFiles += 1;
+      repairedRows += result.repaired;
+      history?.push({ event: "info", step: "finance_budget_malformed_group_repair", name: "finance",
+        path: fp, repaired: result.repaired, git_commit: git.commit, git_tag: git.tag,
+        git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+        path: fp, reason: e.message, git_commit: git.commit, git_tag: git.tag,
+        git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "finance_budget_malformed_group_repair", name: "finance",
+    summary: { touchedFiles, repairedRows, scanned: budgetFiles.length },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
 }
 
 // ============================================================================
@@ -16206,6 +16279,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // HC-V01190-FIN-SEED-MIGRATE-* direct-invocation family). Pure additive.
     module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
     module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
+    module.exports.applyFinanceBudgetMalformedGroupRepair = applyFinanceBudgetMalformedGroupRepair;
     module.exports._backfillBudgetGroupsFromText = _backfillBudgetGroupsFromText;
     module.exports._repairMalformedBudgetGroups = _repairMalformedBudgetGroups;
     module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;

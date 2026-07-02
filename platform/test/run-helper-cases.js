@@ -12340,6 +12340,23 @@ async function caseFinBgrRepairLeavesCleanNotes() {
     installer._repairMalformedBudgetGroups(legitBlockUnassigned).touched === false);
 }
 
+async function caseFinBgrHealWiredAndUngated() {
+  console.log("\n--- Case HC-FIN-BGR-5: repair heal exported, called, ungated, snapshot-first ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-BGR-5: heal exported",
+    typeof installer.applyFinanceBudgetMalformedGroupRepair === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-FIN-BGR-5: heal invoked in applyFinanceMigrations",
+    /await\s+applyFinanceBudgetMalformedGroupRepair\(/.test(src));
+  const m = src.match(/async\s+function\s+applyFinanceBudgetMalformedGroupRepair\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assertTrue("HC-FIN-BGR-5: heal body matched", m !== null);
+  if (m) {
+    assertTrue("HC-FIN-BGR-5: snapshot before write (.sauce-backup)", /\.sauce-backup/.test(m[1]));
+    assertTrue("HC-FIN-BGR-5: marker-guarded", /__budget_malformed_group_repaired/.test(m[1]));
+    assertTrue("HC-FIN-BGR-5: ungated (no version-gate compare)", !/VERSION_SNAPSHOT|semverGte|isVersionAtLeast/.test(m[1]));
+  }
+}
+
 // v0.107.0 — defaults editor classes shipped in finance blueprint.
 
 async function caseV01070Bde1ClassDeclared() {
@@ -15354,6 +15371,7 @@ async function caseHCV0128FinancePlanning() {
   await caseFinBgrBackfillStillBackfillsBlock();
   await caseFinBgrRepairStripsStray();
   await caseFinBgrRepairLeavesCleanNotes();
+  await caseFinBgrHealWiredAndUngated();
 
   // v0.107.0 — defaults editor widgets (S3)
   await caseV01070Bde1ClassDeclared();
