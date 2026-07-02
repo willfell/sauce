@@ -2575,6 +2575,202 @@ async function runMonthsSentinelHealFamily() {
     }
 }
 
+// =============================================================================
+// HC-TE-SURF-* — task-entity meeting/project migrations + old-chrome upgrade.
+//
+// Direct-invocation family (mirrors runMigrateFamily): builds a throwaway tmp
+// vault with (1) a meeting note carrying an OPEN Action Items line, (2) a
+// project-todo note carrying an OPEN Owned Tasks line, and (3) an OLD-CHROME
+// task-note (has <!-- TASK_NOTES --> but no TaskNoteToDoNav) with user notes
+// below the marker. Then runs applyMeetingTasksToEntityMigration +
+// applyProjectTasksToEntityMigration + applyTaskNoteHeal and asserts the real
+// end-state: task-notes created with the right source/link fields, backups
+// written, migrations idempotent on a second run, and the old-chrome note
+// upgraded (gains TaskNoteToDoNav) with its user notes preserved.
+// =============================================================================
+async function runTaskEntitySurfacesFamily() {
+    const {
+        applyMeetingTasksToEntityMigration,
+        applyProjectTasksToEntityMigration,
+        applyTaskNoteHeal,
+    } = require("../install.js");
+
+    const dv = (cls) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '" });\n```';
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-te-surf-"));
+    const writeFixture = (rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const readVault = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const listTasks = () => {
+        const d = path.join(root, "spice/tasks");
+        return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".md")) : [];
+    };
+    const taskByTitle = (title) => {
+        const out = [];
+        for (const f of listTasks()) {
+            const body = readVault("spice/tasks/" + f);
+            const tm = body.match(/^title:\s*(.*)$/m);
+            const t = tm ? tm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+            if (t === title) out.push({ file: f, body });
+        }
+        return out;
+    };
+    const fmVal = (body, key) => {
+        const m = body.match(new RegExp("^" + key + ":\\s*(.*)$", "m"));
+        return m ? m[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    };
+    const backupExists = (nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+
+    // ----- Fixtures -----
+    // (1) Meeting note with a project: frontmatter + one OPEN Action Items line
+    //     (+ a done line that must NOT convert) under the ACTION_ITEMS_MARKER.
+    const MEETING = "spice/meetings/notes/2026/06-June/Standup-2026-06-18.md";
+    writeFixture(MEETING, [
+        "---", "type: meeting", 'project: "[[Sauce]]"', "---", "",
+        dv("MeetingLeafActions"), "",
+        dv("SectionLabel"), "",   // Action Items label (args elided for the fixture)
+        "<!-- ACTION_ITEMS_MARKER -->", "",
+        "- [ ] Email the vendor [due:: 2026-06-25] [priority:: high]",
+        "- [x] Already done item", "",
+    ].join("\n"));
+
+    // (2) Project-todo note with one OPEN Owned Tasks line under OWNED_TASKS_MARKER.
+    const PROJ_TODO = "spice/projects/global-k8s/Global K8s To-Do.md";
+    writeFixture(PROJ_TODO, [
+        "---", "type: project-todo", 'project: "[[Global K8s]]"',
+        "project_slug: global-k8s", "---", "",
+        dv("ToDoLeafActions"), "",
+        "## Owned Tasks", "",
+        "<!-- OWNED_TASKS_MARKER -->", "",
+        "- [ ] Provision the cluster", "",
+    ].join("\n"));
+
+    // (3) Old-chrome task note (marker present, NO TaskNoteToDoNav) + user notes.
+    const OLD_TASK = "spice/tasks/Buy milk.md";
+    writeFixture(OLD_TASK, [
+        "---", "type: task", "title: Buy milk", "status: open",
+        "scheduled:", "due:", "priority:", "project:", "project_slug:",
+        "source: manual", "source_note:", "created_at: 2026-06-01T09:00:00-06:00",
+        "completed_at:", "---", "",
+        dv("SpaceNavButtons"), "",
+        dv("TaskNoteView"), "",
+        "<!-- TASK_NOTES -->",
+        "",
+        "My handwritten notes about the milk task.",
+        "",
+    ].join("\n"));
+
+    try {
+        const adapter = makeFsAdapter(root);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const history = [];
+
+        // ----- Pass 1 -----
+        await applyMeetingTasksToEntityMigration(tp, history, git);
+        await applyProjectTasksToEntityMigration(tp, history, git);
+        await applyTaskNoteHeal(tp, history, git);
+
+        // === Meeting migration ===
+        const meetTasks = taskByTitle("Email the vendor");
+        ok("HC-TE-SURF-1 meeting task-note created for 'Email the vendor'",
+           meetTasks.length === 1, `found ${meetTasks.length}: ${listTasks().join(", ")}`);
+        const mFm = meetTasks.length ? meetTasks[0].body : "";
+        ok("HC-TE-SURF-1b meeting task source == meeting",
+           fmVal(mFm, "source") === "meeting", `source=${fmVal(mFm, "source")}`);
+        ok("HC-TE-SURF-1c meeting task source_note == [[Standup-2026-06-18]]",
+           fmVal(mFm, "source_note") === "[[Standup-2026-06-18]]", `source_note=${fmVal(mFm, "source_note")}`);
+        ok("HC-TE-SURF-1d meeting task inherits project [[Sauce]] + slug sauce",
+           fmVal(mFm, "project") === "[[Sauce]]" && fmVal(mFm, "project_slug") === "sauce",
+           `project=${fmVal(mFm, "project")} slug=${fmVal(mFm, "project_slug")}`);
+        ok("HC-TE-SURF-1e meeting task due/priority carried",
+           fmVal(mFm, "due") === "2026-06-25" && fmVal(mFm, "priority") === "high",
+           `due=${fmVal(mFm, "due")} prio=${fmVal(mFm, "priority")}`);
+        ok("HC-TE-SURF-1f done line 'Already done item' NOT converted",
+           taskByTitle("Already done item").length === 0);
+        const healedMeeting = readVault(MEETING);
+        ok("HC-TE-SURF-1g meeting note has <!-- meeting-tasks-migrated --> sentinel",
+           healedMeeting.includes("<!-- meeting-tasks-migrated -->"));
+        ok("HC-TE-SURF-1h migrated open line stripped; done line kept",
+           !healedMeeting.includes("- [ ] Email the vendor") &&
+           healedMeeting.includes("- [x] Already done item"));
+        ok("HC-TE-SURF-1i .sauce-backup snapshot of the meeting note exists",
+           backupExists(/Standup-2026-06-18\.md$/));
+
+        // === Project migration ===
+        const projTasks = taskByTitle("Provision the cluster");
+        ok("HC-TE-SURF-2 project task-note created for 'Provision the cluster'",
+           projTasks.length === 1, `found ${projTasks.length}: ${listTasks().join(", ")}`);
+        const pFm = projTasks.length ? projTasks[0].body : "";
+        ok("HC-TE-SURF-2b project task source == project",
+           fmVal(pFm, "source") === "project", `source=${fmVal(pFm, "source")}`);
+        ok("HC-TE-SURF-2c project task project_slug == global-k8s",
+           fmVal(pFm, "project_slug") === "global-k8s", `slug=${fmVal(pFm, "project_slug")}`);
+        ok("HC-TE-SURF-2d project task project == [[Global K8s]]",
+           fmVal(pFm, "project") === "[[Global K8s]]", `project=${fmVal(pFm, "project")}`);
+        const healedProj = readVault(PROJ_TODO);
+        ok("HC-TE-SURF-2e project-todo has <!-- project-tasks-migrated --> sentinel",
+           healedProj.includes("<!-- project-tasks-migrated -->"));
+        ok("HC-TE-SURF-2f migrated open line stripped from project-todo",
+           !healedProj.includes("- [ ] Provision the cluster"));
+        ok("HC-TE-SURF-2g .sauce-backup snapshot of the project-todo exists",
+           backupExists(/Global K8s To-Do\.md$/));
+
+        // === Old-chrome upgrade ===
+        const upgraded = readVault(OLD_TASK);
+        ok("HC-TE-SURF-3 old-chrome task upgraded — gains TaskNoteToDoNav",
+           /class:\s*"TaskNoteToDoNav"/.test(upgraded));
+        ok("HC-TE-SURF-3b upgraded note keeps SpaceNavButtons + TaskNoteView chrome",
+           /class:\s*"SpaceNavButtons"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
+        ok("HC-TE-SURF-3c user notes below the marker preserved",
+           upgraded.includes("My handwritten notes about the milk task."));
+        ok("HC-TE-SURF-3d exactly one <!-- TASK_NOTES --> marker after upgrade",
+           (upgraded.match(/<!-- TASK_NOTES -->/g) || []).length === 1);
+        ok("HC-TE-SURF-3e .sauce-backup snapshot of the old task note exists",
+           backupExists(/Buy milk\.md$/));
+
+        // ----- Pass 2: idempotency -----
+        await applyMeetingTasksToEntityMigration(tp, history, git);
+        await applyProjectTasksToEntityMigration(tp, history, git);
+        await applyTaskNoteHeal(tp, history, git);
+
+        ok("HC-TE-SURF-4 no duplicate meeting task-note after second run",
+           taskByTitle("Email the vendor").length === 1);
+        ok("HC-TE-SURF-4b no duplicate project task-note after second run",
+           taskByTitle("Provision the cluster").length === 1);
+        const upgradedTwice = readVault(OLD_TASK);
+        ok("HC-TE-SURF-4c chrome-upgrade idempotent (still one marker, notes intact)",
+           (upgradedTwice.match(/<!-- TASK_NOTES -->/g) || []).length === 1 &&
+           upgradedTwice.includes("My handwritten notes about the milk task."));
+        ok("HC-TE-SURF-4d meeting/project sentinels present exactly once each",
+           (readVault(MEETING).match(/<!-- meeting-tasks-migrated -->/g) || []).length === 1 &&
+           (readVault(PROJ_TODO).match(/<!-- project-tasks-migrated -->/g) || []).length === 1);
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${root}`);
+        } else {
+            try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -2618,6 +2814,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY");
+    })
+    .then(() => runTaskEntitySurfacesFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-TE-SURF-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-TE-SURF-FAMILY");
     })
     .finally(() => {
         console.log("");
