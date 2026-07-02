@@ -1196,6 +1196,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
   await applyDocLeafActionsBackfill(tp, mech, variables, history, git);   // NEW (Project Doc Updating Wiring PR4) — injects the DocLeafActions Move-button block into existing type:doc-note notes lacking it (insert-only after the ProjectNavButtons `---` divider, idempotent, .sauce-backup before write)
+  await applyDocBulkMoveActionsBackfill(tp, mech, variables, history, git); // NEW (Project Doc Updating Wiring PR5) — injects the DocBulkMoveActions Move-docs block into existing type:docs-hub notes lacking it (insert-only after the entity-create doc-note block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
@@ -2717,6 +2718,82 @@ async function applyDocLeafActionsBackfill(tp, manifest, variables, history, git
   }
 
   history?.push({ event: "info", step: "doc_leaf_actions_backfill", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
+// _injectDocBulkMoveActionsBody — pure, idempotent transform. Injects the
+// `class: "DocBulkMoveActions"` dataviewjs block into a docs-hub body that lacks
+// it, placed AFTER the entity-create:doc-note ("+ New Doc") block (the shipped
+// Docs Hub template placement — a hub-action beside "+ New Doc", above the `---`
+// divider). Falls back to after the ProjectNavButtons fence when the
+// entity-create block is absent. Returns the body unchanged when the block is
+// already present or no anchor exists (driver treats unchanged-no-block as
+// no_anchor_found).
+function _injectDocBulkMoveActionsBody(body) {
+  if (typeof body !== "string") return body;
+  if (body.includes('class: "DocBulkMoveActions"')) return body; // idempotent
+  let anchorIdx = body.indexOf('instance: "doc-note"');          // the "+ New Doc" entity-create block
+  if (anchorIdx === -1) anchorIdx = body.indexOf('class: "ProjectNavButtons"');
+  if (anchorIdx === -1) return body;                             // no anchor
+  const fenceClose = body.indexOf("\n```", anchorIdx);           // closing fence of the anchor block
+  if (fenceClose === -1) return body;
+  const afterFence = fenceClose + 4;                             // just past "\n```"
+  const block = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "DocBulkMoveActions" });\n```';
+  return body.slice(0, afterFence) + block + body.slice(afterFence);
+}
+
+// applyDocBulkMoveActionsBackfill — Project Doc Updating Wiring PR5. Injects the
+// bulk "Move docs" button (DocBulkMoveActions) into pre-existing docs-hub notes
+// lacking it, so the affordance PR3 shipped for NEW Docs hubs (via the template)
+// also reaches hubs users already have. Walks spice/projects/**, filters
+// type:docs-hub, applies _injectDocBulkMoveActionsBody. Insert-only + idempotent;
+// .sauce-backup before write; per-note try/catch, never throws; ungated. Mirrors
+// applyDocLeafActionsBackfill.
+async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "doc_bulk_move_actions_backfill", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
+      if (before.includes('class: "DocBulkMoveActions"')) { skipped += 1; continue; }
+      const after = _injectDocBulkMoveActionsBody(before);
+      if (after === before) {
+        warned += 1;
+        history?.push({ event: "warning", step: "doc_bulk_move_actions_backfill", target: fpath, action: "no_anchor_found",
+          reason: "no entity-create doc-note / ProjectNavButtons block to anchor on",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "doc_bulk_move_actions_backfill", target: fpath, action: "healed",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "doc_bulk_move_actions_backfill", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "doc_bulk_move_actions_backfill", name: "vault", summary: { healed, skipped, warned },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
@@ -16744,6 +16821,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // + its pure body transform (run-doc-leaf-actions-heal.js DLAH-*).
     module.exports.applyDocLeafActionsBackfill = applyDocLeafActionsBackfill;
     module.exports._injectDocLeafActionsBody = _injectDocLeafActionsBody;
+    // Project Doc Updating Wiring PR5 — existing Docs-hub DocBulkMoveActions
+    // backfill heal + its pure body transform (run-doc-bulk-move-heal.js DBMH-*).
+    module.exports.applyDocBulkMoveActionsBackfill = applyDocBulkMoveActionsBackfill;
+    module.exports._injectDocBulkMoveActionsBody = _injectDocBulkMoveActionsBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
