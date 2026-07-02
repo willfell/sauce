@@ -1203,6 +1203,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // v0.119.1 — merges duplicate "Recurring Today" blocks. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
   await stripPersistedRecurringSection(tp, mech, variables, history, git); // NEW v0.120.0 — retires materialized "Recurring Today" / "Recurring" SectionLabel blocks + recurring_from task lines + sentinels from dailies, since ToDoDailyRecurring.render() now live-queries the registry instead of writing to today's file. Idempotent. .sauce-backup snapshot before write.
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
+  await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -7618,6 +7619,129 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
   }
 
   history?.push({ event: "info", step: "project_todo_backfill", name: "project",
+    summary: { created, skipped, errors },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// _linksHubBody — pure. Returns the Links Hub note BODY (below the frontmatter),
+// byte-identical to the project blueprint's entity-create scaffold for a NEW
+// project's `Links Hub.md` (manifest new_entity_buttons[0].extra_files[] →
+// filename_pattern "Links Hub.md" inline_body). Keeping this a single source
+// means backfilled hubs render exactly like freshly-created ones. `viewsPath`
+// defaults to "ranch/views" (the shipped default); passing the installer's
+// resolved views_path keeps the dv.view() paths correct on relocated vaults.
+// run-project-links-hub-backfill.js pins body↔entity-create parity so a future
+// edit to one without the other fails the harness.
+function _linksHubBody(viewsPath) {
+  const v = viewsPath || "ranch/views";
+  return [
+    '```dataviewjs',
+    `await dv.view("${v}/customjs-guard", { class: "Breadcrumb" });`,
+    '```',
+    '',
+    '```dataviewjs',
+    `await dv.view("${v}/customjs-guard", { class: "SpaceNavButtons" });`,
+    '```',
+    '',
+    '```dataviewjs',
+    `await dv.view("${v}/customjs-guard", { class: "ProjectNavButtons" });`,
+    '```',
+    '',
+    '---',
+    '',
+    '```dataviewjs',
+    `await dv.view("${v}/customjs-guard", { class: "ProjectLinksPanel" });`,
+    '```',
+    '',
+  ].join('\n');
+}
+
+// _renderLinksHubNote — pure. Full `Links Hub.md` note (frontmatter + body) for
+// project `name` (display name, mixed case) with folder `slug`. Frontmatter
+// mirrors the entity-create frontmatter_template (type: links-hub, project
+// wikilink, project_slug, empty links[], created_at, links-hub tag). `nowIso`
+// is injectable so tests are deterministic; production passes none and stamps
+// the current time (millisecond-trimmed, matching applyProjectTodoBackfill).
+function _renderLinksHubNote({ name, slug, viewsPath, nowIso } = {}) {
+  const created = nowIso || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return [
+    '---',
+    'type: links-hub',
+    `project: "[[${name}]]"`,
+    `project_slug: ${slug}`,
+    'links: []',
+    `created_at: "${created}"`,
+    'tags:',
+    '  - links-hub',
+    '---',
+    '',
+    _linksHubBody(viewsPath),
+  ].join('\n');
+}
+
+// applyProjectLinksHubBackfill — Project Links Wiring PR3. Creates
+// `spice/projects/<slug>/Links Hub.md` for every project lacking one, so
+// pre-existing projects gain the Helpful Links hub that PR1 scaffolds only for
+// NEW projects (via entity-create). Sibling of applyProjectTodoBackfill: same
+// hub-detection (first direct `type: project` note; the hub basename is the
+// display name), same skip-if-exists idempotency, per-project try/catch, never
+// throws. UNGATED backfill (runs every install) — it materializes NEW content,
+// not a one-time reshape of legacy content, so it is not version-gated (per the
+// migration-lifecycle rule). No .sauce-backup needed: it only ever CREATES a
+// missing note (skip-if-exists), never overwrites, so there is nothing to snap.
+async function applyProjectLinksHubBackfill(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const PROJ_ROOT = "spice/projects";
+  if (!(await adapter.exists(PROJ_ROOT))) return;
+
+  const viewsPath = (variables && variables.views_path) || "ranch/views";
+  let created = 0, skipped = 0, errors = 0;
+
+  let listing;
+  try { listing = await adapter.list(PROJ_ROOT); }
+  catch (_e) { return; }
+
+  for (const projDir of (listing.folders || [])) {
+    try {
+      const subListing = await adapter.list(projDir);
+      // Find the project's hub note — the .md whose frontmatter has type: project
+      // (mirrors applyProjectTodoBackfill). Its basename is the display name.
+      let hubName = null;
+      for (const file of (subListing.files || [])) {
+        if (!file.endsWith('.md')) continue;
+        if (/ To-Do\.md$/.test(file)) continue;
+        if (/Project Map\.md$/.test(file)) continue;
+        if (/-board\.md$/.test(file)) continue;
+        if (/Links Hub\.md$/.test(file)) continue;
+        const content = await adapter.read(file);
+        if (/^type:\s*project\b/m.test(content) || /^type:\s*"project"/m.test(content)) {
+          hubName = file.split('/').pop().replace(/\.md$/, '');
+          break;
+        }
+      }
+      if (!hubName) { skipped++; continue; }
+      const slug = projDir.split('/').pop();
+      const linksHubPath = `${projDir}/Links Hub.md`;
+      if (await adapter.exists(linksHubPath)) { skipped++; continue; }
+      const body = _renderLinksHubNote({ name: hubName, slug, viewsPath });
+      await adapter.write(linksHubPath, body);
+      created++;
+      history?.push({ event: "info", step: "project_links_hub_backfill", name: "project",
+        action: "created", path: linksHubPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      errors++;
+      history?.push({ event: "error", step: "project_links_hub_backfill", name: "project",
+        projDir, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "project_links_hub_backfill", name: "project",
     summary: { created, skipped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
@@ -15911,6 +16035,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // frontmatter-type detector / body transform when authoring future cases.
     module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
+    // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
+    // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
+    module.exports.applyProjectLinksHubBackfill = applyProjectLinksHubBackfill;
+    module.exports._renderLinksHubNote = _renderLinksHubNote;
+    module.exports._linksHubBody = _linksHubBody;
     module.exports.applyProjectNavButtonsSeparatorGap = applyProjectNavButtonsSeparatorGap;
     module.exports._collapseNavButtonsSeparatorGap = _collapseNavButtonsSeparatorGap;
     module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
