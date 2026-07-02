@@ -114,3 +114,11 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 
 <!-- ACTION_ITEMS_MARKER -->
 
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Tasks" }] });
+```
+
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "TaskMeetingList" });
+```
+

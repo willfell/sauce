@@ -31,88 +31,71 @@ const stub = MLA.personStubBody('Jordan Fox', '2026-06-19T10:00:00Z');
 ok('MLA-10 personStubBody has type: person frontmatter', /^---\ntype: person\n/.test(stub) && /\n---\n/.test(stub));
 ok('MLA-11 personStubBody embeds the name', stub.includes('Jordan Fox'));
 
-// ── HC-V0127-MLA-NT-* — v0.127.0 §C cases (instance helpers) ────────────────
-// Build an instance and stub dv.pages for _projectTodoPath; Notice for _noticeDualWrite.
+// ── HC-TE-MLA-NT-* — task-entity meetings wiring (_onNewTask → TaskDialog) ───
+// _onNewTask now opens the task-entity TaskDialog with surface: 'meeting'
+// instead of the old custom modal + dual-write. Verify the payload it passes.
 const inst = new MLA();
 
-function fakeDv(pagesArr) {
-  return {
-    pages(_q) {
-      const arr = pagesArr.slice();
-      const wrapper = {
-        where(pred) { return fakeDv(arr.filter(pred)).pages(); },
-        array() { return arr; },
-      };
-      return wrapper;
-    },
-  };
-}
-// _projectTodoPath uses dv.pages(...).where(...).array(); construct a thin chainable.
-function chainDv(arr) {
-  return {
-    pages(_q) {
-      return {
-        where(pred) {
-          const filtered = arr.filter(pred);
-          return { array() { return filtered; } };
-        },
-      };
-    },
-  };
-}
+// Capture TaskDialog.open payloads via a stubbed window.customJS.
+const opened = [];
+sharedWindow.app = {
+  fileManager: {},
+  vault: { getAbstractFileByPath() { return {}; } },
+  workspace: {},
+};
+sharedWindow.customJS = {
+  TaskDialog: { open(opts) { opened.push(opts); } },
+};
 
-const databricksHub = { type: "project", file: { name: "Databricks", folder: "spice/projects/databricks" } };
-const dvWithHub = chainDv([databricksHub]);
-ok('HC-V0127-MLA-NT-PATH-A _projectTodoPath resolves known project',
-  inst._projectTodoPath('Databricks', dvWithHub) === 'spice/projects/databricks/Databricks To-Do.md');
+// _onNewTask reads _listProjects(dv) to resolve the {name,slug} pair; stub it.
+inst._listProjects = () => [{ slug: 'databricks', name: 'Databricks' }, { slug: 'sauce', name: 'Sauce' }];
 
-const dvEmpty = chainDv([]);
-ok('HC-V0127-MLA-NT-PATH-B _projectTodoPath returns null when no matching hub',
-  inst._projectTodoPath('Databricks', dvEmpty) === null);
+// A dv whose current() is a meeting WITH a project: frontmatter.
+const dvMeetingWithProject = {
+  current() { return { project: '[[Databricks]]', file: { name: 'Standup-2026-06-23.md', path: 'spice/meetings/notes/2026/06-June/Standup-2026-06-23.md' } }; },
+  pages() { return { where() { return { array() { return []; } }; } }; },
+};
 
-// _noticeDualWrite: capture Notice via the loader stub's window bridge.
-const captured = [];
-sharedWindow.__captureNotice = function (msg, _ms) { captured.push(String(msg)); };
+opened.length = 0;
+inst._onNewTask(dvMeetingWithProject);
+ok('HC-TE-MLA-NT-A _onNewTask opens TaskDialog with surface: meeting',
+  opened.length === 1 && opened[0].surface === 'meeting', JSON.stringify(opened[0] || null));
+ok('HC-TE-MLA-NT-B source_note is the meeting basename wikilink',
+  opened.length === 1 && opened[0].sourceNote === '[[Standup-2026-06-23]]', JSON.stringify(opened[0] || null));
+ok('HC-TE-MLA-NT-C project resolved to {name, slug} from the project list',
+  opened.length === 1 && opened[0].project && opened[0].project.name === 'Databricks' && opened[0].project.slug === 'databricks',
+  JSON.stringify(opened[0] && opened[0].project || null));
 
-captured.length = 0;
-inst._noticeDualWrite('spice/meetings/notes/2026/06-June/Standup-2026-06-23.md', 'Databricks', { ok: false, reason: 'no-action-items-anchor' }, null);
-ok('HC-V0127-MLA-NT-NOTICE-A meeting failure surfaces reason',
-  captured.length === 1 && captured[0] === 'Could not write to meeting: no-action-items-anchor');
+// A meeting WITHOUT a project: frontmatter → no project on the payload.
+const dvMeetingNoProject = {
+  current() { return { project: '', file: { name: 'Standup-2026-06-24.md', path: 'spice/meetings/notes/2026/06-June/Standup-2026-06-24.md' } }; },
+  pages() { return { where() { return { array() { return []; } }; } }; },
+};
+opened.length = 0;
+inst._onNewTask(dvMeetingNoProject);
+ok('HC-TE-MLA-NT-D no project frontmatter → project is undefined',
+  opened.length === 1 && opened[0].project === undefined, JSON.stringify(opened[0] || null));
+ok('HC-TE-MLA-NT-E still stamps source_note for the projectless meeting',
+  opened.length === 1 && opened[0].sourceNote === '[[Standup-2026-06-24]]', JSON.stringify(opened[0] || null));
 
-captured.length = 0;
-inst._noticeDualWrite('spice/meetings/notes/2026/06-June/Standup-2026-06-23.md', '', { ok: true }, null);
-ok('HC-V0127-MLA-NT-NOTICE-B meeting OK + no project',
-  captured.length === 1 && captured[0] === 'Added to Standup-2026-06-23');
+// A meeting with an UNLISTED project → slug is the slugified name fallback.
+inst._listProjects = () => [];
+const dvUnlistedProject = {
+  current() { return { project: '[[Some New Thing!]]', file: { name: 'Standup-2026-06-25.md', path: 'x' } }; },
+  pages() { return { where() { return { array() { return []; } }; } }; },
+};
+opened.length = 0;
+inst._onNewTask(dvUnlistedProject);
+ok('HC-TE-MLA-NT-F unlisted project → slugified-name fallback slug',
+  opened.length === 1 && opened[0].project && opened[0].project.slug === 'some-new-thing-',
+  JSON.stringify(opened[0] && opened[0].project || null));
 
-captured.length = 0;
-inst._noticeDualWrite('spice/meetings/notes/2026/06-June/Standup-2026-06-23.md', 'Databricks', { ok: true }, { ok: true });
-ok('HC-V0127-MLA-NT-NOTICE-C meeting + project both OK',
-  captured.length === 1 && captured[0] === 'Added to Standup-2026-06-23 and Databricks To-Do');
-
-captured.length = 0;
-inst._noticeDualWrite('spice/meetings/notes/2026/06-June/Standup-2026-06-23.md', 'Databricks', { ok: true }, { ok: false, reason: 'project-todo-missing' });
-ok('HC-V0127-MLA-NT-NOTICE-D meeting OK + project To-Do missing',
-  captured.length === 1 && captured[0] === 'Added to Standup-2026-06-23; Databricks To-Do not found');
-
-captured.length = 0;
-inst._noticeDualWrite('spice/meetings/notes/2026/06-June/Standup-2026-06-23.md', 'Databricks', { ok: true }, { ok: false, reason: 'write-failed' });
-ok('HC-V0127-MLA-NT-NOTICE-E meeting OK + project write fails (other reason)',
-  captured.length === 1 && captured[0] === 'Added to Standup-2026-06-23; could not update Databricks To-Do: write-failed');
-
-// _projectSlugFor: stub _listProjects via monkey-patch (instance method).
-const slugInst = new MLA();
-slugInst._listProjects = () => [{ slug: 'databricks', name: 'Databricks' }, { slug: 'q3-planning', name: 'Q3 Planning' }];
-ok('HC-V0127-MLA-NT-SLUG-A _projectSlugFor returns listed slug',
-  slugInst._projectSlugFor('Q3 Planning', {}) === 'q3-planning');
-ok('HC-V0127-MLA-NT-SLUG-B _projectSlugFor falls back to slugified default for unlisted',
-  slugInst._projectSlugFor('Some New Thing!', {}) === 'some-new-thing-');
-
-// ── HC-V01330-* — source-contract regression guards ────────────────────────
-// Enter-to-submit on the New Task modal + the dv.current() cold-load guard.
+// The removed dual-write helpers must be GONE (no reintroduction of raw-markdown path).
 const mlaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/meetings/helpers/meeting-leaf-actions.js'), 'utf8');
-ok('HC-V01330-MLA-ENTER-A New Task modal wires Enter → save',
-  /addEventListener\("keydown"[\s\S]{0,220}ev\.key[\s\S]{0,40}"Enter"[\s\S]{0,160}save\.click\(\)/.test(mlaSrc),
-  'no Enter→save keydown handler found in _openTaskModal');
+ok('HC-TE-MLA-NT-G removed the dual-write helpers (_openTaskModal / _noticeDualWrite / _projectTodoPath)',
+  !/_openTaskModal|_noticeDualWrite|_projectTodoPath/.test(mlaSrc));
+ok('HC-TE-MLA-NT-H _onNewTask routes through TaskDialog surface: "meeting"',
+  /TaskDialog[\s\S]{0,400}surface:\s*["']meeting["']/.test(mlaSrc));
 
 const meetManifest = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/meetings/manifest.json'), 'utf8');
 ok('HC-V01330-MLA-DVGUARD-A manifest inline_body has no unguarded dv.current().file.path',
