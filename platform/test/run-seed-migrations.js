@@ -376,6 +376,36 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-* — applyFinanceBudgetMalformedGroupRepair =====
+    // The seed's Budget-2026-05.md is committed with the pre-fix CORRUPTION: an
+    // inline flow-mapping category row (which already carries `group` inside the
+    // braces) followed by a stray `    group: Unassigned` continuation line that
+    // the old group-backfill spliced in. The repair heal must strip ONLY that
+    // stray line while (a) preserving the flow-map row and (b) NOT re-injecting a
+    // fresh stray line (the D1 flow-map skip). (The V0160 prefix is a cosmetic
+    // label — the release pipeline computes the real shipping version; this is
+    // not a version gate.)
+    {
+        let repairBody = "";
+        try { repairBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
+        ok(
+            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-1 stray 'group: Unassigned' line stripped from flow-map row",
+            !/\n    group: Unassigned/.test(repairBody)
+        );
+        ok(
+            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-2 flow-map Golf row preserved (group inside braces)",
+            /\{"group":"Lifestyle","name":"Golf"/.test(repairBody)
+        );
+        ok(
+            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-3 repair marker appended",
+            repairBody.includes("__budget_malformed_group_repaired:")
+        );
+        ok(
+            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-4 original clean block Groceries row untouched",
+            /group: Discretionary, name: Groceries/.test(repairBody)
+        );
+    }
+
     // ===== HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-* — applyFinanceMonthsEntityCreateSentinel =====
     // The seed's months/Months.md is committed in the MALFORMED pre-heal shape
     // (the `// entity-create:month` marker is the LAST line of the FinanceNav
