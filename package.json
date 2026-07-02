@@ -44,6 +44,7 @@
     "test:doc-search": "node platform/test/run-doc-search.js",
     "test:wiki": "node platform/test/run-wiki.js",
     "test:section-label": "node platform/test/run-section-label.js",
+    "test:project-nav": "node platform/test/run-project-nav-buttons.js",
     "status": "node scripts/workshop-status.js",
     "regen-cycle-status": "node scripts/regen-cycle-status.js",
     "scaffold-harness": "node scripts/scaffold-behavioral-harness.js",

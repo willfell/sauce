@@ -185,6 +185,24 @@ class ProjectNavButtons {
         return { label: "Helpful Links", path };
     }
 
+    // WS3 (nav consolidation) — pure classifier splitting the built nav buttons
+    // into a `core` row (rendered inline) and an `overflow` set (folded behind a
+    // "More" menu). Overflow = the secondary destinations Map / To-Do / Helpful
+    // Links, matched by EXACT label so a near-miss ("To-Do List", "Sitemap")
+    // stays in core. Input order is preserved within both partitions. Kept pure
+    // + separate from render() so the split is unit-testable (run-project-nav-
+    // buttons.js PNB-1..5) without stubbing the full Obsidian render.
+    _partitionButtons(buttons) {
+        const OVERFLOW = new Set(["Map", "To-Do", "Helpful Links"]);
+        const core = [];
+        const overflow = [];
+        for (const btn of (buttons || [])) {
+            if (btn && OVERFLOW.has(btn.label)) overflow.push(btn);
+            else core.push(btn);
+        }
+        return { core, overflow };
+    }
+
     // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
     // (bypasses the link resolver, which can double an absolute path against the
     // current note's folder on a cold cache — the doubled-path bug). Falls back
