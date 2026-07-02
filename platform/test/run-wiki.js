@@ -273,8 +273,8 @@ const pages = [
   const src = fs.readFileSync(TREE_SRC, 'utf8');
   ok('W8a WikiTree card nav uses BeaconCards `target:` (not `link:`)',
      /target:\s*\(s\)\s*=>/.test(src) && /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
-  ok('W8b recent-updates list navigates via openLinkText (not a no-op raw <a href>)',
-     /openLinkText\(/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
+  ok('W8b recent-updates renders via BeaconCards (no no-op raw <a href>)',
+     /pages:\s*recent/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +289,7 @@ const pages = [
     const el = { children: [], style: { cssText: '' } };
     el.createEl = (tag, o) => { const c = makeEl2(); c.cls = (o && o.cls) || ''; el.children.push(c); return c; };
     el.closest = () => null;
+    el.querySelector = () => null;
     return el;
   }
   function runLeaf(filePath, sectionHubs, withWikiMove) {
@@ -327,6 +328,55 @@ const pages = [
     ok('W9d root-level page: Wiki + Move only (no Up)',
        b.length === 2 && labels.includes('Wiki') && labels.includes('Move') && !labels.some(l => l.startsWith('Up:')));
   }
+}
+
+// ---------------------------------------------------------------------------
+// W10 — "Recently updated" renders as BeaconCards, each tagged with the section
+// the page came from ("in <section>").
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const bcCalls = [];
+  function makeEl3() {
+    const el = { children: [], style: { cssText: '' } };
+    el.createEl = (t, o) => { const c = makeEl3(); c.cls = (o && o.cls) || ''; el.children.push(c); return c; };
+    el.querySelector = () => null; el.closest = () => null; el.empty = () => { el.children.length = 0; };
+    return el;
+  }
+  const fakeCustomJS = {
+    DocSearch: { render: () => ({ resultsContainer: makeEl3(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: (dv, opts) => bcCalls.push(opts) },
+  };
+  const wikiPages = [
+    makePage('wiki-section', 'spice/wiki/testing/testing.md', 1000),
+    makePage('wiki-page', 'spice/wiki/testing/what.md', 5000),
+  ];
+  const dv = { container: makeEl3(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wikiPages }) };
+  const TreeCls = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(fakeCustomJS, { moment: null });
+  new TreeCls().render(dv);
+  const recentCall = bcCalls.find(c => c.meta && c.pages && c.pages[0] && c.pages[0].type === 'wiki-page' && /^in /.test(String(c.meta(c.pages[0]))));
+  ok('W10a recently-updated renders as BeaconCards (target + meta fns)',
+     !!recentCall && typeof recentCall.target === 'function');
+  ok('W10b recent card meta names the section it came from ("in testing")',
+     recentCall && recentCall.meta(recentCall.pages[0]) === 'in testing');
+}
+
+// ---------------------------------------------------------------------------
+// W11 — mobile legibility + divider: both wiki action helpers render an <hr>
+// divider (between the global nav row and the wiki buttons) and apply mobile
+// sizing to every button via _mobilize; the wiki breadcrumb is prominent.
+// ---------------------------------------------------------------------------
+{
+  const hubSrc  = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js'), 'utf8');
+  const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
+  const bcSrc   = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'breadcrumb.js'), 'utf8');
+  const mobilizes = (s) => /_mobilize\(/.test(s) && /minWidth\s*=/.test(s) && /fontSize\s*=/.test(s);
+  const hasHr = (s) => /createEl\("hr"\)/.test(s);
+  ok('W11a WikiHubActions: hr divider + _mobilize sizing', hasHr(hubSrc) && mobilizes(hubSrc));
+  ok('W11b WikiLeafActions: hr divider + _mobilize sizing', hasHr(leafSrc) && mobilizes(leafSrc));
+  ok('W11c wiki breadcrumb (path_walk) is prominent (font-size: 1em, wiki-breadcrumb class)',
+     /wiki-breadcrumb/.test(bcSrc) && /"font-size: 1em; margin: 2px 0 10px 0; line-height: 1\.9;"/.test(bcSrc));
 }
 
 // ---------------------------------------------------------------------------
