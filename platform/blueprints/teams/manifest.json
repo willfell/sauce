@@ -1,28 +1,68 @@
 {
   "name": "teams",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "kind": "blueprint",
   "module_directory": "teams",
   "skills_dir": ".claude/skills/teams",
   "description": "Org-chart middle tier. Flat notes under spice/teams/<Name>.md with hub at spice/teams/Teams.md. Each Team belongs to exactly one Product (required wikilink). Projects optionally tag a team via teams: [] list. Hub groups teams by Product; per-team page rolls up member projects. v0.3.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Template, Team.md grows ## Mentions H2 below TeamPageCards block — universal cross-blueprint backlink panel via canonical teams: cross-ref reverse query.",
   "depends_on": [
-    { "name": "customjs-guard",  "range": ">=1.0.0" },
-    { "name": "nav-buttons",     "range": ">=2.6.0" },
-    { "name": "accent-button",   "range": ">=0.1.0" },
-    { "name": "cards",           "range": ">=0.2.4" },
-    { "name": "products",        "range": ">=0.1.0" },
-    { "name": "backlink-panel",  "range": ">=0.1.0" }
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "nav-buttons",
+      "range": ">=2.6.0"
+    },
+    {
+      "name": "accent-button",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "cards",
+      "range": ">=0.2.4"
+    },
+    {
+      "name": "products",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "backlink-panel",
+      "range": ">=0.1.0"
+    }
   ],
-  "customjs_classes": ["TeamsHubCards", "TeamPageCards", "TeamActionButtons"],
+  "customjs_classes": [
+    "TeamsHubCards",
+    "TeamPageCards",
+    "TeamActionButtons"
+  ],
   "files": [
-    { "source": "scripts/teams-hub-cards.js",      "dest": "{{scripts_path}}/teams/teams-hub-cards.js" },
-    { "source": "scripts/team-page-cards.js",      "dest": "{{scripts_path}}/teams/team-page-cards.js" },
-    { "source": "scripts/team-action-buttons.js",  "dest": "{{scripts_path}}/teams/team-action-buttons.js" },
-    { "source": "templates/Template, Team.md",     "dest": "{{templates_path}}/Template, Team.md" },
-    { "source": "content/Teams.md",                "dest": "{{module_directory}}/Teams.md" }
+    {
+      "source": "scripts/teams-hub-cards.js",
+      "dest": "{{scripts_path}}/teams/teams-hub-cards.js"
+    },
+    {
+      "source": "scripts/team-page-cards.js",
+      "dest": "{{scripts_path}}/teams/team-page-cards.js"
+    },
+    {
+      "source": "scripts/team-action-buttons.js",
+      "dest": "{{scripts_path}}/teams/team-action-buttons.js"
+    },
+    {
+      "source": "templates/Template, Team.md",
+      "dest": "{{templates_path}}/Template, Team.md"
+    },
+    {
+      "source": "content/Teams.md",
+      "dest": "{{module_directory}}/Teams.md"
+    }
   ],
   "templater_folder_templates": [
-    { "folder": "{{module_directory}}", "template": "{{templates_path}}/Template, Team.md" }
+    {
+      "folder": "{{module_directory}}",
+      "template": "{{templates_path}}/Template, Team.md"
+    }
   ],
   "nav_buttons": [
     {
@@ -30,13 +70,32 @@
       "label": "Teams",
       "icon": "users",
       "order": 75,
-      "action": { "type": "openLink", "target": "{{module_directory}}/Teams.md" }
+      "action": {
+        "type": "openLink",
+        "target": "{{module_directory}}/Teams.md"
+      }
     }
   ],
   "claude_surface": [
-    { "kind": "command", "source": "commands/teams.md",                  "dest": ".claude/commands/teams.md" },
-    { "kind": "skill",   "source": "skills/new-team/SKILL.md",           "dest": "{{skills_dir}}/new-team/SKILL.md" },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Teams", "path": "{{module_directory}}", "command": "/teams" } }
+    {
+      "kind": "command",
+      "source": "commands/teams.md",
+      "dest": ".claude/commands/teams.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/new-team/SKILL.md",
+      "dest": "{{skills_dir}}/new-team/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Teams",
+        "path": "{{module_directory}}",
+        "command": "/teams"
+      }
+    }
   ],
   "post_install": [
     {
@@ -48,12 +107,28 @@
     {
       "target": "teams",
       "fragment": {
-        "scope": { "path_glob": "spice/teams/*.md", "exclude_basenames": ["Teams.md"] },
+        "scope": {
+          "path_glob": "spice/teams/*.md",
+          "exclude_basenames": [
+            "Teams.md"
+          ]
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type":     { "required": true, "type": "string", "equals": "team" },
-          "name":     { "required": true, "type": "string" },
-          "products": { "required": true, "type": "list", "min_length": 1 }
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "team"
+          },
+          "name": {
+            "required": true,
+            "type": "string"
+          },
+          "products": {
+            "required": true,
+            "type": "list",
+            "min_length": 1
+          }
         },
         "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
       }
