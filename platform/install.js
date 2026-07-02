@@ -1230,6 +1230,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
+  await applyBoardCardBreadcrumbHeal(tp, mech, variables, history, git); // WS9 P0b chrome overhaul — stamps `type: task-hub` (or task-board-card) + injects a leading Breadcrumb on promoted board-card notes (tasks/<Task>/<Task>.md); MUST run BEFORE applyProjectChromeDividerHeal so the fresh type lets that heal reach these notes (insert-only, idempotent, .sauce-backup)
   await applyProjectChromeDividerHeal(tp, mech, variables, history, git); // WS9 P0a chrome overhaul — strips legacy literal `---` chrome dividers BETWEEN consecutive customjs-guard chrome blocks + collapses doubled blank gaps on project-related notes (cleanup, idempotent, .sauce-backup; only chrome-bounded `---`, preserves content-boundary dividers)
   await applyProjectsHubAllProjectsHeadingCleanup(tp, mech, variables, history, git); // strips the legacy `## All Projects` H2 from the all-projects hub so it uses the SectionLabel chrome pattern (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
@@ -3366,6 +3367,193 @@ async function applyProjectChromeDividerHeal(tp, manifest, variables, history, g
     history.push({
       event: "info",
       step: "project_chrome_divider_heal",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _injectBoardCardBreadcrumb — pure transform (WS9 P0b chrome overhaul). Promoted
+// board-card notes (the file at spice/projects/<slug>/tasks/<Task>/<Task>.md, or a
+// deeper board card at .../board/<Card>/<Card>.md) shipped BEFORE the chrome
+// overhaul with NO Breadcrumb block and often NO frontmatter `type:` (only tags:
+// kanban-card/project-card). The overhaul stamps a stable type + a Breadcrumb as
+// the first rendered block. This transform, given a `desiredType`:
+//   (1) Ensures frontmatter carries `type: <desiredType>`. install.js CANNOT use
+//       parseYaml (it runs in the Templater Node context, not Obsidian), so this
+//       is regex-based, mirroring the frontmatter idioms already used across the
+//       installer:
+//         - frontmatter present + a `type:` line already exists → left untouched
+//           (never overwrite a user/other type);
+//         - frontmatter present, no `type:` line → insert `type: <desiredType>`
+//           as the FIRST line inside the FM block;
+//         - no frontmatter at all → prepend a minimal `---\ntype: <t>\n---\n\n`.
+//   (2) Inserts a Breadcrumb dataviewjs block as the FIRST rendered block — right
+//       before the first `class: "SpaceNavButtons"` / `class: "ProjectNavButtons"`
+//       dataviewjs fence; if neither exists, immediately after the frontmatter.
+// Idempotent: if a `class: "Breadcrumb"` block is already present the breadcrumb
+// step is skipped; the type step only fires when the FM lacks a `type:`. Returns
+// { changed, body }.
+function _injectBoardCardBreadcrumb(body, desiredType) {
+  const src = String(body == null ? "" : body);
+  const type = String(desiredType || "task-hub");
+  let out = src;
+  let changed = false;
+
+  // ---- (1) frontmatter type: ----
+  const fmMatch = out.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/);
+  if (fmMatch) {
+    const fmBody = fmMatch[1];
+    // A `type:` key anywhere in the FM block (line-anchored) → leave it.
+    if (!/^\s*type\s*:/m.test(fmBody)) {
+      const nl = fmMatch[0].includes("\r\n") ? "\r\n" : "\n";
+      // Insert `type: <type>` as the first FM line, just after the opening `---`.
+      const openLen = ("---" + nl).length;
+      out = out.slice(0, openLen) + "type: " + type + nl + out.slice(openLen);
+      changed = true;
+    }
+  } else {
+    // No frontmatter → prepend a minimal block.
+    out = "---\ntype: " + type + "\n---\n\n" + out;
+    changed = true;
+  }
+
+  // ---- (2) Breadcrumb as first rendered block ----
+  if (!/class:\s*"Breadcrumb"/.test(out)) {
+    const bcBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n```';
+    // Anchor: the first SpaceNavButtons or ProjectNavButtons chrome fence.
+    let navIdx = out.indexOf('class: "SpaceNavButtons"');
+    if (navIdx === -1) navIdx = out.indexOf('class: "ProjectNavButtons"');
+    if (navIdx !== -1) {
+      const fence = out.lastIndexOf("```dataviewjs", navIdx);
+      if (fence !== -1) {
+        out = out.slice(0, fence) + bcBlock + "\n\n" + out.slice(fence);
+        changed = true;
+      }
+    } else {
+      // No nav block — insert right after the frontmatter (or at the top).
+      const fm2 = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+      if (fm2) {
+        out = out.slice(0, fm2[0].length) + "\n" + bcBlock + "\n" + out.slice(fm2[0].length);
+      } else {
+        out = bcBlock + "\n\n" + out;
+      }
+      changed = true;
+    }
+  }
+
+  return { changed: changed && out !== src, body: out };
+}
+
+// applyBoardCardBreadcrumbHeal — WS9 P0b. Walks spice/projects/** and heals
+// promoted board-card notes: a file whose basename === its parent folder name and
+// whose path contains a `/tasks/` segment. Two shapes:
+//   - spice/projects/<slug>/tasks/<Task>/<Task>.md              → type: task-hub
+//   - spice/projects/<slug>/tasks/<Task>/board/<Card>/<Card>.md → type: task-board-card
+// Injects `type` + a leading Breadcrumb via _injectBoardCardBreadcrumb. Insert-only
+// + idempotent (skips notes that already render a Breadcrumb AND carry a type),
+// .sauce-backup snapshot before any write, per-note try/catch (fails loud via
+// history, never throws). MUST run BEFORE applyProjectChromeDividerHeal so the
+// freshly-stamped type lets that heal reach these notes. Mirrors the
+// applyProjectNavButtonsSeparatorGap walk posture.
+async function applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  async function collectMd(dir) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    let files = (listing.files || []).filter((p) => p.endsWith(".md"));
+    for (const sub of (listing.folders || [])) {
+      if (sub.includes("/.sauce-backup")) continue;
+      files = files.concat(await collectMd(sub));
+    }
+    return files;
+  }
+
+  // Classify a path as a promoted board card + return its desired type, else null.
+  //   .../tasks/<Task>/<Task>.md              → task-hub
+  //   .../tasks/<Task>/board/<Card>/<Card>.md → task-board-card
+  function boardCardType(notePath) {
+    const parts = notePath.split("/");
+    const file = parts[parts.length - 1];
+    if (!file.endsWith(".md")) return null;
+    const base = file.slice(0, -3);
+    const parent = parts[parts.length - 2];
+    if (parent !== base) return null;            // basename must === parent folder
+    if (parts.indexOf("tasks") === -1) return null;
+    // Deeper board card: .../board/<Card>/<Card>.md
+    if (parts[parts.length - 3] === "board") return "task-board-card";
+    // Promoted task hub: .../tasks/<Task>/<Task>.md
+    if (parts[parts.length - 3] === "tasks") return "task-hub";
+    return null;
+  }
+
+  let mdFiles;
+  try {
+    mdFiles = await collectMd(root);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "board_card_breadcrumb_heal",
+        reason: `walk failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of mdFiles) {
+    try {
+      const desiredType = boardCardType(notePath);
+      if (!desiredType) { skipped += 1; continue; }
+      const before = await adapter.read(notePath);
+      const { changed, body: after } = _injectBoardCardBreadcrumb(before, desiredType);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "board_card_breadcrumb_heal",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "board_card_breadcrumb_heal",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "board_card_breadcrumb_heal",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -18082,6 +18270,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // (run-v0127-project-hub-heal.js CHR-DIV-*).
     module.exports.applyProjectChromeDividerHeal = applyProjectChromeDividerHeal;
     module.exports._stripProjectChromeDividers = _stripProjectChromeDividers;
+    // WS9 P0b — promoted board-card breadcrumb + type heal + pure transform
+    // (run-v0127-project-hub-heal.js BC-BC-*).
+    module.exports.applyBoardCardBreadcrumbHeal = applyBoardCardBreadcrumbHeal;
+    module.exports._injectBoardCardBreadcrumb = _injectBoardCardBreadcrumb;
     module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
     module.exports._stripAllProjectsHeading = _stripAllProjectsHeading;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
