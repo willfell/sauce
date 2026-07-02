@@ -2,7 +2,7 @@
 type: wiki-hub
 title: Wiki
 dir: spice/wiki
-created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
+created_at: "2026-07-01T18:00:40-06:00"
 tags:
   - wiki-hub
 ---

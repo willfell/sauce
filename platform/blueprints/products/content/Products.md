@@ -1,7 +1,7 @@
 ---
 type: products-hub
 name: Products
-created: {{DATE}}
+created_at: "2026-05-13T07:16:16-06:00"
 tags:
   - products-hub
 ---
