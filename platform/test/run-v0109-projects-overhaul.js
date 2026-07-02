@@ -581,11 +581,15 @@ async function testTemplateIntegrity() {
 
   // TPL-B-1: Project.md section order (strict) — Breadcrumb → SpaceNavButtons
   // → ProjectNavButtons → ProjectStatusWidget → ProjectMeetingsPanel →
-  // ProjectWorkstreamManager. Other orderings would surface the regression.
+  // ProjectLinksPanel. Other orderings would surface the regression.
+  // Chrome overhaul WS2.1: the Workstreams section (ProjectWorkstreamManager)
+  // was removed from the hub template — workstream management now lives on the
+  // Map note — so the trailing assertion targets ProjectLinksPanel (the new
+  // last block) instead.
   {
     console.log("\n--- Case TPL-B-1: Project.md strict section order ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Project.md"), "utf8");
-    const expectedOrder = ["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectWorkstreamManager"];
+    const expectedOrder = ["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectLinksPanel"];
     const positions = expectedOrder.map((cls) => ({ cls, idx: tpl.indexOf(`class: "${cls}"`) }));
     for (let i = 0; i < positions.length; i++) {
       ok(`TPL-B-1.${i + 1} ${positions[i].cls} present`, positions[i].idx >= 0,
