@@ -607,6 +607,58 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W18 — recursive search: an active query searches the current note's whole
+// subtree (flat Results grid, each tagged with its section trail); an empty query
+// falls through to the browse view.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const wp = [
+    makePage('wiki-section', 'spice/wiki/infra/infra.md', 100),
+    makePage('wiki-section', 'spice/wiki/infra/aws/aws.md', 110),
+    makePage('wiki-page',    'spice/wiki/infra/aws/VPC Peering.md', 500),
+    makePage('wiki-page',    'spice/wiki/infra/Overview.md', 400),
+    makePage('wiki-page',    'spice/wiki/ems/VPC notes.md', 600),
+  ];
+  function runTree(active) {
+    const bc = [], labels = [];
+    const cjs = {
+      DocSearch: {
+        render: () => ({ resultsContainer: el(), text: active ? 'vpc' : '', tags: new Set(), hasActiveFilter: !!active }),
+        matches: (p, c) => { if (!c || !c.hasActiveFilter) return true; const n = ((p.file && p.file.name) || '').toLowerCase(); return n.includes((c.text || '').toLowerCase()); },
+      },
+      SectionLabel: { render: (dv, o) => labels.push(o && o.text) },
+      BeaconCards: { render: (dv, opts) => bc.push(opts) },
+    };
+    const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
+    const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+    new Tree().render(dv);
+    return { bc, labels };
+  }
+  const s = runTree(true);
+  const resCall = s.bc.find(c => c.layout === 'stacked' && Array.isArray(c.pages) && c.pages.every(p => p.file));
+  ok('W18a active query → a single flat Results grid (browse view suppressed)',
+     s.bc.length === 1 && !!resCall && resCall.columns === 2 && s.labels.some(l => /^Results \(2\)/.test(l)));
+  ok('W18b results are RECURSIVE (2-level-deep doc matched, non-matches excluded)',
+     !!resCall && resCall.pages.some(p => p.file.path === 'spice/wiki/infra/aws/VPC Peering.md') &&
+     !resCall.pages.some(p => /Overview/.test(p.file.name)));
+  const vpcPeer  = resCall && resCall.pages.find(p => p.file.path === 'spice/wiki/infra/aws/VPC Peering.md');
+  const vpcNotes = resCall && resCall.pages.find(p => p.file.path === 'spice/wiki/ems/VPC notes.md');
+  ok('W18c subtitle shows the section trail relative to the search root',
+     !!vpcPeer && resCall.subtitle(vpcPeer) === 'in infra / aws' &&
+     !!vpcNotes && resCall.subtitle(vpcNotes) === 'in ems');
+  const b = runTree(false);
+  ok('W18d empty query falls through to browse (sections row, no Results label)',
+     b.bc.some(c => c.layout === 'row') && !b.labels.some(l => /^Results/.test(l)));
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

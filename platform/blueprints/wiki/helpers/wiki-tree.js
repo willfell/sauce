@@ -47,6 +47,16 @@ class WikiTree {
         const rawPages = dv.pages('"' + scopePath + '"');
         const pages = rawPages.array ? rawPages.array() : Array.from(rawPages);
 
+        // SEARCH MODE — with an active query, search this note's WHOLE subtree
+        // recursively: a flat list of every matching doc, each tagged with its section.
+        // `pages` is already the full recursive subtree under scopePath, so the query
+        // naturally scopes to "the folder you're in, and everything below it". An empty
+        // query falls through to the normal browse view (sections + this folder's docs).
+        if (ctx && ctx.hasActiveFilter) {
+            this._renderSearchResults(dv, proxyDv, scopePath, pages, ctx);
+            return;
+        }
+
         // Sub-sections — rows, sorted by last-edited (default) with a Recent | A–Z toggle.
         const subs = this._immediateChildFolders(scopePath, pages);
         if (subs.length) {
@@ -140,6 +150,69 @@ class WikiTree {
                 return p;
             },
         };
+    }
+
+    // Recursive search results: every wiki-page in the subtree (most-recent first)
+    // whose name/tags match the active query, as a flat grid. Each card's subtitle is
+    // the section trail (relative to where you searched) so you can tell WHERE a hit
+    // lives. Replaces the browse view while a query is active.
+    _renderSearchResults(dv, proxyDv, scopePath, pages, ctx) {
+        // folder → section display title, for the "in <trail>" subtitle.
+        const sectionByFolder = {};
+        for (const p of pages) {
+            if (p && p.type === "wiki-section" && p.file && p.file.path) {
+                const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+                sectionByFolder[f] = (p.title && String(p.title).trim()) || p.file.path.slice(p.file.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
+            }
+        }
+        const matches = pages
+            .filter(p => p && p.type === "wiki-page" && p.file && p.file.path && customJS.DocSearch.matches(p, ctx))
+            .sort((a, b) => {
+                const at = a.file.mtime && a.file.mtime.ts != null ? a.file.mtime.ts : 0;
+                const bt = b.file.mtime && b.file.mtime.ts != null ? b.file.mtime.ts : 0;
+                return bt - at;
+            });
+
+        customJS.SectionLabel.render(proxyDv, { text: "Results (" + matches.length + ")" });
+        if (!matches.length) {
+            const empty = proxyDv.container.createEl("div");
+            empty.style.cssText = "padding: 16px; text-align: center; color: var(--text-faint); font-style: italic; border: 1px dashed var(--background-modifier-border); border-radius: 8px; margin-top: 8px;";
+            empty.textContent = "No matching docs in this section or below.";
+            return;
+        }
+        const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+        customJS.BeaconCards.render(proxyDv, {
+            pages: matches,
+            layout: "stacked",
+            columns: 2,
+            sort: () => 0,   // keep OUR most-recent-first order
+            title: (p) => p.title || p.file.name,
+            icon: () => fileIcon,
+            target: (p) => p.file.path,
+            subtitle: (p) => {
+                const where = this._sectionTrail(p, scopePath, sectionByFolder);
+                const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
+                if (where) return ago ? (where + " · " + ago) : where;
+                return ago ? ("edited " + ago) : "";
+            },
+        });
+    }
+
+    // "in <section> / <sub-section>" trail for a page, relative to the search root
+    // (scopePath). Uses each folder's section-hub display title, falling back to the
+    // folder slug. A page directly in the search root reads "here".
+    _sectionTrail(p, scopePath, sectionByFolder) {
+        const folder = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+        if (folder === scopePath) return "here";
+        if (!folder.startsWith(scopePath + "/")) return "";
+        const rel = folder.slice(scopePath.length + 1).split("/");
+        const parts = [];
+        let acc = scopePath;
+        for (const seg of rel) {
+            acc = acc + "/" + seg;
+            parts.push((sectionByFolder && sectionByFolder[acc]) || seg);
+        }
+        return "in " + parts.join(" / ");
     }
 
     // Section cards as full-width ROWS (title left, sub-sections · docs · edited right),

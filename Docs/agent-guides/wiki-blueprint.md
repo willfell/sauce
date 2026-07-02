@@ -51,7 +51,9 @@ Type values are globally unique (no collision with project's `docs-hub`/`section
 
 ## Search — `doc-search` mechanism
 
-`DocSearch` graduated from the project blueprint to the shared `doc-search` mechanism at v0.163.0 (both `project` + `wiki` depend on it). `WikiTree` calls `customJS.DocSearch.render(dv, { scopePath, recursive:true, entityType:"wiki-page", persist:false, onChange })`. `persist:false` is deliberate — wiki search text is cleared when you leave a note (nothing in localStorage). `DocSearch.matches(page, ctx)` is the pure text+tag predicate consumers filter with.
+`DocSearch` graduated from the project blueprint to the shared `doc-search` mechanism at v0.163.0 (both `project` + `wiki` depend on it). `WikiTree` calls `customJS.DocSearch.render(dv, { scopePath, recursive:true, entityType:"wiki-page", persist:false, onChange })`. `persist:false` is deliberate — wiki search text is cleared when you leave a note (nothing in localStorage). `DocSearch.matches(page, ctx)` is the pure text+tag predicate consumers filter with (it matches on `file.name` — which for wiki pages IS the title — plus tags).
+
+**Search is recursive & mode-switching (v0.180.x).** `_renderResults` branches on `ctx.hasActiveFilter`: with an **empty** box it renders the normal **browse** view (sections + this folder's docs + hub recently-updated); as soon as you **type**, it switches to **search** mode via `_renderSearchResults` — a flat `Results (N)` grid of EVERY matching `wiki-page` in the current note's **whole subtree**, recursively (the `dv.pages('"<scopePath>"')` query already returns the full subtree, so search naturally scopes to "the folder you're in and everything below it"). Each result card's subtitle is the section trail relative to the search root (`_sectionTrail` → `in <section> / <sub-section>`, using each folder's section-hub display title, falling back to the slug; a hit directly in the current folder reads `here`). Sorted most-recent-first (`sort: () => 0` preserves it). Clearing the box returns to browse (and the `Recent | A–Z` section-sort choice on `dv.container` survives the round-trip).
 
 ## The Move dialog (tree)
 
