@@ -279,9 +279,10 @@ class SpaceNavButtons {
     const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
     if (!doc || !doc.body) return;
 
-    // Toggle: an already-open overlay means "close".
+    // Toggle: an already-open overlay means "close" — route through its own
+    // teardown (__navClose) so the keydown listener is removed too.
     const open = doc.body.querySelector && doc.body.querySelector(".vault-nav-overlay");
-    if (open && open.remove) { open.remove(); return; }
+    if (open) { if (open.__navClose) open.__navClose(); else if (open.remove) open.remove(); return; }
 
     const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
 
@@ -318,15 +319,20 @@ class SpaceNavButtons {
         + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
     }
 
-    for (const btn of menuEntries) {
-      panel.appendChild(this._buildOverlayRow(doc, btn, dv, overlay, isMobile));
-    }
-
+    // Single teardown for ALL dismiss paths (backdrop, Escape, re-tap toggle,
+    // row select) — removes the overlay AND the keydown listener so a stale
+    // capture-phase Escape handler can never swallow keys elsewhere.
     const close = () => {
       if (overlay.remove) overlay.remove();
       if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
     };
     const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+    overlay.__navClose = close;
+
+    for (const btn of menuEntries) {
+      panel.appendChild(this._buildOverlayRow(doc, btn, dv, close, isMobile));
+    }
+
     overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
     if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
 
@@ -338,7 +344,7 @@ class SpaceNavButtons {
   // it renders identically to the chrome glyphs; label text originates from
   // installer-validated registry declarations (trusted, same boundary as the
   // former grid). Full-width rows mean labels never truncate on mobile.
-  _buildOverlayRow(doc, btn, dv, overlay, isMobile) {
+  _buildOverlayRow(doc, btn, dv, close, isMobile) {
     const row = doc.createElement("button");
     const svg = customJS.Icons?.resolve?.(btn.icon) || "";
     row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${svg}</span>`
@@ -350,7 +356,7 @@ class SpaceNavButtons {
       + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
     row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
     row.onmouseleave = () => { row.style.background = "transparent"; };
-    row.onclick = () => { if (overlay.remove) overlay.remove(); return this._dispatchAction(btn, dv); };
+    row.onclick = () => { close(); return this._dispatchAction(btn, dv); };
     return row;
   }
 
