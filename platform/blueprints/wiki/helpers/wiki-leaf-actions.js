@@ -28,11 +28,13 @@ class WikiLeafActions {
         if (existing) existing.remove();
 
         const wrap = dv.container.createEl("div", { cls: "wiki-leaf-actions" });
-        // Divider between the global nav-button row (above) and the wiki buttons.
+        wrap.style.cssText = "margin: 0;";
+        // Divider between the global nav-button row (above) and the wiki buttons —
+        // tight against both, and against the page's trailing divider below.
         const hr = wrap.createEl("hr");
-        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 10px 0 8px 0;";
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0;";
         const row = wrap.createEl("div");
-        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto 4px auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; gap: 10px; margin: 2px auto 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         const open = (target) => { if (target) app.workspace.openLinkText(target, ""); };
 
@@ -87,37 +89,49 @@ class WikiLeafActions {
         const chosen = await new Promise((resolve) => {
             const overlay = document.createElement("div");
             overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;";
+            const close = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
+            overlay.addEventListener("click", (ev) => { if (ev.target === overlay) { close(); resolve(null); } });
             const dialog = document.createElement("div");
-            dialog.style.cssText = "background:var(--background-primary);border-radius:12px;padding:24px;min-width:320px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.3);";
+            dialog.style.cssText = "background:var(--background-primary);border-radius:12px;padding:20px;min-width:320px;max-width:520px;box-shadow:0 8px 32px rgba(0,0,0,0.3);";
             const heading = document.createElement("div");
             heading.textContent = "Move to section";
-            heading.style.cssText = "font-size:1.1em;font-weight:600;margin-bottom:12px;";
+            heading.style.cssText = "font-size:1.1em;font-weight:600;margin-bottom:10px;";
             dialog.appendChild(heading);
-            const sel = document.createElement("select");
-            sel.style.cssText = "width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);font-size:1em;margin-bottom:12px;";
+
+            // Indented tree list — each row is indented by its depth (with a subtle
+            // connector for nested sections) so the section → sub-section hierarchy is
+            // visible; clicking a row moves the note straight into that section.
+            const list = document.createElement("div");
+            list.style.cssText = "max-height:55vh;overflow-y:auto;margin-bottom:12px;border:1px solid var(--background-modifier-border);border-radius:8px;padding:4px;";
             for (const opt of options) {
-                const o = document.createElement("option");
-                o.value = opt.folder; o.textContent = opt.label;
-                sel.appendChild(o);
+                const rowEl = document.createElement("div");
+                const indent = 8 + (opt.depth || 0) * 18;
+                rowEl.style.cssText = "padding:8px 10px;padding-left:" + indent + "px;border-radius:6px;cursor:pointer;color:var(--text-normal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" + (opt.depth === 0 ? "font-weight:600;" : "");
+                const connector = (opt.depth || 0) > 0 ? '<span style="color:var(--text-muted);opacity:0.6;">└ </span>' : "";
+                rowEl.innerHTML = connector + this._escape(opt.label);
+                rowEl.onmouseenter = () => { rowEl.style.background = "var(--background-modifier-hover)"; };
+                rowEl.onmouseleave = () => { rowEl.style.background = "transparent"; };
+                rowEl.onclick = () => { close(); resolve(opt.folder); };
+                list.appendChild(rowEl);
             }
-            dialog.appendChild(sel);
+            dialog.appendChild(list);
+
             const btnRow = document.createElement("div");
             btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
-            const close = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
             const cancelBtn = document.createElement("button");
             cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "padding:6px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);";
             cancelBtn.onclick = () => { close(); resolve(null); };
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Move";
-            okBtn.style.cssText = "padding:6px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--interactive-accent);background:var(--interactive-accent);color:var(--text-on-accent);";
-            okBtn.onclick = () => { close(); resolve(sel.value); };
             btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
             dialog.appendChild(btnRow);
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
         });
         if (chosen) await customJS.WikiMove.move(dv, chosen);
+    }
+
+    _escape(s) {
+        return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     _buildMoveOptions(pages, currentPath) {

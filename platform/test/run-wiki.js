@@ -380,6 +380,46 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W12 — WikiMove.sectionTargets carries `depth` (tree hierarchy) in depth-first
+// order so the Move dialog can indent section → sub-section.
+// ---------------------------------------------------------------------------
+{
+  const move = new WikiMove();
+  const pages = [
+    makePage('wiki-section', 'spice/wiki/ems/ems.md', 1),
+    makePage('wiki-section', 'spice/wiki/ems/sub/sub.md', 2),
+    makePage('wiki-section', 'spice/wiki/zeta/zeta.md', 3),
+    makePage('wiki-page',    'spice/wiki/ems/p.md', 4),
+  ];
+  const t = move.sectionTargets(pages);
+  const byFolder = {}; t.forEach(x => { byFolder[x.folder] = x; });
+  ok('W12a root target is depth 0', t[0].folder === 'spice/wiki' && t[0].depth === 0);
+  ok('W12b top-level section depth 1, sub-section depth 2',
+     byFolder['spice/wiki/ems'].depth === 1 && byFolder['spice/wiki/ems/sub'].depth === 2);
+  const iEms = t.findIndex(x => x.folder === 'spice/wiki/ems');
+  ok('W12c depth-first order — a sub-section immediately follows its parent',
+     t[iEms + 1] && t[iEms + 1].folder === 'spice/wiki/ems/sub');
+}
+
+// ---------------------------------------------------------------------------
+// W13 — polish: search doesn't persist, recent uses the note icon, the move
+// dialog is an indented tree (not a flat <select>), dividers are tight.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
+  const hubSrc  = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js'), 'utf8');
+  ok('W13a wiki search does not persist (persist: false)', /persist:\s*false/.test(treeSrc));
+  ok('W13b recently-updated uses the note (file) icon, not a clock',
+     /const recentIcon = [^;]*M14 2H6a2/.test(treeSrc) && !/const recentIcon = [^;]*circle cx="12" cy="12" r="9"/.test(treeSrc));
+  ok('W13c move dialog is an indented tree (depth), not a flat <select>',
+     /opt\.depth/.test(leafSrc) && !/document\.createElement\("select"\)/.test(leafSrc));
+  ok('W13d divider margins tightened to 2px (no extra line gaps)',
+     /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(hubSrc) &&
+     /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(leafSrc));
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;
