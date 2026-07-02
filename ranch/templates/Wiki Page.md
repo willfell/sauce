@@ -1,14 +1,12 @@
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "WikiLeafActions" });
+await dv.view("{{views_path}}/customjs-guard", { class: "WikiLeafActions" });
 ```
-
----
 

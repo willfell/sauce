@@ -41,14 +41,21 @@ class WikiLeafActions {
         // Wiki home (docs).
         this._mobilize(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") }));
 
-        // Up to the section this page lives in (skip when the page sits at the wiki root).
+        // Up to the section this page lives in (skip when the page sits at the wiki
+        // root). Labelled with just the section name — clicking it takes you there.
         if (folder && folder !== root) {
             const hub = this._resolveSectionHub(dv, folder);
-            this._mobilize(customJS.AccentButton.render(row, { label: "Up: " + hub.label, icon: upIcon, flex: true, onClick: () => open(hub.path) }));
+            this._mobilize(customJS.AccentButton.render(row, { label: hub.label, icon: upIcon, flex: true, onClick: () => open(hub.path) }));
         }
 
         // Move (dialog + options computed on click — render stays dependency-free).
         this._mobilize(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => this._openMoveDialog(dv, filePath) }));
+
+        // Bottom separator — owned by this helper (tight against the buttons) so the
+        // page template no longer needs a trailing "---". A per-note heal strips the
+        // legacy template "---" from existing pages.
+        const hrBottom = wrap.createEl("hr");
+        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0 0 0;";
     }
 
     // Mobile-legible sizing (mirrors WikiHubActions._mobilize): bigger tap target +
