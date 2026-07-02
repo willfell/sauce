@@ -72,11 +72,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "MeetingLeafActions" });
 ```
----
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });

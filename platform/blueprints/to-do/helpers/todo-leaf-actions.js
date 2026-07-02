@@ -67,12 +67,28 @@ class ToDoLeafActions {
         const repeatIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`;
         const listIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`;
 
+        // Chrome dividers owned by the helper (wiki methodology) — but ONLY on the
+        // daily to-do note (type: to-do), whose template brackets this block with
+        // `---`. Render the button bar between a top + bottom <hr> INSIDE this one
+        // dataviewjs block so the separators hug the buttons (12px) instead of the
+        // big inter-block gap the template `---` left; a per-note install heal
+        // strips that legacy `---` from existing daily notes. Project To-Do
+        // (project-todo) and Recurring (to-do-recurring) templates render this block
+        // WITHOUT surrounding `---`, so they keep their divider-less layout.
+        const wantDividers = noteType === 'to-do';
+        const DIVIDER = 'border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;';
+        const host = wantDividers ? dv.container.createEl('div') : dv.container;
+        if (wantDividers) {
+            host.style.cssText = 'margin: 0;';
+            host.createEl('hr').style.cssText = DIVIDER;
+        }
+
         // Two stacked rows: New Task on its OWN full-width row (so its label
         // reads in full — never truncated to "New T..." when 3 buttons shared one
         // phone-width flex row), then Recurring (+ All where applicable) on a
         // second row below. The outer element is a column that centers the rows.
-        const bar = dv.container.createEl('div');
-        bar.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin: 0.5em auto; align-items: stretch; max-width: 600px;';
+        const bar = host.createEl('div');
+        bar.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin: ' + (wantDividers ? '0' : '0.5em') + ' auto; align-items: stretch; max-width: 600px;';
 
         const newRow = bar.createEl('div');
         newRow.style.cssText = 'display: flex; width: 100%;';
@@ -205,5 +221,7 @@ class ToDoLeafActions {
         if (noteType !== 'project-todo') {
             customJS.AccentButton.render(row, { label: 'All', icon: listIcon, onClick: openAllToDos, flex: true });
         }
+
+        if (wantDividers) host.createEl('hr').style.cssText = DIVIDER;
     }
 }

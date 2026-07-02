@@ -14,11 +14,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "ScratchDayActions" });
 ```
----
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "ScratchDayList", args: [{ day: dv.current()?.day }] });

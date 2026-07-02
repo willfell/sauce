@@ -123,5 +123,19 @@ ok('MTU-1 Meeting.md template keeps Attendees / Notes / Action Items / Tasks Sec
   /class:\s*"SectionLabel"[^`]*text:\s*"Action Items"/.test(meetTemplate) &&
   /class:\s*"SectionLabel"[^`]*text:\s*"Tasks"/.test(meetTemplate));
 
+// MLA-DIV — MeetingLeafActions owns its own <hr> dividers (wiki methodology): a
+// top + bottom <hr> (12px breathing room) render INSIDE its dataviewjs block, and
+// the Meeting.md template drops the literal `---`, so the separators hug the
+// buttons instead of leaving the big Obsidian inter-block gap. Mirrors run-wiki
+// W13d/W14c; the install heal strips the legacy `---` from existing meetings.
+// (mlaSrc is already read above.)
+ok('MLA-DIV-1 MeetingLeafActions renders top+bottom <hr> (2 hrs)',
+  (mlaSrc.match(/createEl\(["']hr["']\)/g) || []).length >= 2);
+ok('MLA-DIV-2 hr dividers use the 12px breathing-room margin',
+  /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/.test(mlaSrc));
+ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `---`',
+  !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*MeetingLeafActions/.test(meetTemplate) &&
+  !/MeetingLeafActions[\s\S]*?\n```\n+-{3,}/.test(meetTemplate));
+
 console.log(`\nResult: ${pass} passed, ${fail} failed.`);
 if (fail) { console.log('Failures:'); failures.forEach(f => console.log('  ' + f)); process.exit(1); }

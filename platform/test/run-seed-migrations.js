@@ -714,6 +714,35 @@ withTempVault((vault) => {
        sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
        sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
 
+    // ===== HC-ADIV-SEED-* — action-bar divider strip (ScratchDayActions owns <hr>) =====
+    // The seed scratch-day fixture brackets its ScratchDayActions block with a
+    // blank-line-padded `---` (an older template shape). ScratchDayActions now
+    // renders its OWN top+bottom <hr> dividers, so applyNoteChromeHeal (step 7,
+    // _stripDividersAroundActionBlock) removes the now-redundant `---` on both
+    // sides. `sd` is post-two-install, so a clean result also proves idempotency.
+    ok("HC-ADIV-SEED-1 scratch-day `---` before ScratchDayActions stripped by heal",
+       !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ScratchDayActions/.test(sd));
+    ok("HC-ADIV-SEED-2 scratch-day `---` after ScratchDayActions stripped by heal",
+       !/ScratchDayActions[\s\S]*?\n```\n+-{3,}/.test(sd));
+    ok("HC-ADIV-SEED-3 ScratchDayActions block preserved after strip",
+       /class:\s*"ScratchDayActions"/.test(sd));
+    // Direct unit — _stripDividersAroundActionBlock: strips both sides, idempotent,
+    // and a no-op when the block is not bracketed by `---`.
+    {
+      const { _stripDividersAroundActionBlock } = require("../install.js");
+      const withDiv = '```dataviewjs\nawait dv.view("x", { class: "SpaceNavButtons" });\n```\n\n---\n```dataviewjs\nawait dv.view("x", { class: "ToDoLeafActions" });\n```\n---\n\n```dataviewjs\nawait dv.view("x", { class: "SectionLabel" });\n```\n';
+      const once = _stripDividersAroundActionBlock(withDiv, "ToDoLeafActions");
+      const twice = _stripDividersAroundActionBlock(once, "ToDoLeafActions");
+      ok("HC-ADIV-UNIT-1 strip removes both `---` bracketing the action block",
+         !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ToDoLeafActions/.test(once) &&
+         !/ToDoLeafActions[\s\S]*?\n```\n+-{3,}/.test(once) &&
+         /class:\s*"ToDoLeafActions"/.test(once));
+      ok("HC-ADIV-UNIT-2 strip is idempotent", once === twice);
+      const noDiv = withDiv.replace(/---\n/g, "");
+      ok("HC-ADIV-UNIT-3 strip is a no-op when no `---` brackets the block",
+         _stripDividersAroundActionBlock(noDiv, "ToDoLeafActions") === noDiv);
+    }
+
     // ===== HC-V01241-SEED-DBLDIV-* — double-divider cleanup (v0.124.1) =====
     // The seed meeting fixture carries the real old Meeting.md shape: each `##`
     // content header is preceded by a `---` divider SHIELDED by a blank line
