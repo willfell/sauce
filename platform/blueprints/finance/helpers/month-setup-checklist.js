@@ -70,13 +70,14 @@ class MonthSetupChecklist {
                 month,
             });
 
-            // Row 4 — Deposit tags (the Apple trap): untagged expenses fall to check 1.
+            // Row 4 — Deposit tags (the Apple trap): expenses with a missing/invalid
+            // deposit tag get clamped/coerced by _depositIndex rather than landing where intended.
             const untagged = st.guardrails.untaggedDeposits;
             this._row(root, dv, {
                 state: untagged.count === 0 ? "ok" : "warn",
                 label: untagged.count === 0
                     ? "Every expense deposit-tagged"
-                    : `${untagged.count} expense${untagged.count === 1 ? "" : "s"} default to check 1: ${untagged.items.join(", ")}`,
+                    : `${untagged.count} expense${untagged.count === 1 ? "" : "s"} with a missing/invalid deposit tag: ${untagged.items.join(", ")}`,
                 openPath: `spice/finance/paychecks/${month}/Paycheck-${month}.md`,
                 month,
             });
