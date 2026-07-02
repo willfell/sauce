@@ -1232,6 +1232,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
   await applyBoardCardBreadcrumbHeal(tp, mech, variables, history, git); // WS9 P0b chrome overhaul — stamps `type: task-hub` (or task-board-card) + injects a leading Breadcrumb on promoted board-card notes (tasks/<Task>/<Task>.md); MUST run BEFORE applyProjectChromeDividerHeal so the fresh type lets that heal reach these notes (insert-only, idempotent, .sauce-backup)
   await applyProjectChromeDividerHeal(tp, mech, variables, history, git); // WS9 P0a chrome overhaul — strips legacy literal `---` chrome dividers BETWEEN consecutive customjs-guard chrome blocks + collapses doubled blank gaps on project-related notes (cleanup, idempotent, .sauce-backup; only chrome-bounded `---`, preserves content-boundary dividers)
+  await applyProjectHubWorkstreamRemovalHeal(tp, mech, variables, history, git); // WS9 P1 chrome overhaul — removes the redundant ProjectWorkstreamManager dataviewjs block from existing type:project hubs (workstream mgmt now lives on the Map); collapses the gap (cleanup, idempotent, .sauce-backup)
   await applyProjectsHubAllProjectsHeadingCleanup(tp, mech, variables, history, git); // strips the legacy `## All Projects` H2 from the all-projects hub so it uses the SectionLabel chrome pattern (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
@@ -3554,6 +3555,146 @@ async function applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, gi
     history.push({
       event: "info",
       step: "board_card_breadcrumb_heal",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _removeWorkstreamManagerBlock — pure transform (WS9 P1 chrome overhaul). The
+// chrome overhaul consolidated workstream management onto the Map note, so the
+// ProjectWorkstreamManager block is redundant on the project HUB. This removes the
+// WHOLE `class: "ProjectWorkstreamManager"` dataviewjs fence (the ```dataviewjs
+// opener through its closing ```) from a hub body and collapses the surrounding
+// blank-line gap down to a single blank line, so no doubled blank / orphaned gap
+// remains. Fence-aware + column-0-only: only a top-level (column-0) dataviewjs
+// block naming that class is removed; a callout-embedded reference (`> ...`) is
+// left alone. Idempotent: once removed the class no longer appears → no-op.
+// Returns { changed, body }.
+function _removeWorkstreamManagerBlock(body) {
+  const src = String(body == null ? "" : body);
+  if (!/class:\s*"ProjectWorkstreamManager"/.test(src)) return { changed: false, body: src };
+  const lines = src.split("\n");
+  const out = [];
+  let changed = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // A column-0 ```dataviewjs opener: scan its block for the target class.
+    if (/^```dataviewjs\s*$/.test(line)) {
+      let j = i + 1;
+      let isTarget = false;
+      while (j < lines.length && !/^```\s*$/.test(lines[j])) {
+        if (lines[j].includes('class: "ProjectWorkstreamManager"')) isTarget = true;
+        j++;
+      }
+      // j points at the closing fence (or EOF if unterminated).
+      if (isTarget && j < lines.length) {
+        changed = true;
+        // Drop lines i..j (the whole fence). Then collapse the gap: if BOTH the
+        // last emitted line and the next surviving line are blank, drop one blank
+        // so the removal leaves exactly one blank separator, not two.
+        i = j + 1;
+        // Consume a single trailing blank that immediately followed the block so
+        // we don't leave a doubled blank when the line above `out`'s tail is blank.
+        const prevBlank = out.length > 0 && out[out.length - 1].trim() === "";
+        const nextBlank = i < lines.length && lines[i].trim() === "";
+        if (prevBlank && nextBlank) i++;  // skip one blank line
+        continue;
+      }
+    }
+    out.push(line);
+    i++;
+  }
+  const result = out.join("\n");
+  return { changed: changed && result !== src, body: result };
+}
+
+// applyProjectHubWorkstreamRemovalHeal — WS9 P1. Walks spice/projects/<slug>/ and
+// removes the redundant ProjectWorkstreamManager dataviewjs block from each
+// `type: project` hub note (workstream management now lives on the Map). Finds the
+// hub note the same way applyProjectMeetingsPanelHeal / applyProjectHubLegacyHeadingCleanup
+// do: the *.md directly inside each project dir whose frontmatter type is
+// `project`. Cleanup-type: idempotent (no-op once the block is gone), .sauce-backup
+// snapshot before any write, per-project try/catch (fails loud via history, never
+// throws), history events. Mirrors applyProjectHubLegacyHeadingCleanup posture.
+async function applyProjectHubWorkstreamRemovalHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_hub_workstream_removal_heal",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      const { changed, body: after } = _removeWorkstreamManagerBlock(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(hubPath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_hub_workstream_removal_heal",
+          target: hubPath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_hub_workstream_removal_heal",
+          reason: `${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_hub_workstream_removal_heal",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -18274,6 +18415,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // (run-v0127-project-hub-heal.js BC-BC-*).
     module.exports.applyBoardCardBreadcrumbHeal = applyBoardCardBreadcrumbHeal;
     module.exports._injectBoardCardBreadcrumb = _injectBoardCardBreadcrumb;
+    // WS9 P1 — project-hub ProjectWorkstreamManager block removal heal + pure
+    // transform (run-v0127-project-hub-heal.js WSM-RM-*).
+    module.exports.applyProjectHubWorkstreamRemovalHeal = applyProjectHubWorkstreamRemovalHeal;
+    module.exports._removeWorkstreamManagerBlock = _removeWorkstreamManagerBlock;
     module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
     module.exports._stripAllProjectsHeading = _stripAllProjectsHeading;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
