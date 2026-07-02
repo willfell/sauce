@@ -6715,6 +6715,69 @@ async function casePNBAcc3DividerBreathingRoom() {
 }
 
 // -------------------------------------------------------------------------
+// Slice 1.5 — PNB-MAP-1: Map-note identity switches from the stale
+// `basename.endsWith("- Map")` suffix to `type: map` frontmatter (legacy suffix
+// kept as a non-lossy fallback). The canonical per-project Map note is
+// `Project Map.md` (type: map); 24 of 25 real notes use it, so the suffix check
+// misdetected ~96% of Map notes and the "Map" nav button never rendered (and
+// Slice 2's Map-note read would silently hub-fall-back). Behavioral test on the
+// shared `_isMapNote` predicate + `detectContext`, plus wiring assertions that
+// the Map-button finder and the render is-map guard delegate to the predicate.
+// Loaded the same way customJS does (`new Function(src + "return Class")`), with
+// `customJS`/`app` injected so detectContext resolves its free vars.
+// -------------------------------------------------------------------------
+async function casePNBMap1MapIdentityTypeMap() {
+    console.log("\n--- Case PNB-MAP-1: Slice 1.5 Map-note identity via type:map (not '- Map' suffix) ---");
+    const p = path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js");
+    const src = fs.readFileSync(p, "utf8");
+    const customJSStub = { RenderSafe: { page: (dv) => dv } };  // dv IS the page object
+    const appStub = { metadataCache: { getFileCache: () => ({ frontmatter: { type: "project" } }) } };
+    const PNB = new Function("customJS", "app", src + "\nreturn ProjectNavButtons;")(customJSStub, appStub);
+    const inst = new PNB();
+
+    // (a) predicate: type:map is canonical; legacy suffix still matches; others don't.
+    assertEqual(inst._isMapNote("map", "Project Map"), true, "PNB-MAP-1: type:map ⇒ map note");
+    assertEqual(inst._isMapNote(undefined, "denali - Map"), true, "PNB-MAP-1: legacy '- Map' suffix ⇒ map note (non-lossy fallback)");
+    assertEqual(inst._isMapNote("project", "Some Project"), false, "PNB-MAP-1: project note is NOT a map note");
+    assertEqual(inst._isMapNote("kanban", "foo-board"), false, "PNB-MAP-1: board note is NOT a map note");
+
+    // (b) detectContext: canonical `Project Map.md` (type: map) resolves to
+    // project-map. THE LIVE BUG — under the old suffix check
+    // "Project Map".endsWith("- Map") is false, so ~96% of Map notes were
+    // misdetected and the Map button vanished. RED without the Slice 1.5 fix.
+    const mapCtx = inst.detectContext("spice/projects/foo/Project Map.md",
+        { file: { name: "Project Map", path: "spice/projects/foo/Project Map.md" }, type: "map" });
+    assertEqual(mapCtx.context, "project-map",
+        "PNB-MAP-1: `Project Map.md` (type: map) detects as project-map");
+
+    // legacy `<Name> - Map.md` (no type) still detects as project-map (non-lossy).
+    const legacyCtx = inst.detectContext("spice/projects/bar/bar - Map.md",
+        { file: { name: "bar - Map", path: "spice/projects/bar/bar - Map.md" }, type: undefined });
+    assertEqual(legacyCtx.context, "project-map",
+        "PNB-MAP-1: legacy `<Name> - Map.md` still detects as project-map");
+
+    // a normal project note is NOT misdetected as a map.
+    const hubCtx = inst.detectContext("spice/projects/foo/foo.md",
+        { file: { name: "foo", path: "spice/projects/foo/foo.md" }, type: "project" });
+    assertTrue("PNB-MAP-1: a type:project note is NOT detected as project-map",
+        hubCtx.context !== "project-map");
+
+    // (c) wiring: the Map-button finder + the render is-map guard delegate to
+    // _isMapNote (the two sites detectContext can't reach without full render()).
+    assertTrue("PNB-MAP-1: Map-button finder delegates to _isMapNote(...frontmatter?.type, f.basename)",
+        /projectFiles\.find\(\s*f\s*=>[\s\S]{0,180}?this\._isMapNote\(\s*app\.metadataCache\.getFileCache\(f\)\?\.frontmatter\?\.type\s*,\s*f\.basename\s*\)/.test(src));
+    assertTrue("PNB-MAP-1: render is-map guard delegates to _isMapNote(page.type, page.file.name)",
+        /const\s+isMap\s*=\s*this\._isMapNote\(\s*page\.type\s*,\s*page\.file\.name\s*\)/.test(src));
+    // and the stale suffix-only identity checks are gone from the three sites.
+    assertTrue("PNB-MAP-1: no bare `const isMap = basename.endsWith(\"- Map\")` remains",
+        !/const\s+isMap\s*=\s*basename\.endsWith\("- Map"\)/.test(src));
+    assertTrue("PNB-MAP-1: no bare `const isMap = page.file.name.endsWith(\"- Map\")` remains",
+        !/const\s+isMap\s*=\s*page\.file\.name\.endsWith\("- Map"\)/.test(src));
+    assertTrue("PNB-MAP-1: no bare `const mapNote = projectFiles.find(f => f.basename.endsWith(\"- Map\"))` remains",
+        !/const\s+mapNote\s*=\s*projectFiles\.find\(\s*f\s*=>\s*f\.basename\.endsWith\("- Map"\)\s*\)/.test(src));
+}
+
+// -------------------------------------------------------------------------
 // v0.51.0 — PSW-1..6: ProjectStatusWidget surface + manifest + template
 // asserts. Source-string checks; runtime DOM behavior tested in Obsidian.
 // -------------------------------------------------------------------------
@@ -15145,6 +15208,9 @@ async function caseHCV0128FinancePlanning() {
   await casePNBAcc1AccentDelegation();
   await casePNBAcc2NoHandRolledStyle();
   await casePNBAcc3DividerBreathingRoom();
+
+  // Slice 1.5 — PNB-MAP-1: Map-note identity by type:map (not '- Map' suffix).
+  await casePNBMap1MapIdentityTypeMap();
 
   // v0.51.0 — PSW-1..6: ProjectStatusWidget surface coverage.
   await casePSW1ClassDefined();

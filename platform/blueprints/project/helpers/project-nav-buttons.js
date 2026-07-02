@@ -16,6 +16,21 @@
  * For sub-notes, prepends a "Task: <X>" button only if <X>.md exists in that folder.
  */
 class ProjectNavButtons {
+    // Slice 1.5 — canonical Map-note identity. The per-project Map note is
+    // `Project Map.md` carrying `type: map` frontmatter (24 of 25 real notes);
+    // detecting it by the stale `basename.endsWith("- Map")` suffix missed ~96%
+    // of projects, so the "Map" nav button never rendered and Slice 2's Map-note
+    // read would have resolved to undefined → silent hub-fallback. Detect by
+    // `type: map` first; keep the legacy `- Map` suffix as a non-lossy fallback
+    // for the one un-migrated note (accuris `denali`) until the Slice-4 heal.
+    // Mirrors project-workstream-manager.js's `cache?.frontmatter?.type === "map"`.
+    // `type` is the note's frontmatter `type` (page.type for the current note,
+    // cache.frontmatter.type for a sibling file).
+    _isMapNote(type, basename) {
+        return type === "map"
+            || (typeof basename === "string" && basename.endsWith("- Map"));
+    }
+
     detectContext(filePath, dv) {
         const pathParts = filePath.split("/");
         const planningIdx = pathParts.indexOf("projects");
@@ -28,7 +43,7 @@ class ProjectNavButtons {
 
         const page = customJS.RenderSafe.page(dv);
         const basename = page.file.name;
-        const isMap = basename.endsWith("- Map");
+        const isMap = this._isMapNote(page.type, basename);
 
         // Project board: <slug>-board.md directly under project dir
         if (basename.endsWith("-board") && pathParts.length === planningIdx + 3) {
@@ -450,10 +465,12 @@ class ProjectNavButtons {
                 || (Array.isArray(tags) && tags.includes("project"));
         });
 
-        const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));
+        const mapNote = projectFiles.find(f =>
+            this._isMapNote(app.metadataCache.getFileCache(f)?.frontmatter?.type, f.basename)
+        );
 
         const isMainNote = mainNote && filePath === mainNote.path;
-        const isMap = page.file.name.endsWith("- Map");
+        const isMap = this._isMapNote(page.type, page.file.name);
         const isBoard = page.file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
