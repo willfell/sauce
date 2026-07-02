@@ -72,7 +72,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint to-do axis customjs_behavioral: 6 uncovered
-  status: proposed
+  status: dismissed
+  note: All 7 flagged-uncovered methods are grep-artifact false gaps. 6 are instance render() methods (genuinely tested by run-todo-render-guards.js #211 + functional run-todo-*.js tests) and 1 is ToDoCreateTaskInit.invoke (tested in run-todo-dialog.js via init.invoke() lines 147/155/162). scoreCustomJSBehavioral greps for the static "ClassName.method" form and can't match instance-method invocations. No genuinely-uncovered pure helper. Durable fix = rubric improvement (credit instance-method/render-guard-tested methods), tracked separately.
 
 - id: cov-blueprint-scratch-widget-render
   title: Add coverage for scratch widget_render (0/5)
