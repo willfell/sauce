@@ -890,6 +890,47 @@ withTempVault((vault) => {
            (healedDaily.match(/<!-- tasks-migrated -->/g) || []).length === 1 &&
            (healedDaily.match(/class:\s*"TaskTodayList"/g) || []).length === 1);
     }
+
+    // ===== HC-TASKHEAL-SEED-* — applyTaskNoteHeal =====
+    // The seed carries an ugly-named + bare task note at
+    // spice/tasks/task-20260101-120000-abcd.md (type: task, title: "Do the thing",
+    // no <!-- TASK_NOTES --> marker in its body). The ungated, backup-first,
+    // idempotent applyTaskNoteHeal (1) RENAMES it to the readable
+    // "Do the thing.md" and (2) INJECTS the standard chrome (SpaceNavButtons +
+    // TaskNoteView + <!-- TASK_NOTES --> marker). Asserts run AFTER the
+    // idempotency phase (two installs), so the "no duplicate" assert also proves
+    // the heal is idempotent (a title-named + marker-present note is skipped).
+    {
+        const tasksDir = path.join(vault, "spice/tasks");
+        const topLevel = fs.existsSync(tasksDir)
+            ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
+            : [];
+
+        ok("HC-TASKHEAL-SEED-1 ugly-named task note GONE from its original path",
+           !helpers.fileExists(vault, "spice/tasks/task-20260101-120000-abcd.md"));
+        ok("HC-TASKHEAL-SEED-2 renamed to the readable 'Do the thing.md'",
+           helpers.fileExists(vault, "spice/tasks/Do the thing.md"),
+           `top-level task notes: ${topLevel.join(", ")}`);
+
+        let healedTask = "";
+        try { healedTask = helpers.readNote(vault, "spice/tasks/Do the thing.md"); } catch (e) {}
+        ok("HC-TASKHEAL-SEED-3 healed task note has the <!-- TASK_NOTES --> marker",
+           healedTask.includes("<!-- TASK_NOTES -->"));
+        ok("HC-TASKHEAL-SEED-4 healed task note has SpaceNavButtons + TaskNoteView chrome",
+           /class:\s*"SpaceNavButtons"/.test(healedTask) && /class:\s*"TaskNoteView"/.test(healedTask));
+        ok("HC-TASKHEAL-SEED-5 healed task note frontmatter (title) preserved",
+           /^title:\s*Do the thing\s*$/m.test(healedTask));
+        ok("HC-TASKHEAL-SEED-6 .sauce-backup snapshot exists",
+           helpers.dirExists(vault, ".sauce-backup"));
+
+        // Idempotency: exactly ONE 'Do the thing' task note (no " 2" dup) after two
+        // installs, and exactly one marker in it.
+        const doThingNotes = topLevel.filter((f) => /^Do the thing( \d+)?\.md$/.test(f));
+        ok("HC-TASKHEAL-SEED-7 no duplicate 'Do the thing' note after two installs",
+           doThingNotes.length === 1, `found: ${doThingNotes.join(", ")}`);
+        ok("HC-TASKHEAL-SEED-7b exactly one <!-- TASK_NOTES --> marker (no re-inject)",
+           (healedTask.match(/<!-- TASK_NOTES -->/g) || []).length === 1);
+    }
 });
 
 // =============================================================================
