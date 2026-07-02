@@ -80,7 +80,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint scratch axis widget_render: 5 uncovered
-  status: proposed
+  status: done
+  note: run-scratch-render-guards.js drives all 5 scratch render widgets through the cold-load path (dv.current() undefined/null + empty dv.pages) in normal + .markdown-embed contexts, asserting no-throw. ScratchLeafActions + ScratchHubActions had NO render()-execution test before. Teeth-verified. Rubric still scores 0/5 until coverage-rubric.js credits this harness + matrix regen (tracked separately).
 
 - id: cov-blueprint-trips-customjs-behavioral
   title: Add coverage for trips customjs_behavioral (0/4)
