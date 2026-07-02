@@ -1195,6 +1195,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
+  await applyDocLeafActionsBackfill(tp, mech, variables, history, git);   // NEW (Project Doc Updating Wiring PR4) — injects the DocLeafActions Move-button block into existing type:doc-note notes lacking it (insert-only after the ProjectNavButtons `---` divider, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
@@ -2635,6 +2636,88 @@ async function applyProjectMeetingsPanelHeal(tp, manifest, variables, history, g
       attempted_at: new Date().toISOString(),
     });
   }
+}
+
+// _injectDocLeafActionsBody — pure, idempotent transform. Injects the
+// `class: "DocLeafActions"` dataviewjs block into a doc-note body that lacks it,
+// placed AFTER the `---` divider that follows the ProjectNavButtons block (the
+// shipped Doc Note template placement — toolbar below the chrome divider). If the
+// body already has the block, or has no ProjectNavButtons anchor, returns the body
+// unchanged (the heal driver treats unchanged-with-no-block as no_anchor_found).
+// When no `---` immediately follows the ProjectNavButtons fence, falls back to
+// inserting right after that fence.
+function _injectDocLeafActionsBody(body) {
+  if (typeof body !== "string") return body;
+  if (body.includes('class: "DocLeafActions"')) return body; // idempotent
+  const navIdx = body.indexOf('class: "ProjectNavButtons"');
+  if (navIdx === -1) return body;                             // no anchor
+  const fenceClose = body.indexOf("\n```", navIdx);           // closing fence of the ProjectNavButtons block
+  if (fenceClose === -1) return body;
+  const afterFence = fenceClose + 4;                          // just past "\n```"
+  const rest = body.slice(afterFence);
+  const div = rest.match(/^\s*\n?---[ \t]*\n/);               // the `---` divider (allowing stray blanks)
+  const blockBody = 'await dv.view("ranch/views/customjs-guard", { class: "DocLeafActions" });';
+  if (div) {
+    const insertAt = afterFence + div[0].length;
+    return body.slice(0, insertAt) + '\n```dataviewjs\n' + blockBody + '\n```\n' + body.slice(insertAt);
+  }
+  // No divider — insert directly after the ProjectNavButtons fence.
+  return body.slice(0, afterFence) + '\n\n```dataviewjs\n' + blockBody + '\n```\n' + body.slice(afterFence);
+}
+
+// applyDocLeafActionsBackfill — Project Doc Updating Wiring PR4. Injects the
+// per-doc Move button (DocLeafActions) into pre-existing doc-note notes lacking
+// it, so the Move affordance PR2 shipped for NEW docs (via the template) also
+// reaches docs users already have. Walks spice/projects/**, filters type:doc-note,
+// applies _injectDocLeafActionsBody. Insert-only + idempotent (skip if already
+// present); .sauce-backup snapshot before write; per-note try/catch, never throws;
+// ungated (backfills new content). Mirrors applyProjectMeetingsPanelHeal posture.
+async function applyDocLeafActionsBackfill(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "doc_leaf_actions_backfill", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (_noteChromeFrontmatterType(before) !== "doc-note") continue;
+      if (before.includes('class: "DocLeafActions"')) { skipped += 1; continue; }
+      const after = _injectDocLeafActionsBody(before);
+      if (after === before) {
+        warned += 1;
+        history?.push({ event: "warning", step: "doc_leaf_actions_backfill", target: fpath, action: "no_anchor_found",
+          reason: "no ProjectNavButtons block to anchor on",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "doc_leaf_actions_backfill", target: fpath, action: "healed",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "doc_leaf_actions_backfill", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "doc_leaf_actions_backfill", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
 // applyProjectHubLegacyHeadingCleanup — strips the legacy `## Status` and
@@ -16383,6 +16466,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // Also export note-chrome internals so the heal harness can reuse the
     // frontmatter-type detector / body transform when authoring future cases.
     module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
+    // Project Doc Updating Wiring PR4 — existing-doc DocLeafActions backfill heal
+    // + its pure body transform (run-doc-leaf-actions-heal.js DLAH-*).
+    module.exports.applyDocLeafActionsBackfill = applyDocLeafActionsBackfill;
+    module.exports._injectDocLeafActionsBody = _injectDocLeafActionsBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
