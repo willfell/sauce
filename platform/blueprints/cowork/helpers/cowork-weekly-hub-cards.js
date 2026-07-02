@@ -46,7 +46,7 @@ class CoworkWeeklyHubCards {
         const sortedYears = [...groups.keys()].sort().reverse();
         for (const year of sortedYears) {
             const items = groups.get(year).sort((a, b) => b.file.name.localeCompare(a.file.name));
-            dv.header(3, year);
+            window.customJS.SectionLabel.render(dv, { text: String(year) });
 
             const cardItems = items.map(p => ({
                 file: { name: p.week_label || this._friendlyWeekName(p.file.name), path: p.file.path, mtime: p.file.mtime },

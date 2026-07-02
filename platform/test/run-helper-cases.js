@@ -19012,6 +19012,13 @@ type: cowork-microscope
       span(text) { return { tag: "span", text }; },
       fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
     };
+    // note-chrome: the cowork hub-card helpers now render date headers via
+    // window.customJS.SectionLabel.render (was dv.header(3,…)); simulate the
+    // runtime where customjs-guard has loaded window.customJS.SectionLabel.
+    global.window = global.window || {};
+    global.window.customJS = Object.assign(global.window.customJS || {}, {
+      SectionLabel: { render: (dvArg, o) => { if (dvArg && dvArg.container && dvArg.container.appendChild) dvArg.container.appendChild({ tag: "section-label", text: o && o.text, children: [] }); } },
+    });
     const inst = (typeof Cls === "function") ? new Cls() : null;
     if (inst && typeof inst.render === "function") {
       await inst.render(dv, {});
@@ -19060,6 +19067,13 @@ type: cowork-microscope
       span(text) { return { tag: "span", text }; },
       fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
     };
+    // note-chrome: the cowork hub-card helpers now render date headers via
+    // window.customJS.SectionLabel.render (was dv.header(3,…)); simulate the
+    // runtime where customjs-guard has loaded window.customJS.SectionLabel.
+    global.window = global.window || {};
+    global.window.customJS = Object.assign(global.window.customJS || {}, {
+      SectionLabel: { render: (dvArg, o) => { if (dvArg && dvArg.container && dvArg.container.appendChild) dvArg.container.appendChild({ tag: "section-label", text: o && o.text, children: [] }); } },
+    });
     const inst = (typeof Cls === "function") ? new Cls() : null;
     if (inst && typeof inst.render === "function") {
       await inst.render(dv, {});
@@ -19107,6 +19121,13 @@ type: cowork-microscope
       span(text) { return { tag: "span", text }; },
       fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
     };
+    // note-chrome: the cowork hub-card helpers now render date headers via
+    // window.customJS.SectionLabel.render (was dv.header(3,…)); simulate the
+    // runtime where customjs-guard has loaded window.customJS.SectionLabel.
+    global.window = global.window || {};
+    global.window.customJS = Object.assign(global.window.customJS || {}, {
+      SectionLabel: { render: (dvArg, o) => { if (dvArg && dvArg.container && dvArg.container.appendChild) dvArg.container.appendChild({ tag: "section-label", text: o && o.text, children: [] }); } },
+    });
     const inst = (typeof Cls === "function") ? new Cls() : null;
     if (inst && typeof inst.render === "function") {
       await inst.render(dv, {});

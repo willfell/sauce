@@ -48,7 +48,7 @@ class CoworkDailyHubCards {
         for (const yyyymm of sortedKeys) {
             const items = groups.get(yyyymm).sort((a, b) => b.day.localeCompare(a.day));
             const monthLabel = window.moment(yyyymm, "YYYY-MM").format("MMMM YYYY");
-            dv.header(3, monthLabel);
+            window.customJS.SectionLabel.render(dv, { text: monthLabel });
 
             const cardItems = items.map(({ page, day, weekday }) => ({
                 file: { name: weekday + ", " + window.moment(day, "YYYY-MM-DD").format("MMMM D, YYYY"), path: page.file.path, mtime: page.file.mtime },

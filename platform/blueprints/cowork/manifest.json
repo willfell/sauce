@@ -57,6 +57,10 @@
     {
       "name": "people",
       "range": ">=0.6.0"
+    },
+    {
+      "name": "section-label",
+      "range": ">=0.1.0"
     }
   ],
   "files": [
