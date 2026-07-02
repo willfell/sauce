@@ -6,7 +6,7 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseQueue, selectFromQueue, stripCardChrome } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -93,6 +93,49 @@ ok('SC-8 skips [x]-checked Planning card, picks next',
 const allChecked = '## In Planning\n- [x] [[Done one]]\n- [x] [[Done two]]\n## In Progress\n';
 ok('SC-9 all-checked Planning → no-eligible-work',
   selectCard({ boardMd: allChecked, loadBody }).action === 'no-eligible-work');
+
+// ---- depends_on dependency gate (DEP-*) ----
+ok('DEP-1 parseDependsOn reads every YAML shape (inline/flow/block/alias/bare)',
+  JSON.stringify(parseDependsOn('---\ndepends_on: "[[Slice 2]]"\n---')) === '["Slice 2"]'
+  && JSON.stringify(parseDependsOn('---\ndepends_on: [[A]]\n---')) === '["A"]'
+  && JSON.stringify(parseDependsOn('---\ndepends_on: Slice 2\n---')) === '["Slice 2"]'
+  && JSON.stringify(parseDependsOn('---\ndepends_on: ["[[A]]", "[[B]]"]\n---')) === '["A","B"]'
+  && JSON.stringify(parseDependsOn('---\ndepends_on:\n  - "[[A]]"\n  - B\n---')) === '["A","B"]'
+  && JSON.stringify(parseDependsOn('---\ndepends_on: "[[Slice 2|alias]]"\n---')) === '["Slice 2"]'
+  && JSON.stringify(parseDependsOn('---\ntype: card\n---')) === '[]');
+// A depends-chain board: A done, B depends A, C depends B.
+const depBodies = {
+  A: '---\ntype: card\n---\ndo A',
+  B: '---\ndepends_on: "[[A]]"\n---\ndo B',
+  C: '---\ndepends_on: "[[B]]"\n---\ndo C',
+};
+const depLoad = (c) => depBodies[c] || '';
+const depBoard = '## In Planning\n- [ ] [[B]]\n- [ ] [[C]]\n## Completed\n- [x] [[A]]\n';
+const depPick = selectCard({ boardMd: depBoard, loadBody: depLoad });
+ok('DEP-2 card whose dep is Completed is eligible; the next (unmet) is skipped',
+  depPick.action === 'work' && depPick.card === 'B'
+  && (depPick.skipped || []).every((s) => s.card !== 'B'), JSON.stringify(depPick));
+const cOnly = selectCard({ boardMd: '## In Planning\n- [ ] [[C]]\n## Completed\n- [x] [[A]]\n', loadBody: depLoad });
+ok('DEP-3 card blocked by an unmet dependency → no-eligible-work (never runs early)',
+  cOnly.action === 'no-eligible-work' && /depends_on not complete: B/.test((cOnly.skipped || []).map((s) => s.reason).join('|')),
+  JSON.stringify(cOnly));
+// Only a DIRECT dep in Completed satisfies — B being eligible does NOT satisfy C.
+const bAndC = '## In Planning\n- [ ] [[B]]\n- [ ] [[C]]\n## Completed\n- [x] [[A]]\n';
+const bc = selectCard({ boardMd: bAndC, loadBody: depLoad });
+ok('DEP-4 satisfaction is Completed-gated, not recursive (picks B, not C)', bc.card === 'B');
+// The whole chain sits in Planning; only the head (A, no deps) is picked.
+const chainBoard = '## In Planning\n- [ ] [[A]]\n- [ ] [[B]]\n- [ ] [[C]]\n## Completed\n';
+ok('DEP-5 full chain in Planning → picks the dependency-free head first',
+  selectCard({ boardMd: chainBoard, loadBody: depLoad }).card === 'A');
+// The dependency gate applies to the handoff-recommended card too.
+const recBlocked = selectCard({
+  boardMd: '## In Planning\n- [ ] [[B]]\n## Completed\n',
+  handoffMd: '## Recommended next\n[[B]]',
+  loadBody: depLoad,
+});
+ok('DEP-6 an unmet dep blocks even the recommended card',
+  recBlocked.action === 'no-eligible-work' && /depends_on not complete: A/.test((recBlocked.skipped || []).map((s) => s.reason).join('|')),
+  JSON.stringify(recBlocked));
 
 // ---- stripCardChrome (SCH-*) — scope heuristic must measure task body, not chrome ----
 const CHROME = '---\nkey: value\nstatus: in-planning\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```\n\n---\n\nFix the separator between Open Tasks and Meetings.';
