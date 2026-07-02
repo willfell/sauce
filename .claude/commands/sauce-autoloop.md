@@ -68,6 +68,8 @@ accepted explicitly but is the default. During the assessment window, stay in dr
 
 Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the board's "In Progress" (your parked workstreams) and skips `[x]`-checked Planning cards — it picks only fresh, unchecked Planning work.
 
+**Dependency ordering (`depends_on`).** A Planning card whose note declares `depends_on: "[[Predecessor Card]]"` in its frontmatter (a single wikilink, a YAML list, or a flow list — see `parseDependsOn`) is **skipped until every predecessor is in the Completed column** (the loop's done-signal). This is what lets a multi-slice epic sit **entirely in Planning** and self-sequence in order — each slice becomes eligible only when the one before it ships. The gate is **fail-safe**: an unmet, misspelled, or cyclic dependency just leaves the card un-eligible (it never runs early) and surfaces the reason in `selectCard`'s `skipped[]`. Use `depends_on` for *sequencing* (Blocked is only for cards that need a human reply); if every Planning card is dependency-blocked, `selectCard` returns `no-eligible-work` (reason names the unmet deps) and the turn falls through to the Scout queue below.
+
 1. Call the selector:
    ```bash
    node scripts/autoloop/select-card.js \

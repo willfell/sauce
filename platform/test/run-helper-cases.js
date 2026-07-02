@@ -4566,6 +4566,49 @@ async function caseDDT1DailyTemplateShape() {
     !/COWORK_CALLOUTS/.test(body) &&
     !/^## Notes$/m.test(body);
   assertTrue("DD-T1: daily-template.md content shape regressed", ok);
+
+  // The redundant in-body date heading `# <% friendly %>` was removed — the
+  // note's filename (dddd-YYYY-MM-DD) already carries the date, so the H1 was
+  // duplicate chrome. `friendly` is still computed + used by `day_label:`
+  // frontmatter, so the preamble stays; only the visible H1 line is gone.
+  assertTrue("DD-T1: daily-template.md drops the redundant `# <% friendly %>` date heading",
+    !/^#\s+<%[-=]?\s*friendly\s*[-=]?%>\s*$/m.test(body));
+  // day_label still binds `friendly`, so the const remains wired.
+  assertTrue("DD-T1: daily-template.md keeps day_label bound to friendly",
+    /^day_label:\s*"<%[-=]?\s*friendly\s*[-=]?%>"\s*$/m.test(body));
+}
+
+// -------------------------------------------------------------------------
+// LAT-1: the leaf-action button rows sit TIGHT against their `---` chrome
+// separators — no blank line between the `---` and the
+// `{ToDo,Meeting}LeafActions` / `ScratchDayActions` dataviewjs block, above
+// OR below. Prior templates had `---\n\n<block>\n\n---`, which renders an
+// extra vertical gap between the divider and the buttons. Assert the tight
+// `---\n<block>\n---` shape in all three templates (goes red if a blank line
+// is reintroduced around any of the three action blocks).
+// -------------------------------------------------------------------------
+async function caseLAT1LeafActionsTightSeparators() {
+  console.log("\n--- Case LAT-1: leaf-action rows tight against their `---` separators (to-do / meetings / scratch) ---");
+  const cases = [
+    { file: ["to-do", "templates", "Today To-Do.md"], cls: "ToDoLeafActions" },
+    { file: ["meetings", "templates", "Meeting.md"], cls: "MeetingLeafActions" },
+    { file: ["scratch", "templates", "Scratch Day Hub.md"], cls: "ScratchDayActions" },
+  ];
+  for (const c of cases) {
+    const p = path.join(BLUEPRINTS_DIR, ...c.file);
+    assertTrue(`LAT-1: ${c.file[0]} template source exists`, fs.existsSync(p));
+    const body = fs.readFileSync(p, "utf8");
+    // Tight: `---` directly above the block, `---` directly below — no blank lines.
+    const tight = new RegExp(
+      '\\n---\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"[^`]*\\);\\n```\\n---\\n'
+    );
+    assertTrue(`LAT-1: ${c.cls} row is tight against its --- separators (no blank-line gap above/below)`,
+      tight.test(body));
+    // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
+    const looseAbove = new RegExp('\\n---\\n\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"');
+    assertTrue(`LAT-1: ${c.cls} has no blank line between the --- and the block`,
+      !looseAbove.test(body));
+  }
 }
 
 async function caseDDA1DashboardActivityPanel() {
@@ -15087,6 +15130,7 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
+  await caseLAT1LeafActionsTightSeparators();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
   await caseDDA3TaskMarkdownRenderHelper();
