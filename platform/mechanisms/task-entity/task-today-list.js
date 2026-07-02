@@ -57,14 +57,18 @@ class TaskTodayList {
 
     /**
      * Partition a list of ALREADY-PARSED task objects (parseNote output, or any
-     * object with `{ scheduled, status }`) relative to `todayStr` (YYYY-MM-DD).
-     * Mirrors TaskEntity.queryToday exactly, but is inlined here so the pure
-     * partition is Node-testable without loading TaskEntity. Open-only:
-     *   today   — status === "open" AND scheduled === todayStr
-     *   overdue — status === "open" AND scheduled truthy AND scheduled < todayStr
+     * object with `{ scheduled, status, project_slug, source }`) relative to
+     * `todayStr` (YYYY-MM-DD). Open-only, and PERSONAL-daily-only — a task that
+     * belongs to another daily section is EXCLUDED so it doesn't render twice:
+     *   today   — status "open", scheduled === todayStr, NO project, NOT meeting
+     *   overdue — status "open", scheduled < todayStr, NO project, NOT meeting
      * (string compare of zero-padded ISO dates is chronologically correct.)
-     * Future-scheduled + unscheduled open tasks land in NEITHER band. Tolerates
-     * a null/non-array input (→ empty bands); never throws.
+     * A task WITH a project_slug renders in its "Project Tasks" section
+     * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
+     * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
+     * task-notes, so excluding them here loses nothing. Future-scheduled +
+     * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
+     * input (→ empty bands); never throws.
      */
     static buildBands(parsedTasks, todayStr) {
         const today = [];
@@ -72,6 +76,15 @@ class TaskTodayList {
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
+            // Tasks that belong to another daily section are EXCLUDED here so they
+            // don't show TWICE (once in Today/Overdue, once below). A project task
+            // renders under its own "Project Tasks" section (ToDoDailyProjectGroups);
+            // a meeting-sourced task renders under "Meeting Tasks"
+            // (ToDoDailyUnassignedMeetings) — both of which surface ALL open matching
+            // task-notes, so nothing vanishes. Today/Overdue bands are therefore the
+            // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
+            if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
+            if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
             const sched = t.scheduled;
             if (!sched) continue;
             if (sched === todayStr) today.push(t);
