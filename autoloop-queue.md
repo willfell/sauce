@@ -88,4 +88,5 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint trips axis customjs_behavioral: 4 uncovered
-  status: proposed
+  status: done
+  note: NEW run-trips.js (trips had NO test harness). Unit-tests TripNavButtons.detectContext across every path branch (non-trip/trips-hub/trip-atlas vs trip-section by frontmatter/trip-board/trip-card/folder-style) — the genuine behavioral method — plus cold-load render guards for all 3 trips widgets. Both teeth-verified (detectContext mutation → TC fails; render throw → TRIPGUARD fails). This is REAL coverage (detectContext), not a grep-artifact dismissal.
