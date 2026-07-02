@@ -75,6 +75,27 @@ ok("CRUB-3 widgets absent from every harness stay uncovered (not a blanket pass)
   res.covered < res.total && uncovered.length > 0,
   `covered=${res.covered}/${res.total} uncovered=${uncovered.length}`);
 
+// CRUB-4 — the dynamic-scan probe. The harness set is discovered dynamically
+// (run-renderer.js + every run-*-render-guards.js), NOT a hardcoded list.
+// CoworkDailyHubCards is render-guard-tested in run-cowork-render-guards.js but
+// absent from both run-renderer.js and run-project-render-guards.js — so the old
+// hardcoded 2-file scan scored it uncovered. This fails if the scan reverts to a
+// fixed list that doesn't include the cowork harness.
+const coworkSurface = {
+  kind: "blueprint",
+  name: "cowork",
+  dir: path.join(REPO_ROOT, "platform", "blueprints", "cowork"),
+};
+const coworkManifestPath = path.join(coworkSurface.dir, "manifest.json");
+const coworkManifest = fs.existsSync(coworkManifestPath)
+  ? JSON.parse(fs.readFileSync(coworkManifestPath, "utf8"))
+  : {};
+const coworkRes = rubric.scoreWidgetRender(coworkSurface, coworkManifest, REPO_ROOT);
+const cdh = (coworkRes.widgets || []).find(w => w.widget === "CoworkDailyHubCards");
+ok("CRUB-4 a non-project render-guard harness is credited (CoworkDailyHubCards covered)",
+  !!cdh && cdh.covered === true,
+  cdh ? `covered=${cdh.covered}` : "CoworkDailyHubCards not among scored cowork render widgets");
+
 console.log("");
 if (fail === 0) { console.log(`PASS ${pass}/${pass + fail}`); process.exit(0); }
 console.log(`FAIL ${fail}/${pass + fail}`);

@@ -82,13 +82,27 @@ function scoreCustomJSBehavioral(surface, manifest, repoRoot) {
     for (const cls of classes) {
         const clsFile = findClassFile(cls, repoRoot, surface);
         const methods = clsFile ? publicMethodsFromJsFile(clsFile) : [];
+        // A test file that references the class (require/new/const) — used to
+        // credit instance-style method calls below.
+        const classFiles = tryGrep(`\\b${cls}\\b`, testDir, { flags: "-r -l -E" });
         for (const m of methods) {
             total++;
-            const pattern = `${cls}\\.${m}\\b`;
-            const hits = tryGrep(pattern, testDir, { flags: "-r -l -E" });
-            const isCovered = hits.length > 0;
+            // Covered if a test asserts the method directly (`Class.method`) OR a
+            // test file that references the class also invokes it on an instance
+            // (`.method(`). The literal `Class.method` grep alone mis-scored
+            // behavioral runners that do `new Class(); x.method()` as gaps —
+            // the grep-artifact false gaps the Scout kept re-proposing.
+            const direct = tryGrep(`${cls}\\.${m}\\b`, testDir, { flags: "-r -l -E" });
+            let isCovered = direct.length > 0;
+            if (!isCovered) {
+                const callRe = new RegExp(`\\.${m}\\s*\\(`);
+                for (const tf of classFiles) {
+                    try { if (callRe.test(fs.readFileSync(tf, "utf8"))) { isCovered = true; break; } }
+                    catch (_) { /* unreadable file → skip */ }
+                }
+            }
             if (isCovered) covered++;
-            methodCoverage.push({ cls, method: m, covered: isCovered, hits: hits.length });
+            methodCoverage.push({ cls, method: m, covered: isCovered });
         }
     }
     const score = total === 0 ? null : covered / total;
@@ -255,14 +269,22 @@ function scoreWidgetRender(surface, manifest, repoRoot) {
         return { score: null, reason: "no render() widgets", suggested_archetype: null, suggested_target_file: null };
     }
     // A render widget is "covered" if it is exercised by ANY render-test harness — not just
-    // run-renderer.js. Cold-load render-guard harnesses (e.g. run-project-render-guards.js) drive
-    // a widget's render() through the embed/null-current guard path, which IS a render test; the
-    // rubric previously scanned run-renderer.js alone and mis-scored guard-tested widgets as gaps,
-    // generating un-actionable Scout churn.
-    const RENDER_TEST_HARNESSES = ["run-renderer.js", "run-project-render-guards.js"];
+    // run-renderer.js. Cold-load render-guard harnesses (run-<surface>-render-guards.js) drive
+    // a widget's render() through the embed/null-current guard path, which IS a render test.
+    // The harness set is discovered DYNAMICALLY (run-renderer.js + every run-*-render-guards.js)
+    // so each render-guard harness the loop adds is credited automatically — a hardcoded list
+    // left new harnesses un-scanned, so guard-tested widgets stayed "uncovered" forever and the
+    // deterministic Scout re-proposed them every turn (self-perpetuating coverage churn).
+    const testDir = path.join(repoRoot, "platform", "test");
+    let renderHarnesses = ["run-renderer.js"];
+    try {
+        for (const f of fs.readdirSync(testDir)) {
+            if (/^run-.*-render-guards\.js$/.test(f) && !renderHarnesses.includes(f)) renderHarnesses.push(f);
+        }
+    } catch (_) { /* testDir unreadable → fall back to run-renderer.js alone */ }
     let rendererSrc = "";
-    for (const rel of RENDER_TEST_HARNESSES) {
-        const fp = path.join(repoRoot, "platform", "test", rel);
+    for (const rel of renderHarnesses) {
+        const fp = path.join(testDir, rel);
         if (fs.existsSync(fp)) rendererSrc += "\n" + fs.readFileSync(fp, "utf8");
     }
     let covered = 0;
