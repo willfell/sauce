@@ -1,5 +1,5 @@
 'use strict';
-// Zero-dep harness for SpaceNavButtons pure logic (order + menu model + Menu ctor acquisition).
+// Zero-dep harness for SpaceNavButtons pure logic (entry order + daily split).
 const fs = require('fs');
 const path = require('path');
 
@@ -31,14 +31,22 @@ ok('NL-3 tie on order → source then id (a1 before a2)', ordered[0].id === 'a1'
 ok('NL-4 carries _source tag', ordered[0]._source === 'alpha');
 ok('NL-5 empty/absent contributions → []', inst._orderedEntries({}).length === 0 && inst._orderedEntries({ contributions: {} }).length === 0);
 
-// ── _getMenuCtor: global Menu → require('obsidian').Menu → null ──
+// ── _splitDaily: pull the daily quick-nav entry out of the menu list ──
 const inst2 = new SpaceNavButtons();
-// (a) global present
-globalThis.Menu = function MenuStub() {};
-ok('NL-6 returns global Menu when present', inst2._getMenuCtor() === globalThis.Menu);
-delete globalThis.Menu;
-// (b) absent everywhere (no global, require('obsidian') throws under node) → null
-ok('NL-7 returns null when Menu unobtainable', inst2._getMenuCtor() === null);
+// (a) identify by action.command_id === 'daily-notes'
+const byCmd = inst2._splitDaily([
+  { id: 'p', label: 'Projects', _source: 'project', action: { type: 'openLink', target: 'P.md' } },
+  { id: 'd', label: 'Daily', _source: 'daily', action: { type: 'invoke_command', command_id: 'daily-notes' } },
+  { id: 't', label: 'To Do', _source: 'to-do', action: { type: 'openLink', target: 'T.md' } },
+]);
+ok('NL-6 pulls the daily entry out (command_id daily-notes)', byCmd.dailyEntry && byCmd.dailyEntry.id === 'd');
+ok('NL-7 menuEntries excludes the daily entry, keeps order', byCmd.menuEntries.length === 2 && byCmd.menuEntries[0].id === 'p' && byCmd.menuEntries[1].id === 't');
+// (b) no daily entry → dailyEntry null, menuEntries === all
+const none = inst2._splitDaily([{ id: 'p', label: 'Projects', _source: 'project', action: { type: 'openLink' } }]);
+ok('NL-8 no daily → dailyEntry null, all entries in menu', none.dailyEntry === null && none.menuEntries.length === 1);
+// (c) fallback identify by _source === 'daily' when command_id absent
+const bySource = inst2._splitDaily([{ id: 'd2', label: 'Daily', _source: 'daily', action: {} }]);
+ok('NL-9 identifies daily by _source when command_id absent', bySource.dailyEntry && bySource.dailyEntry.id === 'd2' && bySource.menuEntries.length === 0);
 
 console.log(`\n  ${pass} pass · ${fail} fail`);
 process.exit(fail ? 1 : 0);
