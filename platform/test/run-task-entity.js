@@ -657,29 +657,126 @@ ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink
   assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
 });
 
-// ---------- _renderTitleMarkdown (B4 markdown title) ----------
+// ---------- _parseInlineLinks (FIX 1 — deterministic inline-link parser) ----------
 //
-// The title is now rendered as markdown so `[Chat](url)` + `[[wikilink]]` become
-// clickable. In Node there is no MarkdownRenderer / app, so the method must fall
-// back to plain text (titleEl.textContent) and never throw.
+// The title / LINKS renderer no longer depends on Obsidian's MarkdownRenderer
+// (which is NOT a global in the customJS eval context, so it always fell back to
+// raw text). renderInlineLinks now builds real <a> elements from an ordered
+// segment list produced by this PURE parser. Test the parser in isolation.
+ok('PIL-1 _parseInlineLinks is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass._parseInlineLinks === 'function', 'static on the class');
+  assert(typeof TaskTodayList._parseInlineLinks === 'function', 'delegator on the instance');
+});
+ok('PIL-2 _parseInlineLinks parses a bare wikilink (no alias)', () => {
+  const segs = TaskTodayList._parseInlineLinks('[[Thursday-2026-07-02]]');
+  assert(segs.length === 1, 'one segment: ' + JSON.stringify(segs));
+  assert(segs[0].type === 'wikilink', 'wikilink type: ' + segs[0].type);
+  assert(segs[0].target === 'Thursday-2026-07-02', 'target: ' + segs[0].target);
+  assert(segs[0].alias === null, 'no alias: ' + JSON.stringify(segs[0].alias));
+});
+ok('PIL-3 _parseInlineLinks parses a wikilink with an alias ([[A|B]])', () => {
+  const segs = TaskTodayList._parseInlineLinks('[[A|B]]');
+  assert(segs.length === 1 && segs[0].type === 'wikilink', 'one wikilink: ' + JSON.stringify(segs));
+  assert(segs[0].target === 'A', 'target A: ' + segs[0].target);
+  assert(segs[0].alias === 'B', 'alias B: ' + segs[0].alias);
+});
+ok('PIL-4 _parseInlineLinks parses a markdown link ([label](url))', () => {
+  const segs = TaskTodayList._parseInlineLinks('[testing](https://x.com)');
+  assert(segs.length === 1 && segs[0].type === 'mdlink', 'one mdlink: ' + JSON.stringify(segs));
+  assert(segs[0].label === 'testing', 'label testing: ' + segs[0].label);
+  assert(segs[0].url === 'https://x.com', 'url: ' + segs[0].url);
+});
+ok('PIL-5 _parseInlineLinks splits text + mdlink + text (3 segments)', () => {
+  const segs = TaskTodayList._parseInlineLinks('Take a look at X [here](https://y.com) done');
+  assert(segs.length === 3, '3 segments: ' + JSON.stringify(segs));
+  assert(segs[0].type === 'text' && segs[0].value === 'Take a look at X ', 'lead text: ' + JSON.stringify(segs[0]));
+  assert(segs[1].type === 'mdlink' && segs[1].label === 'here' && segs[1].url === 'https://y.com', 'mid mdlink: ' + JSON.stringify(segs[1]));
+  assert(segs[2].type === 'text' && segs[2].value === ' done', 'trail text: ' + JSON.stringify(segs[2]));
+});
+ok('PIL-6 _parseInlineLinks parses a bare http(s) URL', () => {
+  const segs = TaskTodayList._parseInlineLinks('https://z.com');
+  assert(segs.length === 1 && segs[0].type === 'url', 'one url: ' + JSON.stringify(segs));
+  assert(segs[0].url === 'https://z.com', 'url: ' + segs[0].url);
+});
+ok('PIL-7 _parseInlineLinks returns a single text segment for plain text', () => {
+  const segs = TaskTodayList._parseInlineLinks('just some plain text');
+  assert(segs.length === 1 && segs[0].type === 'text', 'one text seg: ' + JSON.stringify(segs));
+  assert(segs[0].value === 'just some plain text', 'value: ' + segs[0].value);
+  // Empty input → [] (no segments to render).
+  assert(TaskTodayList._parseInlineLinks('').length === 0, 'empty → []');
+  assert(TaskTodayList._parseInlineLinks(null).length === 0, 'null → []');
+});
+
+// ---------- renderInlineLinks (FIX 1 — DOM-stub test exercising the REAL fn) ----------
+//
+// THIS is the test that would have caught the original bug: it runs the ACTUAL
+// renderInlineLinks against a minimal fake `el` (capturing createEl'd children +
+// their tagName/attrs/text/href/dataset + addEventListener), NOT a hand-built
+// <a> replica. It asserts the built children include a real <a href> web anchor
+// AND a real <a data-href> internal-link anchor.
+ok('RIL-1 renderInlineLinks is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass.renderInlineLinks === 'function', 'static on the class');
+  assert(typeof TaskTodayList.renderInlineLinks === 'function', 'delegator on the instance');
+});
+ok('RIL-2 renderInlineLinks builds REAL <a> anchors (web + internal) via createEl', () => {
+  // Minimal fake element: captures createEl'd children + a fake app.workspace.
+  const opened = [];
+  const prevWindow = global.window;
+  global.window = { app: { workspace: { openLinkText: (t, sp) => opened.push([t, sp]) } } };
+  const texts = [];
+  const makeChild = (tag, opts) => {
+    const child = {
+      tagName: String(tag).toUpperCase(),
+      textContent: (opts && opts.text != null) ? opts.text : '',
+      cls: (opts && opts.cls) || '',
+      href: (opts && opts.href != null) ? opts.href : null,
+      attrs: Object.assign({}, (opts && opts.attr) || {}),
+      dataset: {},
+      _listeners: {},
+      setAttribute(k, v) { this.attrs[k] = v; },
+      addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    };
+    return child;
+  };
+  const el = {
+    children: [],
+    textContent: 'STALE',
+    createEl(tag, opts) { const c = makeChild(tag, opts); this.children.push(c); return c; },
+    appendText(v) { texts.push(v); this.children.push({ tagName: '#text', textContent: v }); },
+    createSpan(opts) { const c = makeChild('span', opts); this.children.push(c); return c; },
+    setText(v) { this.textContent = v; this.children = []; },
+  };
+  TaskTodayList.renderInlineLinks(el, 'Look [here](https://x.com) and [[Note]]', 'src.md');
+  const anchors = el.children.filter((c) => c.tagName === 'A');
+  assert(anchors.length === 2, 'two anchors built: ' + JSON.stringify(el.children.map((c) => c.tagName)));
+  const web = anchors.find((a) => a.href === 'https://x.com');
+  assert(web, 'web anchor with href https://x.com present: ' + JSON.stringify(anchors.map((a) => a.href)));
+  assert(web.textContent === 'here', 'web anchor text "here": ' + web.textContent);
+  assert(web.attrs.target === '_blank' && web.attrs.rel === 'noopener', 'web anchor opens in new tab: ' + JSON.stringify(web.attrs));
+  const internal = anchors.find((a) => a.dataset.href === 'Note' || a.attrs['data-href'] === 'Note');
+  assert(internal, 'internal anchor with data-href Note present');
+  assert(internal.cls === 'internal-link', 'internal-link class: ' + internal.cls);
+  assert(internal.textContent === 'Note', 'internal anchor text "Note": ' + internal.textContent);
+  // A wikilink click routes to app.workspace.openLinkText(target, sourcePath).
+  const clickFns = internal._listeners.click || [];
+  assert(clickFns.length === 1, 'internal anchor has a click handler');
+  clickFns[0]({ preventDefault() {}, stopPropagation() {} });
+  assert(opened.length === 1 && opened[0][0] === 'Note' && opened[0][1] === 'src.md',
+    'click opens the note via openLinkText(Note, src.md): ' + JSON.stringify(opened));
+  // Plain leading/joining text lands as text nodes (not swallowed).
+  assert(texts.indexOf('Look ') >= 0 && texts.indexOf(' and ') >= 0, 'plain text preserved: ' + JSON.stringify(texts));
+  global.window = prevWindow;
+});
+ok('RIL-3 renderInlineLinks tolerates a null element (never throws)', () => {
+  let threw = false;
+  try { TaskTodayList.renderInlineLinks(null, 'anything', 'src.md'); } catch (_e) { threw = true; }
+  assert(!threw, 'null element does not throw');
+});
+
+// ---------- _renderTitleMarkdown alias (delegates to renderInlineLinks) ----------
 ok('RTM-1 _renderTitleMarkdown is a function (class + instance)', () => {
   assert(typeof TaskTodayListClass._renderTitleMarkdown === 'function', 'static on the class');
   assert(typeof TaskTodayList._renderTitleMarkdown === 'function', 'delegator on the instance');
-});
-ok('RTM-2 _renderTitleMarkdown falls back to plain text when MarkdownRenderer absent', () => {
-  // Minimal fake element (no querySelectorAll → the anchor pass is skipped).
-  const el = { textContent: '' };
-  TaskTodayList._renderTitleMarkdown(el, 'See [Chat](https://x.test)', 'spice/tasks/a.md');
-  assert(el.textContent === 'See [Chat](https://x.test)', 'plain-text fallback keeps the raw text: ' + el.textContent);
-});
-ok('RTM-3 _renderTitleMarkdown tolerates null/blank title + null element', () => {
-  const el = { textContent: 'x' };
-  TaskTodayList._renderTitleMarkdown(el, '', 'spice/tasks/a.md');
-  assert(el.textContent === '(untitled)', 'blank → (untitled): ' + el.textContent);
-  // Null element must not throw.
-  let threw = false;
-  try { TaskTodayList._renderTitleMarkdown(null, 'anything'); } catch (_e) { threw = true; }
-  assert(!threw, 'null element does not throw');
 });
 
 // ---------- TaskMeetingList._matches (pure filter) ----------
