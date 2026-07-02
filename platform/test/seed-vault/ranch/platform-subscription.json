@@ -125,7 +125,7 @@
     },
     {
       "name": "project",
-      "version": "1.39.1"
+      "version": "1.39.2"
     },
     {
       "name": "to-do",
@@ -153,7 +153,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.2.10"
+      "version": "0.3.0"
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.180.1",
+  "workshop_version": "0.181.0",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
@@ -7,14 +7,14 @@
     "meetings": "0.16.0",
     "people": "0.6.2",
     "products": "0.3.1",
-    "project": "1.39.1",
+    "project": "1.39.2",
     "to-do": "0.16.3",
     "journal": "0.2.0",
     "trips": "0.4.0",
     "finance": "0.17.0",
     "scratch": "0.7.1",
     "teams": "0.3.1",
-    "wiki": "0.2.10",
+    "wiki": "0.3.0",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
     "activity-feed": "0.8.0",
