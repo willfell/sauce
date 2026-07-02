@@ -2242,6 +2242,83 @@ async function testFF31MonthSetupChecklistOutOfPath() {
   return pass;
 }
 
+// FF32 — FinanceEditScopeBanner on a per-month Budget note renders the
+// "Editing {month} only — edit Defaults to change every month." one-liner.
+async function testFF32EditScopeBannerMonthScope() {
+  console.log('\n=== FF32 — FinanceEditScopeBanner month-scope line on a Budget note ===');
+  const app = makeApp();
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'finance-edit-scope-banner.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn FinanceEditScopeBanner;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'fesb-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const hasMonthLine = /Editing/.test(joined) && joined.includes('2026-07') && /edit Defaults/i.test(joined);
+  const noWrites = app.__captured_writes.length === 0;
+  console.log(`  fesb-root: ${!!root} ; month-scope line: ${hasMonthLine} ; no writes: ${noWrites}`);
+  const pass = !!root && hasMonthLine && noWrites;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF33 — FinanceEditScopeBanner on a Defaults note renders the template one-liner.
+async function testFF33EditScopeBannerDefaultsScope() {
+  console.log('\n=== FF33 — FinanceEditScopeBanner defaults-scope line on a Defaults note ===');
+  const app = makeApp();
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'finance-edit-scope-banner.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn FinanceEditScopeBanner;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget Defaults', path: 'spice/finance/Budget Defaults.md' },
+    { type: 'budget-defaults' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'fesb-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const hasTemplateLine = /Template for every new month/i.test(joined) && /seed/i.test(joined);
+  console.log(`  fesb-root: ${!!root} ; template-scope line: ${hasTemplateLine}`);
+  const pass = !!root && hasTemplateLine;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF34 — FinanceEditScopeBanner renders nothing on an unrelated type + embed-dedup.
+async function testFF34EditScopeBannerOtherTypeAndEmbed() {
+  console.log('\n=== FF34 — FinanceEditScopeBanner renders nothing on other type + inside embed ===');
+  const app = makeApp();
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'finance-edit-scope-banner.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn FinanceEditScopeBanner;`)(app, cjs, FakeNotice);
+  // Unrelated type (a month reconciliation view) → nothing.
+  const inst = new Cls();
+  const dvOther = makeDvWithCurrentAndFrontmatter(
+    { name: 'Month-2026-07', path: 'spice/finance/months/Month-2026-07.md' },
+    { type: 'month', month: '2026-07' }
+  );
+  await inst.render(dvOther);
+  const otherRoot = findClass(dvOther.container, 'fesb-root');
+  // Embed-dedup: budget note inside a markdown-embed → nothing.
+  const dvEmbed = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  dvEmbed.container.closest = (sel) => sel === '.markdown-embed' ? { tag: 'div' } : null;
+  await inst.render(dvEmbed);
+  const embedRoot = findClass(dvEmbed.container, 'fesb-root');
+  console.log(`  other-type root (should be false): ${!!otherRoot} ; embed root (should be false): ${!!embedRoot}`);
+  const pass = !otherRoot && !embedRoot;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF21 — PaycheckSummary per-deposit line: a MONTHLY paycheck (deposits[] +
 // tagged expenses) renders a per-deposit income/assigned/leftover line (from
 // stubbed depositTotals), while Band 1's Pay = Σ deposits (not paycheck_amount).
@@ -3337,6 +3414,9 @@ async function testRendHasNotes() {
       results.push(['FF29 month-setup-checklist-renders', await testFF29MonthSetupChecklistRenders()]);
       results.push(['FF30 month-setup-checklist-embed-dedup', await testFF30MonthSetupChecklistEmbedDedup()]);
       results.push(['FF31 month-setup-checklist-out-of-path', await testFF31MonthSetupChecklistOutOfPath()]);
+      results.push(['FF32 edit-scope-banner-month-scope', await testFF32EditScopeBannerMonthScope()]);
+      results.push(['FF33 edit-scope-banner-defaults-scope', await testFF33EditScopeBannerDefaultsScope()]);
+      results.push(['FF34 edit-scope-banner-other-type-and-embed', await testFF34EditScopeBannerOtherTypeAndEmbed()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
