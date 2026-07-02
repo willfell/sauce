@@ -1,7 +1,7 @@
 /**
  * ToDoAllList (CustomJS) — renders all uncompleted tasks from prior days under
  * spice/to-do/**\/ToDo-*.md (excluding today). Tasks are grouped by source
- * date desc, each group rendered as `## YYYY-MM-DD` heading + linked task
+ * date desc, each group rendered under a SectionLabel date header + linked task
  * lines with `(from [[ToDo-YYYY-MM-DD]])` source pointers.
  *
  * Embeds-safe (returns early in markdown-embed contexts). Dual-fire-safe via
@@ -44,8 +44,8 @@ class ToDoAllList {
         const sortedDates = [...byDate.keys()].sort().reverse(); // newest first
         for (const dateStr of sortedDates) {
             if (isStale()) return;
-            const heading = dv.container.createEl('h2');
-            heading.textContent = dateStr;
+            // note-chrome: date-group header via SectionLabel (no bare <h2>).
+            window.customJS.SectionLabel.render(dv, { text: dateStr });
             const ul = dv.container.createEl('ul');
             for (const t of byDate.get(dateStr)) {
                 const li = ul.createEl('li');
