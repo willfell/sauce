@@ -95,12 +95,6 @@ if (notePath) {
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });
-```
-
--
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
 ```
 
