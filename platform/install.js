@@ -5848,7 +5848,12 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+<!-- finance-edit-scope -->
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceEditScopeBanner" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -5870,7 +5875,12 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+<!-- finance-edit-scope -->
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceEditScopeBanner" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -5924,7 +5934,12 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+<!-- finance-edit-scope -->
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceEditScopeBanner" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -6456,7 +6471,9 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git); // NEW v0.115.2 — injects InvoiceWorkspaceNav block + rewrites legacy InvoiceNavButtons -> FinanceNav on every existing Invoice-*.md
   await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies (now also strips top-hub FinanceHubActions via v0.110.3 template change)
   await applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);             // NEW v0.110.3 — strips FinanceHubActions(here:"finance") block from spice/finance/Finance.md (user feedback: duplicate finance nav section)
-  await applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);       // NEW v0.110.3 — injects FinanceNavRow block into Budget/Paycheck/Debt Defaults notes that lack it
+  await applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history, git);       // NEW (cockpit #3) — RETIRES the dead FinanceNavRow injection: strips any FinanceNavRow block from the three Defaults notes (FinanceNav supersedes it). Replaces applyFinanceDefaultsNavRowInjection.
+  await applyFinanceMonthChecklistInjection(tp, manifest, variables, history, git);        // NEW (cockpit #3) — MonthSetupChecklist block above MonthDashboard on every Month note
+  await applyFinanceEditScopeBannerInjection(tp, manifest, variables, history, git);       // NEW (cockpit #3) — FinanceEditScopeBanner one-liner after FinanceNav on Budget/Paycheck/Defaults notes
 }
 
 // applyFinanceHubsRepair — v0.110.0 (finance 0.6.1). Heals consumer vaults
@@ -10987,6 +11004,263 @@ async function applyFinanceDefaultsNavRowInjection(tp, manifest, variables, hist
 
   history?.push({ event: "info", step: "finance_defaults_nav_row_injection", name: "finance",
     summary: { injected, alreadyPresent, absent, noAnchor },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// Finance Month cockpit + edit-scope banner injection + nav-row retirement
+// (finance "make it make sense" #3). Three UNGATED, snapshot-first,
+// marker-guarded, per-file failure-loud heals. Mirror
+// applyFinanceBudgetAllocationsBandInjection posture.
+// ============================================================================
+
+// _listMonthFiles — walk spice/finance/months/<...>/Month-*.md OR flat
+// months/Month-*.md. Returns array of relative file paths. Per-folder
+// failure-loud (skip folder). The month entity historically materializes as a
+// flat months/Month-YYYY-MM.md.
+async function _listMonthFiles(adapter, monthsRoot) {
+  const monthFiles = [];
+  try {
+    const top = await adapter.list(monthsRoot);
+    for (const fp of (top.files || [])) {
+      if (/\/Month-\d{4}-\d{2}\.md$/.test(fp) || /Month-\d{4}-\d{2}\.md$/.test(fp)) monthFiles.push(fp);
+    }
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/\/Month-\d{4}-\d{2}\.md$/.test(fp)) monthFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud, continue */ }
+    }
+  } catch (_e) { /* root list failed — return empty */ }
+  return monthFiles;
+}
+
+// _injectMonthChecklist — pure body transform. Idempotent (marker-guarded).
+// Injects the MonthSetupChecklist dataviewjs block ABOVE the MonthDashboard
+// block on Month notes. Anchor priority:
+//   1. `<!-- month-setup-checklist -->` marker present → no-op.
+//   2. MonthDashboard dataviewjs block → inject BEFORE.
+//   3. FinanceNav dataviewjs block → inject AFTER.
+//   4. Frontmatter close → inject AFTER.
+function _injectMonthChecklist(body) {
+  let out = body;
+  const MARKER = "<!-- month-setup-checklist -->";
+  if (out.includes(MARKER)) return { body: out, touched: false };
+  if (/class:\s*["']MonthSetupChecklist["']/.test(out)) return { body: out, touched: false };
+
+  const checklistBlock = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "MonthSetupChecklist" });\n\`\`\`\n\n`;
+
+  const dashboardBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']MonthDashboard["'][^`]*```[ \t]*\r?\n)/;
+  const db = out.match(dashboardBlockRe);
+  if (db) {
+    out = out.replace(dashboardBlockRe, `${checklistBlock}$1`);
+    return { body: out, touched: true };
+  }
+
+  const navBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']FinanceNav["'][^`]*```[ \t]*\r?\n)/;
+  const nb = out.match(navBlockRe);
+  if (nb) {
+    out = out.replace(navBlockRe, `$1\n${checklistBlock}`);
+    return { body: out, touched: true };
+  }
+
+  const fmEnd = out.indexOf("---\n", 4);
+  if (fmEnd !== -1) {
+    const cutIdx = fmEnd + 4;
+    out = out.slice(0, cutIdx) + `\n${checklistBlock}` + out.slice(cutIdx);
+    return { body: out, touched: true };
+  }
+
+  return { body: out, touched: false };
+}
+
+// _injectEditScopeBanner — pure body transform. Idempotent (marker-guarded).
+// Injects the FinanceEditScopeBanner dataviewjs block AFTER the FinanceNav
+// block on Budget/Paycheck/Defaults notes. Anchor priority:
+//   1. `<!-- finance-edit-scope -->` marker present → no-op.
+//   2. FinanceNav dataviewjs block → inject AFTER.
+//   3. Frontmatter close → inject AFTER.
+function _injectEditScopeBanner(body) {
+  let out = body;
+  const MARKER = "<!-- finance-edit-scope -->";
+  if (out.includes(MARKER)) return { body: out, touched: false };
+  if (/class:\s*["']FinanceEditScopeBanner["']/.test(out)) return { body: out, touched: false };
+
+  const bannerBlock = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "FinanceEditScopeBanner" });\n\`\`\`\n\n`;
+
+  const navBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']FinanceNav["'][^`]*```[ \t]*\r?\n)/;
+  const nb = out.match(navBlockRe);
+  if (nb) {
+    out = out.replace(navBlockRe, `$1\n${bannerBlock}`);
+    return { body: out, touched: true };
+  }
+
+  const fmEnd = out.indexOf("---\n", 4);
+  if (fmEnd !== -1) {
+    const cutIdx = fmEnd + 4;
+    out = out.slice(0, cutIdx) + `\n${bannerBlock}` + out.slice(cutIdx);
+    return { body: out, touched: true };
+  }
+
+  return { body: out, touched: false };
+}
+
+// _stripDefaultsNavRow — pure body transform. Idempotent. Removes a dead
+// FinanceNavRow dataviewjs block (superseded by FinanceNav) from a body,
+// including any leading `// entity-create:` sentinel comment line inside the
+// same block and the trailing blank line so removal leaves no double blank.
+// Leaves FinanceNav (and every other block) untouched.
+function _stripDefaultsNavRow(body) {
+  const BLOCK_RE = /\n?```dataviewjs\s*\n(?:\/\/[^\n]*\n)?await\s+dv\.view\(\s*["'][^"']*customjs-guard[^"']*["']\s*,\s*\{\s*class\s*:\s*["']FinanceNavRow["']\s*\}\s*\)\s*;?\s*\n```[ \t]*\r?\n/;
+  if (!BLOCK_RE.test(body)) return { body, touched: false };
+  const out = body.replace(BLOCK_RE, "\n");
+  if (out === body) return { body, touched: false };
+  return { body: out, touched: true };
+}
+
+// applyFinanceMonthChecklistInjection — inject the MonthSetupChecklist block
+// into every existing Month-YYYY-MM.md that lacks it (above MonthDashboard).
+// UNGATED · marker-guarded · .sauce-backup snapshot before write · per-file
+// failure-loud. New month notes get the block from the manifest inline_body.
+async function applyFinanceMonthChecklistInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const monthsRoot = "spice/finance/months";
+  if (!(await adapter.exists(monthsRoot))) return;
+
+  const monthFiles = await _listMonthFiles(adapter, monthsRoot);
+  if (monthFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touched = 0;
+  for (const fp of monthFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectMonthChecklist(body);
+      if (result.touched) {
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_month_checklist_injection", name: "finance",
+        reason: `body injection failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_month_checklist_injection", name: "finance",
+    reason: `${monthFiles.length} month notes scanned, ${touched} bodies injected (MonthSetupChecklist above MonthDashboard)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// applyFinanceEditScopeBannerInjection — inject the FinanceEditScopeBanner block
+// into every existing Budget-*.md + Paycheck-*.md + the three Defaults notes
+// that lack it (after FinanceNav). UNGATED · marker-guarded · .sauce-backup
+// snapshot · per-file failure-loud. New notes get the block from inline_body.
+async function applyFinanceEditScopeBannerInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const targets = [];
+  const budgetsRoot = "spice/finance/budgets";
+  if (await adapter.exists(budgetsRoot)) {
+    for (const fp of await _listBudgetFiles(adapter, budgetsRoot)) targets.push(fp);
+  }
+  const paychecksRoot = "spice/finance/paychecks";
+  if (await adapter.exists(paychecksRoot)) {
+    for (const fp of await _listPaycheckFiles(adapter, paychecksRoot)) targets.push(fp);
+  }
+  for (const fp of ["spice/finance/Budget Defaults.md", "spice/finance/Paycheck Defaults.md", "spice/finance/Debt Defaults.md"]) {
+    if (await adapter.exists(fp)) targets.push(fp);
+  }
+  if (targets.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touched = 0;
+  for (const fp of targets) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectEditScopeBanner(body);
+      if (result.touched) {
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_edit_scope_banner_injection", name: "finance",
+        reason: `body injection failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_edit_scope_banner_injection", name: "finance",
+    reason: `${targets.length} budget/paycheck/defaults notes scanned, ${touched} bodies injected (FinanceEditScopeBanner after FinanceNav)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// applyFinanceDefaultsNavRowRetirement — retires the DEAD second nav row.
+// Replaces applyFinanceDefaultsNavRowInjection (which ungated-re-injected the
+// superseded FinanceNavRow on every install). Strips any FinanceNavRow block
+// from the three Defaults notes (FinanceNav supersedes it). UNGATED · idempotent
+// (a body with no FinanceNavRow is a no-op) · .sauce-backup snapshot before
+// write · per-file failure-loud.
+async function applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const DEFAULTS_PATHS = [
+    "spice/finance/Budget Defaults.md",
+    "spice/finance/Paycheck Defaults.md",
+    "spice/finance/Debt Defaults.md",
+  ];
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let stripped = 0, absent = 0, alreadyClean = 0;
+
+  for (const fp of DEFAULTS_PATHS) {
+    try {
+      if (!(await adapter.exists(fp))) { absent++; continue; }
+      const body = await adapter.read(fp);
+      const result = _stripDefaultsNavRow(body);
+      if (!result.touched) { alreadyClean++; continue; }
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, result.body);
+      stripped++;
+      history?.push({ event: "info", step: "finance_defaults_nav_row_retirement", name: "finance",
+        path: fp, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_defaults_nav_row_retirement", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_defaults_nav_row_retirement", name: "finance",
+    summary: { stripped, absent, alreadyClean },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -16474,6 +16748,14 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._backfillBudgetGroupsFromText = _backfillBudgetGroupsFromText;
     module.exports._repairMalformedBudgetGroups = _repairMalformedBudgetGroups;
     module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
+    // cockpit #3 — Month cockpit + edit-scope banner injection + nav-row retirement.
+    module.exports.applyFinanceMonthChecklistInjection = applyFinanceMonthChecklistInjection;
+    module.exports._injectMonthChecklist = _injectMonthChecklist;
+    module.exports.applyFinanceEditScopeBannerInjection = applyFinanceEditScopeBannerInjection;
+    module.exports._injectEditScopeBanner = _injectEditScopeBanner;
+    module.exports.applyFinanceDefaultsNavRowRetirement = applyFinanceDefaultsNavRowRetirement;
+    module.exports._stripDefaultsNavRow = _stripDefaultsNavRow;
+    module.exports._listMonthFiles = _listMonthFiles;
     module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
     module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
     module.exports.applyFinancePaycheckBodyMigration = applyFinancePaycheckBodyMigration;

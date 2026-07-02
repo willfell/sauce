@@ -435,7 +435,7 @@
           "actual": 0
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/budgets/Budgets.md"
@@ -482,7 +482,7 @@
           }
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"paycheck\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"paycheck\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/paychecks/Paychecks.md"
@@ -629,7 +629,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- month-setup-checklist -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthSetupChecklist\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/months/Months.md"

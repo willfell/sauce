@@ -12340,6 +12340,153 @@ async function caseFinBgrRepairLeavesCleanNotes() {
     installer._repairMalformedBudgetGroups(legitBlockUnassigned).touched === false);
 }
 
+// ===== HC-FIN-COCKPIT-* — Month cockpit + edit-scope banner injection + nav retirement =====
+
+async function caseFinCockpitChecklistInject() {
+  console.log("\n--- Case HC-FIN-COCKPIT-1: _injectMonthChecklist inserts checklist above MonthDashboard, idempotent ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-COCKPIT-1: _injectMonthChecklist is a function",
+    typeof installer._injectMonthChecklist === "function");
+  const body = [
+    "---", "type: month", "month: 2026-07", "---", "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "MonthDashboard" });',
+    '```', "", "## Notes", "",
+  ].join("\n");
+  const out = installer._injectMonthChecklist(body);
+  assertTrue("HC-FIN-COCKPIT-1: reports touched", out.touched === true);
+  assertTrue("HC-FIN-COCKPIT-1: marker present", /<!-- month-setup-checklist -->/.test(out.body));
+  assertTrue("HC-FIN-COCKPIT-1: MonthSetupChecklist block present",
+    /class:\s*"MonthSetupChecklist"/.test(out.body));
+  // Anchored ABOVE MonthDashboard.
+  const checklistIdx = out.body.indexOf('MonthSetupChecklist');
+  const dashboardIdx = out.body.indexOf('MonthDashboard');
+  assertTrue("HC-FIN-COCKPIT-1: checklist appears BEFORE MonthDashboard",
+    checklistIdx > 0 && dashboardIdx > 0 && checklistIdx < dashboardIdx);
+  // Idempotent — second pass is a no-op.
+  const out2 = installer._injectMonthChecklist(out.body);
+  assertTrue("HC-FIN-COCKPIT-1: idempotent (second pass no-op)", out2.touched === false);
+  assertTrue("HC-FIN-COCKPIT-1: only ONE checklist block after two passes",
+    (out2.body.match(/class:\s*"MonthSetupChecklist"/g) || []).length === 1);
+}
+
+async function caseFinCockpitBannerInject() {
+  console.log("\n--- Case HC-FIN-COCKPIT-2: _injectEditScopeBanner inserts banner after FinanceNav, idempotent ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-COCKPIT-2: _injectEditScopeBanner is a function",
+    typeof installer._injectEditScopeBanner === "function");
+  const body = [
+    "---", "type: budget", "month: 2026-07", "---", "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });',
+    '```', "",
+  ].join("\n");
+  const out = installer._injectEditScopeBanner(body);
+  assertTrue("HC-FIN-COCKPIT-2: reports touched", out.touched === true);
+  assertTrue("HC-FIN-COCKPIT-2: marker present", /<!-- finance-edit-scope -->/.test(out.body));
+  assertTrue("HC-FIN-COCKPIT-2: FinanceEditScopeBanner block present",
+    /class:\s*"FinanceEditScopeBanner"/.test(out.body));
+  // Anchored AFTER FinanceNav, BEFORE BudgetSummary.
+  const navIdx = out.body.indexOf('FinanceNav"');
+  const bannerIdx = out.body.indexOf('FinanceEditScopeBanner');
+  const summaryIdx = out.body.indexOf('BudgetSummary');
+  assertTrue("HC-FIN-COCKPIT-2: banner appears AFTER FinanceNav and BEFORE BudgetSummary",
+    navIdx > 0 && bannerIdx > navIdx && bannerIdx < summaryIdx);
+  // Idempotent.
+  const out2 = installer._injectEditScopeBanner(out.body);
+  assertTrue("HC-FIN-COCKPIT-2: idempotent (second pass no-op)", out2.touched === false);
+  assertTrue("HC-FIN-COCKPIT-2: only ONE banner block after two passes",
+    (out2.body.match(/class:\s*"FinanceEditScopeBanner"/g) || []).length === 1);
+}
+
+async function caseFinCockpitNavRowStrip() {
+  console.log("\n--- Case HC-FIN-COCKPIT-3: _stripDefaultsNavRow removes a FinanceNavRow block, leaves FinanceNav, idempotent ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-COCKPIT-3: _stripDefaultsNavRow is a function",
+    typeof installer._stripDefaultsNavRow === "function");
+  const body = [
+    "---", "type: budget-defaults", "---", "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });',
+    '```', "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });',
+    '```', "",
+  ].join("\n");
+  const out = installer._stripDefaultsNavRow(body);
+  assertTrue("HC-FIN-COCKPIT-3: reports touched", out.touched === true);
+  assertTrue("HC-FIN-COCKPIT-3: FinanceNavRow block removed",
+    !/class:\s*"FinanceNavRow"/.test(out.body));
+  assertTrue("HC-FIN-COCKPIT-3: FinanceNav block preserved",
+    /class:\s*"FinanceNav"/.test(out.body));
+  assertTrue("HC-FIN-COCKPIT-3: editor block preserved",
+    /class:\s*"BudgetDefaultsEditor"/.test(out.body));
+  // Idempotent — a body with no FinanceNavRow is a no-op.
+  const out2 = installer._stripDefaultsNavRow(out.body);
+  assertTrue("HC-FIN-COCKPIT-3: idempotent (second pass no-op)", out2.touched === false);
+  // A body that never had a FinanceNavRow is untouched.
+  const clean = [
+    "---", "type: budget-defaults", "---", "",
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
+    '```', "",
+  ].join("\n");
+  assertTrue("HC-FIN-COCKPIT-3: clean body untouched", installer._stripDefaultsNavRow(clean).touched === false);
+}
+
+async function caseFinCockpitHealsWiredAndUngated() {
+  console.log("\n--- Case HC-FIN-COCKPIT-4: heals exported, wired in applyFinanceMigrations, ungated, snapshot-first; injection call removed ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("HC-FIN-COCKPIT-4: applyFinanceMonthChecklistInjection exported",
+    typeof installer.applyFinanceMonthChecklistInjection === "function");
+  assertTrue("HC-FIN-COCKPIT-4: applyFinanceEditScopeBannerInjection exported",
+    typeof installer.applyFinanceEditScopeBannerInjection === "function");
+  assertTrue("HC-FIN-COCKPIT-4: applyFinanceDefaultsNavRowRetirement exported",
+    typeof installer.applyFinanceDefaultsNavRowRetirement === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  // All three new heals invoked in applyFinanceMigrations.
+  const migMatch = src.match(/async\s+function\s+applyFinanceMigrations\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assertTrue("HC-FIN-COCKPIT-4: applyFinanceMigrations body matched", migMatch !== null);
+  const migBody = migMatch ? migMatch[1] : "";
+  assertTrue("HC-FIN-COCKPIT-4: month-checklist heal invoked",
+    /await\s+applyFinanceMonthChecklistInjection\(/.test(migBody));
+  assertTrue("HC-FIN-COCKPIT-4: edit-scope banner heal invoked",
+    /await\s+applyFinanceEditScopeBannerInjection\(/.test(migBody));
+  assertTrue("HC-FIN-COCKPIT-4: nav-row RETIREMENT heal invoked",
+    /await\s+applyFinanceDefaultsNavRowRetirement\(/.test(migBody));
+  // The OLD injection call is REMOVED from applyFinanceMigrations.
+  assertTrue("HC-FIN-COCKPIT-4: old applyFinanceDefaultsNavRowInjection call REMOVED from applyFinanceMigrations",
+    !/await\s+applyFinanceDefaultsNavRowInjection\(/.test(migBody));
+  // Each heal snapshot-first + ungated.
+  for (const fn of ["applyFinanceMonthChecklistInjection", "applyFinanceEditScopeBannerInjection", "applyFinanceDefaultsNavRowRetirement"]) {
+    const m = src.match(new RegExp("async\\s+function\\s+" + fn + "\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}"));
+    assertTrue(`HC-FIN-COCKPIT-4: ${fn} body matched`, m !== null);
+    if (m) {
+      assertTrue(`HC-FIN-COCKPIT-4: ${fn} snapshot-first (.sauce-backup)`, /\.sauce-backup/.test(m[1]));
+      assertTrue(`HC-FIN-COCKPIT-4: ${fn} ungated (no version-gate compare)`,
+        !/VERSION_SNAPSHOT|semverGte|isVersionAtLeast/.test(m[1]));
+    }
+  }
+}
+
 async function caseFinBgrHealWiredAndUngated() {
   console.log("\n--- Case HC-FIN-BGR-5: repair heal exported, called, ungated, snapshot-first ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -15372,6 +15519,10 @@ async function caseHCV0128FinancePlanning() {
   await caseFinBgrRepairStripsStray();
   await caseFinBgrRepairLeavesCleanNotes();
   await caseFinBgrHealWiredAndUngated();
+  await caseFinCockpitChecklistInject();
+  await caseFinCockpitBannerInject();
+  await caseFinCockpitNavRowStrip();
+  await caseFinCockpitHealsWiredAndUngated();
 
   // v0.107.0 — defaults editor widgets (S3)
   await caseV01070Bde1ClassDeclared();
