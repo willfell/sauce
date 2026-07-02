@@ -12286,6 +12286,60 @@ async function caseFinBgrBackfillStillBackfillsBlock() {
     /\n    group: Unassigned/.test(out.body));
 }
 
+async function caseFinBgrRepairStripsStray() {
+  console.log("\n--- Case HC-FIN-BGR-3: repair strips stray 'group: Unassigned' under a flow-map ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const corrupt = [
+    "---",
+    "type: budget",
+    "month: 2026-07",
+    "categories:",
+    '  - {"group":"Variable Essentials","name":"Groceries","planned":550,"actual":0}',
+    "    group: Unassigned",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    "    group: Unassigned",
+    "groups:",
+    "  - Variable Essentials",
+    "  - Lifestyle",
+    "---",
+    "",
+  ].join("\n");
+  const out = installer._repairMalformedBudgetGroups(corrupt);
+  assertTrue("HC-FIN-BGR-3: repair reports touched", out.touched === true);
+  assertTrue("HC-FIN-BGR-3: stray lines removed", !/\n    group: Unassigned/.test(out.body));
+  assertTrue("HC-FIN-BGR-3: flow-map rows preserved",
+    /\{"group":"Variable Essentials","name":"Groceries"/.test(out.body) &&
+    /\{"group":"Lifestyle","name":"Golf"/.test(out.body));
+  // Idempotent: second pass is a no-op.
+  const out2 = installer._repairMalformedBudgetGroups(out.body);
+  assertTrue("HC-FIN-BGR-3: idempotent (second pass no-op)", out2.touched === false);
+}
+
+async function caseFinBgrRepairLeavesCleanNotes() {
+  console.log("\n--- Case HC-FIN-BGR-4: repair no-ops on clean notes (block + flow) ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const cleanBlock = [
+    "---","type: budget","month: 2026-06","categories:",
+    "  - group: Lifestyle","    name: Golf","    planned: 30","    actual: 0",
+    "---","",
+  ].join("\n");
+  const cleanFlow = [
+    "---","type: budget","month: 2026-08","categories:",
+    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
+    "---","",
+  ].join("\n");
+  assertTrue("HC-FIN-BGR-4: clean block untouched", installer._repairMalformedBudgetGroups(cleanBlock).touched === false);
+  assertTrue("HC-FIN-BGR-4: clean flow untouched", installer._repairMalformedBudgetGroups(cleanFlow).touched === false);
+  // A legitimately block-Unassigned row (not under a flow-map) must NOT be stripped.
+  const legitBlockUnassigned = [
+    "---","type: budget","month: 2026-03","categories:",
+    "  - name: Mystery","    group: Unassigned","    planned: 10","    actual: 0",
+    "---","",
+  ].join("\n");
+  assertTrue("HC-FIN-BGR-4: legit block Unassigned preserved",
+    installer._repairMalformedBudgetGroups(legitBlockUnassigned).touched === false);
+}
+
 // v0.107.0 — defaults editor classes shipped in finance blueprint.
 
 async function caseV01070Bde1ClassDeclared() {
@@ -15298,6 +15352,8 @@ async function caseHCV0128FinancePlanning() {
   await caseV01070Fcgb5IdempotentSkip();
   await caseFinBgrBackfillSkipsFlowMap();
   await caseFinBgrBackfillStillBackfillsBlock();
+  await caseFinBgrRepairStripsStray();
+  await caseFinBgrRepairLeavesCleanNotes();
 
   // v0.107.0 — defaults editor widgets (S3)
   await caseV01070Bde1ClassDeclared();

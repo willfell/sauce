@@ -9245,6 +9245,38 @@ function _backfillBudgetGroupsFromText(body) {
   return { body: newBody, touched: true, added };
 }
 
+// _repairMalformedBudgetGroups — pure string transform on Budget-*.md body.
+// Undoes the pre-fix corruption where the group backfill spliced a stray
+// `    group: Unassigned` line directly beneath an inline flow-mapping category
+// item (which already carries its group inside the braces). Removes ONLY a
+// `    group: Unassigned` line that immediately follows a `  - { … "group" … }`
+// flow-map item. Never touches legitimate block-style `group: Unassigned`.
+// Returns { body, touched, repaired }. Idempotent; never throws on malformed YAML.
+function _repairMalformedBudgetGroups(body) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, repaired: 0 };
+
+  const fmLines = fmMatch[1].split("\n");
+  const out = [];
+  let repaired = 0;
+  for (let i = 0; i < fmLines.length; i++) {
+    const line = fmLines[i];
+    out.push(line);
+    // Flow-map category item that already carries a group inside the braces.
+    if (/^  - \{.*["']?group["']?\s*:/.test(line)) {
+      // Drop a stray `    group: Unassigned` immediately beneath it.
+      if (i + 1 < fmLines.length && /^    group:\s*Unassigned\s*$/.test(fmLines[i + 1])) {
+        i += 1; // skip the stray line (do not push)
+        repaired += 1;
+      }
+    }
+  }
+  if (repaired === 0) return { body, touched: false, repaired: 0 };
+  const newFm = out.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, repaired };
+}
+
 async function applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
@@ -16175,6 +16207,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
     module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
     module.exports._backfillBudgetGroupsFromText = _backfillBudgetGroupsFromText;
+    module.exports._repairMalformedBudgetGroups = _repairMalformedBudgetGroups;
     module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
     module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
     module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
