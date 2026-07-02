@@ -200,8 +200,14 @@ function checkManifestDeclaration(content, opts) {
 // Rule 4: no literal `---` chrome divider. Helpers own dividers via
 // SectionLabel.divider(); a bare thematic-break between/adjacent to chrome
 // dataviewjs blocks is the outlawed pattern.
-function checkNoLiteralChromeDivider(content) {
+function checkNoLiteralChromeDivider(content, opts) {
     const violations = [];
+    // Scoped to the `project` blueprint this cycle: only project templates have
+    // been converted to the helper-owned SectionLabel.divider() grammar. Other
+    // adopted blueprints (meetings / scratch / to-do) still legitimately carry a
+    // literal chrome `---` and are retrofitted in later cycles. See
+    // Docs/plans/2026-07-02-project-blueprint-chrome-overhaul-design.md §S1.
+    if (!opts || opts.blueprint !== 'project') return violations;
     if (isKanbanBoard(content)) return violations;
     const lines = content.split('\n');
     let fmEnd = -1;
@@ -231,7 +237,7 @@ function lintContent(content, opts) {
         ...checkNoHeadings(content),
         ...checkBreadcrumbFirst(content, opts),
         ...checkManifestDeclaration(content, opts),
-        ...checkNoLiteralChromeDivider(content),
+        ...checkNoLiteralChromeDivider(content, opts),
     ];
 }
 
@@ -262,7 +268,7 @@ function collectAdoptedTemplates() {
         const breadcrumbTypes = Object.keys(
             (manifest.breadcrumb && manifest.breadcrumb.types) || {}
         );
-        const opts = { breadcrumbTypes, manifestHasBreadcrumb: true };
+        const opts = { breadcrumbTypes, manifestHasBreadcrumb: true, blueprint: e.name };
 
         const tplDir = path.join(bpDir, 'templates');
         let tpls;
@@ -291,7 +297,7 @@ function runSelfTest() {
     // Fixtures have no sibling manifest, so feed the rule context explicitly.
     // Both fixtures declare `type: meeting`; treat `meeting` as a declared
     // breadcrumb type so the presence half of rule 2 is exercised.
-    const opts = { breadcrumbTypes: ['meeting'], manifestHasBreadcrumb: true };
+    const opts = { breadcrumbTypes: ['meeting'], manifestHasBreadcrumb: true, blueprint: 'project' };
 
     const cases = [
         { dir: 'pass', expectViolations: false },

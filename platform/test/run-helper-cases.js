@@ -6715,13 +6715,16 @@ async function casePNBAcc2NoHandRolledStyle() {
 }
 
 async function casePNBAcc3DividerBreathingRoom() {
-    console.log("\n--- Case PNB-ACC-3: top divider margin-bottom 14px ---");
+    console.log("\n--- Case PNB-ACC-3: leading divider delegates to shared primitive ---");
     const src = fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
         "utf8"
     );
-    assertTrue("PNB-ACC-3: divider margin 8px 0 14px 0",
-        /margin:\s*8px 0 14px 0/.test(src));
+    // WS3 (2026-07-02): the nav row no longer hand-rolls its top divider; it
+    // delegates to the canonical customJS.SectionLabel.divider() primitive so the
+    // chrome-hairline spacing lives in one tunable place (section-label.js).
+    assertTrue("PNB-ACC-3: nav row uses customJS.SectionLabel.divider",
+        /customJS\.SectionLabel\.divider\s*\(/.test(src));
 }
 
 // -------------------------------------------------------------------------
