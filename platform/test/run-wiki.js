@@ -258,6 +258,20 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W8 — regression: card navigation. BeaconCards navigates via `target` (→
+// openLinkText), NOT `link`. Section entries are plain objects with no
+// .file.path, so a `link:` opt left them with an undefined default target →
+// clicking a section card did nothing. Guard the source so it can't regress.
+// ---------------------------------------------------------------------------
+{
+  const src = fs.readFileSync(TREE_SRC, 'utf8');
+  ok('W8a WikiTree card nav uses BeaconCards `target:` (not `link:`)',
+     /target:\s*\(s\)\s*=>/.test(src) && /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
+  ok('W8b recent-updates list navigates via openLinkText (not a no-op raw <a href>)',
+     /openLinkText\(/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

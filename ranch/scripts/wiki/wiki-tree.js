@@ -37,7 +37,10 @@ class WikiTree {
                 layout: "row",
                 title: (s) => s.title,
                 icon: () => folderIcon,
-                link: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
+                // BeaconCards navigates via `target` (→ openLinkText), NOT `link`.
+                // Section entries are plain objects (no .file.path), so without an
+                // explicit target the card had no destination → clicking did nothing.
+                target: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
                 meta: (s) => {
                     if (s.pageCount === 0) return undefined;
                     const ago = window.moment ? window.moment(s.maxMtime).fromNow() : "";
@@ -59,7 +62,7 @@ class WikiTree {
                 layout: "row",
                 title: (p) => p.title || p.file.name,
                 icon: () => fileIcon,
-                link: (p) => p.file.path,
+                target: (p) => p.file.path,
                 meta: (p) => {
                     const created = p.created_at ? (window.moment ? window.moment(typeof p.created_at.toISO === "function" ? p.created_at.toISO() : String(p.created_at)).format("MMM D") : "") : "";
                     const edited = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
@@ -80,7 +83,16 @@ class WikiTree {
                     const label = p.title || p.file.name;
                     const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
                     const row = container.createEl("div");
-                    row.innerHTML = '<a href="' + link + '">' + label + "</a>" + (ago ? " <span style=\"color:var(--text-muted);font-size:0.85em;\">" + ago + "</span>" : "");
+                    row.style.cssText = "margin: 2px 0;";
+                    // A raw <a href> to a vault path does NOT navigate in Obsidian; wire an
+                    // explicit openLinkText click handler (same primitive BeaconCards uses).
+                    const a = row.createEl("a", { text: label });
+                    a.style.cssText = "cursor: pointer; color: var(--link-color, var(--interactive-accent));";
+                    a.addEventListener("click", (ev) => { ev.preventDefault(); app.workspace.openLinkText(link, ""); });
+                    if (ago) {
+                        const s = row.createEl("span", { text: " " + ago });
+                        s.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+                    }
                 }
             }
         }
