@@ -255,6 +255,13 @@ const sd = splitDiff(['scripts/autoloop/select-card.js', 'platform/test/run-foo.
 ok('SD-1 test file classified', sd.testFiles.length === 1 && sd.testFiles[0] === 'platform/test/run-foo.js');
 ok('SD-2 source file classified', sd.sourceFiles.length === 1 && sd.sourceFiles[0] === 'scripts/autoloop/select-card.js');
 ok('SD-3 docs + queue excluded from source', !sd.sourceFiles.some(f => /\.md$/.test(f) || f === 'autoloop-queue.md'));
+// A test-only harness addition wires itself into package.json (release:preflight)
+// to run in CI; that manifest edit is NOT behavioral source, so the mutation check
+// must treat the change as test-only (empty sourceFiles) rather than spuriously
+// blocking. package.json + package-lock.json are excluded like docs + the queue.
+const sdPkg = splitDiff(['platform/test/run-products-render-guards.js', 'package.json', 'package-lock.json', 'autoloop-queue.md']);
+ok('SD-4 package.json + lockfile excluded from source (test-runner wiring is not behavioral)', sdPkg.sourceFiles.length === 0);
+ok('SD-5 pure harness addition classified test-only', sdPkg.testFiles.length === 1 && sdPkg.testFiles[0] === 'platform/test/run-products-render-guards.js');
 // ---- adequacyVerdict (AV-*) ----
 ok('AV-1 no test → inadequate', adequacyVerdict({ hasTest: false }).adequate === false);
 ok('AV-2 passes without source → inadequate', adequacyVerdict({ hasTest: true, redWithoutSource: false, greenWithSource: true }).adequate === false);
