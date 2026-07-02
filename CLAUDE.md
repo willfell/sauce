@@ -14,6 +14,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 - [`Docs/agent-guides/architecture.md`](Docs/agent-guides/architecture.md) — mechanisms vs blueprints, installer, distribution model, `claude_surface[]`.
 - [`Docs/agent-guides/build-test-verify.md`](Docs/agent-guides/build-test-verify.md) — preflight, release workflow, brew-tap chain, dogfood, cycle-close artifacts.
 - [`Docs/agent-guides/code-conventions.md`](Docs/agent-guides/code-conventions.md) — the five non-negotiables, customjs gotchas, module-directory invariant, marker regions.
+- [`Docs/agent-guides/blueprint-conformance.md`](Docs/agent-guides/blueprint-conformance.md) — the button/template/customjs conformance standard (the one right way) + the `platform/conformance-index.json` gate registry + `npm run conformance:audit`.
 - [`Docs/agent-guides/project-blueprint-ui.md`](Docs/agent-guides/project-blueprint-ui.md) — shared rendering primitives (Breadcrumb, SectionLabel, DocSearch) + section-ordering + spacing conventions for the project blueprint.
 - [`Docs/agent-guides/note-chrome.md`](Docs/agent-guides/note-chrome.md) — vault-wide chrome standard: breadcrumb/nav grammar, no-`## H2`/SectionLabel rule + outline/anchor tradeoff, breadcrumb-declaration schema, open-mode + button rules, migration posture.
 - [`Docs/agent-guides/dev-workflow.md`](Docs/agent-guides/dev-workflow.md) — day-to-day workflow: `npm run status` first; local-clone vs brew; per-vault sync; the four scripts (workshop-status, regen-cycle-status, scaffold-behavioral-harness, dev-sync).
