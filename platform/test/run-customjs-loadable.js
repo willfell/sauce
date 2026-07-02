@@ -128,6 +128,57 @@ function scan(dirs) {
   return { scanned: files.length, classFiles, failures };
 }
 
+// --- CJS-REF: template class-ref resolution (sibling failure to a non-loadable
+// class). A note template / content note / manifest `inline_body` that invokes
+// customjs-guard with { class: "X" } for a class X that has NO `class X`
+// definition in any shipped helper produces the SAME "_X unavailable_"
+// placeholder as a class file that fails to load — customJS simply never
+// registers X. This is exactly how finance shipped the deleted InvoiceNavButtons
+// ref (consistency-audit W0). run-finance-template-classes.js is the finance-
+// scoped regression lock; this is the PLATFORM-WIDE guardrail across all
+// blueprints + mechanisms. Only literal `class: "Name"` refs are checked;
+// dynamic/variable class names are not statically resolvable and are skipped.
+const REF_SCAN_DIRS = ['platform/blueprints', 'platform/mechanisms'];
+
+// Class DEFINITIONS are the runtime truth (customJS loads the shipped .js files,
+// not the manifest customjs_classes[] catalogue), so resolve refs against actual
+// `class X` definitions — a class shipped but omitted from a manifest still
+// resolves at render, and must not false-positive here.
+function collectClassNames(dirs) {
+  const names = new Set();
+  for (const d of dirs) {
+    for (const f of walk(d, [])) {
+      const t = fs.readFileSync(f, 'utf8');
+      const re = /(?:^|\n)\s*class\s+([A-Za-z0-9_]+)/g;
+      let m;
+      while ((m = re.exec(t)) !== null) names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+function scanClassRefs() {
+  const defs = collectClassNames(REF_SCAN_DIRS);
+  const refs = [];
+  function rec(abs) {
+    let ents;
+    try { ents = fs.readdirSync(abs, { withFileTypes: true }); } catch (_e) { return; }
+    for (const e of ents) {
+      const p = path.join(abs, e.name);
+      if (e.isDirectory()) { if (e.name === 'node_modules') continue; rec(p); }
+      else if (e.name.endsWith('.md') || e.name === 'manifest.json') {
+        const text = fs.readFileSync(p, 'utf8');
+        const re = /customjs-guard["'][^)]*\bclass\s*:\s*["']([A-Za-z0-9_]+)["']/g;
+        let m;
+        while ((m = re.exec(text)) !== null) refs.push({ cls: m[1], file: path.relative(REPO_ROOT, p) });
+      }
+    }
+  }
+  for (const d of REF_SCAN_DIRS) rec(path.join(REPO_ROOT, d));
+  const unresolved = refs.filter((r) => !defs.has(r.cls));
+  return { refCount: refs.length, defCount: defs.size, unresolved };
+}
+
 function runSelfTest() {
   const fx = path.join(REPO_ROOT, 'platform', 'test', 'fixtures', 'customjs-loadable');
   const cases = [
@@ -158,18 +209,31 @@ function runSelfTest() {
 
 function main() {
   if (process.argv.includes('--self-test')) return runSelfTest();
+
+  // Gate 1 (CJS-LOAD): every customJS class FILE loads the way the plugin loads it.
   const { scanned, classFiles, failures } = scan(SCAN_DIRS);
-  if (failures.length === 0) {
-    console.log(`ok CJS-LOAD: ${classFiles} customJS class file(s) load via customJS's eval("(" + file + ")") + new (of ${scanned} .js scanned); no violations.`);
-    process.exit(0);
+  if (failures.length) {
+    console.error(`FAIL CJS-LOAD: ${failures.length} customJS class file(s) do NOT load the way the CustomJS plugin loads them:\n`);
+    for (const v of failures) console.error(`  ${v.file}\n    ${v.message}`);
+    console.error('\nCustomJS wraps each file in ( ... ) and evals it as a SINGLE expression, then calls new().');
+    console.error('A customJS class file must be a bare class definition with NO trailing statements.');
+    console.error('For Node-testable statics, do NOT append a `module.exports` trailer — load the class in the');
+    console.error('harness via `new Function(src + "\\nreturn ClassName;")` instead (see run-renderer.js).');
+    process.exit(1);
   }
-  console.error(`FAIL CJS-LOAD: ${failures.length} customJS class file(s) do NOT load the way the CustomJS plugin loads them:\n`);
-  for (const v of failures) console.error(`  ${v.file}\n    ${v.message}`);
-  console.error('\nCustomJS wraps each file in ( ... ) and evals it as a SINGLE expression, then calls new().');
-  console.error('A customJS class file must be a bare class definition with NO trailing statements.');
-  console.error('For Node-testable statics, do NOT append a `module.exports` trailer — load the class in the');
-  console.error('harness via `new Function(src + "\\nreturn ClassName;")` instead (see run-renderer.js).');
-  process.exit(1);
+  console.log(`ok CJS-LOAD: ${classFiles} customJS class file(s) load via customJS's eval("(" + file + ")") + new (of ${scanned} .js scanned); no violations.`);
+
+  // Gate 2 (CJS-REF): every customjs-guard { class: "X" } literal ref resolves to
+  // a shipped `class X` definition (same "_X unavailable_" failure otherwise).
+  const { refCount, defCount, unresolved } = scanClassRefs();
+  if (unresolved.length) {
+    console.error(`\nFAIL CJS-REF: ${unresolved.length} customjs-guard class ref(s) reference a class with NO shipped definition (renders "_<class> unavailable_" on every note born from that template):\n`);
+    for (const u of unresolved) console.error(`  { class: "${u.cls}" } <- ${u.file}`);
+    console.error('\nEither the class was deleted/renamed (repoint the ref to a live class) or its helper file is missing.');
+    process.exit(1);
+  }
+  console.log(`ok CJS-REF: ${refCount} customjs-guard class ref(s) across ${REF_SCAN_DIRS.join(' + ')} all resolve to a shipped class definition (of ${defCount} known).`);
+  process.exit(0);
 }
 
 main();
