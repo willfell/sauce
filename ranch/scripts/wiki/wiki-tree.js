@@ -4,6 +4,17 @@ class WikiTree {
         if (!cur || !cur.file) return;
         if (cur.type !== "wiki-hub" && cur.type !== "wiki-section") return;
 
+        // Render the create/nav buttons at the top of THIS block (they used to live
+        // in a separate WikiHubActions dataviewjs block followed by a "---"). Keeping
+        // them in the same block as the search bar makes the buttons↔search divider
+        // tight — no cross-block line gap. Best-effort: if WikiHubActions is cold,
+        // the search + cards below still render.
+        try {
+            if (customJS && customJS.WikiHubActions && typeof customJS.WikiHubActions.render === "function") {
+                customJS.WikiHubActions.render(dv);
+            }
+        } catch (_e) { /* buttons are best-effort */ }
+
         const filePath = cur.file.path;
         const scopePath = filePath.slice(0, filePath.lastIndexOf("/"));
 

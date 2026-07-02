@@ -446,6 +446,70 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W15 — hub chrome consolidated into ONE block: WikiTree renders the create/nav
+// buttons itself (calling WikiHubActions), the hub/section templates no longer
+// carry a separate WikiHubActions block or "---", and the heal collapses that
+// legacy block out of existing notes (idempotently). This is what kills the
+// cross-block line gap between the wiki buttons and the search bar.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const hubSrc  = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js'), 'utf8');
+  const installSrc = fs.readFileSync(path.join(ROOT, 'platform', 'install.js'), 'utf8');
+  const hubTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'templates', 'Section Hub.md'), 'utf8');
+  const wikiTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'content', 'Wiki Hub.md'), 'utf8');
+
+  // W15a — WikiTree calls WikiHubActions.render so the buttons render in-block.
+  {
+    function el() {
+      const e = { children: [], style: { cssText: '' } };
+      e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+      e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+      return e;
+    }
+    let hubRendered = false;
+    const cjs = {
+      WikiHubActions: { render: () => { hubRendered = true; } },
+      DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+      SectionLabel: { render: () => {} },
+      BeaconCards: { render: () => {} },
+    };
+    const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
+    const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+    new Tree().render(dv);
+    ok('W15a WikiTree renders the create/nav buttons in-block (calls WikiHubActions)', hubRendered);
+  }
+
+  // W15b — WikiHubActions owns BOTH a top and a bottom divider (2 hrs) so its
+  // buttons sit tight between the nav row and the search bar.
+  ok('W15b WikiHubActions renders top + bottom dividers (2 hrs)',
+     (hubSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
+
+  // W15c — hub/section templates carry NO separate WikiHubActions block; chrome
+  // ends in WikiTree.
+  ok('W15c hub/section templates drop the WikiHubActions block (WikiTree only)',
+     !/WikiHubActions/.test(hubTpl) && /WikiTree/.test(hubTpl) &&
+     !/WikiHubActions/.test(wikiTpl) && /WikiTree/.test(wikiTpl));
+
+  // W15d — heal behavior: existing hub note (WikiHubActions block + "---")
+  // collapses to [bc][nav][WikiTree], no divider between nav and tree, idempotent.
+  {
+    const m = installSrc.match(/function _healWikiChromeBody\(body, type\) \{[\s\S]*?\n\}\n/);
+    const heal = new Function(m[0] + '\nreturn _healWikiChromeBody;')();
+    const VP = 'ranch/views/customjs-guard';
+    const blk = (c) => '```dataviewjs\nawait dv.view("' + VP + '", { class: "' + c + '" });\n```';
+    const hub = ['---', 'type: wiki-section', 'title: ems', 'dir: spice/wiki/ems', '---', '',
+      blk('Breadcrumb'), '', blk('SpaceNavButtons'), '', blk('WikiHubActions'), '', '---', '', blk('WikiTree'), ''].join('\n');
+    const h1 = heal(hub, 'wiki-section');
+    const h2 = heal(h1, 'wiki-section');
+    const between = h1.slice(h1.indexOf('SpaceNavButtons'), h1.indexOf('WikiTree'));
+    ok('W15d heal removes legacy WikiHubActions block, keeps WikiTree, drops the "---", idempotent',
+       !/class:\s*"WikiHubActions"/.test(h1) && /class:\s*"WikiTree"/.test(h1) &&
+       !/^-{3,}$/m.test(between) && h1 === h2);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

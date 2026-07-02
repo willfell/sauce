@@ -7,11 +7,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "WikiHubActions" });
-```
-
----
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "WikiTree" });
 ```

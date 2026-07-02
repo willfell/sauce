@@ -70,6 +70,13 @@ class WikiHubActions {
 
         mk("+ New Section", folderPlus, "wiki-section");
         mk("+ New Page", filePlus, "wiki-page");
+
+        // Bottom divider between the wiki buttons and whatever follows. WikiTree
+        // renders this helper directly above its search bar, so keeping the divider
+        // INSIDE this block (tight against the buttons) makes the buttons↔search
+        // boundary gap-free — the whole hub chrome lives in one dataviewjs block.
+        const hrBottom = wrap.createEl("hr");
+        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0 0 0;";
     }
 
     // Mobile-legible sizing: bigger tap target + readable label. Each button takes
