@@ -25,6 +25,10 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "doc-note" }] });
 ```
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "DocBulkMoveActions" });
+```
+
 ---
 
 ```dataviewjs

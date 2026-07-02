@@ -174,6 +174,69 @@ const D = Cls ? new Cls() : null;
     dla && dla.projectDirFor('spice/projects/x/tasks/T.md') === '' && dla.projectDirFor('') === '');
 }
 
+// ---- DocBulkMoveActions pure helpers (Project Doc Updating Wiring PR3) ----
+// The bulk Move-docs modal + runtime batch move are dogfood-only; these cover
+// the three pure helpers it owns (normalizeHubs, groupDocsBySection, planBulkMove)
+// including the batch planner's already-there / no-dest / intra-batch collision
+// skips. Loads the class from source, so reverting doc-bulk-move.js fails DBM0
+// (Gate B L1 red).
+{
+  const DBM_SRCFILE = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'doc-bulk-move.js');
+  const DBM_SRC = fs.existsSync(DBM_SRCFILE) ? fs.readFileSync(DBM_SRCFILE, 'utf8') : '';
+  const DBMCls = DBM_SRC ? new Function(`${DBM_SRC}\nreturn DocBulkMoveActions;`)() : null;
+  ok('DBM0 helper class loads', !!DBMCls);
+
+  // groupDocsBySection — groups by `section` frontmatter, sorted; blank -> "(unsectioned)".
+  const grouped = DBMCls && DBMCls.groupDocsBySection([
+    { section: 'Knowledge', sub_section: '', path: 'p/docs/knowledge/B.md', file: { name: 'B.md', path: 'p/docs/knowledge/B.md' } },
+    { section: 'Knowledge', sub_section: '', path: 'p/docs/knowledge/A.md', file: { name: 'A.md', path: 'p/docs/knowledge/A.md' } },
+    { section: '', path: 'p/docs/Loose.md', file: { name: 'Loose.md', path: 'p/docs/Loose.md' } },
+    null,
+  ]);
+  ok('DBM1 groupDocsBySection groups + sorts sections',
+    grouped && grouped.length === 2 && grouped[0].section === '(unsectioned)' && grouped[1].section === 'Knowledge');
+  ok('DBM2 groupDocsBySection sorts docs by name within a section',
+    grouped && grouped[1].docs.length === 2 && grouped[1].docs[0].name === 'A' && grouped[1].docs[1].name === 'B');
+  // wikilink section value is stripped to the plain display name.
+  const gwl = DBMCls && DBMCls.groupDocsBySection([{ section: '[[Knowledge|Kb]]', path: 'p/docs/knowledge/X.md', file: { name: 'X.md', path: 'p/docs/knowledge/X.md' } }]);
+  ok('DBM3 groupDocsBySection strips wikilink section', gwl && gwl.length === 1 && gwl[0].section === 'Knowledge');
+
+  // planBulkMove — uses DocMove for targetPath + isSameLocation; classifies skips.
+  const target = { section: 'Knowledge', subSection: '', folder: 'p/docs/knowledge' };
+  const plan = DBMCls && D && DBMCls.planBulkMove([
+    { path: 'p/docs/notes/A.md' },            // moves -> p/docs/knowledge/A.md
+    { path: 'p/docs/knowledge/B.md' },        // already-there (same folder as target)
+    { path: 'p/docs/other/A.md' },            // collision: also -> p/docs/knowledge/A.md
+    { path: '' },                             // ignored (no path)
+  ], target, D);
+  ok('DBM4 planBulkMove moves a relocatable doc',
+    plan && plan.moves.length === 1 && plan.moves[0].from === 'p/docs/notes/A.md' &&
+    plan.moves[0].to === 'p/docs/knowledge/A.md' && plan.moves[0].section === 'Knowledge');
+  ok('DBM5 planBulkMove skips already-there',
+    plan && plan.skipped.some((s) => s.path === 'p/docs/knowledge/B.md' && s.reason === 'already-there'));
+  ok('DBM6 planBulkMove skips intra-batch destination collision',
+    plan && plan.skipped.some((s) => s.path === 'p/docs/other/A.md' && s.reason === 'collision'));
+
+  // normalizeHubs — same shape contract as DocLeafActions (depth-2 parent mapping).
+  const nh = DBMCls && DBMCls.normalizeHubs([
+    { section: 'Knowledge', depth: 1, parent_section: '', file: { name: 'Knowledge', path: 'p/docs/knowledge/Knowledge.md' }, path: 'p/docs/knowledge/Knowledge.md' },
+    { section: 'Advanced', depth: 2, parent_section: 'Knowledge', file: { name: 'Advanced', path: 'p/docs/knowledge/advanced/Advanced.md' }, path: 'p/docs/knowledge/advanced/Advanced.md' },
+  ]);
+  ok('DBM7 normalizeHubs maps depth + parent',
+    nh && nh.length === 2 && nh[0].depth === 1 && nh[1].depth === 2 && nh[1].parent === 'Knowledge');
+
+  // docsFolderFor — the docs-hub note lives at spice/projects/<slug>/docs/Docs.md,
+  // so its folder IS the docs folder to scan (NOT folder + "/docs"). This pins the
+  // exact path-derivation the modal depends on (a regression here dead-ends the button).
+  const dbm = DBMCls ? new DBMCls() : null;
+  ok('DBM8 docsFolderFor uses the hub note folder as the docs folder',
+    dbm && dbm.docsFolderFor({ file: { folder: 'spice/projects/x/docs', path: 'spice/projects/x/docs/Docs.md' } }) === 'spice/projects/x/docs');
+  ok('DBM9 docsFolderFor derives folder from path when folder absent',
+    dbm && dbm.docsFolderFor({ file: { path: 'spice/projects/x/docs/Docs.md' } }) === 'spice/projects/x/docs');
+  ok('DBM10 docsFolderFor rejects a non-docs folder -> ""',
+    dbm && dbm.docsFolderFor({ file: { folder: 'spice/projects/x' } }) === '' && dbm.docsFolderFor({ file: {} }) === '');
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);
