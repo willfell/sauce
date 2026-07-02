@@ -4566,6 +4566,16 @@ async function caseDDT1DailyTemplateShape() {
     !/COWORK_CALLOUTS/.test(body) &&
     !/^## Notes$/m.test(body);
   assertTrue("DD-T1: daily-template.md content shape regressed", ok);
+
+  // The redundant in-body date heading `# <% friendly %>` was removed — the
+  // note's filename (dddd-YYYY-MM-DD) already carries the date, so the H1 was
+  // duplicate chrome. `friendly` is still computed + used by `day_label:`
+  // frontmatter, so the preamble stays; only the visible H1 line is gone.
+  assertTrue("DD-T1: daily-template.md drops the redundant `# <% friendly %>` date heading",
+    !/^#\s+<%[-=]?\s*friendly\s*[-=]?%>\s*$/m.test(body));
+  // day_label still binds `friendly`, so the const remains wired.
+  assertTrue("DD-T1: daily-template.md keeps day_label bound to friendly",
+    /^day_label:\s*"<%[-=]?\s*friendly\s*[-=]?%>"\s*$/m.test(body));
 }
 
 async function caseDDA1DashboardActivityPanel() {

@@ -24,8 +24,6 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ---
 
-# <% friendly %>
-
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceDailyDashboard" });
 ```
