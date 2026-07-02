@@ -32,7 +32,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint project axis customjs_behavioral: 13 uncovered
-  status: proposed
+  status: dismissed
+  note: not honestly actionable — grep-based rubric (ClassName.method literal) cannot credit the 10 instance-method render() widgets; ProjectNavButtons.detectContext is already behaviorally tested via instance in run-project-links.js (PLB-D*). Durable fix = rubric improvement (credit instance-method + render-guard tests), not metric-gaming.
 
 - id: cov-blueprint-project-widget-render
   title: Add coverage for project widget_render (3/14)
