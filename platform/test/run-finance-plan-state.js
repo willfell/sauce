@@ -522,5 +522,120 @@ function tierCase(balance) {
         dNo === dWith && typeof dNo === "number");
 }
 
+// ===== HC-MSS-* — monthSetupStatus: display-only month cockpit health =====
+// A pure aggregation over the existing readers (budget presence, paycheck
+// presence + deposits, untagged deposits, reconcile-to-income, bills progress).
+// It is DISPLAY-ONLY: it must never move an envelope value. Design.md §Engine.
+{
+    // No budget note for the month → status.budget.exists === false.
+    const dvNoBudget = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [], paychecks: [] });
+    const sNoBudget = fm.monthSetupStatus(dvNoBudget, "2026-07");
+    ok("HC-MSS-1 no budget → budget.exists false", sNoBudget.budget.exists === false);
+    ok("HC-MSS-2 no paycheck → paycheck.exists false", sNoBudget.paycheck.exists === false);
+    ok("HC-MSS-3 no paycheck → depositsMaterialized false", sNoBudget.paycheck.depositsMaterialized === false);
+    ok("HC-MSS-4 not ready when nothing set up", sNoBudget.ready === false);
+
+    // Budget + monthly paycheck present; one expense missing a valid deposit tag
+    // (would silently fall to check 1) → untaggedDeposits counts it + names it.
+    const mpUntagged = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+        expenses: [
+            { item: "Rent", amount: 2200, category: "Housing", deposit: 1, paid: true },
+            { item: "Apple", amount: 950, category: "Credit Payment", debt: "[[Debt-Apple-Card]]", deposit: 2, paid: false },
+            { item: "Untagged Thing", amount: 100, category: "Misc", paid: false }, // no deposit tag
+        ],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    };
+    const dvTagged = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [mpUntagged] });
+    const sTagged = fm.monthSetupStatus(dvTagged, "2026-07");
+    ok("HC-MSS-5 budget present → budget.exists true", sTagged.budget.exists === true);
+    ok("HC-MSS-6 paycheck present → paycheck.exists + depositsMaterialized true",
+        sTagged.paycheck.exists === true && sTagged.paycheck.depositsMaterialized === true);
+    ok("HC-MSS-7 untagged deposit counted (>=1)", sTagged.guardrails.untaggedDeposits.count >= 1);
+    ok("HC-MSS-8 untagged item name listed",
+        Array.isArray(sTagged.guardrails.untaggedDeposits.items)
+        && sTagged.guardrails.untaggedDeposits.items.includes("Untagged Thing"));
+    ok("HC-MSS-9 bills progress paidCount/total (1 of 3 paid)",
+        sTagged.bills.paidCount === 1 && sTagged.bills.total === 3);
+    ok("HC-MSS-10 not ready while an untagged deposit exists", sTagged.ready === false);
+
+    // Fully-tagged paycheck (every expense has a valid deposit) → untagged count 0.
+    const mpClean = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+        expenses: [
+            { item: "Rent", amount: 2200, category: "Housing", deposit: 1, paid: true },
+            { item: "Apple", amount: 950, category: "Credit Payment", deposit: 2, paid: true },
+        ],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    };
+    const dvClean = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [mpClean] });
+    const sClean = fm.monthSetupStatus(dvClean, "2026-07");
+    ok("HC-MSS-11 fully-tagged → untagged count 0", sClean.guardrails.untaggedDeposits.count === 0);
+    ok("HC-MSS-12 fully-tagged → all bills paid pct 100", sClean.bills.pct === 100);
+}
+
+// HC-MSS-RECONCILE — allocations over income flag reconcile.ok=false + deltaOver>0;
+// under income → ok=true. Reads budgetAllocations().totals READ-ONLY.
+{
+    // income_floor 9000; fixed(plan)=3851; a big debt override pushes total allocated
+    // over income. Over-allocated budget: debt_allocations sum huge.
+    const over = makeDv({
+        plan: { income_floor: 9000, fixed_living_monthly: 3851 },
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07",
+            categories: [{ group: "D", name: "All", planned: 3000, actual: 0 }],
+            debt_allocations: [{ slug: "Debt-Apple-Card", planned: 6000 }], savings_allocations: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    });
+    const sOver = fm.monthSetupStatus(over, "2026-07");
+    ok("HC-MSS-RECONCILE-1 over income → reconcile.ok false", sOver.guardrails.reconcile.ok === false);
+    ok("HC-MSS-RECONCILE-2 over income → deltaOver > 0", sOver.guardrails.reconcile.deltaOver > 0);
+
+    // Under income: small allocations that sum below the floor.
+    const under = makeDv({
+        plan: { income_floor: 9000, fixed_living_monthly: 3851 },
+        debts: [debt("Apple-Card", 14000, 22.74, 100)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07",
+            categories: [{ group: "D", name: "All", planned: 500, actual: 0 }],
+            debt_allocations: [{ slug: "Debt-Apple-Card", planned: 100 }], savings_allocations: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    });
+    const sUnder = fm.monthSetupStatus(under, "2026-07");
+    ok("HC-MSS-RECONCILE-3 under income → reconcile.ok true", sUnder.guardrails.reconcile.ok === true);
+    ok("HC-MSS-RECONCILE-4 under income → deltaOver 0", sUnder.guardrails.reconcile.deltaOver === 0);
+}
+
+// HC-MSS-ISOLATE — envelope isolation: computing monthSetupStatus must NOT change
+// any computePlanState envelope value. Compute the envelope before AND after a
+// monthSetupStatus call and assert byte-for-byte equality. (monthSetupStatus is a
+// pure read; this guards against any accidental fold of debt/savings/fixed into
+// the discretionary envelope.)
+{
+    const cfg = {
+        plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)],
+    };
+    const dvA = makeDv(cfg);
+    const before = JSON.stringify(fm.computePlanState(dvA, "2026-07").envelope);
+    // interleave the status call
+    fm.monthSetupStatus(dvA, "2026-07");
+    const after = JSON.stringify(fm.computePlanState(dvA, "2026-07").envelope);
+    ok("HC-MSS-ISOLATE-1 monthSetupStatus does not move the envelope", before === after);
+    // and ready=true only when everything green (this fixture has an untagged
+    // legacy paycheck with no deposits → not ready, but the envelope equality holds).
+    ok("HC-MSS-ISOLATE-2 envelope snapshot is a non-empty object", before.length > 2);
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -1801,7 +1801,11 @@ async function runFinanceMigrateFamily() {
         await install.applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git);
         await install.applyFinanceHubsRepair(tp, manifest, variables, history, git);
         await install.applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);
-        await install.applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);
+        // cockpit #3 — RETIREMENT replaces the old FinanceNavRow injection (which
+        // ungated-re-injected the superseded second nav row on every install).
+        await install.applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history, git);
+        await install.applyFinanceMonthChecklistInjection(tp, manifest, variables, history, git);
+        await install.applyFinanceEditScopeBannerInjection(tp, manifest, variables, history, git);
         // Unified-nav is the FinanceHubActions/FinanceNavRow -> FinanceNav vault-wide
         // sweep; runs LAST so it sees the canonical post-repair shapes.
         await install.applyFinanceUnifiedNavMigration(tp, manifest, variables, history, git);
@@ -1991,19 +1995,28 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-F4 no file under spice/finance/ contains 'class: \"FinanceNavRow\"' (#17 collapses all to FinanceNav)",
             !/class:\s*"FinanceNavRow"/.test(fAllBodies)
         );
+        // cockpit #3 — the dead FinanceNavRow INJECTION is RETIRED. F4 already
+        // asserts no FinanceNavRow survives vault-wide; F5-F7 now assert the
+        // Defaults notes carry NO dead second nav row AND gained the edit-scope
+        // banner block (injected after FinanceNav, or after frontmatter when the
+        // legacy Defaults fixture has no nav block).
         const fBudgetDefaultsBody = readFin("Budget Defaults.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F5 Budget Defaults has FinanceNav reference (#18 inject + #17 unify)",
-            /class:\s*"FinanceNav"/.test(fBudgetDefaultsBody)
+            "HC-V01190-FIN-SEED-MIGRATE-F5 Budget Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
+            !/class:\s*"FinanceNavRow"/.test(fBudgetDefaultsBody)
+                && /class:\s*"FinanceEditScopeBanner"/.test(fBudgetDefaultsBody)
         );
+        const fPaycheckDefaultsBody = readFin("Paycheck Defaults.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F6 Paycheck Defaults has FinanceNav reference (#18 inject + #17 unify)",
-            /class:\s*"FinanceNav"/.test(bPaycheckDefaultsBody)
+            "HC-V01190-FIN-SEED-MIGRATE-F6 Paycheck Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
+            !/class:\s*"FinanceNavRow"/.test(fPaycheckDefaultsBody)
+                && /class:\s*"FinanceEditScopeBanner"/.test(fPaycheckDefaultsBody)
         );
         const fDebtDefaultsBody = readFin("Debt Defaults.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F7 Debt Defaults has FinanceNav reference (#18 inject + #17 unify)",
-            /class:\s*"FinanceNav"/.test(fDebtDefaultsBody)
+            "HC-V01190-FIN-SEED-MIGRATE-F7 Debt Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
+            !/class:\s*"FinanceNavRow"/.test(fDebtDefaultsBody)
+                && /class:\s*"FinanceEditScopeBanner"/.test(fDebtDefaultsBody)
         );
         ok(
             "HC-V01190-FIN-SEED-MIGRATE-F8 Finance.md body has NO FinanceHubActions (#19 top-hub dedup + #17)",
@@ -2068,7 +2081,9 @@ async function runFinanceMigrateFamily() {
         await install.applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history2, git);
         await install.applyFinanceHubsRepair(tp, manifest, variables, history2, git);
         await install.applyFinanceTopHubNavRowDedup(tp, manifest, variables, history2, git);
-        await install.applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history2, git);
+        await install.applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history2, git);
+        await install.applyFinanceMonthChecklistInjection(tp, manifest, variables, history2, git);
+        await install.applyFinanceEditScopeBannerInjection(tp, manifest, variables, history2, git);
         await install.applyFinanceUnifiedNavMigration(tp, manifest, variables, history2, git);
 
         ok(

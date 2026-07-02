@@ -582,4 +582,54 @@ class FinanceMath {
         const discretionary = ps && ps.ok ? num(ps.envelope.effective) : Math.max(0, income - planFixed - debtTotal - savTotal);
         return { fixed: fb.items, debt, savings, totals: { debt: debtTotal, savings: savTotal, fixed, income, discretionary } };
     }
+
+    // Display-only month cockpit health (finance "make it make sense" #3). Pure
+    // aggregation over the existing readers — NEVER mutates, NEVER touches the
+    // discretionary envelope (envelope-isolation invariant). Feeds the
+    // MonthSetupChecklist widget on the Month note. Returns:
+    //   { month, budget:{exists}, paycheck:{exists,depositsMaterialized,expenseCount},
+    //     guardrails:{ untaggedDeposits:{count,items[]}, reconcile:{income,totalAllocated,ok,deltaOver} },
+    //     bills:{paidCount,total,pct}, ready }
+    // `untaggedDeposits` = expenses whose `deposit` is missing/invalid (would
+    // silently fall to check 1 — the Apple trap). `reconcile` reads
+    // budgetAllocations().totals READ-ONLY (income vs Σ fixed+debt+savings+discretionary).
+    monthSetupStatus(dv, monthKey) {
+        const mk = this._coerceMonthString(monthKey) || monthKey;
+        const budget = this.readBudgetForMonth(dv, mk);
+        const paychecks = this.readPaychecksForMonth(dv, mk);
+        const paycheck = paychecks && paychecks.length ? paychecks[0] : null;
+        const expenses = (paycheck && Array.isArray(paycheck.expenses)) ? paycheck.expenses : [];
+        const deposits = (paycheck && Array.isArray(paycheck.deposits)) ? paycheck.deposits : [];
+        // untagged = expense whose `deposit` is missing/invalid — it would silently
+        // fall to check 1 (see _depositIndex). A valid tag is an integer 1..N.
+        const untagged = expenses.filter(e => {
+            const raw = e && e.deposit;
+            const n = Number(raw);
+            return !(Number.isInteger(n) && n >= 1 && n <= Math.max(1, deposits.length));
+        }).map(e => (e && e.item != null && String(e.item).length) ? String(e.item) : "(unnamed)");
+        let reconcile = { income: 0, totalAllocated: 0, ok: true, deltaOver: 0 };
+        try {
+            const alloc = this.budgetAllocations(dv, mk);
+            const t = (alloc && alloc.totals) ? alloc.totals : {};
+            const income = Number(t.income) || 0;
+            const totalAllocated = (Number(t.fixed) || 0) + (Number(t.debt) || 0) + (Number(t.savings) || 0) + (Number(t.discretionary) || 0);
+            reconcile = { income, totalAllocated, ok: totalAllocated <= income + 0.01, deltaOver: Math.max(0, totalAllocated - income) };
+        } catch (_e) { /* no plan/budget yet — leave defaults */ }
+        const paidCount = expenses.filter(e => e && e.paid === true).length;
+        const status = {
+            month: mk,
+            budget: { exists: !!budget },
+            paycheck: { exists: !!paycheck, depositsMaterialized: deposits.length > 0, expenseCount: expenses.length },
+            guardrails: {
+                untaggedDeposits: { count: untagged.length, items: untagged },
+                reconcile,
+            },
+            bills: { paidCount, total: expenses.length, pct: expenses.length ? Math.round((paidCount / expenses.length) * 100) : 0 },
+        };
+        status.ready = status.budget.exists && status.paycheck.exists
+            && status.paycheck.depositsMaterialized
+            && status.guardrails.untaggedDeposits.count === 0
+            && status.guardrails.reconcile.ok;
+        return status;
+    }
 }
