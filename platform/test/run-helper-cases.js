@@ -4579,35 +4579,46 @@ async function caseDDT1DailyTemplateShape() {
 }
 
 // -------------------------------------------------------------------------
-// LAT-1: the leaf-action button rows sit TIGHT against their `---` chrome
-// separators — no blank line between the `---` and the
-// `{ToDo,Meeting}LeafActions` / `ScratchDayActions` dataviewjs block, above
-// OR below. Prior templates had `---\n\n<block>\n\n---`, which renders an
-// extra vertical gap between the divider and the buttons. Assert the tight
-// `---\n<block>\n---` shape in all three templates (goes red if a blank line
-// is reintroduced around any of the three action blocks).
+// LAT-1: the daily to-do / meeting / scratch-day action helpers now OWN their
+// chrome dividers. Each renders a top + bottom <hr> (12px breathing room) INSIDE
+// its own dataviewjs block (the wiki methodology), and the template drops the
+// literal `---`. This is the real fix for the gap the older "tight `---` in the
+// template" shape could never close: two adjacent blocks (a markdown `---` and a
+// dataviewjs block) always get an Obsidian inter-block gap no `---` can remove,
+// so the separator only hugs the buttons when the helper renders it in the same
+// block. Assert (a) no `---` brackets the action block in any of the three
+// templates, and (b) each helper renders two <hr>s with the 12px divider style
+// (to-do gated on the daily note). Goes red if a template `---` is reintroduced
+// or a helper divider is dropped.
 // -------------------------------------------------------------------------
-async function caseLAT1LeafActionsTightSeparators() {
-  console.log("\n--- Case LAT-1: leaf-action rows tight against their `---` separators (to-do / meetings / scratch) ---");
+async function caseLAT1LeafActionsOwnDividers() {
+  console.log("\n--- Case LAT-1: leaf-action helpers own their <hr> dividers; templates carry no `---` (to-do / meetings / scratch) ---");
+  const DIVIDER_STYLE = /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/;
   const cases = [
-    { file: ["to-do", "templates", "Today To-Do.md"], cls: "ToDoLeafActions" },
-    { file: ["meetings", "templates", "Meeting.md"], cls: "MeetingLeafActions" },
-    { file: ["scratch", "templates", "Scratch Day Hub.md"], cls: "ScratchDayActions" },
+    { tpl: ["to-do", "templates", "Today To-Do.md"], helper: ["to-do", "helpers", "todo-leaf-actions.js"], cls: "ToDoLeafActions", gated: true },
+    { tpl: ["meetings", "templates", "Meeting.md"], helper: ["meetings", "helpers", "meeting-leaf-actions.js"], cls: "MeetingLeafActions", gated: false },
+    { tpl: ["scratch", "templates", "Scratch Day Hub.md"], helper: ["scratch", "helpers", "scratch-day-actions.js"], cls: "ScratchDayActions", gated: false },
   ];
   for (const c of cases) {
-    const p = path.join(BLUEPRINTS_DIR, ...c.file);
-    assertTrue(`LAT-1: ${c.file[0]} template source exists`, fs.existsSync(p));
-    const body = fs.readFileSync(p, "utf8");
-    // Tight: `---` directly above the block, `---` directly below — no blank lines.
-    const tight = new RegExp(
-      '\\n---\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"[^`]*\\);\\n```\\n---\\n'
-    );
-    assertTrue(`LAT-1: ${c.cls} row is tight against its --- separators (no blank-line gap above/below)`,
-      tight.test(body));
-    // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
-    const looseAbove = new RegExp('\\n---\\n\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"');
-    assertTrue(`LAT-1: ${c.cls} has no blank line between the --- and the block`,
-      !looseAbove.test(body));
+    const tp = path.join(BLUEPRINTS_DIR, ...c.tpl);
+    const hp = path.join(BLUEPRINTS_DIR, ...c.helper);
+    assertTrue(`LAT-1: ${c.tpl[0]} template + helper source exist`, fs.existsSync(tp) && fs.existsSync(hp));
+    const tpl = fs.readFileSync(tp, "utf8");
+    const helper = fs.readFileSync(hp, "utf8");
+    // (a) No `---` brackets the action block (above OR below) in the template.
+    const bracketedAbove = new RegExp('-{3,}[ \\t]*\\n+```dataviewjs\\n[^`]*' + c.cls);
+    const bracketedBelow = new RegExp(c.cls + '[\\s\\S]*?\\n```\\n+-{3,}');
+    assertTrue(`LAT-1: ${c.tpl.slice(-1)[0]} no longer brackets ${c.cls} with \`---\``,
+      !bracketedAbove.test(tpl) && !bracketedBelow.test(tpl));
+    // (b) The helper renders its own top + bottom <hr> with the 12px style.
+    assertTrue(`LAT-1: ${c.cls} renders top+bottom <hr> (2 hrs)`,
+      (helper.match(/createEl\(["']hr["']\)/g) || []).length >= 2);
+    assertTrue(`LAT-1: ${c.cls} hr dividers use the 12px breathing-room margin`,
+      DIVIDER_STYLE.test(helper));
+    if (c.gated) {
+      assertTrue(`LAT-1: ${c.cls} dividers gated on the daily note (noteType === 'to-do')`,
+        /noteType\s*===\s*'to-do'/.test(helper));
+    }
   }
 }
 
@@ -15149,7 +15160,7 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
-  await caseLAT1LeafActionsTightSeparators();
+  await caseLAT1LeafActionsOwnDividers();
   await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();

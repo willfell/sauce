@@ -4709,8 +4709,11 @@ const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
 // (5) Meeting only: inject ACTION_ITEMS_MARKER above the Action Items
 // SectionLabel block (v0.127.0 §B; task-interactions appendTask anchor).
 // (6) To-do only: inject TODAY_CAPTURE_MARKER below the Today SectionLabel
-// block (v0.127.0 §F; TodayCaptureEditableList anchor). Returns the body
-// unchanged when nothing applies (driver relies on `after === before`).
+// block (v0.127.0 §F; TodayCaptureEditableList anchor). (7) To-do / meeting /
+// scratch-day: strip the redundant `---` bracketing the action block now that
+// the ToDoLeafActions/MeetingLeafActions/ScratchDayActions helper renders its own
+// <hr> dividers (see _stripDividersAroundActionBlock). Returns the body unchanged
+// when nothing applies (driver relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -4896,6 +4899,44 @@ function _healNoteChromeBody(body, type) {
       }
     }
   }
+  // Step 7 (action-bar dividers) — the daily to-do / meeting / scratch-day action
+  // helpers now render their OWN top+bottom <hr> dividers INSIDE their dataviewjs
+  // block (wiki methodology), so the literal `---` the old templates bracketed
+  // those blocks with is now a redundant double divider (and keeps the big
+  // inter-block gap the change was meant to close). Strip a `---` immediately
+  // before AND after the action block. Idempotent + tolerant of the current
+  // adjacent shape (```/---/```dataviewjs) and the older blank-padded shape.
+  if (type === 'to-do')       out = _stripDividersAroundActionBlock(out, 'ToDoLeafActions');
+  if (type === 'meeting')     out = _stripDividersAroundActionBlock(out, 'MeetingLeafActions');
+  if (type === 'scratch-day') out = _stripDividersAroundActionBlock(out, 'ScratchDayActions');
+  return out;
+}
+
+// _stripDividersAroundActionBlock — pure, idempotent. Removes a markdown `---`
+// divider immediately BEFORE and immediately AFTER a `class: "<className>"`
+// dataviewjs action block, collapsing each side to a single blank line. The
+// action helper now renders its own <hr> dividers (wiki methodology), so the
+// template `---` is redundant. Tolerant of both the current adjacent template
+// shape (```\n---\n```dataviewjs) and the older seed-fixture shape that padded
+// the `---` with blank lines (```\n\n---\n\n```dataviewjs). A `---` that is not
+// adjacent to the named action block is never touched. Mirrors the wiki heal's
+// trailing-divider strip (_healWikiChromeBody step 4), extended to both sides.
+function _stripDividersAroundActionBlock(body, className) {
+  if (typeof body !== "string") return body;
+  const q = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = body;
+  // BEFORE: a `---` (with any padding blank lines) directly preceding the action
+  // block → drop it, keeping exactly one blank line before the block.
+  out = out.replace(
+    new RegExp('\\n\\n-{3,}[ \\t]*\\n[ \\t\\r\\n]*(```dataviewjs\\n(?:\\/\\/[^\\n]*\\n)?await dv\\.view\\([^\\n]*class:\\s*"' + q + '")'),
+    '\n\n$1'
+  );
+  // AFTER: a `---` directly following the action block's closing fence → drop it,
+  // keeping one blank line after the block. (Same tail as _healWikiChromeBody.)
+  out = out.replace(
+    new RegExp('(class:\\s*"' + q + '"[\\s\\S]*?\\n```\\n)\\s*\\n?-{3,}[ \\t]*(\\r?\\n|$)'),
+    '$1'
+  );
   return out;
 }
 
@@ -18024,6 +18065,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
+    module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
