@@ -24,8 +24,15 @@
  * won't catch it; the CJS-LOAD gate (run-customjs-loadable.js) does. To Node-test
  * the statics, load via `new Function(src + "\nreturn TaskProjectList;")()`.
  *
+ * "From Meetings" split: a project To-Do note ALSO renders a "From Meetings"
+ * section (ToDoDailyProjectGroups, scope project-todo) that shows the meeting-
+ * sourced tasks for this project. To avoid a task appearing in BOTH lists, the
+ * "Project Tasks" list here EXCLUDES meeting-sourced tasks (`source === 'meeting'`)
+ * — those belong only to "From Meetings". So Project Tasks = project_slug matches
+ * AND source !== 'meeting'.
+ *
  * Static API (Node-testable, pure):
- *   TaskProjectList._matches(task, projectSlug) → bool  (raw-slug string equality)
+ *   TaskProjectList._matches(task, projectSlug) → bool  (raw-slug equality AND non-meeting)
  *
  * Instance API (browser-side):
  *   TaskProjectList.render(dv)   ← the customjs-guard entry point
@@ -40,16 +47,22 @@ class TaskProjectList {
 
     /**
      * Does a task (parseNote output OR a raw Dataview page — either exposes a
-     * plain-string `project_slug`) belong to the project whose slug is
-     * `projectSlug`? Pure string equality on project_slug. A blank target slug or
-     * a task with no project_slug → false. Never throws.
+     * plain-string `project_slug` + `source`) belong to the "Project Tasks" list
+     * of the project whose slug is `projectSlug`? True when project_slug matches
+     * AND the task is NOT meeting-sourced (`source !== 'meeting'`) — meeting tasks
+     * render only in the "From Meetings" section, so excluding them here prevents
+     * a duplicate. A blank target slug, a task with no project_slug, or a
+     * meeting-sourced task → false. Pure; never throws.
      */
     static _matches(task, projectSlug) {
         if (!task) return false;
         const want = String(projectSlug == null ? '' : projectSlug).trim();
         if (!want) return false;
         const got = String(task.project_slug == null ? '' : task.project_slug).trim();
-        return got !== '' && got === want;
+        if (got === '' || got !== want) return false;
+        // Meeting-sourced tasks belong to "From Meetings", not "Project Tasks".
+        const src = String(task.source == null ? '' : task.source).trim();
+        return src !== 'meeting';
     }
 
     // ---------- Instance / browser render ----------
@@ -86,7 +99,10 @@ class TaskProjectList {
 
         // ----- Live query: open task notes for this project (exclude _trash/ + _done/). -----
         // Filter on the RAW page.project_slug (a plain string) BEFORE parseNote —
-        // simplest + avoids any Link coercion.
+        // simplest + avoids any Link coercion. EXCLUDE meeting-sourced tasks
+        // (`source === 'meeting'`): they render in the "From Meetings" section
+        // (ToDoDailyProjectGroups, scope project-todo), so including them here too
+        // would duplicate them. Mirrors _matches's meeting exclusion.
         let parsed = [];
         try {
             const raw = dv.pages('"spice/tasks"').where(p =>
@@ -94,7 +110,8 @@ class TaskProjectList {
                 && p.file && p.file.path
                 && !p.file.path.includes('/_trash/')
                 && !p.file.path.includes('/_done/')
-                && String(p.project_slug == null ? '' : p.project_slug).trim() === ourSlug);
+                && String(p.project_slug == null ? '' : p.project_slug).trim() === ourSlug
+                && String(p.source == null ? '' : p.source).trim() !== 'meeting');
             parsed = raw.map(p => TE.parseNote(p)).array
                 ? raw.map(p => TE.parseNote(p)).array()
                 : Array.from(raw).map(p => TE.parseNote(p));

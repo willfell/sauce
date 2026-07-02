@@ -528,6 +528,29 @@ ok('RTR-1 renderTaskRow is a function (class + instance)', () => {
   assert(TaskTodayList._stripWikilink('[[Sauce]]') === 'Sauce', '_stripWikilink unwraps');
 });
 
+// RTR-2. _projectChipText extracts the CLEAN basename (FIX 2) — Dataview
+// resolves a `[[Connectors]]` project value to a FULL-PATH Link, so a bare
+// strip-wikilink would show `spice/projects/connectors/Connectors.md|Connectors`.
+// The chip must read `Connectors`. Without window.customJS (Node), the LOCAL
+// fallback path is exercised; it must still produce the basename.
+ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink)', () => {
+  assert(typeof TaskTodayListClass._projectChipText === 'function', 'static on the class');
+  assert(typeof TaskTodayList._projectChipText === 'function', 'delegator on the instance');
+  // Dataview Link object (path + display) → basename.
+  assert(TaskTodayList._projectChipText({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }) === 'Connectors',
+    'Link object → Connectors: ' + TaskTodayList._projectChipText({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }));
+  // Full-path wikilink string with pipe alias → basename.
+  assert(TaskTodayList._projectChipText('[[spice/projects/connectors/Connectors.md|Connectors]]') === 'Connectors',
+    'path+.md+pipe wikilink → Connectors: ' + TaskTodayList._projectChipText('[[spice/projects/connectors/Connectors.md|Connectors]]'));
+  // Simple wikilink → inner name.
+  assert(TaskTodayList._projectChipText('[[Sauce]]') === 'Sauce', 'simple wikilink → Sauce');
+  // Bare string passthrough.
+  assert(TaskTodayList._projectChipText('Sauce') === 'Sauce', 'bare string passthrough');
+  // Nullish → "".
+  assert(TaskTodayList._projectChipText(null) === '', 'null → ""');
+  assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
+});
+
 // ---------- _renderTitleMarkdown (B4 markdown title) ----------
 //
 // The title is now rendered as markdown so `[Chat](url)` + `[[wikilink]]` become
@@ -575,6 +598,26 @@ ok('TPL-1 _matches keys off project_slug (raw plain-string equality)', () => {
   assert(TaskProjectList._matches({ project_slug: '' }, 'sauce') === false, 'blank slug → false');
   assert(TaskProjectList._matches({ project_slug: 'sauce' }, '') === false, 'blank target → false');
   assert(TaskProjectList._matches(null, 'sauce') === false, 'null task → false');
+});
+
+// TPL-2. _matches EXCLUDES meeting-sourced tasks (they render only in "From
+// Meetings"; including them in Project Tasks too would duplicate — FIX 3).
+ok('TPL-2 _matches excludes meeting-sourced tasks (dedup with From Meetings)', () => {
+  // Same matching slug, but source === 'meeting' → excluded from Project Tasks.
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'meeting' }, 'sauce') === false,
+    'meeting-sourced with matching slug → false');
+  // Non-meeting sources still match.
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'project' }, 'sauce') === true,
+    'project-sourced → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'daily' }, 'sauce') === true,
+    'daily-sourced → true');
+  // No source field (legacy / blank) → still matches (only 'meeting' is excluded).
+  assert(TaskProjectList._matches({ project_slug: 'sauce' }, 'sauce') === true,
+    'missing source → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: '' }, 'sauce') === true,
+    'blank source → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: null }, 'sauce') === true,
+    'null source → true');
 });
 
 // ---------- MeetingLeafActions.cleanProjectName (B1 clean-name extractor) ----------
