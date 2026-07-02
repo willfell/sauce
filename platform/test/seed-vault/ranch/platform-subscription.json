@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     {
       "name": "breadcrumb",
@@ -129,7 +129,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.16.2"
+      "version": "0.16.3"
     },
     {
       "name": "journal",
