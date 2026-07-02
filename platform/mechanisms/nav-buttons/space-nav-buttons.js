@@ -7,16 +7,17 @@
  * This class reads the registry at render time, orders entries by (order,
  * source, id), and dispatches click on action.type.
  *
- * Layout (v2.10.0): one chrome line. The daily quick-nav is split out of the
- * menu into an always-present "Daily" pill (jumps to today) that sits beside
- * the "Go to…" pill; when the daily blueprint is installed prev/next-day arrows
- * flank them: [ ‹ prev ]  [ ◲ Daily ] [ ⧉ Go to… ]  [ next › ]. Tapping "Go to…"
- * opens a custom launcher OVERLAY appended to document.body (so it is never
- * clipped by the note container): a full-width bottom sheet on mobile, an
- * anchored dropdown on desktop, listing every other blueprint with icon + full
- * label. Backdrop-tap / Escape / re-tap closes it. This replaces the v2.9.0
- * native-Menu reveal (which rendered as a cramped, text-truncating popup on
- * mobile) and the pre-v2.9.0 always-visible multi-row button grid.
+ * Layout (v2.11.0): two chrome rows. Row 1 is the prev/next-day arrows
+ * (space-between) when the daily blueprint is installed. Row 2 is the always-
+ * present "Daily" pill and the "Go to…" pill as EQUAL halves (flex:1) filling
+ * the row. The daily quick-nav is split out of the menu into that Daily pill
+ * (jumps to today). Tapping "Go to…" opens a custom launcher OVERLAY appended
+ * to document.body (so it is never clipped by the note container): a full-width
+ * bottom sheet on mobile, an anchored dropdown on desktop (min 300px), listing
+ * every other blueprint with icon + full label. Backdrop-tap / Escape / re-tap
+ * closes it. This replaces the v2.10.0 single-row layout, the v2.9.0 native-Menu
+ * reveal (a cramped, text-truncating popup on mobile), and the pre-v2.9.0
+ * always-visible multi-row button grid.
  *
  * Action types (v0.4.2):
  *   - openLink             { target }
@@ -145,15 +146,10 @@ class SpaceNavButtons {
     const { dailyEntry, menuEntries } = this._splitDaily(entries);
     const dailyMeta = await this._readDailyNotesMeta();
 
-    // ── One chrome line: [ ‹ prev ] [ ◲ Daily ] [ ⧉ Go to… ] [ next › ] ──
-    const chromeRow = container.createEl("div");
-    chromeRow.style.cssText = `
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-    `;
+    // ── Two chrome rows: prev/next-day arrows on top; [ Daily | Go to… ]
+    //    evenly splitting the row below. ──
+    const chrome = container.createEl("div");
+    chrome.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
 
     const arrowBaseStyle = `
       display: inline-flex;
@@ -171,9 +167,11 @@ class SpaceNavButtons {
     const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
     const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
 
-    // Prev-day arrow (left) — only when the daily blueprint is installed.
-    let later = null;
+    // Row 1: prev/next-day arrows — only when the daily blueprint is installed.
     if (dailyMeta) {
+      const arrowRow = chrome.createEl("div");
+      arrowRow.style.cssText = `display: flex; align-items: center; justify-content: space-between; gap: 6px;`;
+
       const currentFile = dv.current && dv.current();
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
       const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
@@ -184,9 +182,9 @@ class SpaceNavButtons {
         .filter(x => x && x.m.isValid())
         .sort((a, b) => a.m.diff(b.m));
       const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
-      later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
+      const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
 
-      const prevBtn = chromeRow.createEl("button");
+      const prevBtn = arrowRow.createEl("button");
       prevBtn.innerHTML = chevronLeft + `<span>${earlier ? earlier.m.format("ddd, MMM D") : "—"}</span>`;
       prevBtn.style.cssText = arrowBaseStyle + (earlier ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
       if (earlier) {
@@ -194,17 +192,8 @@ class SpaceNavButtons {
         prevBtn.onmouseleave = () => { prevBtn.style.color = "var(--text-muted)"; prevBtn.style.background = "transparent"; };
         prevBtn.onclick = () => app.workspace.openLinkText(earlier.file.path, "");
       }
-    }
 
-    // Center group: Daily + Go to… kept together (wrap as a unit).
-    const centerGroup = chromeRow.createEl("div");
-    centerGroup.style.cssText = `display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;`;
-    if (dailyEntry) this._renderDailyButton(centerGroup, dailyEntry, dv);
-    this._renderPill(centerGroup, menuEntries, dv);
-
-    // Next-day arrow (right).
-    if (dailyMeta) {
-      const nextBtn = chromeRow.createEl("button");
+      const nextBtn = arrowRow.createEl("button");
       nextBtn.innerHTML = `<span>${later ? later.m.format("ddd, MMM D") : "—"}</span>` + chevronRight;
       nextBtn.style.cssText = arrowBaseStyle + (later ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
       if (later) {
@@ -212,9 +201,19 @@ class SpaceNavButtons {
         nextBtn.onmouseleave = () => { nextBtn.style.color = "var(--text-muted)"; nextBtn.style.background = "transparent"; };
         nextBtn.onclick = () => app.workspace.openLinkText(later.file.path, "");
       }
-    } else {
-      chromeRow.style.justifyContent = "center";
     }
+
+    // Row 2: Daily + Go to… as equal halves filling the row.
+    const pillRow = chrome.createEl("div");
+    pillRow.style.cssText = `display: flex; align-items: stretch; gap: 8px;`;
+    if (dailyEntry) {
+      const dailyEl = this._renderDailyButton(pillRow, dailyEntry, dv);
+      dailyEl.style.flex = "1 1 0";
+      dailyEl.style.justifyContent = "center";
+    }
+    const pillEl = this._renderPill(pillRow, menuEntries, dv);
+    pillEl.style.flex = "1 1 0";
+    pillEl.style.justifyContent = "center";
   }
 
   // Shared pill styling (outline chip, accent on hover) for the Daily + Go to…
@@ -258,6 +257,7 @@ class SpaceNavButtons {
     btnEl.innerHTML = icon + `<span>${dailyEntry.label || "Daily"}</span>`;
     this._stylePill(btnEl);
     btnEl.onclick = () => this._dispatchAction(dailyEntry, dv);
+    return btnEl;
   }
 
   // Render the "Go to…" pill; wire its click to the launcher overlay.
@@ -269,6 +269,7 @@ class SpaceNavButtons {
     pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
     this._stylePill(pill);
     pill.onclick = (evt) => this._openLauncher(evt, pill, menuEntries, dv);
+    return pill;
   }
 
   // Open the launcher as a viewport overlay appended to document.body (so it is
@@ -311,7 +312,7 @@ class SpaceNavButtons {
     } else {
       const rect = (pill && pill.getBoundingClientRect) ? pill.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
       const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
-      const width = Math.max(240, Math.round(rect.width) || 0);
+      const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
       let left = Math.round(rect.left || 0);
       if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
       panel.style.cssText = panelBase
