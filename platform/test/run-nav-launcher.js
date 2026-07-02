@@ -32,5 +32,14 @@ ok('NL-3 tie on order → source then id (a1 before a2)', ordered[0].id === 'a1'
 ok('NL-4 carries _source tag', ordered[0]._source === 'alpha');
 ok('NL-5 empty/absent contributions → []', inst._orderedEntries({}).length === 0 && inst._orderedEntries({ contributions: {} }).length === 0);
 
+// ── _getMenuCtor: global Menu → require('obsidian').Menu → null ──
+const inst2 = new SpaceNavButtons();
+// (a) global present
+globalThis.Menu = function MenuStub() {};
+ok('NL-6 returns global Menu when present', inst2._getMenuCtor() === globalThis.Menu);
+delete globalThis.Menu;
+// (b) absent everywhere (no global, require('obsidian') throws under node) → null
+ok('NL-7 returns null when Menu unobtainable', inst2._getMenuCtor() === null);
+
 console.log(`\n  ${pass} pass · ${fail} fail`);
 process.exit(fail ? 1 : 0);

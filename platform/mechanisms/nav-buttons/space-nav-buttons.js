@@ -74,6 +74,22 @@ class SpaceNavButtons {
     return entries;
   }
 
+  // Acquire the Obsidian Menu constructor. Order: bare global (Obsidian
+  // globalizes several API classes in the customJS/Dataview eval context, e.g.
+  // Notice) → require('obsidian').Menu → null. Never throws. Null → caller
+  // uses the inline-accordion fallback.
+  _getMenuCtor() {
+    try { if (typeof Menu !== "undefined" && Menu) return Menu; } catch (_e) {}
+    try {
+      const req = (typeof require === "function") ? require : null;
+      if (req) {
+        const obs = req("obsidian");
+        if (obs && obs.Menu) return obs.Menu;
+      }
+    } catch (_e) {}
+    return null;
+  }
+
   async render(dv) {
     const fallbackIcon = (label) =>
       `<span class="nav-fallback-icon">${(label && label[0] || "?").toUpperCase()}</span>`;
