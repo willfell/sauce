@@ -203,6 +203,66 @@ class ProjectNavButtons {
         return { core, overflow };
     }
 
+    // WS3 — overflow "More" menu. A document.body-appended overlay (so it is
+    // never clipped by the note's scroll container), one row per entry: the
+    // entry's icon + label; click opens the target and closes. Mirrors the
+    // Space-nav Go-to launcher (space-nav-buttons.js _openLauncher): a bottom
+    // sheet on mobile, a centered dropdown on desktop. A SINGLE close() removes
+    // the overlay AND the one Escape keydown listener — never leave a dangling
+    // listener (the leak a prior nav-launcher review caught). Backdrop click
+    // (target === overlay) closes too. Defensive against a missing document /
+    // customJS / app.isMobile.
+    _openMoreMenu(entries) {
+        const doc = (typeof document !== "undefined" && document) || null;
+        if (!doc || !doc.body || !Array.isArray(entries) || entries.length === 0) return;
+        const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
+
+        const overlay = doc.createElement("div");
+        overlay.className = "pnb-more-overlay";
+        overlay.style.cssText = "position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.5); display: flex; justify-content: center; "
+            + (isMobile ? "align-items: flex-end;" : "align-items: center;");
+
+        const panel = doc.createElement("div");
+        const panelBase = "box-sizing: border-box; background: var(--background-primary); border: 1px solid var(--background-modifier-border); box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto; display: flex; flex-direction: column;";
+        if (isMobile) {
+            panel.style.cssText = panelBase
+                + " width: 100%; max-width: 620px; max-height: 72vh; border-radius: 16px 16px 0 0; padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 2px;";
+            const handle = doc.createElement("div");
+            handle.style.cssText = "flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;";
+            panel.appendChild(handle);
+        } else {
+            panel.style.cssText = panelBase
+                + " min-width: 260px; max-width: 420px; max-height: 60vh; border-radius: 12px; padding: 8px; gap: 2px;";
+        }
+
+        // Single teardown for ALL dismiss paths (backdrop, Escape, row select).
+        const close = () => {
+            if (overlay.remove) overlay.remove();
+            else if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (doc.removeEventListener) doc.removeEventListener("keydown", onKey);
+        };
+        const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+
+        for (const entry of entries) {
+            const row = doc.createElement("button");
+            const icon = (entry && entry.icon) || "";
+            row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${icon}</span>`
+                + `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(entry && entry.label) || ""}</span>`;
+            row.style.cssText = "cursor: pointer; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; box-sizing: border-box; border: none; border-radius: 8px; background: transparent; color: var(--text-normal); font-family: inherit; line-height: 1.25;"
+                + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+            row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+            row.onmouseleave = () => { row.style.background = "transparent"; };
+            row.onclick = () => { close(); this._openNavTarget(entry.path); };
+            panel.appendChild(row);
+        }
+
+        overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+        if (doc.addEventListener) doc.addEventListener("keydown", onKey);
+
+        overlay.appendChild(panel);
+        doc.body.appendChild(overlay);
+    }
+
     // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
     // (bypasses the link resolver, which can double an absolute path against the
     // current note's folder on a cold cache — the doubled-path bug). Falls back
@@ -647,8 +707,13 @@ class ProjectNavButtons {
         if (previousRoot) previousRoot.remove();
         const root = dv.container.createEl("div", { cls: "pnb-root" });
 
-        const topDivider = root.createEl("hr");
-        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 14px 0;";
+        // WS3 — leading hairline via the canonical SectionLabel.divider primitive
+        // (owns the chrome hairline spacing in one place; see note-chrome.md).
+        // Guarded so a cold-load where the section-label mechanism hasn't
+        // registered yet can't throw and blank the whole nav row.
+        if (customJS && customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+            customJS.SectionLabel.divider(root);
+        }
 
         const sectionLabel = root.createEl("div");
         sectionLabel.textContent = "Project";
@@ -662,6 +727,11 @@ class ProjectNavButtons {
             margin-bottom: 4px;
         `;
 
+        // WS3 — split the built nav row into a `core` row (rendered inline) and
+        // an `overflow` set (Map / To-Do / Helpful Links) folded behind a "More"
+        // menu, keeping the primary destinations one tap away without wrapping.
+        const { core, overflow } = this._partitionButtons(buttons);
+
         // v0.100.0 — nav buttons delegate to the shared AccentButton mechanism:
         // identical styling to the New Doc / New Note buttons by construction,
         // flex: true stretches the row across the full note width.
@@ -672,11 +742,23 @@ class ProjectNavButtons {
         // folder (the doubled-path bug: spice/projects/<slug>/spice/projects/<slug>/…).
         // openFile bypasses the link resolver entirely; openLinkText is the fallback
         // only when the file isn't indexed yet.
-        for (const btn of buttons) {
+        for (const btn of core) {
             customJS.AccentButton.render(container, {
                 label: btn.label,
                 icon: btn.icon,
                 onClick: () => this._openNavTarget(btn.path),
+                flex: true
+            });
+        }
+
+        // WS3 — "More ▾" opens an overlay listing the overflow destinations.
+        // Rendered only when there is at least one overflow button.
+        if (overflow.length > 0) {
+            const moreIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+            customJS.AccentButton.render(container, {
+                label: "More",
+                icon: moreIcon,
+                onClick: () => this._openMoreMenu(overflow),
                 flex: true
             });
         }
