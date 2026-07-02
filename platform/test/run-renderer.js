@@ -2145,6 +2145,103 @@ async function testFF28BudgetAllocationsRendersFixedSection() {
   return pass;
 }
 
+// FF29 — MonthSetupChecklist renders setup-health rows on a Month note from a
+// stubbed FinanceMath.monthSetupStatus. When the budget is absent it shows a
+// "Create Budget" button; when the paycheck is absent a "Create Paycheck" button.
+// Guardrail rows surface untagged-deposit + reconcile warnings. Pure render — no writes.
+async function testFF29MonthSetupChecklistRenders() {
+  console.log('\n=== FF29 — MonthSetupChecklist renders health rows + create buttons on Month note ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const status = {
+    month: '2026-07',
+    budget: { exists: false },
+    paycheck: { exists: true, depositsMaterialized: true, expenseCount: 3 },
+    guardrails: {
+      untaggedDeposits: { count: 1, items: ['Untagged Thing'] },
+      reconcile: { income: 9000, totalAllocated: 9500, ok: false, deltaOver: 500 },
+    },
+    bills: { paidCount: 1, total: 3, pct: 33 },
+    ready: false,
+  };
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'month-setup-checklist.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { monthSetupStatus: () => status, fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}`, _coerceMonthString: (v) => (typeof v === 'string' ? v.slice(0, 7) : null) };
+  cjs.Icons = ICONS_INSTANCE;
+  let created = [];
+  cjs.EntityCreate = { create: async (opts) => { created.push(opts); } };
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn MonthSetupChecklist;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Month-2026-07', path: 'spice/finance/months/Month-2026-07.md' },
+    { type: 'month', month: '2026-07' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'msc-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const buttons = root ? collectButtons(root) : [];
+  const createBudgetBtn = buttons.find(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('Create Budget'));
+  // paycheck exists → NO Create Paycheck button.
+  const createPaycheckBtn = buttons.find(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('Create Paycheck'));
+  const hasUntaggedWarn = /Untagged Thing/.test(joined) || /default to check 1/i.test(joined) || /1\b/.test(joined);
+  const hasReconcileWarn = /over/i.test(joined) && joined.includes('$500.00');
+  const hasBillsProgress = joined.includes('1') && joined.includes('3');
+  const noWrites = app.__captured_writes.length === 0;
+  console.log(`  msc-root: ${!!root} ; Create Budget btn: ${!!createBudgetBtn} ; NO Create Paycheck btn: ${!createPaycheckBtn} ; untagged warn: ${hasUntaggedWarn} ; reconcile over $500: ${hasReconcileWarn} ; bills 1/3: ${hasBillsProgress} ; no writes: ${noWrites}`);
+  // Clicking Create Budget delegates to EntityCreate.create with the month preset.
+  if (createBudgetBtn && typeof createBudgetBtn.onclick === 'function') { await createBudgetBtn.onclick(); }
+  const delegatedBudget = created.length === 1 && created[0].instance === 'budget' && created[0].presetPrompts && created[0].presetPrompts.month === '2026-07';
+  console.log(`  Create Budget delegates to EntityCreate.create({instance:'budget', presetPrompts:{month:'2026-07'}}): ${delegatedBudget}`);
+  const pass = !!root && !!createBudgetBtn && !createPaycheckBtn && hasUntaggedWarn && hasReconcileWarn && hasBillsProgress && noWrites && delegatedBudget;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF30 — MonthSetupChecklist embed-dedup: inside a .markdown-embed it renders nothing.
+async function testFF30MonthSetupChecklistEmbedDedup() {
+  console.log('\n=== FF30 — MonthSetupChecklist inside .markdown-embed renders nothing ===');
+  const app = makeApp();
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'month-setup-checklist.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { monthSetupStatus: () => ({ month: '2026-07', budget: { exists: true }, paycheck: { exists: true, depositsMaterialized: true, expenseCount: 0 }, guardrails: { untaggedDeposits: { count: 0, items: [] }, reconcile: { income: 0, totalAllocated: 0, ok: true, deltaOver: 0 } }, bills: { paidCount: 0, total: 0, pct: 0 }, ready: true }), fmtMoney: (n) => `$${n}`, _coerceMonthString: (v) => (typeof v === 'string' ? v.slice(0, 7) : null) };
+  cjs.Icons = ICONS_INSTANCE;
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn MonthSetupChecklist;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Month-2026-07', path: 'spice/finance/months/Month-2026-07.md' },
+    { type: 'month', month: '2026-07' }
+  );
+  dv.container.closest = (sel) => sel === '.markdown-embed' ? { tag: 'div' } : null;
+  await inst.render(dv);
+  const root = findClass(dv.container, 'msc-root');
+  console.log(`  msc-root present (should be false): ${!!root}`);
+  const pass = !root;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF31 — MonthSetupChecklist on a NON-month note renders nothing (type guard).
+async function testFF31MonthSetupChecklistOutOfPath() {
+  console.log('\n=== FF31 — MonthSetupChecklist on a non-month note renders nothing ===');
+  const app = makeApp();
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'month-setup-checklist.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { monthSetupStatus: () => { throw new Error('should not be called on a non-month note'); }, fmtMoney: (n) => `$${n}`, _coerceMonthString: (v) => (typeof v === 'string' ? v.slice(0, 7) : null) };
+  cjs.Icons = ICONS_INSTANCE;
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn MonthSetupChecklist;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'msc-root');
+  console.log(`  msc-root present (should be false): ${!!root}`);
+  const pass = !root;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF21 — PaycheckSummary per-deposit line: a MONTHLY paycheck (deposits[] +
 // tagged expenses) renders a per-deposit income/assigned/leftover line (from
 // stubbed depositTotals), while Band 1's Pay = Σ deposits (not paycheck_amount).
@@ -3237,6 +3334,9 @@ async function testRendHasNotes() {
       results.push(['FF15 budget-allocations-editor-renders-sections', await testFF15BudgetAllocationsRendersSections()]);
       results.push(['FF16 budget-allocations-editor-edit-materializes-override', await testFF16BudgetAllocationsEditMaterializesOverride()]);
       results.push(['FF28 budget-allocations-editor-renders-fixed-section', await testFF28BudgetAllocationsRendersFixedSection()]);
+      results.push(['FF29 month-setup-checklist-renders', await testFF29MonthSetupChecklistRenders()]);
+      results.push(['FF30 month-setup-checklist-embed-dedup', await testFF30MonthSetupChecklistEmbedDedup()]);
+      results.push(['FF31 month-setup-checklist-out-of-path', await testFF31MonthSetupChecklistOutOfPath()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);

@@ -60,6 +60,7 @@
     "MonthlyOverview",
     "MonthsCards",
     "MonthDashboard",
+    "MonthSetupChecklist",
     "FinanceHubSummary",
     "FinancePlanDashboard",
     "PlanBand",
@@ -179,6 +180,10 @@
     {
       "source": "helpers/month-dashboard.js",
       "dest": "{{scripts_path}}/finance/month-dashboard.js"
+    },
+    {
+      "source": "helpers/month-setup-checklist.js",
+      "dest": "{{scripts_path}}/finance/month-setup-checklist.js"
     },
     {
       "source": "helpers/monthly-overview.js",
