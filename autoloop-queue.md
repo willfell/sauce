@@ -40,7 +40,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint project axis widget_render: 11 uncovered
-  status: proposed
+  status: dismissed
+  note: project render widgets are ALREADY cold-load render-guard-covered in run-project-render-guards.js; the widget_render rubric only scans run-renderer.js, so adding them there is low-value duplication. Durable fix = teach scoreWidgetRender to also credit run-project-render-guards.js.
 
 - id: cov-blueprint-cowork-customjs-behavioral
   title: Add coverage for cowork customjs_behavioral (0/9)
