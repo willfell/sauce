@@ -44,6 +44,8 @@ class TaskDialog {
     trashPath(path) { return TaskDialog.trashPath(path); }
     donePath(path) { return TaskDialog.donePath(path); }
     _loadProjectList(app) { return TaskDialog._loadProjectList(app); }
+    _bodyNotesBelowMarker(fileText) { return TaskDialog._bodyNotesBelowMarker(fileText); }
+    _replaceBody(fileText, newNotes) { return TaskDialog._replaceBody(fileText, newNotes); }
 
     // ---------- Static pure helpers ----------
 
@@ -382,7 +384,10 @@ class TaskDialog {
         notesInput.oninput = () => { state.notes = notesInput.value; };
         if (editPath && editFile && app.vault && typeof app.vault.read === 'function') {
             app.vault.read(editFile).then((txt) => {
-                const body = TaskDialog._stripFrontmatter(txt);
+                // Load ONLY the user-notes portion (below <!-- TASK_NOTES -->), not
+                // the regenerable chrome. A legacy note with no marker falls back
+                // to the whole body (minus frontmatter) so nothing is lost.
+                const body = TaskDialog._bodyNotesBelowMarker(txt);
                 notesInput.value = body;
                 state.notes = body;
             }).catch(() => { /* leave notes blank on read failure */ });
@@ -475,20 +480,33 @@ class TaskDialog {
     }
 
     /**
-     * CREATE — write ONE new file. Compose via TaskEntity, validate, render the
-     * note string (with the typed notes as the body), ensure spice/tasks/ exists,
-     * then app.vault.create. Never touches any other note.
+     * CREATE — write ONE new file. Compose via TaskEntity, validate, then build
+     * the final body as CHROME (SpaceNavButtons + TaskNoteView + marker) with the
+     * typed user notes appended BELOW the `<!-- TASK_NOTES -->` marker. The
+     * filename is the readable "<title>.md"; since titles can collide, dedupe the
+     * base against the vault (" 2", " 3", …) so we never clobber an existing task.
+     * Never touches any other note.
      */
     async _create(app, payload, notes) {
         const TE = TaskDialog._taskEntity();
         if (!TE) { try { new Notice('task-entity mechanism not loaded'); } catch (_e) {} return; }
-        // Stamp a moment so composeNote can derive the filename + created_at.
+        // Stamp a moment so composeNote can derive created_at.
         const moment = (typeof window !== 'undefined' && window.moment) ? window.moment() : null;
         const payloadWithMoment = Object.assign({}, payload, { moment });
         const v = TE.validatePayload(payloadWithMoment);
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
-        const { path, frontmatter, body } = TE.composeNote(payloadWithMoment);
-        const content = TaskDialog.renderNote(frontmatter, notes || body || '');
+        const { frontmatter, body } = TE.composeNote(payloadWithMoment);
+        // Human-readable filename, deduped against the vault (title collisions).
+        const base = TE.taskFilename(payloadWithMoment);
+        const finalName = TE._uniqueName(base, (pp) => !!(app.vault
+            && typeof app.vault.getAbstractFileByPath === 'function'
+            && app.vault.getAbstractFileByPath(pp)));
+        const path = 'spice/tasks/' + finalName;
+        // Chrome first (from composeNote), then the typed notes below the marker.
+        const chromeBody = body || '';
+        const userNotes = String(notes == null ? '' : notes);
+        const finalBody = userNotes ? chromeBody + userNotes + '\n' : chromeBody;
+        const content = TaskDialog.renderNote(frontmatter, finalBody);
         await this._ensureFolder(app, 'spice/tasks');
         await app.vault.create(path, content);
         try { new Notice('Task created'); } catch (_e) {}
@@ -608,18 +626,79 @@ class TaskDialog {
     }
 
     /**
-     * Swap the body of a task file's text while preserving its leading
-     * frontmatter block verbatim. Keeps everything through the closing `---`
-     * line, then appends `\n` + newBody. A file with no leading frontmatter is
-     * treated as all-body. Pure string work — used by _saveEdit to persist the
-     * Notes textarea back into the task's OWN file only.
+     * Return just the USER-NOTES portion of a task file's text: everything AFTER
+     * the first `<!-- TASK_NOTES -->` marker (the chrome above it is regenerable).
+     * A leading newline right after the marker is trimmed so the textarea doesn't
+     * start with a blank line, and a trailing newline is trimmed for tidy edits.
+     * A file with NO marker (legacy note pre-heal) falls back to the whole body
+     * minus its frontmatter, so an edit before the heal ran never loses notes.
+     * Pure string work.
      */
-    static _replaceBody(fileText, newBody) {
+    static _bodyNotesBelowMarker(fileText) {
         const s = String(fileText == null ? '' : fileText);
-        const body = String(newBody == null ? '' : newBody);
+        const MARKER = '<!-- TASK_NOTES -->';
+        const idx = s.indexOf(MARKER);
+        if (idx < 0) return TaskDialog._stripFrontmatter(s);
+        let after = s.slice(idx + MARKER.length);
+        after = after.replace(/^\r?\n/, '');   // drop the newline right after the marker
+        after = after.replace(/\s+$/, '');     // trim trailing whitespace
+        return after;
+    }
+
+    /**
+     * Persist edited notes back into a task file, PRESERVING everything up to and
+     * including the `<!-- TASK_NOTES -->` marker (frontmatter + chrome + marker)
+     * and replacing only what's AFTER the marker with `\n` + newNotes. If the
+     * file has no marker (legacy note being edited before the heal ran), we
+     * re-inject the chrome+marker (so the edit also un-bares the note) and place
+     * the notes below it. The frontmatter is preserved verbatim in both cases.
+     * Single-file invariant intact — pure string work, called only against the
+     * task's OWN file.
+     */
+    static _replaceBody(fileText, newNotes) {
+        const s = String(fileText == null ? '' : fileText);
+        const notes = String(newNotes == null ? '' : newNotes).replace(/\s+$/, '');
+        const notesTail = notes ? '\n' + notes + '\n' : '\n';
+        const MARKER = '<!-- TASK_NOTES -->';
+        const idx = s.indexOf(MARKER);
+        if (idx >= 0) {
+            // Keep everything through the marker; swap only what follows it.
+            const head = s.slice(0, idx + MARKER.length);
+            return head + notesTail;
+        }
+        // No marker → legacy note. Preserve frontmatter, then inject the chrome +
+        // marker (via TaskEntity when available; otherwise a byte-identical inline
+        // fallback so an edit still un-bares a note even on cold-load), then notes.
         const m = /^(---\r?\n[\s\S]*?\r?\n---)\r?\n?/.exec(s);
         const header = m ? m[1] : '';
-        if (!header) return body ? body + (body.endsWith('\n') ? '' : '\n') : '';
-        return header + '\n' + (body ? body + (body.endsWith('\n') ? '' : '\n') : '');
+        const chrome = TaskDialog._chromeBody();
+        if (!header) {
+            // No frontmatter either — chrome + marker + notes only.
+            return chrome + (notes ? notes + '\n' : '');
+        }
+        return header + '\n' + chrome + (notes ? notes + '\n' : '');
+    }
+
+    /**
+     * The canonical CHROME body for a task note. Prefers the TaskEntity instance
+     * (single source of truth) and falls back to a BYTE-IDENTICAL inline copy so
+     * _replaceBody's legacy path still works if customJS isn't ready. Keep this
+     * in lockstep with TaskEntity._chromeBody + the install heal.
+     */
+    static _chromeBody() {
+        const TE = TaskDialog._taskEntity();
+        if (TE && typeof TE._chromeBody === 'function') {
+            try { return TE._chromeBody(); } catch (_e) { /* fall through */ }
+        }
+        return '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            '```\n' +
+            '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n' +
+            '```\n' +
+            '\n' +
+            '<!-- TASK_NOTES -->\n';
     }
 }
