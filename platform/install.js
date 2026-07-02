@@ -11025,6 +11025,18 @@ await dv.view("ranch/views/customjs-guard", { class: "DebtSummary" });
 // Returns plain object with top-level scalar/array values, or null on failure.
 // Handles: scalar strings/numbers/booleans, flow arrays `[...]`, block-list arrays.
 // Does NOT handle: nested objects, inline tables, multiline strings.
+// Strip a single pair of surrounding matching quotes from a YAML scalar so
+// `type: "project-todo"` parses to `project-todo` (not `"project-todo"`). YAML
+// quotes are syntactic — the parsed value never includes them — so this is
+// always correct; without it, `fm.type === "..."` checks in the install heals
+// silently skip quoted-frontmatter notes (e.g. project-todo To-Do notes).
+function _unquoteScalar(v) {
+  if (typeof v !== "string" || v.length < 2) return v;
+  const a = v[0], b = v[v.length - 1];
+  if ((a === '"' && b === '"') || (a === "'" && b === "'")) return v.slice(1, -1);
+  return v;
+}
+
 function _parseFrontmatterStrict(body) {
   if (typeof body !== "string") return null;
   const m = body.match(/^---\n([\s\S]*?)\n---/);
@@ -11061,9 +11073,9 @@ function _parseFrontmatterStrict(body) {
         if (itemStart.includes(":")) {
           // First key of inline object on the `  - ` line
           const [k, ...vParts] = itemStart.split(":");
-          obj[k.trim()] = vParts.join(":").trim();
+          obj[k.trim()] = _unquoteScalar(vParts.join(":").trim());
         } else if (itemStart !== "") {
-          arr.push(itemStart);
+          arr.push(_unquoteScalar(itemStart));
           j++;
           continue;
         }
@@ -11071,7 +11083,7 @@ function _parseFrontmatterStrict(body) {
         let k2 = j + 1;
         while (k2 < lines.length && /^    \S/.test(lines[k2])) {
           const contMatch = lines[k2].match(/^    ([A-Za-z_][A-Za-z0-9_]*):\s*(.*)/);
-          if (contMatch) obj[contMatch[1]] = contMatch[2].trim();
+          if (contMatch) obj[contMatch[1]] = _unquoteScalar(contMatch[2].trim());
           k2++;
         }
         arr.push(obj);
@@ -11088,7 +11100,7 @@ function _parseFrontmatterStrict(body) {
       continue;
     }
     // Scalar
-    result[key] = rest;
+    result[key] = _unquoteScalar(rest);
     i++;
   }
   return result;

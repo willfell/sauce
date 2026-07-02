@@ -2868,8 +2868,10 @@ async function runTaskEntityLinksProjectFamily() {
     // (4) project-todo note WITHOUT a TaskProjectList block (predates B2).
     const PROJ_TODO = "spice/projects/connectors/Connectors To-Do.md";
     writeFixture(PROJ_TODO, [
-        "---", "type: project-todo", 'project: "[[Connectors]]"',
-        "project_slug: connectors", "---", "",
+        // QUOTED type (real notes are `type: "project-todo"`) — regression for
+        // the _parseFrontmatterStrict quote-strip fix so the heal matches them.
+        "---", 'type: "project-todo"', 'project: "[[Connectors]]"',
+        'project_slug: "connectors"', "---", "",
         dv("ToDoLeafActions"), "",
         dv("SectionLabel"), "  <!-- (Owned Tasks label, args elided) -->", "",
         '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });\n```', "",
