@@ -5049,9 +5049,10 @@ function _healWikiChromeBody(body, type) {
     }
   }
 
-  // 2. bare note (no nav at all): inject full chrome after the frontmatter.
+  // 2. bare note (no nav at all): inject full chrome after the frontmatter. No
+  //    trailing "---" — the action helpers render their own dividers now.
   if (!/class:\s*"SpaceNavButtons"/.test(out)) {
-    const header = [bcBlock, "", navBlock, "", actionBlock, "", "---", ""].join("\n");
+    const header = [bcBlock, "", navBlock, "", actionBlock, ""].join("\n");
     const fm = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
     out = fm ? out.slice(0, fm[0].length) + "\n" + header + "\n" + out.slice(fm[0].length) : header + "\n" + out;
     return out;
@@ -5062,6 +5063,12 @@ function _healWikiChromeBody(body, type) {
     const navIdx = out.indexOf('class: "SpaceNavButtons"');
     const fence = out.lastIndexOf("```dataviewjs", navIdx);
     if (fence !== -1) out = out.slice(0, fence) + bcBlock + "\n\n" + out.slice(fence);
+  }
+
+  // 4. wiki-page: WikiLeafActions now renders its own trailing divider, so strip the
+  //    template's redundant "---" immediately after that block (idempotent).
+  if (type === "wiki-page") {
+    out = out.replace(/(class:\s*"WikiLeafActions"[\s\S]*?\n```\n)\s*\n?-{3,}[ \t]*(\r?\n|$)/, "$1");
   }
   return out;
 }

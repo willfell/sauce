@@ -53,7 +53,7 @@ class WikiHubActions {
             const parentFolder = secFolder.slice(0, secFolder.lastIndexOf("/"));
             if (parentFolder && parentFolder !== root && parentFolder.startsWith(root + "/")) {
                 const up = this._resolveSectionHub(dv, parentFolder);
-                this._mobilize(customJS.AccentButton.render(row, { label: "Up: " + up.label, icon: upIcon, flex: true, onClick: () => open(up.path) }));
+                this._mobilize(customJS.AccentButton.render(row, { label: up.label, icon: upIcon, flex: true, onClick: () => open(up.path) }));
             }
         }
 
