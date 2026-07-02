@@ -1,8 +1,8 @@
 /**
  * WikiLeafActions (CustomJS)
  * Renders the navigation + action row at the top of a wiki-page note, as ONE
- * horizontal row with the section-nav on the left and Move pushed to the far right:
- *   [ Wiki ]  [ <section> ] ................................ [ Move ]
+ * centered horizontal row whose buttons stretch to fill the width evenly:
+ *   [   Wiki   ] [   <section>   ] [   Move   ]
  * — so you can always get back to the wiki home (docs) and up to the section the
  * page lives in, from anywhere. Move options are computed LAZILY on click (never
  * at render), so a cold-loading WikiMove can't throw and blank the whole row.
@@ -35,27 +35,27 @@ class WikiLeafActions {
         // row isn't squished against the nav above or the page content below.
         const hr = wrap.createEl("hr");
         hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
-        // ONE horizontal row: [Wiki] [<section>] on the left, [Move] pushed to the far
-        // right via margin-left:auto. No wrap — the controls stay on a single line.
+        // ONE horizontal row, CENTERED and stretched to fill the width: [Wiki]
+        // [<section>] [Move] each take an equal share (flex: 1) so they read as one
+        // evenly-spaced group across the screen — not with Move stranded on the right.
+        // Mirrors the hub buttons' centered max-width row.
         const row = wrap.createEl("div");
-        row.style.cssText = "display: flex; gap: 10px; margin: 0; align-items: center;";
+        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px;";
 
         const open = (target) => { if (target) app.workspace.openLinkText(target, ""); };
 
-        // Wiki home (docs) — left.
+        // Wiki home (docs).
         this._styleLeafBtn(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, onClick: () => open(root + "/Wiki.md") }));
 
         // Up to the section this page lives in (skip when the page sits at the wiki
         // root). Labelled with just the section name — clicking it takes you there.
-        // { shrink } lets a long section label ellipsis so the row never overflows.
         if (folder && folder !== root) {
             const hub = this._resolveSectionHub(dv, folder);
-            this._styleLeafBtn(customJS.AccentButton.render(row, { label: hub.label, icon: upIcon, onClick: () => open(hub.path) }), { shrink: true });
+            this._styleLeafBtn(customJS.AccentButton.render(row, { label: hub.label, icon: upIcon, onClick: () => open(hub.path) }));
         }
 
-        // Move — pushed to the very right of the row ({ right }). Dialog + options
-        // computed on click, so render stays dependency-free.
-        this._styleLeafBtn(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, onClick: () => this._openMoveDialog(dv, filePath) }), { right: true });
+        // Move — dialog + options computed on click, so render stays dependency-free.
+        this._styleLeafBtn(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, onClick: () => this._openMoveDialog(dv, filePath) }));
 
         // Bottom separator — 12px above (buttons) + below (page content). The leaf owns
         // this divider so the page template needs no trailing "---"; a per-note heal
@@ -64,19 +64,16 @@ class WikiLeafActions {
         hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
     }
 
-    // One-row sizing: readable label + tap target at natural width. Wiki + section sit
-    // on the left; { right:true } pushes Move to the far right; { shrink:true } lets a
-    // long section label ellipsis-shrink so the row never overflows on a phone.
-    _styleLeafBtn(btn, opts) {
-        opts = opts || {};
+    // Each button stretches to an equal share of the centered row (flex: 1) with a
+    // readable label + tap target, so Wiki / section / Move fill the width evenly.
+    _styleLeafBtn(btn) {
         if (!btn || !btn.style) return btn;
+        btn.style.flex = "1 1 0";
+        btn.style.minWidth = "0";
         btn.style.fontSize = "0.9em";
         btn.style.padding = "8px 14px";
-        btn.style.flex = opts.shrink ? "0 1 auto" : "0 0 auto";
-        btn.style.minWidth = "0";
         btn.style.overflow = "hidden";
         btn.style.whiteSpace = "nowrap";
-        if (opts.right) btn.style.marginLeft = "auto";
         return btn;
     }
 
