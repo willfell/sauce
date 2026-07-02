@@ -64,9 +64,11 @@ const readScan = (f) => {
 };
 
 // Load every component (blueprint + mechanism): { name, dir, kind, own:Set, deps:[names] }
-function loadComponents() {
+// `roots` defaults to the real tree; the self-test passes a fixture tree so it
+// exercises THIS function + the real regexes/comment-stripper end to end.
+function loadComponents(roots) {
     const comps = [];
-    for (const [root, kind] of [[BP_DIR, 'blueprint'], [MECH_DIR, 'mechanism']]) {
+    for (const [root, kind] of (roots || [[BP_DIR, 'blueprint'], [MECH_DIR, 'mechanism']])) {
         let entries;
         try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (_e) { continue; }
         for (const e of entries) {
@@ -87,8 +89,8 @@ function loadComponents() {
     return comps;
 }
 
-function analyze() {
-    const comps = loadComponents();
+function analyze(roots) {
+    const comps = loadComponents(roots);
     const byName = new Map(comps.map(c => [c.name, c]));
 
     // Global "defined": manifest-declared ∪ file-defined `class X`.
@@ -147,22 +149,26 @@ function analyze() {
 }
 
 function runSelfTest() {
+    // Exercise the REAL analyze() against a fixture component tree so the
+    // self-test protects the actual detection logic (regexes, comment-stripper,
+    // existsSomewhere, allowedFor), not a reimplementation.
+    const fixRoot = path.join(REPO_ROOT, 'platform', 'test', 'fixtures', 'lint-dead-classes', 'tree');
+    const roots = [
+        [path.join(fixRoot, 'blueprints'), 'blueprint'],
+        [path.join(fixRoot, 'mechanisms'), 'mechanism'],
+    ];
+    let breaking, undeclared, dead;
+    try { ({ breaking, undeclared, dead } = analyze(roots)); }
+    catch (e) { console.error(`FAIL self-test: analyze() threw (${e.message}) — fixtures missing?`); process.exit(1); }
+    const bn = breaking.map(b => b.name), un = undeclared.map(u => u.name), dn = dead.map(d => d.name);
     const cases = [
-        ['breaking = ref w/ no file & no declaration', (() => {
-            const exists = (n) => new Set(['Real']).has(n);
-            const allowed = new Set(['Real']);
-            const ref = 'Ghost';
-            return !exists(ref) === true && !allowed.has(ref);
-        })()],
-        ['undeclared = ref exists but not in owner allowed', (() => {
-            const exists = (n) => new Set(['Panel']).has(n) || true; // has file
-            const allowed = new Set(); // owner didn't declare
-            return exists('Panel') && !allowed.has('Panel');
-        })()],
-        ['ok = ref exists and allowed', (() => {
-            const allowed = new Set(['Nav']);
-            return allowed.has('Nav');
-        })()],
+        ['BREAKING flags Ghost (invoked, no file, undeclared)', bn.includes('Ghost')],
+        ['BREAKING does NOT flag AlphaWidget/MechClass (they resolve)', !bn.includes('AlphaWidget') && !bn.includes('MechClass')],
+        ['comment-strip: CommentGhost (in a // comment) is NOT a ref', !bn.includes('CommentGhost')],
+        ['UNDECLARED flags UndeclaredPanel (has file, not in own/deps)', un.includes('UndeclaredPanel')],
+        ['UNDECLARED does NOT flag MechClass (declared via dep mech1)', !un.includes('MechClass')],
+        ['DEAD flags DeadClass (declared, never invoked)', dn.includes('DeadClass')],
+        ['DEAD does NOT flag AlphaWidget (it is invoked)', !dn.includes('AlphaWidget')],
     ];
     let passes = 0, fails = 0;
     for (const [name, ok] of cases) {
@@ -170,6 +176,7 @@ function runSelfTest() {
         else { console.error(`FAIL self-test ${name}`); fails++; }
     }
     console.log(`\n${passes} passed, ${fails} failed`);
+    if (passes + fails < 7) { console.error('FAIL self-test: too few cases ran (fixtures missing?)'); process.exit(1); }
     process.exit(fails === 0 ? 0 : 1);
 }
 

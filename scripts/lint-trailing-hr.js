@@ -2,11 +2,16 @@
 
 // TPL-5 — no-trailing-hr gate.
 //
-// A trailing `---` horizontal rule as the last non-blank line of a template
-// body renders as a dangling divider with nothing after it. Internal `---`
-// dividers BETWEEN widgets are legitimate and are not flagged — only the final
-// trailing rule is. A file that is frontmatter-only (its last non-blank line is
-// the frontmatter CLOSING fence) is never flagged.
+// A trailing `---` horizontal rule that FLOATS after a blank line at the end of
+// a template body renders as a dangling divider with nothing after it. Only that
+// floating form is flagged. Two forms are NOT flagged:
+//   • internal `---` dividers between widgets (not the last line);
+//   • a `---` that HUGS the previous non-blank line (no blank between). That is
+//     the canonical nav-row separator the project-hub NAV-SEP heal maintains
+//     (e.g. Kanban Card's `---` immediately after the ProjectNavButtons fence);
+//     removing it breaks run-v0127-project-hub-heal.js's NAV-SEP-T assertion.
+// A frontmatter-only file (last non-blank line = the frontmatter close fence) is
+// never flagged.
 //
 // Scope: platform/blueprints/**/templates/*.md
 // Opt-out: `<!-- lint-trailing-hr:allow <reason> -->` on the rule line or the
@@ -62,9 +67,14 @@ function lintContent(content) {
     const prev = lastIdx > 0 ? lines[lastIdx - 1] : '';
     if (ALLOW_RE.test(lines[lastIdx]) || ALLOW_RE.test(prev)) return [];
 
+    // A `---` that HUGS the previous non-blank line is a separator (nav-row
+    // separator, NAV-SEP convention), not a dangling rule. Only flag the
+    // floating form: a `---` with a blank line directly above it.
+    if (prev.trim() !== '') return [];
+
     return [{
         line: lastIdx + 1,
-        message: 'trailing `---` horizontal rule at end of template body — remove it (internal dividers between widgets are fine; a dangling final rule is not).',
+        message: 'dangling trailing `---` (floats after a blank line at end of body) — remove it. Internal dividers and a `---` hugging the nav-row fence are fine.',
     }];
 }
 
@@ -106,6 +116,9 @@ function runSelfTest() {
         }
     }
     console.log(`\n${passes} passed, ${fails} failed`);
+    // Guard against a vacuous pass: if the fixtures dir is missing/empty, no
+    // cases run and the self-test would falsely "pass". Require a minimum.
+    if (passes + fails < 4) { console.error('FAIL self-test: fixtures missing (ran too few cases)'); process.exit(1); }
     process.exit(fails === 0 ? 0 : 1);
 }
 

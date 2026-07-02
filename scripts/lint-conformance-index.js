@@ -9,7 +9,8 @@
 //     skips — an exemption must say WHY);
 //   • a non-planned rule's `gate` file exists on disk;
 //   • an `enforcing` rule's gate is actually wired into release:preflight;
-//   • a `report-only` rule's gate is actually wired into conformance:audit.
+//   • a `conformance:audit` script exists (the registry-driven runner that runs
+//     every non-planned rule's gate, so report-only gates need no per-gate wiring).
 //
 // Usage: node scripts/lint-conformance-index.js [--self-test]
 
@@ -25,8 +26,8 @@ const SEVERITIES = new Set(['error', 'warn']);
 const REQUIRED = ['id', 'theme', 'title', 'gate', 'severity', 'status'];
 
 // Validate a parsed registry against optional wiring strings. Returns string[]
-// of error messages (empty = valid). `opts.preflight` / `opts.audit` are the
-// npm script bodies; `opts.gateExists(path)` reports on-disk presence.
+// of error messages (empty = valid). `opts.preflight` is the release:preflight
+// script body; `opts.gateExists(path)` reports on-disk presence.
 function validate(reg, opts) {
     const errs = [];
     if (!reg || typeof reg !== 'object') return ['registry is not an object'];
@@ -78,7 +79,6 @@ function runSelfTest() {
     const opts = {
         gateExists: (g) => ['scripts/a.js', 'scripts/b.js'].includes(g),   // c.js absent, but C is planned
         preflight: 'node scripts/a.js',
-        audit: 'node scripts/b.js',
     };
     const cases = [
         ['good registry passes', validate(good, opts).length === 0],
@@ -107,7 +107,6 @@ function main() {
     const opts = {
         gateExists: (g) => fs.existsSync(path.join(REPO_ROOT, g)),
         preflight: (pkg.scripts && pkg.scripts['release:preflight']) || '',
-        audit: (pkg.scripts && pkg.scripts['conformance:audit']) || '',
     };
     const errs = validate(reg, opts);
     if (!(pkg.scripts && pkg.scripts['conformance:audit'])) {

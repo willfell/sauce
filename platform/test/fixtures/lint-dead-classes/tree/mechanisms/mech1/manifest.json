@@ -1,0 +1,5 @@
+{
+  "name": "mech1",
+  "kind": "mechanism",
+  "customjs_classes": ["MechClass", "DeadClass"]
+}

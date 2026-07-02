@@ -1,0 +1,6 @@
+{
+  "name": "alpha",
+  "kind": "blueprint",
+  "customjs_classes": ["AlphaWidget"],
+  "depends_on": [{ "name": "mech1" }]
+}

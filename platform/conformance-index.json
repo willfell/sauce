@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Blueprint conformance rule registry. Single source of truth for the button/template/customjs conventions and the gates that enforce them. See Docs/agent-guides/blueprint-conformance.md. Statuses: 'enforcing' = gate wired into release:preflight and green; 'report-only' = gate in `npm run conformance:audit` (non-blocking), debt still being swept; 'planned' = rule defined, gate not yet built/extended.",
+  "description": "Blueprint conformance rule catalog. Maps each button/template/customjs convention to its gate + severity + status + reasoned exemptions. The meta-gate (scripts/lint-conformance-index.js) validates THIS file's structure and enforcing-gate wiring; each gate owns its own detection + exemption logic, which this registry documents (kept in sync by review — the registry is not read back into gate behavior). See Docs/agent-guides/blueprint-conformance.md. Statuses: 'enforcing' = gate wired into release:preflight and green; 'report-only' = gate run by `npm run conformance:audit` (non-blocking), debt still being swept; 'planned' = rule defined, gate not yet built/extended.",
   "rules": [
     {
       "id": "BTN-1",
