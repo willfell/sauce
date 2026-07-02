@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.35.0",
+  "version": "1.36.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -64,6 +64,7 @@
     "SectionHub",
     "DocMove",
     "DocLeafActions",
+    "DocBulkMoveActions",
     "ProjectLinksPanel",
     "WorkstreamSource"
   ],
@@ -189,6 +190,10 @@
     {
       "source": "helpers/doc-leaf-actions.js",
       "dest": "{{scripts_path}}/project/doc-leaf-actions.js"
+    },
+    {
+      "source": "helpers/doc-bulk-move.js",
+      "dest": "{{scripts_path}}/project/doc-bulk-move.js"
     },
     {
       "source": "helpers/project-links-panel.js",
