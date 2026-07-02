@@ -46,6 +46,9 @@ class TaskDialog {
     _loadProjectList(app) { return TaskDialog._loadProjectList(app); }
     _bodyNotesBelowMarker(fileText) { return TaskDialog._bodyNotesBelowMarker(fileText); }
     _replaceBody(fileText, newNotes) { return TaskDialog._replaceBody(fileText, newNotes); }
+    _wikilink(name) { return TaskDialog._wikilink(name); }
+    _mdLink(label, url) { return TaskDialog._mdLink(label, url); }
+    _insertAt(text, insertion, start, end) { return TaskDialog._insertAt(text, insertion, start, end); }
 
     // ---------- Static pure helpers ----------
 
@@ -173,6 +176,57 @@ class TaskDialog {
             return '"' + s.replace(/"/g, '\\"') + '"';
         }
         return s;
+    }
+
+    /**
+     * Build an Obsidian wikilink from a note basename: `[[Name]]`. Trims the
+     * name; an empty/nullish/all-whitespace name yields "" (so the caller can
+     * no-op). Pure string work — the note-picker inserts the result into the
+     * Notes textarea, where Obsidian renders it as a real link.
+     */
+    static _wikilink(name) {
+        const n = String(name == null ? '' : name).trim();
+        return n ? '[[' + n + ']]' : '';
+    }
+
+    /**
+     * Build a markdown link from a URL + optional label.
+     *   no url                → ""            (caller no-ops)
+     *   url, no/blank label   → "<url>"       (autolink; renders clickable)
+     *   url + label           → "[label](url)"
+     * Both label and url are trimmed. Pure string work.
+     */
+    static _mdLink(label, url) {
+        const u = String(url == null ? '' : url).trim();
+        if (!u) return '';
+        const l = String(label == null ? '' : label).trim();
+        return l ? '[' + l + '](' + u + ')' : '<' + u + '>';
+    }
+
+    /**
+     * Splice `insertion` into `text`, replacing the [start, end) selection (the
+     * textarea's selectionStart / selectionEnd). When the range is invalid
+     * (null / NaN / out of [0, text.length]), APPEND `insertion` to the end
+     * instead, with a single leading space when `text` is non-empty and doesn't
+     * already end in whitespace (so an inserted link never abuts prior text).
+     * Returns the new string. Pure — this is what the textarea insertion uses.
+     */
+    static _insertAt(text, insertion, start, end) {
+        const s = String(text == null ? '' : text);
+        const ins = String(insertion == null ? '' : insertion);
+        const len = s.length;
+        // Number(null) === 0 (a valid integer), so reject null/undefined BEFORE
+        // coercing — a nullish selection means "no caret" → append, not caret-0.
+        const a = (start == null) ? NaN : Number(start);
+        const b = (end == null) ? NaN : Number(end);
+        const valid = Number.isInteger(a) && Number.isInteger(b)
+            && a >= 0 && b >= 0 && a <= len && b <= len && a <= b;
+        if (!valid) {
+            if (!s) return ins;
+            const sep = /\s$/.test(s) ? '' : ' ';
+            return s + sep + ins;
+        }
+        return s.slice(0, a) + ins + s.slice(b);
     }
 
     // ---------- Instance / browser API ----------
@@ -303,6 +357,12 @@ class TaskDialog {
 
         const host = modal.createDiv();
         const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
+        // Native iOS <input type="date"> has an intrinsic min-width and ignores
+        // width:100% even with box-sizing+min-width:0 — the boxes overflow the
+        // modal. `-webkit-appearance:none; appearance:none` strips the intrinsic
+        // control chrome/sizing (the native date picker still opens on tap), so
+        // the input finally respects the container width like the text fields.
+        const dateCss = fieldCss + ' -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;';
         const label = (text) => {
             const el = host.createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; color:var(--text-muted, #999); margin-top:16px; margin-bottom:6px;';
@@ -320,14 +380,14 @@ class TaskDialog {
         // Scheduled
         label('Scheduled (optional)');
         const schedInput = host.createEl('input', { type: 'date' });
-        schedInput.style.cssText = fieldCss;
+        schedInput.style.cssText = dateCss;
         schedInput.value = state.scheduled;
         schedInput.onchange = () => { state.scheduled = schedInput.value; updateSubmit(); };
 
         // Due
         label('Due (optional)');
         const dueInput = host.createEl('input', { type: 'date' });
-        dueInput.style.cssText = fieldCss;
+        dueInput.style.cssText = dateCss;
         dueInput.value = state.due;
         dueInput.onchange = () => { state.due = dueInput.value; updateSubmit(); };
 
@@ -396,6 +456,127 @@ class TaskDialog {
                 state.notes = body;
             }).catch(() => { /* leave notes blank on read failure */ });
         }
+
+        // ----- Link inserters (both modes) -----
+        // Two ghost buttons under the Notes textarea reveal a lightweight inline
+        // inserter that writes markdown at the cursor: a note picker ([[wikilink]])
+        // and a web-link mini-form ([label](url) / <url>). Insertion routes through
+        // the PURE statics (_wikilink / _mdLink / _insertAt) so the browser shell
+        // stays thin. Everything is guarded — a bad DOM/vault call never throws
+        // out of _render. Only ONE inserter is open at a time.
+        try {
+            const linkRow = host.createDiv();
+            linkRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;';
+            // Small ghost buttons that match the footer button grammar (quiet,
+            // native tokens, comfortable tap height).
+            const GHOST_LINK = 'display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:30px; padding:5px 11px; border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; white-space:nowrap; border:1px solid var(--background-modifier-border,#444); background:transparent; color:var(--text-normal,#ddd); transition:background 120ms ease;';
+            const mkGhost = (parent, text) => {
+                const b = parent.createEl('button', { text });
+                b.style.cssText = GHOST_LINK;
+                b.onmouseenter = () => { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; };
+                b.onmouseleave = () => { b.style.background = 'transparent'; };
+                b.onfocus = () => { b.style.outline = '2px solid var(--interactive-accent,#6a6abf)'; b.style.outlineOffset = '1px'; };
+                b.onblur = () => { b.style.outline = 'none'; };
+                return b;
+            };
+            const noteBtn = mkGhost(linkRow, '＋ Link note');
+            const webBtn = mkGhost(linkRow, '＋ Web link');
+
+            // A single host div below the row that holds whichever inserter is open.
+            const inserterBox = host.createDiv();
+            inserterBox.style.cssText = 'margin-top:8px;';
+            let openKind = null;   // null | 'note' | 'web'
+            const closeInserter = () => { inserterBox.empty(); openKind = null; };
+
+            // Splice `ins` into the Notes textarea at the caret (falling back to
+            // append), keep state.notes in sync, close the inserter, refocus.
+            const insertIntoNotes = (ins) => {
+                if (!ins) return;
+                const next = TaskDialog._insertAt(notesInput.value, ins, notesInput.selectionStart, notesInput.selectionEnd);
+                notesInput.value = next;
+                state.notes = next;
+                closeInserter();
+                try { notesInput.focus(); } catch (_e) {}
+            };
+
+            // ----- Note picker -----
+            const openNotePicker = () => {
+                if (openKind === 'note') { closeInserter(); return; }
+                closeInserter();
+                openKind = 'note';
+                // Build the candidate list ONCE, then filter in JS on each keystroke.
+                let names = [];
+                try {
+                    const files = (app.vault && typeof app.vault.getMarkdownFiles === 'function')
+                        ? app.vault.getMarkdownFiles() : [];
+                    const seen = {};
+                    for (const f of files) {
+                        const p = (f && f.path) || '';
+                        if (p.indexOf('spice/tasks/') === 0) continue;   // don't link tasks to tasks
+                        if (editPath && p === editPath) continue;        // not the current file
+                        const bn = (f && f.basename) || '';
+                        if (!bn || seen[bn]) continue;
+                        seen[bn] = 1; names.push(bn);
+                    }
+                    names.sort((a, b) => a.localeCompare(b));
+                } catch (_e) { names = []; }
+
+                const filterInput = inserterBox.createEl('input', { type: 'text' });
+                filterInput.placeholder = 'Filter notes…';
+                filterInput.style.cssText = fieldCss;
+                const results = inserterBox.createDiv();
+                results.style.cssText = 'margin-top:6px; max-height:160px; overflow-y:auto; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px);';
+                const renderResults = () => {
+                    results.empty();
+                    const q = (filterInput.value || '').trim().toLowerCase();
+                    const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
+                    if (!hits.length) {
+                        const none = results.createDiv({ text: q ? 'No matches' : 'No notes' });
+                        none.style.cssText = 'padding:6px 8px; font-size:12px; color:var(--text-muted,#999);';
+                        return;
+                    }
+                    for (const n of hits) {
+                        const row = results.createDiv({ text: n });
+                        row.style.cssText = 'padding:6px 8px; font-size:13px; cursor:pointer; color:var(--text-normal,#ddd);';
+                        row.onmouseenter = () => { row.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; };
+                        row.onmouseleave = () => { row.style.background = 'transparent'; };
+                        row.onclick = () => { insertIntoNotes(TaskDialog._wikilink(n)); };
+                    }
+                };
+                filterInput.oninput = renderResults;
+                renderResults();
+                setTimeout(() => { try { filterInput.focus(); } catch (_e) {} }, 30);
+            };
+
+            // ----- Web-link mini-form -----
+            const openWebForm = () => {
+                if (openKind === 'web') { closeInserter(); return; }
+                closeInserter();
+                openKind = 'web';
+                const urlInput = inserterBox.createEl('input', { type: 'url' });
+                urlInput.placeholder = 'https://…';
+                urlInput.style.cssText = fieldCss;
+                const labelInput = inserterBox.createEl('input', { type: 'text' });
+                labelInput.placeholder = 'Link text (optional)';
+                labelInput.style.cssText = fieldCss + ' margin-top:6px;';
+                const insertBtn = mkGhost(inserterBox, 'Insert');
+                insertBtn.style.cssText = GHOST_LINK + ' margin-top:8px;';
+                const doInsert = () => {
+                    const ins = TaskDialog._mdLink(labelInput.value, urlInput.value);
+                    if (!ins) { try { new Notice('Enter a URL first'); } catch (_e) {} return; }
+                    insertIntoNotes(ins);
+                };
+                insertBtn.onclick = doInsert;
+                // Enter in either field inserts.
+                const onKey = (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doInsert(); } };
+                urlInput.addEventListener('keydown', onKey);
+                labelInput.addEventListener('keydown', onKey);
+                setTimeout(() => { try { urlInput.focus(); } catch (_e) {} }, 30);
+            };
+
+            noteBtn.onclick = openNotePicker;
+            webBtn.onclick = openWebForm;
+        } catch (_e) { /* link inserters are best-effort; never abort the render */ }
 
         // ----- Footer -----
         // A two-group flex row: item actions (Open / Done / Delete) grouped on the
