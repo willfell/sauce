@@ -62,17 +62,35 @@ class ProjectLinksPanel {
     return out;
   }
 
-  // Render the read-only "Helpful Links" panel for the current note.
-  // Reads `links` off the note's frontmatter (via the render-safe page shim).
-  // Empty-renders-nothing when there is no usable container; when the note has
-  // no links it shows the label + a muted hint so the Link Hub note isn't blank.
+  // Resolve the links to display for the current note. On the Link Hub note
+  // (type: links-hub) that's the note's own `links`; on a PROJECT hub it's the
+  // sibling `Links Hub.md`'s links (PR2 read-only mirror — Option B, no `links`
+  // dependency: reuse this class's own _parse over the sibling's frontmatter).
+  // Guarded: any dv.pages failure (e.g. cold-load harness) yields [].
+  _resolveSiblingLinks(dv, page) {
+    try {
+      const folder = page && page.file && page.file.folder ? String(page.file.folder) : "";
+      if (!folder) return [];
+      const hubs = dv.pages('"' + folder + '"').where((p) => p && p.type === "links-hub").array();
+      return hubs.length ? this._parse(hubs[0].links) : [];
+    } catch (_e) { return []; }
+  }
+
+  // Render the read-only "Helpful Links" panel. On the Link Hub note it reads the
+  // note's own `links` and shows a "No links yet." hint when empty (so the hub is
+  // never blank). On a project hub it mirrors the sibling Link Hub's links and
+  // renders NOTHING when there are none (no clutter on link-less projects).
   render(dv, opts = {}) {
     const page = customJS.RenderSafe.page(dv);
     if (!page || !page.file) return;              // cold-load guard
     const c = (dv && dv.container) ? dv.container : dv;
     if (!c || typeof c.createEl !== "function") return;
 
-    const links = this._parse(page.links);
+    // Sibling-mirror mode activates ONLY on an actual project hub (type:project);
+    // the Link Hub note and any other note read their own `links` (backward-compat).
+    const onProjectHub = page.type === "project";
+    const links = onProjectHub ? this._resolveSiblingLinks(dv, page) : this._parse(page.links);
+    if (onProjectHub && links.length === 0) return;   // project-hub mirror: silent when empty
 
     // Label via the shared SectionLabel primitive (guarded — absent in cold-load
     // harnesses). Falls back to a plain muted label so the panel still heads up.
