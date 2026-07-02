@@ -522,6 +522,31 @@ ok('RTR-1 renderTaskRow is a function (class + instance)', () => {
   assert(TaskTodayList._stripWikilink('[[Sauce]]') === 'Sauce', '_stripWikilink unwraps');
 });
 
+// ---------- _renderTitleMarkdown (B4 markdown title) ----------
+//
+// The title is now rendered as markdown so `[Chat](url)` + `[[wikilink]]` become
+// clickable. In Node there is no MarkdownRenderer / app, so the method must fall
+// back to plain text (titleEl.textContent) and never throw.
+ok('RTM-1 _renderTitleMarkdown is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass._renderTitleMarkdown === 'function', 'static on the class');
+  assert(typeof TaskTodayList._renderTitleMarkdown === 'function', 'delegator on the instance');
+});
+ok('RTM-2 _renderTitleMarkdown falls back to plain text when MarkdownRenderer absent', () => {
+  // Minimal fake element (no querySelectorAll → the anchor pass is skipped).
+  const el = { textContent: '' };
+  TaskTodayList._renderTitleMarkdown(el, 'See [Chat](https://x.test)', 'spice/tasks/a.md');
+  assert(el.textContent === 'See [Chat](https://x.test)', 'plain-text fallback keeps the raw text: ' + el.textContent);
+});
+ok('RTM-3 _renderTitleMarkdown tolerates null/blank title + null element', () => {
+  const el = { textContent: 'x' };
+  TaskTodayList._renderTitleMarkdown(el, '', 'spice/tasks/a.md');
+  assert(el.textContent === '(untitled)', 'blank → (untitled): ' + el.textContent);
+  // Null element must not throw.
+  let threw = false;
+  try { TaskTodayList._renderTitleMarkdown(null, 'anything'); } catch (_e) { threw = true; }
+  assert(!threw, 'null element does not throw');
+});
+
 // ---------- TaskMeetingList._matches (pure filter) ----------
 const TaskMeetingListClass = loadClass('mechanisms/task-entity/task-meeting-list.js', 'TaskMeetingList');
 const TaskMeetingList = new TaskMeetingListClass();
@@ -560,6 +585,69 @@ ok('TDN-1 _dailyPath derives today’s daily to-do path from a moment', () => {
     'path: ' + TaskNoteToDoNav._dailyPath(m));
   assert(TaskNoteToDoNav._dailyPath(null) === '', 'null moment → ""');
   assert(TaskNoteToDoNav._dailyPath({}) === '', 'format-less moment → ""');
+});
+
+// ---------- MeetingLeafActions.cleanProjectName (B1 clean-name extractor) ----------
+//
+// A meeting's `project:` frontmatter surfaces as a RESOLVED Dataview Link whose
+// .path is the FULL note path (spice/projects/connectors/Connectors.md). The old
+// stripWikilink returned that whole path, so the project-list lookup failed and
+// the slug mangled into `spice-projects-connectors-connectors-md-connectors`.
+// cleanProjectName extracts the CLEAN basename so the lookup + slug are correct.
+// MeetingLeafActions.cleanProjectName / _slugify / resolveProjectPreselect are
+// STATIC pure helpers (called as `MeetingLeafActions.x(...)` from render), so we
+// exercise them on the CLASS (not an instance) — mirrors the render call form.
+const MeetingLeafActions = loadClass('blueprints/meetings/helpers/meeting-leaf-actions.js', 'MeetingLeafActions');
+
+ok('MLA-CPN-1 cleanProjectName extracts basename from a Dataview Link object', () => {
+  assert(MeetingLeafActions.cleanProjectName({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }) === 'Connectors',
+    'Link object → Connectors: ' + MeetingLeafActions.cleanProjectName({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }));
+  assert(MeetingLeafActions.cleanProjectName({ path: 'a/b/Foo.md' }) === 'Foo', 'path-only Link → Foo');
+  assert(MeetingLeafActions.cleanProjectName({ display: 'Bar', subpath: null }) === 'Bar', 'display-only Link → Bar');
+});
+
+ok('MLA-CPN-2 cleanProjectName extracts basename from wikilink / bare strings', () => {
+  assert(MeetingLeafActions.cleanProjectName('[[a/b/Foo.md|Foo]]') === 'Foo', 'path+.md+pipe → Foo: ' + MeetingLeafActions.cleanProjectName('[[a/b/Foo.md|Foo]]'));
+  assert(MeetingLeafActions.cleanProjectName('[[Bar]]') === 'Bar', 'simple wikilink → Bar');
+  assert(MeetingLeafActions.cleanProjectName('[[Connectors]]') === 'Connectors', 'wikilink → Connectors');
+  assert(MeetingLeafActions.cleanProjectName('Plain') === 'Plain', 'bare passthrough');
+});
+
+ok('MLA-CPN-3 cleanProjectName nullish/empty → ""', () => {
+  assert(MeetingLeafActions.cleanProjectName('') === '', 'empty → ""');
+  assert(MeetingLeafActions.cleanProjectName(null) === '', 'null → ""');
+  assert(MeetingLeafActions.cleanProjectName(undefined) === '', 'undefined → ""');
+});
+
+ok('MLA-CPN-4 _slugify yields the REAL slug (never a path-slug)', () => {
+  assert(MeetingLeafActions._slugify('Connectors') === 'connectors', 'Connectors → connectors');
+  assert(MeetingLeafActions._slugify('Global K8s') === 'global-k8s', 'Global K8s → global-k8s');
+  // The mangled path-string must NOT be what we slugify — cleanProjectName strips
+  // the path FIRST, so the slug is `connectors`, not the old path-slug.
+  const clean = MeetingLeafActions.cleanProjectName({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' });
+  assert(MeetingLeafActions._slugify(clean) === 'connectors',
+    'clean-then-slugify → connectors (not spice-projects-…): ' + MeetingLeafActions._slugify(clean));
+});
+
+// resolveProjectPreselect now keys off cleanProjectName → the list lookup hits.
+ok('MLA-CPN-5 resolveProjectPreselect resolves a Link-valued project against the list', () => {
+  const list = [{ name: 'Connectors', slug: 'connectors' }];
+  const cur = { project: { path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' } };
+  const pre = MeetingLeafActions.resolveProjectPreselect(cur, list);
+  assert(pre && pre.type === 'project' && pre.slug === 'connectors' && pre.name === 'Connectors',
+    'preselect resolves: ' + JSON.stringify(pre));
+});
+
+// ---------- ToDoLeafActions clean-name extractor (project-todo create path) ----------
+const ToDoLeafActionsClass = loadClass('blueprints/to-do/helpers/todo-leaf-actions.js', 'ToDoLeafActions');
+
+ok('TLA-CPN-1 ToDoLeafActions._cleanProjectName mirrors the meeting extractor', () => {
+  assert(ToDoLeafActionsClass._cleanProjectName({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }) === 'Connectors',
+    'Link object → Connectors');
+  assert(ToDoLeafActionsClass._cleanProjectName('[[Bar]]') === 'Bar', 'wikilink → Bar');
+  assert(ToDoLeafActionsClass._cleanProjectName('[[a/b/Foo.md|Foo]]') === 'Foo', 'path+pipe → Foo');
+  assert(ToDoLeafActionsClass._cleanProjectName(null) === '', 'null → ""');
+  assert(ToDoLeafActionsClass._slugify('Global K8s') === 'global-k8s', 'slugify Global K8s');
 });
 
 console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
