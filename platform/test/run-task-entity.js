@@ -481,26 +481,32 @@ ok('LT-4 parseNote coerces source_note Link → basename', () => {
   assert(parsed.project_slug === 'sauce', 'project_slug passthrough preserved');
 });
 
-// ---------- Chrome body shape (ToDoNav + divider) ----------
+// ---------- Chrome body shape (nav → HR → card → HR → notes) ----------
 //
-// The task-note chrome now emits: SpaceNavButtons, a `---` divider, the
-// TaskNoteToDoNav button, then TaskNoteView, then the marker. Assert the new
-// shape so a regression (missing divider / ToDoNav) fails loudly.
-ok('CB-1 _chromeBody emits SpaceNavButtons + divider + ToDoNav + TaskNoteView + marker in order', () => {
+// The task-note chrome now emits: SpaceNavButtons, a `---` divider, TaskNoteView,
+// a SECOND `---` divider, then the `<!-- TASK_NOTES -->` marker. The
+// TaskNoteToDoNav block is GONE. Assert the new shape (two HRs, no ToDoNav) so a
+// regression (missing second divider / a resurrected ToDoNav) fails loudly.
+ok('CB-1 _chromeBody emits SpaceNavButtons + HR + TaskNoteView + HR + marker in order (no ToDoNav)', () => {
   const body = TaskEntity._chromeBody();
   const iNav = body.indexOf('class: "SpaceNavButtons"');
-  const iRule = body.indexOf('\n---\n');
-  const iTodo = body.indexOf('class: "TaskNoteToDoNav"');
+  const iRule1 = body.indexOf('\n---\n');
   const iView = body.indexOf('class: "TaskNoteView"');
+  const iRule2 = body.indexOf('\n---\n', iView);
   const iMarker = body.indexOf('<!-- TASK_NOTES -->');
   assert(iNav >= 0, 'has SpaceNavButtons');
-  assert(iRule > iNav, 'divider after SpaceNavButtons');
-  assert(iTodo > iRule, 'ToDoNav after divider');
-  assert(iView > iTodo, 'TaskNoteView after ToDoNav');
-  assert(iMarker > iView, 'marker last');
-  // composeNote body carries the new chrome too.
-  assert(TaskEntity.composeNote({ title: 'x' }).body.indexOf('class: "TaskNoteToDoNav"') >= 0,
-    'composeNote body includes the ToDoNav block');
+  assert(iRule1 > iNav, 'first divider after SpaceNavButtons');
+  assert(iView > iRule1, 'TaskNoteView after first divider');
+  assert(iRule2 > iView, 'second divider after TaskNoteView');
+  assert(iMarker > iRule2, 'marker after second divider');
+  // Exactly two thematic breaks (nav-fence HR + card-fence HR), no third.
+  assert((body.match(/\n---\n/g) || []).length === 2, 'exactly two `---` dividers');
+  // TaskNoteToDoNav is fully removed from the chrome.
+  assert(body.indexOf('TaskNoteToDoNav') < 0, 'no TaskNoteToDoNav block in the chrome');
+  // composeNote body carries the new chrome too (has the second divider, no ToDoNav).
+  const cn = TaskEntity.composeNote({ title: 'x' }).body;
+  assert(cn.indexOf('TaskNoteToDoNav') < 0, 'composeNote body has no ToDoNav block');
+  assert((cn.match(/\n---\n/g) || []).length === 2, 'composeNote body has two dividers');
 });
 
 // TaskDialog's inline chrome fallback must stay BYTE-IDENTICAL to TaskEntity's.
@@ -569,22 +575,6 @@ ok('TPL-1 _matches keys off project_slug (raw plain-string equality)', () => {
   assert(TaskProjectList._matches({ project_slug: '' }, 'sauce') === false, 'blank slug → false');
   assert(TaskProjectList._matches({ project_slug: 'sauce' }, '') === false, 'blank target → false');
   assert(TaskProjectList._matches(null, 'sauce') === false, 'null task → false');
-});
-
-// ---------- TaskNoteToDoNav._dailyPath (pure) ----------
-const TaskNoteToDoNavClass = loadClass('mechanisms/task-entity/task-note-todo-nav.js', 'TaskNoteToDoNav');
-const TaskNoteToDoNav = new TaskNoteToDoNavClass();
-
-ok('TDN-1 _dailyPath derives today’s daily to-do path from a moment', () => {
-  const m = {
-    format: (f) =>
-      f === 'YYYY/MM-MMMM' ? '2026/07-July' :
-      f === 'YYYY-MM-DD' ? '2026-07-01' : '',
-  };
-  assert(TaskNoteToDoNav._dailyPath(m) === 'spice/to-do/2026/07-July/ToDo-2026-07-01.md',
-    'path: ' + TaskNoteToDoNav._dailyPath(m));
-  assert(TaskNoteToDoNav._dailyPath(null) === '', 'null moment → ""');
-  assert(TaskNoteToDoNav._dailyPath({}) === '', 'format-less moment → ""');
 });
 
 // ---------- MeetingLeafActions.cleanProjectName (B1 clean-name extractor) ----------

@@ -2580,13 +2580,14 @@ async function runMonthsSentinelHealFamily() {
 //
 // Direct-invocation family (mirrors runMigrateFamily): builds a throwaway tmp
 // vault with (1) a meeting note carrying an OPEN Action Items line, (2) a
-// project-todo note carrying an OPEN Owned Tasks line, and (3) an OLD-CHROME
-// task-note (has <!-- TASK_NOTES --> but no TaskNoteToDoNav) with user notes
-// below the marker. Then runs applyMeetingTasksToEntityMigration +
-// applyProjectTasksToEntityMigration + applyTaskNoteHeal and asserts the real
-// end-state: task-notes created with the right source/link fields, backups
-// written, migrations idempotent on a second run, and the old-chrome note
-// upgraded (gains TaskNoteToDoNav) with its user notes preserved.
+// project-todo note carrying an OPEN Owned Tasks line, and (3) a v0.178-CHROME
+// task-note (has <!-- TASK_NOTES --> AND a TaskNoteToDoNav block, no second
+// `---`) with user notes below the marker. Then runs
+// applyMeetingTasksToEntityMigration + applyProjectTasksToEntityMigration +
+// applyTaskNoteHeal and asserts the real end-state: task-notes created with the
+// right source/link fields, backups written, migrations idempotent on a second
+// run, and the v0.178-chrome note upgraded to the NEW chrome (LOSES
+// TaskNoteToDoNav, GAINS the second `---` HR) with its user notes preserved.
 // =============================================================================
 async function runTaskEntitySurfacesFamily() {
     const {
@@ -2662,7 +2663,8 @@ async function runTaskEntitySurfacesFamily() {
         "- [ ] Provision the cluster", "",
     ].join("\n"));
 
-    // (3) Old-chrome task note (marker present, NO TaskNoteToDoNav) + user notes.
+    // (3) v0.178-chrome task note (marker present, HAS a TaskNoteToDoNav block,
+    //     no second `---` HR before the marker) + user notes below the marker.
     const OLD_TASK = "spice/tasks/Buy milk.md";
     writeFixture(OLD_TASK, [
         "---", "type: task", "title: Buy milk", "status: open",
@@ -2670,6 +2672,8 @@ async function runTaskEntitySurfacesFamily() {
         "source: manual", "source_note:", "created_at: 2026-06-01T09:00:00-06:00",
         "completed_at:", "---", "",
         dv("SpaceNavButtons"), "",
+        "---", "",
+        dv("TaskNoteToDoNav"), "",
         dv("TaskNoteView"), "",
         "<!-- TASK_NOTES -->",
         "",
@@ -2733,10 +2737,12 @@ async function runTaskEntitySurfacesFamily() {
         ok("HC-TE-SURF-2g .sauce-backup snapshot of the project-todo exists",
            backupExists(/Global K8s To-Do\.md$/));
 
-        // === Old-chrome upgrade ===
+        // === v0.178-chrome upgrade → new chrome ===
         const upgraded = readVault(OLD_TASK);
-        ok("HC-TE-SURF-3 old-chrome task upgraded — gains TaskNoteToDoNav",
-           /class:\s*"TaskNoteToDoNav"/.test(upgraded));
+        ok("HC-TE-SURF-3 v0.178-chrome task upgraded — TaskNoteToDoNav removed",
+           !/class:\s*"TaskNoteToDoNav"/.test(upgraded));
+        ok("HC-TE-SURF-3a upgraded note gains the second `---` HR before the marker",
+           /```\r?\n\r?\n---\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
         ok("HC-TE-SURF-3b upgraded note keeps SpaceNavButtons + TaskNoteView chrome",
            /class:\s*"SpaceNavButtons"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
         ok("HC-TE-SURF-3c user notes below the marker preserved",

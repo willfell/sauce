@@ -8967,12 +8967,13 @@ async function applyProjectTasksToEntityMigration(tp, history, git) {
 }
 
 // _taskNoteChromeBody — the canonical CHROME body a task note gets: a
-// SpaceNavButtons nav block, the TaskNoteView card block, and the
-// `<!-- TASK_NOTES -->` marker that separates the (regenerable) chrome above
-// from the user's own notes below. MUST stay BYTE-IDENTICAL to
-// TaskEntity._chromeBody() (mechanisms/task-entity/task-entity.js) — the heal
-// can't require the customJS class in the headless installer, so the string is
-// replicated here. Any drift breaks the "already has chrome → skip" idempotency.
+// SpaceNavButtons nav block, a `---` HR, the TaskNoteView card block, a second
+// `---` HR, and the `<!-- TASK_NOTES -->` marker that separates the (regenerable)
+// chrome above from the user's own notes below (nav → HR → card → HR → notes).
+// MUST stay BYTE-IDENTICAL to TaskEntity._chromeBody()
+// (mechanisms/task-entity/task-entity.js) — the heal can't require the customJS
+// class in the headless installer, so the string is replicated here. Any drift
+// breaks the "already has chrome → skip" idempotency.
 function _taskNoteChromeBody() {
   return "\n" +
     "```dataviewjs\n" +
@@ -8982,12 +8983,10 @@ function _taskNoteChromeBody() {
     "---\n" +
     "\n" +
     "```dataviewjs\n" +
-    "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteToDoNav\" });\n" +
-    "```\n" +
-    "\n" +
-    "```dataviewjs\n" +
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteView\" });\n" +
     "```\n" +
+    "\n" +
+    "---\n" +
     "\n" +
     "<!-- TASK_NOTES -->\n";
 }
@@ -9080,12 +9079,14 @@ async function applyTaskNoteHeal(tp, history, git) {
       return header + "\n" + chrome + tail;
     };
 
-    // UPGRADE old chrome (has the marker but the above-marker region is the
-    // legacy shape — no TaskNoteToDoNav / no `---`): rebuild the WHOLE region
-    // above (and including) the marker as frontmatter + the current chrome body,
-    // PRESERVING everything the user wrote BELOW the marker verbatim. Idempotent
-    // because the new chrome already carries TaskNoteToDoNav, so the caller's
-    // needsChromeUpgrade guard is false on the next pass.
+    // UPGRADE old chrome (has the marker but the above-marker region is a legacy
+    // shape — the v0.178 chrome that carried a TaskNoteToDoNav block, or an even
+    // older chrome lacking the second `---` HR before the marker): rebuild the
+    // WHOLE region above (and including) the marker as frontmatter + the current
+    // chrome body, PRESERVING everything the user wrote BELOW the marker verbatim.
+    // Idempotent because the new chrome drops TaskNoteToDoNav AND ends with a
+    // `---` HR right before the marker, so the caller's needsChromeUpgrade guard
+    // is false on the next pass.
     const _upgradeChrome = (content) => {
       const idx = content.indexOf(MARKER);
       if (idx < 0) return content;                 // no marker → not our case
@@ -9114,18 +9115,23 @@ async function applyTaskNoteHeal(tp, history, git) {
         const needsRename = OLD_NAME_RE.test(stemNoExt);
         const needsChrome = !before.includes(MARKER);
         // Old-chrome upgrade: the note HAS the marker but its above-marker region
-        // predates TaskNoteToDoNav (the marker is present but the nav class isn't
-        // in the chrome above it). Only inspect the region ABOVE the marker so a
-        // user who happens to mention the class in their notes below doesn't
-        // suppress the upgrade.
+        // is a LEGACY chrome — either the v0.178 shape that still carries a
+        // TaskNoteToDoNav block, or an older shape that lacks the second `---` HR
+        // right before the marker. The NEW chrome has NEITHER a TaskNoteToDoNav
+        // block NOR a missing pre-marker HR, so both conditions being false ⇒
+        // already-new ⇒ skip (idempotent). Only inspect the region ABOVE the
+        // marker so a user who happens to mention the class / a `---` in their
+        // notes below doesn't perturb the decision.
         const _aboveMarker = needsChrome ? "" : before.slice(0, before.indexOf(MARKER));
-        const needsChromeUpgrade = !needsChrome
-          && !/class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
+        const _hasToDoNav = /class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
+        const _endsWithHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
+        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || !_endsWithHr);
         if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
 
         // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
-        // old chrome region (add TaskNoteToDoNav + `---`) preserving user notes;
-        // and the healed PATH (rename if old-pattern; copy-to-new + remove-old).
+        // old chrome region (drop TaskNoteToDoNav, add the second `---` HR)
+        // preserving user notes; and the healed PATH (rename if old-pattern;
+        // copy-to-new + remove-old).
         let content = needsChrome ? _injectChrome(before)
           : (needsChromeUpgrade ? _upgradeChrome(before) : before);
 
