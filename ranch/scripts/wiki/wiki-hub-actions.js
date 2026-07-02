@@ -35,12 +35,14 @@ class WikiHubActions {
 
         const wrap = dv.container.createEl("div", { cls: "wiki-hub-actions" });
         wrap.style.cssText = "margin: 0;";
-        // Divider between the global nav-button row (above) and the wiki buttons —
-        // tight against both so there's no extra line gap on either side.
+        // Divider between the global nav-button row (above) and the wiki buttons.
+        // Breathing room: ~one line break (12px) above + below every separator/row so
+        // the chrome isn't squished. Vertical spacing lives on the dividers; the row
+        // itself carries no vertical margin, so gaps stay a consistent 12px.
         const hr = wrap.createEl("hr");
-        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0;";
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
         const row = wrap.createEl("div");
-        row.style.cssText = "display: flex; gap: 10px; margin: 2px auto 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         const root = "spice/wiki";
         const open = (t) => { if (t) app.workspace.openLinkText(t, ""); };
@@ -71,12 +73,12 @@ class WikiHubActions {
         mk("+ New Section", folderPlus, "wiki-section");
         mk("+ New Page", filePlus, "wiki-page");
 
-        // Bottom divider between the wiki buttons and whatever follows. WikiTree
-        // renders this helper directly above its search bar, so keeping the divider
-        // INSIDE this block (tight against the buttons) makes the buttons↔search
-        // boundary gap-free — the whole hub chrome lives in one dataviewjs block.
+        // Bottom divider between the wiki buttons and the search bar. WikiTree renders
+        // this helper directly above its search bar (one block), so this divider owns
+        // the buttons↔search spacing: 12px above + below gives a clear line break so the
+        // buttons and search aren't squished together.
         const hrBottom = wrap.createEl("hr");
-        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0 0 0;";
+        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
     }
 
     // Mobile-legible sizing: bigger tap target + readable label. Each button takes

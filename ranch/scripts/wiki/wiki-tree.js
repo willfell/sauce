@@ -46,8 +46,9 @@ class WikiTree {
             const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
             customJS.BeaconCards.render(proxyDv, {
                 pages: subs,
-                layout: "stacked",
-                columns: 2,
+                // Section cards are full-width ROWS (not a grid): title on the left,
+                // metadata (sub-sections · docs · last edited) on the right.
+                layout: "row",
                 title: (s) => s.title,
                 icon: () => folderIcon,
                 // BeaconCards navigates via `target` (→ openLinkText), NOT `link`.
@@ -55,10 +56,11 @@ class WikiTree {
                 // explicit target the card had no destination → clicking did nothing.
                 target: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
                 meta: (s) => {
-                    if (s.pageCount === 0) return undefined;
-                    const ago = window.moment ? window.moment(s.maxMtime).fromNow() : "";
-                    const pc = s.pageCount;
-                    return pc + " page" + (pc === 1 ? "" : "s") + (ago ? " · updated " + ago : "");
+                    const parts = [];
+                    if (s.subSectionCount) parts.push(s.subSectionCount + " section" + (s.subSectionCount === 1 ? "" : "s"));
+                    parts.push(s.pageCount + " doc" + (s.pageCount === 1 ? "" : "s"));
+                    if (s.maxMtime && window.moment) parts.push("edited " + window.moment(s.maxMtime).fromNow());
+                    return parts.join(" · ");
                 },
             });
         }
@@ -77,7 +79,9 @@ class WikiTree {
                 title: (p) => p.title || p.file.name,
                 icon: () => fileIcon,
                 target: (p) => p.file.path,
-                meta: (p) => {
+                // subtitle (not meta) — meta only renders in row layout; grid cards
+                // surface the detail as a muted second line.
+                subtitle: (p) => {
                     const created = p.created_at ? (window.moment ? window.moment(typeof p.created_at.toISO === "function" ? p.created_at.toISO() : String(p.created_at)).format("MMM D") : "") : "";
                     const edited = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
                     return created ? "created " + created + " · edited " + edited : (edited ? "edited " + edited : "");
@@ -111,12 +115,14 @@ class WikiTree {
                 const recentIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
                 customJS.BeaconCards.render(proxyDv, {
                     pages: recent,
+                    // Stays a GRID (2 columns); the section + when-updated detail shows
+                    // as a muted second line (subtitle — meta only renders in row layout).
                     layout: "stacked",
-                columns: 2,
+                    columns: 2,
                     title: (p) => p.title || p.file.name,
                     icon: () => recentIcon,
                     target: (p) => p.file.path,
-                    meta: (p) => {
+                    subtitle: (p) => {
                         const sec = sectionOf(p);
                         const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
                         const where = sec ? ("in " + sec) : "in Wiki";
@@ -146,6 +152,9 @@ class WikiTree {
         };
     }
 
+    // Aggregates each immediate child section: pageCount (docs, recursive),
+    // subSectionCount (immediate sub-section folders), and maxMtime (last edit of
+    // ANY note in the subtree). The card meta surfaces all three.
     _immediateChildFolders(scopePath, pages) {
         const seen = new Map();
         for (const p of pages) {
@@ -158,20 +167,23 @@ class WikiTree {
             // Default title = folder slug; real title/link resolved from the child's own
             // section-hub note below (folders are slugified, hub notes are Display-Case, so
             // reconstructing folder+slug+".md" would 404 on case-sensitive filesystems).
-            if (!seen.has(child)) seen.set(child, { folder: child, title: segs[0], hubPath: null, pageCount: 0, maxMtime: 0 });
+            if (!seen.has(child)) seen.set(child, { folder: child, title: segs[0], hubPath: null, pageCount: 0, subSections: new Set(), maxMtime: 0 });
             const entry = seen.get(child);
             // Capture the child's section-hub note (the wiki-section living DIRECTLY in `child`).
             if (p.type === "wiki-section" && folder === child) {
                 entry.title = (p.title && String(p.title).trim()) || (p.file.name ? String(p.file.name).replace(/\.md$/, "") : entry.title);
                 entry.hubPath = p.file.path;
             }
-            if (p.type === "wiki-page") {
-                entry.pageCount++;
-                const ts = p.file.mtime && p.file.mtime.ts != null ? p.file.mtime.ts : 0;
-                if (ts > entry.maxMtime) entry.maxMtime = ts;
-            }
+            // segs[1] (when present) is an immediate sub-section folder of `child`.
+            if (segs.length >= 2 && segs[1]) entry.subSections.add(segs[1]);
+            if (p.type === "wiki-page") entry.pageCount++;
+            // "last edited" reflects any note in the subtree (docs + section hubs).
+            const ts = p.file.mtime && p.file.mtime.ts != null ? p.file.mtime.ts : 0;
+            if (ts > entry.maxMtime) entry.maxMtime = ts;
         }
-        return Array.from(seen.values()).sort((a, b) => a.folder.localeCompare(b.folder));
+        return Array.from(seen.values())
+            .map(({ subSections, ...rest }) => ({ ...rest, subSectionCount: subSections.size }))
+            .sort((a, b) => a.folder.localeCompare(b.folder));
     }
 
     _immediatePages(scopePath, pages) {

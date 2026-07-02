@@ -1,10 +1,12 @@
 /**
  * WikiLeafActions (CustomJS)
- * Renders the navigation + action row at the top of a wiki-page note:
- *   [ Wiki ]  [ Up: <section> ]  [ Move ]
+ * Renders the navigation + action row at the top of a wiki-page note, as ONE
+ * horizontal row with the section-nav on the left and Move pushed to the far right:
+ *   [ Wiki ]  [ <section> ] ................................ [ Move ]
  * — so you can always get back to the wiki home (docs) and up to the section the
  * page lives in, from anywhere. Move options are computed LAZILY on click (never
  * at render), so a cold-loading WikiMove can't throw and blank the whole row.
+ * Separators above + below get ~one line break of breathing room.
  *
  * Usage:
  *   await dv.view("ranch/views/customjs-guard", { class: "WikiLeafActions" });
@@ -29,43 +31,52 @@ class WikiLeafActions {
 
         const wrap = dv.container.createEl("div", { cls: "wiki-leaf-actions" });
         wrap.style.cssText = "margin: 0;";
-        // Divider between the global nav-button row (above) and the wiki buttons —
-        // tight against both, and against the page's trailing divider below.
+        // Breathing room: ~one line break (12px) above + below every separator so the
+        // row isn't squished against the nav above or the page content below.
         const hr = wrap.createEl("hr");
-        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0;";
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+        // ONE horizontal row: [Wiki] [<section>] on the left, [Move] pushed to the far
+        // right via margin-left:auto. No wrap — the controls stay on a single line.
         const row = wrap.createEl("div");
-        row.style.cssText = "display: flex; gap: 10px; margin: 2px auto 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; gap: 10px; margin: 0; align-items: center;";
 
         const open = (target) => { if (target) app.workspace.openLinkText(target, ""); };
 
-        // Wiki home (docs).
-        this._mobilize(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") }));
+        // Wiki home (docs) — left.
+        this._styleLeafBtn(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, onClick: () => open(root + "/Wiki.md") }));
 
         // Up to the section this page lives in (skip when the page sits at the wiki
         // root). Labelled with just the section name — clicking it takes you there.
+        // { shrink } lets a long section label ellipsis so the row never overflows.
         if (folder && folder !== root) {
             const hub = this._resolveSectionHub(dv, folder);
-            this._mobilize(customJS.AccentButton.render(row, { label: hub.label, icon: upIcon, flex: true, onClick: () => open(hub.path) }));
+            this._styleLeafBtn(customJS.AccentButton.render(row, { label: hub.label, icon: upIcon, onClick: () => open(hub.path) }), { shrink: true });
         }
 
-        // Move (dialog + options computed on click — render stays dependency-free).
-        this._mobilize(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => this._openMoveDialog(dv, filePath) }));
+        // Move — pushed to the very right of the row ({ right }). Dialog + options
+        // computed on click, so render stays dependency-free.
+        this._styleLeafBtn(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, onClick: () => this._openMoveDialog(dv, filePath) }), { right: true });
 
-        // Bottom separator — owned by this helper (tight against the buttons) so the
-        // page template no longer needs a trailing "---". A per-note heal strips the
-        // legacy template "---" from existing pages.
+        // Bottom separator — 12px above (buttons) + below (page content). The leaf owns
+        // this divider so the page template needs no trailing "---"; a per-note heal
+        // strips the legacy template "---" from existing pages.
         const hrBottom = wrap.createEl("hr");
-        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0 0 0;";
+        hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
     }
 
-    // Mobile-legible sizing (mirrors WikiHubActions._mobilize): bigger tap target +
-    // readable label; each button takes ~half the row so a phone wraps them 2-up.
-    _mobilize(btn) {
+    // One-row sizing: readable label + tap target at natural width. Wiki + section sit
+    // on the left; { right:true } pushes Move to the far right; { shrink:true } lets a
+    // long section label ellipsis-shrink so the row never overflows on a phone.
+    _styleLeafBtn(btn, opts) {
+        opts = opts || {};
         if (!btn || !btn.style) return btn;
-        btn.style.flex = "1 1 calc(50% - 6px)";
-        btn.style.minWidth = "128px";
-        btn.style.fontSize = "0.92em";
-        btn.style.padding = "9px 14px";
+        btn.style.fontSize = "0.9em";
+        btn.style.padding = "8px 14px";
+        btn.style.flex = opts.shrink ? "0 1 auto" : "0 0 auto";
+        btn.style.minWidth = "0";
+        btn.style.overflow = "hidden";
+        btn.style.whiteSpace = "nowrap";
+        if (opts.right) btn.style.marginLeft = "auto";
         return btn;
     }
 
