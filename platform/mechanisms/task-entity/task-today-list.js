@@ -46,6 +46,8 @@ class TaskTodayList {
     // TaskEntity / TaskDialog).
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
+    renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
+    _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
 
     // ---------- Static pure helper ----------
 
@@ -180,13 +182,40 @@ class TaskTodayList {
     }
 
     /**
-     * Render one task row: functional done-checkbox → TaskDialog.markDone(path);
-     * title text (row click → TaskDialog.open({ edit: path })); chips for
-     * project / priority / due when present.
+     * Render one task row (instance) — thin delegator to the SELF-CONTAINED static
+     * renderTaskRow so the daily still renders identically. The static is what any
+     * OTHER widget (TaskMeetingList / TaskProjectList) calls cross-class via
+     * window.customJS.TaskTodayList.renderTaskRow(...).
      */
     _renderRow(band, task) {
+        return TaskTodayList.renderTaskRow(band, task);
+    }
+
+    /**
+     * Render one task row into `container` — SELF-CONTAINED (no dependence on
+     * instance `this`), so any widget can draw a uniform task row by calling
+     * `window.customJS.TaskTodayList.renderTaskRow(container, task)` cross-class.
+     * Draws:
+     *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail)
+     *   - a title (row/title click → TaskDialog.open({ edit: path }))
+     *   - metadata chips for project(name) / priority / due when present.
+     * `TDref` is an OPTIONAL TaskDialog reference; when omitted the method reads
+     * `window.customJS.TaskDialog` at click-time (both markDone + open are lazily
+     * resolved so a cold-load TDZ never throws out of the row build). Never throws.
+     */
+    static renderTaskRow(container, task, TDref) {
+        if (!container || typeof container.createEl !== 'function') return null;
+        // Resolve TaskDialog lazily at click-time so a passed ref OR the global
+        // both work; a cold-load (customJS not ready) just no-ops the gesture.
+        const getTD = () => {
+            try {
+                return TDref
+                    || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog)
+                    || null;
+            } catch (_e) { return null; }
+        };
         const path = task && task.path;
-        const row = band.createEl('div', { cls: 'sauce-task-today-row' });
+        const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         // No flex-wrap: the chips (especially DUE) stay on the SAME row as the
         // title even on a narrow (mobile) container. align-items:flex-start pins
         // the chips to the top-right while a long title wraps within its own
@@ -205,9 +234,10 @@ class TaskTodayList {
         cb.style.cssText = 'margin: 0; cursor: pointer; flex-shrink: 0;';
         cb.addEventListener('click', (ev) => { ev.stopPropagation(); });
         cb.addEventListener('change', async () => {
-            if (!path) { cb.checked = false; return; }
+            const TD = getTD();
+            if (!path || !TD || typeof TD.markDone !== 'function') { cb.checked = false; return; }
             try {
-                const res = await window.customJS.TaskDialog.markDone(path);
+                const res = await TD.markDone(path);
                 if (res && res.ok === false) {
                     cb.checked = false;
                     try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
@@ -228,9 +258,10 @@ class TaskTodayList {
         title.style.cssText = 'flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
 
         const openEditor = () => {
-            if (!path) return;
+            const TD = getTD();
+            if (!path || !TD || typeof TD.open !== 'function') return;
             try {
-                window.customJS.TaskDialog.open({ edit: path });
+                TD.open({ edit: path });
             } catch (e) {
                 try { new Notice('Could not open task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
@@ -245,13 +276,14 @@ class TaskTodayList {
             const chip = chips.createEl('span', { text: label });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
-        if (task && task.project) addChip(this._stripWikilink(task.project));
+        if (task && task.project) addChip(TaskTodayList._stripWikilink(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
+        return row;
     }
 
-    /** Strip surrounding `[[ ]]` from a wikilink for chip display. */
-    _stripWikilink(v) {
+    /** Strip surrounding `[[ ]]` from a wikilink for chip display (static). */
+    static _stripWikilink(v) {
         const s = String(v == null ? '' : v).trim();
         const m = /^\[\[([^\]]+)\]\]$/.exec(s);
         return m ? m[1] : s;

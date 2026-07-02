@@ -72,145 +72,47 @@ class MeetingLeafActions {
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
+  // v0.13.0 (task-entity meetings wiring): + New Task now creates ONE task-note
+  // via the task-entity mechanism's TaskDialog (surface: 'meeting'). No more
+  // custom inline modal + dual-write of raw markdown into the meeting's Action
+  // Items AND the project To-Do — the task lives as a single note under
+  // spice/tasks/, stamped with source: meeting + source_note: [[<meeting>]] +
+  // (when the meeting has a project: frontmatter) the project link/slug. The
+  // meeting's TaskMeetingList block live-queries those task-notes by source_note;
+  // the daily aggregators pick them up by source == meeting. Nothing is appended
+  // to any surface note.
   _onNewTask(dv) {
     const cur = dv.current && dv.current();
     if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
-    const meetingPath = cur.file.path;
+    const TD = window.customJS && window.customJS.TaskDialog;
+    if (!TD || typeof TD.open !== "function") {
+      new Notice("Install the task-entity mechanism to create tasks from meetings.", 6000);
+      return;
+    }
+    // Meeting basename (no .md) → source_note wikilink so the task-note's
+    // TaskMeetingList query resolves back to this meeting.
+    const meetingBasename = String(cur.file.name || "").replace(/\.md$/i, "");
+    // Project (optional): only when the meeting carries a project: frontmatter.
+    // Resolve {name, slug} from the project list so composeNote gets the same
+    // pair a project-surface create would.
     const projectName = MeetingLeafActions.stripWikilink(cur.project);
-    const ti = window.customJS?.TaskInteractions;
-    if (!ti) {
-      new Notice("Install the task-interactions mechanism to create tasks from meetings.", 6000);
-      return;
+    let project;
+    if (projectName) {
+      const hit = this._listProjects(dv).find((p) => p.name === projectName);
+      project = {
+        name: projectName,
+        slug: hit ? hit.slug : String(projectName).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      };
     }
-    this._openTaskModal(dv, projectName, async (payload) => {
-      if (!payload || !payload.title || !payload.title.trim()) return;
-      const fullPayload = {
-        mode: 'one-shot',
-        title: payload.title.trim(),
-        destination: projectName
-          ? { type: 'project', slug: this._projectSlugFor(projectName, dv), name: projectName }
-          : 'today',
-        priority: payload.priority || '',
-        due: payload.due || '',
-      };
-      const serializedLine = ti.serializeTaskLine(fullPayload);
-      const mRes = await ti.appendTask(meetingPath, fullPayload, { serializedLine });
-      let pRes = null;
-      if (projectName) {
-        const projectTodoPath = this._projectTodoPath(projectName, dv);
-        if (projectTodoPath && app.vault.getAbstractFileByPath(projectTodoPath)) {
-          pRes = await ti.appendTask(projectTodoPath, fullPayload, { serializedLine });
-        } else {
-          pRes = { ok: false, reason: 'project-todo-missing' };
-        }
-      }
-      this._noticeDualWrite(meetingPath, projectName, mRes, pRes);
-    });
-  }
-
-  _openTaskModal(dv, projectName, onSubmit) {
-    this._openModal({ title: "New task", build: (panel, close) => {
-      const state = { title: "", due: "", priority: "" };
-      if (projectName) {
-        const chip = panel.createEl("div", { text: `Will be linked to: ${projectName}` });
-        chip.style.cssText = "margin:10px 0 4px; padding:5px 9px; border-radius:6px; background:var(--background-modifier-hover); color:var(--text-muted); font-size:0.85em; display:inline-block;";
-      }
-      const titleWrap = panel.createEl("div");
-      titleWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const titleLabel = titleWrap.createEl("label", { text: "Title" });
-      titleLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const titleInput = titleWrap.createEl("input"); titleInput.type = "text"; titleInput.placeholder = "Task title…";
-      titleInput.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const dueWrap = panel.createEl("div");
-      dueWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const dueLabel = dueWrap.createEl("label", { text: "Due (optional)" });
-      dueLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const dueInput = dueWrap.createEl("input"); dueInput.type = "date";
-      dueInput.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const prioWrap = panel.createEl("div");
-      prioWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const prioLabel = prioWrap.createEl("label", { text: "Priority (optional)" });
-      prioLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const chipsRow = prioWrap.createEl("div");
-      chipsRow.style.cssText = "display:flex; gap:6px; flex-wrap:wrap;";
-      const chipButtons = {};
-      const paintChips = () => {
-        for (const [k, btn] of Object.entries(chipButtons)) {
-          const active = state.priority === k;
-          btn.style.background = active ? "var(--interactive-accent)" : "var(--background-primary)";
-          btn.style.color = active ? "var(--text-on-accent)" : "var(--text-normal)";
-          btn.style.borderColor = active ? "var(--interactive-accent)" : "var(--background-modifier-border)";
-        }
-      };
-      for (const p of ["low", "medium", "high", "highest"]) {
-        const b = chipsRow.createEl("button", { text: p });
-        b.style.cssText = "padding:4px 10px; border-radius:14px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer; font-size:0.85em;";
-        b.onclick = (e) => { e.preventDefault(); state.priority = (state.priority === p ? "" : p); paintChips(); };
-        chipButtons[p] = b;
-      }
-      paintChips();
-      const save = panel.createEl("button", { text: "Add task" });
-      save.style.cssText = "margin-top:14px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
-      const updateSaveState = () => {
-        const enabled = !!(titleInput.value || "").trim();
-        save.disabled = !enabled;
-        save.style.opacity = enabled ? "1" : "0.5";
-        save.style.cursor = enabled ? "pointer" : "not-allowed";
-      };
-      titleInput.oninput = () => { state.title = titleInput.value; updateSaveState(); };
-      dueInput.oninput = () => { state.due = dueInput.value; };
-      updateSaveState();
-      save.onclick = async () => {
-        if (save.disabled) return;
-        try { await onSubmit({ title: state.title, due: state.due, priority: state.priority }); }
-        catch (e) { new Notice("Could not add task: " + (e.message || e), 6000); }
-        close();
-      };
-      // Enter in the Title field submits the task (skips the mouse). Ignore IME
-      // composition Enter; no-op while the button is disabled (empty title).
-      titleInput.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Enter" || ev.isComposing) return;
-        ev.preventDefault();
-        if (!save.disabled) save.click();
-      });
-      setTimeout(() => titleInput.focus(), 0);
-    }});
-  }
-
-  _projectSlugFor(name, dv) {
-    const projects = this._listProjects(dv);
-    const hit = projects.find((p) => p.name === name);
-    return hit ? hit.slug : String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  }
-
-  _projectTodoPath(name, dv) {
     try {
-      const hubs = dv.pages('"spice/projects"').where((p) => p && p.type === "project" && (p.name || p.file.name) === name).array();
-      if (hubs.length === 0) return null;
-      const folder = hubs[0].file.folder;
-      return `${folder}/${name} To-Do.md`;
-    } catch (_e) { return null; }
-  }
-
-  _noticeDualWrite(meetingPath, projectName, mRes, pRes) {
-    const meetingBase = meetingPath.split('/').pop().replace(/\.md$/, '');
-    if (mRes && !mRes.ok) {
-      new Notice(`Could not write to meeting: ${mRes.reason || 'unknown'}`, 6000);
-      return;
+      TD.open({
+        surface: "meeting",
+        sourceNote: "[[" + meetingBasename + "]]",
+        project,
+      });
+    } catch (e) {
+      new Notice("Could not open task dialog: " + (e.message || e), 6000);
     }
-    if (!projectName) {
-      new Notice(`Added to ${meetingBase}`);
-      return;
-    }
-    if (pRes && pRes.ok) {
-      new Notice(`Added to ${meetingBase} and ${projectName} To-Do`);
-      return;
-    }
-    if (pRes && pRes.reason === 'project-todo-missing') {
-      new Notice(`Added to ${meetingBase}; ${projectName} To-Do not found`);
-      return;
-    }
-    new Notice(`Added to ${meetingBase}; could not update ${projectName} To-Do: ${(pRes && pRes.reason) || 'unknown'}`);
   }
 
   _onAddToProject(dv) {

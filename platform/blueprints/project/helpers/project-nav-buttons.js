@@ -170,6 +170,21 @@ class ProjectNavButtons {
         return { label: "Helpful Links", path };
     }
 
+    // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
+    // (bypasses the link resolver, which can double an absolute path against the
+    // current note's folder on a cold cache — the doubled-path bug). Falls back
+    // to openLinkText only when the file isn't in the vault index yet.
+    _openNavTarget(vaultPath) {
+        try {
+            const f = app.vault.getAbstractFileByPath(vaultPath);
+            if (f && app.workspace && typeof app.workspace.getLeaf === "function") {
+                app.workspace.getLeaf(false).openFile(f);
+                return;
+            }
+        } catch (_e) { /* fall through to openLinkText */ }
+        app.workspace.openLinkText(vaultPath, "");
+    }
+
     async _promptForTitle(notesFolder) {
         return new Promise((resolve) => {
             const overlay = document.createElement("div");
@@ -489,7 +504,15 @@ class ProjectNavButtons {
         // mainNote.basename + " To-Do.md" so the filename convention stays consistent
         // with applyProjectTodoBackfill + entity-create extra_files entry.
         if (ctx.context !== "project-todo" && mainNote) {
-            const toDoPath = `${projectDir}/${mainNote.basename} To-Do.md`;
+            // Derive the To-Do path from mainNote.PATH (source of truth) rather
+            // than re-joining projectDir + basename. mainNote.path already carries
+            // the correct project folder, so slicing off its filename and appending
+            // "<basename> To-Do.md" can never double the "spice/projects/<slug>/"
+            // prefix even if projectDir was mis-derived from a malformed current
+            // path (the doubled-link bug: projectDir + a value already containing
+            // the project dir → spice/projects/<slug>/spice/projects/<slug>/…).
+            const mainDir = mainNote.path.slice(0, mainNote.path.lastIndexOf("/"));
+            const toDoPath = `${mainDir}/${mainNote.basename} To-Do.md`;
             if (app.vault.getAbstractFileByPath(toDoPath)) {
                 buttons.push({ label: "To-Do", icon: icons.todo, path: toDoPath });
             }
@@ -607,11 +630,18 @@ class ProjectNavButtons {
         // v0.100.0 — nav buttons delegate to the shared AccentButton mechanism:
         // identical styling to the New Doc / New Note buttons by construction,
         // flex: true stretches the row across the full note width.
+        // btn.path is an ABSOLUTE vault path. _openNavTarget resolves it to the
+        // TFile and opens that directly — openLinkText treats its first arg as a
+        // LINK TEXT (linkpath) resolved relative to the sourcePath, which on a cold
+        // metadata cache can re-prefix an absolute path with the current note's
+        // folder (the doubled-path bug: spice/projects/<slug>/spice/projects/<slug>/…).
+        // openFile bypasses the link resolver entirely; openLinkText is the fallback
+        // only when the file isn't indexed yet.
         for (const btn of buttons) {
             customJS.AccentButton.render(container, {
                 label: btn.label,
                 icon: btn.icon,
-                onClick: () => app.workspace.openLinkText(btn.path, ""),
+                onClick: () => this._openNavTarget(btn.path),
                 flex: true
             });
         }

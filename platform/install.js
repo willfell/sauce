@@ -535,6 +535,15 @@ module.exports = async function (tp) {
     // historical dailies untouched).
     await applyDailyTasksToEntityMigration(tp, installedNow.history, git);
 
+    // 6a4b. task-entity — convert EVERY meeting note's OPEN Action Items lines +
+    // EVERY project To-Do note's OPEN Owned Tasks lines into note-per-task files
+    // under spice/tasks/ (source: meeting / project). Ungated, backup-first,
+    // per-note sentinel, non-destructive (done lines untouched; unparseable lines
+    // left raw). Runs alongside the daily migration so all three surfaces feed the
+    // same spice/tasks/ store.
+    await applyMeetingTasksToEntityMigration(tp, installedNow.history, git);
+    await applyProjectTasksToEntityMigration(tp, installedNow.history, git);
+
     // 6a5. task-entity — heal EXISTING task notes under spice/tasks/ (top level):
     // rename ugly `task-YYYYMMDD-HHmmss-hhhh.md` files to the readable
     // `<title>.md`, and inject the standard chrome (SpaceNavButtons + TaskNoteView
@@ -8475,6 +8484,465 @@ async function applyDailyTasksToEntityMigration(tp, history, git) {
   }
 }
 
+// _composeEntityTaskFrontmatter — pure. Builds the task-note frontmatter block
+// (the `---`…`---` YAML + trailing blank line) for a meeting/project migration,
+// mirroring TaskEntity.composeNote's canonical key ORDER + empty-string-for-blank
+// + quote-when-hostile convention (same as _composeDailyTaskNote). The body
+// (chrome) is appended by the caller. Args:
+//   opts = {
+//     title, scheduled, due, priority,       // scalars (strings; "" allowed)
+//     project,        // display name (no brackets), or "" — emitted as "[[name]]"
+//     projectSlug,    // slug string, or ""
+//     source,         // "meeting" | "project"
+//     sourceNote,     // "[[<Meeting>]]" wikilink string, or ""
+//     nowIso,         // created_at ISO string
+//   }
+// Quoting: project + source_note are wikilinks (contain `[`), so quoted when
+// non-empty (matches _composeDailyTaskNote). Title emitted raw (parser tolerant).
+function _composeEntityTaskFrontmatter(opts) {
+  const o = opts || {};
+  const project = o.project ? `[[${o.project}]]` : "";
+  const sourceNote = o.sourceNote || "";
+  return [
+    "---",
+    "type: task",
+    `title: ${o.title || ""}`,
+    "status: open",
+    `scheduled: ${o.scheduled || ""}`,
+    `due: ${o.due || ""}`,
+    `priority: ${o.priority || ""}`,
+    `project: ${project ? `"${project}"` : ""}`,
+    `project_slug: ${o.projectSlug || ""}`,
+    `source: ${o.source || ""}`,
+    `source_note: ${sourceNote ? `"${sourceNote}"` : ""}`,
+    `created_at: ${o.nowIso || ""}`,
+    "completed_at:",
+    "---",
+    "",
+  ].join("\n");
+}
+
+// _parseSurfaceTaskLine — like _parseDailyTaskLine but returns ALL parsed fields
+// for a meeting/project surface line. Reuses _parseDailyTaskLine (same grammar),
+// so an OPEN `- [ ] Title [due:: …][priority:: …]` line yields {title, due,
+// priority, scheduled, project}. Returns null for non-task / checked lines.
+function _parseSurfaceTaskLine(line) {
+  return _parseDailyTaskLine(line);
+}
+
+// _extractOpenLinesUnderMarker — pure. Given a note's full text + a marker
+// comment, return the OPEN task lines that appear AFTER the marker (fence-aware),
+// dedup'd by normalized title within the note. Returns { openIdxs, parsedByIdx,
+// uniqueParsed } shaped like applyDailyTasksToEntityMigration's step (4) so the
+// strip logic is identical. When the marker is absent, scans the WHOLE body
+// (some legacy notes lack the marker but still hold `- [ ]` lines under the
+// section heading).
+function _extractOpenLinesUnderMarker(content, marker) {
+  const lines = content.split("\n");
+  const markerIdx = lines.findIndex((l) => l.includes(marker));
+  const startAt = markerIdx >= 0 ? markerIdx + 1 : 0;
+  let inFence = false;
+  const openIdxs = [];
+  const parsedByIdx = new Map();
+  const seenTitles = new Set();
+  const uniqueParsed = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (/^\s*```/.test(ln)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (i < startAt) continue;                 // only lines AFTER the marker
+    let parsed = null;
+    try { parsed = _parseSurfaceTaskLine(ln); }
+    catch (_e) { parsed = null; }
+    if (!parsed) continue;
+    openIdxs.push(i);
+    parsedByIdx.set(i, parsed);
+    const norm = parsed.title.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seenTitles.has(norm)) continue;
+    seenTitles.add(norm);
+    uniqueParsed.push(parsed);
+  }
+  return { lines, openIdxs, parsedByIdx, uniqueParsed };
+}
+
+// _surfaceTaskNoteExists — true if an OPEN/any task-note with the SAME title +
+// source + (project_slug for project source) already exists ANYWHERE under
+// spice/tasks/. Idempotency guard mirroring _dailyTaskNoteExists so a re-run
+// never spawns a duplicate. Matches on title + source; for project source also
+// project_slug (so the same title under two projects stays distinct).
+async function _surfaceTaskNoteExists(adapter, wantTitle, wantSource, wantSlug) {
+  const ROOT = "spice/tasks";
+  if (!(await adapter.exists(ROOT).catch(() => false))) return false;
+  const wt = String(wantTitle || "").trim();
+  const ws = String(wantSource || "").trim();
+  const wslug = String(wantSlug || "").trim();
+  async function _walk(dir, out = []) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return out; }
+    for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+    for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+    return out;
+  }
+  const files = await _walk(ROOT);
+  for (const f of files) {
+    let body;
+    try { body = await adapter.read(f); } catch (_e) { continue; }
+    const tm = body.match(/^title:\s*(.*)$/m);
+    const sm = body.match(/^source:\s*(.*)$/m);
+    const gm = body.match(/^project_slug:\s*(.*)$/m);
+    const title = tm ? tm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    const source = sm ? sm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    const slug = gm ? gm[1].trim().replace(/^"(.*)"$/, "$1") : "";
+    if (source !== ws) continue;
+    if (title !== wt) continue;
+    if (wslug && slug !== wslug) continue;
+    return true;
+  }
+  return false;
+}
+
+// _createSurfaceTaskNotes — shared writer for the meeting + project migrations.
+// For each uniqueParsed line, compose a task-note (frontmatter + chrome body)
+// with a READABLE filename (<sanitized title>.md, deduped via _uniqueName against
+// the vault — matching dialog-created notes). Skips a line whose equivalent
+// task-note already exists (idempotency). Returns { created, createdTitles } and
+// grows `existingNames` so intra-run dedupe is correct. Never throws per-line —
+// records a warning + preserves the raw line (caller only strips created titles).
+async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, existingNames, history, git, step) {
+  const _uniqueName = (baseFilename) => {
+    if (!existingNames.has(baseFilename)) return baseFilename;
+    const dot = baseFilename.lastIndexOf(".");
+    const stem = dot > 0 ? baseFilename.slice(0, dot) : baseFilename;
+    const ext = dot > 0 ? baseFilename.slice(dot) : "";
+    for (let n = 2; n < 10000; n++) {
+      const cand = stem + " " + n + ext;
+      if (!existingNames.has(cand)) return cand;
+    }
+    return stem + " " + Date.now() + ext;
+  };
+  let created = 0;
+  const createdTitles = [];
+  for (const parsed of uniqueParsed) {
+    try {
+      const projectSlug = common.source === "project"
+        ? (common.projectSlug || "")
+        : (parsed.project
+            ? String(parsed.project).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+            : (common.projectSlug || ""));
+      const projectName = common.source === "project"
+        ? (common.project || "")
+        : (parsed.project || common.project || "");
+      // Skip if an equivalent task-note already exists (idempotency).
+      if (await _surfaceTaskNoteExists(adapter, parsed.title, common.source, projectSlug)) { continue; }
+      const fmBlock = _composeEntityTaskFrontmatter({
+        title: parsed.title,
+        scheduled: parsed.due || "",
+        due: parsed.due || "",
+        priority: parsed.priority || "",
+        project: projectName,
+        projectSlug,
+        source: common.source,
+        sourceNote: common.sourceNote || "",
+        nowIso: common.nowIso,
+      });
+      const body = fmBlock + _taskNoteChromeBody();
+      const base = _sanitizeTaskTitleForFilename(parsed.title) + ".md";
+      const finalName = _uniqueName(base);
+      const taskPath = `spice/tasks/${finalName}`;
+      if (await adapter.exists(taskPath).catch(() => false)) { continue; }
+      await adapter.write(taskPath, body);
+      existingNames.add(finalName);
+      created += 1;
+      createdTitles.push(parsed.title);
+    } catch (e) {
+      history?.push({ event: "warning", step, name: "task-entity",
+        task: parsed && parsed.title, reason: e && e.message ? e.message : String(e),
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+  return { created, createdTitles };
+}
+
+// applyMeetingTasksToEntityMigration — task-entity. Ungated, backup-first,
+// idempotent, NON-DESTRUCTIVE conversion of EVERY meeting note's OPEN Action
+// Items lines into note-per-task files under spice/tasks/. Unlike the daily
+// migration (most-recent only), this processes ALL meeting notes under
+// spice/meetings/notes/**.
+//
+// Contract (mirrors applyDailyTasksToEntityMigration's posture):
+//   - Ungated (runs every install) — back-injects NEW content.
+//   - Per-note `<!-- meeting-tasks-migrated -->` sentinel → SKIP on re-run.
+//   - .sauce-backup snapshot of the meeting note BEFORE any write.
+//   - Fail-safe: per-note + per-line + whole-heal try/catch. An unparseable
+//     line is LEFT as raw markdown (never dropped). Never throws.
+//   - Only OPEN `- [ ]` lines under the ACTION_ITEMS_MARKER convert; done lines
+//     untouched. A task-note is stamped source: meeting, source_note:
+//     [[<meetingBasename>]], + project/project_slug when the meeting has a
+//     project: frontmatter.
+// Signature matches applyDailyTasksToEntityMigration: (tp, history, git).
+async function applyMeetingTasksToEntityMigration(tp, history, git) {
+  const STEP = "meeting_tasks_to_entity_migration";
+  const SENTINEL = "<!-- meeting-tasks-migrated -->";
+  const MARKER = "<!-- ACTION_ITEMS_MARKER -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/meetings/notes";
+    if (!(await adapter.exists(ROOT).catch(() => false))) {
+      history?.push({ event: "info", step: STEP, name: "meetings",
+        summary: { converted: 0, skipped_reason: "spice/meetings/notes not present" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // Enumerate meeting notes recursively.
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const meetings = await _walk(ROOT);
+    if (!meetings.length) return;
+
+    const now = new Date();
+    const nowIso = _localIsoNoMillis(now);
+    try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
+
+    // Live set of top-level task-note basenames for intra-run dedupe.
+    let taskListing;
+    try { taskListing = await adapter.list("spice/tasks"); } catch (_e) { taskListing = { files: [] }; }
+    const existingNames = new Set((taskListing.files || [])
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.substring(f.lastIndexOf("/") + 1)));
+
+    let totalConverted = 0, notesTouched = 0;
+    for (const fp of meetings) {
+      try {
+        const content = await adapter.read(fp);
+        if (content.includes(SENTINEL)) continue;  // idempotent skip
+
+        const fm = _parseFrontmatterStrict(content) || {};
+        // project display name (strip [[ ]] / quotes) + slug.
+        let projectName = fm.project != null ? String(fm.project).replace(/^"(.*)"$/, "$1").replace(/^\[\[|\]\]$/g, "").trim() : "";
+        const projectSlug = projectName
+          ? projectName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+          : "";
+        const meetingBasename = fp.substring(fp.lastIndexOf("/") + 1).replace(/\.md$/, "");
+        const sourceNote = `[[${meetingBasename}]]`;
+
+        const { lines, openIdxs, parsedByIdx, uniqueParsed } =
+          _extractOpenLinesUnderMarker(content, MARKER);
+
+        if (!openIdxs.length) {
+          // No open Action Items lines — still stamp the sentinel so re-runs skip.
+          const stamped = content.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+          await _backupAndWrite(adapter, fp, content, stamped);
+          continue;
+        }
+
+        const { created, createdTitles } = await _createSurfaceTaskNotes(
+          adapter, uniqueParsed,
+          { source: "meeting", project: projectName, projectSlug, sourceNote, nowIso },
+          existingNames, history, git, STEP);
+        totalConverted += created;
+
+        // Strip only the migrated open lines (those whose task-note exists now).
+        const strippable = new Set();
+        for (const parsed of uniqueParsed) {
+          try {
+            if (createdTitles.includes(parsed.title)
+              || await _surfaceTaskNoteExists(adapter, parsed.title, "meeting", projectSlug)) {
+              strippable.add(parsed.title.toLowerCase().replace(/\s+/g, " ").trim());
+            }
+          } catch (_e) { /* leave the line raw on error */ }
+        }
+        const keptLines = [];
+        for (let i = 0; i < lines.length; i++) {
+          if (openIdxs.includes(i)) {
+            const parsed = parsedByIdx.get(i);
+            const norm = parsed.title.toLowerCase().replace(/\s+/g, " ").trim();
+            if (strippable.has(norm)) continue;
+          }
+          keptLines.push(lines[i]);
+        }
+        let rewritten = keptLines.join("\n").replace(/\n{3,}/g, "\n\n");
+        rewritten = rewritten.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+        await _backupAndWrite(adapter, fp, content, rewritten);
+        notesTouched += 1;
+      } catch (e) {
+        history?.push({ event: "warning", step: STEP, name: "meetings",
+          target: fp, reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "meetings",
+      summary: { scanned: meetings.length, notes_touched: notesTouched, converted: totalConverted },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "meetings",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
+// applyProjectTasksToEntityMigration — task-entity. Ungated, backup-first,
+// idempotent, NON-DESTRUCTIVE conversion of EVERY project To-Do note's OPEN
+// Owned Tasks lines (and any spice/projects/*/tasks/*.md kanban task files'
+// open lines) into note-per-task files under spice/tasks/. Processes ALL
+// project-todo notes (spice/projects/*/*  To-Do.md).
+//
+// Contract mirrors applyMeetingTasksToEntityMigration: ungated, per-note
+// `<!-- project-tasks-migrated -->` sentinel, .sauce-backup before write,
+// per-note/-line try/catch, only OPEN lines under OWNED_TASKS_MARKER convert.
+// Task-notes are stamped source: project, project: [[<projectName>]],
+// project_slug (from the note's frontmatter). Signature: (tp, history, git).
+async function applyProjectTasksToEntityMigration(tp, history, git) {
+  const STEP = "project_tasks_to_entity_migration";
+  const SENTINEL = "<!-- project-tasks-migrated -->";
+  const MARKER = "<!-- OWNED_TASKS_MARKER -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/projects";
+    if (!(await adapter.exists(ROOT).catch(() => false))) {
+      history?.push({ event: "info", step: STEP, name: "project",
+        summary: { converted: 0, skipped_reason: "spice/projects not present" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    // Enumerate every markdown file under spice/projects/ so we can pick out the
+    // project-todo notes (frontmatter type: project-todo) + kanban task files
+    // (spice/projects/<slug>/tasks/<X>.md).
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const allFiles = await _walk(ROOT);
+    // Targets: project-todo notes (type: project-todo) + tasks/*.md kanban files.
+    const targets = [];
+    for (const fp of allFiles) {
+      const rel = fp.slice(ROOT.length + 1);              // "<slug>/..."
+      const parts = rel.split("/");
+      const isToDo = /\sTo-Do\.md$/.test(fp) || parts.length === 2;  // <slug>/<Name> To-Do.md
+      const isKanbanTask = parts.length >= 3 && parts[1] === "tasks";
+      if (isToDo || isKanbanTask) targets.push(fp);
+    }
+    if (!targets.length) {
+      history?.push({ event: "info", step: STEP, name: "project",
+        summary: { converted: 0, skipped_reason: "no project-todo / kanban task notes found" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    const now = new Date();
+    const nowIso = _localIsoNoMillis(now);
+    try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
+
+    let taskListing;
+    try { taskListing = await adapter.list("spice/tasks"); } catch (_e) { taskListing = { files: [] }; }
+    const existingNames = new Set((taskListing.files || [])
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.substring(f.lastIndexOf("/") + 1)));
+
+    let totalConverted = 0, notesTouched = 0;
+    for (const fp of targets) {
+      try {
+        const content = await adapter.read(fp);
+        // Only migrate genuine project-todo notes (type: project-todo). Kanban
+        // task files rarely carry OWNED_TASKS_MARKER; process them only if the
+        // marker is present.
+        const fm = _parseFrontmatterStrict(content) || {};
+        const isProjectTodo = fm.type === "project-todo";
+        const hasMarker = content.includes(MARKER);
+        if (!isProjectTodo && !hasMarker) continue;  // not a task surface we own
+        if (content.includes(SENTINEL)) continue;    // idempotent skip
+
+        // project name + slug from the project-todo frontmatter; fall back to path.
+        let projectName = fm.project != null
+          ? String(fm.project).replace(/^"(.*)"$/, "$1").replace(/^\[\[|\]\]$/g, "").trim()
+          : "";
+        let projectSlug = fm.project_slug != null
+          ? String(fm.project_slug).replace(/^"(.*)"$/, "$1").trim()
+          : "";
+        if (!projectSlug) {
+          const rel = fp.slice(ROOT.length + 1);
+          projectSlug = rel.split("/")[0] || "";
+        }
+        if (!projectName && projectSlug) projectName = projectSlug;
+
+        const { lines, openIdxs, parsedByIdx, uniqueParsed } =
+          _extractOpenLinesUnderMarker(content, MARKER);
+
+        if (!openIdxs.length) {
+          const stamped = content.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+          await _backupAndWrite(adapter, fp, content, stamped);
+          continue;
+        }
+
+        const { created, createdTitles } = await _createSurfaceTaskNotes(
+          adapter, uniqueParsed,
+          { source: "project", project: projectName, projectSlug, sourceNote: "", nowIso },
+          existingNames, history, git, STEP);
+        totalConverted += created;
+
+        const strippable = new Set();
+        for (const parsed of uniqueParsed) {
+          try {
+            if (createdTitles.includes(parsed.title)
+              || await _surfaceTaskNoteExists(adapter, parsed.title, "project", projectSlug)) {
+              strippable.add(parsed.title.toLowerCase().replace(/\s+/g, " ").trim());
+            }
+          } catch (_e) { /* leave the line raw on error */ }
+        }
+        const keptLines = [];
+        for (let i = 0; i < lines.length; i++) {
+          if (openIdxs.includes(i)) {
+            const parsed = parsedByIdx.get(i);
+            const norm = parsed.title.toLowerCase().replace(/\s+/g, " ").trim();
+            if (strippable.has(norm)) continue;
+          }
+          keptLines.push(lines[i]);
+        }
+        let rewritten = keptLines.join("\n").replace(/\n{3,}/g, "\n\n");
+        rewritten = rewritten.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+        await _backupAndWrite(adapter, fp, content, rewritten);
+        notesTouched += 1;
+      } catch (e) {
+        history?.push({ event: "warning", step: STEP, name: "project",
+          target: fp, reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "project",
+      summary: { scanned: targets.length, notes_touched: notesTouched, converted: totalConverted },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "project",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
 // _taskNoteChromeBody — the canonical CHROME body a task note gets: a
 // SpaceNavButtons nav block, the TaskNoteView card block, and the
 // `<!-- TASK_NOTES -->` marker that separates the (regenerable) chrome above
@@ -8486,6 +8954,12 @@ function _taskNoteChromeBody() {
   return "\n" +
     "```dataviewjs\n" +
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n" +
+    "```\n" +
+    "\n" +
+    "---\n" +
+    "\n" +
+    "```dataviewjs\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteToDoNav\" });\n" +
     "```\n" +
     "\n" +
     "```dataviewjs\n" +
@@ -8583,6 +9057,28 @@ async function applyTaskNoteHeal(tp, history, git) {
       return header + "\n" + chrome + tail;
     };
 
+    // UPGRADE old chrome (has the marker but the above-marker region is the
+    // legacy shape — no TaskNoteToDoNav / no `---`): rebuild the WHOLE region
+    // above (and including) the marker as frontmatter + the current chrome body,
+    // PRESERVING everything the user wrote BELOW the marker verbatim. Idempotent
+    // because the new chrome already carries TaskNoteToDoNav, so the caller's
+    // needsChromeUpgrade guard is false on the next pass.
+    const _upgradeChrome = (content) => {
+      const idx = content.indexOf(MARKER);
+      if (idx < 0) return content;                 // no marker → not our case
+      const belowRaw = content.slice(idx + MARKER.length);
+      // Keep the user's notes below the marker; drop only a single leading
+      // newline so the rebuilt chrome (which ends in "<!-- TASK_NOTES -->\n")
+      // joins cleanly. Preserve internal structure otherwise.
+      const below = belowRaw.replace(/^\r?\n/, "");
+      const m = /^(---\r?\n[\s\S]*?\r?\n---)\r?\n?/.exec(content);
+      const header = m ? m[1] : "";
+      const chrome = _taskNoteChromeBody();       // ends with "<!-- TASK_NOTES -->\n"
+      const tail = below ? below : "";
+      if (!header) return chrome + tail;
+      return header + "\n" + chrome + tail;
+    };
+
     for (const fp of topLevel) {
       try {
         const basename = fp.substring(fp.lastIndexOf("/") + 1);
@@ -8594,11 +9090,21 @@ async function applyTaskNoteHeal(tp, history, git) {
 
         const needsRename = OLD_NAME_RE.test(stemNoExt);
         const needsChrome = !before.includes(MARKER);
-        if (!needsRename && !needsChrome) continue;  // idempotent no-op
+        // Old-chrome upgrade: the note HAS the marker but its above-marker region
+        // predates TaskNoteToDoNav (the marker is present but the nav class isn't
+        // in the chrome above it). Only inspect the region ABOVE the marker so a
+        // user who happens to mention the class in their notes below doesn't
+        // suppress the upgrade.
+        const _aboveMarker = needsChrome ? "" : before.slice(0, before.indexOf(MARKER));
+        const needsChromeUpgrade = !needsChrome
+          && !/class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
+        if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
 
-        // Compute the healed CONTENT (inject chrome if bare) and the healed PATH
-        // (rename if old-pattern). The rename is a copy-to-new + remove-old.
-        let content = needsChrome ? _injectChrome(before) : before;
+        // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
+        // old chrome region (add TaskNoteToDoNav + `---`) preserving user notes;
+        // and the healed PATH (rename if old-pattern; copy-to-new + remove-old).
+        let content = needsChrome ? _injectChrome(before)
+          : (needsChromeUpgrade ? _upgradeChrome(before) : before);
 
         if (needsRename) {
           const desired = _sanitizeTaskTitleForFilename(rawTitle) + ".md";
@@ -8608,14 +9114,15 @@ async function applyTaskNoteHeal(tp, history, git) {
           const newPath = `${ROOT}/${finalName}`;
           // Snapshot the original before touching it.
           await _backup(fp, before);
-          // Write the (possibly chromed) content to the new path, remove the old.
+          // Write the (possibly chromed/upgraded) content to the new path, remove old.
           await adapter.write(newPath, content);
           await adapter.remove(fp);
           existingNames.add(finalName);
           renamed += 1;
-          if (needsChrome) chromed += 1;
+          if (needsChrome || needsChromeUpgrade) chromed += 1;
           history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
-            action: needsChrome ? "renamed+chromed" : "renamed", from: fp, to: newPath,
+            action: (needsChrome ? "renamed+chromed" : (needsChromeUpgrade ? "renamed+chrome-upgraded" : "renamed")),
+            from: fp, to: newPath,
             git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
             attempted_at: new Date().toISOString() });
         } else if (needsChrome) {
@@ -8625,6 +9132,15 @@ async function applyTaskNoteHeal(tp, history, git) {
           chromed += 1;
           history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
             action: "chromed", target: fp,
+            git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+            attempted_at: new Date().toISOString() });
+        } else if (needsChromeUpgrade) {
+          // Upgrade old chrome in place (preserve user notes below the marker).
+          await _backup(fp, before);
+          await adapter.write(fp, content);
+          chromed += 1;
+          history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
+            action: "chrome-upgraded", target: fp,
             git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
             attempted_at: new Date().toISOString() });
         }
@@ -16967,11 +17483,15 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // task-entity — backup-first daily→note-per-task migration (for
     // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
     module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;
+    module.exports.applyMeetingTasksToEntityMigration = applyMeetingTasksToEntityMigration;
+    module.exports.applyProjectTasksToEntityMigration = applyProjectTasksToEntityMigration;
     module.exports.applyTaskNoteHeal = applyTaskNoteHeal;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;
     module.exports._composeDailyTaskNote = _composeDailyTaskNote;
+    module.exports._composeEntityTaskFrontmatter = _composeEntityTaskFrontmatter;
+    module.exports._extractOpenLinesUnderMarker = _extractOpenLinesUnderMarker;
     module.exports._swapDailyToTaskTodayList = _swapDailyToTaskTodayList;
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;

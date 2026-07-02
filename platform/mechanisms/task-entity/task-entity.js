@@ -51,6 +51,7 @@ class TaskEntity {
     queryToday(tasks, todayStr) { return TaskEntity.queryToday(tasks, todayStr); }
     validatePayload(payload) { return TaskEntity.validatePayload(payload); }
     _toDateStr(v) { return TaskEntity._toDateStr(v); }
+    _linkText(v) { return TaskEntity._linkText(v); }
     _sanitizeTitle(title) { return TaskEntity._sanitizeTitle(title); }
     _uniqueName(baseFilename, existsFn) { return TaskEntity._uniqueName(baseFilename, existsFn); }
     _chromeBody() { return TaskEntity._chromeBody(); }
@@ -135,6 +136,49 @@ class TaskEntity {
     }
 
     /**
+     * Coerce a Dataview LINK-valued frontmatter field (source_note / project) into
+     * a plain, comparable BASENAME string. Just like an unquoted date becomes a
+     * Luxon DateTime, a `[[Wikilink]]` frontmatter value becomes a Dataview Link
+     * OBJECT (with `.path` / `.display` / `.subpath`), NOT a string — so comparing
+     * `page.source_note === meetingBasename` always fails and a meeting/project
+     * task-list filter never matches. This normalizes every shape to the note's
+     * basename (the last `/` segment of the path, trailing `.md` stripped):
+     *   - nullish                                    → ''
+     *   - Dataview Link ({path/display/subpath})     → basename of .path, else .display
+     *   - string "[[Bar]]" / "[[a/b/Baz.md|Baz]]"    → basename, pipe-label + path + .md tolerated
+     *   - anything else                              → String(v)
+     * Pure + null-tolerant; never throws.
+     */
+    static _linkText(v) {
+        if (v == null) return '';
+        // Basename of a path-ish string: last `/` segment, trailing `.md` stripped.
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        // Dataview Link object — has .path/.display/.subpath (not a string).
+        if (typeof v === 'object'
+            && ('path' in v || 'display' in v || 'subpath' in v)) {
+            if (v.path != null && String(v.path).trim() !== '') return baseOf(v.path);
+            if (v.display != null) return String(v.display).trim();
+            return '';
+        }
+        if (typeof v === 'string') {
+            let s = v.trim();
+            // Strip surrounding [[ ]] if present.
+            const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+            if (m) s = m[1].trim();
+            // Split off any `|label` alias → keep the target (before the pipe).
+            const pipe = s.indexOf('|');
+            if (pipe >= 0) s = s.slice(0, pipe).trim();
+            return baseOf(s);
+        }
+        return String(v);
+    }
+
+    /**
      * Human-readable per-task filename: the sanitized TITLE + ".md"
      * (e.g. "Go through mail.md") — NO timestamp, NO hash. Titles can collide,
      * so the CALLER dedupes the returned base against the vault via
@@ -161,6 +205,12 @@ class TaskEntity {
         return '\n' +
             '```dataviewjs\n' +
             'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            '```\n' +
+            '\n' +
+            '---\n' +
+            '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteToDoNav" });\n' +
             '```\n' +
             '\n' +
             '```dataviewjs\n' +
@@ -235,7 +285,12 @@ class TaskEntity {
             project: p.project != null ? p.project : null,
             project_slug: p.project_slug != null ? p.project_slug : null,
             source: p.source != null ? p.source : null,
-            source_note: p.source_note != null ? p.source_note : null,
+            // Dataview surfaces a `[[Meeting]]` frontmatter value as a Link OBJECT,
+            // not a string. Coerce to a comparable basename so the meeting task-list
+            // filter (source_note === meetingBasename) actually matches. project is
+            // left as-is (TaskNoteView strips its brackets); the reliable project
+            // filter uses project_slug (a plain string) above.
+            source_note: p.source_note != null ? TaskEntity._linkText(p.source_note) : null,
             created_at: p.created_at != null ? p.created_at : null,
             completed_at: blankToNull(p.completed_at),
             path: path,

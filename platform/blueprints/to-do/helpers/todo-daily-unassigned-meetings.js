@@ -16,24 +16,30 @@ class ToDoDailyUnassignedMeetings {
         const cur = dv.current();
         if (!cur || cur.type !== 'to-do') return;
 
-        let meetings;
+        // task-entity: surface OPEN task-notes that came from a meeting
+        // (source == 'meeting') but carry NO project (project_slug blank). Task
+        // creation now writes note-per-task files, so this reads spice/tasks/
+        // rather than raw meeting `file.tasks`. Rows render via the shared
+        // TaskTodayList.renderTaskRow (clickable → edit dialog, checkbox → done).
+        const TE = window.customJS && window.customJS.TaskEntity;
+        const TTL = window.customJS && window.customJS.TaskTodayList;
+        if (!TE || typeof TE.parseNote !== 'function' || !TTL || typeof TTL.renderTaskRow !== 'function') return;
+
+        let parsed;
         try {
-            meetings = dv.pages('"spice/meetings/notes"').where(m => {
-                if (!m) return false;
-                if (m.project == null) return true;
-                const v = String(m.project).trim();
-                return v.length === 0;
-            }).array();
+            const raw = dv.pages('"spice/tasks"').where(p =>
+                p && p.type === 'task' && p.status === 'open'
+                && p.file && p.file.path
+                && !p.file.path.includes('/_trash/')
+                && !p.file.path.includes('/_done/'));
+            parsed = raw.map(p => TE.parseNote(p)).array
+                ? raw.map(p => TE.parseNote(p)).array()
+                : Array.from(raw).map(p => TE.parseNote(p));
         } catch (e) { return; }
 
-        const tasks = [];
-        for (const meet of meetings) {
-            if (meet.file && meet.file.tasks) {
-                for (const t of meet.file.tasks) {
-                    if (!t.completed) tasks.push({ text: t.text, source: meet.file.path });
-                }
-            }
-        }
+        const tasks = parsed.filter(t =>
+            t && t.source === 'meeting'
+            && String(t.project_slug == null ? '' : t.project_slug).trim() === '');
         if (!tasks.length) return;
 
         if (window.customJS && window.customJS.SectionLabel) {
@@ -44,24 +50,28 @@ class ToDoDailyUnassignedMeetings {
             h.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin:10px 0 6px; font-weight:600;';
         }
 
-        for (const t of tasks) this._renderTaskRow(dv.container, t);
+        const TD = window.customJS && window.customJS.TaskDialog;
+        for (const t of tasks) {
+            try { TTL.renderTaskRow(dv.container, t, TD); } catch (_e) { /* one bad note */ }
+        }
     }
 
+    // Legacy raw-markdown row renderer + text cleaner. RETAINED (no longer on the
+    // render() path — rows go through TaskTodayList.renderTaskRow now) so the
+    // inline-markdown token/anchor/XSS helpers below stay exercised by the
+    // existing markdown-render regression tests without churn.
     _renderTaskRow(container, t) {
         const row = container.createEl('div');
         row.style.cssText = 'display:flex; align-items:baseline; gap:8px; padding:4px 0; cursor:pointer; line-height:1.45;';
         row.onclick = () => {
             if (window.app && window.app.workspace) window.app.workspace.openLinkText(t.source, '', false);
         };
-
         const box = row.createEl('span');
         box.textContent = '☐';
         box.style.cssText = 'flex-shrink:0; opacity:0.6; font-size:0.95em;';
-
         const txt = row.createEl('span');
         this._renderInlineMarkdown(txt, this._cleanTaskText(t.text));
         txt.style.cssText = 'flex:1; color:var(--text-normal); overflow-wrap:anywhere;';
-
         const src = row.createEl('span');
         const fname = t.source.split('/').pop().replace(/\.md$/, '');
         src.textContent = `‹${fname}›`;
