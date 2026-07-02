@@ -277,16 +277,18 @@ class TaskDialog {
         const overlay = document.body.createDiv({ cls: 'sauce-todo-create-overlay' });
         overlay.style.cssText = `
             position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-            display: flex; align-items: center; justify-content: center; z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999; padding: 16px;
         `;
         const modal = overlay.createDiv();
         modal.style.cssText = `
             background: var(--background-primary, #1c1c1c);
             color: var(--text-normal, #ddd);
             border: 1px solid var(--background-modifier-border, #444);
-            border-radius: 10px; padding: 18px 20px; box-sizing: border-box;
+            border-radius: var(--radius-m, 12px);
+            padding: 20px 22px; box-sizing: border-box;
             width: min(440px, 92vw); max-height: 80vh; overflow-y: auto; overflow-x: hidden;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
         `;
         const closeOverlay = () => {
             try { document.removeEventListener('keydown', escListener); } catch (_e) {}
@@ -296,14 +298,14 @@ class TaskDialog {
         const escListener = (ev) => { if (ev.key === 'Escape') closeOverlay(); };
         document.addEventListener('keydown', escListener);
 
-        const heading = modal.createEl('h3', { text: editPath ? 'Edit Task' : '+ New Task' });
-        heading.style.cssText = 'margin: 0 0 14px;';
+        const heading = modal.createEl('h3', { text: editPath ? 'Edit Task' : 'New Task' });
+        heading.style.cssText = 'margin: 0 0 4px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--text-normal, #ddd);';
 
         const host = modal.createDiv();
-        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
+        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
         const label = (text) => {
             const el = host.createEl('div', { text });
-            el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
+            el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; color:var(--text-muted, #999); margin-top:16px; margin-bottom:6px;';
             return el;
         };
 
@@ -332,15 +334,17 @@ class TaskDialog {
         // Priority chip row
         label('Priority');
         const chipRow = host.createDiv();
-        chipRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;';
+        chipRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+        const chipOff = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:transparent; color:var(--text-muted,#999); transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
+        const chipOn = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--interactive-accent,#6a6abf); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:var(--interactive-accent,#6a6abf); color:var(--text-on-accent,#fff); font-weight:600; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
+        const chips = [];
         for (const p of ['', 'low', 'medium', 'high', 'highest']) {
             const c = chipRow.createEl('div', { text: p || 'none' });
-            c.style.cssText = 'flex:1; min-width:0; box-sizing:border-box; text-align:center; padding:4px 6px; border:1px solid var(--background-modifier-border,#444); border-radius:4px; font-size:11px; cursor:pointer;';
-            if (state.priority === p) c.style.background = 'var(--interactive-accent, #6a6abf)';
+            c.style.cssText = state.priority === p ? chipOn : chipOff;
+            chips.push({ el: c, val: p });
             c.onclick = () => {
                 state.priority = p;
-                for (const cc of chipRow.children) cc.style.background = '';
-                c.style.background = 'var(--interactive-accent, #6a6abf)';
+                for (const cc of chips) cc.el.style.cssText = cc.val === p ? chipOn : chipOff;
             };
         }
 
@@ -394,17 +398,64 @@ class TaskDialog {
         }
 
         // ----- Footer -----
+        // A two-group flex row: item actions (Open / Done / Delete) grouped on the
+        // LEFT as quiet ghost buttons, then Cancel + Save (the accent anchor) on the
+        // RIGHT. `justify-content: space-between` pushes the groups apart; each group
+        // wraps as a unit on a narrow phone so nothing overflows at 360px.
         const footer = host.createDiv();
-        footer.style.cssText = 'margin-top:16px; padding-top:12px; border-top:1px solid var(--background-modifier-border,#333); display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;';
+        footer.style.cssText = 'margin-top:22px; padding-top:16px; border-top:1px solid var(--background-modifier-border,#333); display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;';
 
-        const btnCss = (accent) => accent
-            ? 'padding:6px 14px; border-radius:4px; border:1px solid var(--interactive-accent,#6a6abf); background:var(--interactive-accent,#6a6abf); color:white; cursor:pointer;'
-            : 'padding:6px 14px; border-radius:4px; border:1px solid var(--background-modifier-border,#444); background:var(--background-secondary,#2a2a2a); color:var(--text-normal,#ddd); cursor:pointer;';
+        const leftGroup = footer.createDiv();
+        leftGroup.style.cssText = 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;';
+        const rightGroup = footer.createDiv();
+        rightGroup.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto;';
 
-        // Open note + Done + Delete (edit mode only) sit on the LEFT.
+        // Icons: crisp inline Lucide SVGs at 16px, currentColor so they theme with
+        // the button's text (matches ToDoLeafActions' icon convention).
+        const svg = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+        const ICON = {
+            check: svg('<polyline points="20 6 9 17 4 12"/>'),
+            trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+            open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
+        };
+
+        // Consistent button geometry across the whole footer: same height, radius,
+        // font-size, icon+label gap. `variant` picks the color scheme.
+        //   ghost   → quiet secondary (transparent, muted text) — item actions + Cancel
+        //   accent  → primary anchor (accent bg, on-accent text) — Save
+        //   danger  → ghost by default, red text/border on hover — Delete
+        const BTN_BASE = 'display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:6px 12px; border-radius:var(--radius-s,6px); font-size:13px; line-height:1; cursor:pointer; white-space:nowrap; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
+        const mkBtn = (parent, opts) => {
+            const b = parent.createEl('button');
+            const variant = opts.variant || 'ghost';
+            const isAccent = variant === 'accent';
+            const isDanger = variant === 'danger';
+            const border = isAccent ? 'var(--interactive-accent,#6a6abf)' : 'var(--background-modifier-border,#444)';
+            const bg = isAccent ? 'var(--interactive-accent,#6a6abf)' : 'transparent';
+            const fg = isAccent ? 'var(--text-on-accent,#fff)' : 'var(--text-normal,#ddd)';
+            b.style.cssText = BTN_BASE + `border:1px solid ${border}; background:${bg}; color:${fg};` + (isAccent ? ' font-weight:600;' : '');
+            if (opts.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = opts.icon; }
+            if (opts.label) b.createSpan({ text: opts.label });
+            // Hover / active affordances (native feel).
+            b.onmouseenter = () => {
+                if (b.disabled) return;
+                if (isAccent) { b.style.background = 'var(--interactive-accent-hover,#7b7bd0)'; }
+                else if (isDanger) { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; b.style.color = 'var(--text-error,#e05561)'; b.style.borderColor = 'var(--text-error,#e05561)'; }
+                else { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; }
+            };
+            b.onmouseleave = () => {
+                if (isAccent) { b.style.background = b.disabled ? 'var(--interactive-accent,#6a6abf)' : 'var(--interactive-accent,#6a6abf)'; }
+                else if (isDanger) { b.style.background = 'transparent'; b.style.color = 'var(--text-normal,#ddd)'; b.style.borderColor = 'var(--background-modifier-border,#444)'; }
+                else { b.style.background = 'transparent'; }
+            };
+            b.onfocus = () => { b.style.outline = '2px solid var(--interactive-accent,#6a6abf)'; b.style.outlineOffset = '1px'; };
+            b.onblur = () => { b.style.outline = 'none'; };
+            return b;
+        };
+
+        // Open note + Done + Delete (edit mode only) sit on the LEFT as quiet actions.
         if (editPath) {
-            const openBtn = footer.createEl('button', { text: 'Open note' });
-            openBtn.style.cssText = btnCss(false);
+            const openBtn = mkBtn(leftGroup, { label: 'Open', icon: ICON.open, variant: 'ghost' });
             openBtn.onclick = async () => {
                 try {
                     if (app.workspace && typeof app.workspace.getLeaf === 'function' && editFile) {
@@ -415,34 +466,31 @@ class TaskDialog {
                     closeOverlay();
                 } catch (e) { try { new Notice('Could not open note: ' + (e && (e.message || e)), 6000); } catch (_e) {} }
             };
-            const doneBtn = footer.createEl('button', { text: '✓ Done' });
-            doneBtn.style.cssText = btnCss(false);
+            const doneBtn = mkBtn(leftGroup, { label: 'Done', icon: ICON.check, variant: 'ghost' });
             doneBtn.onclick = async () => {
                 try { await this._markDone(app, editFile); closeOverlay(); }
                 catch (e) { try { new Notice('Done failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
-            const delBtn = footer.createEl('button', { text: '🗑 Delete' });
-            delBtn.style.cssText = btnCss(false);
+            const delBtn = mkBtn(leftGroup, { label: 'Delete', icon: ICON.trash, variant: 'danger' });
             delBtn.onclick = async () => {
                 try { await this._markDeleted(app, editFile); closeOverlay(); }
                 catch (e) { try { new Notice('Delete failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
-            const spacer = footer.createDiv();
-            spacer.style.cssText = 'flex:1;';
         }
 
-        const cancelBtn = footer.createEl('button', { text: 'Cancel' });
-        cancelBtn.style.cssText = btnCss(false);
+        const cancelBtn = mkBtn(rightGroup, { label: 'Cancel', variant: 'ghost' });
         cancelBtn.onclick = () => closeOverlay();
 
-        const saveBtn = footer.createEl('button', { text: 'Save' });
+        const saveBtn = mkBtn(rightGroup, { label: 'Save', icon: ICON.check, variant: 'accent' });
         saveBtn.classList.add('mod-cta');
-        saveBtn.style.cssText = btnCss(true);
         const buildPayload = () => this._payloadFromState(state);
         const updateSubmit = () => {
             const TE = TaskDialog._taskEntity();
             const v = TE ? TE.validatePayload(buildPayload()) : { valid: !!(state.title && state.title.trim()) };
             saveBtn.disabled = !v.valid;
+            // Mute the accent when Save is unavailable so the disabled state reads.
+            saveBtn.style.opacity = v.valid ? '1' : '0.45';
+            saveBtn.style.cursor = v.valid ? 'pointer' : 'not-allowed';
         };
         saveBtn.onclick = async () => {
             try {
