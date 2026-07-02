@@ -36,7 +36,7 @@ class MonthSetupChecklist {
         root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
 
         const head = root.createEl("div");
-        head.textContent = st.ready ? `${month} — set up` : `${month} — set up`;
+        head.textContent = st.ready ? `${month} — ready` : `${month} — setup`;
         head.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.04em; font-weight: 600; text-transform: uppercase; margin-bottom: 8px;";
 
         // Row 1 — Budget created (Create Budget when absent).
