@@ -1,7 +1,7 @@
 ---
 type: teams-hub
 name: Teams
-created: {{DATE}}
+created_at: "2026-05-13T07:42:11-06:00"
 tags:
   - teams-hub
 ---
