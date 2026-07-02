@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "description": "Blueprint conformance rule registry. Single source of truth for the button/template/customjs conventions and the gates that enforce them. See Docs/agent-guides/blueprint-conformance.md. Statuses: 'enforcing' = gate wired into release:preflight and green; 'report-only' = gate in `npm run conformance:audit` (non-blocking), debt still being swept; 'planned' = rule defined, gate not yet built/extended.",
+  "rules": [
+    {
+      "id": "BTN-1",
+      "theme": "buttons",
+      "title": "no-hand-rolled-buttons",
+      "gate": "scripts/lint-buttons.js",
+      "severity": "error",
+      "status": "report-only",
+      "exemptions": [
+        { "target": "platform/mechanisms/accent-button/", "reason": "the sanctioned action-button renderer" },
+        { "target": "platform/mechanisms/nav-buttons/", "reason": "the sanctioned nav-button renderer" },
+        { "target": "platform/mechanisms/entity-create/", "reason": "the sanctioned create-button renderer" }
+      ],
+      "notes": "Nav/create buttons via manifest blocks; action buttons via AccentButton.render(). 53 hand-rolled sites; output-changing sweep lands as a dedicated PR."
+    },
+    {
+      "id": "BTN-2",
+      "theme": "buttons",
+      "title": "icons-via-mechanism",
+      "gate": "scripts/lint-buttons.js",
+      "severity": "error",
+      "status": "report-only",
+      "exemptions": [
+        { "target": "platform/mechanisms/icons/", "reason": "the glyph source itself" }
+      ],
+      "notes": "Emoji/raw-svg glyphs in view JS -> Icons.get('kebab-name'). 154 sites; .md prose emoji not flagged. Dedicated PR."
+    },
+    {
+      "id": "CHR-1",
+      "theme": "chrome",
+      "title": "note-chrome-adoption",
+      "gate": "scripts/lint-note-chrome.js",
+      "severity": "error",
+      "status": "planned",
+      "exemptions": [
+        { "target": "boards", "reason": "kanban-only blueprint; no chromed leaf notes" }
+      ],
+      "notes": "Mandatory adoption inverts lint-note-chrome.js's current opt-in (manifest breadcrumb block). 8 non-adopters. Per-blueprint note-chrome PR series."
+    },
+    {
+      "id": "CHR-2",
+      "theme": "chrome",
+      "title": "template-has-breadcrumb",
+      "gate": "scripts/lint-note-chrome.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "Enforced over ADOPTED blueprints today (lint-note-chrome.js rule 2). Widens automatically as blueprints adopt via CHR-1."
+    },
+    {
+      "id": "CHR-3",
+      "theme": "chrome",
+      "title": "open-mode-routed",
+      "gate": "scripts/lint-open-mode.js",
+      "severity": "error",
+      "status": "planned",
+      "exemptions": [],
+      "notes": "New-note open routed through open-helpers/forceLeafPreview. Gate not yet built; lands with the note-chrome PR series."
+    },
+    {
+      "id": "TPL-1",
+      "theme": "templates",
+      "title": "path-variables",
+      "gate": "scripts/lint-path-variables.js",
+      "severity": "error",
+      "status": "report-only",
+      "exemptions": [],
+      "notes": "No hardcoded ranch/{views,scripts,templates}; use {{views_path}} etc. 229 sites (fixtures/test excluded). Byte-identical for code invocations; per-file-class substitution verification needed for skills/commands/mechanisms. Dedicated sweep PR."
+    },
+    {
+      "id": "TPL-2",
+      "theme": "templates",
+      "title": "no-token-leak",
+      "gate": "scripts/lint-token-leak.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "Resolver-aware: a template {{TOKEN}} is a leak only if nothing resolves it (installer vars, now, or a scaffolder .replace). Green. Content/*.md half covered by platform/test/run-content-token-leaks.js."
+    },
+    {
+      "id": "TPL-3",
+      "theme": "templates",
+      "title": "no-content-h2",
+      "gate": "scripts/lint-note-chrome.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "## H2 -> SectionLabel. Enforced over ADOPTED blueprints (lint-note-chrome.js rule 1); kanban columns exempt. Widens with CHR-1 adoption."
+    },
+    {
+      "id": "TPL-4",
+      "theme": "templates",
+      "title": "render-nothing",
+      "gate": "scripts/lint-empty-state.js",
+      "severity": "error",
+      "status": "report-only",
+      "exemptions": [],
+      "notes": "Empty helper output renders NOTHING (project-blueprint-ui.md §3). 22 placeholder strings (finance-heavy). Output-changing; dedicated PR."
+    },
+    {
+      "id": "TPL-5",
+      "theme": "templates",
+      "title": "no-trailing-hr",
+      "gate": "scripts/lint-trailing-hr.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "No dangling final --- in a template body (internal dividers kept). Green (6 fixed)."
+    },
+    {
+      "id": "CJS-1",
+      "theme": "customjs",
+      "title": "loadable",
+      "gate": "platform/test/run-customjs-loadable.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "Bare-class-only, no trailing statements (landmine #31). Pre-existing gate."
+    },
+    {
+      "id": "CJS-2",
+      "theme": "customjs",
+      "title": "render-safe",
+      "gate": "scripts/lint-cold-load.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "Guarded dv.current()/customJS (cold-load TDZ). Pre-existing gate."
+    },
+    {
+      "id": "CJS-3",
+      "theme": "customjs",
+      "title": "no-dead-classes",
+      "gate": "scripts/lint-dead-classes.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "BREAKING (invocation of a class that exists nowhere) is fatal; green. UNDECLARED (manifest-completeness, 9) + DEAD (cleanup candidates, 17) print report-only."
+    },
+    {
+      "id": "CJS-4",
+      "theme": "customjs",
+      "title": "contract",
+      "gate": "platform/test/run-customjs-contract.js",
+      "severity": "error",
+      "status": "enforcing",
+      "exemptions": [],
+      "notes": "Non-static members for customJS.X.method dispatch. Pre-existing gate."
+    }
+  ]
+}
