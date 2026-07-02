@@ -48,4 +48,40 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint cowork axis customjs_behavioral: 9 uncovered
+  status: dismissed
+  note: all 9 uncovered methods are dogfood-only render() instance widgets; grep-based scoreCustomJSBehavioral (ClassName.method literal) cannot credit them. No pure helpers to test. Durable fix = rubric improvement, not metric-gaming.
+
+- id: cov-blueprint-cowork-widget-render
+  title: Add coverage for cowork widget_render (0/9)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint cowork axis widget_render: 9 uncovered
+  status: proposed
+
+- id: cov-blueprint-to-do-widget-render
+  title: Add coverage for to-do widget_render (0/7)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint to-do axis widget_render: 7 uncovered
+  status: proposed
+
+- id: cov-blueprint-to-do-customjs-behavioral
+  title: Add coverage for to-do customjs_behavioral (25/31)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint to-do axis customjs_behavioral: 6 uncovered
+  status: proposed
+
+- id: cov-blueprint-scratch-widget-render
+  title: Add coverage for scratch widget_render (0/5)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint scratch axis widget_render: 5 uncovered
+  status: proposed
+
+- id: cov-blueprint-trips-customjs-behavioral
+  title: Add coverage for trips customjs_behavioral (0/4)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint trips axis customjs_behavioral: 4 uncovered
   status: proposed
