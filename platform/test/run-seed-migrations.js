@@ -577,6 +577,18 @@ withTempVault((vault) => {
             /class:\s*"WikiHubActions"/.test(hubBody) && !/entity-create:wiki-(section|page)/.test(hubBody),
             `hasWHA=${/WikiHubActions/.test(hubBody)} hasLegacy=${/entity-create:wiki-/.test(hubBody)}`
         );
+
+        // WIKI-10: breadcrumbs guaranteed on EVERY wiki section + page (path_walk chrome
+        // via template + heal) — hub, both nested section hubs, and a deep page.
+        let awsBody = "", vpcBody = "";
+        try { awsBody = helpers.readNote(vault, "spice/wiki/infra/aws/AWS.md"); } catch (e) {}
+        try { vpcBody = helpers.readNote(vault, "spice/wiki/infra/aws/VPC Peering.md"); } catch (e) {}
+        const _hasBc = (b) => /class:\s*"Breadcrumb"/.test(b);
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-10 breadcrumb present on every wiki section + page (hub/infra/aws + deep page)",
+            _hasBc(hubBody) && _hasBc(infraBody) && _hasBc(awsBody) && _hasBc(vpcBody),
+            `hub=${_hasBc(hubBody)} infra=${_hasBc(infraBody)} aws=${_hasBc(awsBody)} vpc=${_hasBc(vpcBody)}`
+        );
     }
 
     // ===== Idempotency phase: snapshot, second install, compare =====
