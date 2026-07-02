@@ -31,22 +31,35 @@ ok('NL-3 tie on order → source then id (a1 before a2)', ordered[0].id === 'a1'
 ok('NL-4 carries _source tag', ordered[0]._source === 'alpha');
 ok('NL-5 empty/absent contributions → []', inst._orderedEntries({}).length === 0 && inst._orderedEntries({ contributions: {} }).length === 0);
 
-// ── _splitDaily: pull the daily quick-nav entry out of the menu list ──
+// ── _partitionEntries: fixed pinned quick-nav set (by _source order) + rest ──
 const inst2 = new SpaceNavButtons();
-// (a) identify by action.command_id === 'daily-notes'
-const byCmd = inst2._splitDaily([
-  { id: 'p', label: 'Projects', _source: 'project', action: { type: 'openLink', target: 'P.md' } },
-  { id: 'd', label: 'Daily', _source: 'daily', action: { type: 'invoke_command', command_id: 'daily-notes' } },
-  { id: 't', label: 'To Do', _source: 'to-do', action: { type: 'openLink', target: 'T.md' } },
+// Registry-ish ordered entries across many sources (order sort already applied).
+const all = [
+  { id: 'd',  label: 'Daily',    _source: 'daily',    action: { type: 'invoke_command', command_id: 'daily-notes' } },
+  { id: 'co', label: 'Cowork',   _source: 'cowork',   action: { type: 'openLink', target: 'C.md' } },
+  { id: 'pe', label: 'People',   _source: 'people',   action: { type: 'openLink', target: 'Pe.md' } },
+  { id: 't',  label: 'To Do',    _source: 'to-do',    action: { type: 'openLink', target: 'T.md' } },
+  { id: 'me', label: 'Meetings', _source: 'meetings', action: { type: 'openLink', target: 'M.md' } },
+  { id: 'sc', label: 'Scratch',  _source: 'scratch',  action: { type: 'openLink', target: 'S.md' } },
+  { id: 'w',  label: 'Wiki',     _source: 'wiki',     action: { type: 'openLink', target: 'W.md' } },
+  { id: 'pr', label: 'Projects', _source: 'project',  action: { type: 'openLink', target: 'P.md' } },
+];
+const part = inst2._partitionEntries(all);
+// pinned in the FIXED source order: daily, to-do, scratch, project, meetings.
+ok('NL-6 pins exactly the 5 fixed sources', part.pinned.length === 5);
+ok('NL-7 pinned are in fixed source order (daily,to-do,scratch,project,meetings)',
+  part.pinned.map(e => e._source).join(',') === 'daily,to-do,scratch,project,meetings');
+ok('NL-8 rest = everything else, original order preserved',
+  part.rest.map(e => e.id).join(',') === 'co,pe,w');
+// Absent pinned source simply drops its cell; extra entries per source → rest.
+const partial = inst2._partitionEntries([
+  { id: 'd',  label: 'Daily',   _source: 'daily',   action: {} },
+  { id: 'x',  label: 'X',       _source: 'other',   action: {} },
+  { id: 'd2', label: 'Daily 2', _source: 'daily',   action: {} }, // second daily → rest
 ]);
-ok('NL-6 pulls the daily entry out (command_id daily-notes)', byCmd.dailyEntry && byCmd.dailyEntry.id === 'd');
-ok('NL-7 menuEntries excludes the daily entry, keeps order', byCmd.menuEntries.length === 2 && byCmd.menuEntries[0].id === 'p' && byCmd.menuEntries[1].id === 't');
-// (b) no daily entry → dailyEntry null, menuEntries === all
-const none = inst2._splitDaily([{ id: 'p', label: 'Projects', _source: 'project', action: { type: 'openLink' } }]);
-ok('NL-8 no daily → dailyEntry null, all entries in menu', none.dailyEntry === null && none.menuEntries.length === 1);
-// (c) fallback identify by _source === 'daily' when command_id absent
-const bySource = inst2._splitDaily([{ id: 'd2', label: 'Daily', _source: 'daily', action: {} }]);
-ok('NL-9 identifies daily by _source when command_id absent', bySource.dailyEntry && bySource.dailyEntry.id === 'd2' && bySource.menuEntries.length === 0);
+ok('NL-9 missing pins drop out; only first-per-source pins; extras → rest',
+  partial.pinned.length === 1 && partial.pinned[0].id === 'd'
+  && partial.rest.map(e => e.id).join(',') === 'x,d2');
 
 console.log(`\n  ${pass} pass · ${fail} fail`);
 process.exit(fail ? 1 : 0);
