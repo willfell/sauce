@@ -13304,20 +13304,27 @@ async function caseV01101SourceTemplatesUseGuard() {
   // block (the SectionHub view renders the create buttons inline), so it's
   // dropped from this guard-form list — there's no EntityCreate dispatch left
   // to assert on.
+  // WS1 chrome overhaul: Projects.md no longer dispatches EntityCreate directly
+  // from the marker block. The `// entity-create:project` block now guard-
+  // dispatches ProjectsHubCards.renderNewProjectButton, which renders the
+  // EntityCreate button (helper-internal, cold-load-safe) inside a full-width
+  // centered row bracketed by SectionLabel dividers. The intent — guard-routed,
+  // no raw customJS call in the content file — is unchanged; only the dispatch
+  // target moved. Assert per-template on the correct dispatched class.
   const TEMPLATES = [
-    "platform/blueprints/project/content/Projects.md",
-    "platform/blueprints/project/templates/Docs Hub.md",
-    "platform/blueprints/people/content/People.md",
-    "platform/blueprints/meetings/templates/Meeting Hub.md",
+    { rel: "platform/blueprints/project/content/Projects.md", dispatch: "ProjectsHubCards" },
+    { rel: "platform/blueprints/project/templates/Docs Hub.md", dispatch: "EntityCreate" },
+    { rel: "platform/blueprints/people/content/People.md", dispatch: "EntityCreate" },
+    { rel: "platform/blueprints/meetings/templates/Meeting Hub.md", dispatch: "EntityCreate" },
   ];
-  for (const rel of TEMPLATES) {
+  for (const { rel, dispatch } of TEMPLATES) {
     const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");
     assertTrue(`V01101-TPL-GUARD-${rel}: no direct customJS.EntityCreate.render call`,
       !/await\s+customJS\.EntityCreate\.render\(dv\s*,/.test(src),
       `${rel} still emits direct EntityCreate call`);
-    assertTrue(`V01101-TPL-GUARD-${rel}: uses customjs-guard EntityCreate dispatch`,
-      /customjs-guard[\s\S]{0,200}EntityCreate/.test(src),
-      `${rel} missing customjs-guard EntityCreate dispatch`);
+    assertTrue(`V01101-TPL-GUARD-${rel}: uses customjs-guard ${dispatch} dispatch`,
+      new RegExp(`customjs-guard[\\s\\S]{0,200}${dispatch}`).test(src),
+      `${rel} missing customjs-guard ${dispatch} dispatch`);
   }
 }
 

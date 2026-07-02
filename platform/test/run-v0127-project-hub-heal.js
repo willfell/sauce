@@ -637,10 +637,14 @@ async function run() {
     const phc = fs.readFileSync(path.join(bpDir, "helpers", "projects-hub-cards.js"), "utf8");
     const ds = fs.readFileSync(path.join(__dirname, "..", "mechanisms", "doc-search", "doc-search.js"), "utf8");
     const tpl = fs.readFileSync(path.join(bpDir, "content", "Projects.md"), "utf8");
-    ok("PHUB-L1 group-by defaults to none", /this\._groupBy\s*\|\|\s*"none"/.test(phc) && !/this\._groupBy\s*\|\|\s*"status"/.test(phc),
-      "projects hub group-by must default to none, not status");
-    ok("PHUB-L2 group headers use SectionLabel not <h3>", /SectionLabel\.render/.test(phc) && !/createEl\("h3"/.test(phc),
-      "group headers must render via SectionLabel, not a raw <h3>");
+    // WS1 chrome overhaul: the group-by selector + status/team/product chip bars
+    // + recently-active strip were REMOVED. The hub is sorted, not grouped —
+    // default sort is last-edited (mtime), toggled to alpha, persisted under
+    // localStorage. PHUB-L1/L2 rewritten to lock the removal + the new sort.
+    ok("PHUB-L1 group-by + recently-active + chip bars removed", !/_groupBy/.test(phc) && !/_renderGroupSelector/.test(phc) && !/_renderRecentStrip/.test(phc) && !/_renderChips/.test(phc),
+      "projects hub must no longer carry group-by / recently-active / status-chip code paths");
+    ok("PHUB-L2 no raw <h3> chrome + sort persisted to localStorage", !/createEl\("h3"/.test(phc) && /sauce\.projects-hub\.sort/.test(phc) && /_sortProjects/.test(phc),
+      "hub must persist the sort mode (sauce.projects-hub.sort) and expose the pure _sortProjects, with no raw <h3> headers");
     ok("PHUB-L3 passes hideTags + persist:false to DocSearch", /hideTags:\s*true/.test(phc) && /persist:\s*false/.test(phc),
       "projects hub must pass hideTags:true + persist:false to DocSearch");
     ok("PHUB-L4 doc-search honors hideTags", /hideTags\s*=\s*opts\.hideTags\s*===\s*true/.test(ds) && /hideTags\s*\?\s*\{\}\s*:/.test(ds),
