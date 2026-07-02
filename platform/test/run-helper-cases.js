@@ -10985,13 +10985,17 @@ async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
   // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
   // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
   // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
-  // is invoked; section order is now Status → Meetings → Workstreams.
+  // is invoked.
+  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was REMOVED from
+  // the hub template — workstream management now lives exclusively on the Map
+  // note — so the hub no longer invokes it and the old Meetings→Workstreams
+  // ordering assertion is retired.
   assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
     /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
   const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
-  const idxWorkstreams = body.indexOf('class: "ProjectWorkstreamManager"');
-  assertTrue("HC-V01020-PROJ-TPL-2-ORDER: Meetings BEFORE Workstreams (v0.109.0 ordering)",
-    idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Meetings panel present on hub", idxMeetings >= 0);
+  assertTrue("HC-V01020-PROJ-TPL-2-NOWSM: ProjectWorkstreamManager NOT on hub (moved to Map)",
+    body.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
 
 async function caseV01020ProjTpl3DocNoteRuleGlobNested() {
@@ -14610,6 +14614,26 @@ async function caseV01090TplMapHasBreadcrumb() {
   const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Map.md"), "utf8");
   assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes Breadcrumb before SpaceNavButtons",
     /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+  // Chrome overhaul WS-Workstreams: workstream MANAGEMENT (Add/Remove) was
+  // consolidated onto the Map note. The Map now invokes ProjectWorkstreamManager
+  // (management UI) ABOVE ProjectWorkstreams (grouped view). Both read the same
+  // note's workstreams[] when rendered on the Map (dv.current() === the Map),
+  // so adding a workstream then reloading surfaces it in the grouped view.
+  const idxNav  = t.indexOf('class: "ProjectNavButtons"');
+  const idxMgr  = t.indexOf('class: "ProjectWorkstreamManager"');
+  const idxView = t.indexOf('class: "ProjectWorkstreams"');
+  assertTrue("HC-V01090-TPL-MAP-WSM: Map invokes ProjectWorkstreamManager", idxMgr >= 0);
+  assertTrue("HC-V01090-TPL-MAP-WSV: Map invokes ProjectWorkstreams", idxView >= 0);
+  assertTrue("HC-V01090-TPL-MAP-ORDER: NavButtons < WorkstreamManager < ProjectWorkstreams",
+    idxNav >= 0 && idxNav < idxMgr && idxMgr < idxView);
+  // Chrome grammar: helpers own dividers now — no literal `---` chrome divider
+  // between the nav row and the workstream section (the manager's SectionLabel
+  // emits its own leading hairline). Check the BODY only (frontmatter fences
+  // are `---` and are excluded).
+  const fmMatch = t.match(/^---\n[\s\S]*?\n---\n/);
+  const mapBody = fmMatch ? t.slice(fmMatch[0].length) : t;
+  assertTrue("HC-V01090-TPL-MAP-NODASH: no literal `---` chrome divider in Map body",
+    !/^---$/m.test(mapBody));
 }
 
 async function caseV01090TplTaskHasBreadcrumb() {
@@ -14654,13 +14678,16 @@ async function caseV01090TplNoLegacyPanels() {
 }
 
 async function caseV01090TplSectionOrder() {
-  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings → Workstreams ---");
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings (Workstreams moved to Map) ---");
   const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
   const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
   const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
-  const idxWorkstreams = tpl.indexOf('class: "ProjectWorkstreamManager"');
   assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
-  assertTrue("HC-V01090-TPL-SO: Meetings BEFORE Workstreams", idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was removed from
+  // the hub template (workstream management now lives on the Map note), so the
+  // hub no longer invokes it. The old Meetings→Workstreams ordering is retired.
+  assertTrue("HC-V01090-TPL-SO: ProjectWorkstreamManager NOT on hub (moved to Map)",
+    tpl.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
 
 // S5 — ProjectMeetingsPanel rewrite + SectionLabel adoption everywhere.

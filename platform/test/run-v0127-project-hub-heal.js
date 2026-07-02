@@ -533,9 +533,13 @@ async function run() {
 
     // T1..T4 — the shipping templates must NOT keep a blank between the
     // ProjectNavButtons fence and the `---` below it.
+    // Chrome overhaul WS-Workstreams: `Project Map.md` DROPPED its literal `---`
+    // chrome divider (helpers own dividers now — the workstream manager's
+    // SectionLabel emits its own leading hairline), so it is no longer in this
+    // "separator hugs the button row" list.
     const fs = require("fs");
     const tplDir = path.join(__dirname, "..", "blueprints", "project", "templates");
-    for (const tpl of ["Kanban Card.md", "Doc Note.md", "Project Map.md", "Section Hub.md"]) {
+    for (const tpl of ["Kanban Card.md", "Doc Note.md", "Section Hub.md"]) {
       let lintOk = false;
       try {
         const lines = fs.readFileSync(path.join(tplDir, tpl), "utf8").split("\n");
@@ -560,7 +564,10 @@ async function run() {
     // T5..T8 — the installer-materialized ranch copies must ALSO hug the
     // separator (blueprint↔ranch parity for the fixed region).
     const ranchDir = path.join(__dirname, "..", "..", "ranch", "templates");
-    for (const tpl of ["Template, Kanban Card.md", "Template, Doc Note.md", "Template, Project Map.md", "Template, Section Hub.md"]) {
+    // `Template, Project Map.md` dropped its literal `---` chrome divider in the
+    // WS-Workstreams consolidation (helpers own dividers), so it is excluded here
+    // in parity with the blueprint list above.
+    for (const tpl of ["Template, Kanban Card.md", "Template, Doc Note.md", "Template, Section Hub.md"]) {
       let lintOk = false;
       try {
         const lines = fs.readFileSync(path.join(ranchDir, tpl), "utf8").split("\n");
