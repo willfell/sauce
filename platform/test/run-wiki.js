@@ -311,9 +311,10 @@ const pages = [
   {
     const b = runLeaf('spice/wiki/testing/what.md', hubs, true);
     const labels = b.map(x => x.label);
-    ok('W9a wiki-page nav row: Wiki + Up:section + Move',
-       b.length === 3 && labels.includes('Wiki') && labels.some(l => l.startsWith('Up: ')) && labels.includes('Move'));
-    ok('W9b Up button resolves the real section-hub title ("Up: testing")', labels.includes('Up: testing'));
+    ok('W9a wiki-page nav row: Wiki + <section> + Move',
+       b.length === 3 && labels.includes('Wiki') && labels.includes('testing') && labels.includes('Move'));
+    ok('W9b section nav button shows the real section-hub title ("testing", no "Up:" prefix)',
+       labels.includes('testing') && !labels.some(l => l.startsWith('Up:')));
   }
   // W9c — render must NOT throw when WikiMove is cold/absent (lazy move options).
   {
@@ -417,6 +418,31 @@ const pages = [
   ok('W13d divider margins tightened to 2px (no extra line gaps)',
      /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(hubSrc) &&
      /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(leafSrc));
+}
+
+// ---------------------------------------------------------------------------
+// W14 — closing polish: no "Up:" prefix, 2-col card grid (stacks on mobile),
+// leaf owns top+bottom dividers, page template has no trailing "---".
+// ---------------------------------------------------------------------------
+{
+  const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
+  const hubSrc  = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js'), 'utf8');
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const installSrc = fs.readFileSync(path.join(ROOT, 'platform', 'install.js'), 'utf8');
+  const pageTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'templates', 'Wiki Page.md'), 'utf8');
+
+  ok('W14a "Up:" prefix removed from the up/section nav button (both helpers)',
+     !/"Up: "/.test(leafSrc) && !/"Up: "/.test(hubSrc));
+  ok('W14b WikiTree cards use a 2-col grid (stacked + columns:2, no row layout)',
+     /layout: "stacked"/.test(treeSrc) && /columns: 2/.test(treeSrc) && !/layout: "row"/.test(treeSrc));
+  ok('W14c WikiLeafActions renders its own top AND bottom divider (2 hrs)',
+     (leafSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
+  ok('W14d page template no longer carries a trailing "---"',
+     !/\n-{3,}\s*$/.test(pageTpl.trimEnd() + "\n") && !/WikiLeafActions[\s\S]*\n---/.test(pageTpl));
+  ok('W14e heal strips the legacy template "---" after WikiLeafActions on existing pages',
+     /class:\\s\*"WikiLeafActions"\[\\s\\S\]\*\?\\n```\\n\)\\s\*\\n\?-\{3,\}/.test(installSrc) ||
+     /WikiLeafActions"\[\\s\\S\]/.test(installSrc) ||
+     /type === "wiki-page"[\s\S]{0,200}-\{3,\}/.test(installSrc));
 }
 
 // ---------------------------------------------------------------------------
