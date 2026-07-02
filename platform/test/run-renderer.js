@@ -132,11 +132,18 @@ function makeEl(tag, opts) {
     el.children.push(c);
     return c;
   };
+  // Overlay code (SpaceNavButtons._openLauncher) builds nodes via
+  // document.createElement + appendChild and identifies them via .className.
+  el.appendChild = function (child) {
+    child.parent = el;
+    el.children.push(child);
+    return child;
+  };
   el.querySelector = function (sel) {
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     const walk = (n) => {
-      if (n.cls === cls) return n;
+      if (n.cls === cls || n.className === cls) return n;
       for (const c of n.children) {
         const found = walk(c);
         if (found) return found;
@@ -149,18 +156,32 @@ function makeEl(tag, opts) {
     if (el.parent) el.parent.children = el.parent.children.filter((c) => c !== el);
   };
   // Walk ancestors for the nearest element matching a ".class" selector.
-  // Used by SpaceNavButtons._renderAccordion (pill.closest(".vault-nav")).
   el.closest = function (sel) {
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     let n = el;
     while (n) {
-      if (n.cls === cls) return n;
+      if (n.cls === cls || n.className === cls) return n;
       n = n.parent;
     }
     return null;
   };
   return el;
+}
+
+// Global document stub — the v2.10.0 launcher overlay is appended to
+// document.body (bottom sheet / dropdown) rather than the note container.
+// app.isMobile is false in makeApp(), so the overlay takes the desktop path
+// (pill.getBoundingClientRect is guarded → falls back when absent).
+if (!global.document) {
+  const _body = makeEl('body');
+  global.document = {
+    body: _body,
+    createElement: (t) => makeEl(t),
+    addEventListener: function () {},
+    removeEventListener: function () {},
+    querySelector: (sel) => _body.querySelector(sel),
+  };
 }
 
 function makeDv() {
@@ -386,17 +407,16 @@ function findButtonByLabel(root, label) {
   }
   return null;
 }
-// nav-buttons@2.9.0: entry buttons are no longer rendered directly — they live
-// behind the collapsed "Go to…" launcher pill. In this headless harness the
-// Obsidian Menu constructor is unobtainable, so _openLauncher falls back to the
-// inline accordion. Find the pill, open it, then return the entry button by
-// label so the existing click→_dispatchAction assertions keep working.
+// nav-buttons@2.10.0: entry buttons live behind the collapsed "Go to…" pill,
+// which on click builds a launcher overlay appended to document.body (bottom
+// sheet / dropdown). Clear any prior overlay, open a fresh one, then return the
+// entry button by label so the existing click→_dispatchAction assertions hold.
 function openLauncherFindByLabel(root, label) {
+  if (global.document && global.document.body) global.document.body.children = [];
   const pill = findButtonByLabel(root, 'Go to…');
   if (!pill || typeof pill.onclick !== 'function') return null;
-  // Synthetic click event: no showAtMouseEvent path (no Menu), so evt is unused.
-  pill.onclick({});
-  return findButtonByLabel(root, label);
+  pill.onclick({ stopPropagation() {} });
+  return findButtonByLabel(global.document.body, label);
 }
 function collectButtons(root, out) {
   out = out || [];
@@ -919,10 +939,11 @@ async function testBarebonesOneButton() {
     console.log('  FAIL — Go to… launcher pill not rendered');
     return false;
   }
-  // Open the launcher (accordion fallback in this headless env) and enumerate entries.
-  pill.onclick({});
-  const accordion = findClass(dv.container, 'vault-nav-accordion');
-  const entries = accordion ? collectButtons(accordion) : [];
+  // Open the launcher (overlay appended to document.body) and enumerate entries.
+  if (global.document && global.document.body) global.document.body.children = [];
+  pill.onclick({ stopPropagation() {} });
+  const panel = global.document.body.querySelector('.vault-nav-panel');
+  const entries = panel ? collectButtons(panel) : [];
   console.log(`  entries revealed: ${entries.length}`);
   for (const b of entries) {
     const m = b.innerHTML.match(/<span(?:\s[^>]*)?>([^<]+)<\/span>/);
