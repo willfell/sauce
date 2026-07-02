@@ -43,7 +43,7 @@ class ToDoDailyUnassignedMeetings {
         if (!tasks.length) return;
 
         if (window.customJS && window.customJS.SectionLabel) {
-            window.customJS.SectionLabel.render(dv, { text: 'Meeting Tasks (unassigned)' });
+            window.customJS.SectionLabel.render(dv, { text: 'Meeting Tasks' });
         } else {
             const h = dv.container.createEl('div');
             h.textContent = 'MEETING TASKS (UNASSIGNED)';
