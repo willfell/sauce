@@ -23,22 +23,41 @@ class WikiLeafActions {
         const upIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="9 14 12 11 15 14"/></svg>`;
         const moveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>`;
 
-        const row = dv.container.createEl("div", { cls: "wiki-leaf-actions" });
-        row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+        // Dual-fire guard: replace (not append) the row on Dataview re-render.
+        const existing = dv.container.querySelector(".wiki-leaf-actions");
+        if (existing) existing.remove();
+
+        const wrap = dv.container.createEl("div", { cls: "wiki-leaf-actions" });
+        // Divider between the global nav-button row (above) and the wiki buttons.
+        const hr = wrap.createEl("hr");
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 10px 0 8px 0;";
+        const row = wrap.createEl("div");
+        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto 4px auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         const open = (target) => { if (target) app.workspace.openLinkText(target, ""); };
 
         // Wiki home (docs).
-        customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") });
+        this._mobilize(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") }));
 
         // Up to the section this page lives in (skip when the page sits at the wiki root).
         if (folder && folder !== root) {
             const hub = this._resolveSectionHub(dv, folder);
-            customJS.AccentButton.render(row, { label: "Up: " + hub.label, icon: upIcon, flex: true, onClick: () => open(hub.path) });
+            this._mobilize(customJS.AccentButton.render(row, { label: "Up: " + hub.label, icon: upIcon, flex: true, onClick: () => open(hub.path) }));
         }
 
         // Move (dialog + options computed on click — render stays dependency-free).
-        customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => this._openMoveDialog(dv, filePath) });
+        this._mobilize(customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => this._openMoveDialog(dv, filePath) }));
+    }
+
+    // Mobile-legible sizing (mirrors WikiHubActions._mobilize): bigger tap target +
+    // readable label; each button takes ~half the row so a phone wraps them 2-up.
+    _mobilize(btn) {
+        if (!btn || !btn.style) return btn;
+        btn.style.flex = "1 1 calc(50% - 6px)";
+        btn.style.minWidth = "128px";
+        btn.style.fontSize = "0.92em";
+        btn.style.padding = "9px 14px";
+        return btn;
     }
 
     // Resolve the wiki-section hub note that lives directly in `folder` (for the Up
