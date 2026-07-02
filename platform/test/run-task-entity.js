@@ -98,6 +98,9 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(fm.created_at === '2026-07-01T10:00:00-06:00', 'created_at from payload.now');
   assert(fm.due === '', 'absent due → empty string');
   assert(fm.completed_at === '', 'absent completed_at → empty string');
+  // FIX 5 — links is always present as an array (empty when none provided).
+  assert(Array.isArray(fm.links), 'links is an array');
+  assert(fm.links.length === 0, 'absent links → empty array');
   assert(out.path === 'spice/tasks/Call X.md', 'path is readable "<title>.md": ' + out.path);
   // Body is now the CHROME body (SpaceNavButtons + TaskNoteView + marker), not empty.
   assert(out.body.includes('<!-- TASK_NOTES -->'), 'body has the TASK_NOTES marker');
@@ -110,6 +113,37 @@ ok('TE-3 composeNote minimal payload → blank scheduled + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
   assert(out.frontmatter.scheduled === '', 'absent scheduled → empty string');
   assert(TaskEntity.validatePayload({ title: 'x' }).valid === true, 'minimal payload valid');
+});
+
+// 3a. composeNote — provided links[] flow through to the frontmatter (FIX 5).
+ok('TE-3a composeNote carries a provided links[] onto the frontmatter', () => {
+  const out = TaskEntity.composeNote({ title: 'x', links: ['[[Retro Notes]]', '[Scalr run](https://scalr.io/r/1)'] });
+  assert(Array.isArray(out.frontmatter.links), 'links is an array');
+  assert(out.frontmatter.links.length === 2, 'two links carried: ' + out.frontmatter.links.length);
+  assert(out.frontmatter.links[0] === '[[Retro Notes]]', 'note link preserved');
+  assert(out.frontmatter.links[1] === '[Scalr run](https://scalr.io/r/1)', 'web link preserved');
+  // Non-array / nullish links → normalized to [].
+  assert(Array.isArray(TaskEntity.composeNote({ title: 'x', links: null }).frontmatter.links), 'null links → []');
+  assert(TaskEntity.composeNote({ title: 'x', links: 'nope' }).frontmatter.links.length === 0, 'string links → []');
+  // Blank/nullish entries are dropped; strings are trimmed.
+  const cleaned = TaskEntity.composeNote({ title: 'x', links: ['  [[A]]  ', '', null, '[b](u)'] }).frontmatter.links;
+  assert(cleaned.length === 2 && cleaned[0] === '[[A]]' && cleaned[1] === '[b](u)', 'trims + drops blanks: ' + JSON.stringify(cleaned));
+});
+
+// 3b. renderNote serializes links[] as a YAML flow array that round-trips (FIX 5).
+ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
+  const out = TaskEntity.composeNote({ title: 'x', links: ['[[Retro Notes]]', '[Scalr run](https://scalr.io/r/1)'] });
+  const text = TaskDialog.renderNote(out.frontmatter, out.body);
+  // The links line is a bracketed flow array with quoted, escaped entries.
+  const m = /\nlinks: (\[.*\])\n/.exec(text);
+  assert(m, 'links flow-array line present: ' + JSON.stringify(text.split('\n').filter((l) => l.indexOf('links') === 0)));
+  const parsed = JSON.parse(m[1]);
+  assert(Array.isArray(parsed) && parsed.length === 2, 'round-trips to a 2-element array: ' + m[1]);
+  assert(parsed[0] === '[[Retro Notes]]', 'note link round-trips: ' + parsed[0]);
+  assert(parsed[1] === '[Scalr run](https://scalr.io/r/1)', 'web link round-trips: ' + parsed[1]);
+  // Empty links → an empty flow array `[]` (not omitted, not a bare key).
+  const empty = TaskDialog.renderNote(TaskEntity.composeNote({ title: 'x' }).frontmatter, '');
+  assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
@@ -266,6 +300,55 @@ ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
   assert(TaskDialog._insertAt('', 'X', null, null) === 'X', 'empty text append → just insertion (no leading space)');
 });
 
+// ---------- TaskDialog link-chip pure helpers (FIX 5) ----------
+//
+// The dialog's ＋Link note / ＋Web link buttons now PUSH a markdown link STRING
+// onto state.links (rendered as removable chips), instead of splicing into the
+// Notes textarea. The add/remove logic is factored into two PURE statics so the
+// browser chip UI is a thin shell. Called through an INSTANCE so a regression to
+// instance-less statics fails loudly.
+
+// TD-12. _addLink appends a trimmed, non-empty, DEDUPED entry (returns a new array).
+ok('TD-12 _addLink appends a trimmed non-empty deduped entry', () => {
+  assert(deepEq(TaskDialog._addLink([], '[[A]]'), ['[[A]]']), 'first add: ' + JSON.stringify(TaskDialog._addLink([], '[[A]]')));
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '  [b](u)  '), ['[[A]]', '[b](u)']), 'trims + appends');
+  // Duplicate entry is a no-op (kept unique).
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '[[A]]'), ['[[A]]']), 'dup ignored');
+  // Empty / nullish entry is a no-op.
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], ''), ['[[A]]']), 'empty ignored');
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], null), ['[[A]]']), 'null ignored');
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '   '), ['[[A]]']), 'whitespace ignored');
+  // Non-array base → treated as [].
+  assert(deepEq(TaskDialog._addLink(null, '[[A]]'), ['[[A]]']), 'null base → [entry]');
+  // Purity — the input array is not mutated.
+  const base = ['[[A]]'];
+  TaskDialog._addLink(base, '[b](u)');
+  assert(base.length === 1, 'input array not mutated');
+});
+
+// TD-13. _removeLink drops the entry at index i (returns a new array; oob → clone).
+ok('TD-13 _removeLink drops index i (out-of-range → unchanged clone)', () => {
+  assert(deepEq(TaskDialog._removeLink(['a', 'b', 'c'], 1), ['a', 'c']), 'drops middle');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], 0), ['b']), 'drops first');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], 5), ['a', 'b']), 'oob → unchanged');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], -1), ['a', 'b']), 'negative → unchanged');
+  assert(deepEq(TaskDialog._removeLink(null, 0), []), 'null base → []');
+  // Purity — input not mutated.
+  const base = ['a', 'b'];
+  TaskDialog._removeLink(base, 0);
+  assert(base.length === 2, 'input array not mutated');
+});
+
+// TD-14. _payloadFromState carries state.links onto the payload (FIX 5).
+ok('TD-14 _payloadFromState includes state.links', () => {
+  const p = TaskDialog._payloadFromState({ title: 't', links: ['[[A]]', '[b](u)'] });
+  assert(Array.isArray(p.links) && p.links.length === 2, 'links on payload: ' + JSON.stringify(p.links));
+  assert(p.links[0] === '[[A]]' && p.links[1] === '[b](u)', 'link entries preserved');
+  // Missing state.links → an empty array on the payload (never undefined).
+  const p2 = TaskDialog._payloadFromState({ title: 't' });
+  assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
@@ -365,6 +448,29 @@ ok('TNV-6 _priorityMeta returns capitalized label + color (unset → null)', () 
   // Unknown priority is tolerated (capitalized passthrough, non-empty color).
   const weird = TaskNoteView._priorityMeta('urgent');
   assert(weird && weird.label === 'Urgent', 'unknown → capitalized: ' + JSON.stringify(weird));
+});
+
+// TNV-7. _linkEntries returns renderable markdown strings for the LINKS section
+// (FIX 5). Coerces each frontmatter entry to a markdown string: a string as-is,
+// a Dataview Link object → `[[basename]]`. Drops blanks; null/empty task → [].
+ok('TNV-7 _linkEntries coerces links[] to renderable markdown strings', () => {
+  // Plain string entries (note link + web link) pass through, trimmed.
+  const rows = TaskNoteView._linkEntries({ links: ['  [[Retro Notes]]  ', '[Scalr run](https://scalr.io/r/1)'] });
+  assert(rows.length === 2, 'two entries: ' + JSON.stringify(rows));
+  assert(rows[0] === '[[Retro Notes]]', 'note link trimmed passthrough: ' + rows[0]);
+  assert(rows[1] === '[Scalr run](https://scalr.io/r/1)', 'web link passthrough');
+  // A Dataview Link object → `[[basename]]`.
+  const objRows = TaskNoteView._linkEntries({ links: [{ path: 'a/b/Retro Notes.md', display: 'Retro Notes' }] });
+  assert(objRows.length === 1 && objRows[0] === '[[Retro Notes]]', 'Link object → [[basename]]: ' + JSON.stringify(objRows));
+  // Blank / nullish entries are dropped.
+  const mixed = TaskNoteView._linkEntries({ links: ['[[A]]', '', null, '   ', '[b](u)'] });
+  assert(mixed.length === 2 && mixed[0] === '[[A]]' && mixed[1] === '[b](u)', 'drops blanks: ' + JSON.stringify(mixed));
+  // Null / empty / non-array links → [].
+  assert(TaskNoteView._linkEntries(null).length === 0, 'null task → []');
+  assert(TaskNoteView._linkEntries({}).length === 0, 'no links → []');
+  assert(TaskNoteView._linkEntries({ links: 'nope' }).length === 0, 'non-array links → []');
+  // A single object that already looks like a bare wikilink target string stays a wikilink.
+  assert(deepEq(TaskNoteView._linkEntries({ links: ['[[a/b/Baz.md|Baz]]'] }), ['[[a/b/Baz.md|Baz]]']), 'wikilink string kept verbatim');
 });
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
