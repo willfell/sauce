@@ -254,9 +254,17 @@ function scoreWidgetRender(surface, manifest, repoRoot) {
     if (widgets.length === 0) {
         return { score: null, reason: "no render() widgets", suggested_archetype: null, suggested_target_file: null };
     }
-    const rendererSrc = fs.existsSync(path.join(repoRoot, "platform", "test", "run-renderer.js"))
-        ? fs.readFileSync(path.join(repoRoot, "platform", "test", "run-renderer.js"), "utf8")
-        : "";
+    // A render widget is "covered" if it is exercised by ANY render-test harness — not just
+    // run-renderer.js. Cold-load render-guard harnesses (e.g. run-project-render-guards.js) drive
+    // a widget's render() through the embed/null-current guard path, which IS a render test; the
+    // rubric previously scanned run-renderer.js alone and mis-scored guard-tested widgets as gaps,
+    // generating un-actionable Scout churn.
+    const RENDER_TEST_HARNESSES = ["run-renderer.js", "run-project-render-guards.js"];
+    let rendererSrc = "";
+    for (const rel of RENDER_TEST_HARNESSES) {
+        const fp = path.join(repoRoot, "platform", "test", rel);
+        if (fs.existsSync(fp)) rendererSrc += "\n" + fs.readFileSync(fp, "utf8");
+    }
     let covered = 0;
     const detail = widgets.map(w => {
         const isCovered = rendererSrc.includes(w);
