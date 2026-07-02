@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     {
       "name": "breadcrumb",
@@ -113,7 +113,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.16.0"
+      "version": "0.16.1"
     },
     {
       "name": "people",
@@ -129,7 +129,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.16.3"
+      "version": "0.16.4"
     },
     {
       "name": "journal",
@@ -145,7 +145,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.7.1"
+      "version": "0.7.2"
     },
     {
       "name": "teams",
