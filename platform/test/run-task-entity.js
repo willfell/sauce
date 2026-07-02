@@ -47,14 +47,35 @@ const fixedMoment = {
     '2026-07-01',
 };
 
-// 1. taskFilename — shape + determinism (same second, different title → different file).
-ok('TE-1 taskFilename shape + title-sensitive determinism', () => {
-  const fn1 = TaskEntity.taskFilename({ title: 'Buy milk' }, fixedMoment);
-  assert(/^task-\d{8}-\d{6}-[0-9a-f]{4}\.md$/.test(fn1), 'filename shape: ' + fn1);
-  const fn1b = TaskEntity.taskFilename({ title: 'Buy milk' }, fixedMoment);
-  assert(fn1 === fn1b, 'same title+moment must be deterministic (no Date.now/Math.random)');
-  const fn2 = TaskEntity.taskFilename({ title: 'Call bob' }, fixedMoment);
-  assert(fn1 !== fn2, 'different titles in the same second must differ: ' + fn1 + ' vs ' + fn2);
+// 1. taskFilename — human-readable "<title>.md" (no timestamp, no hash).
+ok('TE-1 taskFilename is the readable "<title>.md"', () => {
+  const fn = TaskEntity.taskFilename({ title: 'Buy milk' }, fixedMoment);
+  assert(fn === 'Buy milk.md', 'readable filename: ' + fn);
+  // Deterministic — same title → same base (dedupe is the caller's job).
+  assert(TaskEntity.taskFilename({ title: 'Buy milk' }, fixedMoment) === 'Buy milk.md', 'stable');
+});
+
+// 1a. _sanitizeTitle — strip illegal chars, collapse ws, empty → "Task".
+ok('TE-1a _sanitizeTitle strips illegal chars + handles empty', () => {
+  assert(TaskEntity._sanitizeTitle('Go/through:mail?') === 'Gothroughmail', 'strips / : ?: ' + TaskEntity._sanitizeTitle('Go/through:mail?'));
+  assert(TaskEntity._sanitizeTitle('Go through mail') === 'Go through mail', 'preserves case + spaces');
+  assert(TaskEntity._sanitizeTitle('  a   b  ') === 'a b', 'collapses + trims whitespace');
+  assert(TaskEntity._sanitizeTitle('') === 'Task', 'empty → Task');
+  assert(TaskEntity._sanitizeTitle('///') === 'Task', 'all-illegal → Task');
+  assert(TaskEntity._sanitizeTitle(null) === 'Task', 'null → Task');
+  assert(TaskEntity._sanitizeTitle('a'.repeat(200)).length === 80, 'caps to ~80 chars');
+});
+
+// 1b. _uniqueName — free base returned as-is; collision → " 2", " 3", …
+ok('TE-1b _uniqueName dedupes against the vault', () => {
+  // Nothing exists → base returned unchanged.
+  assert(TaskEntity._uniqueName('X.md', () => false) === 'X.md', 'free base returned');
+  // "spice/tasks/X.md" taken → "X 2.md".
+  assert(TaskEntity._uniqueName('X.md', (p) => p === 'spice/tasks/X.md') === 'X 2.md',
+    'collision → X 2.md: ' + TaskEntity._uniqueName('X.md', (p) => p === 'spice/tasks/X.md'));
+  // X.md AND X 2.md taken → X 3.md.
+  const taken2 = (p) => p === 'spice/tasks/X.md' || p === 'spice/tasks/X 2.md';
+  assert(TaskEntity._uniqueName('X.md', taken2) === 'X 3.md', 'two collisions → X 3.md');
 });
 
 // 2. composeNote — full payload → frontmatter with exact keys/values.
@@ -77,8 +98,11 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(fm.created_at === '2026-07-01T10:00:00-06:00', 'created_at from payload.now');
   assert(fm.due === '', 'absent due → empty string');
   assert(fm.completed_at === '', 'absent completed_at → empty string');
-  assert(out.path.startsWith('spice/tasks/'), 'path under spice/tasks/: ' + out.path);
-  assert(out.body === '', 'empty body');
+  assert(out.path === 'spice/tasks/Call X.md', 'path is readable "<title>.md": ' + out.path);
+  // Body is now the CHROME body (SpaceNavButtons + TaskNoteView + marker), not empty.
+  assert(out.body.includes('<!-- TASK_NOTES -->'), 'body has the TASK_NOTES marker');
+  assert(out.body.includes('class: "SpaceNavButtons"'), 'body renders SpaceNavButtons nav');
+  assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
 // 3. composeNote — minimal payload → blank scheduled, still valid.
@@ -154,6 +178,51 @@ ok('TD-5 donePath rewrites prefix into _done', () => {
     'got ' + TaskDialog.donePath('spice/tasks/task-a.md'));
 });
 
+// TD-6. _bodyNotesBelowMarker returns only the user-notes portion (below marker).
+ok('TD-6 _bodyNotesBelowMarker extracts notes below the marker', () => {
+  const fileText = [
+    '---', 'type: task', 'title: X', '---', '',
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', '```',
+    '', '<!-- TASK_NOTES -->', 'my note line 1', 'my note line 2', '',
+  ].join('\n');
+  const notes = TaskDialog._bodyNotesBelowMarker(fileText);
+  assert(notes === 'my note line 1\nmy note line 2', 'notes below marker: ' + JSON.stringify(notes));
+  // No marker (legacy) → whole body minus frontmatter.
+  const legacy = '---\ntype: task\ntitle: X\n---\nraw legacy note\n';
+  assert(TaskDialog._bodyNotesBelowMarker(legacy) === 'raw legacy note\n',
+    'legacy fallback: ' + JSON.stringify(TaskDialog._bodyNotesBelowMarker(legacy)));
+});
+
+// TD-7. _replaceBody preserves chrome + marker, swaps only the notes below it.
+ok('TD-7 _replaceBody preserves marker + chrome, swaps notes', () => {
+  const fileText = [
+    '---', 'type: task', 'title: X', '---', '',
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });', '```',
+    '', '<!-- TASK_NOTES -->', 'OLD NOTE', '',
+  ].join('\n');
+  const out = TaskDialog._replaceBody(fileText, 'NEW NOTE');
+  assert(out.includes('<!-- TASK_NOTES -->'), 'marker preserved');
+  assert(out.includes('class: "SpaceNavButtons"'), 'chrome preserved');
+  assert(out.includes('type: task'), 'frontmatter preserved');
+  assert(out.includes('NEW NOTE') && !out.includes('OLD NOTE'), 'notes swapped');
+  // Notes sit AFTER the marker.
+  assert(out.indexOf('NEW NOTE') > out.indexOf('<!-- TASK_NOTES -->'), 'notes below marker');
+  // Clearing notes leaves just the chrome+marker (marker still present).
+  const cleared = TaskDialog._replaceBody(fileText, '');
+  assert(cleared.includes('<!-- TASK_NOTES -->') && !cleared.includes('OLD NOTE'), 'cleared notes');
+});
+
+// TD-8. _replaceBody on a legacy (no-marker) note re-injects chrome + marker.
+ok('TD-8 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
+  const legacy = '---\ntype: task\ntitle: X\n---\nsome old body\n';
+  const out = TaskDialog._replaceBody(legacy, 'kept note');
+  assert(out.includes('<!-- TASK_NOTES -->'), 'marker injected');
+  assert(out.includes('class: "TaskNoteView"'), 'chrome injected');
+  assert(out.includes('type: task'), 'frontmatter preserved');
+  assert(out.includes('kept note') && out.indexOf('kept note') > out.indexOf('<!-- TASK_NOTES -->'),
+    'notes below the injected marker');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
@@ -163,6 +232,36 @@ ok('TD-5 donePath rewrites prefix into _done', () => {
 // through an INSTANCE so a regression to instance-less statics fails loudly.
 const TaskTodayListClass = loadClass('mechanisms/task-entity/task-today-list.js', 'TaskTodayList');
 const TaskTodayList = new TaskTodayListClass();
+
+// ---------- TaskNoteView static helper (pure) ----------
+//
+// TaskNoteView is the clean task-note card rendered in a task note's body. Its
+// render() is browser-only, but _fieldRows is a PURE helper that returns the
+// metadata rows to draw (SET fields only), so it's Node-testable. We load the
+// class the same bare-class way and call the static through an INSTANCE so a
+// regression to instance-less statics fails loudly.
+const TaskNoteViewClass = loadClass('mechanisms/task-entity/task-note-view.js', 'TaskNoteView');
+const TaskNoteView = new TaskNoteViewClass();
+
+// TNV-1. _fieldRows includes only set fields; strips project wikilink brackets.
+ok('TNV-1 _fieldRows returns only set fields (project unwrapped)', () => {
+  const rows = TaskNoteView._fieldRows({
+    scheduled: '2026-07-01', due: '', priority: 'high', project: '[[Sauce]]',
+  });
+  const byLabel = {};
+  for (const r of rows) byLabel[r.label] = r.value;
+  assert(rows.length === 3, 'only 3 set fields (no due): got ' + rows.length);
+  assert(byLabel.Scheduled === '2026-07-01', 'scheduled row');
+  assert(byLabel.Priority === 'high', 'priority row');
+  assert(byLabel.Project === 'Sauce', 'project unwrapped: ' + byLabel.Project);
+  assert(!('Due' in byLabel), 'empty due omitted');
+});
+
+// TNV-2. _fieldRows tolerates a null / empty task (never throws → []).
+ok('TNV-2 _fieldRows tolerates null / empty task', () => {
+  assert(TaskNoteView._fieldRows(null).length === 0, 'null → []');
+  assert(TaskNoteView._fieldRows({}).length === 0, 'empty → []');
+});
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
