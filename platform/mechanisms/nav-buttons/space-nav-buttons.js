@@ -7,17 +7,19 @@
  * This class reads the registry at render time, orders entries by (order,
  * source, id), and dispatches click on action.type.
  *
- * Layout (v2.11.0): two chrome rows. Row 1 is the prev/next-day arrows
- * (space-between) when the daily blueprint is installed. Row 2 is the always-
- * present "Daily" pill and the "Go to…" pill as EQUAL halves (flex:1) filling
- * the row. The daily quick-nav is split out of the menu into that Daily pill
- * (jumps to today). Tapping "Go to…" opens a custom launcher OVERLAY appended
- * to document.body (so it is never clipped by the note container): a full-width
- * bottom sheet on mobile, an anchored dropdown on desktop (min 300px), listing
- * every other blueprint with icon + full label. Backdrop-tap / Escape / re-tap
- * closes it. This replaces the v2.10.0 single-row layout, the v2.9.0 native-Menu
- * reveal (a cramped, text-truncating popup on mobile), and the pre-v2.9.0
- * always-visible multi-row button grid.
+ * Layout (v2.12.0): prev/next-day arrows on top (space-between, when the daily
+ * blueprint is installed), then a fixed 3-COLUMN GRID of pinned quick-nav
+ * buttons — Daily | To-Do | Scratch  /  Projects | Meetings | Go to… — where
+ * the final cell is the "Go to…" launcher holding EVERY OTHER blueprint. Pins
+ * are chosen by _partitionEntries via a fixed _source order; any pinned source
+ * absent from the registry simply drops its cell (the grid reflows). Each pinned
+ * button dispatches its own registry action; tapping "Go to…" opens a custom
+ * launcher OVERLAY appended to document.body (so it is never clipped by the note
+ * container): a full-width bottom sheet on mobile, an anchored dropdown on
+ * desktop (min 300px), listing the rest with icon + full label. Backdrop-tap /
+ * Escape / re-tap closes it. This replaces the v2.11.0 two-row even-split layout,
+ * the v2.9.0 native-Menu reveal (cramped/truncating on mobile), and the
+ * pre-v2.9.0 always-visible multi-row button grid.
  *
  * Action types (v0.4.2):
  *   - openLink             { target }
@@ -84,22 +86,24 @@ class SpaceNavButtons {
     return entries;
   }
 
-  // Split the daily quick-nav entry (action.command_id 'daily-notes', or
-  // _source 'daily') out of the ordered entries so it can render as an
-  // always-present pill in the chrome row instead of living inside the "Go to…"
-  // menu. Pure; Node-testable. Returns { dailyEntry|null, menuEntries }.
-  _splitDaily(entries) {
-    let dailyEntry = null;
-    const menuEntries = [];
+  // Partition ordered entries into the fixed set of PINNED quick-nav buttons
+  // (by _source, in this order) and the "rest" that live inside the Go to…
+  // menu. Only the first entry per source can claim a pin slot. Pure;
+  // Node-testable. Returns { pinned: entry[], rest: entry[] }.
+  _partitionEntries(entries) {
+    const PINNED_SOURCES = ["daily", "to-do", "scratch", "project", "meetings"];
+    const firstBySource = {};
     for (const e of (entries || [])) {
-      const a = (e && e.action) || {};
-      if (!dailyEntry && (a.command_id === "daily-notes" || e._source === "daily")) {
-        dailyEntry = e;
-      } else {
-        menuEntries.push(e);
-      }
+      if (e && e._source && !firstBySource[e._source]) firstBySource[e._source] = e;
     }
-    return { dailyEntry, menuEntries };
+    const pinned = [];
+    const pinnedSet = new Set();
+    for (const src of PINNED_SOURCES) {
+      const e = firstBySource[src];
+      if (e) { pinned.push(e); pinnedSet.add(e); }
+    }
+    const rest = (entries || []).filter((e) => !pinnedSet.has(e));
+    return { pinned, rest };
   }
 
   async render(dv) {
@@ -142,12 +146,12 @@ class SpaceNavButtons {
       margin: 4px 0 12px 0;
     `;
 
-    // Split the daily quick-nav out into an always-present pill.
-    const { dailyEntry, menuEntries } = this._splitDaily(entries);
+    // Partition into pinned quick-nav buttons + the rest (Go to… menu).
+    const { pinned, rest } = this._partitionEntries(entries);
     const dailyMeta = await this._readDailyNotesMeta();
 
-    // ── Two chrome rows: prev/next-day arrows on top; [ Daily | Go to… ]
-    //    evenly splitting the row below. ──
+    // ── Chrome: prev/next-day arrows on top; a fixed 3-column grid below —
+    //    Daily | To-Do | Scratch  /  Projects | Meetings | Go to… (the rest). ──
     const chrome = container.createEl("div");
     chrome.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
 
@@ -203,17 +207,18 @@ class SpaceNavButtons {
       }
     }
 
-    // Row 2: Daily + Go to… as equal halves filling the row.
-    const pillRow = chrome.createEl("div");
-    pillRow.style.cssText = `display: flex; align-items: stretch; gap: 8px;`;
-    if (dailyEntry) {
-      const dailyEl = this._renderDailyButton(pillRow, dailyEntry, dv);
-      dailyEl.style.flex = "1 1 0";
-      dailyEl.style.justifyContent = "center";
-    }
-    const pillEl = this._renderPill(pillRow, menuEntries, dv);
-    pillEl.style.flex = "1 1 0";
-    pillEl.style.justifyContent = "center";
+    // Row 2+: a fixed 3-column grid of pinned quick-nav buttons, with the
+    // "Go to…" menu (holding every other blueprint) as the final cell.
+    const grid = chrome.createEl("div");
+    grid.style.cssText = `display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;`;
+    const fillCell = (el) => {
+      el.style.width = "100%";
+      el.style.minWidth = "0";
+      el.style.overflow = "hidden";
+      el.style.justifyContent = "center";
+    };
+    for (const entry of pinned) fillCell(this._renderEntryButton(grid, entry, dv));
+    if (rest.length > 0) fillCell(this._renderPill(grid, rest, dv));
   }
 
   // Shared pill styling (outline chip, accent on hover) for the Daily + Go to…
@@ -224,7 +229,7 @@ class SpaceNavButtons {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 14px;
+      padding: 7px 10px;
       border-radius: 6px;
       border: 1px solid var(--background-modifier-border);
       background: var(--background-primary);
@@ -247,16 +252,15 @@ class SpaceNavButtons {
     };
   }
 
-  // Always-present Daily pill (jumps to today's daily note). Dispatches the
-  // daily registry entry's own action via the unchanged _dispatchAction.
-  _renderDailyButton(row, dailyEntry, dv) {
+  // Pinned quick-nav button for any entry (Daily / To-Do / Scratch / Projects /
+  // Meetings). Dispatches the entry's own registry action via the unchanged
+  // _dispatchAction. Label is ellipsised so it never overflows its grid cell.
+  _renderEntryButton(row, entry, dv) {
     const btnEl = row.createEl("button");
-    const icon = (customJS.Icons?.resolve?.(dailyEntry.icon || "daily"))
-      || (customJS.Icons?.resolve?.("calendar-days"))
-      || `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
-    btnEl.innerHTML = icon + `<span>${dailyEntry.label || "Daily"}</span>`;
+    const icon = (customJS.Icons?.resolve?.(entry.icon)) || "";
+    btnEl.innerHTML = icon + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${entry.label || entry._source || ""}</span>`;
     this._stylePill(btnEl);
-    btnEl.onclick = () => this._dispatchAction(dailyEntry, dv);
+    btnEl.onclick = () => this._dispatchAction(entry, dv);
     return btnEl;
   }
 
