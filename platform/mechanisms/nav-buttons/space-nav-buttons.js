@@ -57,6 +57,23 @@ class SpaceNavButtons {
     return window.moment().format("YYYY-MM-DD");
   }
 
+  // Flatten registry.contributions.<source>[] into a single array tagged with
+  // _source, sorted by (order ?? 100, source, id). Pure; Node-testable.
+  _orderedEntries(registry) {
+    const entries = [];
+    const contributions = (registry && registry.contributions) || {};
+    for (const [source, btns] of Object.entries(contributions)) {
+      if (!Array.isArray(btns)) continue;
+      for (const btn of btns) entries.push({ ...btn, _source: source });
+    }
+    entries.sort((a, b) =>
+      (a.order ?? 100) - (b.order ?? 100) ||
+      a._source.localeCompare(b._source) ||
+      a.id.localeCompare(b.id)
+    );
+    return entries;
+  }
+
   async render(dv) {
     const fallbackIcon = (label) =>
       `<span class="nav-fallback-icon">${(label && label[0] || "?").toUpperCase()}</span>`;
@@ -81,16 +98,7 @@ class SpaceNavButtons {
     }
 
     // ── Flatten + sort ───────────────────────────────────────────────────
-    const entries = [];
-    for (const [source, btns] of Object.entries(registry.contributions || {})) {
-      if (!Array.isArray(btns)) continue;
-      for (const btn of btns) entries.push({ ...btn, _source: source });
-    }
-    entries.sort((a, b) =>
-      (a.order ?? 100) - (b.order ?? 100) ||
-      a._source.localeCompare(b._source) ||
-      a.id.localeCompare(b.id)
-    );
+    const entries = this._orderedEntries(registry);
     if (entries.length === 0) return;
 
     // ── Render container (carry-over grid styling from v1.0.0) ───────────
