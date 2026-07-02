@@ -96,7 +96,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: mechanism people-identity axis customjs_behavioral: 4 uncovered
-  status: proposed
+  status: done
+  note: NEW run-people-identity.js (mechanism had NO harness) — 32 assertions covering all 4 public resolver methods (resolvePerson 4-tier + collision + null/non-string; findByAlias type+value + collision; getAliases wikilink/path/pipe forms + string-vs-object normalization + malformed-drop; listAliasesOfType) via a synthetic app vault stub. Genuine pure-logic coverage (NOT a grep-artifact — these are real data methods). Teeth-verified (mutating normalization broke 6 assertions).
 
 - id: cov-blueprint-scratch-customjs-behavioral
   title: Add coverage for scratch customjs_behavioral (5/8)
