@@ -9479,7 +9479,7 @@ async function applyFinanceBudgetMalformedGroupRepair(tp, manifest, variables, h
       }
       // Append the marker so the repair is one-shot per file.
       let out = result.body;
-      out = out.replace(/^(---\n[\s\S]*?)\n---/, `$1\n__budget_malformed_group_repaired: v0.16\n---`);
+      out = out.replace(/^(---\n[\s\S]*?)\n---/, `$1\n__budget_malformed_group_repaired: v0.16.1\n---`);
       await adapter.write(fp, out);
       touchedFiles += 1;
       repairedRows += result.repaired;
