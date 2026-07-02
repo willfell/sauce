@@ -34,11 +34,13 @@ class WikiHubActions {
         const upIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="9 14 12 11 15 14"/></svg>`;
 
         const wrap = dv.container.createEl("div", { cls: "wiki-hub-actions" });
-        // Divider between the global nav-button row (above) and the wiki buttons.
+        wrap.style.cssText = "margin: 0;";
+        // Divider between the global nav-button row (above) and the wiki buttons —
+        // tight against both so there's no extra line gap on either side.
         const hr = wrap.createEl("hr");
-        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 10px 0 8px 0;";
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 2px 0;";
         const row = wrap.createEl("div");
-        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto 4px auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; gap: 10px; margin: 2px auto 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         const root = "spice/wiki";
         const open = (t) => { if (t) app.workspace.openLinkText(t, ""); };

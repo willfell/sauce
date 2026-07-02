@@ -407,11 +407,15 @@ function findButtonByLabel(root, label) {
   }
   return null;
 }
-// nav-buttons@2.10.0: entry buttons live behind the collapsed "Go to…" pill,
-// which on click builds a launcher overlay appended to document.body (bottom
-// sheet / dropdown). Clear any prior overlay, open a fresh one, then return the
-// entry button by label so the existing click→_dispatchAction assertions hold.
+// nav-buttons@2.12.0: some entries are PINNED as direct 3-col-grid buttons
+// (Daily/To-Do/Scratch/Projects/Meetings); the rest live behind the "Go to…"
+// pill, which on click builds a launcher overlay appended to document.body.
+// Try the direct grid button first; otherwise open the overlay and search it —
+// so the existing click→_dispatchAction assertions hold whether the entry is
+// pinned or in the menu.
 function openLauncherFindByLabel(root, label) {
+  const direct = findButtonByLabel(root, label);
+  if (direct) return direct;
   if (global.document && global.document.body) global.document.body.children = [];
   const pill = findButtonByLabel(root, 'Go to…');
   if (!pill || typeof pill.onclick !== 'function') return null;
@@ -1570,14 +1574,15 @@ async function testBB8BaseCssClipsOverflow() {
 }
 
 async function testNavWrapRowStyleWraps() {
-  console.log('\n=== NAV-LAYOUT — SpaceNavButtons pills split the row evenly (no crush/overflow on narrow screens) ===');
-  // v2.11.0: two-row chrome. The Daily + Go to… pills fill their row as equal
-  // halves (flex: 1 1 0), which shrink evenly rather than overflow; no
-  // flex-wrap:nowrap crush anywhere in the source.
-  const evenSplit = RENDERER_SRC.includes('flex = "1 1 0"');
+  console.log('\n=== NAV-LAYOUT — SpaceNavButtons renders a fixed 3-column grid (pinned buttons + Go to…) ===');
+  // v2.12.0: pinned quick-nav buttons + the Go to… menu render in a fixed
+  // 3-column CSS grid; cells clip overflow (labels ellipsised) so nothing
+  // crushes on narrow screens. No flex-wrap:nowrap crush anywhere.
+  const gridCols = RENDERER_SRC.includes('grid-template-columns: repeat(3, 1fr)');
+  const cellClips = RENDERER_SRC.includes('overflow') && RENDERER_SRC.includes('text-overflow:ellipsis');
   const noNowrap = !RENDERER_SRC.includes('flex-wrap: nowrap');
-  const pass = evenSplit && noNowrap;
-  console.log(`  evenSplit(flex 1 1 0): ${evenSplit}; noNowrap: ${noNowrap}`);
+  const pass = gridCols && cellClips && noNowrap;
+  console.log(`  3-col grid: ${gridCols}; cellClips: ${cellClips}; noNowrap: ${noNowrap}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -3441,7 +3446,7 @@ async function testRendHasNotes() {
       results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
       results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
       results.push(['BB9 label-span-truncates', await testBB9LabelSpanTruncates()]);
-      results.push(['NAV-LAYOUT pills-even-split', await testNavWrapRowStyleWraps()]);
+      results.push(['NAV-LAYOUT 3col-grid', await testNavWrapRowStyleWraps()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);

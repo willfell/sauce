@@ -112,7 +112,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint to-do axis installer_migration: 3 uncovered
-  status: proposed
+  status: dismissed
+  note: DOUBLE artifact. (1) Mis-attribution — scoreInstallerMigration assigns install.js apply* fns to a surface by crude name-substring/module-dir match, so it wrongly attributes wiki/project/generic fns to to-do: applyWikiToDocsMigration (wiki), applyProjectLinksHubBackfill + applyProjectTodoOwnedTasksHeal (project, spice/projects), applyOrphanedHelperCleanup + applyPreInstall (generic). (2) Scan gap — the rubric only credits fns named in run-seed-migrations.js, but every "uncovered" fn IS tested in a dedicated harness (run-wiki-to-docs-migration.js, run-project-links-hub-backfill.js, run-project-todo-owned-tasks.js via _healProjectTodoOwnedTasksBody, run-helper-cases.js, run-install.js). No genuine to-do install migration lacks coverage. Durable fix = rubric attribution + multi-harness scan.
 
 - id: cov-blueprint-finance-installer-migration
   title: Add coverage for finance installer_migration (20/23)
