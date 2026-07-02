@@ -1197,6 +1197,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
   await applyDocLeafActionsBackfill(tp, mech, variables, history, git);   // NEW (Project Doc Updating Wiring PR4) — injects the DocLeafActions Move-button block into existing type:doc-note notes lacking it (insert-only after the ProjectNavButtons `---` divider, idempotent, .sauce-backup before write)
   await applyDocBulkMoveActionsBackfill(tp, mech, variables, history, git); // NEW (Project Doc Updating Wiring PR5) — injects the DocBulkMoveActions Move-docs block into existing type:docs-hub notes lacking it (insert-only after the entity-create doc-note block, idempotent, .sauce-backup before write)
+  await applyProjectLinksManagerBackfill(tp, mech, variables, history, git); // NEW (Project Links Wiring PR4) — injects the ProjectLinksManager Add/Manage-links block into existing type:links-hub notes lacking it (insert-only before the ProjectLinksPanel block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
@@ -2794,6 +2795,79 @@ async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history,
   }
 
   history?.push({ event: "info", step: "doc_bulk_move_actions_backfill", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
+// _injectProjectLinksManagerBody — pure, idempotent transform. Injects the
+// `class: "ProjectLinksManager"` (Add link / Manage links) dataviewjs block into
+// a links-hub body that lacks it, placed IMMEDIATELY BEFORE the ProjectLinksPanel
+// (read-only list) block — the shipped Links Hub template placement (manager
+// buttons above the list). Returns the body unchanged when the block is already
+// present or there's no ProjectLinksPanel anchor (driver treats unchanged-no-block
+// as no_anchor_found).
+function _injectProjectLinksManagerBody(body) {
+  if (typeof body !== "string") return body;
+  if (body.includes('class: "ProjectLinksManager"')) return body; // idempotent
+  const panelIdx = body.indexOf('class: "ProjectLinksPanel"');
+  if (panelIdx === -1) return body;                               // no anchor
+  const openFence = body.lastIndexOf("```dataviewjs", panelIdx); // opening fence of the ProjectLinksPanel block
+  if (openFence === -1) return body;
+  const block = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectLinksManager" });\n```\n\n';
+  return body.slice(0, openFence) + block + body.slice(openFence);
+}
+
+// applyProjectLinksManagerBackfill — Project Links Wiring PR4. Injects the
+// ProjectLinksManager (Add link / Manage links) block into pre-existing
+// type:links-hub notes lacking it, so Link Hubs backfilled before Project Links
+// PR2 (which have ProjectLinksPanel but no manager) gain the add/edit buttons.
+// Walks spice/projects/**, filters type:links-hub, applies
+// _injectProjectLinksManagerBody. Insert-only + idempotent; .sauce-backup before
+// write; per-note try/catch, never throws; ungated. Mirrors applyDocLeafActionsBackfill.
+async function applyProjectLinksManagerBackfill(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "project_links_manager_backfill", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (_noteChromeFrontmatterType(before) !== "links-hub") continue;
+      if (before.includes('class: "ProjectLinksManager"')) { skipped += 1; continue; }
+      const after = _injectProjectLinksManagerBody(before);
+      if (after === before) {
+        warned += 1;
+        history?.push({ event: "warning", step: "project_links_manager_backfill", target: fpath, action: "no_anchor_found",
+          reason: "no ProjectLinksPanel block to anchor on",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "project_links_manager_backfill", target: fpath, action: "healed",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "project_links_manager_backfill", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "project_links_manager_backfill", name: "vault", summary: { healed, skipped, warned },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
@@ -16825,6 +16899,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // backfill heal + its pure body transform (run-doc-bulk-move-heal.js DBMH-*).
     module.exports.applyDocBulkMoveActionsBackfill = applyDocBulkMoveActionsBackfill;
     module.exports._injectDocBulkMoveActionsBody = _injectDocBulkMoveActionsBody;
+    // Project Links Wiring PR4 — existing Link-Hub ProjectLinksManager backfill
+    // heal + its pure body transform (run-project-links-manager-heal.js PLMH-*).
+    module.exports.applyProjectLinksManagerBackfill = applyProjectLinksManagerBackfill;
+    module.exports._injectProjectLinksManagerBody = _injectProjectLinksManagerBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
