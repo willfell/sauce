@@ -120,7 +120,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint finance axis installer_migration: 3 uncovered
-  status: proposed
+  status: dismissed
+  note: DOUBLE artifact (same class as the dismissed to-do item above). Live rubric now reports 29/33 with 4 "uncovered" fns, all false signals. (1) Mis-attribution — scoreInstallerMigration assigns install.js apply* fns to a surface by crude name-substring/module-dir match, wrongly attributing generic install-infra fns to finance: applyExternalPlugins, applyOrphanedHelperCleanup, applyPreInstall (none is a finance migration). (2) Dead code — applyFinanceDefaultsNavRowInjection is RETIRED: its call in applyFinanceMigrations was replaced by applyFinanceDefaultsNavRowRetirement (install.js:6760 "Replaces applyFinanceDefaultsNavRowInjection"), and run-helper-cases.js HC-FIN-COCKPIT-4 ALREADY asserts the injection call is removed while HC-FIN-COCKPIT-3 tests the retirement (_stripDefaultsNavRow); a seed test exercising the injection would contradict HC-FIN-COCKPIT-4 and pin dead code against future deletion. (3) Scan gap — the rubric only credits fns named in run-seed-migrations.js, but all 4 ARE tested elsewhere: applyFinanceDefaultsNavRowInjection + applyExternalPlugins + applyOrphanedHelperCleanup in run-helper-cases.js, applyExternalPlugins also in run-bootstrap.js, applyPreInstall in run-install.js. No genuine finance install migration lacks coverage. Durable fix = rubric attribution + multi-harness scan + dead-code (retired call-site) exclusion in scoreInstallerMigration.
 
 - id: cov-blueprint-products-widget-render
   title: Add coverage for products widget_render (0/3)
