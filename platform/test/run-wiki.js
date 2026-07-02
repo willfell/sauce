@@ -255,6 +255,12 @@ const pages = [
     ok('W7e wiki-hub-actions.js is a bare class (no module.exports)',
        stripped.startsWith('class ') && !/module\.exports/.test(src));
   }
+  // W7f — section note prepends a "Wiki" home nav button (get back to docs).
+  {
+    const { btnCalls } = runRender('wiki-section');
+    ok('W7f WikiHubActions renders a "Wiki" home nav button on a section',
+       btnCalls.map(b => b.label).includes('Wiki'));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +275,58 @@ const pages = [
      /target:\s*\(s\)\s*=>/.test(src) && /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
   ok('W8b recent-updates list navigates via openLinkText (not a no-op raw <a href>)',
      /openLinkText\(/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
+}
+
+// ---------------------------------------------------------------------------
+// W9 — WikiLeafActions nav row on a wiki-page: [ Wiki ] [ Up: <section> ] [ Move ],
+// resolves the parent section hub, and renders WITHOUT throwing when WikiMove is
+// cold/absent (move options are computed lazily on click, never at render).
+// ---------------------------------------------------------------------------
+{
+  const LEAF_SRC = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-leaf-actions.js');
+  const leafSrc  = fs.readFileSync(LEAF_SRC, 'utf8');
+  function makeEl2() {
+    const el = { children: [], style: { cssText: '' } };
+    el.createEl = (tag, o) => { const c = makeEl2(); c.cls = (o && o.cls) || ''; el.children.push(c); return c; };
+    el.closest = () => null;
+    return el;
+  }
+  function runLeaf(filePath, sectionHubs, withWikiMove) {
+    const btnCalls = [];
+    const fakeCustomJS = { AccentButton: { render: (c, o) => btnCalls.push(o) } };
+    if (withWikiMove) fakeCustomJS.WikiMove = { sectionTargets: () => [], move: () => {} };
+    const dv = {
+      container: makeEl2(),
+      current: () => ({ type: 'wiki-page', file: { path: filePath } }),
+      pages: () => ({ array: () => (sectionHubs || []) }),
+    };
+    const Cls = new Function('customJS', 'Notice', 'app', `${leafSrc}\nreturn WikiLeafActions;`)(
+      fakeCustomJS, function () {}, { workspace: { openLinkText() {} } });
+    new Cls().render(dv);
+    return btnCalls;
+  }
+  const hubs = [{ type: 'wiki-section', title: 'testing', file: { folder: 'spice/wiki/testing', path: 'spice/wiki/testing/testing.md', name: 'testing.md' } }];
+  // W9a/b — page inside a section: Wiki + Up:<section-title> + Move.
+  {
+    const b = runLeaf('spice/wiki/testing/what.md', hubs, true);
+    const labels = b.map(x => x.label);
+    ok('W9a wiki-page nav row: Wiki + Up:section + Move',
+       b.length === 3 && labels.includes('Wiki') && labels.some(l => l.startsWith('Up: ')) && labels.includes('Move'));
+    ok('W9b Up button resolves the real section-hub title ("Up: testing")', labels.includes('Up: testing'));
+  }
+  // W9c — render must NOT throw when WikiMove is cold/absent (lazy move options).
+  {
+    let threw = false;
+    try { runLeaf('spice/wiki/testing/what.md', hubs, false); } catch (_e) { threw = true; }
+    ok('W9c render does not throw when WikiMove is cold/absent (lazy move)', !threw);
+  }
+  // W9d — page at the wiki root: Wiki + Move only (no Up).
+  {
+    const b = runLeaf('spice/wiki/Loose.md', [], true);
+    const labels = b.map(x => x.label);
+    ok('W9d root-level page: Wiki + Move only (no Up)',
+       b.length === 2 && labels.includes('Wiki') && labels.includes('Move') && !labels.some(l => l.startsWith('Up:')));
+  }
 }
 
 // ---------------------------------------------------------------------------
