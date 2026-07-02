@@ -4611,6 +4611,25 @@ async function caseLAT1LeafActionsTightSeparators() {
   }
 }
 
+// -------------------------------------------------------------------------
+// DNT-1: the Doc Note template's Move-button row (DocLeafActions) sits TIGHT
+// against the `---` chrome divider that follows ProjectNavButtons — no blank
+// line between the `---` and the DocLeafActions dataviewjs block. Prior
+// template had `---\n\n<block>`, rendering an extra gap above the Move button.
+// -------------------------------------------------------------------------
+async function caseDNT1DocNoteTightSeparator() {
+  console.log("\n--- Case DNT-1: Doc Note template Move button tight against its `---` separator ---");
+  const p = path.join(BLUEPRINTS_DIR, "project", "templates", "Doc Note.md");
+  assertTrue("DNT-1: Doc Note.md template source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  // Tight: `---` directly above the DocLeafActions block (no blank line).
+  assertTrue("DNT-1: DocLeafActions row is tight against its --- separator (no blank-line gap)",
+    /\n---\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"[^`]*\);\n```/.test(body));
+  // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
+  assertTrue("DNT-1: no blank line between the --- and the DocLeafActions block",
+    !/\n---\n\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"/.test(body));
+}
+
 async function caseDDA1DashboardActivityPanel() {
   console.log("\n--- Case DD-A1: SpaceDailyDashboard activity panel structure ---");
   const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
@@ -15131,6 +15150,7 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
   await caseLAT1LeafActionsTightSeparators();
+  await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
   await caseDDA3TaskMarkdownRenderHelper();
