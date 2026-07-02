@@ -1570,11 +1570,14 @@ async function testBB8BaseCssClipsOverflow() {
 }
 
 async function testNavWrapRowStyleWraps() {
-  console.log('\n=== NAV-WRAP — SpaceNavButtons row style wraps (no crush/overflow on narrow screens) ===');
-  const wraps = RENDERER_SRC.includes('flex-wrap: wrap');
+  console.log('\n=== NAV-LAYOUT — SpaceNavButtons pills split the row evenly (no crush/overflow on narrow screens) ===');
+  // v2.11.0: two-row chrome. The Daily + Go to… pills fill their row as equal
+  // halves (flex: 1 1 0), which shrink evenly rather than overflow; no
+  // flex-wrap:nowrap crush anywhere in the source.
+  const evenSplit = RENDERER_SRC.includes('flex = "1 1 0"');
   const noNowrap = !RENDERER_SRC.includes('flex-wrap: nowrap');
-  const pass = wraps && noNowrap;
-  console.log(`  wraps: ${wraps}; noNowrap: ${noNowrap}`);
+  const pass = evenSplit && noNowrap;
+  console.log(`  evenSplit(flex 1 1 0): ${evenSplit}; noNowrap: ${noNowrap}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -3264,7 +3267,7 @@ async function testRendHasNotes() {
       results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
       results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
       results.push(['BB9 label-span-truncates', await testBB9LabelSpanTruncates()]);
-      results.push(['NAV-WRAP rowstyle-wraps', await testNavWrapRowStyleWraps()]);
+      results.push(['NAV-LAYOUT pills-even-split', await testNavWrapRowStyleWraps()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
