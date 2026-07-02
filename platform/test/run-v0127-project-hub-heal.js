@@ -531,26 +531,16 @@ async function run() {
       ok("NAV-SEP-I3 no-throw on empty vault", !threw, "empty spice/projects/ must not throw");
     }
 
-    // T1..T4 — the shipping templates must NOT keep a blank between the
-    // ProjectNavButtons fence and the `---` below it.
-    // Chrome overhaul WS-Workstreams: `Project Map.md` DROPPED its literal `---`
-    // chrome divider (helpers own dividers now — the workstream manager's
-    // SectionLabel emits its own leading hairline), so it is no longer in this
-    // "separator hugs the button row" list.
-    const fs = require("fs");
-    const tplDir = path.join(__dirname, "..", "blueprints", "project", "templates");
-    for (const tpl of ["Kanban Card.md", "Doc Note.md", "Section Hub.md"]) {
-      let lintOk = false;
-      try {
-        const lines = fs.readFileSync(path.join(tplDir, tpl), "utf8").split("\n");
-        const idx = lines.findIndex((l) => l.includes('class: "ProjectNavButtons"'));
-        lintOk = idx >= 0 &&
-          (lines[idx + 1] || "").trim() === "```" &&
-          (lines[idx + 2] || "").trim() === "---";
-      } catch (_e) { lintOk = false; }
-      ok("NAV-SEP-T:" + tpl + " separator hugs the button row",
-        lintOk, "the `---` must immediately follow the ProjectNavButtons fence (no blank line)");
-    }
+    // T1..T4 / T5..T8 (RETIRED — chrome overhaul 2026-07-02) — these asserted
+    // that project templates (blueprint + installer-materialized ranch copies)
+    // keep a literal `---` hugging the ProjectNavButtons fence. That grammar is
+    // REVERSED by this cycle: helpers now own dividers (SectionLabel.divider)
+    // and project templates carry NO literal chrome `---`. Coverage of "no
+    // literal chrome `---` in project templates" now lives in
+    // scripts/lint-note-chrome.js (Rule 4, project-scoped). The NAV-SEP-U*/I*
+    // heal-function unit tests (below) remain valid — the
+    // applyProjectNavButtonsSeparatorGap heal still collapses a stray blank
+    // before a `---` on LEGACY notes that predate this overhaul.
 
     // U5 — a ProjectNavButtons fence followed by a blank then ordinary PROSE
     // (not `---`, not a widget block) is left untouched.
@@ -561,24 +551,6 @@ async function run() {
         "a blank before ordinary prose (not a `---` separator) must be preserved");
     }
 
-    // T5..T8 — the installer-materialized ranch copies must ALSO hug the
-    // separator (blueprint↔ranch parity for the fixed region).
-    const ranchDir = path.join(__dirname, "..", "..", "ranch", "templates");
-    // `Template, Project Map.md` dropped its literal `---` chrome divider in the
-    // WS-Workstreams consolidation (helpers own dividers), so it is excluded here
-    // in parity with the blueprint list above.
-    for (const tpl of ["Template, Kanban Card.md", "Template, Doc Note.md", "Template, Section Hub.md"]) {
-      let lintOk = false;
-      try {
-        const lines = fs.readFileSync(path.join(ranchDir, tpl), "utf8").split("\n");
-        const idx = lines.findIndex((l) => l.includes('class: "ProjectNavButtons"'));
-        lintOk = idx >= 0 &&
-          (lines[idx + 1] || "").trim() === "```" &&
-          (lines[idx + 2] || "").trim() === "---";
-      } catch (_e) { lintOk = false; }
-      ok("NAV-SEP-Tranch:" + tpl + " separator hugs the button row",
-        lintOk, "the ranch materialized copy must also have `---` immediately after the ProjectNavButtons fence");
-    }
   }
 
   // ----- Project hub Display tweaks (PHUB-*) -----
