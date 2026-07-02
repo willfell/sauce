@@ -128,4 +128,5 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint products axis widget_render: 3 uncovered
-  status: proposed
+  status: done
+  note: Added platform/test/run-products-render-guards.js (mirrors run-cowork-render-guards.js) driving ProductsHubCards / ProductPageCards / ProductActionButtons render() through the cold-load path (empty dv.pages) in normal + .markdown-embed contexts; wired into release:preflight. scoreWidgetRender now credits products 3/3. Mutation-verified: injecting a throw into a widget render() turns the harness RED.
