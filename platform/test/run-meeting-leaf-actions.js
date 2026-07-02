@@ -79,6 +79,10 @@ ok('HC-TE-MLA-NT-E still stamps source_note for the projectless meeting',
   opened.length === 1 && opened[0].sourceNote === '[[Standup-2026-06-24]]', JSON.stringify(opened[0] || null));
 
 // A meeting with an UNLISTED project → slug is the slugified name fallback.
+// The fallback now uses the canonical slug shape (MeetingLeafActions._slugify),
+// which trims a TRAILING "-" left by a terminal illegal char ("!") — so the slug
+// is the clean "some-new-thing" (was "some-new-thing-" with a dangling dash under
+// the old inline replace). Matches the slug shape composeNote / the project list use.
 inst._listProjects = () => [];
 const dvUnlistedProject = {
   current() { return { project: '[[Some New Thing!]]', file: { name: 'Standup-2026-06-25.md', path: 'x' } }; },
@@ -86,8 +90,8 @@ const dvUnlistedProject = {
 };
 opened.length = 0;
 inst._onNewTask(dvUnlistedProject);
-ok('HC-TE-MLA-NT-F unlisted project → slugified-name fallback slug',
-  opened.length === 1 && opened[0].project && opened[0].project.slug === 'some-new-thing-',
+ok('HC-TE-MLA-NT-F unlisted project → slugified-name fallback slug (canonical, no trailing dash)',
+  opened.length === 1 && opened[0].project && opened[0].project.slug === 'some-new-thing',
   JSON.stringify(opened[0] && opened[0].project || null));
 
 // The removed dual-write helpers must be GONE (no reintroduction of raw-markdown path).

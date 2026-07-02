@@ -15,8 +15,55 @@ class MeetingLeafActions {
     if (s == null) return "";
     return String(s).replace(/^\[\[|\]\]$/g, "").trim();
   }
+  // cleanProjectName — extract the CLEAN project basename from a `project:`
+  // frontmatter value that may be a Dataview Link OBJECT (a RESOLVED link, with
+  // .path / .display), a `[[...]]` wikilink string, or a bare string. Dataview
+  // hands a `[[Connectors]]` frontmatter value back as a Link whose `.path` is
+  // the RESOLVED note path (`spice/projects/connectors/Connectors.md`); naively
+  // stripping `[[ ]]` off `String(link)` leaves the whole path + `|alias`, which
+  // then mangles into a path-slug. This mirrors TaskEntity._linkText semantics
+  // (last `/` segment, drop `.md`, drop a trailing `|alias`) so meeting-created
+  // tasks get the SAME clean {name, slug} a project-surface create would.
+  //   - Link object → basename of .path (else .display)
+  //   - "[[a/b/Connectors.md|Connectors]]" → "Connectors" (basename, .md + pipe stripped)
+  //   - "[[Bar]]" → "Bar";  "Plain" → "Plain";  nullish/empty → ""
+  static cleanProjectName(v) {
+    if (v == null) return "";
+    const baseOf = (s) => {
+      let out = String(s == null ? "" : s).trim();
+      const slash = out.lastIndexOf("/");
+      if (slash >= 0) out = out.slice(slash + 1);
+      return out.replace(/\.md$/i, "");
+    };
+    // Dataview Link object — has .path / .display / .subpath (not a string).
+    if (typeof v === "object" && ("path" in v || "display" in v || "subpath" in v)) {
+      if (v.path != null && String(v.path).trim() !== "") return baseOf(v.path);
+      if (v.display != null) return String(v.display).trim();
+      return "";
+    }
+    if (typeof v === "string") {
+      let s = v.trim();
+      const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+      if (m) s = m[1].trim();
+      // Split off a `|label` alias → keep the target (before the pipe), then
+      // take its basename. For "[[a/b/Connectors.md|Connectors]]" the target is
+      // "a/b/Connectors.md" → basename "Connectors" (== the alias here).
+      const pipe = s.indexOf("|");
+      if (pipe >= 0) s = s.slice(0, pipe).trim();
+      return baseOf(s);
+    }
+    return String(v);
+  }
+  // _slugify — the SAME slug shape composeNote / the project list use: lowercase,
+  // non-alnum runs → "-", trimmed of leading/trailing "-". Pure.
+  static _slugify(name) {
+    return String(name == null ? "" : name)
+      .toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
   static resolveProjectPreselect(cur, projectList) {
-    const name = MeetingLeafActions.stripWikilink(cur && cur.project);
+    const name = MeetingLeafActions.cleanProjectName(cur && cur.project);
     if (!name) return "today";
     const hit = (projectList || []).find((p) => p.name === name);
     return hit ? { type: "project", slug: hit.slug, name: hit.name } : "today";
@@ -93,15 +140,17 @@ class MeetingLeafActions {
     // TaskMeetingList query resolves back to this meeting.
     const meetingBasename = String(cur.file.name || "").replace(/\.md$/i, "");
     // Project (optional): only when the meeting carries a project: frontmatter.
-    // Resolve {name, slug} from the project list so composeNote gets the same
-    // pair a project-surface create would.
-    const projectName = MeetingLeafActions.stripWikilink(cur.project);
+    // cur.project may be a RESOLVED Dataview Link (its .path is the full note
+    // path) — cleanProjectName extracts the CLEAN basename ("Connectors"), NOT
+    // the path, so the list lookup succeeds and composeNote gets the same clean
+    // {name, slug} a project-surface create would (no path-slug mangling).
+    const projectName = MeetingLeafActions.cleanProjectName(cur.project);
     let project;
     if (projectName) {
       const hit = this._listProjects(dv).find((p) => p.name === projectName);
       project = {
         name: projectName,
-        slug: hit ? hit.slug : String(projectName).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        slug: hit ? hit.slug : MeetingLeafActions._slugify(projectName),
       };
     }
     try {

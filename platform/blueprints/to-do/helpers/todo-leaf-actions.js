@@ -17,6 +17,41 @@
  * embed-safe early return, render-gen counter.
  */
 class ToDoLeafActions {
+    // _cleanProjectName — extract the CLEAN project basename from a `project:`
+    // frontmatter value that may be a RESOLVED Dataview Link OBJECT (its .path is
+    // the full note path), a `[[...]]` wikilink string, or a bare string. Naively
+    // `String(link).replace(/^\[\[|\]\]$/g,'')` leaves the whole path (which then
+    // mangles into a path-slug); this returns just the basename ("Connectors").
+    // Mirrors TaskEntity._linkText / MeetingLeafActions.cleanProjectName.
+    static _cleanProjectName(v) {
+        if (v == null) return '';
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        if (typeof v === 'object' && ('path' in v || 'display' in v || 'subpath' in v)) {
+            if (v.path != null && String(v.path).trim() !== '') return baseOf(v.path);
+            if (v.display != null) return String(v.display).trim();
+            return '';
+        }
+        if (typeof v === 'string') {
+            let s = v.trim();
+            const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+            if (m) s = m[1].trim();
+            const pipe = s.indexOf('|');
+            if (pipe >= 0) s = s.slice(0, pipe).trim();
+            return baseOf(s);
+        }
+        return String(v);
+    }
+    static _slugify(name) {
+        return String(name == null ? '' : name)
+            .toLowerCase().trim()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+    }
     async render(dv) {
         if (dv.container.closest('.markdown-embed')) return;
 
@@ -47,8 +82,10 @@ class ToDoLeafActions {
 
         const defaultDestForCurrent = () => {
             if (noteType === 'project-todo' && cur && cur.project) {
-                const name = String(cur.project).replace(/^\[\[|\]\]$/g, '');
-                const slug = cur.project_slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                // cur.project may be a RESOLVED Dataview Link — take the clean
+                // basename, and prefer the note's own project_slug frontmatter.
+                const name = ToDoLeafActions._cleanProjectName(cur.project);
+                const slug = cur.project_slug || ToDoLeafActions._slugify(name);
                 return { type: 'project', slug, name };
             }
             return 'today';
@@ -75,11 +112,13 @@ class ToDoLeafActions {
             // source: project + project_slug; the project's TaskProjectList block
             // live-queries it by project_slug. No raw markdown is appended.
             if (noteType === 'project-todo') {
-                const name = cur && cur.project
-                    ? String(cur.project).replace(/^\[\[|\]\]$/g, '')
-                    : '';
+                // cur.project may be a RESOLVED Dataview Link (its .path is the
+                // full note path). Take the CLEAN basename for the name, and
+                // prefer the note's own project_slug frontmatter for the slug so
+                // the task-note is stamped with the REAL slug (not a path-slug).
+                const name = ToDoLeafActions._cleanProjectName(cur && cur.project);
                 const slug = (cur && cur.project_slug)
-                    || (name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-') : '');
+                    || (name ? ToDoLeafActions._slugify(name) : '');
                 try {
                     window.customJS.TaskDialog.open({
                         surface: 'project',
