@@ -2969,6 +2969,183 @@ async function runTaskEntityLinksProjectFamily() {
     }
 }
 
+// =============================================================================
+// HC-V01790-SEED-MIGRATE-CHROME-* — WS9 project-chrome overhaul install heals.
+//
+// Like runTaskEntityLinksProjectFamily above, this is self-contained: the heals
+// (applyBoardCardBreadcrumbHeal, applyProjectChromeDividerHeal,
+// applyProjectHubWorkstreamRemovalHeal) run in the platform install loop, but the
+// seed install short-circuits on version match, so we DIRECTLY INVOKE them in
+// their canonical run order against a throwaway tmp vault seeded with
+// PRE-migration-shape fixtures (the exact legacy shapes observed in real consumer
+// vaults: a Project Map with a `---` hugging the ProjectNavButtons fence between
+// chrome blocks; a promoted board-card note under tasks/<Task>/<Task>.md with NO
+// frontmatter `type:` and NO Breadcrumb; a type:project hub carrying a
+// ProjectWorkstreamManager block plus a `## Mentions` content divider that MUST
+// survive). Covers: the `---` chrome dividers gone, no doubled chrome gap, the
+// board card gains a Breadcrumb + `type: task-hub`, the hub loses the
+// ProjectWorkstreamManager block, content dividers preserved, .sauce-backup
+// snapshots exist, and idempotency on a second pass.
+// =============================================================================
+async function runProjectChromeMigrateFamily() {
+    const {
+        applyBoardCardBreadcrumbHeal,
+        applyProjectChromeDividerHeal,
+        applyProjectHubWorkstreamRemovalHeal,
+    } = require("../install.js");
+
+    const dv = (cls) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '" });\n```';
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-chrome-mig-"));
+    const writeFixture = (rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const readVault = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const backupExists = (nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+
+    // (1) PRE: Project Map with a `---` HUGGING the ProjectNavButtons fence
+    //     between two chrome blocks (real Project Map.md legacy shape).
+    const MAP = "spice/projects/chrome-demo/Project Map.md";
+    writeFixture(MAP, [
+        "---", "type: map", "project_name: Chrome Demo", "---", "",
+        dv("SpaceNavButtons"), "",
+        dv("ProjectNavButtons"), "---", "",
+        dv("ProjectWorkstreams"), "",
+    ].join("\n"));
+
+    // (2) PRE: promoted board-card note (basename === parent folder, under
+    //     /tasks/) with NO frontmatter `type:` and NO Breadcrumb — plus a
+    //     `---` chrome divider between SpaceNavButtons and ProjectNavButtons.
+    const CARD = "spice/projects/chrome-demo/tasks/Migrate Stage/Migrate Stage.md";
+    writeFixture(CARD, [
+        "---", "created_at: 2026-05-19T13:53:47-06:00",
+        "tags:", "  - kanban-card", "  - project-card",
+        "status: completed", "---", "",
+        dv("SpaceNavButtons"), "", "---", "",
+        dv("ProjectNavButtons"), "",
+    ].join("\n"));
+
+    // (3) PRE: type:project hub with a ProjectWorkstreamManager block sandwiched
+    //     between `---` chrome dividers, followed by a `## Mentions` content
+    //     divider (which MUST survive both P0a and P1).
+    const HUB = "spice/projects/chrome-demo/Chrome Demo.md";
+    writeFixture(HUB, [
+        "---", "type: project", "name: Chrome Demo", "---", "",
+        dv("Breadcrumb"), "",
+        dv("SpaceNavButtons"), "",
+        dv("ProjectNavButtons"), "---", "",
+        dv("ProjectStatusWidget"), "",
+        dv("ProjectMeetingsPanel"), "", "---", "",
+        dv("ProjectWorkstreamManager"), "", "---", "",
+        "## Mentions", "",
+        dv("BacklinkPanel"), "",
+    ].join("\n"));
+
+    try {
+        const adapter = makeFsAdapter(root);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        // ----- Pass 1 — canonical run order: P0b (board-card) → P0a (dividers) → P1. -----
+        await applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, git);
+        await applyProjectChromeDividerHeal(tp, manifest, variables, history, git);
+        await applyProjectHubWorkstreamRemovalHeal(tp, manifest, variables, history, git);
+
+        // === P0a: Project Map dividers stripped, no doubled chrome gap ===
+        const map1 = readVault(MAP);
+        ok("HC-V01790-SEED-MIGRATE-CHROME-1 Map: hugging chrome `---` gone",
+            !/```\n---\n/.test(map1) && map1.includes('class: "ProjectWorkstreams"'),
+            "the `---` hugging the ProjectNavButtons fence between chrome blocks must be removed");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-1b Map: no doubled blank gap",
+            !/\n\n\n/.test(map1),
+            "consecutive chrome blocks must be single-blank-separated");
+
+        // === P0b: board card gains type:task-hub + a leading Breadcrumb ===
+        const card1 = readVault(CARD);
+        ok("HC-V01790-SEED-MIGRATE-CHROME-2 board card gains type: task-hub",
+            /^type: task-hub$/m.test(card1),
+            "the promoted board-card note must gain `type: task-hub`");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-2b board card gains a Breadcrumb block",
+            /class:\s*"Breadcrumb"/.test(card1),
+            "the board card must gain a Breadcrumb dataviewjs block");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-2c Breadcrumb is the first rendered block",
+            card1.indexOf("Breadcrumb") < card1.indexOf("SpaceNavButtons"),
+            "the Breadcrumb must precede SpaceNavButtons");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-2d board card chrome `---` divider stripped",
+            !/```\n\n---\n\n```dataviewjs/.test(card1),
+            "P0a (running after P0b stamped the type) must strip the board card's chrome `---`");
+
+        // === P1: hub loses the ProjectWorkstreamManager block; content divider kept ===
+        const hub1 = readVault(HUB);
+        ok("HC-V01790-SEED-MIGRATE-CHROME-3 hub loses ProjectWorkstreamManager block",
+            !/ProjectWorkstreamManager/.test(hub1),
+            "the type:project hub must lose its ProjectWorkstreamManager block");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-3b hub chrome `---` dividers gone",
+            !/```\n---\n/.test(hub1),
+            "the hub's chrome-hugging `---` dividers must be removed by P0a");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-3c hub `## Mentions` content divider preserved",
+            /```\n\n---\n\n## Mentions/.test(hub1),
+            "the `---` before the `## Mentions` heading is a content boundary and must survive");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-3d hub has no doubled blank gap",
+            !/\n\n\n/.test(hub1),
+            "the WSM-removal + divider-strip must not leave a doubled blank");
+
+        // === .sauce-backup snapshots exist ===
+        ok("HC-V01790-SEED-MIGRATE-CHROME-4 .sauce-backup snapshot for board card",
+            backupExists(/^Migrate Stage\.md$/),
+            "a pre-heal backup of the board card must exist");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-4b .sauce-backup snapshot for hub",
+            backupExists(/^Chrome Demo\.md$/),
+            "a pre-heal backup of the hub must exist");
+
+        // === history recorded a healed event for each heal ===
+        ok("HC-V01790-SEED-MIGRATE-CHROME-5 history records all three heal steps",
+            history.some((h) => h.step === "board_card_breadcrumb_heal" && h.action === "healed") &&
+            history.some((h) => h.step === "project_chrome_divider_heal" && h.action === "healed") &&
+            history.some((h) => h.step === "project_hub_workstream_removal_heal" && h.action === "healed"),
+            "each heal must record a `healed` history event");
+
+        // ----- Pass 2 — idempotency: a second run touches nothing. -----
+        const mapAfter = readVault(MAP);
+        const cardAfter = readVault(CARD);
+        const hubAfter = readVault(HUB);
+        await applyBoardCardBreadcrumbHeal(tp, manifest, variables, [], git);
+        await applyProjectChromeDividerHeal(tp, manifest, variables, [], git);
+        await applyProjectHubWorkstreamRemovalHeal(tp, manifest, variables, [], git);
+        ok("HC-V01790-SEED-MIGRATE-CHROME-6 Map byte-identical after 2nd pass",
+            readVault(MAP) === mapAfter, "second pass must not re-touch the Map");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-6b board card byte-identical after 2nd pass",
+            readVault(CARD) === cardAfter, "second pass must not re-touch the board card");
+        ok("HC-V01790-SEED-MIGRATE-CHROME-6c hub byte-identical after 2nd pass",
+            readVault(HUB) === hubAfter, "second pass must not re-touch the hub");
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${root}`);
+        } else {
+            try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -3024,6 +3201,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-TE-LP-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-TE-LP-FAMILY");
+    })
+    .then(() => runProjectChromeMigrateFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V01790-SEED-MIGRATE-CHROME-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01790-SEED-MIGRATE-CHROME-FAMILY");
     })
     .finally(() => {
         console.log("");

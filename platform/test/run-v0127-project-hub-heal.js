@@ -634,6 +634,298 @@ async function run() {
       "the Projects.md template must not carry a `## All Projects` heading");
   }
 
+  // ===== WS9 P0a — applyProjectChromeDividerHeal (CHR-DIV-*) =====
+  // Strips legacy literal `---` chrome dividers BETWEEN consecutive customjs-guard
+  // chrome blocks + collapses doubled blank gaps; preserves content-boundary `---`.
+  {
+    const strip = install._stripProjectChromeDividers;
+    const applyHeal = install.applyProjectChromeDividerHeal;
+    ok("CHR-DIV.exports", typeof strip === "function" && typeof applyHeal === "function",
+      "install must export _stripProjectChromeDividers + applyProjectChromeDividerHeal");
+
+    const G = (c) => '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + c + '" });\n```';
+
+    // U1 — a `---` HUGGING a chrome fence, between two chrome blocks, is removed
+    // (Project Map real shape: ProjectNavButtons```\n---\n\nProjectWorkstreams).
+    {
+      const map = ["---", "type: map", "---", "", G("SpaceNavButtons"), "", G("ProjectNavButtons"), "---", "", G("ProjectWorkstreams"), ""].join("\n");
+      const r = strip(map);
+      ok("CHR-DIV-U1 hugging chrome-chrome --- removed",
+        r.changed === true && !/```\n---\n/.test(r.body) && r.body.includes('ProjectWorkstreams'),
+        "the `---` hugging the ProjectNavButtons fence between two chrome blocks must be dropped");
+    }
+    // U2 — a blank-shielded `---` between two chrome blocks is removed (Links Hub).
+    {
+      const links = ["---", "type: links-hub", "---", "", G("ProjectNavButtons"), "", "---", "", G("ProjectLinksManager"), ""].join("\n");
+      const want = ["---", "type: links-hub", "---", "", G("ProjectNavButtons"), "", G("ProjectLinksManager"), ""].join("\n");
+      const r = strip(links);
+      ok("CHR-DIV-U2 blank-shielded chrome-chrome --- removed",
+        r.changed === true && r.body === want,
+        "a blank-shielded `---` between two chrome blocks collapses to a single blank");
+    }
+    // U3 — a `---` between a chrome block and an `## H2` heading is PRESERVED
+    // (Databricks hub `## Mentions` boundary — content divider, not chrome).
+    {
+      const hub = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", "---", "", "## Mentions", "", "body", ""].join("\n");
+      const r = strip(hub);
+      ok("CHR-DIV-U3 content-boundary --- preserved",
+        r.changed === false && /```\n\n---\n\n## Mentions/.test(r.body),
+        "a `---` between a chrome block and a `## H2` heading is a content boundary and must survive");
+    }
+    // U4 — a `---` between a chrome block and a user callout is PRESERVED.
+    {
+      const callout = ["---", "type: project", "---", "", G("BacklinkPanel"), "", "---", "", "> [!note] mine", ""].join("\n");
+      const r = strip(callout);
+      ok("CHR-DIV-U4 callout-boundary --- preserved",
+        r.changed === false && r.body.includes("\n---\n\n> [!note]"),
+        "a `---` before a user callout must survive");
+    }
+    // U5 — a trailing chrome `---` at EOF (orphaned chrome, Kanban Card) is removed.
+    {
+      const kanban = ["---", "type: task-hub", "---", "", G("ProjectNavButtons"), "", "---", ""].join("\n");
+      const want = ["---", "type: task-hub", "---", "", G("ProjectNavButtons"), ""].join("\n");
+      const r = strip(kanban);
+      ok("CHR-DIV-U5 trailing chrome --- at EOF removed",
+        r.changed === true && r.body === want,
+        "a `---` after the last chrome block with no content below is orphaned chrome and must be dropped");
+    }
+    // U6 — an already-clean note (single-blank-separated chrome, no `---`) is a no-op.
+    {
+      const clean = ["---", "type: map", "---", "", G("SpaceNavButtons"), "", G("ProjectNavButtons"), ""].join("\n");
+      const r = strip(clean);
+      ok("CHR-DIV-U6 clean note untouched", r.changed === false && r.body === clean,
+        "a note already using single-blank chrome separators must be left byte-identical");
+    }
+    // U7 — the leading frontmatter `---`/`---` YAML fence is NEVER touched.
+    {
+      const fmOnly = ["---", "type: project", "status: active", "---", "", G("SpaceNavButtons"), ""].join("\n");
+      const r = strip(fmOnly);
+      ok("CHR-DIV-U7 frontmatter fence untouched", r.changed === false && r.body === fmOnly,
+        "the YAML frontmatter `---` fences must never be treated as chrome dividers");
+    }
+    // U8 — idempotent: a second pass over a healed body is a no-op.
+    {
+      const map = ["---", "type: map", "---", "", G("ProjectNavButtons"), "---", "", G("ProjectWorkstreams"), ""].join("\n");
+      const once = strip(map);
+      const twice = strip(once.body);
+      ok("CHR-DIV-U8 idempotent", twice.changed === false && twice.body === once.body,
+        "second pass over a healed body must be a no-op");
+    }
+    // I1 — integration: a nested map note is healed, backed up, idempotent; a
+    // NON-project-type note in spice/projects is skipped.
+    {
+      const mapPath = "spice/projects/demo/Project Map.md";
+      const mapBody = ["---", "type: map", "---", "", G("ProjectNavButtons"), "---", "", G("ProjectWorkstreams"), ""].join("\n");
+      const alien = "spice/projects/demo/random.md";
+      const alienBody = ["---", "type: something-else", "---", "", G("SpaceNavButtons"), "", "---", "", G("ProjectNavButtons"), ""].join("\n");
+      const adapter = makeAdapter({ [mapPath]: mapBody, [alien]: alienBody });
+      const history = [];
+      await applyHeal(makeTp(adapter), {}, {}, history, GIT);
+      const healedMap = adapter._files.get(mapPath);
+      ok("CHR-DIV-I1a map healed", healedMap && !/```\n---\n/.test(healedMap),
+        "the map note's hugging chrome `---` should be gone");
+      ok("CHR-DIV-I1b alien type skipped", adapter._files.get(alien) === alienBody,
+        "a note whose type is not in PROJECT_CHROME_TYPES must be left byte-identical");
+      const backedUp = [...adapter._files.keys()].some((k) => k.startsWith(".sauce-backup/") && k.endsWith("/" + mapPath));
+      ok("CHR-DIV-I1c backup written", backedUp, "a .sauce-backup snapshot of the pre-heal map must exist");
+      ok("CHR-DIV-I1d heal history event",
+        history.some((h) => h.step === "project_chrome_divider_heal" && h.action === "healed"),
+        "a healed history event must be recorded");
+      const after1 = adapter._files.get(mapPath);
+      await applyHeal(makeTp(adapter), {}, {}, [], GIT);
+      ok("CHR-DIV-I1e idempotent second install", adapter._files.get(mapPath) === after1,
+        "a second install pass must not re-touch the healed map");
+    }
+    // I2 — empty spice/projects/ runs without throwing.
+    {
+      const adapter = makeAdapter({});
+      let threw = false;
+      try { await applyHeal(makeTp(adapter), {}, {}, [], GIT); } catch (_e) { threw = true; }
+      ok("CHR-DIV-I2 no-throw on empty vault", !threw, "empty spice/projects/ must not throw");
+    }
+  }
+
+  // ===== WS9 P0b — applyBoardCardBreadcrumbHeal (BC-BC-*) =====
+  // Stamps `type` + injects a leading Breadcrumb on promoted board-card notes
+  // (basename === parent folder, under /tasks/).
+  {
+    const inject = install._injectBoardCardBreadcrumb;
+    const applyHeal = install.applyBoardCardBreadcrumbHeal;
+    ok("BC-BC.exports", typeof inject === "function" && typeof applyHeal === "function",
+      "install must export _injectBoardCardBreadcrumb + applyBoardCardBreadcrumbHeal");
+
+    const G = (c) => '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + c + '" });\n```';
+
+    // U1 — real legacy card: FM without type, no breadcrumb, SpaceNavButtons first.
+    {
+      const legacy = ["---", "created_at: 2026-05-19", "tags:", "  - kanban-card", "status: completed", "---", "", G("SpaceNavButtons"), "", "---", "", G("ProjectNavButtons"), ""].join("\n");
+      const r = inject(legacy, "task-hub");
+      ok("BC-BC-U1a type: task-hub added as first FM line",
+        r.changed === true && /^---\ntype: task-hub\ncreated_at:/.test(r.body),
+        "`type: task-hub` must be inserted as the first frontmatter line");
+      ok("BC-BC-U1b breadcrumb is the first rendered block",
+        /^---[\s\S]*?\n---\n\n```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "Breadcrumb" \}\);/.test(r.body),
+        "a Breadcrumb block must be the first rendered block");
+      ok("BC-BC-U1c breadcrumb before nav",
+        r.body.indexOf("Breadcrumb") < r.body.indexOf("SpaceNavButtons"),
+        "the Breadcrumb must precede SpaceNavButtons");
+    }
+    // U2 — existing `type:` is NEVER overwritten.
+    {
+      const withType = ["---", "type: task-board-card", "created_at: x", "---", "", G("SpaceNavButtons"), ""].join("\n");
+      const r = inject(withType, "task-hub");
+      ok("BC-BC-U2 existing type preserved",
+        !/type: task-hub/.test(r.body) && /type: task-board-card/.test(r.body) && /Breadcrumb/.test(r.body),
+        "an existing frontmatter type must be preserved; only the breadcrumb is added");
+    }
+    // U3 — no frontmatter at all → a minimal FM block is created.
+    {
+      const noFm = [G("SpaceNavButtons"), "", "body"].join("\n");
+      const r = inject(noFm, "task-hub");
+      ok("BC-BC-U3 minimal FM created",
+        r.changed === true && /^---\ntype: task-hub\n---/.test(r.body) && /Breadcrumb/.test(r.body),
+        "a note with no frontmatter must gain a minimal `---\\ntype: task-hub\\n---` block");
+    }
+    // U4 — idempotent: breadcrumb + type already present → total no-op.
+    {
+      const done = ["---", "type: task-hub", "---", "", G("Breadcrumb"), "", G("SpaceNavButtons"), ""].join("\n");
+      const r = inject(done, "task-hub");
+      ok("BC-BC-U4 idempotent no-op", r.changed === false && r.body === done,
+        "a note that already has a Breadcrumb + type must be untouched");
+    }
+    // U5 — breadcrumb present but no type → only the type is added (no 2nd breadcrumb).
+    {
+      const bcNoType = ["---", "created_at: x", "---", "", G("Breadcrumb"), "", G("SpaceNavButtons"), ""].join("\n");
+      const r = inject(bcNoType, "task-hub");
+      const bcCount = (r.body.match(/class: "Breadcrumb"/g) || []).length;
+      ok("BC-BC-U5 adds type only when breadcrumb already present",
+        r.changed === true && /type: task-hub/.test(r.body) && bcCount === 1,
+        "the heal must add the type without injecting a second Breadcrumb");
+    }
+    // I1 — integration: only promoted board cards are healed; hubs/todos/leaf
+    // notes are skipped; the deeper board/<Card>/<Card>.md gets task-board-card.
+    {
+      const legacyCard = ["---", "tags:", "  - kanban-card", "---", "", G("SpaceNavButtons"), "", "---", "", G("ProjectNavButtons"), ""].join("\n");
+      const hub = ["---", "type: project", "---", "", G("SpaceNavButtons"), ""].join("\n");
+      const todo = ["---", "type: project-todo", "---", "", G("SpaceNavButtons"), ""].join("\n");
+      const adapter = makeAdapter({
+        "spice/projects/demo/tasks/Foo/Foo.md": legacyCard,             // promoted → task-hub
+        "spice/projects/demo/tasks/Foo/board/Bar/Bar.md": legacyCard,   // deeper   → task-board-card
+        "spice/projects/demo/tasks/Foo/Notes.md": legacyCard,          // basename!==parent → skip
+        "spice/projects/demo/Demo.md": hub,                            // hub → skip
+        "spice/projects/demo/Demo To-Do.md": todo,                     // todo → skip
+      });
+      const history = [];
+      await applyHeal(makeTp(adapter), {}, {}, history, GIT);
+      const foo = adapter._files.get("spice/projects/demo/tasks/Foo/Foo.md");
+      const bar = adapter._files.get("spice/projects/demo/tasks/Foo/board/Bar/Bar.md");
+      ok("BC-BC-I1a promoted card → type:task-hub + Breadcrumb",
+        /type: task-hub/.test(foo) && /class: "Breadcrumb"/.test(foo), "Foo.md must become a task-hub with a breadcrumb");
+      ok("BC-BC-I1b deeper board card → type:task-board-card + Breadcrumb",
+        /type: task-board-card/.test(bar) && /class: "Breadcrumb"/.test(bar), "board/Bar/Bar.md must become a task-board-card with a breadcrumb");
+      ok("BC-BC-I1c non-promoted leaf note skipped",
+        adapter._files.get("spice/projects/demo/tasks/Foo/Notes.md") === legacyCard, "Notes.md (basename != parent) must be untouched");
+      ok("BC-BC-I1d hub skipped", adapter._files.get("spice/projects/demo/Demo.md") === hub, "the project hub must be untouched");
+      ok("BC-BC-I1e todo skipped", adapter._files.get("spice/projects/demo/Demo To-Do.md") === todo, "the project to-do must be untouched");
+      ok("BC-BC-I1f backup written",
+        [...adapter._files.keys()].some((k) => k.startsWith(".sauce-backup/") && k.endsWith("/Foo.md")),
+        "a .sauce-backup snapshot of the pre-heal card must exist");
+      ok("BC-BC-I1g heal history event",
+        history.some((h) => h.step === "board_card_breadcrumb_heal" && h.action === "healed"), "a healed history event must be recorded");
+      const fooAfter = adapter._files.get("spice/projects/demo/tasks/Foo/Foo.md");
+      await applyHeal(makeTp(adapter), {}, {}, [], GIT);
+      ok("BC-BC-I1h idempotent second install", adapter._files.get("spice/projects/demo/tasks/Foo/Foo.md") === fooAfter,
+        "a second install pass must not re-touch the healed card");
+    }
+    // I2 — empty spice/projects/ runs without throwing.
+    {
+      const adapter = makeAdapter({});
+      let threw = false;
+      try { await applyHeal(makeTp(adapter), {}, {}, [], GIT); } catch (_e) { threw = true; }
+      ok("BC-BC-I2 no-throw on empty vault", !threw, "empty spice/projects/ must not throw");
+    }
+  }
+
+  // ===== WS9 P1 — applyProjectHubWorkstreamRemovalHeal (WSM-RM-*) =====
+  // Removes the redundant ProjectWorkstreamManager block from existing type:project
+  // hubs (workstream management now lives on the Map).
+  {
+    const remove = install._removeWorkstreamManagerBlock;
+    const applyHeal = install.applyProjectHubWorkstreamRemovalHeal;
+    ok("WSM-RM.exports", typeof remove === "function" && typeof applyHeal === "function",
+      "install must export _removeWorkstreamManagerBlock + applyProjectHubWorkstreamRemovalHeal");
+
+    const G = (c) => '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + c + '" });\n```';
+
+    // U1 — the whole ProjectWorkstreamManager fence is removed; gap collapses to
+    // a single blank; no doubled blank remains (fresh v0.109 shape).
+    {
+      const fresh = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", G("ProjectWorkstreamManager"), "", G("ProjectLinksPanel"), ""].join("\n");
+      const want = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", G("ProjectLinksPanel"), ""].join("\n");
+      const r = remove(fresh);
+      ok("WSM-RM-U1 block removed + gap collapsed",
+        r.changed === true && r.body === want && !/ProjectWorkstreamManager/.test(r.body) && !/\n\n\n/.test(r.body),
+        "the ProjectWorkstreamManager block must be removed and the gap collapsed to one blank");
+    }
+    // U2 — after a P0a pass on the Databricks shape, P1 removes the block and
+    // preserves the `---` before `## Mentions`.
+    {
+      const hub = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", "---", "", G("ProjectWorkstreamManager"), "", "---", "", "## Mentions", "", "body", ""].join("\n");
+      const afterP0a = install._stripProjectChromeDividers(hub).body;
+      const r = remove(afterP0a);
+      ok("WSM-RM-U2 P0a→P1 chain clean",
+        r.changed === true && !/ProjectWorkstreamManager/.test(r.body) && /```\n\n---\n\n## Mentions/.test(r.body) && !/\n\n\n/.test(r.body),
+        "after P0a strips chrome dividers, P1 must remove the WSM block yet keep the `## Mentions` content divider");
+    }
+    // U3 — no-op when the block is absent.
+    {
+      const noWsm = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", G("ProjectLinksPanel"), ""].join("\n");
+      const r = remove(noWsm);
+      ok("WSM-RM-U3 no-op when absent", r.changed === false && r.body === noWsm,
+        "a hub without a ProjectWorkstreamManager block must be untouched");
+    }
+    // U4 — idempotent: a second pass over a healed body is a no-op.
+    {
+      const fresh = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", G("ProjectWorkstreamManager"), "", G("ProjectLinksPanel"), ""].join("\n");
+      const once = remove(fresh);
+      const twice = remove(once.body);
+      ok("WSM-RM-U4 idempotent", twice.changed === false && twice.body === once.body,
+        "second pass over a healed hub must be a no-op");
+    }
+    // I1 — integration: the type:project hub is healed, backed up, idempotent; a
+    // non-hub note in the same project dir is skipped.
+    {
+      const hubPath = "spice/projects/demo/Demo.md";
+      const hubBody = ["---", "type: project", "---", "", G("ProjectMeetingsPanel"), "", G("ProjectWorkstreamManager"), "", G("ProjectLinksPanel"), ""].join("\n");
+      const mapPath = "spice/projects/demo/Project Map.md";
+      const mapBody = ["---", "type: map", "---", "", G("ProjectNavButtons"), "", G("ProjectWorkstreamManager"), ""].join("\n");
+      const adapter = makeAdapter({ [hubPath]: hubBody, [mapPath]: mapBody });
+      const history = [];
+      await applyHeal(makeTp(adapter), {}, {}, history, GIT);
+      ok("WSM-RM-I1a hub block removed", !/ProjectWorkstreamManager/.test(adapter._files.get(hubPath)),
+        "the type:project hub must lose its ProjectWorkstreamManager block");
+      ok("WSM-RM-I1b map (type:map) untouched", adapter._files.get(mapPath) === mapBody,
+        "the Map note keeps its ProjectWorkstreamManager block — only type:project hubs are healed");
+      ok("WSM-RM-I1c backup written",
+        [...adapter._files.keys()].some((k) => k.startsWith(".sauce-backup/") && k.endsWith("/" + hubPath)),
+        "a .sauce-backup snapshot of the pre-heal hub must exist");
+      ok("WSM-RM-I1d heal history event",
+        history.some((h) => h.step === "project_hub_workstream_removal_heal" && h.action === "healed"),
+        "a healed history event must be recorded");
+      const hubAfter = adapter._files.get(hubPath);
+      await applyHeal(makeTp(adapter), {}, {}, [], GIT);
+      ok("WSM-RM-I1e idempotent second install", adapter._files.get(hubPath) === hubAfter,
+        "a second install pass must not re-touch the healed hub");
+    }
+    // I2 — empty spice/projects/ runs without throwing.
+    {
+      const adapter = makeAdapter({});
+      let threw = false;
+      try { await applyHeal(makeTp(adapter), {}, {}, [], GIT); } catch (_e) { threw = true; }
+      ok("WSM-RM-I2 no-throw on empty vault", !threw, "empty spice/projects/ must not throw");
+    }
+  }
+
   console.log("");
   if (fail === 0) {
     console.log(`PASS ${pass}/${pass + fail}`);
