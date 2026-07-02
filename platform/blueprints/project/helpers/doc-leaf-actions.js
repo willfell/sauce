@@ -58,6 +58,15 @@ class DocLeafActions {
     if (!c || typeof c.createEl !== "function") return;
     if (c.closest && c.closest(".markdown-embed")) return;
 
+    // Leading hairline via the canonical SectionLabel.divider primitive: Doc
+    // Note.md no longer carries a literal `---` between the nav row and this
+    // action bar (helpers own dividers now), so render our own leading hairline
+    // to stay visually separated from the ProjectNavButtons row above. Guarded
+    // so a cold-load where section-label hasn't registered yet can't throw.
+    if (customJS && customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+      customJS.SectionLabel.divider(c);
+    }
+
     const moveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 11 15 14"/></svg>`;
 
     const row = c.createEl("div");
