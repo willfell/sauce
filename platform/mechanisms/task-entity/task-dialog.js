@@ -282,8 +282,8 @@ class TaskDialog {
             background: var(--background-primary, #1c1c1c);
             color: var(--text-normal, #ddd);
             border: 1px solid var(--background-modifier-border, #444);
-            border-radius: 10px; padding: 18px 20px;
-            width: min(440px, 92vw); max-height: 80vh; overflow: auto;
+            border-radius: 10px; padding: 18px 20px; box-sizing: border-box;
+            width: min(440px, 92vw); max-height: 80vh; overflow-y: auto; overflow-x: hidden;
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
         `;
         const closeOverlay = () => {
@@ -298,7 +298,7 @@ class TaskDialog {
         heading.style.cssText = 'margin: 0 0 14px;';
 
         const host = modal.createDiv();
-        const fieldCss = 'width:100%; box-sizing:border-box; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
+        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
         const label = (text) => {
             const el = host.createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
@@ -330,10 +330,10 @@ class TaskDialog {
         // Priority chip row
         label('Priority');
         const chipRow = host.createDiv();
-        chipRow.style.cssText = 'display:flex; gap:4px; margin-top:4px;';
+        chipRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;';
         for (const p of ['', 'low', 'medium', 'high', 'highest']) {
             const c = chipRow.createEl('div', { text: p || 'none' });
-            c.style.cssText = 'flex:1; text-align:center; padding:4px 6px; border:1px solid var(--background-modifier-border,#444); border-radius:4px; font-size:11px; cursor:pointer;';
+            c.style.cssText = 'flex:1; min-width:0; box-sizing:border-box; text-align:center; padding:4px 6px; border:1px solid var(--background-modifier-border,#444); border-radius:4px; font-size:11px; cursor:pointer;';
             if (state.priority === p) c.style.background = 'var(--interactive-accent, #6a6abf)';
             c.onclick = () => {
                 state.priority = p;
@@ -396,10 +396,20 @@ class TaskDialog {
             ? 'padding:6px 14px; border-radius:4px; border:1px solid var(--interactive-accent,#6a6abf); background:var(--interactive-accent,#6a6abf); color:white; cursor:pointer;'
             : 'padding:6px 14px; border-radius:4px; border:1px solid var(--background-modifier-border,#444); background:var(--background-secondary,#2a2a2a); color:var(--text-normal,#ddd); cursor:pointer;';
 
-        // Done + Delete (edit mode only) sit on the LEFT.
+        // Open note + Done + Delete (edit mode only) sit on the LEFT.
         if (editPath) {
-            const spacer = footer.createDiv();
-            spacer.style.cssText = 'flex:1;';
+            const openBtn = footer.createEl('button', { text: 'Open note' });
+            openBtn.style.cssText = btnCss(false);
+            openBtn.onclick = async () => {
+                try {
+                    if (app.workspace && typeof app.workspace.getLeaf === 'function' && editFile) {
+                        await app.workspace.getLeaf(false).openFile(editFile);
+                    } else if (app.workspace && typeof app.workspace.openLinkText === 'function') {
+                        await app.workspace.openLinkText(editPath, '', false);
+                    }
+                    closeOverlay();
+                } catch (e) { try { new Notice('Could not open note: ' + (e && (e.message || e)), 6000); } catch (_e) {} }
+            };
             const doneBtn = footer.createEl('button', { text: '✓ Done' });
             doneBtn.style.cssText = btnCss(false);
             doneBtn.onclick = async () => {
@@ -412,6 +422,8 @@ class TaskDialog {
                 try { await this._markDeleted(app, editFile); closeOverlay(); }
                 catch (e) { try { new Notice('Delete failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
+            const spacer = footer.createDiv();
+            spacer.style.cssText = 'flex:1;';
         }
 
         const cancelBtn = footer.createEl('button', { text: 'Cancel' });
