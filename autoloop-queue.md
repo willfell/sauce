@@ -56,7 +56,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint cowork axis widget_render: 9 uncovered
-  status: proposed
+  status: done
+  note: run-cowork-render-guards.js exercises all 9 cowork widgets' render() through the cold-load path (empty dv.pages) in normal + .markdown-embed contexts, asserting no-throw. Teeth-verified. Rubric still scores 0/9 until coverage-rubric.js credits this harness + matrix regen (tracked separately).
 
 - id: cov-blueprint-to-do-widget-render
   title: Add coverage for to-do widget_render (0/7)
