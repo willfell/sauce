@@ -197,11 +197,41 @@ function checkManifestDeclaration(content, opts) {
     return violations;
 }
 
+// Rule 4: no literal `---` chrome divider. Helpers own dividers via
+// SectionLabel.divider(); a bare thematic-break between/adjacent to chrome
+// dataviewjs blocks is the outlawed pattern.
+function checkNoLiteralChromeDivider(content) {
+    const violations = [];
+    if (isKanbanBoard(content)) return violations;
+    const lines = content.split('\n');
+    let fmEnd = -1;
+    if (lines[0] && lines[0].trim() === '---') {
+        for (let j = 1; j < lines.length; j++) { if (lines[j].trim() === '---') { fmEnd = j; break; } }
+    }
+    let fenceDepth = 0;
+    const isChrome = (s) => typeof s === 'string' && s.includes('class: "') && s.includes('customjs-guard');
+    for (let i = 0; i < lines.length; i++) {
+        if (i <= fmEnd) continue;
+        const line = lines[i];
+        if (/^\s*(```|~~~)/.test(line)) { fenceDepth = fenceDepth === 0 ? 1 : 0; continue; }
+        if (fenceDepth !== 0) continue;
+        if (!/^-{3,}\s*$/.test(line)) continue;
+        let up = i - 1; while (up >= 0 && lines[up].trim() === '') up--;
+        let dn = i + 1; while (dn < lines.length && lines[dn].trim() === '') dn++;
+        const near = [lines[up - 1], lines[up], lines[dn], lines[dn + 1]].filter(Boolean);
+        if (near.some(isChrome) || (lines[up] && lines[up].trim() === '```') || (lines[dn] && lines[dn].trim().startsWith('```'))) {
+            violations.push({ line: i + 1, message: 'literal `---` chrome divider not allowed — helpers own dividers via SectionLabel.divider().' });
+        }
+    }
+    return violations;
+}
+
 function lintContent(content, opts) {
     return [
         ...checkNoHeadings(content),
         ...checkBreadcrumbFirst(content, opts),
         ...checkManifestDeclaration(content, opts),
+        ...checkNoLiteralChromeDivider(content),
     ];
 }
 
