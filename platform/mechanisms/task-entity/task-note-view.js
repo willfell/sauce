@@ -386,13 +386,23 @@ class TaskNoteView {
                 'background:var(--background-secondary)',
             ].join(';') + ';';
 
-            // ----- Header: status pill + title -----
+            // ----- Header: title LEFT, status pill RIGHT (single flex row) -----
+            // Title on the left (takes the row, wraps within its own column), pill
+            // pinned top-right (never shrinks). align-items:flex-start keeps the pill
+            // at the top of the first title line while a long title wraps below it.
             const header = card.createEl('div');
-            header.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+            header.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start; gap:12px;';
 
             const status = task.status.trim().toLowerCase();
+
+            // TITLE first (left column).
+            const titleEl = header.createEl('div', { text: task.title || '(untitled)' });
+            titleEl.style.cssText = 'flex:1 1 auto; min-width:0; font-size:1.3em; font-weight:700; line-height:1.25; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word; text-align:left;';
+
+            // PILL second (right column) — sits on the right, never shrinks. The
+            // color-coding is preserved (OPEN accent / DONE green / DELETED muted).
             const pill = header.createEl('span', { text: this._statusLabel(task.status).toUpperCase() });
-            const pillBase = 'align-self:flex-start; font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; padding:3px 10px; border-radius:999px; box-sizing:border-box;';
+            const pillBase = 'flex-shrink:0; font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; padding:3px 10px; border-radius:999px; box-sizing:border-box; white-space:nowrap;';
             if (status === 'done') {
                 pill.style.cssText = pillBase + 'background:var(--color-green, #4c9a5a); color:var(--text-on-accent, #fff);';
             } else if (status === 'deleted') {
@@ -400,9 +410,6 @@ class TaskNoteView {
             } else {
                 pill.style.cssText = pillBase + 'background:var(--interactive-accent, #6a6abf); color:var(--text-on-accent, #fff);';
             }
-
-            const titleEl = header.createEl('div', { text: task.title || '(untitled)' });
-            titleEl.style.cssText = 'font-size:1.3em; font-weight:700; line-height:1.25; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
 
             // ----- Divider -----
             const drawDivider = () => {
@@ -446,7 +453,14 @@ class TaskNoteView {
             const createdHuman = task.created_at ? TaskNoteView._humanDate(task.created_at, todayStr) : { text: '' };
             const hasCreated = !!createdHuman.text;
 
-            const anyDetails = hasScheduled || hasDue || !!prioMeta || hasProject || hasCreated;
+            // FIX 6 — DETAILS is gated on _fieldRows(task): the SINGLE source of truth
+            // for what the section contains (Scheduled / Due / Priority / Project).
+            // When _fieldRows is empty there are no set detail fields, so we render
+            // NEITHER the DETAILS label NOR an empty grid — the card goes straight
+            // from the header to SOURCE / LINKS / Edit. (Created is a trailing muted
+            // stamp shown INSIDE the section when present; it never resurrects an
+            // otherwise-empty DETAILS block.)
+            const anyDetails = TaskNoteView._fieldRows(task).length > 0;
             if (anyDetails) {
                 drawDivider();
 
