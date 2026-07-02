@@ -104,7 +104,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint scratch axis customjs_behavioral: 3 uncovered
-  status: proposed
+  status: done
+  note: NEW run-scratch-migrate.js covers the 2 genuinely-behavioral of the 3 uncovered methods — ScratchDayMigrate.migrate (frontmatter day-value repair from path segment/filename, incl. Date/numeric/missing cases + guards) and ScratchDayMigrateInit.invoke (happy-path + guard branches, no-throw; stubbed the 30s _waitForDataview poll via app.plugins.plugins.dataview.api). The 3rd (render) is already covered by run-scratch-render-guards.js #212. Teeth-verified (repair mutation broke SM-2/3/4).
 
 - id: cov-blueprint-to-do-installer-migration
   title: Add coverage for to-do installer_migration (3/6)
