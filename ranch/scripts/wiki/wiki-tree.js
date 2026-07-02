@@ -29,6 +29,14 @@ class WikiTree {
             },
         });
 
+        // Match the search bar's top gap to the wiki buttons↔divider gap (12px) so the
+        // spacing above the search is IDENTICAL to the spacing around the wiki buttons.
+        // (The shared doc-search strip ships a 2px top margin; wiki wants 12px.)
+        try {
+            const strip = dv.container.querySelector(".doc-search-strip");
+            if (strip && strip.style) strip.style.marginTop = "12px";
+        } catch (_e) { /* cosmetic only */ }
+
         this._renderResults(dv, ctx, scopePath, cur);
     }
 
@@ -39,30 +47,12 @@ class WikiTree {
         const rawPages = dv.pages('"' + scopePath + '"');
         const pages = rawPages.array ? rawPages.array() : Array.from(rawPages);
 
-        // Sub-sections
+        // Sub-sections — rows, sorted by last-edited (default) with a Recent | A–Z toggle.
         const subs = this._immediateChildFolders(scopePath, pages);
         if (subs.length) {
             customJS.SectionLabel.render(proxyDv, { text: "Sections" });
             const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-            customJS.BeaconCards.render(proxyDv, {
-                pages: subs,
-                // Section cards are full-width ROWS (not a grid): title on the left,
-                // metadata (sub-sections · docs · last edited) on the right.
-                layout: "row",
-                title: (s) => s.title,
-                icon: () => folderIcon,
-                // BeaconCards navigates via `target` (→ openLinkText), NOT `link`.
-                // Section entries are plain objects (no .file.path), so without an
-                // explicit target the card had no destination → clicking did nothing.
-                target: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
-                meta: (s) => {
-                    const parts = [];
-                    if (s.subSectionCount) parts.push(s.subSectionCount + " section" + (s.subSectionCount === 1 ? "" : "s"));
-                    parts.push(s.pageCount + " doc" + (s.pageCount === 1 ? "" : "s"));
-                    if (s.maxMtime && window.moment) parts.push("edited " + window.moment(s.maxMtime).fromNow());
-                    return parts.join(" · ");
-                },
-            });
+            this._renderSectionCards(dv, proxyDv, subs, folderIcon);
         }
 
         // Pages in this folder
@@ -150,6 +140,68 @@ class WikiTree {
                 return p;
             },
         };
+    }
+
+    // Section cards as full-width ROWS (title left, sub-sections · docs · edited right),
+    // sorted by LAST-EDITED by default with a "Recent | A–Z" toggle. The chosen mode
+    // lives on dv.container so it survives search-driven re-renders; toggling re-sorts
+    // only these cards. This is the single Sections renderer, so the toggle is
+    // consistent on the hub AND every section / sub-section note.
+    _renderSectionCards(dv, proxyDv, subs, folderIcon) {
+        const host = proxyDv.container;
+        const meta = (s) => {
+            const parts = [];
+            if (s.subSectionCount) parts.push(s.subSectionCount + " section" + (s.subSectionCount === 1 ? "" : "s"));
+            parts.push(s.pageCount + " doc" + (s.pageCount === 1 ? "" : "s"));
+            if (s.maxMtime && window.moment) parts.push("edited " + window.moment(s.maxMtime).fromNow());
+            return parts.join(" · ");
+        };
+        const renderCards = (container, ordered) => {
+            const cdv = this._makeProxyDv(dv, container);
+            customJS.BeaconCards.render(cdv, {
+                pages: ordered,
+                layout: "row",
+                sort: () => 0,   // keep OUR order (synthetic pages have no file.mtime for BeaconCards' default sort)
+                title: (s) => s.title,
+                icon: () => folderIcon,
+                // BeaconCards navigates via `target` (→ openLinkText), NOT `link`. Section
+                // entries are plain objects (no .file.path) → need an explicit target.
+                target: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
+                meta,
+            });
+        };
+
+        // A single section → no toggle, just the card.
+        if (subs.length < 2) { renderCards(host, subs); return; }
+
+        const sortRecent = (list) => [...list].sort((a, b) => (b.maxMtime || 0) - (a.maxMtime || 0));
+        const sortAlpha  = (list) => [...list].sort((a, b) => String(a.title).localeCompare(String(b.title)));
+
+        const toggle = host.createEl("div");
+        toggle.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; margin: -2px 0 0 0;";
+        const cardsWrap = host.createEl("div");
+
+        const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
+        const pills = {};
+        const getMode = () => (dv.container.__wikiSectionSort === "alpha" ? "alpha" : "recent");
+        const paint = () => {
+            const mode = getMode();
+            for (const m of modes) {
+                const active = m.key === mode;
+                pills[m.key].style.cssText = "cursor: pointer; font-size: 0.72em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--background-modifier-border); " +
+                    (active ? "background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent);"
+                            : "background: transparent; color: var(--text-muted);");
+            }
+            cardsWrap.empty();
+            renderCards(cardsWrap, mode === "alpha" ? sortAlpha(subs) : sortRecent(subs));
+        };
+        for (const m of modes) {
+            const pill = toggle.createEl("span");
+            pill.textContent = m.label;
+            pill.onclick = () => { dv.container.__wikiSectionSort = m.key; paint(); };
+            pills[m.key] = pill;
+        }
+        paint();
     }
 
     // Aggregates each immediate child section: pageCount (docs, recursive),

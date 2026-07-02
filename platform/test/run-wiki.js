@@ -374,10 +374,11 @@ const pages = [
   const bcSrc   = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'breadcrumb.js'), 'utf8');
   const mobilizes = (s) => /_mobilize\(/.test(s) && /minWidth\s*=/.test(s) && /fontSize\s*=/.test(s);
   const hasHr = (s) => /createEl\("hr"\)/.test(s);
-  // Leaf switched from _mobilize (2-up wrap) to _styleLeafBtn (one row, Move at right).
-  const stylesLeaf = (s) => /_styleLeafBtn\(/.test(s) && /marginLeft\s*=\s*"auto"/.test(s) && /fontSize\s*=/.test(s);
+  // Leaf uses _styleLeafBtn — buttons stretch to fill a centered row (flex:1), NOT
+  // Move-pushed-right (no margin-left:auto).
+  const stylesLeaf = (s) => /_styleLeafBtn\(/.test(s) && /flex\s*=\s*"1 1 0"/.test(s) && /fontSize\s*=/.test(s) && !/marginLeft\s*=\s*"auto"/.test(s);
   ok('W11a WikiHubActions: hr divider + _mobilize sizing', hasHr(hubSrc) && mobilizes(hubSrc));
-  ok('W11b WikiLeafActions: hr divider + one-row Move-right sizing', hasHr(leafSrc) && stylesLeaf(leafSrc));
+  ok('W11b WikiLeafActions: hr divider + centered width-filling buttons', hasHr(leafSrc) && stylesLeaf(leafSrc));
   ok('W11c wiki breadcrumb (path_walk) is prominent (font-size: 1em, wiki-breadcrumb class)',
      /wiki-breadcrumb/.test(bcSrc) && /"font-size: 1em; margin: 2px 0 10px 0; line-height: 1\.9;"/.test(bcSrc));
 }
@@ -513,7 +514,7 @@ const pages = [
 
 // ---------------------------------------------------------------------------
 // W16 — section cards as ROWS with rich metadata (sub-sections · docs · edited),
-// recent/pages stay a grid, and the leaf row is ONE line with Move at the right.
+// recent/pages stay a grid, and the leaf row is centered + width-filling.
 // ---------------------------------------------------------------------------
 {
   const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
@@ -553,11 +554,56 @@ const pages = [
   const zeta = sectionsCall && sectionsCall.pages.find(s => s.folder === 'spice/wiki/zeta');
   ok('W16d empty section still shows a doc count', !!zeta && sectionsCall.meta(zeta) === '0 docs');
 
-  // Leaf: one horizontal row (no wrap, no max-width) + Move pushed right.
-  ok('W16e leaf row is one line (no flex-wrap, no max-width) with Move margin-left:auto',
-     !/flex-wrap: wrap/.test(leafSrc.split('_styleLeafBtn')[0]) &&
-     !/max-width: 640px/.test(leafSrc.split('_styleLeafBtn')[0]) &&
-     /right\b[\s\S]{0,80}marginLeft\s*=\s*"auto"/.test(leafSrc));
+  // Leaf: centered row that stretches its buttons to fill the width (flex:1), NOT
+  // Move-pushed-right.
+  ok('W16e leaf row is centered + width-filling (max-width + justify center + flex:1, no Move-right)',
+     /max-width: 640px/.test(leafSrc.split('_styleLeafBtn')[0]) &&
+     /justify-content: center/.test(leafSrc.split('_styleLeafBtn')[0]) &&
+     /flex\s*=\s*"1 1 0"/.test(leafSrc) &&
+     !/marginLeft\s*=\s*"auto"/.test(leafSrc));
+}
+
+// ---------------------------------------------------------------------------
+// W17 — sections sort toggle (last-edited default, A–Z toggle) + search-gap match.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  // W17a — the search strip top gap is normalized to 12px (identical to the
+  // buttons↔divider gap the user wanted matched).
+  ok('W17a WikiTree matches the search strip top gap to 12px',
+     /\.doc-search-strip/.test(treeSrc) && /marginTop\s*=\s*"12px"/.test(treeSrc));
+  // W17d — toggle labels + persisted mode key present in source.
+  ok('W17d sections render a "Recent | A–Z" toggle backed by __wikiSectionSort',
+     /Recent/.test(treeSrc) && /A–Z/.test(treeSrc) && /__wikiSectionSort/.test(treeSrc));
+
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const bc = [];
+  const cjs = {
+    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: (dv, opts) => bc.push(opts) },
+  };
+  // beta (edited 9000) is alphabetically AFTER alpha (edited 1000) — last-edited
+  // default must put beta FIRST.
+  const wp = [
+    makePage('wiki-section', 'spice/wiki/alpha/alpha.md', 1000),
+    makePage('wiki-page',    'spice/wiki/alpha/p.md', 1000),
+    makePage('wiki-section', 'spice/wiki/beta/beta.md', 5000),
+    makePage('wiki-page',    'spice/wiki/beta/p.md', 9000),
+  ];
+  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
+  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+  new Tree().render(dv);
+  const rowCall = bc.find(c => c.layout === 'row' && Array.isArray(c.pages) && c.pages.some(s => s && s.folder));
+  ok('W17b section cards default to LAST-EDITED order (most recent first)',
+     !!rowCall && rowCall.pages[0] && rowCall.pages[0].folder === 'spice/wiki/beta');
+  ok('W17c BeaconCards keeps our order (sort: () => 0)',
+     !!rowCall && typeof rowCall.sort === 'function' && rowCall.sort({}, {}) === 0);
 }
 
 // ---------------------------------------------------------------------------
