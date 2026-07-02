@@ -33,8 +33,12 @@ class WikiHubActions {
         const homeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
         const upIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="9 14 12 11 15 14"/></svg>`;
 
-        const row = dv.container.createEl("div", { cls: "wiki-hub-actions" });
-        row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+        const wrap = dv.container.createEl("div", { cls: "wiki-hub-actions" });
+        // Divider between the global nav-button row (above) and the wiki buttons.
+        const hr = wrap.createEl("hr");
+        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 10px 0 8px 0;";
+        const row = wrap.createEl("div");
+        row.style.cssText = "display: flex; gap: 10px; margin: 0 auto 4px auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         const root = "spice/wiki";
         const open = (t) => { if (t) app.workspace.openLinkText(t, ""); };
@@ -42,12 +46,12 @@ class WikiHubActions {
         // On a SECTION: prepend navigation so you can get back to the wiki home and
         // up to the parent section from any depth. The root hub itself is home — no nav.
         if (cur.type === "wiki-section") {
-            customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") });
+            this._mobilize(customJS.AccentButton.render(row, { label: "Wiki", icon: homeIcon, flex: true, onClick: () => open(root + "/Wiki.md") }));
             const secFolder = cur.file.path.slice(0, cur.file.path.lastIndexOf("/"));
             const parentFolder = secFolder.slice(0, secFolder.lastIndexOf("/"));
             if (parentFolder && parentFolder !== root && parentFolder.startsWith(root + "/")) {
                 const up = this._resolveSectionHub(dv, parentFolder);
-                customJS.AccentButton.render(row, { label: "Up: " + up.label, icon: upIcon, flex: true, onClick: () => open(up.path) });
+                this._mobilize(customJS.AccentButton.render(row, { label: "Up: " + up.label, icon: upIcon, flex: true, onClick: () => open(up.path) }));
             }
         }
 
@@ -59,11 +63,23 @@ class WikiHubActions {
                 }
                 customJS.EntityCreate.create({ instance, dv });
             };
-            customJS.AccentButton.render(row, { label, icon, onClick: go, flex: true });
+            this._mobilize(customJS.AccentButton.render(row, { label, icon, onClick: go, flex: true }));
         };
 
         mk("+ New Section", folderPlus, "wiki-section");
         mk("+ New Page", filePlus, "wiki-page");
+    }
+
+    // Mobile-legible sizing: bigger tap target + readable label. Each button takes
+    // ~half the row (min 128px) so a phone wraps them 2-up instead of shrinking
+    // every label to an ellipsis. Layered on AccentButton's flex:1 base.
+    _mobilize(btn) {
+        if (!btn || !btn.style) return btn;
+        btn.style.flex = "1 1 calc(50% - 6px)";
+        btn.style.minWidth = "128px";
+        btn.style.fontSize = "0.92em";
+        btn.style.padding = "9px 14px";
+        return btn;
     }
 
     // Resolve the wiki-section hub note living directly in `folder` (title + link
