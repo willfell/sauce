@@ -4769,10 +4769,55 @@ function _dropDividersBeforeSectionLabels(body) {
 // Posture mirrors the established heals: per-note try/catch, fails-loud (history
 // warning) but never throws, full git fields on every push, .sauce-backup
 // snapshot before any write. Reuses _listAllMarkdownRecursive.
+// _healWikiChromeBody — pure, idempotent body transform for wiki notes. Three
+// content-idempotent operations (each guarded so a second pass is a no-op):
+//   1. hub/section: swap the two stacked entity-create:wiki-section/-page
+//      dataviewjs blocks → a single WikiHubActions block (one evenly-spaced row).
+//   2. any wiki note with NO SpaceNavButtons block (bare/hand-made): inject the
+//      full chrome header (Breadcrumb + SpaceNavButtons + WikiHubActions|WikiLeafActions)
+//      right after the frontmatter so it renders nav like every other note.
+//   3. nav present but Breadcrumb absent: inject the Breadcrumb block before nav.
+// A correctly-chromed note (breadcrumb + nav + the right actions, no legacy
+// entity-create blocks) is returned unchanged.
+function _healWikiChromeBody(body, type) {
+  if (typeof body !== "string") return body;
+  if (!["wiki-hub", "wiki-section", "wiki-page"].includes(type)) return body;
+  const VP = "ranch/views/customjs-guard";
+  const bcBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "Breadcrumb" });\n```';
+  const navBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "SpaceNavButtons" });\n```';
+  const actionClass = type === "wiki-page" ? "WikiLeafActions" : "WikiHubActions";
+  const actionBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "' + actionClass + '" });\n```';
+  let out = body;
+
+  // 1. hub/section: collapse the two legacy entity-create blocks into WikiHubActions.
+  if (type !== "wiki-page" && !/class:\s*"WikiHubActions"/.test(out)) {
+    const two = /```dataviewjs\n\/\/ entity-create:wiki-section[\s\S]*?instance: "wiki-page" \}\] \}\);\n```\n?/;
+    if (two.test(out)) {
+      out = out.replace(two, '```dataviewjs\nawait dv.view("' + VP + '", { class: "WikiHubActions" });\n```\n');
+    }
+  }
+
+  // 2. bare note (no nav at all): inject full chrome after the frontmatter.
+  if (!/class:\s*"SpaceNavButtons"/.test(out)) {
+    const header = [bcBlock, "", navBlock, "", actionBlock, "", "---", ""].join("\n");
+    const fm = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+    out = fm ? out.slice(0, fm[0].length) + "\n" + header + "\n" + out.slice(fm[0].length) : header + "\n" + out;
+    return out;
+  }
+
+  // 3. nav present but breadcrumb missing: inject breadcrumb before the nav block.
+  if (!/class:\s*"Breadcrumb"/.test(out)) {
+    const navIdx = out.indexOf('class: "SpaceNavButtons"');
+    const fence = out.lastIndexOf("```dataviewjs", navIdx);
+    if (fence !== -1) out = out.slice(0, fence) + bcBlock + "\n\n" + out.slice(fence);
+  }
+  return out;
+}
+
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -4791,8 +4836,9 @@ async function applyNoteChromeHeal(tp, history, git) {
       try {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
-        if (!["meeting", "scratch", "scratch-day", "to-do", "person"].includes(type)) continue;
-        const after = _healNoteChromeBody(before, type);
+        const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
+        if (!["meeting", "scratch", "scratch-day", "to-do", "person", ...WIKI_TYPES].includes(type)) continue;
+        const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
         const backupPath = `.sauce-backup/${ts}/${fpath}`;

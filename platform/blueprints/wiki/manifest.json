@@ -88,7 +88,8 @@
   "customjs_classes": [
     "WikiTree",
     "WikiMove",
-    "WikiLeafActions"
+    "WikiLeafActions",
+    "WikiHubActions"
   ],
   "files": [
     {
@@ -110,6 +111,10 @@
     {
       "source": "helpers/wiki-tree.js",
       "dest": "{{scripts_path}}/wiki/wiki-tree.js"
+    },
+    {
+      "source": "helpers/wiki-hub-actions.js",
+      "dest": "{{scripts_path}}/wiki/wiki-hub-actions.js"
     },
     {
       "source": "helpers/wiki-move.js",

@@ -558,6 +558,25 @@ withTempVault((vault) => {
             fs.existsSync(docSearchMechPath) && !hasLocalDocSearch,
             `mechExists=${fs.existsSync(docSearchMechPath)} projectLocalDocSearch=${hasLocalDocSearch}`
         );
+
+        // WIKI-8: chrome heal swapped the two stacked entity-create blocks in the
+        // seed's section hub for a single WikiHubActions block (one evenly-spaced row).
+        let infraBody = "";
+        try { infraBody = helpers.readNote(vault, "spice/wiki/infra/Infra.md"); } catch (e) {}
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-8 section hub healed: WikiHubActions present, stacked entity-create blocks gone",
+            /class:\s*"WikiHubActions"/.test(infraBody) && !/entity-create:wiki-(section|page)/.test(infraBody),
+            `hasWHA=${/WikiHubActions/.test(infraBody)} hasLegacy=${/entity-create:wiki-/.test(infraBody)}`
+        );
+
+        // WIKI-9: the re-materialized root hub renders the WikiHubActions one-row block.
+        let hubBody = "";
+        try { hubBody = helpers.readNote(vault, "spice/wiki/Wiki.md"); } catch (e) {}
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-9 root hub renders WikiHubActions (no stacked entity-create blocks)",
+            /class:\s*"WikiHubActions"/.test(hubBody) && !/entity-create:wiki-(section|page)/.test(hubBody),
+            `hasWHA=${/WikiHubActions/.test(hubBody)} hasLegacy=${/entity-create:wiki-/.test(hubBody)}`
+        );
     }
 
     // ===== Idempotency phase: snapshot, second install, compare =====
