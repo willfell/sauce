@@ -129,6 +129,51 @@ const D = Cls ? new Cls() : null;
   ok('D37 infer last-docs semantics', inf && inf.section === 'reference' && inf.subSection === '');
 }
 
+// ---- DocLeafActions pure helpers (Project Doc Updating Wiring PR2) ----
+// The Move dialog's runtime (renameFile/processFrontMatter) + modal are
+// dogfood-only; these cover the two pure helpers it relies on plus the
+// normalizeHubs -> DocMove.sectionTargets seam. Loads DocLeafActions from
+// source, so reverting doc-leaf-actions.js makes DLA0 fail (Gate B L1 red).
+{
+  const DLA_SRCFILE = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'doc-leaf-actions.js');
+  const DLA_SRC = fs.existsSync(DLA_SRCFILE) ? fs.readFileSync(DLA_SRCFILE, 'utf8') : '';
+  const DLACls = DLA_SRC ? new Function(`${DLA_SRC}\nreturn DocLeafActions;`)() : null;
+  ok('DLA0 helper class loads', !!DLACls);
+  const dla = DLACls ? new DLACls() : null;
+
+  // normalizeHubs — maps queried section-hub pages to { label, path, depth, parent }.
+  const hubs = DLACls && DLACls.normalizeHubs([
+    { section: 'Knowledge', depth: 1, parent_section: '', file: { name: 'Knowledge', path: 'spice/projects/x/docs/knowledge/Knowledge.md' }, path: 'spice/projects/x/docs/knowledge/Knowledge.md' },
+    { section: 'Advanced', depth: 2, parent_section: 'Knowledge', file: { name: 'Advanced', path: 'spice/projects/x/docs/knowledge/advanced/Advanced.md' }, path: 'spice/projects/x/docs/knowledge/advanced/Advanced.md' },
+    null,
+  ]);
+  ok('DLA1 normalizeHubs drops null + maps fields',
+    hubs && hubs.length === 2 && hubs[0].label === 'Knowledge' && hubs[0].depth === 1 &&
+    hubs[1].parent === 'Knowledge' && hubs[1].depth === 2);
+  // falls back to the hub file basename when frontmatter `section` is absent; depth defaults to 1.
+  const hb2 = DLACls && DLACls.normalizeHubs([{ file: { name: 'Ops', path: 'p/docs/ops/Ops.md' } }]);
+  ok('DLA2 normalizeHubs name fallback + depth default',
+    hb2 && hb2.length === 1 && hb2[0].label === 'Ops' && hb2[0].depth === 1 && hb2[0].path === 'p/docs/ops/Ops.md');
+
+  // normalizeHubs -> DocMove.sectionTargets seam produces the right ordered targets.
+  const tgts = D && DLACls && D.sectionTargets(DLACls.normalizeHubs([
+    { section: 'Knowledge', depth: 1, parent_section: '', file: { name: 'Knowledge', path: 'spice/projects/x/docs/knowledge/Knowledge.md' }, path: 'spice/projects/x/docs/knowledge/Knowledge.md' },
+    { section: 'Advanced', depth: 2, parent_section: 'Knowledge', file: { name: 'Advanced', path: 'spice/projects/x/docs/knowledge/advanced/Advanced.md' }, path: 'spice/projects/x/docs/knowledge/advanced/Advanced.md' },
+  ]));
+  ok('DLA3 normalizeHubs feeds sectionTargets',
+    tgts && tgts.length === 2 &&
+    tgts.some((t) => t.label === 'Knowledge' && t.folder === 'spice/projects/x/docs/knowledge') &&
+    tgts.some((t) => t.label === 'Knowledge / Advanced' && t.folder === 'spice/projects/x/docs/knowledge/advanced'));
+
+  // projectDirFor — derives the project root from a doc-note path; "" when not under docs/.
+  ok('DLA4 projectDirFor derives project root',
+    dla && dla.projectDirFor('spice/projects/x/docs/knowledge/Note.md') === 'spice/projects/x');
+  ok('DLA5 projectDirFor nested sub-section',
+    dla && dla.projectDirFor('spice/projects/x/docs/knowledge/advanced/Note.md') === 'spice/projects/x');
+  ok('DLA6 projectDirFor non-docs path -> ""',
+    dla && dla.projectDirFor('spice/projects/x/tasks/T.md') === '' && dla.projectDirFor('') === '');
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

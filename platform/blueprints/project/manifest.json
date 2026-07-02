@@ -63,6 +63,7 @@
     "ProjectDocsIndex",
     "SectionHub",
     "DocMove",
+    "DocLeafActions",
     "ProjectLinksPanel",
     "WorkstreamSource"
   ],
@@ -184,6 +185,10 @@
     {
       "source": "helpers/doc-move.js",
       "dest": "{{scripts_path}}/project/doc-move.js"
+    },
+    {
+      "source": "helpers/doc-leaf-actions.js",
+      "dest": "{{scripts_path}}/project/doc-leaf-actions.js"
     },
     {
       "source": "helpers/project-links-panel.js",

@@ -31,6 +31,7 @@ const widgets = [
     { name: 'ProjectActivityPanel',       path: 'platform/blueprints/project/helpers/project-activity-panel.js' },
     { name: 'ProjectOpenTasks',           path: 'platform/blueprints/project/helpers/project-open-tasks.js' },
     { name: 'ProjectLinksPanel',          path: 'platform/blueprints/project/helpers/project-links-panel.js' },
+    { name: 'DocLeafActions',             path: 'platform/blueprints/project/helpers/doc-leaf-actions.js' },
 ];
 
 // dv stub variants the guards must tolerate.
