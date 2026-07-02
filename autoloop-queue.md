@@ -24,7 +24,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint finance axis widget_render: 16 uncovered
-  status: proposed
+  status: done
+  note: added 14 finance widgets to run-renderer.js cold-load render-guard (FF-COLD) via PR #189 -> widget_render 10->24/26; DebtsCards + DebtsHubSummary need full-render coverage (dv.pages data) - follow-up
 
 - id: cov-blueprint-project-customjs-behavioral
   title: Add coverage for project customjs_behavioral (6/19)
