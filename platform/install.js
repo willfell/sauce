@@ -1230,6 +1230,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
+  await applyProjectChromeDividerHeal(tp, mech, variables, history, git); // WS9 P0a chrome overhaul — strips legacy literal `---` chrome dividers BETWEEN consecutive customjs-guard chrome blocks + collapses doubled blank gaps on project-related notes (cleanup, idempotent, .sauce-backup; only chrome-bounded `---`, preserves content-boundary dividers)
   await applyProjectsHubAllProjectsHeadingCleanup(tp, mech, variables, history, git); // strips the legacy `## All Projects` H2 from the all-projects hub so it uses the SectionLabel chrome pattern (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
@@ -3137,6 +3138,234 @@ async function applyProjectNavButtonsSeparatorGap(tp, manifest, variables, histo
     history.push({
       event: "info",
       step: "project_nav_buttons_separator_gap",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// PROJECT_CHROME_TYPES — the frontmatter `type:` values whose bodies the project
+// chrome overhaul (WS0-WS8, 2026-07-02) governs. applyProjectChromeDividerHeal +
+// applyBoardCardBreadcrumbHeal both scope to this set. Kept as a module-level
+// constant so the two heals + their unit harness read from one source.
+const PROJECT_CHROME_TYPES = [
+  "project", "project-todo", "docs-hub", "section-hub", "doc-note",
+  "map", "kanban", "task-note", "task-hub", "task-board-card", "links-hub",
+];
+
+// _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
+// chrome overhaul reversed the divider grammar: helpers now render their own
+// leading hairline (SectionLabel.divider()), so consecutive chrome dataviewjs
+// blocks must be separated by a SINGLE blank line and NO literal `---`. Legacy
+// notes still carry the old grammar: a `---` line (often blank-shielded) BETWEEN
+// two consecutive customjs-guard chrome blocks, and/or a doubled blank gap.
+//
+// This transform removes a `---` divider ONLY when it sits between two chrome
+// blocks (a customjs-guard dataviewjs fence closes above it — ignoring blanks —
+// AND a customjs-guard dataviewjs fence opens below it), and collapses the
+// surrounding blank-line gap down to exactly one blank line. A `---` adjacent to
+// a chrome block on ONE side but to prose / an `## H2` heading / a callout on the
+// other side is a CONTENT boundary and is preserved (e.g. the `---` above a
+// `## Mentions` heading, or below a BacklinkPanel before user notes).
+//
+// Fence-aware + column-0-only: a chrome block is recognized ONLY when its
+// ```dataviewjs opener starts at column 0 (so callout-embedded `> ```dataviewjs`
+// blocks and blocks nested inside another fence never count as chrome anchors,
+// and the leading frontmatter `---`/`---` YAML fence is never a chrome divider).
+// Idempotent: once collapsed the span is a single blank line with no `---`, which
+// re-matches to itself. Returns { changed, body }.
+function _stripProjectChromeDividers(body) {
+  const src = String(body == null ? "" : body);
+  const lines = src.split("\n");
+
+  // Skip the leading frontmatter block so its `---` fences are never candidates.
+  let start = 0;
+  if (lines[0] === "---") {
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === "---") { start = i + 1; break; }
+    }
+  }
+
+  // Classify each line's fence state at column 0 so we know which ``` opens a
+  // chrome (customjs-guard) dataviewjs block. isChromeClose[i] = true when line i
+  // is the closing ``` of a column-0 dataviewjs block that referenced
+  // customjs-guard. isChromeOpen[i] = true when line i is that opener.
+  const isChromeOpen = new Array(lines.length).fill(false);
+  const isChromeClose = new Array(lines.length).fill(false);
+  {
+    let inFence = false;   // inside a column-0 fenced block?
+    let openIdx = -1;      // line index of the current block's opener
+    let state = "none";    // "none" | "pending" (```dataviewjs opener, no guard ref yet) | "guard"
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // A column-0 fence line opens/closes a block. Skip inline triple-backtick
+      // spans (```lang``` on one line) — those aren't block fences.
+      const isFenceLine = /^```/.test(line) && !/^```[^`]*```/.test(line);
+      if (isFenceLine) {
+        if (!inFence) {
+          inFence = true;
+          openIdx = i;
+          state = /^```dataviewjs\s*$/.test(line) ? "pending" : "none";
+        } else {
+          // closing fence: mark the block as chrome only if a guard ref appeared.
+          if (state === "guard") {
+            isChromeOpen[openIdx] = true;
+            isChromeClose[i] = true;
+          }
+          inFence = false;
+          openIdx = -1;
+          state = "none";
+        }
+        continue;
+      }
+      if (inFence && state === "pending" && line.includes("customjs-guard")) {
+        state = "guard";
+      }
+    }
+  }
+
+  // Walk and drop `---` lines that sit between two chrome blocks, collapsing the
+  // blank gap to one blank line. We rebuild the output. `lastEmittedChromeClose`
+  // tracks whether the most recent non-blank emitted line was a chrome closing
+  // fence, so a `---`/gap is only collapsed when it's chrome-bounded on BOTH sides.
+  const out = [];
+  let changed = false;
+  let i = start;
+  // Emit the frontmatter verbatim.
+  for (let k = 0; k < start; k++) out.push(lines[k]);
+
+  while (i < lines.length) {
+    if (isChromeClose[i]) {
+      out.push(lines[i]);
+      i++;
+      // Look ahead: [blanks] ([---] [blanks])? — decide if the NEXT non-blank,
+      // non-`---` line opens a chrome block. If so, normalize the span to one
+      // blank line. Otherwise emit the span verbatim.
+      let j = i;
+      let sawDivider = false;
+      let dividerCount = 0;
+      while (j < lines.length && (lines[j].trim() === "" || lines[j].trim() === "---")) {
+        if (lines[j].trim() === "---") { sawDivider = true; dividerCount++; }
+        j++;
+      }
+      // j now points at the first "real" line after the gap (or EOF).
+      const nextIsChrome = j < lines.length && isChromeOpen[j];
+      const atEof = j >= lines.length;
+      // Collapse when the gap has AT MOST one `---` AND either the next real line
+      // opens a chrome block (chrome↔chrome divider), OR there's no content below
+      // at all (a trailing chrome `---` at EOF — orphaned chrome cruft). A `---`
+      // followed by prose / an `## H2` / a callout is a CONTENT boundary → kept.
+      // Multiple `---` in one gap is unusual content — left verbatim to avoid
+      // eating a user divider.
+      if ((nextIsChrome || (atEof && sawDivider)) && dividerCount <= 1) {
+        // Chrome↔chrome divider OR a trailing chrome `---` at EOF: normalize the
+        // span to exactly one blank line after the chrome fence.
+        const spanLen = j - i;
+        if (sawDivider || spanLen !== 1) changed = true;
+        out.push("");
+        i = j;
+      } else {
+        // Emit the span verbatim (content boundary or ambiguous).
+        for (; i < j; i++) out.push(lines[i]);
+      }
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+
+  const result = out.join("\n");
+  return { changed: changed && result !== src, body: result };
+}
+
+// applyProjectChromeDividerHeal — WS9 P0a. Walks spice/projects/** recursively
+// and applies _stripProjectChromeDividers to every project-related note (frontmatter
+// type ∈ PROJECT_CHROME_TYPES). Removes the legacy literal `---` chrome dividers
+// between consecutive customjs-guard chrome blocks + collapses doubled blank gaps,
+// so the helper-owned leading hairline is the sole separator. Cleanup-type:
+// idempotent (no-op once normalized), .sauce-backup snapshot before any write,
+// per-note try/catch (fails loud via history, never throws), history events. Safe
+// to run every install. Mirrors applyProjectNavButtonsSeparatorGap posture.
+async function applyProjectChromeDividerHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  async function collectMd(dir) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    let files = (listing.files || []).filter((p) => p.endsWith(".md"));
+    for (const sub of (listing.folders || [])) {
+      if (sub.includes("/.sauce-backup")) continue;  // never recurse our own backups
+      files = files.concat(await collectMd(sub));
+    }
+    return files;
+  }
+
+  let mdFiles;
+  try {
+    mdFiles = await collectMd(root);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_chrome_divider_heal",
+        reason: `walk failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of mdFiles) {
+    try {
+      const before = await adapter.read(notePath);
+      const type = _noteChromeFrontmatterType(before);
+      if (!PROJECT_CHROME_TYPES.includes(type)) { skipped += 1; continue; }
+      const { changed, body: after } = _stripProjectChromeDividers(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_chrome_divider_heal",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_chrome_divider_heal",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_chrome_divider_heal",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -17849,6 +18078,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._linksHubBody = _linksHubBody;
     module.exports.applyProjectNavButtonsSeparatorGap = applyProjectNavButtonsSeparatorGap;
     module.exports._collapseNavButtonsSeparatorGap = _collapseNavButtonsSeparatorGap;
+    // WS9 P0a — project chrome literal-`---`-divider strip heal + pure transform
+    // (run-v0127-project-hub-heal.js CHR-DIV-*).
+    module.exports.applyProjectChromeDividerHeal = applyProjectChromeDividerHeal;
+    module.exports._stripProjectChromeDividers = _stripProjectChromeDividers;
     module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
     module.exports._stripAllProjectsHeading = _stripAllProjectsHeading;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
