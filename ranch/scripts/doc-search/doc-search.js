@@ -47,7 +47,7 @@ class DocSearch {
 
     // PERMANENT strip — built once, never rebuilt. Survives keystrokes.
     const stripContainer = dv.container.createEl("div", { cls: "doc-search-strip" });
-    stripContainer.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin: 8px 0;";
+    stripContainer.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px 0;";
 
     // Inline SVG search icon (v0.105.0 Issue 9 — replaces the prior emoji).
     const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>`;
