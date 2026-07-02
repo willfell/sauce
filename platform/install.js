@@ -8013,8 +8013,6 @@ function _linksHubBody(viewsPath) {
     `await dv.view("${v}/customjs-guard", { class: "ProjectNavButtons" });`,
     '```',
     '',
-    '---',
-    '',
     '```dataviewjs',
     `await dv.view("${v}/customjs-guard", { class: "ProjectLinksManager" });`,
     '```',

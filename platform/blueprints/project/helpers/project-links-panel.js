@@ -62,6 +62,35 @@ class ProjectLinksPanel {
     return out;
   }
 
+  // Best-effort hostname from a url string. Tries the URL parser, then a bare
+  // "scheme://host" / "host" regex, and finally falls back to the trimmed url.
+  // Never throws on a malformed value (cold-load / user-typed garbage safe).
+  _host(url) {
+    const s = String(url == null ? "" : url).trim();
+    if (!s) return "";
+    try {
+      const u = new URL(s);
+      if (u.hostname) return u.hostname.replace(/^www\./, "");
+    } catch (_e) { /* fall through to regex */ }
+    const m = s.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i) || s.match(/^([^/?#\s]+)/);
+    if (m && m[1]) return m[1].replace(/^www\./, "");
+    return s;
+  }
+
+  // Pure card model for the responsive grid: normalize + dedupe (via _parse),
+  // then derive a { text, url, host } per link. host = best-effort hostname;
+  // text falls back to the host when the entry carries no display text (or the
+  // text equals the raw url, so a bare-url entry shows the tidy host instead).
+  // Insertion order preserved; duplicates removed. Never throws.
+  _linkCards(links) {
+    return this._parse(links).map((l) => {
+      const host = this._host(l.url);
+      const raw = String(l.text == null ? "" : l.text).trim();
+      const text = raw && raw !== l.url ? raw : (host || l.url);
+      return { text, url: l.url, host };
+    });
+  }
+
   // Resolve the links to display for the current note. On the Link Hub note
   // (type: links-hub) that's the note's own `links`; on a PROJECT hub it's the
   // sibling `Links Hub.md`'s links (PR2 read-only mirror — Option B, no `links`
@@ -76,10 +105,12 @@ class ProjectLinksPanel {
     } catch (_e) { return []; }
   }
 
-  // Render the read-only "Helpful Links" panel. On the Link Hub note it reads the
-  // note's own `links` and shows a "No links yet." hint when empty (so the hub is
-  // never blank). On a project hub it mirrors the sibling Link Hub's links and
-  // renders NOTHING when there are none (no clutter on link-less projects).
+  // Render the read-only "Helpful Links" panel as a responsive card grid. Each
+  // link is a card anchor (opens in a new tab) showing the link text (bold) + the
+  // host (muted). On the Link Hub note it reads the note's own `links`; on a
+  // project hub it mirrors the sibling Link Hub's links. Per the empty-state rule
+  // the panel renders NOTHING when there are no links — no label, no divider, no
+  // "No links yet." hint (the Add-link button above owns the empty affordance).
   render(dv, opts = {}) {
     const page = customJS.RenderSafe.page(dv);
     if (!page || !page.file) return;              // cold-load guard
@@ -89,35 +120,49 @@ class ProjectLinksPanel {
     // Sibling-mirror mode activates ONLY on an actual project hub (type:project);
     // the Link Hub note and any other note read their own `links` (backward-compat).
     const onProjectHub = page.type === "project";
-    const links = onProjectHub ? this._resolveSiblingLinks(dv, page) : this._parse(page.links);
-    if (onProjectHub && links.length === 0) return;   // project-hub mirror: silent when empty
+    const raw = onProjectHub ? this._resolveSiblingLinks(dv, page) : this._parse(page.links);
+    const cards = this._linkCards(raw);
+    if (!cards.length) return;                    // empty-state: render nothing
 
-    // Label via the shared SectionLabel primitive (guarded — absent in cold-load
-    // harnesses). Falls back to a plain muted label so the panel still heads up.
+    // Leading hairline + "Helpful Links" label via the shared SectionLabel
+    // primitive (guarded — absent in cold-load harnesses; falls back to a plain
+    // divider + muted label so the panel still heads up).
     if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
       customJS.SectionLabel.render(dv, { text: "Helpful Links" });
     } else {
+      if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+        customJS.SectionLabel.divider(c);
+      }
       const lbl = c.createEl("div");
       lbl.textContent = "Helpful Links";
       if (lbl.style) lbl.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
     }
 
-    if (!links.length) {
-      const em = c.createEl("div");
-      em.textContent = "No links yet.";
-      if (em.style) em.style.cssText = "color: var(--text-muted); font-style: italic;";
-      return;
-    }
-
-    const list = c.createEl("div");
-    if (list.style) list.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
-    for (const link of links) {
-      const a = list.createEl("a", { text: link.text, href: link.url });
+    const grid = c.createEl("div");
+    if (grid.style) grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px;";
+    for (const card of cards) {
+      const a = grid.createEl("a", { href: card.url });
       if (a && typeof a.setAttr === "function") {
         a.setAttr("target", "_blank");
         a.setAttr("rel", "noopener");
       }
-      if (a && a.style) a.style.cssText = "color: var(--text-accent);";
+      if (a && a.style) {
+        a.style.cssText =
+          "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
+          "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
+          "background: var(--background-primary); color: var(--text-normal); " +
+          "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
+      }
+      if (a && typeof a.addEventListener === "function") {
+        a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
+        a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
+      }
+      const title = a.createEl("div", { text: card.text });
+      if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      if (card.host) {
+        const host = a.createEl("div", { text: card.host });
+        if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      }
     }
   }
 }
