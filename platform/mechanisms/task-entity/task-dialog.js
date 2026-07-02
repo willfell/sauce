@@ -436,7 +436,9 @@ class TaskDialog {
         titleInput.style.cssText = fieldCss;
         titleInput.value = state.title;
         titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
-        setTimeout(() => titleInput.focus(), 50);
+        // Autofocus the title ONLY in create mode (FIX 4) — opening the dialog on an
+        // existing task shouldn't grab focus (the title is already filled in).
+        if (!editPath) setTimeout(() => titleInput.focus(), 50);
 
         // Scheduled
         label('Scheduled (optional)');
