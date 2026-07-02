@@ -12524,7 +12524,7 @@ async function caseV01080EntityCreatePatchBump() {
   console.log("\n--- Case V01080-EC-PATCH: entity-create 0.7.1 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
-  assertTrue("V01080-EC-PATCH-1: version 0.7.x", /^0\.7\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("V01080-EC-PATCH-1: version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components["entity-create"], `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
   assertTrue("V01080-EC-PATCH-2: description references resolve_wikilinks",
     /resolve_wikilinks/.test(m.description || ""), "description missing resolve_wikilinks");
 }
@@ -12710,8 +12710,8 @@ async function caseV01080FinanceVersionBump() {
   assertTrue("V01080-FV-3: workshop manifest pin finance matches snapshot SSOT",
     fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
-  assertTrue("V01080-FV-4: workshop manifest pin entity-create 0.7.x",
-    ec && /^0\.7\.\d+$/.test(ec.version), `got: ${ec?.version}`);
+  assertTrue("V01080-FV-4: workshop manifest pin entity-create matches snapshot SSOT",
+    ec && ec.version === VERSION_SNAPSHOT.components["entity-create"], `got: ${ec?.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version matches the version-pin snapshot (major.minor; v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
     sameMajorMinor(workshop.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${workshop.workshop_version}`);
