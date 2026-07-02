@@ -6,14 +6,15 @@
  * Renders on a `type: to-do` daily note (invoked via customjs-guard, so its
  * entry method is the instance `render(dv)`). It live-queries the task notes
  * under `spice/tasks/` (open only, excluding _done/ + _trash/), partitions them
- * into an "Overdue / Carryover" band and a "Today" band, and draws each task as
- * a row with a functional done-checkbox + metadata chips. Every mutation is
- * DELEGATED to TaskDialog — the widget only READS the task notes; it never
- * writes one directly. That keeps the single-file-write invariant (a bad write
- * can only ever touch one task's file) entirely inside TaskDialog:
+ * into a "Today" band (rendered FIRST) and an "Overdue / Carryover" band, and
+ * draws each task as a row with a functional done-checkbox + metadata chips.
+ * Task CREATION lives in ToDoLeafActions' single nav-button "New Task" (this
+ * widget renders no create button of its own). Every mutation is DELEGATED to
+ * TaskDialog — the widget only READS the task notes; it never writes one
+ * directly. That keeps the single-file-write invariant (a bad write can only
+ * ever touch one task's file) entirely inside TaskDialog:
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
  *   - row click       → TaskDialog.open({ edit: path })
- *   - + New Task      → TaskDialog.open({ surface: 'daily', today })
  *
  * COLD-LOAD SAFETY (landmines #1-2): Dataview can run this block before the
  * embedding note is indexed. We resolve the page via the render-safe mechanism
@@ -135,24 +136,19 @@ class TaskTodayList {
         const wrap = dv.container.createEl('div', { cls: 'sauce-task-today' });
         wrap.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin: 4px 0; width: 100%;';
 
-        // + New Task button (top) → delegate to TaskDialog with the daily surface.
-        const newBtn = wrap.createEl('button', { cls: 'sauce-task-today-new', text: '+ New Task' });
-        newBtn.style.cssText = 'align-self: flex-start; padding: 4px 12px; border-radius: 4px; border: 1px solid var(--interactive-accent, #6a6abf); background: var(--interactive-accent, #6a6abf); color: white; cursor: pointer; font-size: 0.85em;';
-        newBtn.addEventListener('click', () => {
-            try {
-                window.customJS.TaskDialog.open({ surface: 'daily', today });
-            } catch (e) {
-                try { new Notice('Could not open task dialog: ' + (e && (e.message || e)), 6000); } catch (_e) {}
-            }
-        });
+        // NOTE: the widget no longer renders its own "+ New Task" button — task
+        // creation is consolidated into the single ToDoLeafActions "New Task"
+        // button in the nav-button section (avoids two create buttons on the
+        // daily). This widget only READS + partitions the task notes.
 
-        // Overdue / Carryover band (only when non-empty).
+        // Today band FIRST — the tasks the user made for today are the primary
+        // focus; always shown, with an empty hint.
+        this._renderBand(wrap, 'Today', bands.today, 'No tasks scheduled today');
+
+        // Overdue / Carryover band below (only when non-empty).
         if (bands.overdue.length) {
             this._renderBand(wrap, 'Overdue / Carryover', bands.overdue, null);
         }
-
-        // Today band — always shown, with an empty hint.
-        this._renderBand(wrap, 'Today', bands.today, 'No tasks scheduled today');
     }
 
     /**
