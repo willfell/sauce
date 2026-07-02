@@ -49,6 +49,7 @@ class TaskDialog {
     _wikilink(name) { return TaskDialog._wikilink(name); }
     _mdLink(label, url) { return TaskDialog._mdLink(label, url); }
     _insertAt(text, insertion, start, end) { return TaskDialog._insertAt(text, insertion, start, end); }
+    _chromeBody() { return TaskDialog._chromeBody(); }
 
     // ---------- Static pure helpers ----------
 
@@ -922,6 +923,12 @@ class TaskDialog {
         return '\n' +
             '```dataviewjs\n' +
             'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            '```\n' +
+            '\n' +
+            '---\n' +
+            '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteToDoNav" });\n' +
             '```\n' +
             '\n' +
             '```dataviewjs\n' +

@@ -13,7 +13,10 @@
     "TaskEntity",
     "TaskDialog",
     "TaskTodayList",
-    "TaskNoteView"
+    "TaskNoteView",
+    "TaskMeetingList",
+    "TaskProjectList",
+    "TaskNoteToDoNav"
   ],
   "files": [
     {
@@ -31,6 +34,18 @@
     {
       "source": "task-note-view.js",
       "dest": "{{scripts_path}}/task-entity/task-note-view.js"
+    },
+    {
+      "source": "task-meeting-list.js",
+      "dest": "{{scripts_path}}/task-entity/task-meeting-list.js"
+    },
+    {
+      "source": "task-project-list.js",
+      "dest": "{{scripts_path}}/task-entity/task-project-list.js"
+    },
+    {
+      "source": "task-note-todo-nav.js",
+      "dest": "{{scripts_path}}/task-entity/task-note-todo-nav.js"
     }
   ],
   "post_install": [],

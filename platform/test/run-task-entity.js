@@ -437,5 +437,130 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   assert(res.overdue.length === 1, 'overdue = the 06-28 Luxon task: got ' + res.overdue.length);
 });
 
+// ---------- Dataview Link coercion (source_note / project filter fix) ----------
+//
+// Dataview surfaces a `[[Meeting]]` frontmatter value as a Link OBJECT (with
+// .path / .display / .subpath), NOT a string — so a meeting/project task-list
+// filter comparing `page.source_note === meetingBasename` never matches.
+// TaskEntity._linkText normalizes any Link shape to a comparable BASENAME string.
+
+// LT-1. _linkText coerces a Dataview Link object → the note basename.
+ok('LT-1 _linkText coerces a Dataview Link object to a basename', () => {
+  assert(TaskEntity._linkText({ path: 'spice/meetings/notes/2026/07-July/Foo.md', display: 'Foo' }) === 'Foo',
+    'link object → basename: ' + TaskEntity._linkText({ path: 'spice/meetings/notes/2026/07-July/Foo.md', display: 'Foo' }));
+  // Path with no display still yields the basename.
+  assert(TaskEntity._linkText({ path: 'a/b/Bar.md' }) === 'Bar', 'path-only link → basename');
+  // Display-only (no path) falls back to display.
+  assert(TaskEntity._linkText({ display: 'Baz', subpath: null }) === 'Baz', 'display-only link → display');
+});
+
+// LT-2. _linkText coerces a "[[Wikilink]]" string → the basename (pipe/path tolerated).
+ok('LT-2 _linkText coerces wikilink strings to a basename', () => {
+  assert(TaskEntity._linkText('[[Bar]]') === 'Bar', 'simple wikilink: ' + TaskEntity._linkText('[[Bar]]'));
+  assert(TaskEntity._linkText('[[a/b/Baz.md|Baz]]') === 'Baz', 'path+.md+pipe-label → basename: ' + TaskEntity._linkText('[[a/b/Baz.md|Baz]]'));
+  assert(TaskEntity._linkText('[[a/b/Qux|Q]]') === 'Qux', 'path+pipe (no .md) → basename: ' + TaskEntity._linkText('[[a/b/Qux|Q]]'));
+  assert(TaskEntity._linkText('Plain') === 'Plain', 'bare string passthrough');
+});
+
+// LT-3. _linkText handles nullish / empty → ''.
+ok('LT-3 _linkText nullish/empty → ""', () => {
+  assert(TaskEntity._linkText('') === '', 'empty string → ""');
+  assert(TaskEntity._linkText(null) === '', 'null → ""');
+  assert(TaskEntity._linkText(undefined) === '', 'undefined → ""');
+});
+
+// LT-4. parseNote coerces a Link-valued source_note into a comparable basename.
+ok('LT-4 parseNote coerces source_note Link → basename', () => {
+  const parsed = TaskEntity.parseNote({
+    type: 'task', status: 'open',
+    source_note: { path: 'spice/meetings/notes/2026/07-July/Standup.md', display: 'Standup' },
+    project_slug: 'sauce',
+    file: { path: 'spice/tasks/a.md' },
+  });
+  assert(parsed.source_note === 'Standup', 'source_note is the basename string: ' + JSON.stringify(parsed.source_note));
+  assert(parsed.project_slug === 'sauce', 'project_slug passthrough preserved');
+});
+
+// ---------- Chrome body shape (ToDoNav + divider) ----------
+//
+// The task-note chrome now emits: SpaceNavButtons, a `---` divider, the
+// TaskNoteToDoNav button, then TaskNoteView, then the marker. Assert the new
+// shape so a regression (missing divider / ToDoNav) fails loudly.
+ok('CB-1 _chromeBody emits SpaceNavButtons + divider + ToDoNav + TaskNoteView + marker in order', () => {
+  const body = TaskEntity._chromeBody();
+  const iNav = body.indexOf('class: "SpaceNavButtons"');
+  const iRule = body.indexOf('\n---\n');
+  const iTodo = body.indexOf('class: "TaskNoteToDoNav"');
+  const iView = body.indexOf('class: "TaskNoteView"');
+  const iMarker = body.indexOf('<!-- TASK_NOTES -->');
+  assert(iNav >= 0, 'has SpaceNavButtons');
+  assert(iRule > iNav, 'divider after SpaceNavButtons');
+  assert(iTodo > iRule, 'ToDoNav after divider');
+  assert(iView > iTodo, 'TaskNoteView after ToDoNav');
+  assert(iMarker > iView, 'marker last');
+  // composeNote body carries the new chrome too.
+  assert(TaskEntity.composeNote({ title: 'x' }).body.indexOf('class: "TaskNoteToDoNav"') >= 0,
+    'composeNote body includes the ToDoNav block');
+});
+
+// TaskDialog's inline chrome fallback must stay BYTE-IDENTICAL to TaskEntity's.
+ok('CB-2 TaskDialog._chromeBody fallback is byte-identical to TaskEntity._chromeBody', () => {
+  // Force the fallback path (no window.customJS in Node) → the inline copy.
+  assert(TaskDialog._chromeBody() === TaskEntity._chromeBody(),
+    'TaskDialog inline chrome must equal TaskEntity chrome');
+});
+
+// ---------- TaskTodayList.renderTaskRow (shared static) ----------
+//
+// The per-row renderer is now a SELF-CONTAINED static so any widget can draw a
+// uniform task row cross-class. DOM behavior is Playwright/dogfood-verified; here
+// we assert it's a callable function on both the class and the stored instance.
+ok('RTR-1 renderTaskRow is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass.renderTaskRow === 'function', 'static on the class');
+  assert(typeof TaskTodayList.renderTaskRow === 'function', 'delegator on the instance');
+  assert(typeof TaskTodayList._stripWikilink === 'function', '_stripWikilink static present');
+  assert(TaskTodayList._stripWikilink('[[Sauce]]') === 'Sauce', '_stripWikilink unwraps');
+});
+
+// ---------- TaskMeetingList._matches (pure filter) ----------
+const TaskMeetingListClass = loadClass('mechanisms/task-entity/task-meeting-list.js', 'TaskMeetingList');
+const TaskMeetingList = new TaskMeetingListClass();
+
+ok('TML-1 _matches keys off the source_note basename (open-only is the query’s job)', () => {
+  assert(TaskMeetingList._matches({ source_note: 'Standup' }, 'Standup') === true, 'exact match');
+  assert(TaskMeetingList._matches({ source_note: 'Standup' }, 'Other') === false, 'non-match');
+  assert(TaskMeetingList._matches({ source_note: '' }, 'Standup') === false, 'blank source_note → false');
+  assert(TaskMeetingList._matches({ source_note: 'Standup' }, '') === false, 'blank meeting → false');
+  assert(TaskMeetingList._matches(null, 'Standup') === false, 'null task → false');
+});
+
+// ---------- TaskProjectList._matches (pure filter) ----------
+const TaskProjectListClass = loadClass('mechanisms/task-entity/task-project-list.js', 'TaskProjectList');
+const TaskProjectList = new TaskProjectListClass();
+
+ok('TPL-1 _matches keys off project_slug (raw plain-string equality)', () => {
+  assert(TaskProjectList._matches({ project_slug: 'sauce' }, 'sauce') === true, 'exact match');
+  assert(TaskProjectList._matches({ project_slug: 'sauce' }, 'other') === false, 'non-match');
+  assert(TaskProjectList._matches({ project_slug: '' }, 'sauce') === false, 'blank slug → false');
+  assert(TaskProjectList._matches({ project_slug: 'sauce' }, '') === false, 'blank target → false');
+  assert(TaskProjectList._matches(null, 'sauce') === false, 'null task → false');
+});
+
+// ---------- TaskNoteToDoNav._dailyPath (pure) ----------
+const TaskNoteToDoNavClass = loadClass('mechanisms/task-entity/task-note-todo-nav.js', 'TaskNoteToDoNav');
+const TaskNoteToDoNav = new TaskNoteToDoNavClass();
+
+ok('TDN-1 _dailyPath derives today’s daily to-do path from a moment', () => {
+  const m = {
+    format: (f) =>
+      f === 'YYYY/MM-MMMM' ? '2026/07-July' :
+      f === 'YYYY-MM-DD' ? '2026-07-01' : '',
+  };
+  assert(TaskNoteToDoNav._dailyPath(m) === 'spice/to-do/2026/07-July/ToDo-2026-07-01.md',
+    'path: ' + TaskNoteToDoNav._dailyPath(m));
+  assert(TaskNoteToDoNav._dailyPath(null) === '', 'null moment → ""');
+  assert(TaskNoteToDoNav._dailyPath({}) === '', 'format-less moment → ""');
+});
+
 console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
