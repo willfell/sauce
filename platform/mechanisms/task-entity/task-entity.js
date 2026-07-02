@@ -5,7 +5,7 @@
  * `type: task` frontmatter; surfaces (daily, project, meeting) live-query
  * those notes. This class owns the DETERMINISTIC, side-effect-free core:
  *
- *   - taskFilename(payload, moment) → collision-resistant filename
+ *   - taskFilename(payload, moment) → human-readable "<title>.md" (caller dedupes)
  *   - composeNote(payload)          → { path, frontmatter, body }
  *   - parseNote(page)               → normalized task view
  *   - queryToday(tasks, todayStr)   → { today, overdue }
@@ -15,10 +15,11 @@
  * ever touch one task's file, never a whole day's list; every helper here is
  * pure so the same input always yields the same output.
  *
- * DETERMINISM: no Date.now / Math.random / new Date — the filename hash is a
- * tiny non-crypto string hash over `title + '|' + HHmmss`, so two tasks
- * created in the same second with different titles land in different files,
- * and re-deriving the same payload+moment yields the same filename.
+ * DETERMINISM: no Date.now / Math.random / new Date. The filename is the
+ * SANITIZED title + ".md" (readable), so two tasks with the SAME title collide
+ * — the caller resolves that with `_uniqueName(base, existsFn)`, which appends
+ * " 2", " 3", … against the vault. Re-deriving the same payload yields the same
+ * base name.
  *
  * BARE CLASS ONLY — no trailing statements. The CustomJS loader wraps the whole
  * file in `( ... )` and evals it as ONE expression; any trailer (`module.exports`,
@@ -26,7 +27,9 @@
  * load via `new Function(src + "; return TaskEntity;")()` (see run-task-entity.js).
  *
  * Static API (Node-testable, pure):
- *   TaskEntity.taskFilename(payload, moment) → string
+ *   TaskEntity._sanitizeTitle(title)         → safe readable filename base
+ *   TaskEntity.taskFilename(payload, moment) → "<title>.md"
+ *   TaskEntity._uniqueName(base, existsFn)   → collision-free filename
  *   TaskEntity.composeNote(payload)          → { path, frontmatter, body }
  *   TaskEntity.parseNote(page)               → normalized object
  *   TaskEntity.queryToday(tasks, todayStr)   → { today, overdue }
@@ -48,26 +51,55 @@ class TaskEntity {
     queryToday(tasks, todayStr) { return TaskEntity.queryToday(tasks, todayStr); }
     validatePayload(payload) { return TaskEntity.validatePayload(payload); }
     _toDateStr(v) { return TaskEntity._toDateStr(v); }
+    _sanitizeTitle(title) { return TaskEntity._sanitizeTitle(title); }
+    _uniqueName(baseFilename, existsFn) { return TaskEntity._uniqueName(baseFilename, existsFn); }
+    _chromeBody() { return TaskEntity._chromeBody(); }
 
     // ---------- Static pure helpers ----------
 
     /**
-     * Tiny non-crypto string hash → 4 lowercase hex chars. Deterministic:
-     * same input → same output, ALWAYS. (FNV-1a-ish; masked to 16 bits.) No
-     * Math.random / Date.now — those are banned and would break determinism +
-     * the CJS-load gate's no-wall-clock-in-constructor invariant.
+     * Turn a task title into a safe, HUMAN-READABLE filename base (no `.md`).
+     * Strips Obsidian-illegal filename chars (`/ \ : * ? " < > | # ^ [ ]`),
+     * collapses runs of whitespace to a single space, trims, and caps to ~80
+     * chars so a pathological title can't blow the filesystem name limit.
+     * Normal case + spaces are preserved so "Go through mail" stays readable.
+     * An empty result (title was all-illegal or blank) → "Task" so we never
+     * emit ".md" / a dotfile. Pure + deterministic.
      */
-    static _hash4(str) {
-        let h = 0x811c9dc5; // FNV offset basis (32-bit)
-        const s = String(str == null ? '' : str);
-        for (let i = 0; i < s.length; i++) {
-            h ^= s.charCodeAt(i);
-            // FNV prime multiply, kept in 32-bit range via Math.imul.
-            h = Math.imul(h, 0x01000193);
+    static _sanitizeTitle(title) {
+        const s = String(title == null ? '' : title)
+            .replace(/[/\\:*?"<>|#^[\]]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80)
+            .trim();
+        return s === '' ? 'Task' : s;
+    }
+
+    /**
+     * Given a base filename ("Go through mail.md") and a predicate
+     * `existsFn(vaultPath)` → bool that reports whether `spice/tasks/<name>`
+     * is already taken, return a FREE filename: the base if it's free, else
+     * "Go through mail 2.md", "…3.md", … Returns just the filename (the caller
+     * prepends `spice/tasks/`). Pure apart from the injected predicate; a
+     * missing/non-function predicate → the base is returned unchanged.
+     */
+    static _uniqueName(baseFilename, existsFn) {
+        const base = String(baseFilename == null ? '' : baseFilename);
+        const taken = (name) => {
+            try { return typeof existsFn === 'function' ? !!existsFn('spice/tasks/' + name) : false; }
+            catch (_e) { return false; }
+        };
+        if (!taken(base)) return base;
+        const dot = base.lastIndexOf('.');
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        const ext = dot > 0 ? base.slice(dot) : '';
+        // Cap the probe count so a pathological existsFn can't spin forever.
+        for (let n = 2; n < 10000; n++) {
+            const candidate = stem + ' ' + n + ext;
+            if (!taken(candidate)) return candidate;
         }
-        // Fold to 16 bits and render as exactly 4 hex chars.
-        const v = (h ^ (h >>> 16)) & 0xffff;
-        return ('0000' + (v >>> 0).toString(16)).slice(-4);
+        return stem + ' ' + Date.now() + ext;
     }
 
     /**
@@ -103,27 +135,51 @@ class TaskEntity {
     }
 
     /**
-     * Deterministic per-task filename:
-     *   task-<YYYYMMDD>-<HHmmss>-<hex4>.md
-     * `moment` is a moment-like object exposing `.format(fmt)`. The hex4 is a
-     * hash of `title + '|' + HHmmss`, so two tasks in the SAME second with
-     * DIFFERENT titles get DIFFERENT filenames.
+     * Human-readable per-task filename: the sanitized TITLE + ".md"
+     * (e.g. "Go through mail.md") — NO timestamp, NO hash. Titles can collide,
+     * so the CALLER dedupes the returned base against the vault via
+     * `_uniqueName(base, existsFn)` before writing. `moment` is accepted for
+     * signature compatibility (created_at stamping lives in composeNote) but is
+     * no longer used to derive the name.
      */
     static taskFilename(payload, moment) {
         const p = payload || {};
-        const ymd = moment && moment.format ? moment.format('YYYYMMDD') : '00000000';
-        const hms = moment && moment.format ? moment.format('HHmmss') : '000000';
-        const hex = TaskEntity._hash4((p.title || '') + '|' + hms);
-        return `task-${ymd}-${hms}-${hex}.md`;
+        return TaskEntity._sanitizeTitle(p.title) + '.md';
+    }
+
+    /**
+     * The canonical CHROME body for a task note (no user notes yet). Task notes
+     * are written at RUNTIME (app.vault.create), not through the template
+     * installer, so the customjs-guard refs are MATERIALIZED here rather than
+     * left as installer tokens. SpaceNavButtons gives vault-global nav; the
+     * TaskNoteView widget renders the clean task card. The `<!-- TASK_NOTES -->`
+     * marker separates the (regenerable) chrome above from the user's own notes
+     * below — the edit dialog + the install heal both key off this marker.
+     * Keep this string BYTE-IDENTICAL to the heal's inline copy in install.js.
+     */
+    static _chromeBody() {
+        return '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            '```\n' +
+            '\n' +
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n' +
+            '```\n' +
+            '\n' +
+            '<!-- TASK_NOTES -->\n';
     }
 
     /**
      * Compose a task note from a create payload. Returns:
-     *   { path: "spice/tasks/<filename>", frontmatter: {...}, body: "" }
+     *   { path: "spice/tasks/<filename>", frontmatter: {...}, body: <chrome> }
      *
      * Frontmatter keys are emitted in the canonical schema order. Absent
      * scheduled / due / completed_at are emitted as EMPTY STRINGS (not omitted)
      * so downstream edits (setting a date) are a simple in-place field write.
+     * The body is the CHROME body (SpaceNavButtons + TaskNoteView + the
+     * `<!-- TASK_NOTES -->` marker) so a freshly-created task note is never
+     * bare; the caller appends any typed user notes BELOW the marker.
      *
      * payload = {
      *   title, status?, scheduled?, due?, priority?,
@@ -154,7 +210,7 @@ class TaskEntity {
             created_at: createdAt,
             completed_at: p.completed_at || '',
         };
-        return { path: 'spice/tasks/' + filename, frontmatter: frontmatter, body: '' };
+        return { path: 'spice/tasks/' + filename, frontmatter: frontmatter, body: TaskEntity._chromeBody() };
     }
 
     /**
