@@ -12,7 +12,8 @@
   "customjs_classes": [
     "TaskEntity",
     "TaskDialog",
-    "TaskTodayList"
+    "TaskTodayList",
+    "TaskNoteView"
   ],
   "files": [
     {
@@ -26,6 +27,10 @@
     {
       "source": "task-today-list.js",
       "dest": "{{scripts_path}}/task-entity/task-today-list.js"
+    },
+    {
+      "source": "task-note-view.js",
+      "dest": "{{scripts_path}}/task-entity/task-note-view.js"
     }
   ],
   "post_install": [],
