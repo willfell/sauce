@@ -6439,6 +6439,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinancePlanScaffolding(tp, manifest, variables, history, git);              // NEW v0.10.0 — create-if-absent Finance Plan.md singleton
   await applyFinanceSavingsScaffolding(tp, manifest, variables, history, git);           // NEW v0.10.0 — create-if-absent savings/ + Savings.md + Savings-Emergency-Fund.md
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+  await applyFinanceBudgetMalformedGroupRepair(tp, manifest, variables, history, git);   // NEW — repairs pre-fix stray Unassigned
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
@@ -9387,6 +9388,16 @@ function _backfillBudgetGroupsFromText(body) {
           const itemStartIdx = i;
           let j = i + 1;
           while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+          // Inline flow-mapping items (e.g. `- {"group":"…","name":"…"}`) carry
+          // their group INSIDE the braces; the line-scan below cannot see it and
+          // would splice a stray `    group: Unassigned` beneath the row, producing
+          // malformed frontmatter. Skip flow-map items entirely — the scaffold and
+          // BudgetCategoriesEditor always write `group` inside the flow-map, so
+          // there is nothing to backfill.
+          if (/^  - \{/.test(fmLines[itemStartIdx])) {
+            i = j;
+            continue;
+          }
           // Check if this item has `group:` already.
           let hasGroup = false;
           for (let k = itemStartIdx; k < j; k++) {
@@ -9421,6 +9432,38 @@ function _backfillBudgetGroupsFromText(body) {
   const newFm = fmLines.join("\n");
   const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
   return { body: newBody, touched: true, added };
+}
+
+// _repairMalformedBudgetGroups — pure string transform on Budget-*.md body.
+// Undoes the pre-fix corruption where the group backfill spliced a stray
+// `    group: Unassigned` line directly beneath an inline flow-mapping category
+// item (which already carries its group inside the braces). Removes ONLY a
+// `    group: Unassigned` line that immediately follows a `  - { … "group" … }`
+// flow-map item. Never touches legitimate block-style `group: Unassigned`.
+// Returns { body, touched, repaired }. Idempotent; never throws on malformed YAML.
+function _repairMalformedBudgetGroups(body) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, repaired: 0 };
+
+  const fmLines = fmMatch[1].split("\n");
+  const out = [];
+  let repaired = 0;
+  for (let i = 0; i < fmLines.length; i++) {
+    const line = fmLines[i];
+    out.push(line);
+    // Flow-map category item that already carries a group inside the braces.
+    if (/^  - \{.*["']?group["']?\s*:/.test(line)) {
+      // Drop a stray `    group: Unassigned` immediately beneath it.
+      if (i + 1 < fmLines.length && /^    group:\s*Unassigned\s*$/.test(fmLines[i + 1])) {
+        i += 1; // skip the stray line (do not push)
+        repaired += 1;
+      }
+    }
+  }
+  if (repaired === 0) return { body, touched: false, repaired: 0 };
+  const newFm = out.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, repaired };
 }
 
 async function applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git) {
@@ -9569,6 +9612,78 @@ async function applyFinanceCategoriesGroupBackfill(tp, manifest, variables, hist
     reason: `${budgetFiles.length} budgets scanned, ${snapshots} snapshotted, ${touched} touched, ${backfilled} categories backfilled to "Unassigned"; 0 categories modified beyond add; snapshot at ${backupRoot}`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     attempted_at: new Date().toISOString() });
+}
+
+// applyFinanceBudgetMalformedGroupRepair — ungated, snapshot-first, marker-guarded,
+// idempotent repair of the pre-fix corruption (stray `    group: Unassigned` spliced
+// under inline flow-mapping category items). Runs on every install so every vault
+// self-heals; per-file failure-loud. Mirrors applyFinanceCategoriesGroupBackfill.
+async function applyFinanceBudgetMalformedGroupRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+      reason: `list failed: ${e.message}`, git_commit: git.commit, git_tag: git.tag,
+      git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  if (budgetFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = `.sauce-backup/${ts}/spice/finance/budgets`;
+  let touchedFiles = 0, repairedRows = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      if (/__budget_malformed_group_repaired:/.test(body)) continue; // idempotency marker
+      const result = _repairMalformedBudgetGroups(body);
+      if (!result.touched) continue;
+      // Snapshot before write.
+      try {
+        const rel = fp.substring(budgetsRoot.length);
+        const backupPath = backupRoot + rel;
+        const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+        await adapter.write(backupPath, body);
+      } catch (e) {
+        history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+          path: fp, reason: `snapshot failed: ${e.message}`, git_commit: git.commit,
+          git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+      // Append the marker so the repair is one-shot per file.
+      let out = result.body;
+      out = out.replace(/^(---\n[\s\S]*?)\n---/, `$1\n__budget_malformed_group_repaired: v0.16.1\n---`);
+      await adapter.write(fp, out);
+      touchedFiles += 1;
+      repairedRows += result.repaired;
+      history?.push({ event: "info", step: "finance_budget_malformed_group_repair", name: "finance",
+        path: fp, repaired: result.repaired, git_commit: git.commit, git_tag: git.tag,
+        git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_malformed_group_repair", name: "finance",
+        path: fp, reason: e.message, git_commit: git.commit, git_tag: git.tag,
+        git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "finance_budget_malformed_group_repair", name: "finance",
+    summary: { touchedFiles, repairedRows, scanned: budgetFiles.length },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
 }
 
 // ============================================================================
@@ -16355,6 +16470,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // HC-V01190-FIN-SEED-MIGRATE-* direct-invocation family). Pure additive.
     module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
     module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
+    module.exports.applyFinanceBudgetMalformedGroupRepair = applyFinanceBudgetMalformedGroupRepair;
+    module.exports._backfillBudgetGroupsFromText = _backfillBudgetGroupsFromText;
+    module.exports._repairMalformedBudgetGroups = _repairMalformedBudgetGroups;
     module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
     module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
     module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
