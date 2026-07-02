@@ -20,5 +20,3 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("{{views_path}}/customjs-guard", { class: "ScratchLeafActions" });
 ```
 
----
-

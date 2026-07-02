@@ -31,5 +31,3 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "MeetingsHubCards" });
 ```
-
----
