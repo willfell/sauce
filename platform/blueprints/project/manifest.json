@@ -64,6 +64,7 @@
     "SectionHub",
     "DocMove",
     "DocLeafActions",
+    "DocBulkMoveActions",
     "ProjectLinksPanel",
     "WorkstreamSource"
   ],
@@ -189,6 +190,10 @@
     {
       "source": "helpers/doc-leaf-actions.js",
       "dest": "{{scripts_path}}/project/doc-leaf-actions.js"
+    },
+    {
+      "source": "helpers/doc-bulk-move.js",
+      "dest": "{{scripts_path}}/project/doc-bulk-move.js"
     },
     {
       "source": "helpers/project-links-panel.js",
