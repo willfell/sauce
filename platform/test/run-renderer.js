@@ -148,6 +148,18 @@ function makeEl(tag, opts) {
   el.remove = function () {
     if (el.parent) el.parent.children = el.parent.children.filter((c) => c !== el);
   };
+  // Walk ancestors for the nearest element matching a ".class" selector.
+  // Used by SpaceNavButtons._renderAccordion (pill.closest(".vault-nav")).
+  el.closest = function (sel) {
+    if (typeof sel !== 'string' || sel[0] !== '.') return null;
+    const cls = sel.slice(1);
+    let n = el;
+    while (n) {
+      if (n.cls === cls) return n;
+      n = n.parent;
+    }
+    return null;
+  };
   return el;
 }
 
@@ -374,6 +386,18 @@ function findButtonByLabel(root, label) {
   }
   return null;
 }
+// nav-buttons@2.9.0: entry buttons are no longer rendered directly — they live
+// behind the collapsed "Go to…" launcher pill. In this headless harness the
+// Obsidian Menu constructor is unobtainable, so _openLauncher falls back to the
+// inline accordion. Find the pill, open it, then return the entry button by
+// label so the existing click→_dispatchAction assertions keep working.
+function openLauncherFindByLabel(root, label) {
+  const pill = findButtonByLabel(root, 'Go to…');
+  if (!pill || typeof pill.onclick !== 'function') return null;
+  // Synthetic click event: no showAtMouseEvent path (no Menu), so evt is unused.
+  pill.onclick({});
+  return findButtonByLabel(root, label);
+}
 function collectButtons(root, out) {
   out = out || [];
   if (root.tag === 'button') out.push(root);
@@ -514,7 +538,7 @@ async function testUnknownAction() {
     const sn = new Cls();
     await sn.render(dv);
     const buttons = countButtons(dv.container);
-    const fakeBtn = findButtonByLabel(dv.container, 'Fake');
+    const fakeBtn = openLauncherFindByLabel(dv.container, 'Fake');
     console.log(`  buttons rendered: ${buttons}`);
     console.log(`  Fake button: ${fakeBtn ? 'found' : 'NOT FOUND'}`);
     if (!fakeBtn) {
@@ -581,7 +605,7 @@ async function testInvokeCommandArgs() {
     const dv = makeDv();
     const sn = new Cls();
     await sn.render(dv);
-    const btn = findButtonByLabel(dv.container, 'Bootstrap');
+    const btn = openLauncherFindByLabel(dv.container, 'Bootstrap');
     if (!btn) {
       console.log('  FAIL — Bootstrap button not rendered');
       return false;
@@ -726,7 +750,7 @@ async function testScratchDayHubRunTemplaterTemplate() {
       const sn = new Cls();
       await sn.render(dv);
 
-      const btn = findButtonByLabel(dv.container, 'Scratch');
+      const btn = openLauncherFindByLabel(dv.container, 'Scratch');
       if (!btn) {
         console.log('  FAIL — Scratch button not rendered');
         return false;
@@ -818,7 +842,7 @@ async function testLazyScaffold() {
     await sn.render(dv);
 
     const buttons = countButtons(dv.container);
-    const boardBtn = findButtonByLabel(dv.container, 'Board');
+    const boardBtn = openLauncherFindByLabel(dv.container, 'Board');
     console.log(`  buttons rendered: ${buttons}`);
     console.log(`  Board button: ${boardBtn ? 'found' : 'NOT FOUND'}`);
     if (!boardBtn) {
@@ -864,13 +888,13 @@ async function testLazyScaffold() {
   });
 }
 
-// T4.4 — barebones registry should produce exactly one Board button.
-//
-// Reads the target vault's registry as-is (no sandbox). Asserts: vault-nav
-// container present, exactly one button, label "Board", icon HTML matches the
-// "board" lucide icon.
+// T4.4 — barebones registry should produce exactly one Board entry behind the
+// "Go to…" launcher (nav-buttons@2.9.0: entries are collapsed into the launcher,
+// not always-visible). Reads the target vault's registry as-is (no sandbox).
+// Asserts: vault-nav container present, a single "Go to…" pill after render, and
+// opening the launcher reveals exactly one entry — label "Board", board icon.
 async function testBarebonesOneButton() {
-  console.log('\n=== T4.4 — barebones registry → exactly one Board button ===');
+  console.log('\n=== T4.4 — barebones registry → exactly one Board entry in launcher ===');
   reset();
   if (!fs.existsSync(REGISTRY_ABS)) {
     console.log(`  registry not present at ${REGISTRY_ABS}`);
@@ -884,24 +908,36 @@ async function testBarebonesOneButton() {
   const sn = new Cls();
   await sn.render(dv);
 
-  const all = collectButtons(dv.container);
   const navContainer = findClass(dv.container, 'vault-nav');
+  // After render, before opening the launcher, the collapsed chrome exposes the
+  // pill (and, if the daily blueprint is installed, prev/next arrows — but the
+  // barebones registry has no daily contributor, so pill only).
+  const pill = findButtonByLabel(dv.container, 'Go to…');
   console.log(`  vault-nav container: ${navContainer ? 'present' : 'absent'}`);
-  console.log(`  buttons rendered: ${all.length}`);
-  for (const b of all) {
-    const m = b.innerHTML.match(/<span(?:\s[^>]*)?>([^<]+)<\/span>/);
-    console.log(`    button label="${m && m[1]}" iconHasBoardSvg=${b.innerHTML.includes('rect width="18" height="18"')}`);
-  }
-  if (all.length !== 1) {
-    console.log('  FAIL — expected exactly 1 button');
+  console.log(`  Go to… pill: ${pill ? 'present' : 'absent'}`);
+  if (!pill || typeof pill.onclick !== 'function') {
+    console.log('  FAIL — Go to… launcher pill not rendered');
     return false;
   }
-  const labelOk = labelSpanRe('Board').test(all[0].innerHTML);
-  // Board icon: lucide "board" svg has rect 18x18 + the three vertical paths
-  const iconOk = all[0].innerHTML.includes('M8 7v7') && all[0].innerHTML.includes('M16 7v9');
+  // Open the launcher (accordion fallback in this headless env) and enumerate entries.
+  pill.onclick({});
+  const accordion = findClass(dv.container, 'vault-nav-accordion');
+  const entries = accordion ? collectButtons(accordion) : [];
+  console.log(`  entries revealed: ${entries.length}`);
+  for (const b of entries) {
+    const m = b.innerHTML.match(/<span(?:\s[^>]*)?>([^<]+)<\/span>/);
+    console.log(`    entry label="${m && m[1]}"`);
+  }
+  if (entries.length !== 1) {
+    console.log('  FAIL — expected exactly 1 entry');
+    return false;
+  }
+  const labelOk = labelSpanRe('Board').test(entries[0].innerHTML);
+  // Board icon: lucide "board" svg has the three vertical paths
+  const iconOk = entries[0].innerHTML.includes('M8 7v7') && entries[0].innerHTML.includes('M16 7v9');
   console.log(`  label is Board: ${labelOk}`);
   console.log(`  icon is board: ${iconOk}`);
-  const pass = navContainer && all.length === 1 && labelOk && iconOk && captured_notices.length === 0;
+  const pass = !!navContainer && entries.length === 1 && labelOk && iconOk && captured_notices.length === 0;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -2600,7 +2636,7 @@ async function testCoworkHubOpenLink() {
     const sn = new Cls();
     await sn.render(dv);
 
-    const btn = findButtonByLabel(dv.container, 'Cowork');
+    const btn = openLauncherFindByLabel(dv.container, 'Cowork');
     if (!btn) {
       console.log('  FAIL — Cowork button not rendered');
       return false;

@@ -301,7 +301,7 @@ class SpaceNavButtons {
       `;
       row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
       row.onmouseleave = () => { row.style.background = "transparent"; };
-      row.onclick = () => { panel.remove(); this._dispatchAction(btn, dv); };
+      row.onclick = () => { panel.remove(); return this._dispatchAction(btn, dv); };
     }
   }
 
