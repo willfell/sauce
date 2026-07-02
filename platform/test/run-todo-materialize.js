@@ -401,28 +401,34 @@ console.log('run-todo-materialize:');
 })();
 
 // --- UM-1: ToDoDailyUnassignedMeetings.render surfaces only unassigned tasks ---
-// One meeting is project-assigned (excluded); one is unassigned (included).
+// task-entity: the widget now reads OPEN task-notes under spice/tasks/ (source ==
+// meeting, blank project_slug) rather than raw meeting file.tasks. One task-note
+// is project-assigned (excluded); one is unassigned meeting task (included);
+// one is a daily task (wrong source, excluded). Rows render via a stubbed
+// TaskTodayList.renderTaskRow so the DOM carries the task title.
 (() => {
-    sharedWindow.customJS = undefined; // exercise the muted-div fallback label
+    const assignedNote = { type: 'task', status: 'open', title: 'Assigned task', source: 'meeting', project_slug: 'sauce', file: { path: 'spice/tasks/Assigned task.md' } };
+    const unassignedNote = { type: 'task', status: 'open', title: 'Loose meeting task', source: 'meeting', project_slug: '', file: { path: 'spice/tasks/Loose meeting task.md' } };
+    const dailyNote = { type: 'task', status: 'open', title: 'Daily thing', source: 'daily', project_slug: '', file: { path: 'spice/tasks/Daily thing.md' } };
+    // Minimal TaskEntity.parseNote + TaskTodayList.renderTaskRow stubs.
     sharedWindow.app = {};
-    const assigned = {
-        project: '[[Sauce]]',
-        file: { path: 'spice/meetings/notes/Assigned.md', tasks: [{ text: 'Assigned task', completed: false }] },
-    };
-    const unassigned = {
-        project: null,
-        file: { path: 'spice/meetings/notes/Unassigned.md', tasks: [{ text: 'Loose meeting task', completed: false }] },
+    sharedWindow.customJS = {
+        TaskEntity: { parseNote(p) { return { title: p.title, status: p.status, source: p.source, project_slug: p.project_slug, path: p.file && p.file.path }; } },
+        TaskTodayList: { renderTaskRow(container, t) { const d = container.createEl('div'); d.textContent = t.title; return d; } },
+        SectionLabel: undefined, // exercise the muted-div fallback label
     };
     const container = makeEl('div');
     const dv = {
         container,
         current() { return { type: 'to-do' }; },
         pages(glob) {
-            if (glob !== '"spice/meetings/notes"') return { where() { return { array() { return []; } }; } };
+            if (glob !== '"spice/tasks"') return { where() { return { array() { return []; } }; } };
             return {
                 where(fn) {
-                    const filtered = [assigned, unassigned].filter(fn);
-                    return { array() { return filtered; } };
+                    const filtered = [assignedNote, unassignedNote, dailyNote].filter(fn);
+                    return {
+                        map(mfn) { const mapped = filtered.map(mfn); return { array() { return mapped; } }; },
+                    };
                 },
             };
         },
@@ -437,7 +443,9 @@ console.log('run-todo-materialize:');
     ok('UM-1 render does not throw', !threw);
     ok('UM-1a includes the unassigned task', dom.includes('Loose meeting task'), `dom: ${dom}`);
     ok('UM-1b excludes the project-assigned task', !dom.includes('Assigned task'), `dom: ${dom}`);
+    ok('UM-1c excludes a non-meeting (daily) task', !dom.includes('Daily thing'), `dom: ${dom}`);
     sharedWindow.app = undefined;
+    sharedWindow.customJS = undefined;
 })();
 
 // ---------- TDMAT-MIDDAY-1: mid-day-added recurring task (bug-(b) repro) ----------
