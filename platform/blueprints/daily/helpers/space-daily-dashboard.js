@@ -111,47 +111,62 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
-  // ---- pure date helpers (Node-testable; no dv/DOM/customJS) ----
-  // Card "To Do number on daily note to show to items for all": the daily
-  // To-Do pill should also count tasks living in project + meeting notes, but
-  // ONLY those due today or already overdue (per the user's scope decision).
-  // The decision logic lives here as pure statics so it can be regression-
-  // tested; getTasks() is just the dv adapter that feeds it task records.
-
-  // Pull an ISO date (YYYY-MM-DD) out of a task's text: supports the dataview
-  // `due:: 2026-06-30` inline field (bare or [bracketed]) and the Tasks-plugin
-  // `📅 2026-06-30` emoji. Returns the date string, or null when there is none.
-  static _parseTaskDue(text) {
-    if (!text || typeof text !== "string") return null;
-    // \b before `due` so `overdue:: …` / `startdue:: …` don't false-match.
-    const m = text.match(/(?:\bdue\s*::\s*|📅\s*)(\d{4}-\d{2}-\d{2})/);
-    return m ? m[1] : null;
-  }
-
-  // A dated external task counts toward "today" iff its due date is today or
-  // earlier (overdue). No date, or a future date, → does NOT count. ISO date
-  // strings sort lexicographically, so a string compare is correct here.
-  static _countsTowardToday(due, today) {
-    if (!due || !today) return false;
-    return due <= today;
-  }
-
-  // Select the OPEN external task records ({text, completed, parentPath}) that
-  // belong on today's pill: not completed, and due today or overdue. Completed
-  // external tasks are intentionally NOT counted — project/meeting notes don't
-  // record a completion date, so "done today" is unknowable and counting "done
-  // ever" would grow the Done pill with the whole vault history. The Done count
-  // therefore stays scoped to today's own to-do note; only the OPEN count gains
-  // these external items. Pure — the dv adapter in getTasks() builds the records.
-  static _foldExternalTasks(records, today) {
-    const open = [];
-    for (const r of (records || [])) {
-      if (!r || r.completed) continue;
-      const due = SpaceDailyDashboard._parseTaskDue(r.text);
-      if (!SpaceDailyDashboard._countsTowardToday(due, today)) continue;
-      open.push({ text: r.text, parentPath: r.parentPath, due });
+  /**
+   * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
+   * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
+   * render() `getTasks` closure is just the adapter passing the live dv +
+   * customJS.TaskEntity. Returns { open, done }:
+   *   open — parsed task objects (TaskEntity.parseNote), today-first then overdue,
+   *          each tagged `_overdue`. Partitioned by TaskEntity.queryToday, which is
+   *          SOURCE-AGNOSTIC (scheduled==today | scheduled<today; future + unscheduled
+   *          excluded). We use queryToday, NOT TaskTodayList.buildBands, because
+   *          buildBands drops project_slug/source==meeting tasks (they render in the
+   *          TO-DO note's own sections) — the dashboard mirror wants ALL sources.
+   *   done — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
+   *          only; all-done would grow unbounded with vault history).
+   * Filtering is done in plain JS AFTER dv.pages() (not via DataArray .where) so a
+   * plain-array dv-stub exercises the real path. No TE (cold load / mechanism not
+   * registered) → { open: [], done: 0 }; the panel simply hides. Never throws.
+   */
+  static selectTasks(dv, todayStr, TE) {
+    if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
+      return { open: [], done: 0 };
     }
-    return open;
+    const toArr = (q) => {
+      try {
+        const r = dv.pages(q);
+        if (!r) return [];
+        if (typeof r.array === "function") return r.array();
+        return Array.from(r);
+      } catch (_e) { return []; }
+    };
+
+    // Open — all sources, excluding the _done/ + _trash/ archives.
+    const openParsed = [];
+    for (const p of toArr('"spice/tasks"')) {
+      if (!p || p.type !== "task" || p.status !== "open") continue;
+      const path = p.file && p.file.path;
+      if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
+      openParsed.push(TE.parseNote(p));
+    }
+    const bands = TE.queryToday(openParsed, todayStr);
+    const open = [];
+    for (const t of bands.today)   open.push(Object.assign({}, t, { _overdue: false }));
+    for (const t of bands.overdue) open.push(Object.assign({}, t, { _overdue: true }));
+
+    // Done today — _done/ notes with completed_at date == today.
+    let done = 0;
+    for (const p of toArr('"spice/tasks/_done"')) {
+      if (!p || p.type !== "task") continue;
+      const path = p.file && p.file.path;
+      if (!path || path.includes("/_trash/")) continue;
+      // Compare the RAW page field: parseNote does not date-coerce completed_at
+      // (it blankToNulls it but keeps the raw string/Luxon), so route it through
+      // _toDateStr here (handles string / datetime-with-offset / Luxon → YYYY-MM-DD).
+      if (TE._toDateStr(p.completed_at) === todayStr) done++;
+    }
+
+    return { open, done };
   }
 
   async render(dv) {
@@ -175,10 +190,6 @@ class SpaceDailyDashboard {
 
     const config = {
       meetingsPath: "spice/meetings/notes",
-      todoPaths: ["spice/to-do"],
-      // Card "To Do number ... for all": project + meeting notes whose tasks
-      // (due today or overdue) also feed the daily To-Do count.
-      externalTaskPaths: ["spice/projects", "spice/meetings/notes"]
     };
 
     const getMeetings = () => {
@@ -193,47 +204,20 @@ class SpaceDailyDashboard {
       return pages.array();
     };
 
+    // Note-per-task migration: the panel mirrors open task-NOTES scheduled today +
+    // overdue (all sources) + a done-today count. Data selection lives in the pure
+    // static selectTasks (Node-tested via SELTASK-1); this closure is just the dv
+    // adapter that passes the live customJS.TaskEntity.
     const getTasks = () => {
-      // v0.13.1 (sauce v0.84.1): split open vs done so the section header
-      // can surface a green "N done" pill alongside the open count. Body
-      // still iterates open only — completed items stay collapsed under
-      // the source page to keep the dashboard focused on what's left.
-      const open = [];
-      const done = [];
-      for (const todoPath of config.todoPaths) {
-        const todoPages = dv.pages(`"${todoPath}"`)
-          .where(p => p.file.name.includes(today));
-        for (const page of todoPages) {
-          for (const task of page.file.tasks) {
-            const item = { text: task.text, parentPath: page.file.path };
-            (task.completed ? done : open).push(item);
-          }
-        }
-      }
-      // Fold in project + meeting tasks that are DUE TODAY or OVERDUE. These
-      // notes are NOT date-named, so we can't filter by filename — we walk them
-      // and let the pure _foldExternalTasks decide by each task's due date.
-      // (Undated / future-dated tasks are skipped: the pill is "what's on my
-      // plate today", not every open task in the vault.)
-      for (const extPath of config.externalTaskPaths) {
-        const records = [];
-        for (const page of dv.pages(`"${extPath}"`)) {
-          if (!page.file || !page.file.tasks) continue;
-          for (const task of page.file.tasks) {
-            records.push({ text: task.text, completed: task.completed, parentPath: page.file.path });
-          }
-        }
-        const externalOpen = SpaceDailyDashboard._foldExternalTasks(records, today);
-        for (const it of externalOpen) open.push(it);
-      }
-      return { open, done };
+      const TE = (typeof customJS !== "undefined" && customJS) ? customJS.TaskEntity : null;
+      return SpaceDailyDashboard.selectTasks(dv, today, TE);
     };
 
     const meetings = getMeetings();
-    const { open: openTasks, done: doneTasks } = getTasks();
+    const { open: openTasks, done: doneCount } = getTasks();
     const activityResult = await this._getActivityCount(dv, today);
     const activityCount = activityResult.total;
-    const hasContent = meetings.length > 0 || openTasks.length > 0 || doneTasks.length > 0 || activityCount > 0;
+    const hasContent = meetings.length > 0 || openTasks.length > 0 || doneCount > 0 || activityCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
     // render so the 3 _renderSection calls don't each hit the adapter.
@@ -270,7 +254,7 @@ class SpaceDailyDashboard {
       return;
     }
 
-    if (openTasks.length > 0 || doneTasks.length > 0) {
+    if (openTasks.length > 0 || doneCount > 0) {
       // v0.13.3 (sauce v0.84.3): pills move out of the title text and into a
       // right-aligned sauce-section-counts container. Three forms:
       //   open > 0 && done > 0 → orange "N Open" + green "K Done"
@@ -279,14 +263,14 @@ class SpaceDailyDashboard {
       // Numeric counts interpolated directly into rightHtml are XSS-safe; we control
       // both arms of the conditional.
       let tasksRightHtml;
-      if (openTasks.length > 0 && doneTasks.length > 0) {
+      if (openTasks.length > 0 && doneCount > 0) {
         tasksRightHtml =
           `<span class="sauce-section-open-pill">${openTasks.length} Open</span>` +
-          `<span class="sauce-section-done-pill">${doneTasks.length} Done</span>`;
+          `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
       } else if (openTasks.length > 0) {
         tasksRightHtml = `<span class="sauce-section-open-pill">${openTasks.length} Open</span>`;
       } else {
-        tasksRightHtml = `<span class="sauce-section-done-pill">${doneTasks.length} Done</span>`;
+        tasksRightHtml = `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
       }
 
       const tasksBody = this._renderSection(container, {
@@ -299,34 +283,45 @@ class SpaceDailyDashboard {
         sectionState,
       });
 
-      // v0.13.1: body iterates open tasks only. Done tasks are surfaced
-      // via the header count; their text stays in the source notes.
+      // v0.13.1: body iterates open tasks only. Done tasks are surfaced via the
+      // header count; their notes stay in spice/tasks/_done/.
       if (openTasks.length > 0) {
         const tasksList = tasksBody.createEl("ul");
         tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
 
+        // Deterministic inline-link renderer from the task-entity mechanism — real
+        // <a> for [[wl]] / [md](url) / bare URLs (task titles can carry links). NOT
+        // MarkdownRenderer (absent in the customJS eval context → raw text). Falls
+        // back to plain text if TaskTodayList isn't registered yet (cold load).
+        const TTL = (typeof customJS !== "undefined" && customJS) ? customJS.TaskTodayList : null;
+
         for (const task of openTasks) {
           const li = tasksList.createEl("li");
-          // v0.2.6: word-break + overflow-wrap protect against long task strings
-          // (URLs, hashes, no-space text) overflowing the dashboard.
           li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
-          // v0.5.1 (v0.64.1): render markdown links + wikilinks as clickable
-          // anchors. Plain-text clicks (outside any <a>) still open the parent
-          // daily note via the LI's onclick.
-          li.innerHTML = this._renderTaskHTML(task.text);
+
+          const titleSpan = li.createEl("span");
+          const titleText = (task && task.title) || "(untitled)";
+          if (TTL && typeof TTL.renderInlineLinks === "function") {
+            TTL.renderInlineLinks(titleSpan, titleText, task.path);
+          } else {
+            titleSpan.textContent = titleText;
+          }
+
+          // Overdue marker — appended AFTER the title span (renderInlineLinks clears
+          // its target element, so a sibling tag survives the rebuild).
+          if (task && task._overdue) {
+            const tag = li.createEl("span");
+            tag.textContent = "overdue";
+            tag.style.cssText = "margin-left: 6px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-red, #e05252);";
+          }
+
+          // Row click → open the task NOTE (read-mostly mirror; the note carries its
+          // own edit affordance). Ignore clicks that land on an inner <a> so opening
+          // a title link doesn't ALSO navigate to the note.
           li.onclick = (e) => {
             if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
-            app.workspace.openLinkText(task.parentPath, "");
+            if (task && task.path) app.workspace.openLinkText(task.path, "");
           };
-          const wikilinks = li.querySelectorAll("a.internal-link");
-          for (const a of wikilinks) {
-            a.onclick = (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const target = a.getAttribute("data-href") || a.textContent || "";
-              app.workspace.openLinkText(target, task.parentPath);
-            };
-          }
         }
       }
     }
@@ -1297,81 +1292,6 @@ class SpaceDailyDashboard {
     }
   }
 
-  /**
-   * v0.5.1 (v0.64.1): convert task text containing markdown links + wikilinks
-   * into safe HTML for innerHTML rendering. All non-link content is HTML-escaped.
-   *  - `[text](url)` → external <a target="_blank">
-   *  - `[[target]]` / `[[target|alias]]` → internal <a class="internal-link">
-   *    (caller wires onclick → app.workspace.openLinkText)
-   */
-  _renderTaskHTML(text) {
-    const escapeHtml = (s) => String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-
-    // Process in segments: split on link tokens, escape literal segments,
-    // emit anchor HTML for link tokens. Two-pass scan keeps wikilink matches
-    // from interfering with markdown-link matches (and vice versa).
-    const tokens = [];
-    let i = 0;
-    while (i < text.length) {
-      // Try wikilink [[...]] first (must come before markdown-link probe
-      // because [[x]] starts with [[ which markdown-link's [ would also match).
-      if (text.charAt(i) === "[" && text.charAt(i + 1) === "[") {
-        const end = text.indexOf("]]", i + 2);
-        if (end >= 0) {
-          const inner = text.slice(i + 2, end);
-          const pipe = inner.indexOf("|");
-          const target = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
-          const alias  = pipe >= 0 ? inner.slice(pipe + 1).trim() : target;
-          tokens.push({ kind: "wikilink", target, alias });
-          i = end + 2;
-          continue;
-        }
-      }
-      // Markdown link [text](url)
-      if (text.charAt(i) === "[") {
-        const closeBracket = text.indexOf("]", i + 1);
-        if (closeBracket >= 0 && text.charAt(closeBracket + 1) === "(") {
-          // find the closing paren, allowing balanced parens inside the URL
-          // (Teams deep-links contain literal "(...)" in query params)
-          let depth = 0, closeParen = -1;
-          for (let k = closeBracket + 2; k < text.length; k++) {
-            const c = text.charAt(k);
-            if (c === "(") depth++;
-            else if (c === ")") { if (depth === 0) { closeParen = k; break; } depth--; }
-          }
-          if (closeParen >= 0) {
-            const linkText = text.slice(i + 1, closeBracket);
-            const url      = text.slice(closeBracket + 2, closeParen);
-            tokens.push({ kind: "mdlink", text: linkText, url });
-            i = closeParen + 1;
-            continue;
-          }
-        }
-      }
-      // Literal char — accumulate to next token
-      let j = i;
-      while (j < text.length && text.charAt(j) !== "[") j++;
-      if (j === i) j = i + 1; // safety against zero-width
-      tokens.push({ kind: "text", value: text.slice(i, j) });
-      i = j;
-    }
-
-    let html = "";
-    for (const tok of tokens) {
-      if (tok.kind === "text") {
-        html += escapeHtml(tok.value);
-      } else if (tok.kind === "mdlink") {
-        html += `<a href="${escapeHtml(tok.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(tok.text)}</a>`;
-      } else if (tok.kind === "wikilink") {
-        html += `<a href="#" class="internal-link" data-href="${escapeHtml(tok.target)}">${escapeHtml(tok.alias)}</a>`;
-      }
-    }
-    return html;
-  }
 }
 
 // NOTE: do NOT append a `module.exports` / `if (typeof module ...)` trailer here.
