@@ -5980,6 +5980,11 @@ const _HOME_CHROME = [
 //   user content that lived after the marker (or, for a bare pre-blueprint note
 //   with no marker at all, appending the whole thing below the fresh marker).
 function _healHomeChromeBody(body) {
+  // Contract: everything ABOVE the HOME_CHROME_END marker is platform-owned chrome
+  // (rebuilt here); only content BELOW the marker is user free-write and is preserved.
+  // A healthy note (SpaceHome block present) is returned unchanged. When the chrome is
+  // missing, above-marker text is intentionally discarded — applyHomeScaffoldHeal always
+  // writes a .sauce-backup first, so it is recoverable.
   const marker = "[//]: # (HOME_CHROME_END)";
   const chrome = [
     '```dataviewjs',
