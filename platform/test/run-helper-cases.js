@@ -4623,22 +4623,23 @@ async function caseLAT1LeafActionsOwnDividers() {
 }
 
 // -------------------------------------------------------------------------
-// DNT-1: the Doc Note template's Move-button row (DocLeafActions) sits TIGHT
-// against the `---` chrome divider that follows ProjectNavButtons — no blank
-// line between the `---` and the DocLeafActions dataviewjs block. Prior
-// template had `---\n\n<block>`, rendering an extra gap above the Move button.
+// DNT-1 (chrome overhaul 2026-07-02): the Doc Note template no longer carries a
+// literal `---` chrome divider. Helpers own dividers now — DocLeafActions
+// renders its OWN leading hairline via customJS.SectionLabel.divider (leading-
+// hairline ownership; see note-chrome.md §1a). This asserts the new grammar.
 // -------------------------------------------------------------------------
 async function caseDNT1DocNoteTightSeparator() {
-  console.log("\n--- Case DNT-1: Doc Note template Move button tight against its `---` separator ---");
+  console.log("\n--- Case DNT-1: Doc Note template has no literal --- (DocLeafActions owns its divider) ---");
   const p = path.join(BLUEPRINTS_DIR, "project", "templates", "Doc Note.md");
   assertTrue("DNT-1: Doc Note.md template source exists", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  // Tight: `---` directly above the DocLeafActions block (no blank line).
-  assertTrue("DNT-1: DocLeafActions row is tight against its --- separator (no blank-line gap)",
-    /\n---\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"[^`]*\);\n```/.test(body));
-  // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
-  assertTrue("DNT-1: no blank line between the --- and the DocLeafActions block",
-    !/\n---\n\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"/.test(body));
+  // New grammar: NO literal `---` chrome divider above the DocLeafActions block.
+  assertTrue("DNT-1: no literal --- chrome divider above the DocLeafActions block",
+    !/\n---\n+```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"/.test(body));
+  // DocLeafActions renders its own leading hairline via the shared primitive.
+  const dla = fs.readFileSync(path.join(BLUEPRINTS_DIR, "project", "helpers", "doc-leaf-actions.js"), "utf8");
+  assertTrue("DNT-1: DocLeafActions delegates its leading divider to SectionLabel.divider",
+    /customJS\.SectionLabel\.divider\s*\(/.test(dla));
 }
 
 async function caseDDA1DashboardActivityPanel() {
