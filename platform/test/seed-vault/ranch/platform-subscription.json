@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.14.0"
+      "version": "2.14.1"
     },
     {
       "name": "cards",
@@ -109,7 +109,7 @@
     },
     {
       "name": "daily",
-      "version": "0.18.0"
+      "version": "0.18.1"
     },
     {
       "name": "meetings",
