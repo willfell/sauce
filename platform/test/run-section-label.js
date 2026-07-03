@@ -37,17 +37,19 @@ const Cls = SRC ? new Function(`${SRC}\nreturn SectionLabel;`)() : null;
 // SL3 — legacy project-helper copy removed (single source of truth)
 ok('SL3 legacy copy gone', !fs.existsSync(LEGACY));
 
-// SL4 — divider() returns an hr chrome hairline with the canonical 8px 0 margin
+// SL4 — divider() returns an hr chrome hairline with the canonical 12px 0 margin
+// (wiki-aligned 2026-07-02: bumped 8px → 12px so project chrome matches the wiki
+// helper-owned dividers, which use margin: 12px 0).
 {
   const c = makeEl('div');
   let hr = null;
   if (Cls) hr = new Cls().divider({ container: c });
   const css = hr && hr.style && hr.style.cssText;
   ok(
-    'SL4 divider() hr with border-top + margin: 8px 0',
+    'SL4 divider() hr with border-top + margin: 12px 0',
     hr && hr.tag === 'hr' &&
     /border-top:\s*1px solid var\(--background-modifier-border\)/.test(css) &&
-    /margin:\s*8px 0/.test(css)
+    /margin:\s*12px 0/.test(css)
   );
 }
 // SL5 — divider() accepts a bare container (no `.container` wrapper)

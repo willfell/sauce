@@ -36,7 +36,7 @@ class SectionLabel {
   divider(dv) {
     const c = (dv && dv.container) || dv;
     const hr = c.createEl("hr");
-    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
     return hr;
   }
 }
