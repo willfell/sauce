@@ -1,120 +1,100 @@
-# Daily homepage — command-center header + quick-capture
+# Home command center — glance counts + one-gesture task capture
 
 - **Date:** 2026-07-02
-- **Status:** Design approved (brainstorm), pending spec review → plan
-- **Blueprint/mechanism:** `daily` blueprint (`SpaceDailyDashboard`), new sibling `SpaceDailyHeader`
+- **Status:** Design approved (brainstorm) → RECONCILED with shipped Home command center
+- **Blueprint/mechanism:** `home` blueprint (`SpaceHome`), `daily` blueprint (`SpaceDailyDashboard` static API), `task-entity` mechanism (`TaskDialog`)
 - **Branch/worktree:** `feature/daily-homepage-command-center` @ `.worktrees/daily-homepage-command-center`
 
-## Context
+## Reconciliation note (why this design changed mid-flight)
 
-The vault's homepage (via the Homepage community plugin) opens today's daily note in Reading view. That note renders `SpaceNavButtons` → `---` → `SpaceDailyDashboard` (three panels: Tasks, Meetings, Activity) → `---` → free-write.
+The original brainstorm assumed the homepage *was* the daily note and proposed a new `SpaceDailyHeader`. While that spec was being written, PRs **#275** (`feat(home): Home command center — Homepage opens a reading-mode Home.md dashboard on startup`) and **#278** (`fix(home): drop hard deps on meetings + scratch`) shipped a real Home command center: `spice/home/Home.md`, rendered by the `SpaceHome` CustomJS class, is now the startup homepage. It already has:
 
-The dashboard is already a strong "today" surface, but the page opens straight into the Tasks panel — you have to *read* the panels to know how your day looks, and there is no way to capture a thought without navigating away. The goal is to add a **command-center orientation layer** on top without removing any current daily functionality.
+- a **greeting + human date** header (`SpaceHome._greeting(hour)` + `SpaceHome._humanDate`), and
+- a **quick-capture band of 4 buttons** — `＋ To-Do` (opens the full `TaskDialog`), `＋ Meeting`, `＋ Scratch`, `Open today's daily` — then the embedded `SpaceDailyDashboard` (via the `asOf: today` DRY seam).
 
-The Homepage plugin is a container/launcher, not a widget engine: everything visible on the homepage is rendered by the daily note's CustomJS surfaces. So this work is entirely within `SpaceDailyDashboard` + a new sibling render module — no Homepage-plugin config change.
+So the two approved improvements already exist, but in the exact forms the user *rejected or wanted improved*:
+1. **At-a-glance header** → greeting exists, but there is **no rolled-up counts line** (counts live only in the Tasks-section pills below). ← genuine gap.
+2. **Quick-capture** → exists as a **button that opens the full dialog** — i.e. "Approach 3", the button→dialog the user explicitly rejected in favor of one-gesture inline capture. ← needs replacing.
+
+This design therefore **enhances `SpaceHome`** rather than building anything new on the daily note.
 
 ## Goals
 
-1. **At-a-glance header** at the very top of the dashboard: a time-aware greeting + the note's date + a rolled-up, cross-panel count line. Turns *scanning* into *glancing*.
-2. **Quick-capture**: an always-visible jot box that creates a task-note scheduled for today (reusing `TaskEntity`), which appears in the Tasks panel instantly. The command-center "do, not just view" piece.
-3. Keep the three existing panels (Tasks, Meetings, Activity) **exactly as-is**.
-4. Ship on **every** daily note the moment it lands — no template change, no migration heal.
+1. **Glance counts** — add a rolled-up, cross-panel count line to the `SpaceHome` greeting: `N today · M overdue · K meetings · J done`. Zeros hidden; empty day → `Clear day — nothing scheduled`.
+2. **One-gesture task capture** — replace the `＋ To-Do` button with an **inline jot input + Add** that creates a task-note scheduled today directly (no modal), which appears in the Tasks panel immediately.
+3. Keep `＋ Meeting`, `＋ Scratch`, `Open today's daily`, the greeting, and the embedded dashboard otherwise unchanged.
 
 ## Non-goals (explicit YAGNI)
 
-- **No weather.** (Considered and cut — no network dependency.)
-- **No greeting name.** Greeting is nameless: `Good morning · <date>`. No owner/display-name config field.
-- **No finance snapshot, no project-health strip, no this-week horizon.** These were considered as portal expansions and deferred; the homepage stays a sharp today-command-center, not a portal-of-everything.
-- No changes to `SpaceNavButtons`, the free-write region, or the daily template body.
+- **No weather.** **No greeting name.** **No finance / project / horizon portal strips.** (All deferred to "future".)
+- No template/marker changes, no install heal, no migration — `SpaceHome` renders live on every Home.md open, so enhancing its render ships everywhere instantly.
+- No new blueprint or mechanism; no version bumps by hand (the release pipeline owns versions).
 
 ## Design
 
-### Architecture
+### E1 — Glance counts in the greeting
 
-**New module:** `ranch/scripts/daily/space-daily-header.js` → class `SpaceDailyHeader`, a sibling of `space-daily-dashboard.js` (CustomJS auto-loads it from the same folder). It is a **pure render module** — it owns no Dataview queries. Interface:
+`SpaceHome.render` already computes `today`. Add, between the greeting date and the capture band, a `.sauce-home-glance` row of count chips.
 
-- `SpaceDailyHeader.greeting(hour)` → `"Good morning" | "Good afternoon" | "Good evening"`. Pure; takes the hour as an argument (testable). Bands: `hour < 12` → morning; `12–16` → afternoon; `hour >= 17` → evening.
-- `SpaceDailyHeader.render({ dv, page, counts, onCapture })` → builds the header DOM (three rows: orientation, roll-up, capture) into `dv.container`. `onCapture(text)` is an async callback supplied by the dashboard that performs the task-note write + re-render.
+- **Count source (DRY):** a new static on the daily dashboard, `SpaceDailyDashboard.computeCounts(dv, todayStr, TE)` → `{ today, overdue, done, meetings }` (all integers). It composes the existing `SpaceDailyDashboard.selectTasks` (→ `{ open[], overdue, done }`) with a newly-extracted `SpaceDailyDashboard.selectMeetings(dv, todayStr)` (the render's `getMeetings` closure, hoisted to a reusable static and called by both `render` and `computeCounts`). Cold-load safe (no TE → zeros), never throws.
+- **Chip rendering (pure, Node-testable):** `SpaceHome._glanceChips(counts)` → an ordered array of `{ n, label, cls }` (or the empty-state sentinel) describing which chips to show. `render()` derives counts (impure, via `customJS.SpaceDailyDashboard.computeCounts`, guarded like `_dispatch`) then feeds them to `_glanceChips` and builds the DOM. Mirrors the existing pure/impure split (`_greeting` pure; `render` reads the clock).
+- **Chip rules:** show a chip only when its count `> 0`. Order: `today` (accent), `overdue` (`sauce-section-overdue-pill`, red), `meetings`, `done` (green). Label pluralization only where it reads wrong: `meeting`/`meetings`. If every count is 0, render one muted `Clear day — nothing scheduled` line instead of chips.
 
-**Orchestration change in `SpaceDailyDashboard.render`:** hoist the count computation so it runs **once**, then feed both the header and the panels:
+### E2 — Inline one-gesture To-Do capture
 
-```
-render():
-  const counts = computeCounts()      // selectTasks() + meetings scan — computed ONCE
-  SpaceDailyHeader.render({ counts, onCapture })   // NEW — renders first, on top
-  renderTasksPanel(counts.tasks)       // reuses the same data (no re-query)
-  renderMeetingsPanel(counts.meetings)
-  renderActivityPanel()
-```
+Replace the `todo` **button** with an inline capture row at the top of the capture band: a full-width `<input type="text" placeholder="Jot a task…">` + an `Add` button. `＋ Meeting`, `＋ Scratch`, `Open today's daily` remain as buttons below it.
 
-`computeCounts()` returns `{ tasks: { open: [...today], overdueCount, doneCount }, meetings: { count } }` — reusing the existing `SpaceDailyDashboard.selectTasks()` and the existing meetings scan. No new queries are introduced; the header is free data.
-
-This also starts relieving the 1,289-line `space-daily-dashboard.js` by extracting the header render into its own focused module.
+- **`_captureSpec()`** drops `todo` and returns the 3 remaining button specs (`meeting`, `scratch`, `openDaily`), preserving order + `{key,label,icon}` shape.
+- **Submit** (Enter in the input, or the Add button) with non-empty trimmed text calls `customJS.TaskDialog.createQuick({ title, today, source: "daily" })` (guarded, no-op on cold load — same pattern as `_dispatch`).
+- **`TaskDialog.createQuick({ title, today, source })`** (new **instance** method on `TaskDialog`, so it's reachable as `customJS.TaskDialog.createQuick`): trims `title`; on blank → no-op; else builds the minimal payload `{ title, scheduled: today, source, links: [] }` and reuses the existing `this._create(app, payload, "")` path (which composes via `TaskEntity` — defaulting `type: task`, `status: open` — dedupes the filename, and does exactly one `app.vault.create`). `app` is grabbed from the runtime global (as `_dispatch` grabs `customJS`/`app`).
+- **Refresh:** after `createQuick` resolves, re-invoke `this.render(dv, params)`. `render` is idempotent (it removes any prior `.sauce-home` and the dashboard removes its prior `.space-daily-dashboard`), so the new task appears in the Tasks panel and the `today` glance chip ticks up — single source of truth via re-query. The input is rebuilt empty (clears itself).
+- **Mobile discipline:** **no autofocus** (home opens on every launch; autofocus would pop the keyboard every time). Empty/whitespace submit → no-op.
 
 ### Component boundaries
 
 | Unit | What it does | Interface | Depends on |
 | --- | --- | --- | --- |
-| `SpaceDailyHeader.greeting(hour)` | Maps an hour to a greeting string | `(number) → string` | nothing (pure) |
-| `SpaceDailyHeader.render(ctx)` | Renders the 3-row header DOM | `({dv, page, counts, onCapture}) → void` | DOM only; `page.day_label`; pill CSS classes |
-| `SpaceDailyDashboard.computeCounts()` | Single source of counts for header + panels | `() → {tasks, meetings}` | `selectTasks`, `TaskEntity.queryToday`, meetings scan |
-| `SpaceDailyDashboard` capture handler | Writes a task-note, re-renders Tasks panel + roll-up | `(text) → Promise<void>` | `TaskEntity` create path |
+| `SpaceDailyDashboard.selectMeetings(dv, today)` | Today's meeting notes (filename-includes-today) | `(dv, string) → page[]` | Dataview pages; pure filter |
+| `SpaceDailyDashboard.computeCounts(dv, today, TE)` | Count roll-up for the glance line | `(dv, string, TE) → {today,overdue,done,meetings}` | `selectTasks`, `selectMeetings` |
+| `SpaceHome._glanceChips(counts)` | Pure chip descriptor list / empty sentinel | `({today,overdue,done,meetings}) → chip[]` | nothing (pure) |
+| `SpaceHome.render` | Greeting → glance → capture(input+3 buttons) → dashboard | `(dv, params) → void` | the above + `TaskDialog.createQuick` |
+| `TaskDialog.createQuick({title,today,source})` | Direct one-file task create, no modal | `(opts) → Promise<void>` | `this._create` / `TaskEntity` / `app.vault` |
 
-### The header UI (three stacked rows, full-width, mobile-first)
-
-1. **Orientation:** `Good morning · Wednesday, July 2, 2026`. Greeting from `greeting(new Date().getHours())` (display-only wall-clock read — not date math, so it does not conflict with the deterministic `_humanDate` Hinnant rule). Date is read verbatim from the note's existing `day_label` frontmatter — no computation.
-2. **Roll-up chips** that *span* the panels (not a repeat of the Tasks-panel pills): `3 tasks today · 1 overdue · 2 meetings · 5 done`. Reuses existing pill styling for cohesion; overdue stays red via `.sauce-section-overdue-pill`. **Any zero count is hidden** (same rule the panel pills follow). If nothing is scheduled today, the row shows a friendly `Clear day — nothing scheduled` instead of a line of zeros.
-3. **Quick-capture:** a full-width text input + an "Add" button (button matters for thumbs on mobile; Enter also submits).
-
-### Quick-capture behavior
-
-On submit (Enter or Add), with non-empty trimmed text:
-
-1. Call the **existing `TaskEntity` create path** directly (the same one `TaskDialog` uses) — **not** the dialog. Seeds a well-formed task-note: `type: task`, `status: open`, `scheduled: <today>`, `source: daily`, `links: []`. Title = the trimmed text. Filename dedup is already handled by `TaskEntity`.
-2. Writes **exactly one file** into `spice/tasks/` → respects the note-per-task invariant, structurally immune to the mobile whole-note wipe.
-3. **Instant feedback:** re-run `selectTasks`, then re-render the Tasks panel + the header roll-up count in place. Single source of truth (re-query) — the new task appears and the "N today" chip ticks up. Clear the input, leave it ready for the next jot.
-
-**Deliberate mobile behaviors:**
-- **No autofocus** — the homepage opens on every launch; autofocus would pop the keyboard each time. Capture is tap-to-start (matches the CREATE-only-autofocus rule from the dialog work).
-- Empty/whitespace input → no-op (no blank tasks).
-
-### Final layout
+### DOM order (inside `.sauce-home`)
 
 ```
-SpaceNavButtons
----
-[ SpaceDailyDashboard ]
-    Header:  greeting · date
-             roll-up chips (tasks · overdue · meetings · done)
-             quick-capture box
-    Tasks panel      (unchanged)
-    Meetings panel   (unchanged)
-    Activity panel   (unchanged)
----
-free-write (unchanged)
+greeting (.sauce-home-greeting: line + date)
+glance   (.sauce-home-glance: chips OR "Clear day …")
+capture  (.sauce-home-capture: [ jot input | Add ] + ＋Meeting + ＋Scratch + Open today's daily)
+─ then the SpaceDailyDashboard mount (appended after .sauce-home, unchanged)
 ```
 
-## Testing
+## Testing (a lot — following existing harness patterns)
 
-Following existing harness patterns (SELTASK-1 / RIL-2 DOM-stub tests, `run-task-entity`, seed-vault regression):
+**`run-home.js`:**
+- **HOME-GLANCE** (new): `_glanceChips` — all-zero → empty sentinel; single non-zero → one chip; full → 4 chips in order with correct labels/classes; zeros hidden; `meeting` vs `meetings` pluralization.
+- **HOME-RENDER** (updated): `.sauce-home` child order greeting → glance → capture; capture band holds **1 input + 3 buttons**; dashboard still mounts once with `args:[{asOf:today,live:true}]`.
+- **HOME-CAP** (updated): `_captureSpec()` → 3 entries (`meeting`,`scratch`,`openDaily`); dispatch wiring for those 3 unchanged; **new**: firing the inline input submit (Enter + Add button) calls `customJS.TaskDialog.createQuick({title,today,source:"daily"})` with the typed text; blank input → no createQuick; missing `customJS` → no throw (graceful degrade).
+- Existing HOME-GREET / HOME-DATE / HOME-HEAL untouched (still green).
 
-1. **`greeting(hour)`** — pure table test across band boundaries (`11→morning`, `12→afternoon`, `16→afternoon`, `17→evening`, `0/23` edges).
-2. **Header render** — DOM-stub test: feed representative `counts`, assert the correct chips render, zero counts are hidden, and the `Clear day` empty state fires when everything is zero.
-3. **Quick-capture** — Node test running the **real** `TaskEntity` create path against a `dv`/`app` stub, asserting the written note's frontmatter (`type: task`, `status: open`, `scheduled == today`, `source: daily`). Proves capture yields a queryable task, not a hand-built replica.
-4. **Count roll-up** — assert `computeCounts()` aggregates today's tasks + overdue + done + meeting count correctly (extends the SELTASK-1 fixtures).
-5. **Seed-vault regression** — confirm the daily seed note renders the header section (portable sentinel if one is needed).
+**`run-task-entity.js` (or `run-task-interactions.js`):**
+- **createQuick**: with a stubbed `app.vault` (spy `create`, `getAbstractFileByPath`, `createFolder`) + stubbed `customJS.TaskEntity`, `createQuick({title:"call dentist", today:"2026-07-02", source:"daily"})` → exactly one `vault.create` at `spice/tasks/call dentist.md` whose content carries `type: task`, `status: open`, `scheduled: 2026-07-02`, `source: daily`. Blank title → zero creates. Colliding filename → deduped (` 2`).
+
+**`run-helper-cases.js` (daily dashboard area):**
+- **computeCounts**: dv-stub + stub TE → returns `{today,overdue,done,meetings}` matching the stub data; cold load (no TE) → tasks zeroed, meetings still counted; never throws.
+- **selectMeetings**: filters meeting pages by filename-includes-today (both leading- and trailing-date conventions).
+- Re-route (do not preserve) any source-text assertion that keyed on the old `getMeetings` closure body.
+
+**Whole suite:** `npm run release:preflight` green (macos+ubuntu in CI); workshop dogfood green; `npm run release:preflight-bumped` green on a clean tree before merge.
 
 ## Edge cases
 
 - **Empty day** → `Clear day — nothing scheduled` (no zero chips).
-- **Cold cache / Dataview Luxon dates** → counts route through the same `selectTasks`/`TaskEntity` coercion already in place; header adds no new date parsing.
-- **Whitespace-only jot** → ignored.
-- **Filename collision on capture** → handled by existing `TaskEntity` dedup.
-- **Historical daily notes** → header renders on them too (live dashboard re-render), showing that day's counts; capture always targets *today* (not the note's date) — acceptable for v1; a future refinement could target the note's `day`.
+- **Cold load / not-yet-registered mechanisms** → counts route through `selectTasks`/`selectMeetings` guards (zeros), capture no-ops; render never throws.
+- **Dataview Luxon dates** → counts reuse the dashboard's existing `_toDateStr`/`queryToday` coercion; no new date parsing.
+- **Whitespace-only jot** → ignored. **Filename collision** → existing `_uniqueName` dedupe.
+- **Re-render churn** → `render()` is idempotent; capture re-render can't stack duplicate `.sauce-home` / dashboard nodes.
 
 ## Out of scope / future
 
-- Weather row (wttr.in or OpenWeather in a dataviewjs block).
-- Reusing `SpaceDailyHeader` on weekly/monthly hubs (the module is written pure enough to allow it later).
-- Portal signals: finance envelope snapshot, project-health strip, this-week horizon.
-- Homepage "run command on open" chaining to auto-refresh data on launch.
+- Weather row; reusing the glance line on weekly/monthly hubs; finance/project/horizon portal strips; Homepage "run command on open" auto-refresh chaining.
