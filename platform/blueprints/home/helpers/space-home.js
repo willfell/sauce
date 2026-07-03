@@ -187,6 +187,28 @@ class SpaceHome {
     return { empty: false, chips };
   }
 
+  /**
+   * Toggle a class on/off, stub-safe. Uses the real `classList` when present
+   * (browser / Obsidian), else rewrites the element's class string (the Node DOM
+   * stub keeps its class in `.cls`) so the "+" open/close state is testable both
+   * ways. PURE w.r.t. globals — no `document`/`window` access.
+   */
+  static _setClass(el, cls, on) {
+    if (!el) return;
+    if (el.classList && typeof el.classList.toggle === "function") {
+      el.classList.toggle(cls, !!on);
+      return;
+    }
+    const cur = String(el.className || el.cls || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((c) => c !== cls);
+    if (on) cur.push(cls);
+    const next = cur.join(" ");
+    el.cls = next;
+    el.className = next;
+  }
+
   // ---------- Instance / browser render ----------
 
   /**
@@ -212,12 +234,101 @@ class SpaceHome {
 
     const home = dv.el("div", "", { cls: "sauce-home" });
 
-    // 1) Greeting header ─────────────────────────────────────────────────────
-    const greeting = home.createEl("div", { cls: "sauce-home-greeting" });
-    const line = greeting.createEl("div", { cls: "sauce-home-greeting-line" });
-    line.textContent = SpaceHome._greeting(hour);
+    // 1) Header row — greeting (left) + a subtle "+" quick-add (right) ────────
+    // Sharp editorial hierarchy: a small tracked eyebrow (the date) OVER a large
+    // negative-tracked greeting. The loud always-on capture band is gone; all
+    // capture now lives behind one quiet "+" that springs open a dropdown.
+    const head = home.createEl("div", { cls: "sauce-home-head" });
+    const greeting = head.createEl("div", { cls: "sauce-home-greeting" });
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
     sub.textContent = SpaceHome._humanDate(today, today);
+    const line = greeting.createEl("div", { cls: "sauce-home-greeting-line" });
+    line.textContent = SpaceHome._greeting(hour);
+
+    // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
+    // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
+    // It holds a one-gesture "Jot a task…" input + New Meeting / New Scratch /
+    // Open today's daily. Outside-click + Escape close it (guarded — no-op on a
+    // cold/stub document so this never throws out of render).
+    const addWrap = head.createEl("div", { cls: "sauce-home-add-wrap" });
+    const addBtn = addWrap.createEl("button", { cls: "sauce-home-add" });
+    addBtn.setAttribute("type", "button");
+    addBtn.setAttribute("aria-label", "Quick add");
+    addBtn.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
+    const menu = addWrap.createEl("div", { cls: "sauce-home-add-menu" });
+
+    let menuOpen = false;
+    const docRef = (typeof document !== "undefined" && document) || null;
+    const setMenu = (open) => {
+      menuOpen = !!open;
+      SpaceHome._setClass(menu, "is-open", menuOpen);
+      SpaceHome._setClass(addBtn, "is-open", menuOpen);
+      if (docRef && typeof docRef.addEventListener === "function") {
+        if (menuOpen) {
+          docRef.addEventListener("mousedown", onDocDown);
+          docRef.addEventListener("keydown", onDocKey);
+        } else if (typeof docRef.removeEventListener === "function") {
+          docRef.removeEventListener("mousedown", onDocDown);
+          docRef.removeEventListener("keydown", onDocKey);
+        }
+      }
+    };
+    const onDocDown = (ev) => {
+      if (!menuOpen) return;
+      const t = ev && ev.target;
+      const inMenu = t && menu && typeof menu.contains === "function" && menu.contains(t);
+      const inBtn = t && (t === addBtn || (typeof addBtn.contains === "function" && addBtn.contains(t)));
+      if (!inMenu && !inBtn) setMenu(false);
+    };
+    const onDocKey = (ev) => { if (menuOpen && ev && ev.key === "Escape") setMenu(false); };
+    addBtn.onclick = () => { setMenu(!menuOpen); };
+
+    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
+    // guarded; then close the menu + re-render so the Tasks panel + glance chip
+    // reflect the new task). NO autofocus — home opens on every launch and an
+    // autofocus would pop the mobile keyboard each time.
+    const captureRow = menu.createEl("div", { cls: "sauce-home-add-input-row" });
+    const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
+    input.setAttribute("type", "text");
+    input.setAttribute("placeholder", "Jot a task…");
+    const addTaskBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
+    addTaskBtn.setAttribute("type", "button");
+    addTaskBtn.textContent = "Add";
+    const submitCapture = async () => {
+      const text = input.value;
+      if (!(typeof text === "string" && text.trim())) return;
+      const cjsNow = (typeof customJS !== "undefined" && customJS)
+        || (typeof window !== "undefined" && window.customJS)
+        || null;
+      const td = cjsNow && cjsNow.TaskDialog;
+      try {
+        if (td && typeof td.createQuick === "function") {
+          await td.createQuick({ title: text, today, source: "daily" });
+        }
+      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
+      setMenu(false);
+      await self.render(dv, params);
+    };
+    addTaskBtn.onclick = () => { submitCapture(); };
+    input.addEventListener("keydown", (ev) => {
+      if (ev && ev.key === "Enter" && !ev.isComposing) {
+        if (typeof ev.preventDefault === "function") ev.preventDefault();
+        submitCapture();
+      }
+    });
+
+    // Menu — the secondary capture actions: ＋ Meeting, ＋ Scratch, Open daily.
+    for (const item of SpaceHome._captureSpec()) {
+      const mi = menu.createEl("button", { cls: "sauce-home-add-item" });
+      mi.setAttribute("type", "button");
+      mi.dataset.captureKey = item.key;
+      const iconSpan = mi.createEl("span", { cls: "sauce-home-capture-icon" });
+      iconSpan.innerHTML = item.icon;
+      const labelSpan = mi.createEl("span", { cls: "sauce-home-capture-label" });
+      labelSpan.textContent = item.label;
+      mi.onclick = () => { SpaceHome._dispatch(item.key, dv, today); setMenu(false); };
+    }
 
     // 2) Glance counts ───────────────────────────────────────────────────────
     // A rolled-up count line ("N today · M overdue · K meetings · J done").
@@ -256,60 +367,7 @@ class SpaceHome {
       });
     }
 
-    // 3) Quick-capture band ──────────────────────────────────────────────────
-    const band = home.createEl("div", { cls: "sauce-home-capture" });
-
-    // 3a) Inline one-gesture task capture — a full-width "Jot a task…" input +
-    // Add button. Submitting (Enter or Add) with non-empty trimmed text calls
-    // TaskDialog.createQuick (guarded, no-op on cold load) then re-renders so the
-    // new task appears in the Tasks panel and the `today` glance chip ticks up.
-    // NO autofocus (home opens on every launch — autofocus would pop the mobile
-    // keyboard each time).
-    const captureRow = band.createEl("div", { cls: "sauce-home-capture-input-row" });
-    const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
-    input.setAttribute("type", "text");
-    input.setAttribute("placeholder", "Jot a task…");
-    const addBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
-    addBtn.setAttribute("type", "button");
-    addBtn.textContent = "Add";
-
-    const submitCapture = async () => {
-      const text = input.value;
-      if (!(typeof text === "string" && text.trim())) return;
-      const cjsNow = (typeof customJS !== "undefined" && customJS)
-        || (typeof window !== "undefined" && window.customJS)
-        || null;
-      const td = cjsNow && cjsNow.TaskDialog;
-      try {
-        if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, today, source: "daily" });
-        }
-      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
-      // Re-render (idempotent) so the Tasks panel + glance reflect the new task.
-      // Clears the input (a fresh empty one is rebuilt).
-      await self.render(dv, params);
-    };
-    addBtn.onclick = () => { submitCapture(); };
-    input.addEventListener("keydown", (ev) => {
-      if (ev && ev.key === "Enter" && !ev.isComposing) {
-        if (typeof ev.preventDefault === "function") ev.preventDefault();
-        submitCapture();
-      }
-    });
-
-    // 3b) The remaining capture BUTTONS: ＋ Meeting, ＋ Scratch, Open today's daily.
-    for (const item of SpaceHome._captureSpec()) {
-      const btn = band.createEl("button", { cls: "sauce-home-capture-btn" });
-      btn.setAttribute("type", "button");
-      btn.dataset.captureKey = item.key;
-      const iconSpan = btn.createEl("span", { cls: "sauce-home-capture-icon" });
-      iconSpan.innerHTML = item.icon;
-      const labelSpan = btn.createEl("span", { cls: "sauce-home-capture-label" });
-      labelSpan.textContent = item.label;
-      btn.onclick = () => { SpaceHome._dispatch(item.key, dv, today); };
-    }
-
-    // 4) Daily dashboard (asOf = today) ───────────────────────────────────────
+    // 3) Daily dashboard (asOf = today) ───────────────────────────────────────
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
     // it appends below them, into dv.container (the guard renders there).
