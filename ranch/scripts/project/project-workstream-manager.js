@@ -8,6 +8,139 @@
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
+    // ── extracted per-call context (v0.190.x button-nav refactor) ──────────────
+    // addWorkstream / removeWorkstream were CLOSURES inside render(); the chrome
+    // bar's ⋯ menu needs to invoke the same Add / Remove flows without a render
+    // pass. _wsCtx(dv) re-derives the small state each flow needs (the current
+    // page, project dir, the parse/get/update/slugify helpers) from `dv` so the
+    // methods are self-contained. render() calls the same methods for its own
+    // Add / Remove buttons (no behavior change). Returns null on cold-load (no
+    // page / no file), so both methods no-op safely.
+    _wsCtx(dv) {
+        const current = dv && dv.current ? dv.current() : null;
+        if (!current || !current.file) return null;
+        const filePath = current.file.path;
+        const projectDir = filePath.substring(0, filePath.lastIndexOf("/"));
+        const projectSlug = projectDir.split("/").pop();
+
+        const parseWorkstreams = (raw) => {
+            if (!raw) return [];
+            if (typeof raw === "string") {
+                try { raw = JSON.parse(raw); } catch (e) { return []; }
+            }
+            return Array.isArray(raw) ? raw : [];
+        };
+        const getWorkstreams = () => parseWorkstreams(current.workstreams);
+
+        const findMapNote = () => {
+            return app.vault.getFiles().find(f =>
+                f.path.startsWith(projectDir + "/") &&
+                !f.path.includes("/tasks/") &&
+                (() => {
+                    const cache = app.metadataCache.getFileCache(f);
+                    return cache?.frontmatter?.type === "map";
+                })()
+            );
+        };
+
+        const updateWorkstreams = async (newWs) => {
+            const atlasFile = app.vault.getAbstractFileByPath(filePath);
+            if (atlasFile) await app.fileManager.processFrontMatter(atlasFile, fm => { fm.workstreams = newWs; });
+            const mapFile = findMapNote();
+            if (mapFile) await app.fileManager.processFrontMatter(mapFile, fm => { fm.workstreams = newWs; });
+        };
+
+        const slugify = (str) => {
+            return str.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
+        };
+
+        return { current, filePath, projectDir, projectSlug, getWorkstreams, updateWorkstreams, slugify };
+    }
+
+    // Shared overlay-modal shell (moved out of render() verbatim so the extracted
+    // Add / Remove methods reuse it). Instance method — customJS stores instances.
+    _showModal(content) {
+        const overlay = document.createElement("div");
+        overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+        const dialog = document.createElement("div");
+        dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+        content(dialog, () => document.body.removeChild(overlay));
+        overlay.appendChild(dialog);
+        overlay.addEventListener("click", e => { if (e.target === overlay) document.body.removeChild(overlay); });
+        document.body.appendChild(overlay);
+    }
+
+    // Add a workstream — opens the name/description modal, writes the new
+    // workstreams[] via processFrontMatter (atlas + map). Extracted from render()
+    // so the chrome bar's ⋯ "Add workstream" can call it directly. Never throws.
+    addWorkstream(dv) {
+        const ctx = this._wsCtx(dv);
+        if (!ctx) { try { new Notice("Open a project note to add a workstream."); } catch (_e) {} return; }
+        const { getWorkstreams, updateWorkstreams, slugify } = ctx;
+        this._showModal((dialog, close) => {
+            dialog.createEl("div", { text: "Add Workstream" }).style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            const nameInput = dialog.createEl("input", { type: "text", placeholder: "Name (e.g. Terraform)" });
+            nameInput.style.cssText = "width: 100%; padding: 8px 10px; box-sizing: border-box; margin-bottom: 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em;";
+            const descInput = dialog.createEl("input", { type: "text", placeholder: "Description (optional)" });
+            descInput.style.cssText = "width: 100%; padding: 8px 10px; box-sizing: border-box; margin-bottom: 16px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em;";
+            dialog.createEl("div", { text: "ID auto-generated from name." }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-bottom: 12px;";
+            const btnRow = dialog.createEl("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+            const cancelBtn = btnRow.createEl("button", { text: "Cancel" });
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer;";
+            cancelBtn.onclick = close;
+            const okBtn = btnRow.createEl("button", { text: "Add" });
+            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
+            const submit = async () => {
+                const name = nameInput.value.trim();
+                if (!name) return;
+                const id = slugify(name);
+                if (!id) return;
+                const cur = getWorkstreams();
+                if (cur.some(w => w.id === id)) { new Notice(`"${id}" already exists.`); close(); return; }
+                close();
+                await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }]);
+                new Notice(`Added workstream: ${name}`);
+            };
+            okBtn.onclick = submit;
+            nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); descInput.focus(); } });
+            descInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+            setTimeout(() => nameInput.focus(), 50);
+        });
+    }
+
+    // Remove a workstream — opens the pick-one list, writes the filtered
+    // workstreams[] via processFrontMatter. Extracted from render() so the chrome
+    // bar's ⋯ "Remove workstream" can call it directly. Never throws.
+    removeWorkstream(dv) {
+        const ctx = this._wsCtx(dv);
+        if (!ctx) { try { new Notice("Open a project note to remove a workstream."); } catch (_e) {} return; }
+        const { getWorkstreams, updateWorkstreams } = ctx;
+        const cur = getWorkstreams();
+        if (cur.length === 0) { new Notice("No workstreams to remove."); return; }
+        this._showModal((dialog, close) => {
+            dialog.createEl("div", { text: "Remove Workstream" }).style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            const list = dialog.createEl("div");
+            list.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;";
+            for (const w of cur) {
+                const item = list.createEl("button");
+                item.style.cssText = "display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; cursor: pointer; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em; transition: border-color 0.15s;";
+                item.onmouseenter = () => { item.style.borderColor = "var(--text-error)"; };
+                item.onmouseleave = () => { item.style.borderColor = "var(--background-modifier-border)"; };
+                item.createEl("span", { text: w.name }).style.cssText = "font-weight: 500;";
+                item.createEl("code", { text: w.id }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: 4px;";
+                item.onclick = async () => {
+                    close();
+                    await updateWorkstreams(cur.filter(x => x.id !== w.id));
+                    new Notice(`Removed: ${w.name}`);
+                };
+            }
+            const cancelBtn = dialog.createEl("button", { text: "Cancel" });
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; width: 100%;";
+            cancelBtn.onclick = close;
+        });
+    }
+
     async render(dv) {
         const current = dv && dv.current ? dv.current() : null;
         // v0.119.0 PATCH: bail when Dataview hasn't indexed the file yet
@@ -84,97 +217,9 @@ class ProjectWorkstreamManager {
         const blockedAll = boardTasks.filter(t => t.lane === "Blocked").length;
         const inProgressAll = boardTasks.filter(t => t.lane === "In Progress").length;
 
-        const findMapNote = () => {
-            return app.vault.getFiles().find(f =>
-                f.path.startsWith(projectDir + "/") &&
-                !f.path.includes("/tasks/") &&
-                (() => {
-                    const cache = app.metadataCache.getFileCache(f);
-                    return cache?.frontmatter?.type === "map";
-                })()
-            );
-        };
-
-        const updateWorkstreams = async (newWs) => {
-            const atlasFile = app.vault.getAbstractFileByPath(filePath);
-            if (atlasFile) await app.fileManager.processFrontMatter(atlasFile, fm => { fm.workstreams = newWs; });
-            const mapFile = findMapNote();
-            if (mapFile) await app.fileManager.processFrontMatter(mapFile, fm => { fm.workstreams = newWs; });
-        };
-
-        const slugify = (str) => {
-            return str.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
-        };
-
-        const showModal = (content) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-            content(dialog, () => document.body.removeChild(overlay));
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", e => { if (e.target === overlay) document.body.removeChild(overlay); });
-            document.body.appendChild(overlay);
-        };
-
-        const addWorkstream = () => {
-            showModal((dialog, close) => {
-                dialog.createEl("div", { text: "Add Workstream" }).style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-                const nameInput = dialog.createEl("input", { type: "text", placeholder: "Name (e.g. Terraform)" });
-                nameInput.style.cssText = "width: 100%; padding: 8px 10px; box-sizing: border-box; margin-bottom: 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em;";
-                const descInput = dialog.createEl("input", { type: "text", placeholder: "Description (optional)" });
-                descInput.style.cssText = "width: 100%; padding: 8px 10px; box-sizing: border-box; margin-bottom: 16px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em;";
-                dialog.createEl("div", { text: "ID auto-generated from name." }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-bottom: 12px;";
-                const btnRow = dialog.createEl("div");
-                btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-                const cancelBtn = btnRow.createEl("button", { text: "Cancel" });
-                cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer;";
-                cancelBtn.onclick = close;
-                const okBtn = btnRow.createEl("button", { text: "Add" });
-                okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
-                const submit = async () => {
-                    const name = nameInput.value.trim();
-                    if (!name) return;
-                    const id = slugify(name);
-                    if (!id) return;
-                    const cur = getWorkstreams();
-                    if (cur.some(w => w.id === id)) { new Notice(`"${id}" already exists.`); close(); return; }
-                    close();
-                    await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }]);
-                    new Notice(`Added workstream: ${name}`);
-                };
-                okBtn.onclick = submit;
-                nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); descInput.focus(); } });
-                descInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
-                setTimeout(() => nameInput.focus(), 50);
-            });
-        };
-
-        const removeWorkstream = () => {
-            const cur = getWorkstreams();
-            if (cur.length === 0) { new Notice("No workstreams to remove."); return; }
-            showModal((dialog, close) => {
-                dialog.createEl("div", { text: "Remove Workstream" }).style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-                const list = dialog.createEl("div");
-                list.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;";
-                for (const w of cur) {
-                    const item = list.createEl("button");
-                    item.style.cssText = "display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; cursor: pointer; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em; transition: border-color 0.15s;";
-                    item.onmouseenter = () => { item.style.borderColor = "var(--text-error)"; };
-                    item.onmouseleave = () => { item.style.borderColor = "var(--background-modifier-border)"; };
-                    item.createEl("span", { text: w.name }).style.cssText = "font-weight: 500;";
-                    item.createEl("code", { text: w.id }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: 4px;";
-                    item.onclick = async () => {
-                        close();
-                        await updateWorkstreams(cur.filter(x => x.id !== w.id));
-                        new Notice(`Removed: ${w.name}`);
-                    };
-                }
-                const cancelBtn = dialog.createEl("button", { text: "Cancel" });
-                cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; width: 100%;";
-                cancelBtn.onclick = close;
-            });
-        };
+        // Add / Remove workstream flows now live as instance methods
+        // (this.addWorkstream / this.removeWorkstream) so the chrome bar's ⋯ menu
+        // can invoke them without a render pass; the buttons below delegate.
 
         // v0.109.0 S5 — emit the canonical Workstreams section label at the top.
         // Template, Project.md dropped the `## Workstreams` H2 in this cycle;
@@ -190,8 +235,8 @@ class ProjectWorkstreamManager {
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
         const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
 
-        customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: addWorkstream });
-        customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: removeWorkstream });
+        customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: () => this.addWorkstream(dv) });
+        customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: () => this.removeWorkstream(dv) });
 
         if (totalAll > 0) {
             const pct = Math.round((completedAll / totalAll) * 100);

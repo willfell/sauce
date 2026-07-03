@@ -213,6 +213,34 @@ class ProjectChromeBar {
     return "";
   }
 
+  // Slugify a name the way TaskDialog / ToDoLeafActions do (lowercase, runs of
+  // non-alphanumerics → single dash, trimmed). Used to derive a task's
+  // project.slug when the note lacks a project_slug frontmatter.
+  _slugify(name) {
+    return String(name == null ? "" : name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  // Resolve a project's display name from its hub note basename (mirrors
+  // ProjectNavButtons._resolveProjectName): the project dir holds exactly one
+  // note with frontmatter type:project; its filename (sans .md) IS the display
+  // name. Returns null when projectDir is falsy or no type:project note is found.
+  _resolveProjectName(projectDir) {
+    if (!projectDir) return null;
+    try {
+      const prefix = projectDir + "/";
+      for (const f of app.vault.getMarkdownFiles()) {
+        if (!f.path.startsWith(prefix)) continue;
+        if (f.path.slice(prefix.length).includes("/")) continue;
+        const fm = (app.metadataCache.getFileCache(f) || {}).frontmatter;
+        if (fm && fm.type === "project") return (fm.name || f.basename);
+      }
+    } catch (_e) { /* best-effort — fall back to slug */ }
+    return null;
+  }
+
   // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
   // (bypasses the link resolver, which can double an absolute path against the
   // current note's folder on a cold cache — the doubled-path bug). Falls back
@@ -404,30 +432,254 @@ class ProjectChromeBar {
     return entries;
   }
 
-  // ── _dispatch — STUB for Task 3 ────────────────────────────────────────────
-  // A single switch on the surface-action id. Task 4 fills each case with its
-  // real helper call; for now every branch emits a Notice so the wiring is
-  // observable in-vault. Guarded so a missing Notice global can't throw.
+  // ── _dispatch — route each surface-action id to its existing helper ─────────
+  // A single switch on the surface-action id. Every case delegates to the SAME
+  // helper the old action-row button did, so behavior is byte-faithful. All
+  // branches are cold-load-guarded: a helper that hasn't registered yet degrades
+  // to a graceful Notice instead of throwing (the whole method is wrapped so a
+  // missing global can never abort a render's button click).
+  //
+  // Reuse strategy (documented for future maintainers):
+  //   • entity-create ids (new-doc / new-section / new-subsection / new-project)
+  //     route through customJS.EntityCreate.create({ instance, dv, presetPrompts })
+  //     — the directly-callable create() runs the EXACT prompt→create flow that
+  //     EntityCreate.render()'s button onClick fires (render() just wraps create()
+  //     in an AccentButton). So no button re-render is needed.
+  //   • new-task opens TaskDialog with surface:'project' + project:{ name, slug }
+  //     — the same shape ToDoLeafActions uses (slug prefers the note's
+  //     project_slug frontmatter; name is the resolved project display name).
   _dispatch(dv, ctx, id) {
     try {
+      const missing = (label) => { if (typeof Notice === "function") new Notice(label + " unavailable — reinstall the project blueprint.", 6000); };
       switch (id) {
-        case "new-project":
-        case "new-task":
-        case "new-doc":
-        case "new-section":
-        case "new-subsection":
-        case "new-note":
-        case "move-docs":
-        case "sort":
-        case "add-workstream":
-        case "remove-workstream":
-        case "task-board":
-        case "add-link":
-        case "manage-links":
+        case "new-task": {
+          const TD = (typeof customJS !== "undefined") && customJS.TaskDialog;
+          if (!TD || typeof TD.open !== "function") { missing("TaskDialog"); return; }
+          // Project identity for the task note (mirrors ToDoLeafActions): prefer
+          // the note's own project_slug frontmatter, then the display name from
+          // the project hub note, falling back to the path-derived slug.
+          let cur = null;
+          try { cur = dv && typeof dv.current === "function" ? dv.current() : null; } catch (_e) { cur = null; }
+          const name = this._resolveProjectName(ctx && ctx.projectDir) || (ctx && ctx.projectSlug) || "";
+          const slug = (cur && cur.project_slug) || (ctx && ctx.projectSlug) || (name ? this._slugify(name) : "");
+          TD.open({ surface: "project", project: { name, slug } });
+          return;
+        }
+        case "new-doc": {
+          // On a docs-hub the user picks the section (options_source), so NO
+          // presets. On a section-hub, seed the section (and, for depth-2, the
+          // sub-section) so the doc lands in the CURRENT section without a
+          // re-prompt — mirroring section-hub.js's New Doc button exactly.
+          const presets = (ctx && ctx.context === "section-hub") ? this._docPresetsForSection(dv) : null;
+          this._entityCreate(dv, "doc-note", presets);
+          return;
+        }
+        case "new-section": {
+          this._entityCreate(dv, "section-hub");
+          return;
+        }
+        case "new-subsection": {
+          // sub-section-hub seeds parent_slug from the current section's slug so
+          // the sub-section nests under it (mirrors section-hub.js's presetPrompts).
+          this._entityCreate(dv, "sub-section-hub", { parent_slug: (ctx && ctx.sectionSlug) || "" });
+          return;
+        }
+        case "new-project": {
+          this._entityCreate(dv, "project");
+          return;
+        }
+        case "move-docs": {
+          // Leaf doc-note → the single-doc Move tree dialog (DocMoveDialog,
+          // fallback DocLeafActions._onMove). Hub (docs-hub / section-hub) → the
+          // multi-select bulk-move dialog (DocBulkMoveActions._onBulkMove).
+          const context = (ctx && ctx.context) || "";
+          if (context === "doc-note") {
+            const DMD = (typeof customJS !== "undefined") && customJS.DocMoveDialog;
+            if (DMD && typeof DMD._openMoveDialog === "function") {
+              let currentPath = "";
+              try {
+                const cur = dv && typeof dv.current === "function" ? dv.current() : null;
+                currentPath = (cur && cur.file && cur.file.path) || "";
+              } catch (_e) { currentPath = ""; }
+              DMD._openMoveDialog(dv, currentPath);
+              return;
+            }
+            const DLA = (typeof customJS !== "undefined") && customJS.DocLeafActions;
+            if (DLA && typeof DLA._onMove === "function") { DLA._onMove(dv); return; }
+            missing("DocMoveDialog");
+            return;
+          }
+          const BM = (typeof customJS !== "undefined") && customJS.DocBulkMoveActions;
+          if (BM && typeof BM._onBulkMove === "function") { BM._onBulkMove(dv); return; }
+          missing("DocBulkMoveActions");
+          return;
+        }
+        case "add-link": {
+          const PLM = (typeof customJS !== "undefined") && customJS.ProjectLinksManager;
+          if (PLM && typeof PLM._onAdd === "function") { PLM._onAdd(dv); return; }
+          missing("ProjectLinksManager");
+          return;
+        }
+        case "manage-links": {
+          const PLM = (typeof customJS !== "undefined") && customJS.ProjectLinksManager;
+          if (PLM && typeof PLM._onManage === "function") { PLM._onManage(dv); return; }
+          missing("ProjectLinksManager");
+          return;
+        }
+        case "add-workstream": {
+          const WM = (typeof customJS !== "undefined") && customJS.ProjectWorkstreamManager;
+          if (WM && typeof WM.addWorkstream === "function") { WM.addWorkstream(dv); return; }
+          missing("ProjectWorkstreamManager");
+          return;
+        }
+        case "remove-workstream": {
+          const WM = (typeof customJS !== "undefined") && customJS.ProjectWorkstreamManager;
+          if (WM && typeof WM.removeWorkstream === "function") { WM.removeWorkstream(dv); return; }
+          missing("ProjectWorkstreamManager");
+          return;
+        }
+        case "new-note": {
+          // task-hub "New Note" — reuse ProjectNavButtons' prompt + create.
+          this._createTaskNoteFlow(dv, ctx);
+          return;
+        }
+        case "task-board": {
+          // task-hub "Create/Open Board" — reuse ProjectNavButtons._createTaskBoard;
+          // open the board if it already exists.
+          this._taskBoardFlow(dv, ctx);
+          return;
+        }
+        case "sort": {
+          // projects-hub "Sort A–Z / Recent" — flip the ProjectsHubCards persisted
+          // sort mode + re-render the hub. ProjectsHubCards owns the localStorage
+          // key + the render; toggling the persisted mode then forcing a Dataview
+          // refresh reruns its render with the new order.
+          this._toggleProjectsSort();
+          return;
+        }
         default:
           if (typeof Notice === "function") new Notice("ProjectChromeBar action: " + id);
           return;
       }
+    } catch (_e) { /* never throw */ }
+  }
+
+  // Delegate an entity-create id to the directly-callable EntityCreate.create()
+  // (runs the exact prompt→create flow EntityCreate.render()'s button fires).
+  // Guarded: a cold-loading EntityCreate degrades to a Notice.
+  _entityCreate(dv, instance, presetPrompts) {
+    try {
+      const EC = (typeof customJS !== "undefined") && customJS.EntityCreate;
+      if (!EC || typeof EC.create !== "function") {
+        if (typeof Notice === "function") new Notice("EntityCreate unavailable — reinstall the project blueprint.", 6000);
+        return;
+      }
+      const opts = { instance, dv };
+      if (presetPrompts) opts.presetPrompts = presetPrompts;
+      EC.create(opts);
+    } catch (_e) { /* never throw */ }
+  }
+
+  // Build the doc-note presetPrompts for a "New Doc" fired on a SECTION-HUB, so
+  // the new doc lands in the current section (depth 1) or sub-section (depth 2)
+  // without re-prompting. Byte-for-byte mirrors section-hub.js's _renderActionRow
+  // presets: depth 1 → section=this section; depth 2 → section=parent,
+  // sub_section=this section. Reads the live frontmatter via dv.current().
+  // Returns null on cold-load (the doc-note picker then prompts, a safe fallback).
+  _docPresetsForSection(dv) {
+    try {
+      const cur = dv && typeof dv.current === "function" ? dv.current() : null;
+      if (!cur || !cur.file) return null;
+      const depth = Number(cur.depth) || 1;
+      const sectionSlug = cur.section_slug;
+      const sectionName = cur.section || cur.file.name;
+      if (!sectionSlug) return null;
+      if (depth === 2) {
+        const parentName = this._stripLinkBrackets(cur.parent_section);
+        const parentSlug = this._slugify(parentName);
+        return { section: parentName, section_slug: parentSlug, sub_section: sectionName, sub_section_slug: sectionSlug };
+      }
+      return { section: sectionName, section_slug: sectionSlug, sub_section: "", sub_section_slug: "" };
+    } catch (_e) { return null; }
+  }
+
+  // task-hub "New Note": prompt for a title + create the task note, reusing the
+  // existing ProjectNavButtons methods (_promptForTitle / _createTaskNote). The
+  // notes folder + task-hub path are derived from ctx (the task-hub note is the
+  // current file). On success, open the new note. Guarded end-to-end.
+  async _createTaskNoteFlow(dv, ctx) {
+    try {
+      const PNB = (typeof customJS !== "undefined") && customJS.ProjectNavButtons;
+      if (!PNB || typeof PNB._promptForTitle !== "function" || typeof PNB._createTaskNote !== "function") {
+        if (typeof Notice === "function") new Notice("ProjectNavButtons unavailable — reinstall the project blueprint.", 6000);
+        return;
+      }
+      const projectDir = ctx && ctx.projectDir;
+      const projectSlug = ctx && ctx.projectSlug;
+      const taskFolder = ctx && ctx.taskFolder;
+      if (!projectDir || !taskFolder) return;
+      const notesFolder = `${projectDir}/tasks/${taskFolder}/notes`;
+      // The task-hub note itself is the parent path stamped into the new note.
+      let taskHubPath = `${projectDir}/tasks/${taskFolder}/${taskFolder}.md`;
+      try {
+        const cur = dv && typeof dv.current === "function" ? dv.current() : null;
+        if (cur && cur.file && cur.file.path) taskHubPath = cur.file.path;
+      } catch (_e) { /* keep the derived path */ }
+      const title = await PNB._promptForTitle(notesFolder);
+      if (!title) return;
+      const targetPath = await PNB._createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath, projectDir);
+      if (targetPath) {
+        try { if (typeof Notice === "function") new Notice(`Created: ${title}`); } catch (_e) {}
+        try { app.workspace.openLinkText(targetPath, ""); } catch (_e) {}
+      }
+    } catch (_e) { /* never throw */ }
+  }
+
+  // task-hub "Create/Open Board": open the board if it already exists, else
+  // create it via ProjectNavButtons._createTaskBoard, then open it. Guarded.
+  async _taskBoardFlow(dv, ctx) {
+    try {
+      const projectDir = ctx && ctx.projectDir;
+      const taskFolder = ctx && ctx.taskFolder;
+      if (!projectDir || !taskFolder) return;
+      const boardPath = `${projectDir}/tasks/${taskFolder}/board/${taskFolder}-board.md`;
+      let exists = false;
+      try { exists = !!(app && app.vault && app.vault.getAbstractFileByPath(boardPath)); } catch (_e) { exists = false; }
+      if (exists) { try { app.workspace.openLinkText(boardPath, ""); } catch (_e) {} return; }
+      const PNB = (typeof customJS !== "undefined") && customJS.ProjectNavButtons;
+      if (!PNB || typeof PNB._createTaskBoard !== "function") {
+        if (typeof Notice === "function") new Notice("ProjectNavButtons unavailable — reinstall the project blueprint.", 6000);
+        return;
+      }
+      const created = await PNB._createTaskBoard(projectDir, taskFolder);
+      if (created) {
+        try { if (typeof Notice === "function") new Notice("Task board created."); } catch (_e) {}
+        try { app.workspace.openLinkText(created, ""); } catch (_e) {}
+      }
+    } catch (_e) { /* never throw */ }
+  }
+
+  // projects-hub "Sort A–Z / Recent": flip the persisted ProjectsHubCards sort
+  // mode (localStorage key "sauce.projects-hub.sort") then force a Dataview
+  // refresh so ProjectsHubCards.render() reruns with the new order. The hub
+  // reads the persisted mode on render, so persisting + refreshing is enough.
+  _toggleProjectsSort() {
+    try {
+      const KEY = "sauce.projects-hub.sort";
+      let mode = "mtime";
+      try {
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem(KEY);
+          if (raw === "alpha" || raw === "mtime") mode = raw;
+        }
+      } catch (_e) { mode = "mtime"; }
+      const next = mode === "alpha" ? "mtime" : "alpha";
+      try { if (typeof localStorage !== "undefined") localStorage.setItem(KEY, next); } catch (_e) {}
+      try {
+        if (app && app.commands && typeof app.commands.executeCommandById === "function") {
+          app.commands.executeCommandById("dataview:dataview-force-refresh-views");
+        }
+      } catch (_e) { /* best-effort re-render */ }
     } catch (_e) { /* never throw */ }
   }
 
