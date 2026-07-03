@@ -63,7 +63,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.8.1"
+      "version": "0.8.2"
     },
     {
       "name": "people-rendering",
@@ -145,7 +145,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.7.2"
+      "version": "0.7.3"
     },
     {
       "name": "teams",
