@@ -208,4 +208,5 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint meetings axis installer_migration: 1 uncovered
-  status: proposed
+  status: dismissed
+  note: Rubric artifact (3rd of class, after scratch + breadcrumb). The lone "uncovered" fn is applyPreInstall — a GENERIC pre-install hook (processes any mechanism's mech.pre_install[] delete steps), attributed to 3 surfaces (meetings/to-do/finance) via the module_directory heuristic, exercised end-to-end by run-install.js's full install (run-install.js line 150 explicitly accounts for applyPreInstall's adapter.exists short-circuit). It is neither meetings-specific nor a genuine seed gap; a direct seed test would be a generic-hook duplicate. Durable fix = the coverage-rubric.js scoreInstallerMigration improvement already documented on cov-blueprint-scratch-installer-migration + cov-mechanism-breadcrumb-installer-migration (scan more install-test harnesses + stop attributing generic primitives to a surface).
