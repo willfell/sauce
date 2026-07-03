@@ -604,6 +604,77 @@ async function runAsync(fn) { return await fn(); }
     ok('BC-WIKI-4 existing project type unaffected by path_walk', !!wrap && html.includes('test-project'));
   }
 
+  // ── BC-SEG-1..3: buildSegments() additive DATA seam ──────────────────────
+  // buildSegments(dv) returns the resolved trail as [{ label, link|null }] —
+  // the SAME segments render(dv) draws (asserted byte-identical via BR15–BR29
+  // above). A later chrome-bar helper renders these crumbs on the left of its
+  // bar and needs the data, not pre-rendered HTML. Assert labels AND links.
+  function segEq(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].label !== b[i].label) return false;
+      if ((a[i].link || null) !== (b[i].link || null)) return false;
+    }
+    return true;
+  }
+
+  // BC-SEG-1 — project doc-note: Project(link) / Docs(link) / <section>(link) / <file>(current)
+  {
+    const dv = makeDv({
+      project_name: 'test-project', project: 'test-project', project_slug: 'test-project',
+      type: 'doc-note', section: 'Knowledge',
+      file: { path: 'spice/projects/test-project/docs/knowledge/Architecture.md', name: 'Architecture' }
+    });
+    const inst = new NewBreadcrumb();
+    const segs = await inst.buildSegments(dv);
+    const expected = [
+      { label: 'test-project', link: 'spice/projects/test-project/test-project.md' },
+      { label: 'Docs',         link: 'spice/projects/test-project/docs/Docs.md' },
+      { label: 'Knowledge',    link: 'spice/projects/test-project/docs/knowledge/Knowledge.md' },
+      { label: 'Architecture', link: null },
+    ];
+    ok('BC-SEG-1 doc-note segments {label,link} match render', segEq(segs, expected));
+    if (!segEq(segs, expected)) console.log('    BC-SEG-1 got: ' + JSON.stringify(segs));
+  }
+
+  // BC-SEG-2 — section-hub (depth 1): Project(link) / Docs(link) / <section>(current)
+  // The depth-2 parent_section ancestor is when-gated on fm:depth==2 → dropped at depth 1.
+  {
+    const dv = makeDv({
+      project_name: 'test-project', project: 'test-project', project_slug: 'test-project',
+      type: 'section-hub', section: 'Knowledge', depth: 1,
+      file: { path: 'spice/projects/test-project/docs/knowledge/Knowledge.md', name: 'Knowledge' }
+    });
+    const inst = new NewBreadcrumb();
+    const segs = await inst.buildSegments(dv);
+    const expected = [
+      { label: 'test-project', link: 'spice/projects/test-project/test-project.md' },
+      { label: 'Docs',         link: 'spice/projects/test-project/docs/Docs.md' },
+      { label: 'Knowledge',    link: null },
+    ];
+    ok('BC-SEG-2 section-hub segments {label,link} match render', segEq(segs, expected));
+    if (!segEq(segs, expected)) console.log('    BC-SEG-2 got: ' + JSON.stringify(segs));
+  }
+
+  // BC-SEG-3 — root / no-matching-type → []. The projects-hub root note carries
+  // no breadcrumb-registered `type`, so render() bails (no wrap emitted) — the
+  // data seam mirrors that with an empty array so callers guard by .length.
+  {
+    const dvNoType = makeDv({
+      file: { path: 'spice/projects/Projects.md', name: 'Projects' }
+    });
+    const inst = new NewBreadcrumb();
+    const segsNoType = await inst.buildSegments(dvNoType);
+    // render() produces nothing for this note (no wrap) — confirm parity.
+    const renderDv = makeDv({ file: { path: 'spice/projects/Projects.md', name: 'Projects' } });
+    await new NewBreadcrumb().render(renderDv);
+    const renderedNothing = !renderDv._els[0];
+    ok('BC-SEG-3 no-matching-type → [] (render emits nothing)',
+       Array.isArray(segsNoType) && segsNoType.length === 0 && renderedNothing);
+    if (segsNoType.length !== 0 || !renderedNothing)
+      console.log('    BC-SEG-3 got: ' + JSON.stringify(segsNoType) + ' renderedNothing=' + renderedNothing);
+  }
+
   finish();
 })().catch(err => {
   console.error('harness error:', err);

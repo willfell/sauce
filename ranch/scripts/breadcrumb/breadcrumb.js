@@ -46,6 +46,40 @@ class Breadcrumb {
     // path_walk mode — arbitrary-depth trail derived from the file's vault path.
     if (entry.path_walk) return this._renderPathWalk(dv, entry.path_walk);
 
+    const trail = this._buildAncestorsSegments(entry, dv);
+    if (trail.length === 0) return;
+
+    const html = trail.map((s) => s.link ? this._link(s.label, s.link) : this._currentLabel(s.label));
+
+    const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
+    wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
+    wrap.innerHTML = html.join(' <span style="opacity:0.5;"> / </span> ');
+  }
+
+  // ── buildSegments — additive DATA seam ─────────────────────────────────
+  // Returns the resolved breadcrumb trail as data — [{ label, link|null }] —
+  // matching exactly what render(dv) would draw (same ancestors + optional
+  // current for ancestors-mode entries; same walked trail for path_walk-mode).
+  // A later chrome-bar helper renders the crumbs on the left of its bar and
+  // needs the segments as data rather than pre-rendered HTML. Returns [] when
+  // there is no matching type entry, on cold load (no cur/file), or when the
+  // trail resolves empty — so callers can guard with a simple length check.
+  async buildSegments(dv) {
+    const cur = dv.current();
+    if (!cur || !cur.file) return [];
+
+    const registry = await this._loadRegistry();
+    const entry = this._findTypeEntry(registry, cur);
+    if (!entry) return [];
+
+    if (entry.path_walk) return this._buildPathWalkSegments(dv, entry.path_walk);
+
+    return this._buildAncestorsSegments(entry, dv);
+  }
+
+  // Resolve ancestors[] (+ optional current) into [{ label, link|null }].
+  // Shared by render() and buildSegments() so the trail is defined once.
+  _buildAncestorsSegments(entry, dv) {
     const segments = [];
 
     // Ancestors — render in order, skip when-gated entries that fail predicates.
@@ -56,12 +90,8 @@ class Breadcrumb {
       if (!label) continue; // empty label → drop this ancestor segment
       let link = null;
       if (anc.link) link = this._resolveTemplate(anc.link, dv);
-      if (link) {
-        segments.push(this._link(label, link));
-      } else {
-        // link template failed (or absent) → plain bold label
-        segments.push(this._currentLabel(label));
-      }
+      // link template failed (or absent) → plain bold label (link:null)
+      segments.push({ label, link: link || null });
     }
 
     // Current — optional. Three shapes:
@@ -74,19 +104,11 @@ class Breadcrumb {
       if (label) {
         let link = null;
         if (entry.current.link) link = this._resolveTemplate(entry.current.link, dv);
-        if (link) {
-          segments.push(this._link(label, link));
-        } else {
-          segments.push(this._currentLabel(label));
-        }
+        segments.push({ label, link: link || null });
       }
     }
 
-    if (segments.length === 0) return;
-
-    const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
-    wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
-    wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
+    return segments;
   }
 
   // ── path_walk renderer ─────────────────────────────────────────────────
@@ -106,11 +128,27 @@ class Breadcrumb {
   //   • Note IS a section hub (basename without .md === its own folder name) → skip
   //     self-crumb (the folder segment already IS the current page label)
   _renderPathWalk(dv, pw) {
+    const trail = this._buildPathWalkSegments(dv, pw);
+    if (trail.length === 0) return;
+
+    const html = trail.map((s) => s.link ? this._link(s.label, s.link) : this._currentLabel(s.label));
+
+    const wrap = dv.el("div", "", { cls: "project-breadcrumb wiki-breadcrumb" });
+    // Prominent + mobile-legible: full-size, non-muted, roomy line-height so the
+    // trail is clearly visible (and its crumbs tappable) on a phone. Wiki-only —
+    // ancestors-mode breadcrumbs (project/meetings/…) keep their compact style.
+    wrap.style.cssText = "font-size: 1em; margin: 2px 0 10px 0; line-height: 1.9;";
+    wrap.innerHTML = html.join(' <span style="opacity:0.5;"> / </span> ');
+  }
+
+  // Resolve a path_walk trail into [{ label, link|null }]. Shared by
+  // _renderPathWalk() and buildSegments() so the walked trail is defined once.
+  _buildPathWalkSegments(dv, pw) {
     const cur = dv.current();
-    if (!cur || !cur.file) return;
+    if (!cur || !cur.file) return [];
 
     const filePath = cur.file.path;
-    if (!filePath) return;
+    if (!filePath) return [];
 
     const rootDir  = pw.root_dir;   // e.g. "spice/wiki"
     const rootFile = pw.root_file;  // e.g. "Wiki.md"
@@ -133,15 +171,12 @@ class Breadcrumb {
 
     // ── Root is current? (note IS the root hub) ────────────────────────────
     if (filePath === rootFullPath) {
-      segments.push(this._currentLabel(rootLabel));
-      const wrap = dv.el("div", "", { cls: "project-breadcrumb wiki-breadcrumb" });
-      wrap.style.cssText = "font-size: 1em; margin: 2px 0 10px 0; line-height: 1.9;";
-      wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
-      return;
+      segments.push({ label: rootLabel, link: null });
+      return segments;
     }
 
     // ── Root crumb — always linked ─────────────────────────────────────────
-    segments.push(this._link(rootLabel, rootFullPath));
+    segments.push({ label: rootLabel, link: rootFullPath });
 
     // ── Intermediate folder segments ────────────────────────────────────────
     // Strip the root_dir prefix (+1 for the "/") to get the relative folder path.
@@ -190,23 +225,16 @@ class Breadcrumb {
             segLink = hub.file.path;
           }
         } catch (_e) { /* keep the folder-segment fallback */ }
-        segments.push(this._link(segLabel, segLink));
+        segments.push({ label: segLabel, link: segLink });
       }
     }
 
     // ── Current page crumb — always unlinked ───────────────────────────────
     // For a section hub the label is the fm:title (e.g. "Infra"), not the folder
     // slug ("infra"). For a page it is also fm:title.
-    segments.push(this._currentLabel(pageLabel));
+    segments.push({ label: pageLabel, link: null });
 
-    if (segments.length === 0) return;
-
-    const wrap = dv.el("div", "", { cls: "project-breadcrumb wiki-breadcrumb" });
-    // Prominent + mobile-legible: full-size, non-muted, roomy line-height so the
-    // trail is clearly visible (and its crumbs tappable) on a phone. Wiki-only —
-    // ancestors-mode breadcrumbs (project/meetings/…) keep their compact style.
-    wrap.style.cssText = "font-size: 1em; margin: 2px 0 10px 0; line-height: 1.9;";
-    wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
+    return segments;
   }
 
   // ── Registry load ──────────────────────────────────────────────────────
