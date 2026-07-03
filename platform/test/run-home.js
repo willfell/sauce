@@ -345,6 +345,73 @@ function descendants(el) {
       "a missing customJS/app must make the capture buttons no-op, never throw");
   }
 
+  // ── HOME-HEAL: pure _healHomeChromeBody(body) string transform ─────────────
+  // Load the pure helper the same way run-wiki.js loads _healWikiChromeBody:
+  // slice its source out of install.js and eval it as a standalone function
+  // (it must be a self-contained pure transform — no vault I/O, no closures).
+  {
+    const INSTALL_FILE = path.join(WORKSHOP, "platform", "install.js");
+    const installSrc = fs.readFileSync(INSTALL_FILE, "utf8");
+    const m = installSrc.match(/function _healHomeChromeBody\(body\) \{[\s\S]*?\n\}\n/);
+    assertTrue("HOME-HEAL-0 _healHomeChromeBody is defined as a pure function in install.js", !!m,
+      "expected `function _healHomeChromeBody(body) { … }` in install.js");
+    const heal = m ? new Function(m[0] + "\nreturn _healHomeChromeBody;")() : () => "";
+
+    // (a) empty / whitespace body ⇒ full canonical chrome template.
+    for (const [label, input] of [["empty", ""], ["undefined", undefined], ["whitespace", "   \n\n  "]]) {
+      const out = heal(input);
+      assertTrue(`HOME-HEAL-1 (${label}) → chrome contains SpaceNavButtons block`,
+        typeof out === "string" && /class:\s*"SpaceNavButtons"/.test(out),
+        `expected the SpaceNavButtons view block; got ${JSON.stringify(out)}`);
+      assertTrue(`HOME-HEAL-2 (${label}) → chrome contains SpaceHome block`,
+        typeof out === "string" && /class:\s*"SpaceHome"/.test(out),
+        `expected the SpaceHome view block; got ${JSON.stringify(out)}`);
+      assertTrue(`HOME-HEAL-3 (${label}) → chrome contains HOME_CHROME_END marker`,
+        typeof out === "string" && out.includes("HOME_CHROME_END"),
+        `expected the HOME_CHROME_END marker; got ${JSON.stringify(out)}`);
+    }
+
+    // (b) idempotent: healing a healed body is a fixed point.
+    const once = heal("");
+    const twice = heal(once);
+    assertTrue("HOME-HEAL-4 idempotent on empty-derived chrome (heal(heal('')) === heal(''))",
+      once === twice, `not idempotent:\n--- once ---\n${once}\n--- twice ---\n${twice}`);
+
+    // Idempotent on a body that already carries the chrome + user content.
+    const withUser = heal("") + "\n\nMY NOTES\n- a task I typed\n";
+    const healed1 = heal(withUser);
+    const healed2 = heal(healed1);
+    assertTrue("HOME-HEAL-5 idempotent on chrome + user content", healed1 === healed2,
+      `not idempotent:\n--- once ---\n${healed1}\n--- twice ---\n${healed2}`);
+
+    // (c) preserves user content BELOW the marker; does NOT duplicate the chrome.
+    assertTrue("HOME-HEAL-6 user content ('MY NOTES') survives the heal",
+      typeof healed1 === "string" && healed1.includes("MY NOTES"),
+      `user content below HOME_CHROME_END must be preserved; got ${JSON.stringify(healed1)}`);
+    assertTrue("HOME-HEAL-7 user content ('a task I typed') survives the heal",
+      typeof healed1 === "string" && healed1.includes("a task I typed"),
+      `user content below HOME_CHROME_END must be preserved; got ${JSON.stringify(healed1)}`);
+    const navCount = (healed1.match(/class:\s*"SpaceNavButtons"/g) || []).length;
+    const homeCount = (healed1.match(/class:\s*"SpaceHome"/g) || []).length;
+    const markerCount = (healed1.match(/HOME_CHROME_END/g) || []).length;
+    assertEq("HOME-HEAL-8 chrome not duplicated — exactly one SpaceNavButtons block", navCount, 1);
+    assertEq("HOME-HEAL-9 chrome not duplicated — exactly one SpaceHome block", homeCount, 1);
+    assertEq("HOME-HEAL-10 exactly one HOME_CHROME_END marker", markerCount, 1);
+
+    // A body with NO chrome but pre-existing free text (no marker) ⇒ chrome is
+    // rebuilt and the free text is preserved after the marker.
+    const bare = heal("just some notes I wrote before the blueprint arrived\n");
+    assertTrue("HOME-HEAL-11 bare body gains chrome", /class:\s*"SpaceHome"/.test(bare),
+      `a chrome-less body must be re-chromed; got ${JSON.stringify(bare)}`);
+    assertTrue("HOME-HEAL-12 bare body's free text preserved after marker",
+      bare.includes("just some notes I wrote before the blueprint arrived"),
+      `pre-existing free text must survive; got ${JSON.stringify(bare)}`);
+    const bareMarkerIdx = bare.indexOf("HOME_CHROME_END");
+    assertTrue("HOME-HEAL-13 bare body's free text lands BELOW the marker",
+      bareMarkerIdx >= 0 && bare.indexOf("just some notes I wrote") > bareMarkerIdx,
+      `free text should be appended after HOME_CHROME_END; got ${JSON.stringify(bare)}`);
+  }
+
   // ── Summary ────────────────────────────────────────────────────────────────
   console.log("\n=== Summary ===");
   for (const [name, ok] of results) console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
