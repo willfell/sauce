@@ -174,7 +174,7 @@ class SpaceDailyDashboard {
     return { open, done, overdue };
   }
 
-  async render(dv) {
+  async render(dv, params) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
@@ -191,7 +191,12 @@ class SpaceDailyDashboard {
     // actually contains us is authoritative regardless of focus state.
     const fileName = this._resolveCurrentFileName(dv);
     const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-    const today = dateMatch ? dateMatch[1] : moment().format("YYYY-MM-DD");
+    // DRY seam (Home command center): a host may inject an explicit `asOf`
+    // (and `live`) via params to scope this dashboard to a date OTHER than the
+    // note's own filename date. When absent, `callerAsOf` is null and the
+    // derivation is byte-for-byte the prior filename → moment() fallback.
+    const callerAsOf = (params && typeof params.asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.asOf)) ? params.asOf : null;
+    const today = callerAsOf || (dateMatch ? dateMatch[1] : moment().format("YYYY-MM-DD"));
 
     const config = {
       meetingsPath: "spice/meetings/notes",
