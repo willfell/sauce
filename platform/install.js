@@ -1255,6 +1255,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyFinanceUnifiedNavMigration(tp, mech, variables, history, git);    // NEW v0.111.0 — collapses FinanceHubActions + FinanceNavRow invocations to single-line FinanceNav
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
+  await applyBundledPlugin(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW — vendor + enable a first-party bundled plugin (sauce-plugin mechanism); gated on mech.bundled_plugin
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
@@ -6977,6 +6978,80 @@ async function applyExternalPlugins(tp, manifest, history, git) {
       }
     }
   }
+}
+
+// ============================================================================
+// applyBundledPlugin — vendors a FIRST-PARTY Obsidian plugin bundled inside a
+// mechanism (mech.bundled_plugin) into <vault>/.obsidian/plugins/<id>/ and
+// enables it in community-plugins.json. Unlike applyExternalPluginInstall (which
+// FETCHES community plugins from the obsidian-releases index), this copies files
+// shipped in the platform payload. Idempotent; per-file try/catch; NEVER throws.
+// The enable step preserves all other plugin ids and no-ops on an absent/malformed
+// community-plugins.json (the files still land, so a later manual enable works).
+// Gated on mech.bundled_plugin, so it only fires for the sauce-plugin mechanism.
+async function applyBundledPlugin(tp, mech, vaultPath, workshopPath, history, git) {
+  const bp = mech && mech.bundled_plugin;
+  if (!bp || !bp.id || !Array.isArray(bp.files) || bp.files.length === 0) return;
+  const path = require("path");
+  const fs = require("fs");
+  const adapter = tp.app.vault.adapter;
+  const gitInfo = git || {};
+  const hist = (event, extra) => {
+    if (!history) return;
+    history.push(Object.assign({
+      event, step: "bundled_plugin", name: mech.name, plugin_id: bp.id,
+      git_commit: gitInfo.commit, git_tag: gitInfo.tag, git_dirty: gitInfo.dirty,
+      attempted_at: new Date().toISOString(),
+    }, extra || {}));
+  };
+
+  // Resolve the mechanism's bundled source dir (mirror the bootstrap-lib
+  // __dirname-first / workshopPath-fallback resolution at applyExternalPluginInstall).
+  const srcCandidates = [
+    path.join(__dirname, "mechanisms", mech.name, bp.source_dir || "plugin"),
+    workshopPath ? path.join(workshopPath, "platform", "mechanisms", mech.name, bp.source_dir || "plugin") : null,
+  ].filter(Boolean);
+  let srcDir = null;
+  for (const c of srcCandidates) { try { if (fs.existsSync(c)) { srcDir = c; break; } } catch (_e) {} }
+  if (!srcDir) { hist("error", { message: "bundled plugin source dir not found for " + bp.id }); return; }
+
+  const destDir = ".obsidian/plugins/" + bp.id;
+  try { await adapter.mkdir(destDir); } catch (_e) { /* already exists — fine */ }
+  let wroteCount = 0;
+  for (const f of bp.files) {
+    try {
+      const content = fs.readFileSync(path.join(srcDir, f), "utf8");
+      await adapter.write(destDir + "/" + f, content);
+      wroteCount++;
+    } catch (e) {
+      hist("error", { message: "vendor " + f + " failed: " + (e && e.message ? e.message : String(e)) });
+    }
+  }
+  // Enable ONLY once EVERY declared file vendored — never enable a half-written
+  // plugin dir (Obsidian would fail to load it; CustomJS fallback still applies).
+  if (wroteCount < bp.files.length) {
+    hist("warning", { message: "vendored " + wroteCount + "/" + bp.files.length + " files; not enabling" });
+    return;
+  }
+
+  // Enable in community-plugins.json — preserve all other ids; safe on absent/malformed.
+  const pluginsPath = ".obsidian/community-plugins.json";
+  let exists = false;
+  try { exists = await adapter.exists(pluginsPath); } catch (_e) { exists = false; }
+  if (!exists) { hist("warning", { message: pluginsPath + " absent; vendored but not auto-enabled" }); return; }
+  let raw;
+  try { raw = await adapter.read(pluginsPath); }
+  catch (e) { hist("warning", { message: "read " + pluginsPath + " failed: " + (e && e.message) }); return; }
+  let enabled;
+  try { enabled = JSON.parse(raw); }
+  catch (_e) { hist("warning", { message: pluginsPath + " malformed JSON; vendored but not auto-enabled" }); return; }
+  if (!Array.isArray(enabled)) { hist("warning", { message: pluginsPath + " not an array; vendored but not auto-enabled" }); return; }
+  if (!enabled.includes(bp.id)) {
+    enabled.push(bp.id);
+    try { await adapter.write(pluginsPath, JSON.stringify(enabled, null, 2) + "\n"); hist("enabled", {}); }
+    catch (e) { hist("warning", { message: "write " + pluginsPath + " failed: " + (e && e.message) }); return; }
+  }
+  hist("vendored", {});
 }
 
 // ============================================================================
@@ -19283,6 +19358,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // by run-helper-cases.js (HC-RF1/HC-RF2/HC-RF3 cover the array-support
     // patch). Pure additive; does not affect the function-as-default export.
     module.exports.applyRuleFragment = applyRuleFragment;
+    module.exports.applyBundledPlugin = applyBundledPlugin;
     module.exports.resetSourceContributions = resetSourceContributions;
     // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
     // run-helper-cases.js. Pure additive; does not affect the function-as-default export.

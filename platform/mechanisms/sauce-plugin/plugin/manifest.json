@@ -1,0 +1,9 @@
+{
+  "id": "sauce",
+  "name": "Sauce",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Sauce runtime loader — registers customJS renderer classes at onload so dataviewjs views render on first paint (no cold-load flash). The CustomJS community plugin remains the fallback.",
+  "author": "willfell",
+  "isDesktopOnly": false
+}

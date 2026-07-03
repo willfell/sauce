@@ -158,6 +158,11 @@
       "path": "mechanisms/render-safe"
     },
     {
+      "name": "sauce-plugin",
+      "version": "0.1.0",
+      "path": "mechanisms/sauce-plugin"
+    },
+    {
       "name": "task-entity",
       "version": "0.5.0",
       "path": "mechanisms/task-entity"
