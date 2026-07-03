@@ -1,9 +1,9 @@
 {
-  "workshop_version": "0.183.0",
+  "workshop_version": "0.183.1",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
-    "daily": "0.16.0",
+    "daily": "0.16.1",
     "meetings": "0.16.1",
     "people": "0.6.2",
     "products": "0.3.1",
