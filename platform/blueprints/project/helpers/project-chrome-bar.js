@@ -299,6 +299,68 @@ class ProjectChromeBar {
     }
   }
 
+  // Resolve the project's atlas (type:project) + map (type:map) notes by scanning
+  // the project dir — mirrors ProjectNavButtons.render(). Best-effort: a cold
+  // index simply yields nulls. Shared by _navEntries + navTarget so both agree on
+  // which files back the Map / atlas destinations.
+  _resolveProjectNotes(projectDir) {
+    let mainNote = null;
+    let mapNote = null;
+    if (!projectDir) return { mainNote, mapNote };
+    try {
+      const files = (app.vault.getMarkdownFiles ? app.vault.getMarkdownFiles() : app.vault.getFiles())
+        .filter((f) => f.path.startsWith(projectDir + "/") && !f.basename.endsWith("-board"));
+      for (const f of files) {
+        const ffm = (app.metadataCache.getFileCache(f) || {}).frontmatter || {};
+        const ftags = ffm.tags || [];
+        if (!mainNote && (ffm.type === "project" || (Array.isArray(ftags) && ftags.includes("project")))) mainNote = f;
+        if (!mapNote && this._isMapNote(ffm.type, f.basename)) mapNote = f;
+      }
+    } catch (_e) { /* best-effort */ }
+    return { mainNote, mapNote };
+  }
+
+  // ── navTarget — resolve ONE project destination path by key ─────────────────
+  // key ∈ board | docs | map | todo | links. Returns the absolute vault path for
+  // that destination, gated on existence exactly where _navEntries gates it, or
+  // null when the destination can't be resolved (missing map note / no To-Do note
+  // / no Links Hub / cold index). Public so both _navEntries and the command
+  // mirror (ProjectCommandsInit) compute paths from the SAME logic. Never throws.
+  navTarget(dv, ctx, key) {
+    try {
+      const projectDir = ctx && ctx.projectDir;
+      const projectSlug = ctx && ctx.projectSlug;
+      if (!projectDir) return null;
+      const exists = (p) => {
+        try { return !!(app && app.vault && app.vault.getAbstractFileByPath(p)); }
+        catch (_e) { return false; }
+      };
+      switch (key) {
+        case "board":
+          return projectSlug ? `${projectDir}/${projectSlug}-board.md` : null;
+        case "docs":
+          return `${projectDir}/docs/Docs.md`;
+        case "links": {
+          const linksHubPath = `${projectDir}/Links Hub.md`;
+          return exists(linksHubPath) ? linksHubPath : null;
+        }
+        case "map": {
+          const { mapNote } = this._resolveProjectNotes(projectDir);
+          return mapNote ? mapNote.path : null;
+        }
+        case "todo": {
+          const { mainNote } = this._resolveProjectNotes(projectDir);
+          if (!mainNote) return null;
+          const mainDir = mainNote.path.slice(0, mainNote.path.lastIndexOf("/"));
+          const toDoPath = `${mainDir}/${mainNote.basename} To-Do.md`;
+          return exists(toDoPath) ? toDoPath : null;
+        }
+        default:
+          return null;
+      }
+    } catch (_e) { return null; }
+  }
+
   // ── _navEntries — the Go ▾ launcher entries ────────────────────────────────
   // Builds [{ section:'This project' }, ...project dests, { section:'Vault' },
   // ...vault dests]. Project destinations mirror the exact paths
@@ -312,7 +374,6 @@ class ProjectChromeBar {
     const ICON = ProjectChromeBar.ICON;
     const entries = [];
     const projectDir = ctx && ctx.projectDir;
-    const projectSlug = ctx && ctx.projectSlug;
     const context = (ctx && ctx.context) || "";
 
     // Resolve the current file path so we can omit the current surface.
@@ -322,50 +383,35 @@ class ProjectChromeBar {
       currentPath = (cur && cur.file && cur.file.path) || "";
     } catch (_e) { currentPath = ""; }
 
-    const exists = (p) => {
-      try { return !!(app && app.vault && app.vault.getAbstractFileByPath(p)); }
-      catch (_e) { return false; }
-    };
     const open = (p) => {
       try { this._openNavTarget(p, dv); } catch (_e) { /* never throw */ }
     };
 
     // ── This project ────────────────────────────────────────────────────────
     if (projectDir) {
-      // Resolve the atlas (type:project) + map (type:map) notes by scanning the
-      // project dir — mirrors ProjectNavButtons.render(). Best-effort; on a cold
-      // index the scan simply yields fewer destinations.
-      let mainNote = null;
-      let mapNote = null;
-      try {
-        const files = (app.vault.getMarkdownFiles ? app.vault.getMarkdownFiles() : app.vault.getFiles())
-          .filter((f) => f.path.startsWith(projectDir + "/") && !f.basename.endsWith("-board"));
-        for (const f of files) {
-          const ffm = (app.metadataCache.getFileCache(f) || {}).frontmatter || {};
-          const ftags = ffm.tags || [];
-          if (!mainNote && (ffm.type === "project" || (Array.isArray(ftags) && ftags.includes("project")))) mainNote = f;
-          if (!mapNote && this._isMapNote(ffm.type, f.basename)) mapNote = f;
-        }
-      } catch (_e) { /* best-effort */ }
+      // Resolve the atlas (type:project) + map (type:map) notes once; the map /
+      // to-do / docs / board / links destination PATHS come from navTarget so the
+      // launcher and the command mirror agree by construction.
+      const { mainNote } = this._resolveProjectNotes(projectDir);
 
       const projDests = [];
-      // Project (atlas) hub.
+      // Project (atlas) hub — not a navTarget key (label is the note basename).
       if (mainNote) projDests.push({ label: mainNote.basename, icon: ICON.project, path: mainNote.path });
       // Project Board.
-      if (projectSlug) projDests.push({ label: "Project Board", icon: ICON.board, path: `${projectDir}/${projectSlug}-board.md` });
+      const boardPath = this.navTarget(dv, ctx, "board");
+      if (boardPath) projDests.push({ label: "Project Board", icon: ICON.board, path: boardPath });
       // Map.
-      if (mapNote) projDests.push({ label: "Map", icon: ICON.map, path: mapNote.path });
+      const mapPath = this.navTarget(dv, ctx, "map");
+      if (mapPath) projDests.push({ label: "Map", icon: ICON.map, path: mapPath });
       // Docs.
-      projDests.push({ label: "Docs", icon: ICON.docs, path: `${projectDir}/docs/Docs.md` });
+      const docsPath = this.navTarget(dv, ctx, "docs");
+      if (docsPath) projDests.push({ label: "Docs", icon: ICON.docs, path: docsPath });
       // To-Do — derived from mainNote.path (source of truth), gated on existence.
-      if (mainNote) {
-        const mainDir = mainNote.path.slice(0, mainNote.path.lastIndexOf("/"));
-        const toDoPath = `${mainDir}/${mainNote.basename} To-Do.md`;
-        if (exists(toDoPath)) projDests.push({ label: "To-Do", icon: ICON.todo, path: toDoPath });
-      }
+      const toDoPath = this.navTarget(dv, ctx, "todo");
+      if (toDoPath) projDests.push({ label: "To-Do", icon: ICON.todo, path: toDoPath });
       // Helpful Links — gated on the Links Hub note existing.
-      const linksHubPath = `${projectDir}/Links Hub.md`;
-      if (exists(linksHubPath)) projDests.push({ label: "Helpful Links", icon: ICON.links, path: linksHubPath });
+      const linksHubPath = this.navTarget(dv, ctx, "links");
+      if (linksHubPath) projDests.push({ label: "Helpful Links", icon: ICON.links, path: linksHubPath });
 
       // Omit the destination equal to the current surface (self-nav).
       const projMarkerPushed = { done: false };
