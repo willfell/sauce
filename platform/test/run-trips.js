@@ -216,6 +216,27 @@ function makeDv(embed, currentVal) {
         global.app.vault = savedVault;
     }
 
+    // ---------- TripSectionsCards frontmatter grouping (behavioral) ----------
+    {
+        const TripSectionsCards = loadWidget('platform/blueprints/trips/helpers/trip-sections-cards.js', 'TripSectionsCards');
+        const sc = new TripSectionsCards();
+        const rows = sc._buildRows([
+            { basename: "T — Notes",   path: "p/T — Notes.md",   fm: { type: "trip-section", section: "Notes",   section_kind: "notes" } },
+            { basename: "T — Flights", path: "p/T — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+            { basename: "T — Honorees",path: "p/T — Honorees.md",fm: { type: "trip-section", section: "Honorees",section_kind: "custom" } },
+        ], null);
+        ok('SECTIONS-1 defaults grouped + ordered by kind, custom in Additional',
+            rows.filter(r => r.group === 'Default Sections').map(r => r.title).join('|') === 'Flights|Notes'
+            && rows.filter(r => r.group === 'Additional Sections').map(r => r.title).join('|') === 'Honorees',
+            JSON.stringify(rows.map(r => [r.group, r.title])));
+        const rows2 = sc._buildRows([
+            { basename: "T — Flights", path: "p/T — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+        ], "p/board/t-board.md");
+        ok('SECTIONS-2 board appended last in Default with title "Trip Board"',
+            rows2.filter(r => r.group === 'Default Sections').map(r => r.title).join('|') === 'Flights|Trip Board',
+            JSON.stringify(rows2.map(r => [r.group, r.title])));
+    }
+
     // ---------- render() cold-load guards ----------
     const widgets = [
         { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },
