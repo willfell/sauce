@@ -25,6 +25,10 @@
  *                                             whose dv container hosts the button
  *   {{current_file.frontmatter.<key>}}-routed — expand YYYY-MM-DD date string into
  *                                             3-level routed form YYYY/MM-MMMM/YYYY-MM-DD
+ *   {{current_file.frontmatter.<key>|today}}  — like the two above, but falls back to
+ *   {{current_file.frontmatter.<key>|today}}-routed  TODAY's YYYY-MM-DD when the key is
+ *                                             absent/empty (so a day-scoped entity can be
+ *                                             created from a note without that field, e.g. Home)
  *
  * Derive DSL (prompts[].derive):
  *   slugify(prompts.<key>)            — lowercase + dasherize
@@ -317,9 +321,14 @@ class EntityCreate {
                 const projects = dv.pages()
                     .where(p => p && p.type === "project")
                     .map(p => p.file.name);
-                // dv.pages().map() returns a Dataview DataArray; spread into a
-                // plain JS array for the <select> options loop.
-                return ["(none)", ...Array.from(projects)];
+                // dv.pages() yields notes in vault/index order (NOT by name) —
+                // some vaults come out near-alphabetical but it is never
+                // guaranteed. Sort case-insensitively so the project <select> is
+                // ALWAYS alphabetical. Spread the Dataview DataArray into a plain
+                // JS array first so `.sort()` operates on a real Array.
+                const sorted = Array.from(projects).sort((a, b) =>
+                    String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
+                return ["(none)", ...sorted];
             } catch (_e) {
                 return ["(none)"];
             }
@@ -532,7 +541,12 @@ class EntityCreate {
             wrap.appendChild(lab);
 
             const sel = document.createElement("select");
-            sel.style.cssText = "flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+            // min-width: 0 lets the flex item shrink below the native <select>'s
+            // intrinsic content width (the widest option). Without it a long
+            // project name forces the select wider than its flex track and it
+            // overflows the dialog's right padding by a few px. max-width: 100%
+            // is a belt-and-suspenders cap against the same overflow.
+            sel.style.cssText = "flex: 1; min-width: 0; max-width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
             for (const opt of (p.options || [])) {
                 const o = document.createElement("option");
                 o.value = opt; o.textContent = opt;
@@ -646,10 +660,33 @@ class EntityCreate {
             try { return ctx.now ? ctx.now.format(fmt) : ""; } catch (_e) { return ""; }
         });
 
+        // Resolve current-file frontmatter with an optional `|today` fallback:
+        // when the key is absent/empty, substitute today's YYYY-MM-DD (ctx.now).
+        // This lets day-scoped entities (scratch) be created from a note that has
+        // no `day` frontmatter — e.g. the Home command center + dropdown — instead
+        // of routing to spice/<x>/ with an empty date. Mirrors the missing-field
+        // fallback on {{current_file.folder}} below.
+        const dayOrToday = (key) => {
+            let v = this._readCurrentFrontmatter(ctx, key);
+            if (v == null || v === "") v = (ctx && ctx.now ? ctx.now.format("YYYY-MM-DD") : "");
+            return v;
+        };
+
+        // 2a. {{current_file.frontmatter.<key>|today}}-routed (before ALL plain forms)
+        out = out.replace(/\{\{current_file\.frontmatter\.([a-zA-Z0-9_-]+)\|today\}\}-routed/g, (_, key) => {
+            return this._routedFromDate(dayOrToday(key));
+        });
+
         // 2. {{current_file.frontmatter.<key>}}-routed (must run before plain form)
         out = out.replace(/\{\{current_file\.frontmatter\.([a-zA-Z0-9_-]+)\}\}-routed/g, (_, key) => {
             const v = this._readCurrentFrontmatter(ctx, key);
             return this._routedFromDate(v);
+        });
+
+        // 3a. {{current_file.frontmatter.<key>|today}} — value, else today.
+        out = out.replace(/\{\{current_file\.frontmatter\.([a-zA-Z0-9_-]+)\|today\}\}/g, (_, key) => {
+            const v = dayOrToday(key);
+            return v == null ? "" : String(v);
         });
 
         // 3. {{current_file.frontmatter.<key>}}
