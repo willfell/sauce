@@ -75,7 +75,13 @@ class ToDoLeafActions {
         // strips that legacy `---` from existing daily notes. Project To-Do
         // (project-todo) and Recurring (to-do-recurring) templates render this block
         // WITHOUT surrounding `---`, so they keep their divider-less layout.
-        const wantDividers = noteType === 'to-do';
+        // Chrome-overhaul reconciliation (2026-07-02): the per-project To-Do note
+        // (project-todo) also gets the hugging divider so there's a clear separator
+        // between the project nav buttons and this action bar (user ask), and its
+        // two buttons (New Task + Recurring; All is hidden here) share ONE
+        // full-width row (below). Daily to-do + recurring keep their layout.
+        const wantDividers = noteType === 'to-do' || noteType === 'project-todo';
+        const oneRow = noteType === 'project-todo';
         const DIVIDER = 'border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;';
         const host = wantDividers ? dv.container.createEl('div') : dv.container;
         if (wantDividers) {
@@ -90,11 +96,14 @@ class ToDoLeafActions {
         const bar = host.createEl('div');
         bar.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin: ' + (wantDividers ? '0' : '0.5em') + ' auto; align-items: stretch; max-width: 600px;';
 
-        const newRow = bar.createEl('div');
-        newRow.style.cssText = 'display: flex; width: 100%;';
+        // project-todo: New Task + Recurring share ONE full-width row (both flex:true
+        // fill it evenly, wrapping on a very narrow phone). Other surfaces keep New
+        // Task on its OWN readable row (newRow) with Recurring on a second row below.
+        const newRow = oneRow ? null : bar.createEl('div');
+        if (newRow) newRow.style.cssText = 'display: flex; width: 100%;';
 
         const row = bar.createEl('div');
-        row.style.cssText = 'display: flex; gap: 12px; justify-content: center; align-items: stretch; flex-wrap: wrap;';
+        row.style.cssText = 'display: flex; gap: ' + (oneRow ? '8px' : '12px') + '; ' + (oneRow ? '' : 'justify-content: center; ') + 'align-items: stretch; flex-wrap: wrap;';
 
         const defaultDestForCurrent = () => {
             if (noteType === 'project-todo' && cur && cur.project) {
@@ -216,7 +225,7 @@ class ToDoLeafActions {
         // ~360px phone). Recurring (+ All where applicable) share a second row
         // below; icons carry the action signal (+ for new, repeat for recurring,
         // list for backlog).
-        customJS.AccentButton.render(newRow, { label: 'New Task', icon: plusIcon, onClick: openNewTask, flex: true });
+        customJS.AccentButton.render(newRow || row, { label: 'New Task', icon: plusIcon, onClick: openNewTask, flex: true });
         customJS.AccentButton.render(row, { label: 'Recurring', icon: repeatIcon, onClick: openNewRecurring, flex: true });
         if (noteType !== 'project-todo') {
             customJS.AccentButton.render(row, { label: 'All', icon: listIcon, onClick: openAllToDos, flex: true });

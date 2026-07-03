@@ -27,134 +27,126 @@ class ProjectsHubCards {
         return links.map(l => `<span style="background:var(--background-secondary);padding:1px 6px;border-radius:4px;font-size:0.8em;margin-right:4px;">${l.path.split("/").pop().replace(/\.md$/, "")}</span>`).join("");
     }
 
-    _renderChips(dv, projects) {
-        const STATUSES = ["idea", "planning", "in-progress", "blocked", "done", "superseded", "cancelled"];
+    // WS1 chrome overhaul: the hub is sorted, not filtered. Two modes persist to
+    // localStorage under "sauce.projects-hub.sort": "mtime" (default — most-
+    // recently-edited first) and "alpha" (A–Z by display name, case-insensitive).
+    _SORT_KEY = "sauce.projects-hub.sort";
 
-        // Status chip bar
-        const statusBar = dv.container.createEl("div");
-        statusBar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;";
-        const statusLabel = statusBar.createEl("span", { text: "Status: " });
-        statusLabel.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
-        STATUSES.forEach(s => {
-            const isActive = this._activeStatuses.has(s);
-            const chip = statusBar.createEl("span", { text: s });
-            chip.style.cssText = `cursor:pointer;padding:2px 10px;border-radius:12px;font-size:0.8em;${
-                isActive ? "background:var(--interactive-accent);color:var(--text-on-accent);" : "background:var(--background-secondary);color:var(--text-muted);"
-            }`;
-            chip.addEventListener("click", async () => {
-                if (this._activeStatuses.has(s)) this._activeStatuses.delete(s);
-                else this._activeStatuses.add(s);
-                // v0.109.0 S3: clear ONLY the resultsContainer (the proxy's container)
-                // and re-render via _renderInner. The DocSearch strip lives outside
-                // the proxy and stays intact across status-chip clicks.
-                dv.container.empty();
-                await this._renderInner(dv);
-            });
-        });
+    _readSortMode() {
+        try {
+            if (typeof localStorage === "undefined") return "mtime";
+            const raw = localStorage.getItem(this._SORT_KEY);
+            return (raw === "mtime" || raw === "alpha") ? raw : "mtime";
+        } catch (_e) { return "mtime"; }
+    }
 
-        // Compute team + product chip universe from current (status-filtered) projects.
-        const allTeams = new Set();
-        const allProducts = new Set();
-        for (const p of projects) {
-            (p.teams || []).forEach(l => allTeams.add(l.path));
-            (p.products || []).forEach(l => allProducts.add(l.path));
-        }
-        if (!this._activeTeams)    this._activeTeams    = new Set(allTeams);
-        if (!this._activeProducts) this._activeProducts = new Set(allProducts);
+    _writeSortMode(mode) {
+        const m = (mode === "mtime" || mode === "alpha") ? mode : "mtime";
+        try {
+            if (typeof localStorage !== "undefined") localStorage.setItem(this._SORT_KEY, m);
+        } catch (_e) { /* private-mode / disabled storage — non-fatal */ }
+    }
 
-        const renderLinkChips = (labelText, allSet, activeSet) => {
-            if (!allSet.size) return;
-            const bar = dv.container.createEl("div");
-            bar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;";
-            const lbl = bar.createEl("span", { text: `${labelText}: ` });
-            lbl.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
-            [...allSet].sort().forEach(path => {
-                const display = path.split("/").pop().replace(/\.md$/, "");
-                const isActive = activeSet.has(path);
-                const chip = bar.createEl("span", { text: display });
-                chip.style.cssText = `cursor:pointer;padding:2px 10px;border-radius:12px;font-size:0.8em;${
-                    isActive ? "background:var(--interactive-accent);color:var(--text-on-accent);" : "background:var(--background-secondary);color:var(--text-muted);"
-                }`;
-                chip.addEventListener("click", async () => {
-                    if (activeSet.has(path)) activeSet.delete(path);
-                    else activeSet.add(path);
-                    // v0.109.0 S3 — see status-chip handler above.
-                    dv.container.empty();
-                    await this._renderInner(dv);
-                });
-            });
+    // Pure, no DOM. Reads latestMtime from this._lookup (the SAME accessor the
+    // render path + per-card meta use) so sort order matches the displayed
+    // "last activity" timestamp. Returns a NEW array; never mutates the input.
+    _sortProjects(pages, mode) {
+        const list = [...(pages || [])];
+        const lookup = this._lookup;
+        const mtimeOf = (p) => {
+            const e = lookup && lookup.get ? lookup.get(p.file.path) : null;
+            return (e && e.latestMtime && e.latestMtime.ts) || 0;
         };
-        renderLinkChips("Teams", allTeams, this._activeTeams);
-        renderLinkChips("Products", allProducts, this._activeProducts);
-    }
-
-    _renderGroupSelector(dv) {
-        const wrap = dv.container.createEl("div");
-        wrap.style.cssText = "margin-bottom:10px;";
-        const lbl = wrap.createEl("span", { text: "Group by: " });
-        lbl.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:6px;";
-        const select = wrap.createEl("select");
-        ["none", "status", "team", "product"].forEach(opt => {
-            const o = select.createEl("option", { text: opt, value: opt });
-            if (opt === (this._groupBy || "none")) o.selected = true;
-        });
-        select.addEventListener("change", async (e) => {
-            this._groupBy = e.target.value;
-            // v0.109.0 S3 — see status-chip handler above.
-            dv.container.empty();
-            await this._renderInner(dv);
-        });
-    }
-
-    _renderRecentStrip(dv, enriched) {
-        if (!enriched || enriched.length === 0) return;   // empty-renders-nothing
-        const sorted = [...enriched].sort((a, b) => {
-            const ma = (a.latestMtime && a.latestMtime.ts) || 0;
-            const mb = (b.latestMtime && b.latestMtime.ts) || 0;
-            return mb - ma;
-        }).slice(0, 4);
-
-        customJS.SectionLabel.render(dv, { text: "Recently active" });
-        const bar = dv.container.createEl("div");
-        bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px 0;";
-        for (const e of sorted) {
-            const p = e.project;
-            const name = p.name || p.file.name;
-            const when = (e.latestMtime && e.latestMtime.ts) ? window.moment(e.latestMtime.ts).fromNow() : "";
-            const chip = bar.createEl("span");
-            chip.textContent = when ? `${name} · ${when}` : name;
-            chip.style.cssText = "cursor:pointer;padding:3px 12px;border-radius:12px;font-size:0.85em;background:var(--background-secondary);color:var(--text-normal);border:1px solid var(--background-modifier-border);";
-            chip.addEventListener("click", () => {
-                try { app.workspace.openLinkText(p.file.path, ""); } catch (_e) {}
+        const nameOf = (p) => String(p.name || p.file.name || "").toLowerCase();
+        if (mode === "alpha") {
+            return list.sort((a, b) => {
+                const cmp = nameOf(a).localeCompare(nameOf(b));
+                if (cmp !== 0) return cmp;
+                return mtimeOf(b) - mtimeOf(a);   // stable tiebreak: recent first
             });
         }
+        // default: "mtime" DESC (most-recently-edited first).
+        return list.sort((a, b) => {
+            const d = mtimeOf(b) - mtimeOf(a);
+            if (d !== 0) return d;
+            return nameOf(a).localeCompare(nameOf(b));   // stable tiebreak: A–Z
+        });
+    }
+
+    // Sort toggle — ONE control that flips "Last edited" ↔ "A–Z". Toggling
+    // re-sorts + rebuilds ONLY the grid container (kept as this._gridEl), not
+    // the whole view.
+    _renderSortToggle(dv) {
+        const row = dv.container.createEl("div");
+        row.style.cssText = "display:flex;justify-content:flex-end;margin:0 0 6px 0;";
+        const btn = row.createEl("button");
+        btn.style.cssText = "cursor:pointer;font-size:0.8em;padding:3px 10px;border-radius:12px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-muted);";
+        const label = () => this._sortMode === "alpha" ? "Sort: A–Z" : "Sort: Last edited";
+        btn.textContent = label();
+        btn.addEventListener("click", async () => {
+            this._sortMode = this._sortMode === "alpha" ? "mtime" : "alpha";
+            this._writeSortMode(this._sortMode);
+            btn.textContent = label();
+            await this._rebuildGrid();
+        });
+    }
+
+    // Rebuild ONLY the card grid in place using the current sort mode. Reuses
+    // this._gridEl (a container created inside _renderInner) + this._pages
+    // (the enriched, filtered project list captured on first render).
+    async _rebuildGrid() {
+        if (!this._gridEl) return;
+        this._gridEl.empty();
+        const proxy = this._makeProxyDv(null, this._gridEl);
+        await this._renderCards(proxy, this._sortProjects(this._pages || [], this._sortMode));
+    }
+
+    // WS1: the New Project button in its OWN full-width, centered row, bracketed
+    // by SectionLabel dividers above + below (no blank-line gaps). Dispatched
+    // from the Projects.md `// entity-create:project` marker block via the
+    // customjs-guard (keeps the installer/entity-create smoke marker intact
+    // while giving the button full-width chrome the marker block alone can't).
+    async renderNewProjectButton(dv) {
+        if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
+
+        const row = dv.container.createEl("div");
+        row.style.cssText = "display:flex;justify-content:center;margin:0;";
+        const proxy = this._makeProxyDv(dv, row);
+
+        // Cold-load race: poll for EntityCreate (mirrors section-hub.js).
+        for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        if (window.customJS?.EntityCreate) {
+            await customJS.EntityCreate.render(proxy, { instance: "project" });
+            // Stretch the rendered button to fill the row (full-width, centered).
+            for (const btn of row.querySelectorAll("button")) {
+                btn.style.flex = "1 1 100%";
+                btn.style.width = "100%";
+            }
+        }
+
+        if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
     }
 
     async render(dv) {
-        // v0.39.0 S6.3: default scope filter — hide terminal statuses unless
-        // the chip UI (rendered in S6.4) toggles them on. Records WITHOUT a
-        // `status` field (legacy `#project` tag-only notes pre-v0.38.0)
-        // short-circuit the Set lookup and still render — they surface with
-        // a "?" status pill rather than being filtered out (preserves
-        // v1.4.1 CF-1 legacy-tag-compat posture).
-        if (!this._activeStatuses) {
-            // v0.127.0 §E1: default scope shows ALL statuses including terminal
-            // (done/superseded/cancelled). Users still toggle chips off interactively.
-            this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked", "done", "superseded", "cancelled"]);
-        }
+        // WS1 chrome overhaul: no status/team/product scope filters. Every project
+        // is shown; ordering is the only knob (sort mode, persisted).
+        this._sortMode = this._readSortMode();
 
-        // v0.109.0 S3 — DocSearch filter strip wraps the existing status/team/product
-        // chips + grid. entityType: project + scopePath: spice/projects let DocSearch
-        // build its tag-chip universe from project tags. Chip-strip listeners + the
-        // grid are written into the resultsContainer via a proxyDv shim, mirroring
-        // how ProjectDocsIndex and SectionHub consume DocSearch.
+        // DocSearch stays as the text-only filter strip above the grid.
+        // persist:false → the box never remembers text across visits;
+        // hideNativeSearch:true → suppress the scoped-Obsidian-search button
+        // (a later workstream owns the option in doc-search.js; passing it here
+        // is harmless if unrecognized). hideTags:true drops the tag-chip pool.
         const filterCtx = customJS.DocSearch.render(dv, {
             entityType: "project",
             scopePath:  "spice/projects",
             recursive:  true,
             placeholder: "Filter projects by name or tag…",
-            hideTags: true,   // projects hub: drop the tag-chip section entirely
-            persist:  false,  // projects hub: search box never remembers text across visits
+            hideTags: true,           // projects hub: drop the tag-chip section entirely
+            persist:  false,          // projects hub: search box never remembers text across visits
+            hideNativeSearch: true,   // projects hub: text-only, no native scoped-search button
             onChange: async (ctx) => {
                 this._filterCtx = ctx;
                 ctx.resultsContainer.empty();
@@ -170,8 +162,8 @@ class ProjectsHubCards {
     _makeProxyDv(dv, container) {
         return {
             container,
-            current: dv.current.bind(dv),
-            pages:   dv.pages.bind(dv),
+            current: dv ? dv.current.bind(dv) : (() => null),
+            pages:   dv ? dv.pages.bind(dv)   : (() => []),
             el: (tag, txt, opts) => {
                 const el = container.createEl(tag, { ...(opts || {}) });
                 if (txt !== undefined && txt !== null && txt !== "") el.textContent = String(txt);
@@ -194,9 +186,9 @@ class ProjectsHubCards {
         // would be falsely included by the etag check alone. Filter them out by
         // explicit type, plus the legacy `-board` filename guard for safety.
         //
-        // v0.109.0 S3: final .where applies DocSearch.matches against the filter ctx
-        // so the text input + tag chips compose with status/team/product.
-        const statusFiltered = dv.pages('"spice/projects"')
+        // WS1: the only filter is DocSearch text (persist:false); no status/team/
+        // product scope. All non-hub project notes are candidates.
+        const projectHubs = dv.pages('"spice/projects"')
             .where(p => (p.type === "project"
                       || (p.file.etags.includes("#project")
                           && p.type !== "map"
@@ -204,26 +196,7 @@ class ProjectsHubCards {
                      && p.file.name !== "Projects"
                      && !p.file.path.includes("/steps/")
                      && !p.file.name.toLowerCase().endsWith("-board"))
-            .where(p => !p.status || this._activeStatuses.has(p.status))
             .where(p => customJS.DocSearch.matches(p, this._filterCtx));
-
-        // v0.39.0 S6.4/S6.5: render status + team + product chip bars at top
-        // of hub. Team/product chip set is derived from the status-filtered
-        // projects so the chip universe is responsive to status toggles.
-        this._renderChips(dv, statusFiltered);
-
-        // v0.39.0 S6.6: render group-by dropdown (default: status).
-        this._renderGroupSelector(dv);
-
-        // v0.39.0 S6.5: apply team/product filter (OR-mode multi-select).
-        // Projects with neither teams nor products surface unconditionally
-        // (unassigned-shown posture).
-        const projectHubs = statusFiltered.where(p => {
-            const teams = (p.teams || []).map(l => l.path);
-            const products = (p.products || []).map(l => l.path);
-            if (teams.length === 0 && products.length === 0) return true;
-            return teams.some(t => this._activeTeams.has(t)) || products.some(pr => this._activeProducts.has(pr));
-        });
 
         const enriched = [];
         for (const project of projectHubs) {
@@ -254,41 +227,16 @@ class ProjectsHubCards {
         }
 
         this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
+        this._pages = enriched.map(e => e.project);
 
-        // v?: 'Recently active' strip — top-4 by recency from the filtered set,
-        // rendered just above the grouped grid (cross-status recency access).
-        this._renderRecentStrip(dv, enriched);
+        // WS1: a single sort toggle ("Last edited" ↔ "A–Z") above the grid.
+        this._renderSortToggle(dv);
 
-        // v0.39.0 S6.6: dispatch on this._groupBy. "none" renders all
-        // projects as a single grid (preserves existing behavior). "status"
-        // (default) / "team" / "product" emit an <h3> header per group with
-        // a card list below. Status groups are ordered by STATUS_ORDER
-        // priority; team/product groups are alphabetical.
-        const groupBy = this._groupBy || "none";
-        const pages = enriched.map(e => e.project);
-        if (groupBy === "none" || pages.length === 0) {
-            await this._renderCards(dv, pages);
-        } else {
-            const groups = new Map();
-            for (const p of pages) {
-                let key;
-                if (groupBy === "status") key = p.status || "(no status)";
-                else if (groupBy === "team") key = (p.teams || []).map(l => l.path.split("/").pop().replace(/\.md$/, "")).join(", ") || "(no team)";
-                else if (groupBy === "product") key = (p.products || []).map(l => l.path.split("/").pop().replace(/\.md$/, "")).join(", ") || "(no product)";
-                if (!groups.has(key)) groups.set(key, []);
-                groups.get(key).push(p);
-            }
-            const STATUS_ORDER = ["in-progress", "planning", "blocked", "idea", "done", "superseded", "cancelled", "(no status)"];
-            const sortedKeys = groupBy === "status"
-                ? STATUS_ORDER.filter(s => groups.has(s))
-                : [...groups.keys()].sort();
-            for (const key of sortedKeys) {
-                // Use the shared SectionLabel primitive (no raw ## / <h3> chrome),
-                // matching the sections pattern used across the blueprints.
-                customJS.SectionLabel.render(dv, { text: key });
-                await this._renderCards(dv, groups.get(key));
-            }
-        }
+        // The card grid lives in its own container so the toggle can rebuild
+        // ONLY the grid in place (not the whole view). _rebuildGrid empties +
+        // re-renders this element.
+        this._gridEl = dv.container.createEl("div");
+        await this._renderCards(this._makeProxyDv(null, this._gridEl), this._sortProjects(this._pages, this._sortMode));
     }
 
     async _renderCards(dv, pages) {
@@ -299,26 +247,10 @@ class ProjectsHubCards {
         }
         const briefcase = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
         const lookup = this._lookup;
-        // v0.127.0 §E2: sort primary by max folder mtime DESC (most-recently-touched
-        // project surfaces first regardless of status_changed_at). Status priority
-        // + status_changed_at retained as tiebreakers (only fire when two projects
-        // share the exact same latest-mtime millisecond — extremely rare).
-        const PRIORITY = { "in-progress": 0, "planning": 1, "blocked": 2, "idea": 3, "done": 4, "superseded": 5, "cancelled": 6 };
-        const sorted = [...pages].sort((a, b) => {
-            const ea = lookup && lookup.get ? lookup.get(a.file.path) : null;
-            const eb = lookup && lookup.get ? lookup.get(b.file.path) : null;
-            const ma = (ea && ea.latestMtime && ea.latestMtime.ts) || 0;
-            const mb = (eb && eb.latestMtime && eb.latestMtime.ts) || 0;
-            if (mb !== ma) return mb - ma;
-            const pa = PRIORITY[a.status] ?? 99;
-            const pb = PRIORITY[b.status] ?? 99;
-            if (pa !== pb) return pa - pb;
-            const da = String(a.status_changed_at || "1970-01-01");
-            const db = String(b.status_changed_at || "1970-01-01");
-            return db.localeCompare(da);
-        });
+        // WS1: callers pass a pre-sorted `pages` (via _sortProjects, which honors
+        // the persisted sort mode). _renderCards renders in the order given.
         await customJS.BeaconCards.render(dv, {
-            pages: sorted,
+            pages,
             layout: "row",
             // v0.59.10: titleWrap=true so long project display-names (e.g.
             // "Denali - Migrate Content-Registry to GH Actions") are NOT

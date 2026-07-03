@@ -237,6 +237,74 @@ const D = Cls ? new Cls() : null;
     dbm && dbm.docsFolderFor({ file: { folder: 'spice/projects/x' } }) === '' && dbm.docsFolderFor({ file: {} }) === '');
 }
 
+// ---- DocMoveDialog pure helpers (WS5 — wiki-style Move tree dialog) ----------
+// Mirrors the shipped WikiMove pattern: sectionTargets(pages, projectDir) returns
+// depth-ordered { folder, label, depth } (root first, then every section-hub under
+// docs/ sorted lexically so parents precede children); targetPath/isNoop join +
+// no-op-guard exactly like WikiMove. The overlay + runtime move (renameFile +
+// processFrontMatter) are dogfood-only; these cover the pure logic. Loads the
+// class from source so reverting doc-move-dialog.js fails DMD0 (Gate B L1 red).
+{
+  const DMD_SRCFILE = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'doc-move-dialog.js');
+  const DMD_SRC = fs.existsSync(DMD_SRCFILE) ? fs.readFileSync(DMD_SRCFILE, 'utf8') : '';
+  const DMDCls = DMD_SRC ? new Function(`${DMD_SRC}\nreturn DocMoveDialog;`)() : null;
+  ok('DMD0 helper class loads', !!DMDCls);
+  const dm = DMDCls ? new DMDCls() : null;
+
+  // sectionTargets — root first, then section-hubs depth-ordered (parent precedes child).
+  {
+    const pages = [
+      { type: 'section-hub', section: 'A', file: { path: 'spice/projects/p/docs/a/A.md' } },
+      { type: 'section-hub', section: 'B', file: { path: 'spice/projects/p/docs/a/b/B.md' } },
+    ];
+    const t = dm && dm.sectionTargets(pages, 'spice/projects/p');
+    ok('DMD1 sectionTargets count (root + 2 sections)', t && t.length === 3);
+    ok('DMD2 labels root/A/B', t && t[0].label === 'Docs (root)' && t[1].label === 'A' && t[2].label === 'B');
+    ok('DMD3 depths 0/1/2', t && t[0].depth === 0 && t[1].depth === 1 && t[2].depth === 2);
+    ok('DMD4 root folder = projectDir/docs', t && t[0].folder === 'spice/projects/p/docs');
+    ok('DMD5 section folders = dirname of hub path',
+      t && t[1].folder === 'spice/projects/p/docs/a' && t[2].folder === 'spice/projects/p/docs/a/b');
+  }
+  // sectionTargets — lexical sort places a parent before its children even out of order,
+  // and ignores non-section-hub pages + pages outside projectDir/docs.
+  {
+    const pages = [
+      { type: 'section-hub', section: 'Zeta', file: { path: 'spice/projects/p/docs/z/Zeta.md' } },
+      { type: 'section-hub', section: 'Alpha', file: { path: 'spice/projects/p/docs/a/Alpha.md' } },
+      { type: 'section-hub', section: 'Alpha Sub', file: { path: 'spice/projects/p/docs/a/sub/Alpha Sub.md' } },
+      { type: 'doc-note', file: { path: 'spice/projects/p/docs/a/Note.md' } },       // not a hub — ignored
+      { type: 'section-hub', section: 'Other', file: { path: 'spice/projects/other/docs/x/Other.md' } }, // other project — ignored
+    ];
+    const t = dm && dm.sectionTargets(pages, 'spice/projects/p');
+    ok('DMD6 sort places parent before child + filters foreign pages',
+      t && t.length === 4 &&
+      t[0].label === 'Docs (root)' &&
+      t[1].folder === 'spice/projects/p/docs/a' &&
+      t[2].folder === 'spice/projects/p/docs/a/sub' &&
+      t[3].folder === 'spice/projects/p/docs/z');
+    ok('DMD7 label prefers section over basename', t && t[1].label === 'Alpha' && t[2].label === 'Alpha Sub');
+  }
+  // label fallback: section absent -> title -> basename.
+  {
+    const pages = [
+      { type: 'section-hub', title: 'Titled', file: { path: 'spice/projects/p/docs/t/Titled Hub.md' } },
+      { type: 'section-hub', file: { path: 'spice/projects/p/docs/n/No Label.md' } },
+    ];
+    // sorted lexically by folder: docs(root), .../n (No Label), .../t (Titled)
+    const t = dm && dm.sectionTargets(pages, 'spice/projects/p');
+    ok('DMD8 label fallback title then basename',
+      t && t[1].label === 'No Label' && t[2].label === 'Titled');
+  }
+
+  // targetPath / isNoop — mirror WikiMove.
+  ok('DMD9 targetPath joins folder + basename',
+    dm && dm.targetPath('spice/projects/p/docs/a', 'spice/projects/p/docs/b/Doc.md') === 'spice/projects/p/docs/a/Doc.md');
+  ok('DMD10 isNoop true when already in folder',
+    dm && dm.isNoop('spice/projects/p/docs/a', 'spice/projects/p/docs/a/Doc.md') === true);
+  ok('DMD11 isNoop false when elsewhere',
+    dm && dm.isNoop('spice/projects/p/docs/a', 'spice/projects/p/docs/b/Doc.md') === false);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

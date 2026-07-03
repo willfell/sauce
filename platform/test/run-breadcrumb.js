@@ -165,6 +165,32 @@ const PROJECT_TYPES = {
       }
     ],
     "current": { "label": "file:basename" }
+  },
+  "task-hub": {
+    "ancestors": [
+      {
+        "label": "fm:project_name|path:2",
+        "link":  "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+      },
+      {
+        "label": "lit:Board",
+        "link":  "spice/projects/{path:2}/{path:2}-board.md"
+      }
+    ],
+    "current": { "label": "file:basename" }
+  },
+  "task-board-card": {
+    "ancestors": [
+      {
+        "label": "fm:project_name|path:2",
+        "link":  "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+      },
+      {
+        "label": "path:4",
+        "link":  "spice/projects/{path:2}/tasks/{path:4}/{path:4}.md"
+      }
+    ],
+    "current": { "label": "file:basename" }
   }
 };
 
@@ -429,6 +455,49 @@ async function runAsync(fn) { return await fn(); }
     const all = fx.expect.every((seg) => html.includes(seg));
     ok(fx.name + ' trail contains ' + fx.expect.join(' / '), !!wrap && all);
     if (!all) console.log(`    HTML: ${html}`);
+  }
+
+  // ── BR28–BR29: WS7 board-card breadcrumb coverage (task-hub / task-board-card) ──
+  // task-hub is the promoted project kanban card at tasks/<Task>/<Task>.md — its
+  // trail mirrors task-note: Project > Board > <this card>. task-board-card is the
+  // deeper card at tasks/<Task>/board/<Card>/<Card>.md — Project > <Task> > <card>.
+  {
+    const dv = makeDv({
+      type: 'task-hub',
+      project_name: 'test-project',
+      file: { path: 'spice/projects/test-project/tasks/Ship It/Ship It.md', name: 'Ship It' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    // Project ancestor: linked to the atlas note, label from fm:project_name.
+    const hasProject = html.includes('href="spice/projects/test-project/test-project.md"') && html.includes('>test-project<');
+    // Board ancestor: linked to <slug>-board.md, literal label "Board".
+    const hasBoard = html.includes('href="spice/projects/test-project/test-project-board.md"') && html.includes('>Board<');
+    // Current crumb: unlinked file basename "Ship It".
+    const hasCurrent = html.includes('>Ship It<');
+    ok('BR28 task-hub: Project(atlas link) / Board / <card> current', !!wrap && hasProject && hasBoard && hasCurrent);
+    if (!wrap || !hasProject || !hasBoard || !hasCurrent) console.log(`    BR28 HTML: ${html}`);
+  }
+  {
+    const dv = makeDv({
+      type: 'task-board-card',
+      project_name: 'test-project',
+      file: { path: 'spice/projects/test-project/tasks/Ship It/board/Card One/Card One.md', name: 'Card One' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    // Project ancestor: linked to the atlas note.
+    const hasProject = html.includes('href="spice/projects/test-project/test-project.md"') && html.includes('>test-project<');
+    // Task hub ancestor: path:4 = "Ship It", linked to the task-hub note.
+    const hasTask = html.includes('href="spice/projects/test-project/tasks/Ship It/Ship It.md"') && html.includes('>Ship It<');
+    // Current crumb: unlinked file basename "Card One".
+    const hasCurrent = html.includes('>Card One<');
+    ok('BR29 task-board-card: Project(atlas link) / <Task>(hub link) / <card> current', !!wrap && hasProject && hasTask && hasCurrent);
+    if (!wrap || !hasProject || !hasTask || !hasCurrent) console.log(`    BR29 HTML: ${html}`);
   }
 
   // ── BC-WIKI-1: deep wiki-page — intermediate crumbs resolve section-hub TITLE + real path ──

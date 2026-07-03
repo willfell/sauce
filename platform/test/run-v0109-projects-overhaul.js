@@ -581,11 +581,15 @@ async function testTemplateIntegrity() {
 
   // TPL-B-1: Project.md section order (strict) — Breadcrumb → SpaceNavButtons
   // → ProjectNavButtons → ProjectStatusWidget → ProjectMeetingsPanel →
-  // ProjectWorkstreamManager. Other orderings would surface the regression.
+  // ProjectLinksPanel. Other orderings would surface the regression.
+  // Chrome overhaul WS2.1: the Workstreams section (ProjectWorkstreamManager)
+  // was removed from the hub template — workstream management now lives on the
+  // Map note — so the trailing assertion targets ProjectLinksPanel (the new
+  // last block) instead.
   {
     console.log("\n--- Case TPL-B-1: Project.md strict section order ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Project.md"), "utf8");
-    const expectedOrder = ["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectWorkstreamManager"];
+    const expectedOrder = ["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectLinksPanel"];
     const positions = expectedOrder.map((cls) => ({ cls, idx: tpl.indexOf(`class: "${cls}"`) }));
     for (let i = 0; i < positions.length; i++) {
       ok(`TPL-B-1.${i + 1} ${positions[i].cls} present`, positions[i].idx >= 0,
@@ -661,10 +665,19 @@ async function testTemplateIntegrity() {
   // emits its OWN topDivider <hr> at the top of its render (project-nav-buttons.js),
   // so a literal `---` between the SpaceNavButtons and ProjectNavButtons blocks
   // renders a DOUBLED divider — the bug reported in the "Board Note Template Fix
-  // from Projects Board" card. The chrome must (a) carry NO literal `---` between
-  // the two nav tiers, and (b) carry a trailing `---` after ProjectNavButtons so
-  // the chrome is separated from user-typed card content. Mirrors the canonical
-  // Project Map.md layout.
+  // from Projects Board" card. The chrome must carry NO literal `---` between the
+  // two nav tiers.
+  //
+  // TPL-B-6.5 (RETIRED — chrome overhaul 2026-07-02, WS0-WS8): the old grammar
+  // required a TRAILING `---` after ProjectNavButtons to separate chrome from
+  // content. That grammar is REVERSED — helpers now own their dividers
+  // (SectionLabel.divider / ProjectNavButtons' own hairline), so project
+  // templates carry NO literal chrome `---`. The Kanban Card template dropped its
+  // trailing `---` in WS0-WS8. "No literal chrome `---` in project templates" is
+  // now enforced by scripts/lint-note-chrome.js (Rule 4, project-scoped); the
+  // WS9 applyProjectChromeDividerHeal heal (run-v0127-project-hub-heal.js
+  // CHR-DIV-*) strips the same trailing `---` from LEGACY on-disk notes. The
+  // reversed assert is replaced below by TPL-B-6.5 locking the NEW grammar.
   {
     console.log("\n--- Case TPL-B-6: Kanban Card template nav-tier divider hygiene ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Kanban Card.md"), "utf8");
@@ -680,13 +693,13 @@ async function testTemplateIntegrity() {
     ok("TPL-B-6.4 no literal --- between the two nav tiers (ProjectNavButtons emits its own topDivider)",
       !/^---\s*$/m.test(between),
       `unexpected literal --- between SpaceNavButtons and ProjectNavButtons: ${JSON.stringify(between)}`);
-    // After the ProjectNavButtons block's closing fence: a trailing `---` line
-    // separates the chrome from user content.
+    // NEW grammar: NO literal chrome `---` anywhere after the ProjectNavButtons
+    // block's closing fence (helpers own dividers now).
     const projFenceClose = tpl.indexOf("```", projIdx);
     const afterProj = tpl.slice(projFenceClose + 3);
-    ok("TPL-B-6.5 trailing --- after ProjectNavButtons separates chrome from content",
-      /^---\s*$/m.test(afterProj),
-      "no trailing --- after the ProjectNavButtons block");
+    ok("TPL-B-6.5 no trailing chrome --- after ProjectNavButtons (reversed grammar; helpers own dividers)",
+      !/^---\s*$/m.test(afterProj),
+      `unexpected trailing --- after the ProjectNavButtons block: ${JSON.stringify(afterProj)}`);
   }
 }
 

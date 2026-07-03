@@ -22,14 +22,9 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 
 ```dataviewjs
 // entity-create:doc-note — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "doc-note" }] });
+// renderActionRow draws the full-width action row: New Doc · New Section · Move docs.
+await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex", method: "renderActionRow" });
 ```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "DocBulkMoveActions" });
-```
-
----
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex" });

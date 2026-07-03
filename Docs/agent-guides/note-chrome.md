@@ -19,7 +19,32 @@ The chrome region sits below any `# H1` title and above the first content block.
 Rules:
 
 - **No `---` between the breadcrumb and the nav bar.** They are one chrome unit. (Precedent: `platform/blueprints/to-do/templates/Project To-Do.md`.)
-- **`SectionLabel` owns content-section dividers.** It renders its own hairline above the label, so do NOT add literal `---` between SectionLabels. The chrome `---` grammar applies only between nav tiers, never between content sections. The first content label may pass `top: true` to suppress its hairline directly under the nav bar.
+- **`SectionLabel` owns content-section dividers.** It renders its own hairline above the label, so do NOT add literal `---` between SectionLabels. The first content label may pass `top: true` to suppress its hairline directly under the nav bar.
+
+### 1a. Divider grammar — helper-owned hairlines, never literal `---` (project blueprint; 2026-07-02)
+
+**This reverses the earlier "chrome `---` grammar applies between nav tiers" rule.** A literal markdown `---` renders an `<hr>` with the *theme's* oversized margin (too much); removing it gives 0px (squished). Neither is tunable. So chrome dividers are now **rendered by the helper**, never by a literal `---` or blank lines.
+
+- **The primitive:** `customJS.SectionLabel.divider(containerEl)` renders the canonical hairline — `border-top: 1px solid var(--background-modifier-border); margin: 8px 0` — the single source of the "happy medium" spacing. Tune the gap in that one method. Guard it: `if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(el);`.
+- **Leading-hairline ownership:** every chrome/content block that must be separated from the block above renders the hairline as its **first element**. This yields exactly one hairline per boundary regardless of blank lines — no doubles, no squish. Blocks that lead a boundary: `ProjectNavButtons`, each action row, the search strip, and every `SectionLabel`.
+- **The one exception:** the project-hub `ProjectStatusWidget` renders no leading hairline and no surrounding blank lines — it hugs tight under the nav.
+- **Templates carry no literal `---` and no blank-line gaps between chrome dataviewjs blocks.** Enforced by `scripts/lint-note-chrome.js` **Rule 4** (`checkNoLiteralChromeDivider`, scoped to `opts.blueprint === 'project'`; other adopted blueprints retrofit in later cycles). Existing consumer-vault notes are healed at install by `applyProjectChromeDividerHeal` (strips the literal `---` + collapses gaps; `.sauce-backup`-first, idempotent).
+
+### 1b. Chrome order (project surfaces)
+
+```
+Breadcrumb            ← no divider (one unit with nav)
+SpaceNavButtons       ← global nav
+──────────            ← hairline (owned by the block below)
+ProjectNavButtons     ← core buttons + More▾ overflow (see §5)
+──────────
+[action row]          ← New Doc·New Section·Move / Add link·Manage links / New Task·Recurring — ONE full-width row
+──────────
+[search]              ← docs/section hubs only — simple mode (§5)
+──────────
+[content]             ← SectionLabel-led sections
+```
+Surfaces without an action row or search omit those tiers; the ownership rule keeps spacing correct.
 
 ## 2. No `## H2` rule + the SectionLabel tradeoff
 
@@ -78,6 +103,9 @@ Brand-new notes open in **read / preview**, never edit-with-title-selected. The 
 
 - **Nav-buttons row:** `flex-wrap: wrap`, and each label gets `text-overflow: ellipsis` + `overflow: hidden` + `white-space: nowrap` + `min-width: 0` so long labels truncate instead of overflowing the button.
 - **Accent-button hover:** mutate individual style props (`style.background` / `style.color`). NEVER rebuild `cssText` on hover — that caused button jitter (fixed at `accent-button` v0.1.2).
+- **Core + overflow nav (project blueprint):** a project surface shows a few **core** destinations inline + a **`More ▾`** button that opens a `document.body` overlay menu for the rest — never a single wrapping row of 6+ buttons (that truncated to "…" on phone). `ProjectNavButtons` core = `Project · Board · Docs` (+ a context `Task: <X>`); overflow = `Map · To-Do · Helpful Links`. The overlay uses ONE `close()` that removes the node **and** the Escape keydown listener (no leak). Suppress `More ▾` when overflow is empty.
+- **Action rows:** a set of sibling actions (New Doc·New Section·Move / Add link·Manage links / New Task·Recurring) render as **ONE full-width row**: `display:flex; gap:8px; flex-wrap:wrap;` with each button `flex:1 1 0; min-width:96px;`. The row renders a leading hairline (§1a).
+- **Simple search (docs/section hubs):** pass `DocSearch.render(dv, { hideTags:true, hideNativeSearch:true, persist:false })` — a bare text input, no tag chips, no scoped-search button, empty on every return.
 
 ## 6. Migration posture
 

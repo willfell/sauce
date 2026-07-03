@@ -70,10 +70,23 @@ class ProjectLinksManager {
     const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
     const gearIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h2l.4 2.3a7 7 0 0 1 2 1.2l2.2-.9 1 1.7-1.7 1.5a7 7 0 0 1 0 2.4l1.7 1.5-1 1.7-2.2-.9a7 7 0 0 1-2 1.2L13 20h-2l-.4-2.3a7 7 0 0 1-2-1.2l-2.2.9-1-1.7 1.7-1.5a7 7 0 0 1 0-2.4L3.4 8.3l1-1.7 2.2.9a7 7 0 0 1 2-1.2z"/><circle cx="12" cy="12" r="3"/></svg>`;
 
+    // Leading hairline so the action row reads as its own chrome tier (the
+    // ProjectLinksPanel below renders its own leading divider for the trailing
+    // boundary). Guarded — SectionLabel is absent in cold-load harnesses.
+    if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+      customJS.SectionLabel.divider(c);
+    }
+
+    // ONE full-width action row: the two buttons split the width evenly and wrap
+    // on narrow (mobile) containers.
     const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 8px; margin: 0.4em 0 0.2em;";
-    customJS.AccentButton.render(row, { label: "Add link", icon: plusIcon, onClick: () => this._onAdd(dv) });
-    customJS.AccentButton.render(row, { label: "Manage links", icon: gearIcon, onClick: () => this._onManage(dv) });
+    row.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin: 0.2em 0;";
+    const add = customJS.AccentButton.render(row, { label: "Add link", icon: plusIcon, onClick: () => this._onAdd(dv) });
+    const manage = customJS.AccentButton.render(row, { label: "Manage links", icon: gearIcon, onClick: () => this._onManage(dv) });
+    for (const btn of [add, manage]) {
+      if (btn && btn.style) btn.style.flex = "1 1 0";
+      if (btn && btn.style) btn.style.minWidth = "96px";
+    }
   }
 
   // ── data + write ─────────────────────────────────────────────────────────

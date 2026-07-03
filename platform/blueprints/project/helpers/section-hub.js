@@ -1,25 +1,32 @@
-// section-hub.js — v1.19.0 helper (sauce v0.105.0 S2).
+// section-hub.js — depth-aware section + sub-section renderer.
 //
-// v0.105.0 S2 — docs-system-fixes brief:
-//   • Issue 6 (P0): DocSearch refactored to a permanent strip + transient
-//     resultsContainer; SectionHub now writes ALL post-strip rendering into
-//     the resultsContainer via a synthetic dv-proxy. The strip's input element
-//     survives keystrokes (no full re-render).
-//   • Issue 7: dropped the docs H3 heading (was a redundant label above the
-//     card row — the file H1 + the strip of cards are self-evident).
-//   • Issue 8: EntityCreate buttons rendered into a `display: flex` row with
-//     `flex: 1` per child for full-width layout.
-//   • Issue 10: docs query sorted by `file.mtime?.ts` desc for newest-first.
+// WS4 chrome overhaul (S3 order + simple search):
+//   Every Section hub follows the vault-wide S3 chrome grammar. After the
+//   template's chrome (Breadcrumb → SpaceNavButtons → ProjectNavButtons, the
+//   last of which renders its own leading hairline), SectionHub.render lays out
+//   three tiers, each preceded by its own helper-owned hairline
+//   (SectionLabel.divider):
+//     1. action row — New Doc · New Sub-Section (depth-1 only) · Move docs, a
+//        single full-width row.
+//     2. simple search — a bare text input (hideTags + hideNativeSearch +
+//        persist:false); starts empty on every visit, re-renders on input.
+//     3. list — sub-sections (depth-1 only) + docs cards.
+//   The Section Hub template ships NO entity-create marker blocks (retired at
+//   v0.124.1) — the create buttons are rendered inline here.
 //
-// v0.104.0 S2.2 (carry-over): consumes the v0.104.0 DocSearch helper. The
-// filter UI mounts above the + New Doc / + New Sub-Section buttons. Scope is
-// THIS section's folder; recursive: true at depth 1 (covers sub-section docs in
-// the count), recursive: false at depth 2 (leaf). The docs query + (depth-1)
-// sub-section card count both gate on customJS.DocSearch.matches.
+//   "Move docs" opens the shipped multi-select bulk-move dialog
+//   (DocBulkMoveActions._onBulkMove) — a hub isn't a single doc, so the
+//   single-doc DocMoveDialog tree doesn't fit; the bulk dialog (checkbox list of
+//   docs + destination picker) is the right affordance. Retrofitting the bulk
+//   destination picker to the DocMoveDialog tree is out of scope for WS4.
 //
-// Renders any section-hub note — depth 1 (section) OR depth 2 (sub-section).
-// Reads its own frontmatter (type, project, project_slug, section,
-// section_slug, parent_section, depth) and dispatches the correct render shape.
+// Reads its own frontmatter (type, project, project_slug, section, section_slug,
+// parent_section, depth) and dispatches the correct render shape.
+//
+// This file MUST stay a bare class expression with NO trailing statements — the
+// customJS loader evals the whole file as one expression `("+file+")`; a
+// module.exports / if / const trailer would make it "Unexpected token" and the
+// class would silently never register (lesson: customjs-no-trailing-statements).
 class SectionHub {
   async render(dv, opts = {}) {
     const cur = dv.current();
@@ -32,9 +39,10 @@ class SectionHub {
     const sectionName = cur.section || cur.file.name;
     if (!projectSlug || !sectionSlug) return;
 
-    // v0.104.0 S2.2: DocSearch filter strip — scoped to THIS section's folder.
-    // depth 1: recursive (covers sub-section docs in count). depth 2: leaf.
-    // Compute scopePath up-front so DocSearch + the docsPath below stay in sync.
+    // ── Tier 1: action row (leading hairline + full-width row) ────────────────
+    await this._renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName);
+
+    // ── Tier 2: simple search strip (leading hairline + bare text input) ──────
     const parentSlugForScope = depth === 2
       ? this._slugify(this._stripLink(cur.parent_section))
       : null;
@@ -42,13 +50,16 @@ class SectionHub {
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
       : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
 
-    // v0.105.0 Issue 6: re-render callback now wipes ONLY the resultsContainer
-    // (not dv.container). Without this, the strip's input element would be
-    // destroyed mid-keystroke and lose focus + value.
+    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
+
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
       recursive: depth === 1,
+      hideTags: true,
+      hideNativeSearch: true,
+      persist: false,
+      entityType: "doc-note",
       onChange: (ctx) => {
         this._currentCtx = ctx;
         ctx.resultsContainer.empty();
@@ -59,26 +70,23 @@ class SectionHub {
       Object.assign(filterCtx, this._currentCtx);
     }
 
-    // First-render results into the freshly-created resultsContainer.
+    // ── Tier 3: list (leading hairline + sub-sections + docs) ─────────────────
     this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx);
   }
 
-  // _renderResults writes ALL of the post-strip rendering (buttons + sub-sections
-  // + docs cards) into filterCtx.resultsContainer via a synthetic dv-proxy so
-  // BeaconCards + EntityCreate + dv.header/paragraph all flow into the right
-  // target. The strip itself is rendered by DocSearch.render() and lives outside
-  // this container — the strip is never re-rendered.
-  async _renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx) {
-    const container = filterCtx.resultsContainer;
-    const proxyDv = this._makeProxyDv(dv, container);
+  // Tier 1 — the create/move action row. Leading hairline + one full-width row:
+  // New Doc · New Sub-Section (depth-1 only) · Move docs.
+  async _renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName) {
+    const container = (dv && dv.container) ? dv.container : dv;
+    if (!container || typeof container.createEl !== "function") return;
 
-    // 1. + New Doc + (depth 1) + New Sub-Section — wrapped in a flex row so the
-    //    buttons span full width. Issue 8.
+    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
+
     const btnRow = container.createEl("div");
-    btnRow.style.cssText = "display: flex; gap: 8px; margin: 6px 0;";
+    btnRow.style.cssText = "display:flex; gap:8px; flex-wrap:wrap; margin:6px 0;";
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
-    // v0.110.1: poll for EntityCreate (cold-load race)
+    // Cold-load race: poll for EntityCreate.
     for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -115,20 +123,51 @@ class SectionHub {
       }
     }
 
-    // Stretch each EntityCreate-rendered button to fill its share of the row.
-    for (const btn of btnRow.querySelectorAll("button")) {
-      btn.style.flex = "1";
-    }
+    // Move docs — reuses the shipped bulk-move dialog (project-scoped).
+    this._renderMoveDocsButton(dv, btnRow);
 
-    // 2. Sub-sections list — depth === 1 only.
+    // Full-width: each button stretches to fill its share of the row
+    // (flex: 1 1 0; min-width: 96px).
+    for (const btn of btnRow.querySelectorAll("button")) {
+      btn.style.cssText += ";flex: 1 1 0; min-width: 96px;";
+    }
+  }
+
+  // The "Move docs" button — dispatches the shipped DocBulkMoveActions bulk-move
+  // dialog. That handler resolves the project's docs folder from the current
+  // note; on a Section hub it walks up to the project's Docs.md-equivalent docs
+  // root. Guard against a cold-loading helper (no-op until registered).
+  _renderMoveDocsButton(dv, row) {
+    const moveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 11 15 14"/></svg>`;
+    const onClick = () => {
+      const bm = window.customJS?.DocBulkMoveActions;
+      if (bm && typeof bm._onBulkMove === "function") { bm._onBulkMove(dv); return; }
+      if (typeof Notice === "function") new Notice("DocBulkMoveActions unavailable — reinstall the project blueprint.", 6000);
+    };
+    if (customJS?.AccentButton?.render) {
+      customJS.AccentButton.render(row, { label: "Move docs", icon: moveIcon, onClick, flex: true });
+    } else {
+      const btn = row.createEl("button", { text: "Move docs" });
+      btn.onclick = onClick;
+    }
+  }
+
+  // Tier 3 — writes the sub-sections + docs cards into filterCtx.resultsContainer
+  // via a synthetic dv-proxy so BeaconCards + dv.header/paragraph flow into the
+  // right target. A leading hairline heads the tier. The strip itself is rendered
+  // by DocSearch.render() and lives outside this container.
+  async _renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx) {
+    const container = filterCtx.resultsContainer;
+    const proxyDv = this._makeProxyDv(dv, container);
+
+    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
+
+    // Sub-sections list — depth === 1 only.
     if (depth === 1) {
       const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
       const subHubs = dv.pages(`"${sectionPath}"`)
         .where((p) => p.type === "section-hub" && p.depth === 2);
       if (subHubs.length > 0) {
-        // v0.109.0 S5 — SectionLabel replaces the prior dv.header(3, ...) call;
-        // the project blueprint standardizes on SectionLabel for every section
-        // heading (see Docs/agent-guides/project-blueprint-ui.md).
         customJS.SectionLabel.render(proxyDv, { text: "Sub-sections" });
         const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
         await customJS.BeaconCards.render(proxyDv, {
@@ -149,36 +188,30 @@ class SectionHub {
       }
     }
 
-    // 3. Docs in THIS folder — strict folder match (does NOT recurse).
-    //    depth 1: spice/projects/<slug>/docs/<sectionSlug>
-    //    depth 2: spice/projects/<slug>/docs/<parentSlug>/<sectionSlug>
+    // Docs in THIS folder — strict folder match (does NOT recurse).
     const docsPath = depth === 1
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
       : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
 
-    // v0.105.0 Issue 10: sort docs by file.mtime desc — newest-first card row.
     const docs = dv.pages(`"${docsPath}"`)
       .where((p) => p.type === "doc-note" && p.file.folder === docsPath
         && customJS.DocSearch.matches(p, filterCtx))
       .sort((p) => p.file.mtime?.ts || 0, "desc");
 
-    // v0.106.0.1 — empty-state callout removed entirely (was visual noise on
-    // every fresh-section render). When no docs, render nothing.
+    // No docs → render nothing more (the hairline + sections above stand alone).
     if (docs.length === 0) {
       return;
     }
 
-    // v0.106.0.1 — when this section ALSO has sub-sections (depth-1 only),
-    // emit a small "Docs" header so the docs row is visually separated from
-    // the sub-sections row above. When no sub-sections, the docs cards stand
-    // alone and need no header.
+    // When this section ALSO has sub-sections (depth-1 only), emit a "Docs"
+    // SectionLabel so the docs row is visually separated from the sub-sections
+    // row above.
     if (depth === 1) {
       try {
         const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
         const hasSubSections = dv.pages(`"${sectionPath}"`)
           .where((p) => p.type === "section-hub" && p.depth === 2)
           .length > 0;
-        // v0.109.0 S5 — SectionLabel replaces the prior dv.header(3, ...) call.
         if (hasSubSections) customJS.SectionLabel.render(proxyDv, { text: "Docs" });
       } catch (_e) {}
     }
@@ -198,10 +231,9 @@ class SectionHub {
     });
   }
 
-  // v0.105.0 Issue 6 helper — synthetic dv-proxy that routes dv.container +
-  // dv.el + dv.header + dv.paragraph into a target container. Forwards
-  // dv.current + dv.pages to the real dv (no rebind beyond what BeaconCards /
-  // EntityCreate touch on the proxy).
+  // synthetic dv-proxy that routes dv.container + dv.el + dv.header +
+  // dv.paragraph into a target container. Forwards dv.current + dv.pages to the
+  // real dv.
   _makeProxyDv(dv, container) {
     return {
       container,
@@ -246,8 +278,7 @@ class SectionHub {
 
   // created_at is canonical ISO frontmatter; Dataview parses it into a Luxon
   // DateTime (has .toISO()), but unparsed strings can reach here too. Pre-canonical
-  // notes have no created_at at all → fall back to file ctime. Mirrors
-  // ProjectDocsSections._formatCreated for consistency.
+  // notes have no created_at at all → fall back to file ctime.
   _formatCreated(p) {
     const raw = p.created_at;
     let m = null;
