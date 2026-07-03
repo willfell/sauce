@@ -35,6 +35,12 @@ Installer behavior:
 - Records each operation in `platform-installed.json` (auto-managed; never hand-edit).
 - Applies allowlisted `.obsidian/` edits via helpers (`applyTemplaterHotkeys`, `applySlashCommanderBindings`, `applyCustomJsStartupScripts`, etc.). The allowlist is **18 paths + CLAUDE.md marker regions** per landmine #12.
 
+### Bundled first-party plugin (`bundled_plugin`)
+
+A mechanism may ship a **first-party Obsidian plugin** by declaring `bundled_plugin: { id, source_dir, files[] }` in its manifest (e.g. the `sauce-plugin` mechanism, whose plugin lives in `platform/mechanisms/sauce-plugin/plugin/`). During `installItem`, `applyBundledPlugin` copies those files into the consumer's `.obsidian/plugins/<id>/` and appends `id` to `.obsidian/community-plugins.json` (preserving all other ids; idempotent; never-throws; enables only once ALL files vendored; the mechanism version is stamped into the vendored plugin's `manifest.json`). Unlike `applyExternalPluginInstall` (which *fetches* community plugins from the obsidian-releases index), this vendors files shipped in the platform payload.
+
+The live example — **`sauce-plugin`** — registers customJS renderer classes on `window.customJS` at `onload()` (before Dataview renders → the `customjs-guard` poll passes on the first iteration → no cold-load flash), reading the folder from CustomJS's configured `jsFolder` (default `ranch/scripts`). It is **instantiation-only** (no `startupScriptNames` inits — those stay owned by CustomJS), and **CustomJS stays enabled as the fallback**, so a bundled plugin can never regress. **⚠ A newly-vendored/updated bundled plugin needs a full Obsidian RESTART (not Cmd+R) to load the first time.** It's opt-in per vault via the subscription (a new mechanism is NOT auto-added to consumers — see [build-test-verify.md](build-test-verify.md) § Deploying a new mechanism).
+
 ## Namespace tetrad in consumer vaults
 
 | Top-level dir | Owner | Lifecycle |
