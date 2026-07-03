@@ -113,31 +113,26 @@ function makePage(name, status, mtimeTs, statusChangedAt) {
   const Cls = sandbox.ProjectsHubCards;
 
   // ---------------------------------------------------------------------------
-  // I. Default _activeStatuses — source-text literal check.
-  // The class initializer for _activeStatuses lives inside an async render()
-  // method; rather than wire up the full Dataview surface to trip the init
-  // line, we assert against the source literal directly. The static check is
-  // strong: any future drift away from the 7-state set fails this test.
+  // I. Sort-mode default (WS1 chrome overhaul).
+  // The v0.127.0 status/team/product scope filters + group-by + recently-active
+  // strip were REMOVED in the WS1 chrome overhaul. The hub is now sorted, not
+  // scoped: default sort is "mtime" (most-recently-edited first), toggled to
+  // "alpha" and persisted under localStorage "sauce.projects-hub.sort".
+  // Assert the persisted-default source literal + the _readSortMode default.
   // ---------------------------------------------------------------------------
   {
-    const reMatch = src.match(/this\._activeStatuses\s*=\s*new\s+Set\(\[([^\]]+)\]\)/);
-    ok(reMatch !== null, 'HC-V0127-PHD-DEFAULTS-A: source has Set literal init');
-    if (reMatch) {
-      const setContents = reMatch[1];
-      ok(setContents.includes('"idea"'), 'HC-V0127-PHD-DEFAULTS-B: contains idea');
-      ok(setContents.includes('"planning"'), 'HC-V0127-PHD-DEFAULTS-C: contains planning');
-      ok(setContents.includes('"in-progress"'), 'HC-V0127-PHD-DEFAULTS-D: contains in-progress');
-      ok(setContents.includes('"blocked"'), 'HC-V0127-PHD-DEFAULTS-E: contains blocked');
-      ok(setContents.includes('"done"'), 'HC-V0127-PHD-DEFAULTS-F: contains done');
-      ok(setContents.includes('"superseded"'), 'HC-V0127-PHD-DEFAULTS-G: contains superseded');
-      ok(setContents.includes('"cancelled"'), 'HC-V0127-PHD-DEFAULTS-H: contains cancelled');
-    }
+    ok(/sauce\.projects-hub\.sort/.test(src), 'HC-V0127-PHD-DEFAULTS-A: source keys localStorage under sauce.projects-hub.sort');
+    ok(!/this\._activeStatuses/.test(src), 'HC-V0127-PHD-DEFAULTS-B: status-scope Set removed (no _activeStatuses)');
+    ok(!/_renderGroupSelector/.test(src) && !/_renderRecentStrip/.test(src) && !/_renderChips/.test(src),
+      'HC-V0127-PHD-DEFAULTS-C: group-by + recently-active + chip bars removed');
+    const inst = new Cls();
+    ok(inst._readSortMode() === 'mtime', 'HC-V0127-PHD-DEFAULTS-D: _readSortMode defaults to mtime');
   }
 
   // ---------------------------------------------------------------------------
-  // II. Sort by latestMtime DESC primary.
-  // Build pages + lookup; monkey-patch customJS.BeaconCards.render to capture
-  // the sorted array. Recent project must surface first.
+  // II. Sort by latestMtime DESC primary (via _sortProjects, mtime mode).
+  // _renderCards now renders in the order given; _sortProjects (pure) owns the
+  // ordering. Recent project must surface first.
   // ---------------------------------------------------------------------------
   {
     const inst = new Cls();
@@ -147,69 +142,45 @@ function makePage(name, status, mtimeTs, statusChangedAt) {
       makePage('Recent', 'in-progress', now - 60 * 1000),             // 1 minute ago
       makePage('Mid', 'planning', now - 24 * 60 * 60 * 1000),         // 1 day ago
     ];
-    const lookup = new Map(pages.map(p => [p.file.path, {
-      project: p,
-      latestMtime: p.file.mtime,
-      total: 0,
-      done: 0,
-      blocked: 0,
+    inst._lookup = new Map(pages.map(p => [p.file.path, {
+      project: p, latestMtime: p.file.mtime, total: 0, done: 0, blocked: 0,
     }]));
-    inst._lookup = lookup;
 
+    const sorted = inst._sortProjects(pages, 'mtime');
+    ok(sorted[0] && sorted[0].file.name === 'Recent', 'HC-V0127-PHD-SORT-B: most-recent project first');
+    ok(sorted[1] && sorted[1].file.name === 'Mid', 'HC-V0127-PHD-SORT-C: mid project second');
+    ok(sorted[2] && sorted[2].file.name === 'Old', 'HC-V0127-PHD-SORT-D: oldest project last');
+
+    // _renderCards renders in the order passed (BeaconCards.render capture).
     let captured = null;
-    sandbox.customJS.BeaconCards.render = async (dv, opts) => {
-      captured = opts.pages;
-    };
-
-    const fakeContainer = makeEl();
-    const fakeDv = { container: fakeContainer };
-    await inst._renderCards(fakeDv, pages);
-
+    sandbox.customJS.BeaconCards.render = async (dv, opts) => { captured = opts.pages; };
+    const fakeDv = { container: makeEl() };
+    await inst._renderCards(fakeDv, sorted);
     ok(captured !== null, 'HC-V0127-PHD-SORT-A: _renderCards invoked BeaconCards.render');
     if (captured) {
-      ok(captured[0] && captured[0].file.name === 'Recent', 'HC-V0127-PHD-SORT-B: most-recent project first');
-      ok(captured[1] && captured[1].file.name === 'Mid', 'HC-V0127-PHD-SORT-C: mid project second');
-      ok(captured[2] && captured[2].file.name === 'Old', 'HC-V0127-PHD-SORT-D: oldest project last');
+      ok(captured.map(p => p.file.name).join(',') === 'Recent,Mid,Old',
+        'HC-V0127-PHD-SORT-E: _renderCards preserves the passed order');
     }
   }
 
   // ---------------------------------------------------------------------------
-  // III. Tiebreaker — identical mtime falls back to status priority.
-  // Three projects share the SAME latestMtime ts; expected order: in-progress,
-  // planning, idea (per PRIORITY map: in-progress=0, planning=1, idea=3).
+  // III. Alpha sort mode — case-insensitive A–Z by display name.
   // ---------------------------------------------------------------------------
   {
     const inst = new Cls();
     const sameMtime = Date.now() - 60 * 1000;
     const pages = [
-      makePage('Idea', 'idea', sameMtime),
-      makePage('InProgress', 'in-progress', sameMtime),
-      makePage('Planning', 'planning', sameMtime),
+      makePage('zebra', 'idea', sameMtime),
+      makePage('Apple', 'in-progress', sameMtime),
+      makePage('mango', 'planning', sameMtime),
     ];
-    const lookup = new Map(pages.map(p => [p.file.path, {
-      project: p,
-      latestMtime: p.file.mtime,
-      total: 0,
-      done: 0,
-      blocked: 0,
+    inst._lookup = new Map(pages.map(p => [p.file.path, {
+      project: p, latestMtime: p.file.mtime, total: 0, done: 0, blocked: 0,
     }]));
-    inst._lookup = lookup;
-
-    let captured = null;
-    sandbox.customJS.BeaconCards.render = async (dv, opts) => {
-      captured = opts.pages;
-    };
-
-    const fakeContainer = makeEl();
-    const fakeDv = { container: fakeContainer };
-    await inst._renderCards(fakeDv, pages);
-
-    ok(captured !== null, 'HC-V0127-PHD-TIE-A: invoked');
-    if (captured) {
-      ok(captured[0] && captured[0].file.name === 'InProgress', 'HC-V0127-PHD-TIE-B: in-progress wins tiebreaker');
-      ok(captured[1] && captured[1].file.name === 'Planning', 'HC-V0127-PHD-TIE-C: planning second');
-      ok(captured[2] && captured[2].file.name === 'Idea', 'HC-V0127-PHD-TIE-D: idea last');
-    }
+    const sorted = inst._sortProjects(pages, 'alpha');
+    ok(sorted[0] && sorted[0].file.name === 'Apple', 'HC-V0127-PHD-TIE-B: alpha ci — Apple first');
+    ok(sorted[1] && sorted[1].file.name === 'mango', 'HC-V0127-PHD-TIE-C: mango second');
+    ok(sorted[2] && sorted[2].file.name === 'zebra', 'HC-V0127-PHD-TIE-D: zebra last');
   }
 
   console.log('');

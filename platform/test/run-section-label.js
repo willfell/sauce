@@ -37,6 +37,27 @@ const Cls = SRC ? new Function(`${SRC}\nreturn SectionLabel;`)() : null;
 // SL3 — legacy project-helper copy removed (single source of truth)
 ok('SL3 legacy copy gone', !fs.existsSync(LEGACY));
 
+// SL4 — divider() returns an hr chrome hairline with the canonical 8px 0 margin
+{
+  const c = makeEl('div');
+  let hr = null;
+  if (Cls) hr = new Cls().divider({ container: c });
+  const css = hr && hr.style && hr.style.cssText;
+  ok(
+    'SL4 divider() hr with border-top + margin: 8px 0',
+    hr && hr.tag === 'hr' &&
+    /border-top:\s*1px solid var\(--background-modifier-border\)/.test(css) &&
+    /margin:\s*8px 0/.test(css)
+  );
+}
+// SL5 — divider() accepts a bare container (no `.container` wrapper)
+{
+  const c = makeEl('div');
+  let hr = null;
+  if (Cls) hr = new Cls().divider(c);
+  ok('SL5 divider() bare container', hr && hr.tag === 'hr' && c.children.includes(hr));
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

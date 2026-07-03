@@ -9,6 +9,15 @@
 // and the modal are dogfood-only; the decision logic that CAN be tested lives in
 // the static pure helpers groupDocsBySection / planBulkMove / normalizeHubs.
 //
+// WS5 note: the wiki-style DocMoveDialog (indented section tree) replaces the
+// SINGLE-doc flat picker in DocLeafActions. Bulk move stays as-is — it is a
+// multi-select flow (a checkbox list of many docs + one target-section <select>),
+// not a single-file move, so the per-item single-file tree dialog doesn't fit.
+// Its target chooser is already a <select> dropdown (not a flat clickable picker),
+// and it continues to route each selected doc through DocMove.targetPath /
+// rewriteSection. If a bulk tree-select is ever wanted, it would be a distinct
+// multi-select dialog, out of scope for WS5.
+//
 // customJS stores classes as INSTANCES (customJS.DocBulkMoveActions = new …), so
 // render + handlers are instance methods; the pure helpers are static (referenced
 // by class name) so the Node harness can exercise them without a live vault.
@@ -113,8 +122,11 @@ class DocBulkMoveActions {
   // ── data sources ───────────────────────────────────────────────────────────
   // The docs-hub note (Docs.md) lives at spice/projects/<slug>/docs/Docs.md, so
   // its own folder IS the docs folder to scan (mirrors ProjectDocsIndex, which
-  // derives docsFolder = currentFile.folder). Returns "" when the note is not a
-  // docs hub under a project's docs/ folder.
+  // derives docsFolder = currentFile.folder). WS4 chrome overhaul: the Section
+  // hub's "Move docs" button reuses this handler, so a note nested DEEPER inside
+  // docs/ (e.g. a section-hub at spice/projects/<slug>/docs/<section>/) resolves
+  // up to the project's docs/ root. Returns "" when the note isn't under a
+  // project's docs/ folder at all.
   docsFolderFor(page) {
     const f = page && page.file ? page.file : {};
     let folder = f.folder != null ? String(f.folder) : "";
@@ -123,7 +135,12 @@ class DocBulkMoveActions {
       const i = p.lastIndexOf("/");
       folder = i >= 0 ? p.slice(0, i) : "";
     }
-    return /^spice\/projects\/[^/]+\/docs$/.test(folder) ? folder : "";
+    // Exact docs root (Docs.md's folder).
+    if (/^spice\/projects\/[^/]+\/docs$/.test(folder)) return folder;
+    // Nested under docs/ (a section-hub / sub-section-hub / doc) → walk up to
+    // the docs/ root so bulk-move scans the whole project's docs tree.
+    const m = folder.match(/^(spice\/projects\/[^/]+\/docs)(?:\/.*)?$/);
+    return m ? m[1] : "";
   }
   _listSectionHubs(dv, docsFolder) {
     try { return dv.pages('"' + docsFolder + '"').where((p) => p && p.type === "section-hub").array(); }

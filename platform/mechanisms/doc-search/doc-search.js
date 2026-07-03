@@ -39,8 +39,12 @@ class DocSearch {
     //   hideTags: true  → suppress the tag-chip section entirely.
     //   persist:  false → never save/restore the filter to localStorage (search
     //                     always starts empty; typing is not remembered across visits).
+    //   hideNativeSearch: true → suppress the scoped-Obsidian-search button
+    //                     entirely (a bare text-only filter strip). Default false
+    //                     keeps the button for every existing caller.
     const hideTags = opts.hideTags === true;
     const persist = opts.persist !== false;
+    const hideNativeSearch = opts.hideNativeSearch === true;
     const allDocs = dv.pages(`"${opts.scopePath}"`).where(entityFilter);
     const tagCounts = hideTags ? {} : this._countTags(allDocs, opts.tagExclude || [], entityType);
     const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
@@ -59,18 +63,20 @@ class DocSearch {
     const input = row1.createEl("input", { attr: { type: "text", placeholder } });
     input.style.cssText = "flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
 
-    const nativeBtn = row1.createEl("button");
-    nativeBtn.innerHTML = `${searchIcon} Search`;
-    nativeBtn.style.cssText = "display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: transparent; color: var(--interactive-accent); font-size: 0.85em;";
-    nativeBtn.title = "Open Obsidian native search scoped to this folder";
-    nativeBtn.addEventListener("click", () => {
-      const query = `path:"${opts.scopePath}" `;
-      app.commands.executeCommandById("global-search:open");
-      setTimeout(() => {
-        const searchInput = document.querySelector(".workspace-leaf-content[data-type='search'] input[type='search']");
-        if (searchInput) { searchInput.value = query; searchInput.dispatchEvent(new Event("input")); }
-      }, 100);
-    });
+    if (!hideNativeSearch) {
+      const nativeBtn = row1.createEl("button");
+      nativeBtn.innerHTML = `${searchIcon} Search`;
+      nativeBtn.style.cssText = "display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: transparent; color: var(--interactive-accent); font-size: 0.85em;";
+      nativeBtn.title = "Open Obsidian native search scoped to this folder";
+      nativeBtn.addEventListener("click", () => {
+        const query = `path:"${opts.scopePath}" `;
+        app.commands.executeCommandById("global-search:open");
+        setTimeout(() => {
+          const searchInput = document.querySelector(".workspace-leaf-content[data-type='search'] input[type='search']");
+          if (searchInput) { searchInput.value = query; searchInput.dispatchEvent(new Event("input")); }
+        }, 100);
+      });
+    }
 
     // Row 2: tag chips
     let chipsRow = null;

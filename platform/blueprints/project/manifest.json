@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.39.2",
+  "version": "1.40.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -63,6 +63,7 @@
     "ProjectDocsIndex",
     "SectionHub",
     "DocMove",
+    "DocMoveDialog",
     "DocLeafActions",
     "DocBulkMoveActions",
     "ProjectLinksPanel",
@@ -187,6 +188,10 @@
     {
       "source": "helpers/doc-move.js",
       "dest": "{{scripts_path}}/project/doc-move.js"
+    },
+    {
+      "source": "helpers/doc-move-dialog.js",
+      "dest": "{{scripts_path}}/project/doc-move-dialog.js"
     },
     {
       "source": "helpers/doc-leaf-actions.js",
@@ -347,7 +352,7 @@
               "links-hub"
             ]
           },
-          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksManager\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksPanel\" });\n```\n"
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksManager\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectLinksPanel\" });\n```\n"
         }
       ],
       "render_in": {
@@ -621,6 +626,36 @@
           {
             "label": "lit:Board",
             "link": "spice/projects/{path:2}/{path:2}-board.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "task-hub": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          },
+          {
+            "label": "lit:Board",
+            "link": "spice/projects/{path:2}/{path:2}-board.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "task-board-card": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          },
+          {
+            "label": "path:4",
+            "link": "spice/projects/{path:2}/tasks/{path:4}/{path:4}.md"
           }
         ],
         "current": {

@@ -37,10 +37,15 @@ class ProjectStatusWidget {
         // Dedupe re-renders (Dataview re-fires on frontmatter writes).
         const previousRoot = dv.container.querySelector(":scope > .psw-root");
         if (previousRoot) previousRoot.remove();
+        // Chrome overhaul WS2.2 — the status chip hugs directly under the nav
+        // buttons: NO leading SectionLabel and NO hairline/divider (those belong
+        // to the section-heavy panels below), and a minimal top margin so the
+        // chip sits tight against the nav row instead of floating in a gap.
         const root = dv.container.createEl("div", { cls: "psw-root" });
+        root.style.cssText = "margin: 2px 0;";
 
         const row = root.createEl("div");
-        row.style.cssText = "display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 0 2px; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 2px; flex-wrap: wrap;";
 
         row.createEl("span", { text: "Status:" }).style.cssText = "font-size: 0.82em; color: var(--text-muted);";
 

@@ -18,7 +18,10 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```
----
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
+```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreams" });

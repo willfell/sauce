@@ -242,6 +242,7 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
 }
 -%>
 ---
+type: task-hub
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 source_board: <% sourceBoard %>
 workstream: <% workstreamValue %>
@@ -293,10 +294,13 @@ if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
 -%>
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```
----
