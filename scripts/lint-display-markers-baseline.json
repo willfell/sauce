@@ -81,11 +81,6 @@
       "snippet": "if (/^## /.test(lines[i])) {"
     },
     {
-      "file": "platform/blueprints/to-do/helpers/todo-all-list.js",
-      "line": 4,
-      "snippet": "* date desc, each group rendered as `## YYYY-MM-DD` heading + linked task"
-    },
-    {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
       "line": 663,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
@@ -157,7 +152,7 @@
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstreams.js",
-      "line": 48,
+      "line": 55,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
     },
     {
