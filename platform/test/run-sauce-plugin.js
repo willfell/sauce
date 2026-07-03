@@ -111,6 +111,16 @@ function makeApp(tree) {
   }
   const tpWith = (adapter) => ({ app: { vault: { adapter } } });
 
+  await ok('PL-RESOLVE-1 resolveScriptsFolder reads customJS jsFolder, defaults to ranch/scripts', async () => {
+    const mod = loadPluginModule();
+    const custom = makeAdapter({ '.obsidian/plugins/customjs/data.json': JSON.stringify({ jsFolder: 'ranch/Scripts-custom' }) });
+    assert((await mod.resolveScriptsFolder({ vault: { adapter: custom } })) === 'ranch/Scripts-custom', 'reads configured jsFolder');
+    const none = makeAdapter({});
+    assert((await mod.resolveScriptsFolder({ vault: { adapter: none } })) === 'ranch/scripts', 'defaults when no customjs config');
+    const blank = makeAdapter({ '.obsidian/plugins/customjs/data.json': JSON.stringify({ jsFolder: '' }) });
+    assert((await mod.resolveScriptsFolder({ vault: { adapter: blank } })) === 'ranch/scripts', 'defaults on empty jsFolder');
+  });
+
   await ok('BP-fn applyBundledPlugin is exported', async () => {
     assert(typeof install.applyBundledPlugin === 'function', 'install.applyBundledPlugin must be exported');
   });
@@ -162,6 +172,14 @@ function makeApp(tree) {
     await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT);
     const enabled = JSON.parse(a._store['.obsidian/community-plugins.json']);
     assert(!enabled.includes('sauce'), 'sauce must NOT be enabled when a declared file failed to vendor');
+  });
+
+  await ok('BP-7 vendored plugin manifest.json version is stamped from the mechanism version', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': JSON.stringify(['customjs']) });
+    await install.applyBundledPlugin(tpWith(a), Object.assign({}, MECH, { version: '9.9.9' }), WORKSHOP, WORKSHOP, [], GIT);
+    const vendored = JSON.parse(a._store['.obsidian/plugins/sauce/manifest.json']);
+    assert(vendored.version === '9.9.9', 'plugin manifest version stamped to mech version, got ' + vendored.version);
+    assert(vendored.id === 'sauce', 'other manifest fields preserved');
   });
 
   console.log(`\nrun-sauce-plugin: ${pass} passed, ${fail} failed`);

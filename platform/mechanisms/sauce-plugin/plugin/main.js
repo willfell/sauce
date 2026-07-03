@@ -61,8 +61,24 @@ function registerAll(target, files) {
   return { registered, failures };
 }
 
-// Walk ranch/scripts, read every .js, and register the class-files onto
-// window.customJS. Exported for headless testing.
+// Resolve the folder customJS loads classes from — read its configured jsFolder
+// (.obsidian/plugins/customjs/data.json) so we load from wherever CustomJS does,
+// even if a vault customizes it. Falls back to the default "ranch/scripts".
+// Never throws.
+async function resolveScriptsFolder(app) {
+  try {
+    const adapter = app.vault.adapter;
+    const cfgPath = '.obsidian/plugins/customjs/data.json';
+    if (await adapter.exists(cfgPath)) {
+      const cfg = JSON.parse(await adapter.read(cfgPath));
+      if (cfg && typeof cfg.jsFolder === 'string' && cfg.jsFolder.trim()) return cfg.jsFolder.trim();
+    }
+  } catch (_e) { /* fall through to default */ }
+  return 'ranch/scripts';
+}
+
+// Walk the customJS scripts folder, read every .js, and register the class-files
+// onto window.customJS. Exported for headless testing.
 async function loadCustomJsClasses(app) {
   const adapter = app.vault.adapter;
   const files = [];
@@ -76,7 +92,7 @@ async function loadCustomJsClasses(app) {
     }
     for (const d of (listing.folders || [])) await walk(d);
   };
-  await walk('ranch/scripts');
+  await walk(await resolveScriptsFolder(app));
   const w = (typeof window !== 'undefined') ? window : globalThis;
   w.customJS = w.customJS || {};
   return registerAll(w.customJS, files);
@@ -101,3 +117,4 @@ module.exports = SaucePlugin;
 module.exports.loadCustomJsClasses = loadCustomJsClasses;
 module.exports.registerAll = registerAll;
 module.exports.isClassFile = isClassFile;
+module.exports.resolveScriptsFolder = resolveScriptsFolder;

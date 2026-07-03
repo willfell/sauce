@@ -90,6 +90,12 @@ The pipeline is **deployed + live on `main`** (`.github/workflows/release.yml`):
 
 Don't sign as Claude (no `Co-authored-by: Claude` trailer). Don't skip hooks (`--no-verify`) unless explicitly requested. Don't force-push or rewrite history on `origin/main` without explicit approval — see [asking-before-acting.md](asking-before-acting.md).
 
+### Deploying a NEW mechanism/blueprint to consumers
+
+`scripts/autoloop/deploy.js run` brew-upgrades + `sauce update --bump-pins` each consumer vault — but that only **bumps pins of already-subscribed** components. A **newly-added** mechanism/blueprint is NOT auto-installed on consumers (each vault subscribes a subset). To deploy a new component after its release ships: add `{name, version}` to each consumer vault's `ranch/platform-subscription.json`, then `cd <vault> && sauce update --force` (PATH must include `/opt/homebrew/bin`; `SAUCE_VAULT` is ignored — cwd-ancestor detection wins). Verify the component's artifacts landed. See auto-memory `lesson_new_blueprint_needs_consumer_subscription`.
+
+For a **`bundled_plugin` mechanism** (e.g. `sauce-plugin`, see [architecture.md](architecture.md) § Bundled first-party plugin): after `sauce update`, confirm `.obsidian/plugins/<id>/{main.js,manifest.json}` landed + `<id>` is in `.obsidian/community-plugins.json`, then **the user must fully RESTART Obsidian (not Cmd+R)** for the newly-vendored plugin to load the first time.
+
 ## Branch + PR workflow (preferred from v0.110.0)
 
 Direct-push to `origin/main` remains possible (admin override) but the preferred path for any cycle that touches mechanisms, blueprints, or migrations is now feature-branch + PR + CI gate.
