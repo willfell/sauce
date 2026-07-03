@@ -2727,6 +2727,14 @@ async function applyDocLeafActionsBackfill(tp, manifest, variables, history, git
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "doc-note") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated doc-note
+      // renders the single ProjectChromeBar block, whose `⋯` overflow OWNS the
+      // per-doc Move action. Injecting a standalone DocLeafActions Move block would
+      // duplicate it. (On the new shape there's no ProjectNavButtons anchor so the
+      // transform already no-ops, but the guard makes the intent explicit and skips
+      // the spurious no_anchor_found warning.) Legacy old-shape doc-notes still
+      // backfill below.
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       if (before.includes('class: "DocLeafActions"')) { skipped += 1; continue; }
       const after = _injectDocLeafActionsBody(before);
       if (after === before) {
@@ -3048,6 +3056,12 @@ async function applyDocsHubModernizeHeal(tp, manifest, variables, history, git) 
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated docs-hub
+      // renders the single ProjectChromeBar block, which OWNS the breadcrumb + the
+      // New Doc / New Section / Move docs actions. _modernizeDocsHubBody would
+      // re-inject a second Breadcrumb + a renderActionRow block onto it → duplicate
+      // chrome. Skip it (legacy old-shape hubs still modernize below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       const { changed, body: after } = _modernizeDocsHubBody(before);
       if (!changed || after === before) { skipped += 1; continue; }
       const backupPath = `.sauce-backup/${ts}/${fpath}`;
@@ -3114,6 +3128,12 @@ async function applyProjectLinksManagerBackfill(tp, manifest, variables, history
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "links-hub") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated links-hub
+      // renders the single ProjectChromeBar block, which OWNS the Add link / Manage
+      // links actions (its primary + overflow). _injectProjectLinksManagerBody would
+      // inject a second ProjectLinksManager action row above the panel → double row.
+      // Skip it (legacy old-shape hubs still backfill below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       if (before.includes('class: "ProjectLinksManager"')) { skipped += 1; continue; }
       const after = _injectProjectLinksManagerBody(before);
       if (after === before) {
@@ -3392,6 +3412,20 @@ const PROJECT_CHROME_TYPES = [
   "project", "project-todo", "docs-hub", "section-hub", "doc-note",
   "map", "kanban", "task-note", "task-hub", "task-board-card", "links-hub",
 ];
+
+// _hasChromeBar — true when a note body already renders the single ProjectChromeBar
+// chrome block (the button/nav refactor shape: one `class: "ProjectChromeBar"`
+// dv.view call replaces the old stacked Breadcrumb + SpaceNavButtons +
+// ProjectNavButtons + per-surface action row). Every legacy project-chrome heal
+// that would INJECT a breadcrumb / nav row / action row guards on this so it
+// NO-OPs on a migrated note (ProjectChromeBar owns that chrome — re-injecting
+// would double it). Legacy (old-shape) notes lack the substring, so those heals
+// still run on them until the forward migration (Pass 9b) reshapes them.
+// Substring match (install.js has no parseYaml at runtime); mirrors the many
+// `body.includes('class: "X"')` idempotency guards already used across the heals.
+function _hasChromeBar(body) {
+  return typeof body === "string" && body.includes('class: "ProjectChromeBar"');
+}
 
 // _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
 // chrome overhaul reversed the divider grammar: helpers now render their own
@@ -3753,6 +3787,13 @@ async function applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, gi
       const desiredType = boardCardType(notePath);
       if (!desiredType) { skipped += 1; continue; }
       const before = await adapter.read(notePath);
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated promoted
+      // board-card / task-hub renders the single ProjectChromeBar block, which OWNS
+      // the breadcrumb. _injectBoardCardBreadcrumb would inject a SECOND leading
+      // Breadcrumb block above it → duplicate breadcrumb. Skip it (the note's `type`
+      // is already stamped by the template; legacy typeless/breadcrumb-less notes
+      // still heal below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       const { changed, body: after } = _injectBoardCardBreadcrumb(before, desiredType);
       if (!changed || after === before) { skipped += 1; continue; }
 
@@ -6721,6 +6762,32 @@ async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, h
     body = await adapter.read(targetPath);
   } catch (e) {
     return pushErr(`read failed for ${targetPath}: ${e.message}`);
+  }
+
+  // ProjectChromeBar guard (button/nav refactor Pass 9a): a hub that renders the
+  // single ProjectChromeBar block OWNS entity creation (the bar's primary + `⋯`
+  // route through EntityCreate.create). Such hubs intentionally carry NO
+  // `// entity-create:<id>` marker — the marker + this verify pass predate
+  // ProjectChromeBar. Treat a ProjectChromeBar target as satisfied (record an info
+  // event, no missing_skip_inject warning) so the retired project-hub markers don't
+  // spam every install. Non-ProjectChromeBar hubs (people, finance, meetings,
+  // scratch) still verify their marker below.
+  if (_hasChromeBar(body)) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "entity_create_block_verified",
+        name: sourceName,
+        target: targetPath,
+        instance: instanceId,
+        action: "owned_by_project_chrome_bar",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
   }
 
   const sentinel = `// entity-create:${instanceId}`;
@@ -19432,6 +19499,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
+    // button/nav refactor Pass 9a — ProjectChromeBar-shape guard predicate.
+    // Every legacy project-chrome heal that would re-inject breadcrumb/nav/action
+    // chrome guards on this so it no-ops on a migrated note
+    // (run-project-chrome-heal-guard.js).
+    module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
