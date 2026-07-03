@@ -48,6 +48,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | Cowork Sync Scheduled Jobs | spice/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md | /cowork sync-scheduled-jobs |
 | Cowork Weekly Hub | spice/cowork/Weekly Hub.md | /weekly hub |
 | Daily | spice/daily | /daily |
+| Home | spice/home | /home |
 | Install | .claude/commands/install.md | /install |
 | Meetings | spice/meetings | /meetings |
 | Projects | spice/projects | /project |
