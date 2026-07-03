@@ -210,3 +210,47 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   rationale: blueprint meetings axis installer_migration: 1 uncovered
   status: dismissed
   note: Rubric artifact (3rd of class, after scratch + breadcrumb). The lone "uncovered" fn is applyPreInstall — a GENERIC pre-install hook (processes any mechanism's mech.pre_install[] delete steps), attributed to 3 surfaces (meetings/to-do/finance) via the module_directory heuristic, exercised end-to-end by run-install.js's full install (run-install.js line 150 explicitly accounts for applyPreInstall's adapter.exists short-circuit). It is neither meetings-specific nor a genuine seed gap; a direct seed test would be a generic-hook duplicate. Durable fix = the coverage-rubric.js scoreInstallerMigration improvement already documented on cov-blueprint-scratch-installer-migration + cov-mechanism-breadcrumb-installer-migration (scan more install-test harnesses + stop attributing generic primitives to a surface).
+
+- id: cov-blueprint-meetings-widget-render
+  title: Add coverage for meetings widget_render (1/2)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint meetings axis widget_render: 1 uncovered
+  status: done
+  note: PR #309 — NEW run-meetings-render-guards.js drives MeetingLeafActions.render() (the uncovered widget) through the cold-load path (empty dv.pages; renders 3 AccentButton actions) in normal + .markdown-embed contexts, asserting no-throw (3 guards). MeetingsHubCards was already credited via run-renderer.js and is intentionally excluded (it is NOT cold-load-safe — filed as bug-meetings-hub-cards-cold-load-guard below). coverage-matrix.json regenerated: meetings widget_render 2/2.
+
+- id: cov-blueprint-daily-installer-migration
+  title: Add coverage for daily installer_migration (3/4)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint daily axis installer_migration: 1 uncovered
+  status: proposed
+
+- id: cov-mechanism-backlink-panel-widget-render
+  title: Add coverage for backlink-panel widget_render (0/1)
+  category: test
+  source: coverage-matrix
+  rationale: mechanism backlink-panel axis widget_render: 1 uncovered
+  status: proposed
+
+- id: cov-blueprint-home-installer-migration
+  title: Add coverage for home installer_migration (0/1)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint home axis installer_migration: 1 uncovered
+  status: proposed
+
+- id: cov-blueprint-home-widget-render
+  title: Add coverage for home widget_render (0/1)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint home axis widget_render: 1 uncovered
+  status: proposed
+
+- id: bug-meetings-hub-cards-cold-load-guard
+  title: MeetingsHubCards.render() throws on cold-load (no dv.current() guard)
+  category: bug
+  source: render-guard-finding
+  rationale: platform/blueprints/meetings/helpers/meetings-hub-cards.js render() does `const currentFile = dv.current(); const dateMatch = currentFile.file.name.match(...)` with NO `if (!currentFile || !currentFile.file) return;` guard. When Dataview is not yet indexed (the pre-index window on note open), dv.current() is undefined -> throws "Cannot read properties of undefined (reading 'file')". Every other blueprint hub/leaf widget guards this (e.g. WikiTree/TripNavButtons `if (!cur || !cur.file) return`). Discovered while adding run-meetings-render-guards.js (turn 151) — MeetingsHubCards was excluded from that harness because it fails the cold-load variant.
+  test_sketch: add MeetingsHubCards back into run-meetings-render-guards.js's widgets[] list — it goes RED on the cold-load (dv.current()=undefined/null) variants until the guard is added, GREEN after.
+  status: proposed
