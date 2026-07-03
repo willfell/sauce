@@ -213,6 +213,22 @@ class ProjectChromeBar {
     return "";
   }
 
+  // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
+  // (bypasses the link resolver, which can double an absolute path against the
+  // current note's folder on a cold cache — the doubled-path bug). Falls back
+  // to openLinkText only when the file isn't in the vault index yet. Copied from
+  // ProjectNavButtons._openNavTarget; keep the two in sync.
+  _openNavTarget(path, dv) {
+    try {
+      const f = app.vault.getAbstractFileByPath(path);
+      if (f && app.workspace && typeof app.workspace.getLeaf === "function") {
+        app.workspace.getLeaf(false).openFile(f);
+        return;
+      }
+    } catch (_e) { /* fall through to openLinkText */ }
+    try { app.workspace.openLinkText(path, ""); } catch (_err) { /* never throw */ }
+  }
+
   // ── _surfaceSpec — pure per-surface config ─────────────────────────────────
   // Returns { primary, overflow, leaf }. `primary` is the single AccentButton on
   // a non-leaf surface ({ id, label, icon }), or null. `overflow` is the list of
@@ -283,7 +299,7 @@ class ProjectChromeBar {
       catch (_e) { return false; }
     };
     const open = (p) => {
-      try { app.workspace.openLinkText(p, ""); } catch (_e) { /* never throw */ }
+      try { this._openNavTarget(p, dv); } catch (_e) { /* never throw */ }
     };
 
     // ── This project ────────────────────────────────────────────────────────
@@ -467,7 +483,7 @@ class ProjectChromeBar {
           const target = seg.link;
           a.onclick = (e) => {
             if (e && e.preventDefault) e.preventDefault();
-            try { app.workspace.openLinkText(target, ""); } catch (_err) { /* never throw */ }
+            this._openNavTarget(target, dv);
           };
         } else {
           const cur = left.createEl("span");
@@ -493,8 +509,7 @@ class ProjectChromeBar {
 
     // 1. Go ▾ launcher.
     const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
-    let goBtn = null;
-    goBtn = touch(customJS.AccentButton.render(right, {
+    const goBtn = touch(customJS.AccentButton.render(right, {
       label: "Go",
       icon: chevronDown,
       onClick: async () => {
@@ -519,8 +534,7 @@ class ProjectChromeBar {
 
     // 3. ⋯ overflow menu — when the surface declares overflow actions.
     if (Array.isArray(spec.overflow) && spec.overflow.length > 0) {
-      let dotsBtn = null;
-      dotsBtn = touch(customJS.AccentButton.render(right, {
+      const dotsBtn = touch(customJS.AccentButton.render(right, {
         label: "⋯",
         icon: "",
         onClick: () => {

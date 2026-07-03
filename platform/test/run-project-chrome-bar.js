@@ -138,6 +138,53 @@ function allDescendants(el) {
   ok('PCB-SPEC-9 board/task-note/default surfaces are bare leaves (no primary, no overflow)', allLeaf);
 }
 
+// ── PCB-OPEN-1..2 — _openNavTarget(path, dv) cold-cache-safe direct opens ─────
+// Both the breadcrumb crumb click and the _navEntries `open()` helper route
+// direct absolute-path opens through _openNavTarget so a cold metadata cache
+// can't double-prefix the path (spice/projects/<slug>/spice/projects/<slug>/…).
+// When the file resolves in the vault index we openFile() the TFile (bypassing
+// the link resolver); only an unresolved path falls back to openLinkText.
+{
+  // PCB-OPEN-1 — resolvable path → getLeaf(false).openFile(file), NOT openLinkText.
+  const fakeFile = { path: 'spice/projects/connectors/Connectors.md' };
+  const openFileCalls = [];
+  const openLinkCalls = [];
+  const prevApp = global.app;
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => (p === fakeFile.path ? fakeFile : null) },
+    workspace: {
+      getLeaf: () => ({ openFile: (f) => openFileCalls.push(f) }),
+      openLinkText: (p) => openLinkCalls.push(p),
+    },
+  };
+  const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md' } }) };
+  inst._openNavTarget(fakeFile.path, dv);
+  global.app = prevApp;
+  ok('PCB-OPEN-1a resolvable path calls getLeaf().openFile with the TFile',
+    openFileCalls.length === 1 && openFileCalls[0] === fakeFile);
+  ok('PCB-OPEN-1b resolvable path does NOT call openLinkText (cold-cache safe)',
+    openLinkCalls.length === 0);
+}
+{
+  // PCB-OPEN-2 — unresolved path (getAbstractFileByPath → null) → openLinkText fallback.
+  const openFileCalls = [];
+  const openLinkCalls = [];
+  const prevApp = global.app;
+  global.app = {
+    vault: { getAbstractFileByPath: () => null },
+    workspace: {
+      getLeaf: () => ({ openFile: (f) => openFileCalls.push(f) }),
+      openLinkText: (p) => openLinkCalls.push(p),
+    },
+  };
+  const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md' } }) };
+  inst._openNavTarget('spice/projects/connectors/Connectors.md', dv);
+  global.app = prevApp;
+  ok('PCB-OPEN-2a unresolved path falls back to openLinkText',
+    openLinkCalls.length === 1 && openLinkCalls[0] === 'spice/projects/connectors/Connectors.md');
+  ok('PCB-OPEN-2b unresolved path does NOT call openFile', openFileCalls.length === 0);
+}
+
 // ── PCB-NAV-1 — _navEntries(dv, ctx) launcher entries ────────────────────────
 {
   // Small registry with two openLink vault destinations + one non-openLink.
@@ -216,7 +263,17 @@ function runRenderCases() {
     querySelector: () => null,
     querySelectorAll: () => [],
   };
-  global.app = { isMobile: false, workspace: { openLinkText: () => {} } };
+  // workspace.getLeaf(false).openFile(file) is the cold-cache-safe direct-open
+  // path (_openNavTarget); openBreadcrumbFiles records TFiles opened that way so
+  // the breadcrumb-click integration case can assert it routed correctly.
+  const openBreadcrumbFiles = [];
+  global.app = {
+    isMobile: false,
+    workspace: {
+      openLinkText: () => {},
+      getLeaf: () => ({ openFile: (f) => openBreadcrumbFiles.push(f) }),
+    },
+  };
   global.customJS = {
     RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
     SectionLabel: { divider: () => {} },
@@ -311,9 +368,32 @@ function runRenderCases() {
     });
   };
 
+  // PCB-OPEN-3 — clicking an ancestor breadcrumb crumb routes through
+  // _openNavTarget (getLeaf().openFile), NOT the raw openLinkText — proving the
+  // cold-cache doubled-path fix is wired into the real render path.
+  const doCrumbClick = () => {
+    accentCalls.length = 0; popoverCalls.length = 0; openBreadcrumbFiles.length = 0;
+    const container = makeEl('div');
+    const dv = {
+      container,
+      current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }),
+    };
+    return inst.render(dv).then(() => {
+      // Ancestor crumbs render as <a> with an onclick; the current crumb ("Docs")
+      // is a plain <span> (link:null). Grab the first crumb <a>.
+      const crumbAnchor = allDescendants(container)
+        .find((e) => e.tag === 'a' && typeof e.onclick === 'function');
+      ok('PCB-OPEN-3a ancestor breadcrumb crumb is a clickable <a>', !!crumbAnchor);
+      if (crumbAnchor) crumbAnchor.onclick({ preventDefault() {} });
+      ok('PCB-OPEN-3b breadcrumb click routes through openFile (getLeaf), not openLinkText',
+        openBreadcrumbFiles.length === 1);
+    });
+  };
+
   return doDocNote()
     .then(doDocsHub)
     .then(doGoClick)
+    .then(doCrumbClick)
     .then(() => { restore(); summarize(); })
     .catch((e) => { restore(); console.error('render case threw:', e && e.stack || e); results.push(['render-cases-threw', false]); summarize(); });
 }
