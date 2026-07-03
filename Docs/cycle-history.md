@@ -2822,3 +2822,23 @@ Six releases, two adversarially-verified research fleets, all shipped end-to-end
 
 See `Docs/plans/2026-07-03-perf-seamlessness-arc-result.md` (+ the six `2026-07-03-*-{design,plan}.md` docs).
 
+## reader blueprint CLOSED 2026-07-03 (vX.Y.Z — pipeline-assigned)
+
+**New blueprint:** `reader@0.1.0` (new) · **Mechanisms touched:** none (pure reuse) · **Harnesses:** NEW `run-reader.js` (22 `HC-READER-*`) + seed `HC-V0RDR-SEED-READER-1..4`.
+
+**Headline:** A NEW **`reader` blueprint** (`spice/reader/`) — a flat reading queue for web articles clipped from the browser via the official **Obsidian Web Clipper**. This is the wiki cycle's deferred "ingestion" north-star, scoped down to its own tidy surface (capture-a-web-article → a flat queue → an AI TL;DR). Two globally-unique note types: `reader-hub` (the render-only root `spice/reader/Reader.md`) + `reader-article` (flat leaves, never nested). The lifecycle `unread → reading → archived` lives entirely in the article's frontmatter **`status`** — advancing is a one-field `processFrontMatter` write, **never a folder move** — and the queue is ordered by **`captured_at` (ISO), NOT `mtime`** (landmine #23: mtime drifts on mobile/after sync).
+
+**Surfaces:** global "Reader" nav button (icon `book-open`, order 140); `ReaderQueue` hub (`＋ New article` create row + `doc-search` strip + Unread/Reading/Archived glance pills + status bands, each row opens the note + inline status toggle); `ReaderArticleActions` leaf action row (**Open source ↗** real `<a>` gated on a non-empty `url`, status-aware **Mark reading/read/back** via `processFrontMatter`, **Reader hub** nav; pure `statusTransitions`/`_nextStatusForward`); `ReaderArticleView` leaf card (source-meta + "N min read" + a prominent **AI TL;DR** callout when `summary` is set; pure `_humanDate`/`_readingMinutes`). Breadcrumb is **ancestors mode** (flat — no breadcrumb-mechanism change; contrast wiki's `path_walk`). `/reader` command + `new-reader-article` skill + resolver row. Ships a **Web Clipper artifact** `reader-clip.json` (materialized to `spice/reader/reader-clip.json`) that routes clips to `spice/reader/` with house frontmatter, `{{highlights}}` + `{{content}}`, and an **Interpreter TL;DR** (`summary` = `{{"…summary…"}}`, recommended on a local Ollama). **Import-once** — the installer materializes the JSON but can't push it into the browser extension; `{{views_path}}` inside the clip is installer-substituted (`files[]` runs `substituteLenient` on non-`.md` assets too). Install heal **`applyReaderScaffoldHeal`** (mirrors `applyHomeScaffoldHeal`): scaffolds `spice/reader/Reader.md` if missing, else idempotently heals chrome via pure `_healReaderChromeBody` (sentinel `class: "ReaderQueue"`, preserves user free-write below `READER_CONTENT`); `.sauce-backup/reader/` backup; never throws. Schema: NEW `reader-rule-fragments` bundle in `schemas-index.json` (registers the 2 manifest `rule_fragments` — a small improvement over wiki, which shipped without one).
+
+**Tests:** `run-reader.js` 22/22 PASS; seed 3 `reader-article` notes across statuses + `HC-V0RDR-SEED-READER-1..4`; `npm run release:preflight` GREEN (exit 0); `lint-schemas` 30 schemas 0 issues; workshop dogfood self-install exit 0.
+
+**LESSON — a new blueprint should register its frontmatter contract in `schemas-index.json` in the SAME cycle.** Wiki shipped without a registry entry; reader added `reader-rule-fragments` so `lint-schemas` covers the new contract from day one. Cheap insurance worth repeating.
+
+**Deploy (manual, per-vault — a new blueprint is NOT auto-installed on consumers):** add `{ name: reader, version: <pin> }` to each subscribing vault's `ranch/platform-subscription.json`, then `sauce update --force` with the vault as CWD (SAUCE_VAULT ignored — cwd-ancestor detection wins), verify drift:none, `Cmd+R`, then import `reader-clip.json` once into the browser's Web Clipper.
+
+**Deferred fast-follows:** promote-to-wiki bridge; URL de-dup reconcile; optional `.base` power view; connection plane (link an article to a project/meeting/person).
+
+**Commits:** branch `cycle/reader-blueprint` (design `91df29f0`, plan `6be2e883`, scaffold `85fe5a0c`, helpers `4529f846`, install+schema+clip `33b5de70`, tests+seed `f8a88787`).
+
+See `Docs/plans/2026-07-03-reader-blueprint-result.md` (+ `-design.md` / `-plan.md`).
+
