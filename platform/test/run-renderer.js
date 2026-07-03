@@ -3192,6 +3192,184 @@ async function testSelectTasksNotePerTask() {
   return ok;
 }
 
+// ── REND-ASOF — optional asOf/live inject on SpaceDailyDashboard.render ──────
+// Drives the REAL async render(dv, params) end-to-end through a DOM+dv stub so
+// the observed "today" is whatever the render's date-derivation actually chose.
+// Two cases:
+//   (a) render(dv, { asOf: "2025-01-15", live: true }) — caller-supplied asOf
+//       overrides the filename date. The meetings .where predicate sees
+//       2025-01-15 AND the captured ActivityFeed.render call carries
+//       asOf: "2025-01-15".
+//   (b) render(dv) with no params on a file basename containing 2026-02-03 —
+//       current behavior (regression lock): selection uses 2026-02-03. This
+//       must pass BEFORE and AFTER the seam is added (proves no-params behavior
+//       is byte-for-byte unchanged).
+//
+// This is the Home-command-center DRY seam: a host renders the daily dashboard
+// scoped to an explicit date without changing the note-embedded behavior.
+
+// Minimal DOM element stub sufficient for _renderSection + container ops.
+function makeDashEl() {
+  const el = {
+    _children: [],
+    _tag: null,
+    className: "",
+    dataset: {},
+    style: {},
+    innerHTML: "",
+    open: false,
+    createEl(tag) { const c = makeDashEl(); c._tag = tag; this._children.push(c); return c; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+    remove() {},
+  };
+  // style.cssText assignment is used by render on the container.
+  Object.defineProperty(el.style, "cssText", { value: "", writable: true, configurable: true });
+  return el;
+}
+
+// window.moment shim supporting the subset _getActivityCount needs:
+//   moment(iso, "YYYY-MM-DD").startOf("day").format()  → "<iso>T00:00:00"
+//   moment(iso, "YYYY-MM-DD").endOf("day").format()    → "<iso>T23:59:59"
+// (no new Date() — pure string composition off the YYYY-MM-DD input).
+function makeMomentWindow() {
+  const wrap = (iso, edge) => ({
+    startOf: () => wrap(iso, "start"),
+    endOf: () => wrap(iso, "end"),
+    format: () => `${iso}T${edge === "end" ? "23:59:59" : "00:00:00"}`,
+  });
+  return { moment: (iso) => wrap(String(iso), "start") };
+}
+
+// Load SpaceDailyDashboard with window injected (for window.moment) and no
+// bare app (render/_readSectionState/_resolveCurrentFileName all guard `typeof
+// app`). customJS is set on the injected window's globalThis-free scope via a
+// closure variable that the factory closes over.
+function loadDashboardForRender() {
+  const fsMod = require("fs");
+  const pathMod = require("path");
+  const sddSrc = fsMod.readFileSync(pathMod.resolve(__dirname,
+    "../../platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  // Factory params supply the bare identifiers render + collaborators reference:
+  //   window (window.moment), customJS (BeaconCards/ActivityFeed/TaskEntity).
+  // `app` stays undefined so the guarded fallbacks fire (no app.workspace, so
+  // _resolveCurrentFileName falls back to dv.current().file.name — the shim path).
+  return new Function("window", "customJS",
+    `${sddSrc}\nreturn SpaceDailyDashboard;`);
+}
+
+async function runDashboardRender({ params, fileName }) {
+  const factory = loadDashboardForRender();
+
+  // Capture the date the meetings .where predicate filtered on: seed candidate
+  // meeting pages named after several distinct dates; whichever survives the
+  // filter reveals the `today` the predicate closed over.
+  const candidateDates = ["2025-01-15", "2026-02-03", "2099-12-31"];
+  const meetingPages = candidateDates.map((d) => ({
+    file: { name: `Standup-${d}`, path: `spice/meetings/notes/Standup-${d}.md` },
+    summary: "",
+  }));
+  // One activity page dated on each candidate day so activityCount > 0 for
+  // whichever `today` the render picks — ensures the flow reaches ActivityFeed.
+  const activityPages = candidateDates.map((d) => ({
+    type: "journal", day: d,
+    file: { name: `Journal-${d}`, path: `spice/journal/Journal-${d}.md` },
+  }));
+
+  let meetingsFilteredDate = null;
+  const dv = {
+    pages(query) {
+      if (query === '"spice/meetings/notes"') {
+        return {
+          where(fn) {
+            const kept = meetingPages.filter(fn);
+            // The predicate is `p.file.name.includes(today)`; the surviving
+            // page's embedded date IS the today the render derived.
+            if (kept.length === 1) {
+              const m = String(kept[0].file.name).match(/(\d{4}-\d{2}-\d{2})/);
+              meetingsFilteredDate = m ? m[1] : null;
+            }
+            return { sort() { return { array: () => kept }; } };
+          },
+        };
+      }
+      // Task queries (spice/tasks, _done) — return [] so no task rows (TE is a
+      // real stub below); activity queries iterate this array in _getActivityCount.
+      if (query === '"spice/tasks"' || query === '"spice/tasks/_done"') return [];
+      // _getActivityCount calls dv.pages() with no query.
+      if (query === undefined) return activityPages;
+      return [];
+    },
+    page() { return null; },
+    el(tag) { const e = makeDashEl(); e._tag = tag; this.container._children.push(e); return e; },
+    current() { return { file: { name: fileName } }; },
+    container: makeDashEl(),
+  };
+
+  // customJS stub: BeaconCards + ActivityFeed spies, TaskEntity returns no tasks.
+  let capturedActivityAsOf = null;
+  const customJS = {
+    TaskEntity: { queryToday: () => ({ personal: [], all: [] }) },
+    TaskTodayList: null,
+    BeaconCards: { render: async () => {} },
+    ActivityFeed: {
+      render: async (_shim, opts) => { capturedActivityAsOf = opts && opts.asOf; },
+    },
+  };
+
+  const SpaceDailyDashboard = factory(makeMomentWindow(), customJS);
+  const inst = new SpaceDailyDashboard();
+  await inst.render(dv, params);
+
+  return { meetingsFilteredDate, capturedActivityAsOf };
+}
+
+async function testRendAsOfCallerOverride() {
+  console.log('\n=== REND-ASOF-A — render(dv, { asOf }) scopes selection to the caller date ===');
+  let ok = true;
+  try {
+    const { meetingsFilteredDate, capturedActivityAsOf } = await runDashboardRender({
+      params: { asOf: "2025-01-15", live: true },
+      // Filename carries a DIFFERENT date — asOf must win over the filename.
+      fileName: "Journal-2026-02-03",
+    });
+    const subA = meetingsFilteredDate === "2025-01-15";
+    console.log(`  REND-ASOF-A1 (meetings filter uses caller asOf): ${subA ? 'PASS' : 'FAIL'} — got ${meetingsFilteredDate}`);
+    ok = ok && subA;
+    const subB = capturedActivityAsOf === "2025-01-15";
+    console.log(`  REND-ASOF-A2 (ActivityFeed.render asOf is caller asOf): ${subB ? 'PASS' : 'FAIL'} — got ${capturedActivityAsOf}`);
+    ok = ok && subB;
+  } catch (e) {
+    console.log(`  REND-ASOF-A: FAIL — ${e && e.message}`);
+    ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
+async function testRendAsOfNoParamsRegression() {
+  console.log('\n=== REND-ASOF-B — render(dv) with no params derives today from the filename (regression lock) ===');
+  let ok = true;
+  try {
+    const { meetingsFilteredDate, capturedActivityAsOf } = await runDashboardRender({
+      params: undefined,
+      fileName: "Journal-2026-02-03",
+    });
+    const subA = meetingsFilteredDate === "2026-02-03";
+    console.log(`  REND-ASOF-B1 (meetings filter uses filename date): ${subA ? 'PASS' : 'FAIL'} — got ${meetingsFilteredDate}`);
+    ok = ok && subA;
+    const subB = capturedActivityAsOf === "2026-02-03";
+    console.log(`  REND-ASOF-B2 (ActivityFeed.render asOf is filename date): ${subB ? 'PASS' : 'FAIL'} — got ${capturedActivityAsOf}`);
+    ok = ok && subB;
+  } catch (e) {
+    console.log(`  REND-ASOF-B: FAIL — ${e && e.message}`);
+    ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
 // ── REND-V067-TIME-1: SpaceDailyDashboard._formatTime duck-types Luxon + moment ──
 // v0.67.0: _formatTime must accept a Luxon DateTime (has .toFormat()), a
 // moment-compatible string, and return null for null/undefined.
@@ -3522,6 +3700,8 @@ async function testRendHasNotes() {
     }
     if (which === 'daily' || which === 'all') {
       results.push(['SELTASK-1 selectTasks note-per-task data seam', await testSelectTasksNotePerTask()]);
+      results.push(['REND-ASOF-A render(dv,{asOf}) scopes to caller date', await testRendAsOfCallerOverride()]);
+      results.push(['REND-ASOF-B render(dv) no-params filename-date regression lock', await testRendAsOfNoParamsRegression()]);
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
       results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
       results.push(['REND-HASNOTES scaffold-aware has-notes (SDD + hub)', await testRendHasNotes()]);
