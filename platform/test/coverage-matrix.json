@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.188.0",
+  "generated_at": "0.188.1",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -93,144 +93,6 @@
         ],
         "primary_user_flow": "Install/upgrade/bootstrap lifecycle slash commands trigger aggregateClaudeSurface + materializeClaudeSurface + regenerateClaudeMd to sync CLAUDE.md tables and materialize .claude/commands+skills from all subscribed surfaces.",
         "qualitative_recommendation": "Strong unit-layer coverage; gap is end-to-end install -> materialize -> CLAUDE.md flow. Recommend HC-V0XYZ-PLATFORM-CLAUDE-INSTALL-SMOKE family in run-integration-smoke.js or lightweight behavioral runner."
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "people",
-      "current_version": "0.6.2",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 2,
-          "total": 2,
-          "methods": [
-            {
-              "cls": "PeopleHubCards",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "PersonNavButtons",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-people-peoplehubcards.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 1,
-          "manifest_ratio": 1,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 2,
-          "total": 2,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Template, People.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "people",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 2,
-          "widgets": [
-            {
-              "widget": "PeopleHubCards",
-              "covered": false
-            },
-            {
-              "widget": "PersonNavButtons",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.8,
-      "blast_radius": "med",
-      "blast_radius_rationale": "Cross-cutting via people-identity; stable shape.",
-      "recent_incidents_30d": 5,
-      "priority_score": 0.8999999999999999,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.8999999999999999,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [
-          {
-            "axis": "integration_smoke",
-            "note": "Claims 1.0 (both happy + failure modes) but neither PeopleHubCards nor PersonNavButtons render methods directly tested; only indirectly via integration smoke."
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "widget_render",
-            "note": "Both customjs classes have render() methods but zero coverage in run-renderer.js. Delegate to tested mechanisms (BeaconCards, AccentButton) so isolated tests potentially redundant unless testing orchestration/configuration."
-          }
-        ],
-        "primary_user_flow": "Open People.md hub (PeopleHubCards renders person cards), click a person, view person note (PersonNavButtons renders identity + back-button, PeopleRendering shows mentions), click back to People Hub.",
-        "qualitative_recommendation": "Gaps partially mitigated by delegation to tested mechanisms. A renderer-extend harness adding PeopleHubCards + PersonNavButtons to run-renderer.js would close widget_render and surface any orchestration bugs."
       }
     },
     {
@@ -526,7 +388,7 @@
     {
       "kind": "blueprint",
       "name": "scratch",
-      "current_version": "0.7.2",
+      "current_version": "0.7.3",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -5142,7 +5004,7 @@
     {
       "kind": "mechanism",
       "name": "entity-create",
-      "current_version": "0.8.1",
+      "current_version": "0.8.2",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -5280,8 +5142,8 @@
       "axes": {
         "customjs_behavioral": {
           "score": 1,
-          "covered": 20,
-          "total": 20,
+          "covered": 21,
+          "total": 21,
           "methods": [
             {
               "cls": "TaskEntity",
@@ -5341,6 +5203,11 @@
             {
               "cls": "TaskDialog",
               "method": "markDeleted",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "confirmDelete",
               "covered": true
             },
             {
@@ -6633,6 +6500,144 @@
         "false_negatives": [],
         "primary_user_flow": "Render a list of pages into a mobile-aware card grid with title, optional subtitle/badges/meta, grouping, and custom click handlers.",
         "qualitative_recommendation": "Icon option (actively used in production) should be added to BC test coverage; integration_smoke should be demoted to 0.5 (happy-path only) unless dedicated multi-blueprint flow added. The render() method itself is thoroughly exercised (63 hits across 9 test cases)."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "people",
+      "current_version": "0.6.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "methods": [
+            {
+              "cls": "PeopleHubCards",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "PersonNavButtons",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-people-peoplehubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, People.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "people",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "widgets": [
+            {
+              "widget": "PeopleHubCards",
+              "covered": true
+            },
+            {
+              "widget": "PersonNavButtons",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 1,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Cross-cutting via people-identity; stable shape.",
+      "recent_incidents_30d": 5,
+      "priority_score": 0,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 0,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-people-peoplehubcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Claims 1.0 (both happy + failure modes) but neither PeopleHubCards nor PersonNavButtons render methods directly tested; only indirectly via integration smoke."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "widget_render",
+            "note": "Both customjs classes have render() methods but zero coverage in run-renderer.js. Delegate to tested mechanisms (BeaconCards, AccentButton) so isolated tests potentially redundant unless testing orchestration/configuration."
+          }
+        ],
+        "primary_user_flow": "Open People.md hub (PeopleHubCards renders person cards), click a person, view person note (PersonNavButtons renders identity + back-button, PeopleRendering shows mentions), click back to People Hub.",
+        "qualitative_recommendation": "Gaps partially mitigated by delegation to tested mechanisms. A renderer-extend harness adding PeopleHubCards + PersonNavButtons to run-renderer.js would close widget_render and surface any orchestration bugs."
       }
     }
   ]
