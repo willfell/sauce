@@ -28,6 +28,13 @@ class ProjectWorkstreams {
         // (typically the first render after EntityCreate.openFile on a newly
         // created project). Next render tick will succeed.
         if (!current || !current.file) return;
+        // 2026-07-03 UX pass: the Map stacks ProjectWorkstreamManager (its own
+        // "Workstreams" label) directly above this "tasks by workstream" view with
+        // no separator. Emit a leading divider so this reads as its own section
+        // (guarded so a cold-load can't throw + blank the Map).
+        if (customJS && customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+            customJS.SectionLabel.divider(dv);
+        }
         let rawWs = current.workstreams || [];
         if (typeof rawWs === "string") {
             try { rawWs = JSON.parse(rawWs); } catch (e) { rawWs = []; }
