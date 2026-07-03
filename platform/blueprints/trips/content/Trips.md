@@ -8,6 +8,10 @@ cssclasses:
 ---
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
@@ -15,9 +19,9 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
 ```
 
----
-
-## All Trips
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "All Trips" }] });
+```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "TripsHubCards" });

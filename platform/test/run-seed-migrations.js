@@ -1007,6 +1007,116 @@ withTempVault((vault) => {
         ok("HC-TASKHEAL-SEED-7b exactly one <!-- TASK_NOTES --> marker (no re-inject)",
            (healedTask.match(/<!-- TASK_NOTES -->/g) || []).length === 1);
     }
+
+    // ===== HC-TRIPS-SEED-* — applyTripsConformanceHeal =====
+    // The seed carries a pre-refactor trip under spice/trips/summer-trip/:
+    //   - Trip Atlas.md  (type: trip, name: "Summer Trip", no Breadcrumb, [[Trip Atlas]] link)
+    //   - Trip Flights.md  (legacy created: + tags: [trip], no Breadcrumb, no canonical FM)
+    //   - Trip Packing List.md  (same legacy shape as Flights)
+    // The heal renames atlas → "Summer Trip.md", each section → "Summer Trip — <Section>.md",
+    // canonicalizes section frontmatter (type: trip-section, section_kind, section, trip,
+    // trip_slug, created_at), injects Breadcrumb blocks, and repairs [[Trip Atlas]] links.
+    // Asserts run AFTER the idempotency phase (two installs) so idempotency is implicit
+    // (if re-inject were broken, the backup/rename logic would write extra files
+    // which would fail HC-V01100-SEED-IDEMP-2/3 above).
+    {
+        // HC-TRIPS-SEED-1: atlas renamed to "Summer Trip.md"; original "Trip Atlas.md" gone.
+        ok(
+            "HC-TRIPS-SEED-1 spice/trips/summer-trip/Summer Trip.md exists (atlas renamed)",
+            helpers.fileExists(vault, "spice/trips/summer-trip/Summer Trip.md")
+        );
+        ok(
+            "HC-TRIPS-SEED-1b spice/trips/summer-trip/Trip Atlas.md no longer exists",
+            !helpers.fileExists(vault, "spice/trips/summer-trip/Trip Atlas.md")
+        );
+
+        // HC-TRIPS-SEED-2: Flights section renamed + canonical frontmatter.
+        ok(
+            "HC-TRIPS-SEED-2 spice/trips/summer-trip/Summer Trip — Flights.md exists (section renamed)",
+            helpers.fileExists(vault, "spice/trips/summer-trip/Summer Trip — Flights.md")
+        );
+        let flightsFm = {};
+        try {
+            const flightsNote = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip — Flights.md");
+            flightsFm = helpers.parseFrontmatter(flightsNote).frontmatter;
+        } catch (e) {}
+        ok(
+            "HC-TRIPS-SEED-2b Flights section type: trip-section",
+            flightsFm.type === "trip-section",
+            `actual type=${flightsFm.type}`
+        );
+        ok(
+            "HC-TRIPS-SEED-2c Flights section section_kind: flights",
+            flightsFm.section_kind === "flights",
+            `actual section_kind=${flightsFm.section_kind}`
+        );
+        ok(
+            "HC-TRIPS-SEED-2d Flights section section: \"Flights\"",
+            flightsFm.section === "Flights",
+            `actual section=${flightsFm.section}`
+        );
+        ok(
+            "HC-TRIPS-SEED-2e Flights section trip: \"[[Summer Trip]]\"",
+            flightsFm.trip === "[[Summer Trip]]",
+            `actual trip=${flightsFm.trip}`
+        );
+        ok(
+            "HC-TRIPS-SEED-2f Flights section trip_slug: summer-trip",
+            flightsFm.trip_slug === "summer-trip",
+            `actual trip_slug=${flightsFm.trip_slug}`
+        );
+        ok(
+            "HC-TRIPS-SEED-2g Flights section has created_at (not bare created:)",
+            typeof flightsFm.created_at === "string" && flightsFm.created_at.length > 0,
+            `actual created_at=${flightsFm.created_at}`
+        );
+        {
+            let flightsRaw = "";
+            try { flightsRaw = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip — Flights.md"); } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-2h Flights section has NO bare 'created:' FM key",
+                !/^created\s*:/m.test(flightsRaw),
+                `raw contains 'created:' line`
+            );
+        }
+
+        // HC-TRIPS-SEED-3: Breadcrumb injected into the Flights section body.
+        {
+            let flightsBody = "";
+            try { flightsBody = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip — Flights.md"); } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-3 Flights section body contains class: \"Breadcrumb\" (breadcrumb injected)",
+                /class:\s*"Breadcrumb"/.test(flightsBody)
+            );
+        }
+
+        // HC-TRIPS-SEED-4: [[Trip Atlas]] link repaired to [[Summer Trip]] in the atlas body.
+        {
+            let atlasBody = "";
+            try { atlasBody = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip.md"); } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-4 atlas body [[Trip Atlas]] link repaired to [[Summer Trip]]",
+                atlasBody.includes("[[Summer Trip]]") && !atlasBody.includes("[[Trip Atlas]]"),
+                `body excerpt=${atlasBody.slice(0, 300)}`
+            );
+        }
+
+        // HC-TRIPS-SEED-5: materialized hub contains Breadcrumb and no raw ## All Trips heading.
+        {
+            let hubBody = "";
+            try { hubBody = helpers.readNote(vault, "spice/trips/Trips.md"); } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-5 Trips.md hub contains class: \"Breadcrumb\"",
+                /class:\s*"Breadcrumb"/.test(hubBody),
+                `hub Breadcrumb missing`
+            );
+            ok(
+                "HC-TRIPS-SEED-5b Trips.md hub does NOT contain a raw ## All Trips heading",
+                !/^##\s+All Trips\s*$/m.test(hubBody),
+                `hub still has ## All Trips`
+            );
+        }
+    }
 });
 
 // =============================================================================

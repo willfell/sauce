@@ -7490,12 +7490,16 @@ async function caseFA6DomainRuleFragments() {
     `got: ${trips.rule_fragments.length}`);
   assertTrue("FA6-EXTENDS-trips: all rule_fragments declare extends",
     trips.rule_fragments.every(rf => rf.fragment.extends === "_canonical-vocab"));
-  // trips Trip Atlas rule drops attending requirement + drops trip required_tag
-  const tripAtlasFrag = trips.rule_fragments.find(rf => /Trip Atlas\.md/.test(rf.fragment.scope.path_glob));
-  assertTrue("FA6-EXTENDS-trips: Trip Atlas rule drops attending requirement",
-    !(tripAtlasFrag.fragment.required_frontmatter || {}).attending);
-  assertTrue("FA6-EXTENDS-trips: Trip Atlas rule drops trip required_tag",
-    !(tripAtlasFrag.fragment.required_tags || []).some(t => t.tag === "trip"));
+  // trips: since the conformance refactor the atlas rule is a frontmatter-branch over
+  // spice/trips/*/*.md (filename-independent, mirrors the project blueprint). The
+  // `type: trip` branch still drops the legacy attending requirement + trip required_tag.
+  const tripsBranchFrag = trips.rule_fragments.find(rf => Array.isArray(rf.fragment.frontmatter_branch));
+  const tripBranch = (tripsBranchFrag.fragment.frontmatter_branch || [])
+    .find(b => b.when && b.when.frontmatter && b.when.frontmatter.type === "trip");
+  assertTrue("FA6-EXTENDS-trips: trip branch drops attending requirement",
+    !(tripBranch.required_frontmatter || {}).attending);
+  assertTrue("FA6-EXTENDS-trips: trip branch drops trip required_tag",
+    !(tripBranch.required_tags || []).some(t => t.tag === "trip"));
   // to-do: NEW rule_fragment (was empty). v0.116.0 adds a 2nd fragment for `to-do-recurring`.
   const todo = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
