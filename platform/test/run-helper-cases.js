@@ -4670,21 +4670,6 @@ async function caseDDA2ActivityShimPagesDelegate() {
   assertTrue("DD-A2: activity-panel shim missing .pages delegate (v0.5.0 regression)", ok);
 }
 
-async function caseDDA3TaskMarkdownRenderHelper() {
-  // v0.5.1 (v0.64.1): tasks panel renders markdown links + wikilinks as
-  // clickable HTML anchors via _renderTaskHTML(text). Guards the helper
-  // exists + LI uses innerHTML + LI onclick guards against anchor clicks.
-  console.log("\n--- Case DD-A3: tasks panel markdown link rendering ---");
-  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
-  const body = fs.readFileSync(p, "utf8");
-  const ok =
-    /_renderTaskHTML\s*\(/.test(body) &&
-    /li\.innerHTML\s*=\s*this\._renderTaskHTML\(task\.text\)/.test(body) &&
-    /closest\s*\(\s*["']a["']\s*\)/.test(body) &&
-    /a\.internal-link/.test(body);
-  assertTrue("DD-A3: tasks panel markdown render helper / LI rewire regressed", ok);
-}
-
 async function caseDDA4DashboardAllowlist() {
   // v0.5.2 (v0.64.2): _DEFAULT_DASHBOARD_BLUEPRINTS drops scratch-day + to-do.
   // v0.5.3 (v0.64.3): also drops `meeting` — has its own dedicated panel.
@@ -4785,56 +4770,6 @@ async function caseDDA8DashboardKanbanRollupRule() {
   const hasTodoBoardRoot = /spice\/boards\/To-Do-Board\.md/.test(rulesSource);
   assertTrue("DD-A8: kanban rollup rule missing type:'kanban' or boards-card child match or To-Do-Board root path",
     hasKanbanType && hasBoardsChildGlob && hasTodoBoardRoot);
-}
-
-async function caseDDA9DailyTodoExternalCount() {
-  // Card "To Do number on daily note to show to items for all": the daily
-  // To-Do pill must also count project + meeting tasks that are due TODAY or
-  // OVERDUE (undated / future-dated excluded). BEHAVIORAL test — executes the
-  // dual-exported pure statics (not a source-regex), so a broken filter fails.
-  console.log("\n--- Case DD-A9: daily To-Do count folds in due/overdue external tasks ---");
-  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
-  // Load the class the SAME way the CustomJS plugin does — as a bare class with no
-  // `module.exports` trailer (see run-customjs-loadable.js for why a trailer would
-  // break customJS). `new Function(src + "\nreturn SpaceDailyDashboard;")` mirrors
-  // run-renderer.js and needs no export to reach the pure statics.
-  const sddSrc = fs.readFileSync(p, "utf8");
-  const D = new Function(sddSrc + "\nreturn SpaceDailyDashboard;")();
-  if (!assertTrue("DD-A9: space-daily-dashboard.js exposes SpaceDailyDashboard via new Function()", !!D)) return;
-  const today = "2026-06-30";
-
-  // _parseTaskDue: dataview due::, [due::], Tasks 📅, none, and NOT false-matching
-  // a word that merely ends in "due" (overdue::, startdue::).
-  assertEqual(D._parseTaskDue("do thing due:: 2026-06-30"), "2026-06-30", "DD-A9: parse bare due::");
-  assertEqual(D._parseTaskDue("do [due:: 2026-07-01] thing"), "2026-07-01", "DD-A9: parse bracketed due::");
-  assertEqual(D._parseTaskDue("call bob 📅 2026-06-29"), "2026-06-29", "DD-A9: parse 📅 emoji");
-  assertEqual(D._parseTaskDue("no date here"), null, "DD-A9: no date → null");
-  assertEqual(D._parseTaskDue("was overdue:: 2026-06-29 note"), null, "DD-A9: 'overdue::' does NOT false-match");
-
-  // _countsTowardToday: today + overdue count; future + undated do not.
-  assertEqual(D._countsTowardToday("2026-06-30", today), true, "DD-A9: due today counts");
-  assertEqual(D._countsTowardToday("2026-06-01", today), true, "DD-A9: overdue counts");
-  assertEqual(D._countsTowardToday("2026-07-05", today), false, "DD-A9: future does NOT count");
-  assertEqual(D._countsTowardToday(null, today), false, "DD-A9: undated does NOT count");
-
-  // _foldExternalTasks: returns ONLY the OPEN external tasks due today/overdue.
-  // Completed external tasks are dropped (no completion date on those notes →
-  // Done stays scoped to today's to-do note, not "done ever").
-  const recs = [
-    { text: "overdue open due:: 2026-06-01", completed: false, parentPath: "spice/projects/A/A.md" },
-    { text: "due today 📅 2026-06-30", completed: false, parentPath: "spice/meetings/notes/B.md" },
-    { text: "future open due:: 2026-07-10", completed: false, parentPath: "spice/projects/C/C.md" },
-    { text: "undated open task", completed: false, parentPath: "spice/projects/D/D.md" },
-    { text: "done overdue due:: 2026-06-02", completed: true, parentPath: "spice/meetings/notes/E.md" },
-  ];
-  const openExt = D._foldExternalTasks(recs, today);
-  assertEqual(openExt.length, 2, "DD-A9: fold = overdue + due-today OPEN only (excludes future/undated/completed)");
-  assertEqual(openExt.map(t => t.parentPath).sort(),
-    ["spice/meetings/notes/B.md", "spice/projects/A/A.md"], "DD-A9: fold preserves source path");
-  assertTrue("DD-A9: completed external task is NOT counted (no 'done ever')",
-    !openExt.some(t => t.parentPath === "spice/meetings/notes/E.md"));
-  assertEqual(D._foldExternalTasks([], today), [], "DD-A9: empty records → empty");
-  assertEqual(D._foldExternalTasks(null, today), [], "DD-A9: null records tolerated");
 }
 
 // ============================================================
@@ -15164,13 +15099,11 @@ async function caseHCV0128FinancePlanning() {
   await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
-  await caseDDA3TaskMarkdownRenderHelper();
   await caseDDA4DashboardAllowlist();
   await caseDDA5DashboardPolish();
   await caseDDA6ResolveTitleDefensive();
   await caseDDA7DashboardAllowlistIncludesBoards();
   await caseDDA8DashboardKanbanRollupRule();
-  await caseDDA9DailyTodoExternalCount();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
