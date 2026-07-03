@@ -2805,3 +2805,20 @@ See `Docs/plans/2026-06-24-finance-hub-correctness-result.md`.
 
 See `Docs/plans/2026-06-23-finance-actuals-sync-result.md`.
 
+## Performance / seamlessness arc (v0.187.1 → v0.191.0) CLOSED 2026-07-03
+
+> Note: cycle-history full entries lapsed between ~v0.131 and v0.187 (autoloop-driven releases; per-cycle result docs were not written for those rapid patches). This entry resumes the log for the human-driven performance arc.
+
+Six releases, two adversarially-verified research fleets, all shipped end-to-end to ero/accuris/headspace and code-verified live:
+
+- **v0.187.1 (#291)** — seamless task actions (optimistic complete, scroll-hold via `RenderSafe.captureScroll`, metadataCache-gated add-reconcile, no self-reopen, Home day-refresh watcher). Fixed the "Home stuck on Friday" staleness (not a date-math bug — the Dataview refresh gate).
+- **v0.189.1 (#303)** — dashboard `_getActivityCount` two-sweeps→one + rollup memo; `SpaceNavButtons` day-arrow sweep gated to daily notes + registry read cached.
+- **v0.190.0 (#305)** — NEW `sauce-plugin` mechanism: first-party Obsidian plugin registers customJS at `onload()` → kills the cold-load flash for all ~75 widgets, zero renderer edits; new installer step `applyBundledPlugin` vendors it into `.obsidian/plugins/sauce/`. CustomJS stays the fallback. Mechanism count 25 → 26.
+- **v0.190.1 (#307)** — tech-debt cleanup: version-stamp the vendored plugin manifest; plugin reads CustomJS `jsFolder`; deleted orphan `planning-board-projects.js`; documented `bundled_plugin`/`applyBundledPlugin` + RESTART requirement in the agent-guides.
+- **v0.190.2 (#310)** — dashboard activity single sweep (2→1) via `ActivityFeed.query()` + `precomputed` render; cowork's 4 activity blocks unchanged.
+- **v0.191.0 (#312)** — plugin render reconciler: debounced ~500ms `metadataCache`/`vault` listener fires Dataview's scoped force-refresh for non-active-file changes → background reconcile ~5× faster; Dataview stays renderer + 2.5s backstop.
+
+**Deferred:** retire `project-referenced-by-cards.js` (needs a reviewed seed rebaseline — its own PR); targeted single-block re-render (unsafe/unverifiable — the debounced reconciler ships the safe felt-win instead).
+
+See `Docs/plans/2026-07-03-perf-seamlessness-arc-result.md` (+ the six `2026-07-03-*-{design,plan}.md` docs).
+
