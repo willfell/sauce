@@ -342,6 +342,130 @@ class TaskDialog {
         }
     }
 
+    /**
+     * CONFIRM-DELETE — a tiny yes/no modal for the surface row's trash icon. Opens
+     * a confirm overlay (matching the create/edit dialog grammar) and resolves a
+     * Promise so the caller (TaskTodayList.renderTaskRow's delete button) knows
+     * whether to remove the row:
+     *   { ok: true }                    the user confirmed AND markDeleted succeeded
+     *   { ok: false, cancelled: true }  the user cancelled / dismissed (Esc / backdrop)
+     *   { ok: false, reason }           cold-load (no app / no document) or delete failure
+     * The actual write goes through the SAME single-file markDeleted (status=deleted
+     * + move to _trash/), so the one-file-write invariant is intact and the delete is
+     * recoverable. Fully guarded — never throws (resolves a reason instead). Reuses
+     * the recoverable-delete so nothing is hard-deleted.
+     */
+    async confirmDelete(path) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const done = (r) => { if (settled) return; settled = true; resolve(r); };
+            try {
+                const { app, file } = this._resolveFile(path);
+                if (!app) { done({ ok: false, reason: 'app unavailable' }); return; }
+                const doc = (typeof document !== 'undefined' && document) ? document : null;
+                if (!doc || !doc.body || typeof doc.body.createDiv !== 'function') {
+                    done({ ok: false, reason: 'no document' });
+                    return;
+                }
+
+                // Friendly title for the prompt: frontmatter title → basename → path.
+                let title = '';
+                try {
+                    if (file && app.metadataCache && typeof app.metadataCache.getFileCache === 'function') {
+                        const cache = app.metadataCache.getFileCache(file);
+                        title = (cache && cache.frontmatter && cache.frontmatter.title) || '';
+                    }
+                } catch (_e) { title = ''; }
+                if (!title) {
+                    let base = String((file && file.basename) || path || '').replace(/\.md$/i, '');
+                    const slash = base.lastIndexOf('/');
+                    title = slash >= 0 ? base.slice(slash + 1) : base;
+                }
+
+                // Drop any prior confirm overlay so two taps can't stack modals.
+                try { const prior = doc.querySelector && doc.querySelector('.sauce-task-confirm-overlay'); if (prior) prior.remove(); } catch (_e) {}
+
+                const overlay = doc.body.createDiv({ cls: 'sauce-task-confirm-overlay' });
+                overlay.style.cssText = `
+                    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+                    display: flex; align-items: center; justify-content: center;
+                    z-index: 10000; padding: 16px;
+                `;
+                const modal = overlay.createDiv();
+                modal.style.cssText = `
+                    background: var(--background-primary, #1c1c1c);
+                    color: var(--text-normal, #ddd);
+                    border: 1px solid var(--background-modifier-border, #444);
+                    border-radius: var(--radius-m, 12px);
+                    padding: 20px 22px; box-sizing: border-box;
+                    width: min(380px, 92vw); max-height: 80vh; overflow-y: auto; overflow-x: hidden;
+                    box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
+                `;
+
+                let escListener = null;
+                const close = () => {
+                    try { if (escListener && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', escListener); } catch (_e) {}
+                    try { overlay.remove(); } catch (_e) {}
+                };
+                const cancel = () => { close(); done({ ok: false, cancelled: true }); };
+
+                const heading = modal.createEl('h3', { text: 'Delete task?' });
+                heading.style.cssText = 'margin: 0 0 8px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--text-normal, #ddd);';
+
+                const body = modal.createEl('div');
+                body.style.cssText = 'font-size: 13px; line-height: 1.5; color: var(--text-muted, #999);';
+                body.createSpan({ text: 'This moves ' });
+                const strong = body.createEl('span', { text: '“' + title + '”' });
+                strong.style.cssText = 'color: var(--text-normal, #ddd); font-weight: 600;';
+                body.createSpan({ text: ' to the trash. You can recover it from spice/tasks/_trash.' });
+
+                // Footer — Cancel (quiet ghost) + Delete (solid danger). Right-aligned,
+                // wraps as a unit on a narrow phone. Same button geometry as the editor.
+                const footer = modal.createEl('div');
+                footer.style.cssText = 'margin-top: 20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap;';
+                const BTN_BASE = 'display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 16px; border-radius: var(--radius-s, 6px); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; transition: background 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease;';
+
+                const cancelBtn = footer.createEl('button', { cls: 'sauce-task-confirm-cancel', text: 'Cancel' });
+                cancelBtn.style.cssText = BTN_BASE + 'border: 1px solid var(--background-modifier-border, #444); background: transparent; color: var(--text-normal, #ddd);';
+                try { cancelBtn.setAttribute('type', 'button'); } catch (_e) {}
+                cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background = 'var(--background-modifier-hover, rgba(255,255,255,0.06))'; });
+                cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = 'transparent'; });
+                cancelBtn.addEventListener('focus', () => { cancelBtn.style.outline = '2px solid var(--interactive-accent, #6a6abf)'; cancelBtn.style.outlineOffset = '1px'; });
+                cancelBtn.addEventListener('blur', () => { cancelBtn.style.outline = 'none'; });
+                cancelBtn.addEventListener('click', () => cancel());
+
+                const deleteBtn = footer.createEl('button', { cls: 'sauce-task-confirm-delete', text: 'Delete' });
+                deleteBtn.style.cssText = BTN_BASE + 'border: 1px solid var(--text-error, #e05561); background: var(--text-error, #e05561); color: var(--text-on-accent, #fff); font-weight: 600;';
+                try { deleteBtn.setAttribute('type', 'button'); } catch (_e) {}
+                deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.opacity = '0.9'; });
+                deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.opacity = '1'; });
+                deleteBtn.addEventListener('focus', () => { deleteBtn.style.outline = '2px solid var(--text-error, #e05561)'; deleteBtn.style.outlineOffset = '1px'; });
+                deleteBtn.addEventListener('blur', () => { deleteBtn.style.outline = 'none'; });
+                deleteBtn.addEventListener('click', async () => {
+                    try { deleteBtn.disabled = true; } catch (_e) {}
+                    let res;
+                    try { res = await this.markDeleted(path); }
+                    catch (e) { res = { ok: false, reason: (e && (e.message || String(e))) || 'unknown' }; }
+                    close();
+                    if (res && res.ok) done({ ok: true });
+                    else {
+                        try { new Notice('Could not delete task: ' + ((res && res.reason) || 'unknown'), 6000); } catch (_e) {}
+                        done({ ok: false, reason: (res && res.reason) || 'delete failed' });
+                    }
+                });
+
+                // Backdrop click + Escape cancel. Autofocus Cancel (the SAFE default,
+                // so a stray Enter dismisses rather than deletes).
+                overlay.addEventListener('click', (e) => { if (e && e.target === overlay) cancel(); });
+                escListener = (ev) => { if (ev && ev.key === 'Escape') cancel(); };
+                try { if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', escListener); } catch (_e) {}
+                if (typeof cancelBtn.focus === 'function') { try { setTimeout(() => { try { cancelBtn.focus(); } catch (_e) {} }, 30); } catch (_e) {} }
+            } catch (e) {
+                done({ ok: false, reason: (e && (e.message || String(e))) || 'unknown' });
+            }
+        });
+    }
+
     /** Resolve { app, file } from a vault-relative task path (browser-side). */
     _resolveFile(path) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;

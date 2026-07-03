@@ -1176,11 +1176,13 @@ function makeTreeNode(tag) {
       return c;
     },
     createSpan(opts) { return this.createEl('span', opts); },
+    createDiv(opts) { return this.createEl('div', opts); },
     appendText(v) { this.children.push({ tagName: '#text', textContent: String(v == null ? '' : v), parentNode: this }); },
     setText(v) { this.textContent = v; this.children = []; },
     empty() { this.children = []; },
     setAttribute(k, v) { this.attributes[k] = v; this.dataset[k] = v; },
     addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    removeEventListener() {},
     appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
     insertBefore(node, ref) {
       node.parentNode = this;
@@ -1280,6 +1282,193 @@ async function runOptimisticRemovalTests() {
   global.Notice = prevNotice;
 }
 
+// ---------- Row action icons: edit + delete (RACT-1..6) ----------
+// renderTaskRow now draws two subtle right-aligned action buttons AFTER the chips:
+// an EDIT icon (opens the TaskDialog edit dialog — NOT the note) and a DELETE icon
+// (opens TaskDialog.confirmDelete → on confirm the row is removed optimistically).
+// This is the shared row renderer used by EVERY surface (daily / meeting / project),
+// so one wiring test covers them all. Drives the REAL renderTaskRow against the
+// faithful tree stub + TD spies (same discipline as RTR-3 / the optimistic RTR-4..7).
+function findByCls(node, cls) {
+  if (!node || !node.children) return null;
+  for (const c of node.children) { if (c && c.cls === cls) return c; const d = findByCls(c, cls); if (d) return d; }
+  return null;
+}
+function fireClick(el) {
+  const fns = (el && el._listeners && el._listeners.click) || [];
+  return fns[0] ? fns[0]({ target: el, preventDefault() {}, stopPropagation() {} }) : undefined;
+}
+function childIndex(parent, node) { return (parent && parent.children) ? parent.children.indexOf(node) : -1; }
+
+async function runRowActionTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('RACT-1 renderTaskRow draws edit + delete action buttons, edit before delete, at the far right', async () => {
+    global.window = { app: { workspace: { openLinkText() {} } } };
+    const container = makeTreeNode('div');
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'spice/tasks/x.md' }, TD);
+    const actions = findByCls(row, 'sauce-task-today-actions');
+    assert(actions, 'actions group rendered');
+    // Chips + actions live in a right cluster that is the LAST child of the row
+    // (the far-right end / far-right wrapped line); actions is the far-right element
+    // WITHIN that cluster.
+    const cluster = findByCls(row, 'sauce-task-today-right');
+    assert(cluster, 'right cluster rendered');
+    assert(row.children[row.children.length - 1] === cluster,
+      'right cluster is the row far-right (idx ' + childIndex(row, cluster) + '/' + (row.children.length - 1) + ')');
+    assert(cluster.children[cluster.children.length - 1] === actions,
+      'actions are the far-right element of the cluster');
+    const edit = findByCls(actions, 'sauce-task-action-edit');
+    const del = findByCls(actions, 'sauce-task-action-delete');
+    assert(edit && del, 'both edit + delete buttons present');
+    assert(childIndex(actions, edit) < childIndex(actions, del), 'edit is LEFT of delete');
+    assert(edit.tagName === 'BUTTON' && del.tagName === 'BUTTON', 'both are <button>');
+    assert(edit.attributes['aria-label'] === 'Edit task', 'edit aria-label: ' + edit.attributes['aria-label']);
+    assert(del.attributes['aria-label'] === 'Delete task', 'delete aria-label: ' + del.attributes['aria-label']);
+  });
+
+  await okAsync('RACT-2 edit click opens the edit DIALOG (TD.open{edit}), not the note, not confirmDelete', async () => {
+    const opened = [], openedNote = [], confirmed = [];
+    global.window = { app: { workspace: { openLinkText: (t) => openedNote.push(t) } } };
+    const container = makeTreeNode('div');
+    const path = 'spice/tasks/go through mail.md';
+    const TD = { open: (a) => opened.push(a), confirmDelete: async (p) => { confirmed.push(p); return { ok: false }; } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'go through mail', path }, TD);
+    await fireClick(findByCls(row, 'sauce-task-action-edit'));
+    assert(opened.length === 1 && opened[0] && opened[0].edit === path, 'edit → TD.open({edit: path}): ' + JSON.stringify(opened));
+    assert(openedNote.length === 0, 'edit must NOT open the note: ' + JSON.stringify(openedNote));
+    assert(confirmed.length === 0, 'edit must NOT confirmDelete');
+  });
+
+  await okAsync('RACT-3 delete click routes to TD.confirmDelete(path), not TD.open, not the note', async () => {
+    const opened = [], openedNote = [], confirmed = [];
+    global.window = { app: { workspace: { openLinkText: (t) => openedNote.push(t) } } };
+    const container = makeTreeNode('div');
+    const path = 'spice/tasks/x.md';
+    const TD = { open: (a) => opened.push(a), confirmDelete: async (p) => { confirmed.push(p); return { ok: false, cancelled: true }; } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path }, TD);
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(confirmed.length === 1 && confirmed[0] === path, 'delete → confirmDelete(path): ' + JSON.stringify(confirmed));
+    assert(opened.length === 0, 'delete must NOT open the edit dialog');
+    assert(openedNote.length === 0, 'delete must NOT open the note');
+  });
+
+  await okAsync('RACT-4 delete CONFIRMED (ok:true) removes the row; sibling preserved', async () => {
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: { captureScroll: () => {} } } };
+    const container = makeTreeNode('div');
+    const TD = { open() {}, confirmDelete: async () => ({ ok: true }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    const sib = container.createEl('div');
+    assert(childIndex(container, row) === 0, 'row present before delete');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(childIndex(container, row) < 0, 'row removed after confirmed delete');
+    assert(childIndex(container, sib) >= 0, 'sibling preserved');
+  });
+
+  await okAsync('RACT-5 delete CANCELLED (ok:false) leaves the row in place', async () => {
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: { captureScroll: () => {} } } };
+    const container = makeTreeNode('div');
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false, cancelled: true }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(childIndex(container, row) === 0, 'row stays after cancel');
+  });
+
+  await okAsync('RACT-6 cold load (no TaskDialog) — edit + delete clicks no-op, never throw', async () => {
+    global.window = { customJS: {}, app: { workspace: { openLinkText() {} } } };
+    const container = makeTreeNode('div');
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, null);
+    let threw = false;
+    try { await fireClick(findByCls(row, 'sauce-task-action-edit')); await fireClick(findByCls(row, 'sauce-task-action-delete')); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'no throw on cold-load clicks');
+    assert(childIndex(container, row) === 0, 'row untouched');
+  });
+
+  global.window = prevWindow;
+  global.Notice = prevNotice;
+}
+
+// ---------- TaskDialog.confirmDelete — yes/no delete modal (TDCD-1..4) ----------
+// confirmDelete(path) opens a small confirm overlay and resolves:
+//   { ok: true }                    after the user confirms AND markDeleted succeeds
+//   { ok: false, cancelled: true }  when the user cancels / dismisses
+//   { ok: false, reason }           on cold-load / delete failure (never throws)
+// Drives the REAL confirmDelete against a document stub (faithful, not a replica).
+function makeDocumentStub() {
+  const body = makeTreeNode('body');
+  return { body, addEventListener() {}, removeEventListener() {}, querySelector() { return null; } };
+}
+
+async function runConfirmDeleteTests() {
+  const prevWindow = global.window;
+  const prevApp = global.app;
+  const prevDoc = global.document;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('TDCD-1 confirmDelete is a function on the instance', async () => {
+    assert(typeof TaskDialog.confirmDelete === 'function', 'instance method present');
+  });
+
+  await okAsync('TDCD-2 confirmDelete with no app (cold load) resolves {ok:false}, never touches document / throws', async () => {
+    global.window = {}; delete global.app; global.document = undefined;
+    let threw = false, res;
+    try { res = await new TaskDialogClass().confirmDelete('spice/tasks/x.md'); } catch (_e) { threw = true; }
+    assert(!threw, 'never throws');
+    assert(res && res.ok === false, 'resolves {ok:false}: ' + JSON.stringify(res));
+  });
+
+  await okAsync('TDCD-3 confirm → Delete button calls markDeleted + resolves {ok:true}, dismisses overlay', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    const deleted = [];
+    global.app = {
+      vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'go through mail' }) },
+      metadataCache: { getFileCache: () => ({ frontmatter: { title: 'go through mail' } }) },
+    };
+    global.window = { app: global.app };
+    const dialog = new TaskDialogClass();
+    dialog.markDeleted = async (p) => { deleted.push(p); return { ok: true }; };
+    const p = dialog.confirmDelete('spice/tasks/go through mail.md');
+    const del = findByCls(doc.body, 'sauce-task-confirm-delete');
+    assert(del, 'confirm Delete button rendered');
+    await fireClick(del);
+    const res = await p;
+    assert(deleted.length === 1 && deleted[0] === 'spice/tasks/go through mail.md', 'markDeleted(path): ' + JSON.stringify(deleted));
+    assert(res && res.ok === true, 'resolves {ok:true}: ' + JSON.stringify(res));
+    assert(findByCls(doc.body, 'sauce-task-confirm-delete') === null, 'overlay dismissed after delete');
+  });
+
+  await okAsync('TDCD-4 Cancel button resolves {ok:false, cancelled} + does NOT delete', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    const deleted = [];
+    global.app = {
+      vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'x' }) },
+      metadataCache: { getFileCache: () => null },
+    };
+    global.window = { app: global.app };
+    const dialog = new TaskDialogClass();
+    dialog.markDeleted = async (p) => { deleted.push(p); return { ok: true }; };
+    const p = dialog.confirmDelete('spice/tasks/x.md');
+    const cancel = findByCls(doc.body, 'sauce-task-confirm-cancel');
+    assert(cancel, 'Cancel button rendered');
+    await fireClick(cancel);
+    const res = await p;
+    assert(deleted.length === 0, 'markDeleted NOT called on cancel');
+    assert(res && res.ok === false && res.cancelled === true, 'resolves cancelled: ' + JSON.stringify(res));
+  });
+
+  global.window = prevWindow;
+  if (prevApp === undefined) delete global.app; else global.app = prevApp;
+  global.document = prevDoc;
+  global.Notice = prevNotice;
+}
+
 // ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..3) ----------
 // _reconcileAfterCreate registers a one-shot metadataCache 'changed' listener for
 // the new file's path → fires the Dataview force-refresh command → detaches. A
@@ -1326,6 +1515,8 @@ function runReconcileTests() {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
+  await runRowActionTests();
+  await runConfirmDeleteTests();
   runReconcileTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);

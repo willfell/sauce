@@ -184,7 +184,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint people axis widget_render: 2 uncovered
-  status: proposed
+  status: done
+  note: NEW run-people-render-guards.js drives PeopleHubCards / PersonNavButtons render() through the cold-load path (embed guard; PeopleHubCards empty dv.pages empty-state; PersonNavButtons tolerates missing dv.current via optional chaining, defaults name to "Person", builds its identity row + buttons) in normal + .markdown-embed contexts, asserting no-throw (6 guards). Wired into release:preflight. coverage-matrix.json regenerated: people widget_render now 2/2.
 
 - id: cov-blueprint-scratch-installer-migration
   title: Add coverage for scratch installer_migration (2/4)
