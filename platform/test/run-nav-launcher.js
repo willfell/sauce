@@ -43,23 +43,24 @@ const all = [
   { id: 'sc', label: 'Scratch',  _source: 'scratch',  action: { type: 'openLink', target: 'S.md' } },
   { id: 'w',  label: 'Wiki',     _source: 'wiki',     action: { type: 'openLink', target: 'W.md' } },
   { id: 'pr', label: 'Projects', _source: 'project',  action: { type: 'openLink', target: 'P.md' } },
+  { id: 'h',  label: 'Home',     _source: 'home',     action: { type: 'invoke_command', command_id: 'homepage:open-homepage' } },
 ];
 const part = inst2._partitionEntries(all);
-// pinned in the FIXED source order: daily, to-do, scratch, project, meetings.
+// pinned in the FIXED source order: home, to-do, scratch, project, meetings.
 ok('NL-6 pins exactly the 5 fixed sources', part.pinned.length === 5);
-ok('NL-7 pinned are in fixed source order (daily,to-do,scratch,project,meetings)',
-  part.pinned.map(e => e._source).join(',') === 'daily,to-do,scratch,project,meetings');
-ok('NL-8 rest = everything else, original order preserved',
-  part.rest.map(e => e.id).join(',') === 'co,pe,w');
+ok('NL-7 pinned are in fixed source order (home,to-do,scratch,project,meetings)',
+  part.pinned.map(e => e._source).join(',') === 'home,to-do,scratch,project,meetings');
+ok('NL-8 rest = everything else (incl. Daily now), original order preserved',
+  part.rest.map(e => e.id).join(',') === 'd,co,pe,w');
 // Absent pinned source simply drops its cell; extra entries per source → rest.
 const partial = inst2._partitionEntries([
-  { id: 'd',  label: 'Daily',   _source: 'daily',   action: {} },
-  { id: 'x',  label: 'X',       _source: 'other',   action: {} },
-  { id: 'd2', label: 'Daily 2', _source: 'daily',   action: {} }, // second daily → rest
+  { id: 'h',  label: 'Home',   _source: 'home',   action: {} },
+  { id: 'x',  label: 'X',      _source: 'other',  action: {} },
+  { id: 'h2', label: 'Home 2', _source: 'home',   action: {} }, // second home → rest
 ]);
 ok('NL-9 missing pins drop out; only first-per-source pins; extras → rest',
-  partial.pinned.length === 1 && partial.pinned[0].id === 'd'
-  && partial.rest.map(e => e.id).join(',') === 'x,d2');
+  partial.pinned.length === 1 && partial.pinned[0].id === 'h'
+  && partial.rest.map(e => e.id).join(',') === 'x,h2');
 
 console.log(`\n  ${pass} pass · ${fail} fail`);
 process.exit(fail ? 1 : 0);

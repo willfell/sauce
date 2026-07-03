@@ -1,11 +1,25 @@
 /**
- * SpaceNavButtons (CustomJS) — v2.3.0
+ * SpaceNavButtons (CustomJS) — v2.9.0 (Go-to launcher)
  *
  * Thin renderer over ranch/nav-buttons-registry.json. Each blueprint or
  * mechanism declares nav_buttons[] in its manifest; the installer aggregates
  * declarations into the registry namespaced under contributions.<source>.
- * This class reads the registry at render time, sorts entries by (order,
+ * This class reads the registry at render time, orders entries by (order,
  * source, id), and dispatches click on action.type.
+ *
+ * Layout (v2.12.0): prev/next-day arrows on top (space-between, when the daily
+ * blueprint is installed), then a fixed 3-COLUMN GRID of pinned quick-nav
+ * buttons — Home | To-Do | Scratch  /  Projects | Meetings | Go to… — where
+ * the final cell is the "Go to…" launcher holding EVERY OTHER blueprint. Pins
+ * are chosen by _partitionEntries via a fixed _source order; any pinned source
+ * absent from the registry simply drops its cell (the grid reflows). Each pinned
+ * button dispatches its own registry action; tapping "Go to…" opens a custom
+ * launcher OVERLAY appended to document.body (so it is never clipped by the note
+ * container): a full-width bottom sheet on mobile, an anchored dropdown on
+ * desktop (min 300px), listing the rest with icon + full label. Backdrop-tap /
+ * Escape / re-tap closes it. This replaces the v2.11.0 two-row even-split layout,
+ * the v2.9.0 native-Menu reveal (cramped/truncating on mobile), and the
+ * pre-v2.9.0 always-visible multi-row button grid.
  *
  * Action types (v0.4.2):
  *   - openLink             { target }
@@ -16,10 +30,8 @@
  *       to-do/meetings/journal files by clicking nav buttons on a future-dated daily note.
  *   - invoke_command       { command_id, args? } (v2.3.0; v2.6.0 adds optional args: {[k:string]:string})
  *
- * v2.3.0 also adds a top arrow row for daily-nav (prev/next-day with
- * skip-to-nearest-existing + grey-out) when daily blueprint installed.
- * Renders ABOVE the registry button list. Reads .obsidian/daily-notes.json
- * at runtime to acquire daily folder + format.
+ * The daily-nav arrows (prev/next-day with skip-to-nearest-existing + grey-out)
+ * read .obsidian/daily-notes.json at runtime to acquire daily folder + format.
  *
  * Usage in DataviewJS:
  *   await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
@@ -57,6 +69,43 @@ class SpaceNavButtons {
     return window.moment().format("YYYY-MM-DD");
   }
 
+  // Flatten registry.contributions.<source>[] into a single array tagged with
+  // _source, sorted by (order ?? 100, source, id). Pure; Node-testable.
+  _orderedEntries(registry) {
+    const entries = [];
+    const contributions = (registry && registry.contributions) || {};
+    for (const [source, btns] of Object.entries(contributions)) {
+      if (!Array.isArray(btns)) continue;
+      for (const btn of btns) entries.push({ ...btn, _source: source });
+    }
+    entries.sort((a, b) =>
+      (a.order ?? 100) - (b.order ?? 100) ||
+      a._source.localeCompare(b._source) ||
+      a.id.localeCompare(b.id)
+    );
+    return entries;
+  }
+
+  // Partition ordered entries into the fixed set of PINNED quick-nav buttons
+  // (by _source, in this order) and the "rest" that live inside the Go to…
+  // menu. Only the first entry per source can claim a pin slot. Pure;
+  // Node-testable. Returns { pinned: entry[], rest: entry[] }.
+  _partitionEntries(entries) {
+    const PINNED_SOURCES = ["home", "to-do", "scratch", "project", "meetings"];
+    const firstBySource = {};
+    for (const e of (entries || [])) {
+      if (e && e._source && !firstBySource[e._source]) firstBySource[e._source] = e;
+    }
+    const pinned = [];
+    const pinnedSet = new Set();
+    for (const src of PINNED_SOURCES) {
+      const e = firstBySource[src];
+      if (e) { pinned.push(e); pinnedSet.add(e); }
+    }
+    const rest = (entries || []).filter((e) => !pinnedSet.has(e));
+    return { pinned, rest };
+  }
+
   async render(dv) {
     const fallbackIcon = (label) =>
       `<span class="nav-fallback-icon">${(label && label[0] || "?").toUpperCase()}</span>`;
@@ -81,16 +130,7 @@ class SpaceNavButtons {
     }
 
     // ── Flatten + sort ───────────────────────────────────────────────────
-    const entries = [];
-    for (const [source, btns] of Object.entries(registry.contributions || {})) {
-      if (!Array.isArray(btns)) continue;
-      for (const btn of btns) entries.push({ ...btn, _source: source });
-    }
-    entries.sort((a, b) =>
-      (a.order ?? 100) - (b.order ?? 100) ||
-      a._source.localeCompare(b._source) ||
-      a.id.localeCompare(b.id)
-    );
+    const entries = this._orderedEntries(registry);
     if (entries.length === 0) return;
 
     // ── Render container (carry-over grid styling from v1.0.0) ───────────
@@ -106,91 +146,90 @@ class SpaceNavButtons {
       margin: 4px 0 12px 0;
     `;
 
-    // ── Top arrow row (daily-nav prev/next; rendered when daily blueprint installed) ──
+    // Partition into pinned quick-nav buttons + the rest (Go to… menu).
+    const { pinned, rest } = this._partitionEntries(entries);
     const dailyMeta = await this._readDailyNotesMeta();
+
+    // ── Chrome: prev/next-day arrows on top; a fixed 3-column grid below —
+    //    Home | To-Do | Scratch  /  Projects | Meetings | Go to… (the rest). ──
+    const chrome = container.createEl("div");
+    chrome.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
+
+    const arrowBaseStyle = `
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.8em;
+      font-family: inherit;
+      transition: color 0.15s, background 0.15s;
+    `;
+    const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+    const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+
+    // Row 1: prev/next-day arrows — only when the daily blueprint is installed.
     if (dailyMeta) {
+      const arrowRow = chrome.createEl("div");
+      arrowRow.style.cssText = `display: flex; align-items: center; justify-content: space-between; gap: 6px;`;
+
       const currentFile = dv.current && dv.current();
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
       const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-      const currentDate = dm
-        ? window.moment(dm[1], "YYYY-MM-DD", true)
-        : window.moment();
-
-      // Scan daily folder for existing dailies; sort by date.
+      const currentDate = dm ? window.moment(dm[1], "YYYY-MM-DD", true) : window.moment();
       const allDailies = app.vault.getMarkdownFiles()
         .filter(f => f.path.startsWith(dailyMeta.folder + "/"))
-        .map(f => {
-          const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/);
-          return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null;
-        })
+        .map(f => { const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/); return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null; })
         .filter(x => x && x.m.isValid())
         .sort((a, b) => a.m.diff(b.m));
-
       const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
       const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
 
-      const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
-      const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
-
-      const arrowBaseStyle = `
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 10px;
-        border-radius: 6px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 0.8em;
-        font-family: inherit;
-        transition: color 0.15s, background 0.15s;
-      `;
-
-      const topRow = container.createEl("div");
-      topRow.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      `;
-
-      // Prev button
-      const prevBtn = topRow.createEl("button");
-      const prevLabel = earlier ? earlier.m.format("ddd, MMM D") : "—";
-      prevBtn.innerHTML = chevronLeft + `<span>${prevLabel}</span>`;
-      const prevDisabled = !earlier;
-      prevBtn.style.cssText = arrowBaseStyle + (prevDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
-      if (!prevDisabled) {
+      const prevBtn = arrowRow.createEl("button");
+      prevBtn.innerHTML = chevronLeft + `<span>${earlier ? earlier.m.format("ddd, MMM D") : "—"}</span>`;
+      prevBtn.style.cssText = arrowBaseStyle + (earlier ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
+      if (earlier) {
         prevBtn.onmouseenter = () => { prevBtn.style.color = "var(--text-normal)"; prevBtn.style.background = "var(--background-modifier-hover)"; };
         prevBtn.onmouseleave = () => { prevBtn.style.color = "var(--text-muted)"; prevBtn.style.background = "transparent"; };
         prevBtn.onclick = () => app.workspace.openLinkText(earlier.file.path, "");
       }
 
-      // Next button
-      const nextBtn = topRow.createEl("button");
-      const nextLabel = later ? later.m.format("ddd, MMM D") : "—";
-      nextBtn.innerHTML = `<span>${nextLabel}</span>` + chevronRight;
-      const nextDisabled = !later;
-      nextBtn.style.cssText = arrowBaseStyle + (nextDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
-      if (!nextDisabled) {
+      const nextBtn = arrowRow.createEl("button");
+      nextBtn.innerHTML = `<span>${later ? later.m.format("ddd, MMM D") : "—"}</span>` + chevronRight;
+      nextBtn.style.cssText = arrowBaseStyle + (later ? "cursor: pointer;" : "opacity: 0.4; cursor: default;");
+      if (later) {
         nextBtn.onmouseenter = () => { nextBtn.style.color = "var(--text-normal)"; nextBtn.style.background = "var(--background-modifier-hover)"; };
         nextBtn.onmouseleave = () => { nextBtn.style.color = "var(--text-muted)"; nextBtn.style.background = "transparent"; };
         nextBtn.onclick = () => app.workspace.openLinkText(later.file.path, "");
       }
     }
 
-    const rowStyle = `
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    `;
+    // Row 2+: a fixed 3-column grid of pinned quick-nav buttons, with the
+    // "Go to…" menu (holding every other blueprint) as the final cell.
+    const grid = chrome.createEl("div");
+    grid.style.cssText = `display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;`;
+    const fillCell = (el) => {
+      el.style.width = "100%";
+      el.style.minWidth = "0";
+      el.style.overflow = "hidden";
+      el.style.justifyContent = "center";
+    };
+    for (const entry of pinned) fillCell(this._renderEntryButton(grid, entry, dv));
+    if (rest.length > 0) fillCell(this._renderPill(grid, rest, dv));
+  }
 
-    const btnBase = `
+  // Shared pill styling (outline chip, accent on hover) for the Home + Go to…
+  // chrome buttons.
+  _stylePill(el) {
+    el.style.cssText = `
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      justify-content: center;
       gap: 6px;
-      padding: 6px 14px;
+      padding: 7px 10px;
       border-radius: 6px;
       border: 1px solid var(--background-modifier-border);
       background: var(--background-primary);
@@ -200,50 +239,130 @@ class SpaceNavButtons {
       font-family: inherit;
       letter-spacing: 0.01em;
       transition: all 0.15s ease;
-      min-width: 0;
-      flex: 1;
     `;
+    el.onmouseenter = () => {
+      el.style.background = "var(--interactive-accent)";
+      el.style.color = "var(--text-on-accent)";
+      el.style.borderColor = "var(--interactive-accent)";
+    };
+    el.onmouseleave = () => {
+      el.style.background = "var(--background-primary)";
+      el.style.color = "var(--text-muted)";
+      el.style.borderColor = "var(--background-modifier-border)";
+    };
+  }
 
-    // Mobile splits across more rows; desktop uses 2 rows.
-    const isMobile = app.isMobile;
-    const rowCount = isMobile ? 3 : 2;
-    const baseSize = Math.floor(entries.length / rowCount);
-    const remainder = entries.length % rowCount;
-    const rows = [];
-    let idx = 0;
-    for (let r = 0; r < rowCount; r++) {
-      const size = baseSize + (r < remainder ? 1 : 0);
-      if (size > 0) rows.push(entries.slice(idx, idx + size));
-      idx += size;
+  // Pinned quick-nav button for any entry (Home / To-Do / Scratch / Projects /
+  // Meetings). Dispatches the entry's own registry action via the unchanged
+  // _dispatchAction. Label is ellipsised so it never overflows its grid cell.
+  _renderEntryButton(row, entry, dv) {
+    const btnEl = row.createEl("button");
+    const icon = (customJS.Icons?.resolve?.(entry.icon)) || "";
+    btnEl.innerHTML = icon + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${entry.label || entry._source || ""}</span>`;
+    this._stylePill(btnEl);
+    btnEl.onclick = () => this._dispatchAction(entry, dv);
+    return btnEl;
+  }
+
+  // Render the "Go to…" pill; wire its click to the launcher overlay.
+  _renderPill(row, menuEntries, dv) {
+    const pill = row.createEl("button");
+    const gridIcon = (customJS.Icons?.resolve?.("layout-grid")) ||
+      `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
+    const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+    pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
+    this._stylePill(pill);
+    pill.onclick = (evt) => this._openLauncher(evt, pill, menuEntries, dv);
+    return pill;
+  }
+
+  // Open the launcher as a viewport overlay appended to document.body (so it is
+  // never clipped by the note container): a full-width bottom sheet on mobile,
+  // an anchored dropdown on desktop. Backdrop-tap / Escape / re-tap closes it.
+  _openLauncher(evt, pill, menuEntries, dv) {
+    if (evt && evt.stopPropagation) evt.stopPropagation();
+    const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
+    if (!doc || !doc.body) return;
+
+    // Toggle: an already-open overlay means "close" — route through its own
+    // teardown (__navClose) so the keydown listener is removed too.
+    const open = doc.body.querySelector && doc.body.querySelector(".vault-nav-overlay");
+    if (open) { if (open.__navClose) open.__navClose(); else if (open.remove) open.remove(); return; }
+
+    const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
+
+    const overlay = doc.createElement("div");
+    overlay.className = "vault-nav-overlay";
+    overlay.style.cssText = `position: fixed; inset: 0; z-index: 1000;`
+      + (isMobile
+        ? " background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center;"
+        : " background: transparent;");
+
+    const panel = doc.createElement("div");
+    panel.className = "vault-nav-panel";
+    const panelBase = `box-sizing: border-box; background: var(--background-primary);`
+      + ` border: 1px solid var(--background-modifier-border);`
+      + ` box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;`
+      + ` display: flex; flex-direction: column;`;
+    if (isMobile) {
+      panel.style.cssText = panelBase
+        + ` width: 100%; max-width: 620px; max-height: 72vh;`
+        + ` border-radius: 16px 16px 0 0;`
+        + ` padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));`
+        + ` gap: 2px;`;
+      const handle = doc.createElement("div");
+      handle.style.cssText = `flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;`;
+      panel.appendChild(handle);
+    } else {
+      const rect = (pill && pill.getBoundingClientRect) ? pill.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+      const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
+      const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
+      let left = Math.round(rect.left || 0);
+      if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+      panel.style.cssText = panelBase
+        + ` position: fixed; top: ${Math.round((rect.bottom || 0) + 6)}px; left: ${left}px;`
+        + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
     }
 
-    const btnGrid = container.createEl("div");
-    btnGrid.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+    // Single teardown for ALL dismiss paths (backdrop, Escape, re-tap toggle,
+    // row select) — removes the overlay AND the keydown listener so a stale
+    // capture-phase Escape handler can never swallow keys elsewhere.
+    const close = () => {
+      if (overlay.remove) overlay.remove();
+      if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
+    };
+    const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+    overlay.__navClose = close;
 
-    for (const rowButtons of rows) {
-      const row = btnGrid.createEl("div");
-      row.style.cssText = rowStyle;
-
-      for (const btn of rowButtons) {
-        const el = row.createEl("button");
-        const iconHtml = customJS.Icons.resolve(btn.icon) || fallbackIcon(btn.label);
-        el.innerHTML = iconHtml + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${btn.label}</span>`;
-        el.style.cssText = btnBase;
-
-        el.onmouseenter = () => {
-          el.style.background = "var(--interactive-accent)";
-          el.style.color = "var(--text-on-accent)";
-          el.style.borderColor = "var(--interactive-accent)";
-        };
-        el.onmouseleave = () => {
-          el.style.background = "var(--background-primary)";
-          el.style.color = "var(--text-muted)";
-          el.style.borderColor = "var(--background-modifier-border)";
-        };
-
-        el.onclick = () => this._dispatchAction(btn, dv);
-      }
+    for (const btn of menuEntries) {
+      panel.appendChild(this._buildOverlayRow(doc, btn, dv, close, isMobile));
     }
+
+    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
+
+    overlay.appendChild(panel);
+    doc.body.appendChild(overlay);
+  }
+
+  // Build a single overlay row (icon + full label). Label lives in a <span> so
+  // it renders identically to the chrome glyphs; label text originates from
+  // installer-validated registry declarations (trusted, same boundary as the
+  // former grid). Full-width rows mean labels never truncate on mobile.
+  _buildOverlayRow(doc, btn, dv, close, isMobile) {
+    const row = doc.createElement("button");
+    const svg = customJS.Icons?.resolve?.(btn.icon) || "";
+    row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${svg}</span>`
+      + `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${btn.label}</span>`;
+    row.style.cssText = `cursor: pointer; display: flex; align-items: center; gap: 10px;`
+      + ` width: 100%; text-align: left; box-sizing: border-box; border: none;`
+      + ` border-radius: 8px; background: transparent; color: var(--text-normal);`
+      + ` font-family: inherit; line-height: 1.25;`
+      + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+    row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+    row.onmouseleave = () => { row.style.background = "transparent"; };
+    row.onclick = () => { close(); return this._dispatchAction(btn, dv); };
+    return row;
   }
 
   // ── Action dispatcher ──────────────────────────────────────────────────
