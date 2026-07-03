@@ -134,11 +134,10 @@ class ProjectsHubCards {
         // is shown; ordering is the only knob (sort mode, persisted).
         this._sortMode = this._readSortMode();
 
-        // DocSearch stays as the text-only filter strip above the grid.
-        // persist:false → the box never remembers text across visits;
-        // hideNativeSearch:true → suppress the scoped-Obsidian-search button
-        // (a later workstream owns the option in doc-search.js; passing it here
-        // is harmless if unrecognized). hideTags:true drops the tag-chip pool.
+        // DocSearch stays as the filter strip above the grid. Wiki parity
+        // (2026-07-02): hideNativeSearch dropped so the scoped "Search" button
+        // shows (matches the wiki). persist:false → the box never remembers text
+        // across visits; hideTags:true drops the tag-chip pool.
         const filterCtx = customJS.DocSearch.render(dv, {
             entityType: "project",
             scopePath:  "spice/projects",
@@ -146,13 +145,14 @@ class ProjectsHubCards {
             placeholder: "Filter projects by name or tag…",
             hideTags: true,           // projects hub: drop the tag-chip section entirely
             persist:  false,          // projects hub: search box never remembers text across visits
-            hideNativeSearch: true,   // projects hub: text-only, no native scoped-search button
             onChange: async (ctx) => {
                 this._filterCtx = ctx;
                 ctx.resultsContainer.empty();
                 await this._renderInner(this._makeProxyDv(dv, ctx.resultsContainer));
             },
         });
+        // Wiki parity: normalize the shared search strip's top gap to 12px.
+        try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
         this._filterCtx = filterCtx;
 
         // First-render INTO resultsContainer.

@@ -6,9 +6,9 @@
 //     • renderActionRow(dv) — from the `// entity-create:doc-note` marker block.
 //       A single full-width action row: New Doc · New Section · Move docs,
 //       bracketed above by a helper-owned hairline (SectionLabel.divider).
-//     • render(dv) — the search tier (a bare text input: hideTags +
-//       hideNativeSearch + persist:false) and the sections + docs list, each
-//       preceded by its own leading hairline.
+//     • render(dv) — the search tier (a text input + scoped "Search" button:
+//       hideTags + persist:false, wiki-aligned) and the sections + docs list,
+//       each preceded by its own leading hairline.
 //   The dashboard chip strip (docs/meetings/status/task/recent/tag chips) was
 //   REMOVED — it isn't part of the requested S3 layout.
 //
@@ -71,8 +71,11 @@ class ProjectDocsIndex {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
 
+    // Wiki parity (2026-07-02): the action row uses the wiki centered container
+    // style, but WITHOUT flex-wrap — New Doc · New Section · Move stay on ONE row
+    // (the wiki leaf action bar). Each button sized by _styleLeafBtn.
     const row = container.createEl("div");
-    row.style.cssText = "display:flex; gap:8px; flex-wrap:wrap; margin:6px 0;";
+    row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px;";
     const rowProxy = this._makeProxyDv(dv, row);
 
     // Cold-load race: poll for EntityCreate (mirrors section-hub.js).
@@ -92,11 +95,26 @@ class ProjectDocsIndex {
       }
     }
 
-    // Full-width: each button stretches to fill its share of the row
-    // (flex: 1 1 0; min-width: 96px).
+    // Wiki parity: each button stretches to an equal share of the centered row
+    // (flex: 1 1 0), sized to match the wiki leaf action bar.
     for (const btn of row.querySelectorAll("button")) {
-      btn.style.cssText += ";flex: 1 1 0; min-width: 96px;";
+      this._styleLeafBtn(btn);
     }
+  }
+
+  // Wiki-parity leaf-button sizing (mirrors WikiLeafActions._styleLeafBtn): each
+  // button takes an equal share of the centered one-row action bar (flex: 1 1 0)
+  // with a readable label + tap target; overflow hidden + nowrap so labels never
+  // wrap the row to two lines.
+  _styleLeafBtn(btn) {
+    if (!btn || !btn.style) return btn;
+    btn.style.flex = "1 1 0";
+    btn.style.minWidth = "0";
+    btn.style.fontSize = "0.9em";
+    btn.style.padding = "8px 14px";
+    btn.style.overflow = "hidden";
+    btn.style.whiteSpace = "nowrap";
+    return btn;
   }
 
   // The "Move docs" button — reuses the shipped bulk-move dialog. Rendered via
@@ -124,9 +142,10 @@ class ProjectDocsIndex {
     if (!ctx) return;
     const { projectSlug, projectPath, docsFolder, scopePath } = ctx;
 
-    // Tier 2 — simple search strip: a bare text input (no tag chips, no native
-    // scoped-search button, never persisted → starts empty on every visit).
-    // Leading hairline owns the tier boundary.
+    // Tier 2 — search strip: a text input + scoped "Search" button (wiki parity,
+    // 2026-07-02: hideNativeSearch dropped so the scoped-search button shows, just
+    // like the wiki). No tag chips (hideTags), never persisted (starts empty on
+    // every visit). Leading hairline owns the tier boundary.
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
     const filterCtx = customJS.DocSearch.render(dv, {
@@ -134,7 +153,6 @@ class ProjectDocsIndex {
       scopePath,
       recursive: true,
       hideTags: true,
-      hideNativeSearch: true,
       persist: false,
       entityType: "doc-note",
       onChange: (c) => {
@@ -143,6 +161,9 @@ class ProjectDocsIndex {
         this._renderResults(dv, projectSlug, projectPath, docsFolder, c);
       },
     });
+    // Wiki parity: normalize the shared search strip's top gap to 12px (it ships
+    // a 2px top margin) so the space above the search matches the divider grammar.
+    try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
     if (this._currentCtx) {
       Object.assign(filterCtx, this._currentCtx);
     }

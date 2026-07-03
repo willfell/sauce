@@ -8,8 +8,9 @@
 //   (SectionLabel.divider):
 //     1. action row — New Doc · New Sub-Section (depth-1 only) · Move docs, a
 //        single full-width row.
-//     2. simple search — a bare text input (hideTags + hideNativeSearch +
-//        persist:false); starts empty on every visit, re-renders on input.
+//     2. search — a text input + scoped "Search" button (hideTags +
+//        persist:false, wiki-aligned); starts empty on every visit, re-renders
+//        on input.
 //     3. list — sub-sections (depth-1 only) + docs cards.
 //   The Section Hub template ships NO entity-create marker blocks (retired at
 //   v0.124.1) — the create buttons are rendered inline here.
@@ -52,12 +53,14 @@ class SectionHub {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
+    // Search strip: text input + scoped "Search" button (wiki parity, 2026-07-02:
+    // hideNativeSearch dropped so the scoped-search button shows). No tag chips,
+    // never persisted (starts empty on every visit).
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
       recursive: depth === 1,
       hideTags: true,
-      hideNativeSearch: true,
       persist: false,
       entityType: "doc-note",
       onChange: (ctx) => {
@@ -66,6 +69,8 @@ class SectionHub {
         this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, ctx);
       },
     });
+    // Wiki parity: normalize the shared search strip's top gap to 12px.
+    try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
     if (this._currentCtx) {
       Object.assign(filterCtx, this._currentCtx);
     }
@@ -82,8 +87,11 @@ class SectionHub {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
 
+    // Wiki parity (2026-07-02): the action row uses the wiki centered container
+    // style, but WITHOUT flex-wrap — the create/move buttons stay on ONE row (the
+    // wiki leaf action bar). Each button sized by _styleLeafBtn.
     const btnRow = container.createEl("div");
-    btnRow.style.cssText = "display:flex; gap:8px; flex-wrap:wrap; margin:6px 0;";
+    btnRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px;";
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
     // Cold-load race: poll for EntityCreate.
@@ -126,11 +134,26 @@ class SectionHub {
     // Move docs — reuses the shipped bulk-move dialog (project-scoped).
     this._renderMoveDocsButton(dv, btnRow);
 
-    // Full-width: each button stretches to fill its share of the row
-    // (flex: 1 1 0; min-width: 96px).
+    // Wiki parity: each button stretches to an equal share of the centered row
+    // (flex: 1 1 0), sized to match the wiki leaf action bar.
     for (const btn of btnRow.querySelectorAll("button")) {
-      btn.style.cssText += ";flex: 1 1 0; min-width: 96px;";
+      this._styleLeafBtn(btn);
     }
+  }
+
+  // Wiki-parity leaf-button sizing (mirrors WikiLeafActions._styleLeafBtn): each
+  // button takes an equal share of the centered one-row action bar (flex: 1 1 0)
+  // with a readable label + tap target; overflow hidden + nowrap so labels never
+  // wrap the row to two lines.
+  _styleLeafBtn(btn) {
+    if (!btn || !btn.style) return btn;
+    btn.style.flex = "1 1 0";
+    btn.style.minWidth = "0";
+    btn.style.fontSize = "0.9em";
+    btn.style.padding = "8px 14px";
+    btn.style.overflow = "hidden";
+    btn.style.whiteSpace = "nowrap";
+    return btn;
   }
 
   // The "Move docs" button — dispatches the shipped DocBulkMoveActions bulk-move

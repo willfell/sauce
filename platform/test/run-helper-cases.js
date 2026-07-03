@@ -7066,8 +7066,14 @@ async function casePDC7NavButtonsRenamedToDocs() {
   const hasDocsIcon = /icons\.docs/.test(src);
   const hasDocsPath = /docs\/Docs\.md/.test(src);
   const hasDocsContextGuard = /ctx\.context\s*!==\s*"docs-hub"/.test(src);
-  const noWikiRemaining = !/wiki|Wiki/.test(src);
-  assertTrue("PDC-7: Docs label + icons.docs + docs path + docs-hub guard, no Wiki strings",
+  // 2026-07-02 (wiki-align): the original guard forbade ANY "wiki"/"Wiki"
+  // substring (a v0.52.0 check that the legacy "Wiki" nav BUTTON was renamed to
+  // "Docs"). The wiki-chrome alignment work added "wiki parity" prose to the
+  // comments, which is a legitimate reference to the wiki blueprint, not a
+  // resurrected Wiki button. Narrow the guard to what it actually protects: no
+  // `label: "Wiki"` button and no `spice/wiki` path leaking into project chrome.
+  const noWikiRemaining = !/label:\s*"Wiki"/.test(src) && !/spice\/wiki/.test(src);
+  assertTrue("PDC-7: Docs label + icons.docs + docs path + docs-hub guard, no Wiki button/path",
     hasDocsLabel && hasDocsIcon && hasDocsPath && hasDocsContextGuard && noWikiRemaining,
     `label=${hasDocsLabel} icon=${hasDocsIcon} path=${hasDocsPath} guard=${hasDocsContextGuard} clean=${noWikiRemaining}`);
 }
@@ -11392,8 +11398,10 @@ async function caseV01030Pdi6DashboardChips() {
     !/spice\/meetings\/notes/.test(src));
   assertTrue("HC-V01030-PDI-6b: no _projectMatches meeting-chip helper",
     !/_projectMatches\s*\(/.test(src));
-  assertTrue("HC-V01030-PDI-6c: renders the S3 search tier (hideTags + hideNativeSearch + persist:false)",
-    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
+  // 2026-07-02 (wiki-align): the search tier now SHOWS the scoped "Search" button
+  // to match the wiki (hideNativeSearch dropped). Still hideTags + persist:false.
+  assertTrue("HC-V01030-PDI-6c: renders the search tier (hideTags + persist:false, scoped Search button shown)",
+    /hideTags:\s*true/.test(src) && !/hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
 }
 
 // v0.103.0 S2.2 — SectionHub helper (depth-aware section + sub-section render).
@@ -12240,8 +12248,10 @@ async function caseV01060PdiWidgets3TopTags() {
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
   assertTrue("HC-V01060-PDI-WIDGETS-3: renderActionRow method declared (marker-dispatched action row)",
     /renderActionRow\s*\(/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: simple search — hideTags + hideNativeSearch + persist:false",
-    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
+  // 2026-07-02 (wiki-align): the scoped "Search" button now SHOWS to match the
+  // wiki (hideNativeSearch dropped). Still hideTags + persist:false.
+  assertTrue("HC-V01060-PDI-WIDGETS-3: search — hideTags + persist:false, scoped Search button shown",
+    /hideTags:\s*true/.test(src) && !/hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
   assertTrue("HC-V01060-PDI-WIDGETS-3: uses SectionLabel.divider for helper-owned hairlines",
     /SectionLabel\.divider/.test(src));
 }

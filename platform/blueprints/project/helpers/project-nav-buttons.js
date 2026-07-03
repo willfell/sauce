@@ -203,45 +203,72 @@ class ProjectNavButtons {
         return { core, overflow };
     }
 
-    // WS3 — overflow "More" menu. A document.body-appended overlay (so it is
-    // never clipped by the note's scroll container), one row per entry: the
-    // entry's icon + label; click opens the target and closes. Mirrors the
-    // Space-nav Go-to launcher (space-nav-buttons.js _openLauncher): a bottom
-    // sheet on mobile, a centered dropdown on desktop. A SINGLE close() removes
-    // the overlay AND the one Escape keydown listener — never leave a dangling
-    // listener (the leak a prior nav-launcher review caught). Backdrop click
-    // (target === overlay) closes too. Defensive against a missing document /
-    // customJS / app.isMobile.
-    _openMoreMenu(entries) {
-        const doc = (typeof document !== "undefined" && document) || null;
+    // WS3 — overflow "More" menu, rewritten (2026-07-02) to MIRROR the Space-nav
+    // Go-to launcher (space-nav-buttons.js _openLauncher). A document.body-appended
+    // overlay (so it is never clipped by the note's scroll container). On DESKTOP
+    // it is a transparent overlay with a panel positioned `fixed`, anchored to the
+    // "More" button's getBoundingClientRect (dropdown under the trigger); on MOBILE
+    // a dim backdrop + bottom sheet with a handle bar. Re-tapping "More" while the
+    // overlay is open TOGGLES it closed. A SINGLE close() removes the overlay AND
+    // the capture-phase Escape keydown listener — never leave a dangling listener
+    // (the leak a prior nav-launcher review caught). Backdrop click (target ===
+    // overlay) closes too. Uses activeDocument (multi-window) with a document
+    // fallback. Defensive against a missing document / customJS / app.isMobile.
+    //
+    // triggerEl = the rendered "More" AccentButton element (for desktop anchoring).
+    _openMoreMenu(entries, triggerEl) {
+        const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
         if (!doc || !doc.body || !Array.isArray(entries) || entries.length === 0) return;
+
+        // Toggle: an already-open overlay means "close" — route through its own
+        // teardown (__navClose) so the keydown listener is removed too.
+        const alreadyOpen = doc.body.querySelector && doc.body.querySelector(".pnb-more-overlay");
+        if (alreadyOpen) { if (alreadyOpen.__navClose) alreadyOpen.__navClose(); else if (alreadyOpen.remove) alreadyOpen.remove(); return; }
+
         const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
 
         const overlay = doc.createElement("div");
         overlay.className = "pnb-more-overlay";
-        overlay.style.cssText = "position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.5); display: flex; justify-content: center; "
-            + (isMobile ? "align-items: flex-end;" : "align-items: center;");
+        overlay.style.cssText = "position: fixed; inset: 0; z-index: 1000;"
+            + (isMobile
+                ? " background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center;"
+                : " background: transparent;");
 
         const panel = doc.createElement("div");
-        const panelBase = "box-sizing: border-box; background: var(--background-primary); border: 1px solid var(--background-modifier-border); box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto; display: flex; flex-direction: column;";
+        const panelBase = "box-sizing: border-box; background: var(--background-primary);"
+            + " border: 1px solid var(--background-modifier-border);"
+            + " box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;"
+            + " display: flex; flex-direction: column;";
         if (isMobile) {
             panel.style.cssText = panelBase
-                + " width: 100%; max-width: 620px; max-height: 72vh; border-radius: 16px 16px 0 0; padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 2px;";
+                + " width: 100%; max-width: 620px; max-height: 72vh;"
+                + " border-radius: 16px 16px 0 0;"
+                + " padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));"
+                + " gap: 2px;";
             const handle = doc.createElement("div");
             handle.style.cssText = "flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;";
             panel.appendChild(handle);
         } else {
+            const rect = (triggerEl && triggerEl.getBoundingClientRect) ? triggerEl.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+            const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
+            const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
+            let left = Math.round(rect.left || 0);
+            if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
             panel.style.cssText = panelBase
-                + " min-width: 260px; max-width: 420px; max-height: 60vh; border-radius: 12px; padding: 8px; gap: 2px;";
+                + ` position: fixed; top: ${Math.round((rect.bottom || 0) + 6)}px; left: ${left}px;`
+                + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
         }
 
-        // Single teardown for ALL dismiss paths (backdrop, Escape, row select).
+        // Single teardown for ALL dismiss paths (backdrop, Escape, re-tap toggle,
+        // row select) — removes the overlay AND the capture-phase keydown listener
+        // so a stale Escape handler can never swallow keys elsewhere.
         const close = () => {
             if (overlay.remove) overlay.remove();
             else if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-            if (doc.removeEventListener) doc.removeEventListener("keydown", onKey);
+            if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
         };
         const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+        overlay.__navClose = close;
 
         for (const entry of entries) {
             const row = doc.createElement("button");
@@ -257,10 +284,23 @@ class ProjectNavButtons {
         }
 
         overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
-        if (doc.addEventListener) doc.addEventListener("keydown", onKey);
+        if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
 
         overlay.appendChild(panel);
         doc.body.appendChild(overlay);
+    }
+
+    // Wiki-parity hub-button sizing (mirrors WikiHubActions._mobilize): each
+    // button takes ~half the row (min 128px) so a phone wraps them 2-up instead
+    // of shrinking every label to an ellipsis. Layered on AccentButton's flex:1
+    // base. Applied to the core nav buttons AND the "More" button (2-up wrap).
+    _mobilize(btn) {
+        if (!btn || !btn.style) return btn;
+        btn.style.flex = "1 1 calc(50% - 6px)";
+        btn.style.minWidth = "128px";
+        btn.style.fontSize = "0.92em";
+        btn.style.padding = "9px 14px";
+        return btn;
     }
 
     // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
@@ -715,17 +755,13 @@ class ProjectNavButtons {
             customJS.SectionLabel.divider(root);
         }
 
-        const sectionLabel = root.createEl("div");
-        sectionLabel.textContent = "Project";
-        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
-
+        // Wiki parity (2026-07-02): NO uppercase "Project" label above the row
+        // (the wiki hub/leaf action rows carry no label), and the core button row
+        // uses the wiki hub container style — a centered, max-width, wrapping flex
+        // row — with each button sized by _mobilize so a phone wraps them 2-up
+        // rather than ellipsising every label.
         const container = root.createEl("div");
-        container.style.cssText = `
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-bottom: 4px;
-        `;
+        container.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
         // WS3 — split the built nav row into a `core` row (rendered inline) and
         // an `overflow` set (Map / To-Do / Helpful Links) folded behind a "More"
@@ -743,24 +779,27 @@ class ProjectNavButtons {
         // openFile bypasses the link resolver entirely; openLinkText is the fallback
         // only when the file isn't indexed yet.
         for (const btn of core) {
-            customJS.AccentButton.render(container, {
+            this._mobilize(customJS.AccentButton.render(container, {
                 label: btn.label,
                 icon: btn.icon,
                 onClick: () => this._openNavTarget(btn.path),
                 flex: true
-            });
+            }));
         }
 
         // WS3 — "More ▾" opens an overlay listing the overflow destinations.
-        // Rendered only when there is at least one overflow button.
+        // Rendered only when there is at least one overflow button. Capture the
+        // rendered element so the launcher (mirroring the Go-to launcher) can
+        // anchor its desktop dropdown to it via getBoundingClientRect.
         if (overflow.length > 0) {
             const moreIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
-            customJS.AccentButton.render(container, {
+            const moreBtn = customJS.AccentButton.render(container, {
                 label: "More",
                 icon: moreIcon,
-                onClick: () => this._openMoreMenu(overflow),
+                onClick: () => this._openMoreMenu(overflow, moreBtn),
                 flex: true
             });
+            this._mobilize(moreBtn);
         }
 
         // --- Workstream widget (card notes only) ---

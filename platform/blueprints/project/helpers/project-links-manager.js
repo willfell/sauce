@@ -77,16 +77,31 @@ class ProjectLinksManager {
       customJS.SectionLabel.divider(c);
     }
 
-    // ONE full-width action row: the two buttons split the width evenly and wrap
-    // on narrow (mobile) containers.
+    // Wiki parity (2026-07-02): ONE centered action row using the wiki container
+    // style, WITHOUT flex-wrap — Add link · Manage links split the width evenly on
+    // one row (the wiki leaf action bar). Each button sized by _styleLeafBtn.
     const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin: 0.2em 0;";
+    row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px;";
     const add = customJS.AccentButton.render(row, { label: "Add link", icon: plusIcon, onClick: () => this._onAdd(dv) });
     const manage = customJS.AccentButton.render(row, { label: "Manage links", icon: gearIcon, onClick: () => this._onManage(dv) });
     for (const btn of [add, manage]) {
-      if (btn && btn.style) btn.style.flex = "1 1 0";
-      if (btn && btn.style) btn.style.minWidth = "96px";
+      this._styleLeafBtn(btn);
     }
+  }
+
+  // Wiki-parity leaf-button sizing (mirrors WikiLeafActions._styleLeafBtn): each
+  // button takes an equal share of the centered one-row action bar (flex: 1 1 0)
+  // with a readable label + tap target; overflow hidden + nowrap so labels never
+  // wrap the row to two lines.
+  _styleLeafBtn(btn) {
+    if (!btn || !btn.style) return btn;
+    btn.style.flex = "1 1 0";
+    btn.style.minWidth = "0";
+    btn.style.fontSize = "0.9em";
+    btn.style.padding = "8px 14px";
+    btn.style.overflow = "hidden";
+    btn.style.whiteSpace = "nowrap";
+    return btn;
   }
 
   // ── data + write ─────────────────────────────────────────────────────────
