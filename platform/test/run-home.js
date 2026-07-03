@@ -257,12 +257,13 @@ function descendants(el) {
 
   // ── HOME-CAP: _captureSpec() shape ─────────────────────────────────────────
   const spec = SpaceHome._captureSpec();
-  assertTrue("HOME-CAP-1 _captureSpec returns an array of 3", Array.isArray(spec) && spec.length === 3,
-    `_captureSpec should return exactly 3 entries (todo dropped for inline capture); got ${JSON.stringify(spec)}`);
+  assertTrue("HOME-CAP-1 _captureSpec returns an array of 2", Array.isArray(spec) && spec.length === 2,
+    `_captureSpec should return exactly 2 entries (todo is inline; openDaily removed); got ${JSON.stringify(spec)}`);
   const keys = Array.isArray(spec) ? spec.map((s) => s && s.key) : [];
   assertEq("HOME-CAP-2 key[0] meeting", keys[0], "meeting");
   assertEq("HOME-CAP-3 key[1] scratch", keys[1], "scratch");
-  assertEq("HOME-CAP-4 key[2] openDaily", keys[2], "openDaily");
+  assertTrue("HOME-CAP-4 openDaily entry removed", keys.indexOf("openDaily") < 0,
+    `the Open-today's-daily button must be gone; got ${JSON.stringify(keys)}`);
   assertTrue("HOME-CAP-5 no 'todo' entry remains", keys.indexOf("todo") < 0,
     `the todo button must be gone (replaced by inline capture); got ${JSON.stringify(keys)}`);
   assertTrue("HOME-CAP-6 every entry has { key, label, icon }",
@@ -324,7 +325,7 @@ function descendants(el) {
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
       const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
       assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
-      assertEq("HOME-RENDER-11 menu holds exactly 3 action items (meeting/scratch/openDaily)", items.length, 3);
+      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/scratch)", items.length, 2);
       assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
@@ -365,7 +366,7 @@ function descendants(el) {
     const md = menu ? descendants(menu) : [];
     const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
     const inputs = md.filter((n) => n.tag === "input");
-    assertEq("HOME-CAP-7 render wired 3 action items", items.length, 3);
+    assertEq("HOME-CAP-7 render wired 2 action items", items.length, 2);
     assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
     assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
@@ -384,7 +385,7 @@ function descendants(el) {
     assertTrue("HOME-CAP-8c clicking + again closes the menu", menu && !isOpen(menu),
       "clicking + again should remove is-open");
 
-    // ── Item dispatch: order is [meeting, scratch, openDaily]. ──
+    // ── Item dispatch: order is [meeting, scratch] (Open-daily removed). ──
     await fire(items[0]);
     await fire(items[1]);
     assertEq("HOME-CAP-11 meeting+scratch → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
@@ -392,9 +393,6 @@ function descendants(el) {
     assertEq("HOME-CAP-13 scratch → instance 'scratch'", calls.entityCreate[1] && calls.entityCreate[1].instance, "scratch");
     assertTrue("HOME-CAP-14 EntityCreate.create receives dv", calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
       "EntityCreate.create must receive the live dv");
-    await fire(items[2]);
-    assertEq("HOME-CAP-15 openDaily → executeCommandById once", calls.commandIds.length, 1);
-    assertEq("HOME-CAP-16 openDaily → command id 'daily-notes'", calls.commandIds[0], "daily-notes");
 
     // ── Inline capture: Add click with typed text → createQuick. ──
     {
