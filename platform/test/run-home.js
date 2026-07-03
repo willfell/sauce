@@ -293,39 +293,39 @@ function descendants(el) {
     assertTrue("HOME-RENDER-6 a .sauce-home wrapper is emitted", !!home,
       "render must build a .sauce-home wrapper div");
 
-    // (c) DOM order. Greeting → glance → capture band live INSIDE .sauce-home
-    // (greeting first). The dashboard mount is appended by the guard into
-    // dv.container (the note's own container — the same one .sauce-home lives in),
-    // so in the real DOM it is a SIBLING of .sauce-home appended AFTER it
-    // (render() calls the guard last). We assert both: intra-.sauce-home order +
-    // container-level "dashboard comes after .sauce-home".
+    // (c) DOM order + structure. New shape: a HEAD row (.sauce-home-head) is the
+    // first child (greeting on the left + the "+" quick-add on the right), then
+    // the glance line, then the dashboard mount. ALL capture lives inside the
+    // head's dropdown (.sauce-home-add-menu) — there is NO always-on band.
     if (home) {
       const kids = home.children;
-      const greetingIdx = kids.findIndex((k) => (k.cls || "").includes("sauce-home-greeting"));
-      // `.sauce-home-glance` — match precisely (not a substring of another class);
-      // capture band is `.sauce-home-capture`. Use exact-token checks so glance
-      // isn't confused with capture.
       const hasCls = (k, cls) => (k.cls || "").split(/\s+/).indexOf(cls) >= 0;
+      const headIdx = kids.findIndex((k) => hasCls(k, "sauce-home-head"));
       const glanceIdx = kids.findIndex((k) => hasCls(k, "sauce-home-glance"));
-      const bandIdx = kids.findIndex((k) => hasCls(k, "sauce-home-capture"));
-      assertTrue("HOME-RENDER-7 greeting is the first child of .sauce-home", greetingIdx === 0,
-        `greeting (.sauce-home-greeting) should be first; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
-      assertTrue("HOME-RENDER-7b glance line follows greeting", glanceIdx > greetingIdx && glanceIdx >= 0,
-        `glance (.sauce-home-glance) should follow the greeting; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
-      assertTrue("HOME-RENDER-8 capture band follows the glance line", bandIdx > glanceIdx && bandIdx >= 0,
-        `capture band (.sauce-home-capture) should follow the glance line; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
+      assertTrue("HOME-RENDER-7 head row is the first child of .sauce-home", headIdx === 0,
+        `head (.sauce-home-head) should be first; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
+      assertTrue("HOME-RENDER-7b glance line follows the head row", glanceIdx > headIdx && glanceIdx >= 0,
+        `glance (.sauce-home-glance) should follow the head; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
 
-      // (d) capture band contains exactly 1 text input (the inline jot) + 3
-      // capture buttons (meeting/scratch/openDaily). The Add button belongs to the
-      // input row (it submits the jot), so it's asserted separately.
-      const band = bandIdx >= 0 ? kids[bandIdx] : null;
-      const hasBandCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
-      const inputs = band ? descendants(band).filter((n) => n.tag === "input") : [];
-      const captureBtns = band ? descendants(band).filter((n) => n.tag === "button" && hasBandCls(n, "sauce-home-capture-btn")) : [];
-      const addBtns = band ? descendants(band).filter((n) => n.tag === "button" && hasBandCls(n, "sauce-home-capture-add")) : [];
-      assertEq("HOME-RENDER-10 capture band holds exactly 1 jot input", inputs.length, 1);
-      assertEq("HOME-RENDER-11 capture band holds exactly 3 capture buttons", captureBtns.length, 3);
-      assertEq("HOME-RENDER-12 capture band holds exactly 1 Add button", addBtns.length, 1);
+      const head = headIdx >= 0 ? kids[headIdx] : null;
+      const dsc = head ? descendants(head) : [];
+      const hasD = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+      assertTrue("HOME-RENDER-7c head holds the greeting", dsc.some((n) => hasD(n, "sauce-home-greeting")),
+        "head should contain .sauce-home-greeting");
+      const addBtns = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add"));
+      assertEq("HOME-RENDER-8 head holds exactly one '+' quick-add button", addBtns.length, 1);
+      const menu = dsc.find((n) => hasD(n, "sauce-home-add-menu")) || null;
+      assertTrue("HOME-RENDER-8b the '+' owns a .sauce-home-add-menu dropdown", !!menu,
+        "there should be a .sauce-home-add-menu");
+
+      // The menu holds all capture UI: 1 jot input + 1 Add button + 3 action items.
+      const md = menu ? descendants(menu) : [];
+      const inputs = md.filter((n) => n.tag === "input");
+      const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
+      const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
+      assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
+      assertEq("HOME-RENDER-11 menu holds exactly 3 action items (meeting/scratch/openDaily)", items.length, 3);
+      assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
     // Container-level order: .sauce-home first, guard mount after it.
@@ -337,22 +337,18 @@ function descendants(el) {
       `.sauce-home should precede the dashboard mount in the container; top-level cls = ${JSON.stringify(top.map((k) => k.cls))}`);
   }
 
-  // ── HOME-CAP: dispatch wiring per button + inline capture ──────────────────
+  // ── HOME-CAP: "+" toggle + per-item dispatch + inline capture ───────────────
   installMoment("2026-07-02", 6);
   {
     const dv = makeDv();
 
-    // Spies on the real APIs. computeCounts feeds the glance line (return a mix
-    // so the glance renders chips); createQuick is the inline-capture entrypoint.
     const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [] };
     global.customJS = {
       SpaceDailyDashboard: {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
-      TaskDialog: {
-        createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); },
-      },
+      TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
       EntityCreate: { create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); } },
     };
     global.app = { commands: { executeCommandById: (id) => calls.commandIds.push(id) } };
@@ -362,78 +358,77 @@ function descendants(el) {
     await home_.render(dv, {});
 
     const home = dv.container.querySelector(".sauce-home");
-    const hasBandCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
-    const band = home ? home.children.find((k) => hasBandCls(k, "sauce-home-capture")) : null;
-    // The 3 spec buttons carry .sauce-home-capture-btn; the Add button is separate.
-    const buttons = band ? descendants(band).filter((n) => n.tag === "button" && hasBandCls(n, "sauce-home-capture-btn")) : [];
-    const inputs = band ? descendants(band).filter((n) => n.tag === "input") : [];
-    assertEq("HOME-CAP-7 render wired 3 capture buttons", buttons.length, 3);
-    assertEq("HOME-CAP-7b render wired 1 inline capture input", inputs.length, 1);
-
-    // computeCounts was consulted for the glance line, with the live dv + today.
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add")) || null;
+    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu")) || null;
+    const md = menu ? descendants(menu) : [];
+    const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
+    const inputs = md.filter((n) => n.tag === "input");
+    assertEq("HOME-CAP-7 render wired 3 action items", items.length, 3);
+    assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
     assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
-      `expected one computeCounts(dv,'2026-07-02',…) call; got count=${calls.computeCounts.length}, today=${calls.computeCounts[0] && calls.computeCounts[0].t}`);
+      `expected one computeCounts(dv,'2026-07-02',…) call; got count=${calls.computeCounts.length}`);
 
-    // Invoke each button's click handler and assert the dispatch.
-    const fire = (btn) => {
-      if (btn && typeof btn.onclick === "function") return btn.onclick({});
-      return undefined;
-    };
+    const fire = (btn, e) => (btn && typeof btn.onclick === "function") ? btn.onclick(e || {}) : undefined;
 
-    // Buttons are now [meeting, scratch, openDaily] (todo is inline).
-    // Button 0 = meeting → EntityCreate.create({ instance:'meeting', dv })
-    await fire(buttons[0]);
-    // Button 1 = scratch → EntityCreate.create({ instance:'scratch', dv })
-    await fire(buttons[1]);
+    // ── "+" toggles the dropdown open/closed (via _setClass). ──
+    const isOpen = (n) => (n.cls || "").split(/\s+/).indexOf("is-open") >= 0;
+    assertTrue("HOME-CAP-8a menu starts closed", menu && !isOpen(menu),
+      "menu should not carry is-open before the + is clicked");
+    fire(addBtn);
+    assertTrue("HOME-CAP-8b clicking + opens the menu", menu && isOpen(menu) && addBtn && isOpen(addBtn),
+      "clicking + should add is-open to the menu AND the + button");
+    fire(addBtn);
+    assertTrue("HOME-CAP-8c clicking + again closes the menu", menu && !isOpen(menu),
+      "clicking + again should remove is-open");
+
+    // ── Item dispatch: order is [meeting, scratch, openDaily]. ──
+    await fire(items[0]);
+    await fire(items[1]);
     assertEq("HOME-CAP-11 meeting+scratch → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
     assertEq("HOME-CAP-12 meeting → instance 'meeting'", calls.entityCreate[0] && calls.entityCreate[0].instance, "meeting");
     assertEq("HOME-CAP-13 scratch → instance 'scratch'", calls.entityCreate[1] && calls.entityCreate[1].instance, "scratch");
-    assertTrue("HOME-CAP-14 EntityCreate.create receives dv",
-      calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
+    assertTrue("HOME-CAP-14 EntityCreate.create receives dv", calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
       "EntityCreate.create must receive the live dv");
-
-    // Button 2 = openDaily → app.commands.executeCommandById('daily-notes')
-    await fire(buttons[2]);
+    await fire(items[2]);
     assertEq("HOME-CAP-15 openDaily → executeCommandById once", calls.commandIds.length, 1);
     assertEq("HOME-CAP-16 openDaily → command id 'daily-notes'", calls.commandIds[0], "daily-notes");
 
-    // ── Inline capture: Add click with typed text → createQuick(typed text). ──
+    // ── Inline capture: Add click with typed text → createQuick. ──
     {
-      const input = inputs[0];
-      input.value = "buy milk";
-      const addBtn = descendants(band).find((n) => n.tag === "button" && hasBandCls(n, "sauce-home-capture-add"));
-      await fire(addBtn);
+      inputs[0].value = "buy milk";
+      const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+      await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add click → createQuick carries the typed title + today + source",
+      assertTrue("HOME-CAP-19 Add → createQuick carries title + today + source",
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
           && calls.createQuick[0].today === "2026-07-02" && calls.createQuick[0].source === "daily",
         `expected createQuick({title:'buy milk',today:'2026-07-02',source:'daily'}); got ${JSON.stringify(calls.createQuick[0])}`);
     }
 
-    // ── Inline capture: Enter keydown on the input → createQuick(typed text). ──
-    // (Add's re-render rebuilt .sauce-home; re-locate the fresh input/band.)
+    // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
     {
       calls.createQuick.length = 0;
       const home2 = dv.container.querySelector(".sauce-home");
-      const band2 = home2 ? home2.children.find((k) => (k.cls || "").split(/\s+/).indexOf("sauce-home-capture") >= 0) : null;
-      const input2 = band2 ? descendants(band2).filter((n) => n.tag === "input")[0] : null;
+      const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+      const input2 = menu2 ? descendants(menu2).filter((n) => n.tag === "input")[0] : null;
       input2.value = "call mom";
-      // Fire the keydown listener the input registered (via el.dispatch).
       if (input2 && typeof input2.dispatch === "function") await input2.dispatch("keydown", { key: "Enter" });
-      assertEq("HOME-CAP-20 Enter keydown → createQuick called once", calls.createQuick.length, 1);
-      assertEq("HOME-CAP-21 Enter keydown → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
+      assertEq("HOME-CAP-20 Enter → createQuick called once", calls.createQuick.length, 1);
+      assertEq("HOME-CAP-21 Enter → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──
     {
       calls.createQuick.length = 0;
       const home3 = dv.container.querySelector(".sauce-home");
-      const band3 = home3 ? home3.children.find((k) => (k.cls || "").split(/\s+/).indexOf("sauce-home-capture") >= 0) : null;
-      const input3 = band3 ? descendants(band3).filter((n) => n.tag === "input")[0] : null;
-      const addBtn3 = band3 ? descendants(band3).find((n) => n.tag === "button" && (n.cls || "").split(/\s+/).indexOf("sauce-home-capture-add") >= 0) : null;
+      const menu3 = home3 ? descendants(home3).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+      const input3 = menu3 ? descendants(menu3).filter((n) => n.tag === "input")[0] : null;
+      const capAdd3 = menu3 ? descendants(menu3).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
       input3.value = "   ";
-      await fire(addBtn3);
+      await fire(capAdd3);
       if (input3 && typeof input3.dispatch === "function") await input3.dispatch("keydown", { key: "Enter" });
       assertEq("HOME-CAP-22 blank/whitespace input → createQuick NOT called", calls.createQuick.length, 0);
     }
@@ -454,13 +449,17 @@ function descendants(el) {
     try {
       await home_.render(dv, {});
       const home = dv.container.querySelector(".sauce-home");
-      const band = home ? home.children.find((k) => (k.cls || "").split(/\s+/).indexOf("sauce-home-capture") >= 0) : null;
-      const buttons = band ? descendants(band).filter((n) => n.tag === "button") : [];
-      for (const b of buttons) {
+      const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+      const all = home ? descendants(home) : [];
+      // Clicking the "+" (toggle) and every menu item must no-op, not throw.
+      const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+      const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const md = menu ? descendants(menu) : [];
+      for (const b of md.filter((n) => n.tag === "button")) {
         if (b && typeof b.onclick === "function") await b.onclick({});
       }
-      // The inline capture must also no-op (no createQuick) rather than throw.
-      const input = band ? descendants(band).filter((n) => n.tag === "input")[0] : null;
+      const input = md.filter((n) => n.tag === "input")[0];
       if (input) {
         input.value = "orphan task";
         if (typeof input.dispatch === "function") await input.dispatch("keydown", { key: "Enter" });
@@ -468,8 +467,8 @@ function descendants(el) {
     } catch (_e) {
       threw = true;
     }
-    assertTrue("HOME-CAP-17 buttons + inline capture no-op gracefully when APIs absent", !threw,
-      "a missing customJS/app must make the capture buttons + inline jot no-op, never throw");
+    assertTrue("HOME-CAP-17 + toggle + items + inline capture no-op gracefully when APIs absent", !threw,
+      "a missing customJS/app must make the + toggle, items, and inline jot no-op, never throw");
   }
 
   // ── HOME-HEAL: pure _healHomeChromeBody(body) string transform ─────────────
