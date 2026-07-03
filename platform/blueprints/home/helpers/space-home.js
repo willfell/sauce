@@ -150,9 +150,8 @@ class SpaceHome {
     const svg = (inner) =>
       `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
     return [
-      { key: "meeting",   label: "＋ Meeting",          icon: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`) },
-      { key: "scratch",   label: "＋ Scratch",          icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
-      { key: "openDaily", label: "Open today’s daily", icon: svg(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`) },
+      { key: "meeting", label: "＋ Meeting", icon: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`) },
+      { key: "scratch", label: "＋ Scratch", icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
     ];
   }
 
@@ -225,7 +224,6 @@ class SpaceHome {
       || (typeof window !== "undefined" && window.moment)
       || null;
     const today = M ? M().format("YYYY-MM-DD") : "";
-    const hour = M ? M().hour() : 0;
 
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
@@ -234,16 +232,13 @@ class SpaceHome {
 
     const home = dv.el("div", "", { cls: "sauce-home" });
 
-    // 1) Header row — greeting (left) + a subtle "+" quick-add (right) ────────
-    // Sharp editorial hierarchy: a small tracked eyebrow (the date) OVER a large
-    // negative-tracked greeting. The loud always-on capture band is gone; all
-    // capture now lives behind one quiet "+" that springs open a dropdown.
+    // 1) Header row — the date (left) + a subtle "+" quick-add (right) ────────
+    // Just the date now (no greeting): a clean, sharp header line with the accent
+    // tick. Capture lives behind the quiet "+" that springs open a dropdown.
     const head = home.createEl("div", { cls: "sauce-home-head" });
     const greeting = head.createEl("div", { cls: "sauce-home-greeting" });
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
     sub.textContent = SpaceHome._humanDate(today, today);
-    const line = greeting.createEl("div", { cls: "sauce-home-greeting-line" });
-    line.textContent = SpaceHome._greeting(hour);
 
     // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
     // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").

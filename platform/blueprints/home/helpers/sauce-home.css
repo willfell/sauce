@@ -9,52 +9,46 @@
 .sauce-home {
   --sh-ease: cubic-bezier(0.2, 0.9, 0.25, 1);   /* snappy, faint overshoot */
   --sh-radius: 7px;
+  position: relative;
+  z-index: 5;                     /* keep the open dropdown above the dashboard below */
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
   margin: 4px 0 14px 0;
 }
 
-/* ── Header: greeting (left) + "+" quick-add (right) ───────────────────── */
+/* ── Header: the date (left) + "+" quick-add (right) ───────────────────── */
 .sauce-home .sauce-home-head {
+  position: relative;
+  z-index: 20;                    /* header + its dropdown paint above the glance */
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin: 0 0 14px 0;
 }
 .sauce-home .sauce-home-greeting { min-width: 0; }
 
-/* Eyebrow (the date) — small, uppercase, widely tracked, muted, with a short
- * accent tick before it as the surface's signature. */
+/* The date — the sole header line: uppercase, tracked, in full-strength text,
+ * with a short accent tick before it as the surface's signature. */
 .sauce-home .sauce-home-greeting-date {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.7em;
-  font-weight: 650;
+  gap: 9px;
+  font-size: 0.86em;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--text-muted);
+  letter-spacing: 0.12em;
+  color: var(--text-normal);
   font-variant-numeric: tabular-nums;
 }
 .sauce-home .sauce-home-greeting-date::before {
   content: "";
-  width: 16px;
+  width: 18px;
   height: 2px;
   border-radius: 2px;
   background: var(--interactive-accent);
   flex: 0 0 auto;
-}
-
-/* Greeting — large, heavy, tightly tracked. The one bold typographic gesture. */
-.sauce-home .sauce-home-greeting-line {
-  margin-top: 5px;
-  font-size: 1.85em;
-  font-weight: 800;
-  line-height: 1.08;
-  letter-spacing: -0.025em;
-  color: var(--text-normal);
 }
 
 /* ── "+" quick-add button ──────────────────────────────────────────────── */
@@ -100,7 +94,7 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 30;
+  z-index: 40;
   min-width: 244px;
   max-width: min(84vw, 320px);
   padding: 7px;
@@ -292,7 +286,6 @@
 
 /* ── Mobile pass ───────────────────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .sauce-home .sauce-home-greeting-line { font-size: 1.55em; }
   .sauce-home .sauce-home-head { margin-bottom: 12px; }
   /* Dropdown widens to a near-full-width sheet, still anchored under the "+". */
   .sauce-home .sauce-home-add-menu {
