@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.188.1",
+  "generated_at": "0.190.1",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -93,209 +93,6 @@
         ],
         "primary_user_flow": "Install/upgrade/bootstrap lifecycle slash commands trigger aggregateClaudeSurface + materializeClaudeSurface + regenerateClaudeMd to sync CLAUDE.md tables and materialize .claude/commands+skills from all subscribed surfaces.",
         "qualitative_recommendation": "Strong unit-layer coverage; gap is end-to-end install -> materialize -> CLAUDE.md flow. Recommend HC-V0XYZ-PLATFORM-CLAUDE-INSTALL-SMOKE family in run-integration-smoke.js or lightweight behavioral runner."
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "meetings",
-      "current_version": "0.16.1",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 7,
-          "total": 7,
-          "methods": [
-            {
-              "cls": "MeetingsHubCards",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "stripWikilink",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "cleanProjectName",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "resolveProjectPreselect",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "buildAttendeeFrontmatter",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "personStubBody",
-              "covered": true
-            },
-            {
-              "cls": "MeetingLeafActions",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-meetings-meetingshubcards.js"
-        },
-        "installer_migration": {
-          "score": 0.8571428571428571,
-          "covered": 6,
-          "total": 7,
-          "migrations": [
-            {
-              "fn": "applyProjectMeetingsPanelHeal",
-              "covered": true
-            },
-            {
-              "fn": "applyNoteChromeHeal",
-              "covered": true
-            },
-            {
-              "fn": "applyProjectLinksHubBackfill",
-              "covered": true
-            },
-            {
-              "fn": "applyMeetingTasksToEntityMigration",
-              "covered": true
-            },
-            {
-              "fn": "applyTaskNoteProjectSlugHeal",
-              "covered": true
-            },
-            {
-              "fn": "applyMeetingTaskListHeal",
-              "covered": true
-            },
-            {
-              "fn": "applyPreInstall",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 4,
-          "total": 4,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Meeting.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Meeting Hub.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "meetings",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "meetings",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0.5,
-          "covered": 1,
-          "total": 2,
-          "widgets": [
-            {
-              "widget": "MeetingsHubCards",
-              "covered": true
-            },
-            {
-              "widget": "MeetingLeafActions",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.878968253968254,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Linked from project + cowork; recent project-link migration.",
-      "recent_incidents_30d": 5,
-      "priority_score": 0.75,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.75,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
-      },
-      "qualitative": {
-        "validates_scores": "yes",
-        "false_positives": [
-          {
-            "axis": "widget_render",
-            "note": "MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM"
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta"
-          }
-        ],
-        "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
-        "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
       }
     },
     {
@@ -600,7 +397,7 @@
     {
       "kind": "blueprint",
       "name": "daily",
-      "current_version": "0.18.0",
+      "current_version": "0.18.1",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -2236,7 +2033,7 @@
     {
       "kind": "mechanism",
       "name": "nav-buttons",
-      "current_version": "2.14.0",
+      "current_version": "2.14.1",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -2361,6 +2158,209 @@
         ],
         "primary_user_flow": "User navigates to a note with SpaceNavButtons dataviewjs block; mechanism reads registry JSON, sorts by (order, source, id), renders multi-row button grid, dispatches clicks to action handlers (openLink, createFromTemplate, runTemplaterTemplate, invoke_command).",
         "qualitative_recommendation": "Excellent actual coverage in run-renderer.js (8 dedicated tests, all action types, error paths, real-world scenarios) but scorer's false-negatives obscure it. Recommendations are scorer-level fixes, not new tests."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "meetings",
+      "current_version": "0.16.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 7,
+          "total": 7,
+          "methods": [
+            {
+              "cls": "MeetingsHubCards",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "stripWikilink",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "cleanProjectName",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "resolveProjectPreselect",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "buildAttendeeFrontmatter",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "personStubBody",
+              "covered": true
+            },
+            {
+              "cls": "MeetingLeafActions",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-meetings-meetingshubcards.js"
+        },
+        "installer_migration": {
+          "score": 0.8571428571428571,
+          "covered": 6,
+          "total": 7,
+          "migrations": [
+            {
+              "fn": "applyProjectMeetingsPanelHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyNoteChromeHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectLinksHubBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyMeetingTasksToEntityMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyTaskNoteProjectSlugHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyMeetingTaskListHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyPreInstall",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Meeting.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Meeting Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "widgets": [
+            {
+              "widget": "MeetingsHubCards",
+              "covered": true
+            },
+            {
+              "widget": "MeetingLeafActions",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9623015873015873,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Linked from project + cowork; recent project-link migration.",
+      "recent_incidents_30d": 5,
+      "priority_score": 0.2857142857142858,
+      "top_gap": {
+        "axis": "installer_migration",
+        "score": 0.2857142857142858,
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta"
+          }
+        ],
+        "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
+        "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
       }
     },
     {
@@ -2809,7 +2809,7 @@
           "total": 33,
           "migrations": [
             {
-              "fn": "applyExternalPlugins",
+              "fn": "applyBundledPlugin",
               "covered": false
             },
             {
@@ -3426,6 +3426,82 @@
         "score": 0.24,
         "archetype": "seed-migrate",
         "target_file": "platform/test/run-seed-migrations.js"
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "sauce-plugin",
+      "current_version": "0.2.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.625,
+          "manifest_ratio": 0.25,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.3125,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.22499999999999998,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.22499999999999998,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
       }
     },
     {
@@ -5138,7 +5214,7 @@
     {
       "kind": "mechanism",
       "name": "task-entity",
-      "current_version": "0.4.1",
+      "current_version": "0.5.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -5436,11 +5512,11 @@
       "composite_score": 0.9375,
       "blast_radius": "low",
       "blast_radius_rationale": "Trivial wrapper; v0.88 bug already netted.",
-      "recent_incidents_30d": 1,
-      "priority_score": 0.045,
+      "recent_incidents_30d": 0,
+      "priority_score": 0.0375,
       "top_gap": {
         "axis": "manifest_schema",
-        "score": 0.045,
+        "score": 0.0375,
         "archetype": "hc-family",
         "target_file": "platform/test/run-helper-cases.js"
       },
@@ -6614,7 +6690,7 @@
       "composite_score": 1,
       "blast_radius": "med",
       "blast_radius_rationale": "Cross-cutting via people-identity; stable shape.",
-      "recent_incidents_30d": 5,
+      "recent_incidents_30d": 4,
       "priority_score": 0,
       "top_gap": {
         "axis": "customjs_behavioral",
