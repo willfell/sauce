@@ -187,6 +187,23 @@ const sdm = new ScratchDayMigrate();
     fileSources.indexOf("helpers/scratch-day-migrate-init.js") >= 0);
 }
 
+// ── HC-ADIV-SCRATCH: ScratchDayActions owns its own <hr> dividers ───────────
+// Wiki methodology — the action helper renders a top + bottom <hr> (12px
+// breathing room) INSIDE its own dataviewjs block, and the Scratch Day Hub
+// template drops the literal `---`, so the separators hug the buttons instead of
+// leaving the big Obsidian inter-block gap. Mirrors run-wiki.js W13d/W14c.
+{
+  const sdaSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/scratch/helpers/scratch-day-actions.js"), "utf8");
+  assertTrue("HC-ADIV-SCRATCH-1 ScratchDayActions renders top+bottom <hr> (2 hrs)",
+    (sdaSrc.match(/createEl\(["']hr["']\)/g) || []).length >= 2);
+  assertTrue("HC-ADIV-SCRATCH-2 hr dividers use the 12px breathing-room margin",
+    /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/.test(sdaSrc));
+  const sdhTpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/scratch/templates/Scratch Day Hub.md"), "utf8");
+  assertTrue("HC-ADIV-SCRATCH-3 Scratch Day Hub.md no longer brackets ScratchDayActions with `---`",
+    !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ScratchDayActions/.test(sdhTpl) &&
+    !/ScratchDayActions[\s\S]*?\n```\n+-{3,}/.test(sdhTpl));
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\n${pass} passed, ${fail} failed`);

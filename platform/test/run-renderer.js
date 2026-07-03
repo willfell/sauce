@@ -3126,6 +3126,69 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
   return pass;
 }
 
+// SELTASK-1 — faithful test of the note-per-task data seam. Loads the REAL
+// SpaceDailyDashboard + TaskEntity classes and drives SpaceDailyDashboard.selectTasks
+// through a plain-array dv-stub returning task-note-shaped pages. Exercises the ACTUAL
+// selection path (not a hand-built replica) — the class of bug this file exists to catch.
+async function testSelectTasksNotePerTask() {
+  const fs = require("fs");
+  const path = require("path");
+  const sddSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  const teSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/mechanisms/task-entity/task-entity.js"), "utf8");
+  const SDD = new Function(`${sddSrc}\nreturn SpaceDailyDashboard;`)();
+  const TaskEntity = new Function(`${teSrc}\nreturn TaskEntity;`)();
+  const TE = new TaskEntity(); // customJS stores INSTANCES; delegators call the statics
+
+  const today = "2026-07-02";
+  const pagesByQuery = {
+    '"spice/tasks"': [
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "daily today", source: "daily",   file: { path: "spice/tasks/daily-today.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "proj today",  source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-today.md" } },
+      { type: "task", status: "open", scheduled: "2026-06-30", title: "mtg overdue", source: "meeting",  file: { path: "spice/tasks/mtg-overdue.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-05", title: "future",       file: { path: "spice/tasks/future.md" } },
+      { type: "task", status: "open", scheduled: "",           title: "someday",      file: { path: "spice/tasks/someday.md" } },
+      { type: "task", status: "done", scheduled: "2026-07-02", title: "leaked done",  file: { path: "spice/tasks/_done/leaked.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "trashed",      file: { path: "spice/tasks/_trash/trashed.md" } },
+      { type: "note", status: "open", scheduled: "2026-07-02", title: "not a task",   file: { path: "spice/tasks/note.md" } },
+    ],
+    '"spice/tasks/_done"': [
+      { type: "task", status: "done", completed_at: "2026-07-02T09:15:00-06:00", title: "done today dt",   file: { path: "spice/tasks/_done/a.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-02",                title: "done today date", file: { path: "spice/tasks/_done/b.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-01T23:00:00-06:00", title: "done yesterday",  file: { path: "spice/tasks/_done/c.md" } },
+      { type: "task", status: "done", completed_at: "",                          title: "done no date",    file: { path: "spice/tasks/_done/d.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-02",                title: "trashed done",    file: { path: "spice/tasks/_done/_trash/e.md" } },
+    ],
+  };
+  const fakeDv = { pages: (q) => pagesByQuery[q] || [] };
+
+  let ok = true;
+  const check = (label, cond) => { if (!cond) { ok = false; console.log(`  FAIL: SELTASK-1 ${label}`); } };
+
+  const res = SDD.selectTasks(fakeDv, today, TE);
+  const titles = res.open.map((t) => t.title);
+
+  check("open has exactly the 3 today/overdue tasks", res.open.length === 3);
+  check("all sources present (project + meeting NOT filtered out)",
+    titles.indexOf("proj today") >= 0 && titles.indexOf("mtg overdue") >= 0 && titles.indexOf("daily today") >= 0);
+  check("today band rendered first (2 today, then overdue)",
+    res.open[0].scheduled === "2026-07-02" && res.open[1].scheduled === "2026-07-02" && res.open[2].scheduled === "2026-06-30");
+  check("today rows tagged _overdue:false", res.open[0]._overdue === false && res.open[1]._overdue === false);
+  check("overdue row tagged _overdue:true", res.open[2]._overdue === true);
+  check("future excluded", titles.indexOf("future") < 0);
+  check("unscheduled excluded", titles.indexOf("someday") < 0);
+  check("_trash excluded from open", titles.indexOf("trashed") < 0);
+  check("_done leak excluded from open", titles.indexOf("leaked done") < 0);
+  check("non-task type excluded", titles.indexOf("not a task") < 0);
+  check("done == 2 (today incl datetime form; excl yesterday/no-date/trashed)", res.done === 2);
+
+  const cold = SDD.selectTasks(fakeDv, today, null);
+  check("cold-load (no TE) → empty open + zero done", cold.open.length === 0 && cold.done === 0);
+
+  return ok;
+}
+
 // ── REND-V067-TIME-1: SpaceDailyDashboard._formatTime duck-types Luxon + moment ──
 // v0.67.0: _formatTime must accept a Luxon DateTime (has .toFormat()), a
 // moment-compatible string, and return null for null/undefined.
@@ -3255,72 +3318,6 @@ async function testRendV067Todo1() {
     ok = ok && sub1e;
   } catch (e) {
     console.log(`  REND-V067-TODO-1a (pill rendered when open > 0): FAIL — ${e && e.message}`);
-    ok = false;
-  }
-  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
-  return ok;
-}
-
-// ── REND-V01241-LINK-1: _renderTaskHTML balanced-paren scan for link URLs ──
-// v0.124.1: task text containing markdown links whose URL embeds literal parens
-// (Microsoft Teams deep-links, e.g. channelName=...(Lounge)) must capture the
-// FULL url. The old `indexOf(")")` truncated at the inner ")", leaking the URL
-// tail as escaped literal text after </a>. A CommonMark-style balanced-paren
-// scan fixes this.
-async function testRendV01241Link1() {
-  console.log('\n=== REND-V01241-LINK-1 — _renderTaskHTML balanced-paren scan for link URLs ===');
-  let ok = true;
-  try {
-    const dailySrc = fs.readFileSync(
-      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
-      "utf8"
-    );
-    const factory = new Function(
-      "window",
-      dailySrc + "\nreturn SpaceDailyDashboard;"
-    );
-    const Klass = factory({ moment: () => ({ isValid: () => false }) });
-    const inst = new Klass();
-
-    // Case 1: Teams-style deep-link with literal parens in query params.
-    const teamsTask = "Help Sachin - [chat](https://teams.microsoft.com/l/message/19:x@thread.tacv2/1?tenantId=y&channelName=Developer%20Enablement%20(Lounge)&createdTime=1781776427950&ngc=true)";
-    const teamsHtml = inst._renderTaskHTML(teamsTask);
-    const anchorCount = (teamsHtml.match(/<a /g) || []).length;
-    const sub1a = anchorCount === 1;
-    console.log(`  REND-V01241-LINK-1a (exactly one <a anchor): ${sub1a ? 'PASS' : 'FAIL'} (got ${anchorCount})`);
-    ok = ok && sub1a;
-
-    // href must include the full url ending in ngc=true (& escaped to &amp;).
-    const sub1b = teamsHtml.includes("createdTime=1781776427950&amp;ngc=true");
-    console.log(`  REND-V01241-LINK-1b (href contains full url tail createdTime=...&amp;ngc=true): ${sub1b ? 'PASS' : 'FAIL'}`);
-    ok = ok && sub1b;
-
-    // No leaked literal tail OUTSIDE the anchor (no "</a>&amp;createdTime"), and
-    // the rendered string ends cleanly with </a> (no trailing leaked text).
-    const sub1c = !teamsHtml.includes("</a>&amp;createdTime") && teamsHtml.endsWith("</a>");
-    console.log(`  REND-V01241-LINK-1c (no leaked tail after </a>; ends with </a>): ${sub1c ? 'PASS' : 'FAIL'}`);
-    ok = ok && sub1c;
-
-    // Case 2: control — simple URL, no inner parens.
-    const ctrlHtml = inst._renderTaskHTML("[docs](https://example.com/page)");
-    const sub2a = ctrlHtml === '<a href="https://example.com/page" target="_blank" rel="noopener noreferrer">docs</a>';
-    console.log(`  REND-V01241-LINK-2a (control renders one correct anchor): ${sub2a ? 'PASS' : 'FAIL'}`);
-    if (!sub2a) console.log(`    got: ${ctrlHtml}`);
-    ok = ok && sub2a;
-
-    // Case 3: balanced nested parens in the URL.
-    const nestedHtml = inst._renderTaskHTML("[x](https://e.com/a(b(c))d)");
-    const nestedAnchors = (nestedHtml.match(/<a /g) || []).length;
-    const sub3a = nestedAnchors === 1;
-    console.log(`  REND-V01241-LINK-3a (one anchor for nested parens): ${sub3a ? 'PASS' : 'FAIL'} (got ${nestedAnchors})`);
-    ok = ok && sub3a;
-
-    const sub3b = nestedHtml === '<a href="https://e.com/a(b(c))d" target="_blank" rel="noopener noreferrer">x</a>';
-    console.log(`  REND-V01241-LINK-3b (href is full nested-paren url, no leak): ${sub3b ? 'PASS' : 'FAIL'}`);
-    if (!sub3b) console.log(`    got: ${nestedHtml}`);
-    ok = ok && sub3b;
-  } catch (e) {
-    console.log(`  REND-V01241-LINK-1a (exactly one <a anchor): FAIL — ${e && e.message}`);
     ok = false;
   }
   console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
@@ -3521,9 +3518,9 @@ async function testRendHasNotes() {
       }
     }
     if (which === 'daily' || which === 'all') {
+      results.push(['SELTASK-1 selectTasks note-per-task data seam', await testSelectTasksNotePerTask()]);
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
       results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
-      results.push(['REND-V01241-LINK-1 _renderTaskHTML balanced-paren scan for link URLs', await testRendV01241Link1()]);
       results.push(['REND-HASNOTES scaffold-aware has-notes (SDD + hub)', await testRendHasNotes()]);
     }
   } catch (e) {
@@ -3558,9 +3555,17 @@ async function testRendHasNotes() {
     const fs = require("fs");
     const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
 
-    assertTrue("HC-V0843-A1 getTasks still splits open/done",
-      /const\s+open\s*=\s*\[\]/.test(sddSrc) && /const\s+done\s*=\s*\[\]/.test(sddSrc),
-      "v0.84.1 open/done split must remain; pill rendering depends on the two arrays");
+    assertTrue("HC-V0843-A1 selectTasks is the note-per-task data seam returning { open, done }",
+      /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*\}/.test(sddSrc),
+      "selectTasks must select task-notes and return an open list + a done count (pills read openTasks.length + doneCount)");
+
+    assertTrue("HC-V0843-A1b selectTasks queries spice/tasks (open) + _done (done-today) via queryToday",
+      /"spice\/tasks"/.test(sddSrc) && /"spice\/tasks\/_done"/.test(sddSrc) && /queryToday/.test(sddSrc),
+      "selectTasks must query spice/tasks + spice/tasks/_done and partition open tasks via the source-agnostic TaskEntity.queryToday");
+
+    assertTrue("HC-V0843-A1c task rows render via TaskTodayList.renderInlineLinks + open the note",
+      /renderInlineLinks/.test(sddSrc) && /openLinkText\(task\.path/.test(sddSrc),
+      "task rows must render titles via the canonical inline-link renderer and click through to the task note (task.path)");
 
     assertTrue("HC-V0843-A2 Tasks call site title is bare 'Tasks' (no parenthetical count)",
       /title:\s*["']Tasks["']/.test(sddSrc),

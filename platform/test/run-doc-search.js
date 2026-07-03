@@ -104,6 +104,40 @@ ok('DS1 single source of truth', fs.existsSync(MECH) && !fs.existsSync(LEGACY));
   ok('DS6 render() resultsContainer is distinct from strip', !!(hasResultsContainer && stripIsDistinct));
 }
 
+// DS7 — hideNativeSearch: true → strip has an input but NO scoped-search button;
+//       default (omitted) → the button is still present. Walk the strip subtree
+//       for created <input> / <button> elements (the button lives in row1 with the
+//       input, so a recursive descend covers both).
+function collectTags(el, tag, acc) {
+  if (!el) return acc;
+  if (el.tag === tag) acc.push(el);
+  for (const child of (el.children || [])) collectTags(child, tag, acc);
+  return acc;
+}
+{
+  const inst = DS ? new DS() : null;
+  const mkStrip = (opts) => {
+    const dv = makeDv([]);
+    try { inst.render(dv, opts); } catch (_e) {}
+    // The permanent strip is the first child appended to dv.container.
+    return dv.container.children[0] || null;
+  };
+
+  // default (hideNativeSearch omitted) — button present.
+  const stripDefault = inst ? mkStrip({ scopePath: 'spice/wiki', entityType: 'wiki-page', persist: false, onChange: () => {} }) : null;
+  const defInputs = collectTags(stripDefault, 'input', []);
+  const defButtons = collectTags(stripDefault, 'button', []);
+  ok('DS7 default: strip has input + Search button',
+    !!stripDefault && defInputs.length >= 1 && defButtons.length >= 1);
+
+  // hideNativeSearch: true — input present, NO button.
+  const stripHidden = inst ? mkStrip({ scopePath: 'spice/wiki', entityType: 'wiki-page', persist: false, hideNativeSearch: true, onChange: () => {} }) : null;
+  const hidInputs = collectTags(stripHidden, 'input', []);
+  const hidButtons = collectTags(stripHidden, 'button', []);
+  ok('DS7 hideNativeSearch: input present but NO button',
+    !!stripHidden && hidInputs.length >= 1 && hidButtons.length === 0);
+}
+
 // --- Verdict -----------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;
 const total = results.length;

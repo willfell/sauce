@@ -3676,6 +3676,68 @@ async function caseCP6NewTabDefaultPageFreshWrite() {
   }
 }
 
+async function caseCP7HomepageFreshWrite() {
+  console.log("\n--- Case CP7: applyCommunityPluginData writes homepage data.json (daily→reading) ---");
+  const scratchCP7 = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP7-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "homepage" }],
+      community_plugin_settings: [
+        {
+          id: "homepage",
+          settings: {
+            version: 4,
+            homepages: {
+              "Main Homepage": {
+                value: "",
+                kind: "Daily Note",
+                openOnStartup: false,
+                openMode: "Replace last note",
+                manualOpenMode: "Replace last note",
+                view: "Reading view",
+                revertView: true,
+                openWhenEmpty: false,
+                refreshDataview: true,
+                autoCreate: true,
+                autoScroll: false,
+                pin: false,
+                commands: [],
+                alwaysApply: false,
+                hideReleaseNotes: true,
+              },
+            },
+            separateMobile: false,
+          },
+        },
+      ],
+    });
+    await scaffoldVault(scratchCP7, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Seed plugin dir + community-plugins.json so the prereq gate passes.
+    const hpDir = path.join(scratchCP7, ".obsidian/plugins/homepage");
+    await fsp.mkdir(hpDir, { recursive: true });
+    const cpPath = path.join(scratchCP7, ".obsidian/community-plugins.json");
+    await fsp.writeFile(cpPath, JSON.stringify(["homepage"]), "utf8");
+    const result = await runHarness(scratchCP7);
+    assertTrue("CP7: install ran", result !== null);
+    const dataPath = path.join(scratchCP7, ".obsidian/plugins/homepage/data.json");
+    assertTrue("CP7: data.json written", fs.existsSync(dataPath));
+    const data = await readJson(dataPath);
+    const hp = data.homepages && data.homepages["Main Homepage"];
+    assertTrue("CP7: homepages['Main Homepage'] present", !!hp);
+    assertEq("CP7: kind=Daily Note", hp.kind, "Daily Note");
+    assertEq("CP7: view=Reading view", hp.view, "Reading view");
+    assertEq("CP7: refreshDataview true", hp.refreshDataview, true);
+    assertEq("CP7: openOnStartup false (button-first)", hp.openOnStartup, false);
+    assertEq("CP7: separateMobile false", data.separateMobile, false);
+  } finally {
+    await fsp.rm(scratchCP7, { recursive: true, force: true });
+  }
+}
+
 // -----------------------------------------------------------------------------
 // SF1-SF5 — scaffoldFoundationalPluginData (v0.26.0 P0-2)
 // Materializes Templater data.json defaults at install time when the plugin
@@ -4579,55 +4641,67 @@ async function caseDDT1DailyTemplateShape() {
 }
 
 // -------------------------------------------------------------------------
-// LAT-1: the leaf-action button rows sit TIGHT against their `---` chrome
-// separators — no blank line between the `---` and the
-// `{ToDo,Meeting}LeafActions` / `ScratchDayActions` dataviewjs block, above
-// OR below. Prior templates had `---\n\n<block>\n\n---`, which renders an
-// extra vertical gap between the divider and the buttons. Assert the tight
-// `---\n<block>\n---` shape in all three templates (goes red if a blank line
-// is reintroduced around any of the three action blocks).
+// LAT-1: the daily to-do / meeting / scratch-day action helpers now OWN their
+// chrome dividers. Each renders a top + bottom <hr> (12px breathing room) INSIDE
+// its own dataviewjs block (the wiki methodology), and the template drops the
+// literal `---`. This is the real fix for the gap the older "tight `---` in the
+// template" shape could never close: two adjacent blocks (a markdown `---` and a
+// dataviewjs block) always get an Obsidian inter-block gap no `---` can remove,
+// so the separator only hugs the buttons when the helper renders it in the same
+// block. Assert (a) no `---` brackets the action block in any of the three
+// templates, and (b) each helper renders two <hr>s with the 12px divider style
+// (to-do gated on the daily note). Goes red if a template `---` is reintroduced
+// or a helper divider is dropped.
 // -------------------------------------------------------------------------
-async function caseLAT1LeafActionsTightSeparators() {
-  console.log("\n--- Case LAT-1: leaf-action rows tight against their `---` separators (to-do / meetings / scratch) ---");
+async function caseLAT1LeafActionsOwnDividers() {
+  console.log("\n--- Case LAT-1: leaf-action helpers own their <hr> dividers; templates carry no `---` (to-do / meetings / scratch) ---");
+  const DIVIDER_STYLE = /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/;
   const cases = [
-    { file: ["to-do", "templates", "Today To-Do.md"], cls: "ToDoLeafActions" },
-    { file: ["meetings", "templates", "Meeting.md"], cls: "MeetingLeafActions" },
-    { file: ["scratch", "templates", "Scratch Day Hub.md"], cls: "ScratchDayActions" },
+    { tpl: ["to-do", "templates", "Today To-Do.md"], helper: ["to-do", "helpers", "todo-leaf-actions.js"], cls: "ToDoLeafActions", gated: true },
+    { tpl: ["meetings", "templates", "Meeting.md"], helper: ["meetings", "helpers", "meeting-leaf-actions.js"], cls: "MeetingLeafActions", gated: false },
+    { tpl: ["scratch", "templates", "Scratch Day Hub.md"], helper: ["scratch", "helpers", "scratch-day-actions.js"], cls: "ScratchDayActions", gated: false },
   ];
   for (const c of cases) {
-    const p = path.join(BLUEPRINTS_DIR, ...c.file);
-    assertTrue(`LAT-1: ${c.file[0]} template source exists`, fs.existsSync(p));
-    const body = fs.readFileSync(p, "utf8");
-    // Tight: `---` directly above the block, `---` directly below — no blank lines.
-    const tight = new RegExp(
-      '\\n---\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"[^`]*\\);\\n```\\n---\\n'
-    );
-    assertTrue(`LAT-1: ${c.cls} row is tight against its --- separators (no blank-line gap above/below)`,
-      tight.test(body));
-    // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
-    const looseAbove = new RegExp('\\n---\\n\\n```dataviewjs\\nawait dv\\.view\\("[^"]*", \\{ class: "' + c.cls + '"');
-    assertTrue(`LAT-1: ${c.cls} has no blank line between the --- and the block`,
-      !looseAbove.test(body));
+    const tp = path.join(BLUEPRINTS_DIR, ...c.tpl);
+    const hp = path.join(BLUEPRINTS_DIR, ...c.helper);
+    assertTrue(`LAT-1: ${c.tpl[0]} template + helper source exist`, fs.existsSync(tp) && fs.existsSync(hp));
+    const tpl = fs.readFileSync(tp, "utf8");
+    const helper = fs.readFileSync(hp, "utf8");
+    // (a) No `---` brackets the action block (above OR below) in the template.
+    const bracketedAbove = new RegExp('-{3,}[ \\t]*\\n+```dataviewjs\\n[^`]*' + c.cls);
+    const bracketedBelow = new RegExp(c.cls + '[\\s\\S]*?\\n```\\n+-{3,}');
+    assertTrue(`LAT-1: ${c.tpl.slice(-1)[0]} no longer brackets ${c.cls} with \`---\``,
+      !bracketedAbove.test(tpl) && !bracketedBelow.test(tpl));
+    // (b) The helper renders its own top + bottom <hr> with the 12px style.
+    assertTrue(`LAT-1: ${c.cls} renders top+bottom <hr> (2 hrs)`,
+      (helper.match(/createEl\(["']hr["']\)/g) || []).length >= 2);
+    assertTrue(`LAT-1: ${c.cls} hr dividers use the 12px breathing-room margin`,
+      DIVIDER_STYLE.test(helper));
+    if (c.gated) {
+      assertTrue(`LAT-1: ${c.cls} dividers gated on the daily note (noteType === 'to-do')`,
+        /noteType\s*===\s*'to-do'/.test(helper));
+    }
   }
 }
 
 // -------------------------------------------------------------------------
-// DNT-1: the Doc Note template's Move-button row (DocLeafActions) sits TIGHT
-// against the `---` chrome divider that follows ProjectNavButtons — no blank
-// line between the `---` and the DocLeafActions dataviewjs block. Prior
-// template had `---\n\n<block>`, rendering an extra gap above the Move button.
+// DNT-1 (chrome overhaul 2026-07-02): the Doc Note template no longer carries a
+// literal `---` chrome divider. Helpers own dividers now — DocLeafActions
+// renders its OWN leading hairline via customJS.SectionLabel.divider (leading-
+// hairline ownership; see note-chrome.md §1a). This asserts the new grammar.
 // -------------------------------------------------------------------------
 async function caseDNT1DocNoteTightSeparator() {
-  console.log("\n--- Case DNT-1: Doc Note template Move button tight against its `---` separator ---");
+  console.log("\n--- Case DNT-1: Doc Note template has no literal --- (DocLeafActions owns its divider) ---");
   const p = path.join(BLUEPRINTS_DIR, "project", "templates", "Doc Note.md");
   assertTrue("DNT-1: Doc Note.md template source exists", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  // Tight: `---` directly above the DocLeafActions block (no blank line).
-  assertTrue("DNT-1: DocLeafActions row is tight against its --- separator (no blank-line gap)",
-    /\n---\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"[^`]*\);\n```/.test(body));
-  // Negative: the loose `---\n\n<block>` shape (blank line under the divider) is gone.
-  assertTrue("DNT-1: no blank line between the --- and the DocLeafActions block",
-    !/\n---\n\n```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"/.test(body));
+  // New grammar: NO literal `---` chrome divider above the DocLeafActions block.
+  assertTrue("DNT-1: no literal --- chrome divider above the DocLeafActions block",
+    !/\n---\n+```dataviewjs\nawait dv\.view\("[^"]*", \{ class: "DocLeafActions"/.test(body));
+  // DocLeafActions renders its own leading hairline via the shared primitive.
+  const dla = fs.readFileSync(path.join(BLUEPRINTS_DIR, "project", "helpers", "doc-leaf-actions.js"), "utf8");
+  assertTrue("DNT-1: DocLeafActions delegates its leading divider to SectionLabel.divider",
+    /customJS\.SectionLabel\.divider\s*\(/.test(dla));
 }
 
 async function caseDDA1DashboardActivityPanel() {
@@ -4657,21 +4731,6 @@ async function caseDDA2ActivityShimPagesDelegate() {
     /pages\s*:\s*function/.test(body) ||
     /pages\s*:\s*dv\.pages\.bind/.test(body);
   assertTrue("DD-A2: activity-panel shim missing .pages delegate (v0.5.0 regression)", ok);
-}
-
-async function caseDDA3TaskMarkdownRenderHelper() {
-  // v0.5.1 (v0.64.1): tasks panel renders markdown links + wikilinks as
-  // clickable HTML anchors via _renderTaskHTML(text). Guards the helper
-  // exists + LI uses innerHTML + LI onclick guards against anchor clicks.
-  console.log("\n--- Case DD-A3: tasks panel markdown link rendering ---");
-  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
-  const body = fs.readFileSync(p, "utf8");
-  const ok =
-    /_renderTaskHTML\s*\(/.test(body) &&
-    /li\.innerHTML\s*=\s*this\._renderTaskHTML\(task\.text\)/.test(body) &&
-    /closest\s*\(\s*["']a["']\s*\)/.test(body) &&
-    /a\.internal-link/.test(body);
-  assertTrue("DD-A3: tasks panel markdown render helper / LI rewire regressed", ok);
 }
 
 async function caseDDA4DashboardAllowlist() {
@@ -4774,56 +4833,6 @@ async function caseDDA8DashboardKanbanRollupRule() {
   const hasTodoBoardRoot = /spice\/boards\/To-Do-Board\.md/.test(rulesSource);
   assertTrue("DD-A8: kanban rollup rule missing type:'kanban' or boards-card child match or To-Do-Board root path",
     hasKanbanType && hasBoardsChildGlob && hasTodoBoardRoot);
-}
-
-async function caseDDA9DailyTodoExternalCount() {
-  // Card "To Do number on daily note to show to items for all": the daily
-  // To-Do pill must also count project + meeting tasks that are due TODAY or
-  // OVERDUE (undated / future-dated excluded). BEHAVIORAL test — executes the
-  // dual-exported pure statics (not a source-regex), so a broken filter fails.
-  console.log("\n--- Case DD-A9: daily To-Do count folds in due/overdue external tasks ---");
-  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
-  // Load the class the SAME way the CustomJS plugin does — as a bare class with no
-  // `module.exports` trailer (see run-customjs-loadable.js for why a trailer would
-  // break customJS). `new Function(src + "\nreturn SpaceDailyDashboard;")` mirrors
-  // run-renderer.js and needs no export to reach the pure statics.
-  const sddSrc = fs.readFileSync(p, "utf8");
-  const D = new Function(sddSrc + "\nreturn SpaceDailyDashboard;")();
-  if (!assertTrue("DD-A9: space-daily-dashboard.js exposes SpaceDailyDashboard via new Function()", !!D)) return;
-  const today = "2026-06-30";
-
-  // _parseTaskDue: dataview due::, [due::], Tasks 📅, none, and NOT false-matching
-  // a word that merely ends in "due" (overdue::, startdue::).
-  assertEqual(D._parseTaskDue("do thing due:: 2026-06-30"), "2026-06-30", "DD-A9: parse bare due::");
-  assertEqual(D._parseTaskDue("do [due:: 2026-07-01] thing"), "2026-07-01", "DD-A9: parse bracketed due::");
-  assertEqual(D._parseTaskDue("call bob 📅 2026-06-29"), "2026-06-29", "DD-A9: parse 📅 emoji");
-  assertEqual(D._parseTaskDue("no date here"), null, "DD-A9: no date → null");
-  assertEqual(D._parseTaskDue("was overdue:: 2026-06-29 note"), null, "DD-A9: 'overdue::' does NOT false-match");
-
-  // _countsTowardToday: today + overdue count; future + undated do not.
-  assertEqual(D._countsTowardToday("2026-06-30", today), true, "DD-A9: due today counts");
-  assertEqual(D._countsTowardToday("2026-06-01", today), true, "DD-A9: overdue counts");
-  assertEqual(D._countsTowardToday("2026-07-05", today), false, "DD-A9: future does NOT count");
-  assertEqual(D._countsTowardToday(null, today), false, "DD-A9: undated does NOT count");
-
-  // _foldExternalTasks: returns ONLY the OPEN external tasks due today/overdue.
-  // Completed external tasks are dropped (no completion date on those notes →
-  // Done stays scoped to today's to-do note, not "done ever").
-  const recs = [
-    { text: "overdue open due:: 2026-06-01", completed: false, parentPath: "spice/projects/A/A.md" },
-    { text: "due today 📅 2026-06-30", completed: false, parentPath: "spice/meetings/notes/B.md" },
-    { text: "future open due:: 2026-07-10", completed: false, parentPath: "spice/projects/C/C.md" },
-    { text: "undated open task", completed: false, parentPath: "spice/projects/D/D.md" },
-    { text: "done overdue due:: 2026-06-02", completed: true, parentPath: "spice/meetings/notes/E.md" },
-  ];
-  const openExt = D._foldExternalTasks(recs, today);
-  assertEqual(openExt.length, 2, "DD-A9: fold = overdue + due-today OPEN only (excludes future/undated/completed)");
-  assertEqual(openExt.map(t => t.parentPath).sort(),
-    ["spice/meetings/notes/B.md", "spice/projects/A/A.md"], "DD-A9: fold preserves source path");
-  assertTrue("DD-A9: completed external task is NOT counted (no 'done ever')",
-    !openExt.some(t => t.parentPath === "spice/meetings/notes/E.md"));
-  assertEqual(D._foldExternalTasks([], today), [], "DD-A9: empty records → empty");
-  assertEqual(D._foldExternalTasks(null, today), [], "DD-A9: null records tolerated");
 }
 
 // ============================================================
@@ -6767,13 +6776,16 @@ async function casePNBAcc2NoHandRolledStyle() {
 }
 
 async function casePNBAcc3DividerBreathingRoom() {
-    console.log("\n--- Case PNB-ACC-3: top divider margin-bottom 14px ---");
+    console.log("\n--- Case PNB-ACC-3: leading divider delegates to shared primitive ---");
     const src = fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
         "utf8"
     );
-    assertTrue("PNB-ACC-3: divider margin 8px 0 14px 0",
-        /margin:\s*8px 0 14px 0/.test(src));
+    // WS3 (2026-07-02): the nav row no longer hand-rolls its top divider; it
+    // delegates to the canonical customJS.SectionLabel.divider() primitive so the
+    // chrome-hairline spacing lives in one tunable place (section-label.js).
+    assertTrue("PNB-ACC-3: nav row uses customJS.SectionLabel.divider",
+        /customJS\.SectionLabel\.divider\s*\(/.test(src));
 }
 
 // -------------------------------------------------------------------------
@@ -11038,13 +11050,17 @@ async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
   // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
   // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
   // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
-  // is invoked; section order is now Status → Meetings → Workstreams.
+  // is invoked.
+  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was REMOVED from
+  // the hub template — workstream management now lives exclusively on the Map
+  // note — so the hub no longer invokes it and the old Meetings→Workstreams
+  // ordering assertion is retired.
   assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
     /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
   const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
-  const idxWorkstreams = body.indexOf('class: "ProjectWorkstreamManager"');
-  assertTrue("HC-V01020-PROJ-TPL-2-ORDER: Meetings BEFORE Workstreams (v0.109.0 ordering)",
-    idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Meetings panel present on hub", idxMeetings >= 0);
+  assertTrue("HC-V01020-PROJ-TPL-2-NOWSM: ProjectWorkstreamManager NOT on hub (moved to Map)",
+    body.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
 
 async function caseV01020ProjTpl3DocNoteRuleGlobNested() {
@@ -11304,6 +11320,23 @@ async function caseV01030Pdi1ClassDefined() {
   assertTrue("HC-V01030-PDI-1: async render method", /async\s+render\s*\(/.test(src));
 }
 
+// WS4 chrome overhaul — pure _actionRowSpec builder (Docs hub S3 action row).
+// Behavioral (not just source-text): instantiate ProjectDocsIndex from source
+// and assert the ordered button spec is New Doc → New Section → Move docs.
+async function caseWs4PdiActionRowSpec() {
+  console.log("\n--- Case HC-WS4-PDI-ACTIONROW: ProjectDocsIndex._actionRowSpec is [doc-note, section-hub, move-docs] ---");
+  const src = _readPdiSrc();
+  let inst = null;
+  try { inst = new (new Function(`${src}\nreturn ProjectDocsIndex;`)())(); }
+  catch (e) { assertTrue("HC-WS4-PDI-ACTIONROW: class instantiates", false, e && e.message); return; }
+  const spec = typeof inst._actionRowSpec === "function" ? inst._actionRowSpec() : null;
+  assertTrue("HC-WS4-PDI-ACTIONROW-1: _actionRowSpec returns 3 entries", Array.isArray(spec) && spec.length === 3);
+  assertTrue("HC-WS4-PDI-ACTIONROW-2: order = doc-note, section-hub, move-docs",
+    spec && spec[0].id === "doc-note" && spec[1].id === "section-hub" && spec[2].id === "move-docs");
+  assertTrue("HC-WS4-PDI-ACTIONROW-3: kinds = entity, entity, move",
+    spec && spec[0].kind === "entity" && spec[1].kind === "entity" && spec[2].kind === "move");
+}
+
 async function caseV01030Pdi2ReadsParentProjectSections() {
   console.log("\n--- Case HC-V01030-PDI-2: ProjectDocsIndex reads dv.current() + parent project's sections[] ---");
   const src = _readPdiSrc();
@@ -11348,18 +11381,19 @@ async function caseV01030Pdi5NewSectionButton() {
 }
 
 async function caseV01030Pdi6DashboardChips() {
-  console.log("\n--- Case HC-V01030-PDI-6: emits dashboard chip strip (doc count + open meetings + project status) ---");
+  console.log("\n--- Case HC-V01030-PDI-6: dashboard chip strip REMOVED (WS4 S3 order + simple search) ---");
+  // WS4 chrome overhaul: the Docs hub dropped the dashboard chip strip
+  // (docs/meetings/status chips) — it isn't part of the requested S3 layout.
+  // This case (formerly asserting the meetings query + _projectMatches + status
+  // + chip container) is repurposed to guard the removal, per the WS4 brief's
+  // explicit "Remove the dashboard chip row" directive.
   const src = _readPdiSrc();
-  assertTrue("HC-V01030-PDI-6a: queries spice/meetings/notes",
-    /spice\/meetings\/notes/.test(src));
-  assertTrue("HC-V01030-PDI-6b: filters by p.type === \"meeting\"",
-    /p\.type\s*===\s*["']meeting["']/.test(src));
-  assertTrue("HC-V01030-PDI-6c: _projectMatches helper defined (shared with ProjectMeetingsPanel pattern)",
-    /_projectMatches\s*\(/.test(src));
-  assertTrue("HC-V01030-PDI-6d: reads project.status frontmatter",
-    /\.status\b/.test(src));
-  assertTrue("HC-V01030-PDI-6e: dv.el(\"div\" ...) chip strip container",
-    /dv\.el\s*\(\s*["']div["']/.test(src));
+  assertTrue("HC-V01030-PDI-6a: no meetings-notes query (chip strip retired)",
+    !/spice\/meetings\/notes/.test(src));
+  assertTrue("HC-V01030-PDI-6b: no _projectMatches meeting-chip helper",
+    !/_projectMatches\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-6c: renders the S3 search tier (hideTags + hideNativeSearch + persist:false)",
+    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
 }
 
 // v0.103.0 S2.2 — SectionHub helper (depth-aware section + sub-section render).
@@ -12172,46 +12206,44 @@ async function caseV01060DsDebounce1Input150ms() {
 }
 
 // =====================================================================
-// v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion. Adds three
-// new chips beside the existing docs/meetings/status row:
-//   (a) task-note count under spice/projects/<slug>/tasks/
-//   (b) recent activity — docs touched in last 7 days
-//   (c) top-3 tags as inline #tag chips
-// All share the existing chipStyle pattern for visual consistency.
+// v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion (RETIRED at WS4).
+//
+// WS4 chrome overhaul (S3 order + simple search): the dashboard chip strip
+// (task-note count / recent-7day activity / top-3 tag chips + the base
+// docs/meetings/status chips) was REMOVED — it isn't part of the requested S3
+// Docs-hub layout (Breadcrumb → SpaceNavButtons → ProjectNavButtons → action
+// row → search → sections list). These three cases are repurposed to guard the
+// removal: the chip/widget code MUST be gone, and the S3 tiers MUST be present.
+// Justification: the WS4 brief explicitly directs "Remove the dashboard chip
+// row"; asserting the old chip code would pin retired behavior.
 // =====================================================================
 async function caseV01060PdiWidgets1TaskCount() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-1: ProjectDocsIndex queries task-notes under projects/<slug>/tasks ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-1: ProjectDocsIndex dashboard chip strip REMOVED (WS4 S3) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-1: queries dv.pages tasks subfolder",
-    /dv\.pages\(\s*`"\$\{projectPath\}\/tasks"`/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-1: filters by type === 'task-note'",
-    /p\.type\s*===\s*["']task-note["']/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-1: declares taskCount variable",
-    /\btaskCount\b/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: no _renderChips method (chip strip retired)",
+    !/_renderChips\s*\(/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: no task-note count chip query",
+    !/dv\.pages\(\s*`"\$\{projectPath\}\/tasks"`/.test(src));
 }
 
 async function caseV01060PdiWidgets2RecentActivity() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-2: ProjectDocsIndex computes recent activity (last 7 days) ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-2: ProjectDocsIndex recent-activity + top-tags chips REMOVED (WS4 S3) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-2: computes 7-day window via Date.now() - 7 * 24 * 60 * 60 * 1000",
-    /7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-2: filters allDocs by file.mtime?.ts >= sevenDaysAgo",
-    /file\.mtime\?\.ts[\s\S]{0,40}sevenDaysAgo/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-2: chip label 'updated this week'",
-    /updated this week/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: no 7-day 'updated this week' chip",
+    !/updated this week/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: no _topTags helper (tag chips retired)",
+    !/_topTags\s*\(/.test(src));
 }
 
 async function caseV01060PdiWidgets3TopTags() {
-  console.log("\n--- Case HC-V01060-PDI-WIDGETS-3: ProjectDocsIndex renders top-3 tag chips via _topTags helper ---");
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-3: ProjectDocsIndex renders the S3 tiers (action row + simple search) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01060-PDI-WIDGETS-3: _topTags helper declared",
-    /_topTags\s*\(/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: slices top 3",
-    /\.slice\s*\(\s*0\s*,\s*n\s*\)|\.slice\s*\(\s*0\s*,\s*3\s*\)/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: top-tag call site requests 3",
-    /_topTags\s*\(\s*allDocs\s*,\s*3\s*\)/.test(src));
-  assertTrue("HC-V01060-PDI-WIDGETS-3: excludes doc-note from tag pool",
-    /clean\s*===\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: renderActionRow method declared (marker-dispatched action row)",
+    /renderActionRow\s*\(/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: simple search — hideTags + hideNativeSearch + persist:false",
+    /hideTags:\s*true/.test(src) && /hideNativeSearch:\s*true/.test(src) && /persist:\s*false/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: uses SectionLabel.divider for helper-owned hairlines",
+    /SectionLabel\.divider/.test(src));
 }
 
 // v0.107.0 — entity-create seed_from_defaults schema field (additive).
@@ -13360,20 +13392,33 @@ async function caseV01101SourceTemplatesUseGuard() {
   // block (the SectionHub view renders the create buttons inline), so it's
   // dropped from this guard-form list — there's no EntityCreate dispatch left
   // to assert on.
+  // WS1 chrome overhaul: Projects.md no longer dispatches EntityCreate directly
+  // from the marker block. The `// entity-create:project` block now guard-
+  // dispatches ProjectsHubCards.renderNewProjectButton, which renders the
+  // EntityCreate button (helper-internal, cold-load-safe) inside a full-width
+  // centered row bracketed by SectionLabel dividers. The intent — guard-routed,
+  // no raw customJS call in the content file — is unchanged; only the dispatch
+  // target moved. Assert per-template on the correct dispatched class.
+  // WS4 chrome overhaul: Docs Hub.md no longer dispatches EntityCreate directly
+  // from the `// entity-create:doc-note` marker block. The marker now guard-
+  // dispatches ProjectDocsIndex.renderActionRow, which renders the full-width
+  // action row (New Doc + New Section via EntityCreate, + Move docs) with
+  // helper-owned dividers — same guard-routed, no-raw-customJS-call intent as
+  // WS1's Projects.md → ProjectsHubCards move; only the dispatch target changed.
   const TEMPLATES = [
-    "platform/blueprints/project/content/Projects.md",
-    "platform/blueprints/project/templates/Docs Hub.md",
-    "platform/blueprints/people/content/People.md",
-    "platform/blueprints/meetings/templates/Meeting Hub.md",
+    { rel: "platform/blueprints/project/content/Projects.md", dispatch: "ProjectsHubCards" },
+    { rel: "platform/blueprints/project/templates/Docs Hub.md", dispatch: "ProjectDocsIndex" },
+    { rel: "platform/blueprints/people/content/People.md", dispatch: "EntityCreate" },
+    { rel: "platform/blueprints/meetings/templates/Meeting Hub.md", dispatch: "EntityCreate" },
   ];
-  for (const rel of TEMPLATES) {
+  for (const { rel, dispatch } of TEMPLATES) {
     const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");
     assertTrue(`V01101-TPL-GUARD-${rel}: no direct customJS.EntityCreate.render call`,
       !/await\s+customJS\.EntityCreate\.render\(dv\s*,/.test(src),
       `${rel} still emits direct EntityCreate call`);
-    assertTrue(`V01101-TPL-GUARD-${rel}: uses customjs-guard EntityCreate dispatch`,
-      /customjs-guard[\s\S]{0,200}EntityCreate/.test(src),
-      `${rel} missing customjs-guard EntityCreate dispatch`);
+    assertTrue(`V01101-TPL-GUARD-${rel}: uses customjs-guard ${dispatch} dispatch`,
+      new RegExp(`customjs-guard[\\s\\S]{0,200}${dispatch}`).test(src),
+      `${rel} missing customjs-guard ${dispatch} dispatch`);
   }
 }
 
@@ -14656,6 +14701,26 @@ async function caseV01090TplMapHasBreadcrumb() {
   const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Map.md"), "utf8");
   assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes Breadcrumb before SpaceNavButtons",
     /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+  // Chrome overhaul WS-Workstreams: workstream MANAGEMENT (Add/Remove) was
+  // consolidated onto the Map note. The Map now invokes ProjectWorkstreamManager
+  // (management UI) ABOVE ProjectWorkstreams (grouped view). Both read the same
+  // note's workstreams[] when rendered on the Map (dv.current() === the Map),
+  // so adding a workstream then reloading surfaces it in the grouped view.
+  const idxNav  = t.indexOf('class: "ProjectNavButtons"');
+  const idxMgr  = t.indexOf('class: "ProjectWorkstreamManager"');
+  const idxView = t.indexOf('class: "ProjectWorkstreams"');
+  assertTrue("HC-V01090-TPL-MAP-WSM: Map invokes ProjectWorkstreamManager", idxMgr >= 0);
+  assertTrue("HC-V01090-TPL-MAP-WSV: Map invokes ProjectWorkstreams", idxView >= 0);
+  assertTrue("HC-V01090-TPL-MAP-ORDER: NavButtons < WorkstreamManager < ProjectWorkstreams",
+    idxNav >= 0 && idxNav < idxMgr && idxMgr < idxView);
+  // Chrome grammar: helpers own dividers now — no literal `---` chrome divider
+  // between the nav row and the workstream section (the manager's SectionLabel
+  // emits its own leading hairline). Check the BODY only (frontmatter fences
+  // are `---` and are excluded).
+  const fmMatch = t.match(/^---\n[\s\S]*?\n---\n/);
+  const mapBody = fmMatch ? t.slice(fmMatch[0].length) : t;
+  assertTrue("HC-V01090-TPL-MAP-NODASH: no literal `---` chrome divider in Map body",
+    !/^---$/m.test(mapBody));
 }
 
 async function caseV01090TplTaskHasBreadcrumb() {
@@ -14700,13 +14765,16 @@ async function caseV01090TplNoLegacyPanels() {
 }
 
 async function caseV01090TplSectionOrder() {
-  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings → Workstreams ---");
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings (Workstreams moved to Map) ---");
   const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
   const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
   const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
-  const idxWorkstreams = tpl.indexOf('class: "ProjectWorkstreamManager"');
   assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
-  assertTrue("HC-V01090-TPL-SO: Meetings BEFORE Workstreams", idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was removed from
+  // the hub template (workstream management now lives on the Map note), so the
+  // hub no longer invokes it. The old Meetings→Workstreams ordering is retired.
+  assertTrue("HC-V01090-TPL-SO: ProjectWorkstreamManager NOT on hub (moved to Map)",
+    tpl.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
 
 // S5 — ProjectMeetingsPanel rewrite + SectionLabel adoption everywhere.
@@ -15058,6 +15126,7 @@ async function caseHCV0128FinancePlanning() {
   await caseCP4MalformedJsonGuard();
   await caseCP5PathTraversalRejected();
   await caseCP6NewTabDefaultPageFreshWrite();
+  await caseCP7HomepageFreshWrite();
 
   // v0.26.0 first-run robustness — TDD-first cases for scaffoldFoundationalPluginData.
   await caseSF1AbsentDataJsonScaffolds();
@@ -15153,17 +15222,15 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
-  await caseLAT1LeafActionsTightSeparators();
+  await caseLAT1LeafActionsOwnDividers();
   await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
-  await caseDDA3TaskMarkdownRenderHelper();
   await caseDDA4DashboardAllowlist();
   await caseDDA5DashboardPolish();
   await caseDDA6ResolveTitleDefensive();
   await caseDDA7DashboardAllowlistIncludesBoards();
   await caseDDA8DashboardKanbanRollupRule();
-  await caseDDA9DailyTodoExternalCount();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
@@ -15547,6 +15614,7 @@ async function caseHCV0128FinancePlanning() {
 
   // v0.103.0 S2.1 — ProjectDocsIndex helper (Docs.md sections-index landing).
   await caseV01030Pdi1ClassDefined();
+  await caseWs4PdiActionRowSpec();
   await caseV01030Pdi2ReadsParentProjectSections();
   await caseV01030Pdi3DefaultsKnowledgeNotesWikilinks();
   await caseV01030Pdi4SectionCardsBeaconCardsRow();

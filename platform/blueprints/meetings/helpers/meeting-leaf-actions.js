@@ -94,12 +94,24 @@ class MeetingLeafActions {
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const usersIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
 
-    const row = dv.container.createEl("div");
-    row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+    // Chrome dividers owned by the helper (wiki methodology): render the action
+    // row bracketed by a top + bottom <hr> INSIDE this one dataviewjs block, so the
+    // separators hug the buttons (12px) instead of the big inter-block gap a
+    // template `---` leaves. The Meeting.md template carries no `---` around this
+    // block; a per-note install heal strips the legacy `---` from existing meetings.
+    const DIVIDER = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+    const wrap = dv.container.createEl("div");
+    wrap.style.cssText = "margin: 0;";
+    wrap.createEl("hr").style.cssText = DIVIDER;
+
+    const row = wrap.createEl("div");
+    row.style.cssText = "display: flex; gap: 12px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
 
     customJS.AccentButton.render(row, { label: "New Task", icon: plusIcon, onClick: () => this._onNewTask(dv), flex: true });
     customJS.AccentButton.render(row, { label: "Add to Project", icon: folderIcon, onClick: () => this._onAddToProject(dv), flex: true });
     customJS.AccentButton.render(row, { label: "Edit Attendees", icon: usersIcon, onClick: () => this._onEditAttendees(dv), flex: true });
+
+    wrap.createEl("hr").style.cssText = DIVIDER;
   }
 
   // ── data sources ───────────────────────────────────────────────────────────

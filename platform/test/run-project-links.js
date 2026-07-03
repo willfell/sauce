@@ -59,6 +59,10 @@ const anchorsOf = (root) => {
   walk(root);
   return out;
 };
+// WS6: the panel now renders each link as a CARD anchor — the display title +
+// host live in child <div>s (not anchor.textContent). Helpers read them back.
+const cardTitleOf = (a) => (a.children[0] ? a.children[0].textContent : '');
+const cardHostOf = (a) => (a.children[1] ? a.children[1].textContent : '');
 
 // ─── ProjectLinksPanel render ────────────────────────────────────────────────
 const Panel = loadClass('platform/blueprints/project/helpers/project-links-panel.js', 'ProjectLinksPanel');
@@ -66,24 +70,26 @@ ok('PLB-P0 ProjectLinksPanel class loads', !!Panel);
 const panel = Panel ? new Panel() : null;
 const pageWith = (links) => ({ current: () => ({ file: { name: 'Links Hub', path: 'spice/projects/x/Links Hub.md' }, links }) });
 
-// PLB-P1 — renders one external anchor per link (href + text + target/rel).
+// PLB-P1 — WS6: renders one CARD anchor per link — each carries the external-safe
+// target/rel + href, with the display title in a child <div> and the host below it.
 {
   const c = makeEl('div');
   const dv = Object.assign(pageWith([{ url: 'https://a.com', text: 'A' }, { url: 'https://b.com', text: 'B' }]), { container: c });
   panel && panel.render(dv);
   const a = anchorsOf(c);
-  ok('PLB-P1 anchors rendered (per-anchor target/rel/href/text)',
+  ok('PLB-P1 card anchors rendered (per-anchor target/rel/href + title + host)',
     a.length === 2 &&
     a.every(x => x.attrs.target === '_blank' && x.attrs.rel === 'noopener') &&
-    a[0].href === 'https://a.com' && a[0].textContent === 'A' &&
-    a[1].href === 'https://b.com' && a[1].textContent === 'B');
+    a[0].href === 'https://a.com' && cardTitleOf(a[0]) === 'A' && cardHostOf(a[0]) === 'a.com' &&
+    a[1].href === 'https://b.com' && cardTitleOf(a[1]) === 'B' && cardHostOf(a[1]) === 'b.com');
 }
-// PLB-P2 — empty links: no anchors, shows a muted "No links yet." hint.
+// PLB-P2 — WS6 empty-state rule: empty links render NOTHING (no anchors, no label,
+// no "No links yet." hint). The Add-link button above owns the empty affordance.
 {
   const c = makeEl('div');
   const dv = Object.assign(pageWith([]), { container: c });
   panel && panel.render(dv);
-  ok('PLB-P2 empty -> 0 anchors + hint', anchorsOf(c).length === 0 && c.children.some(x => x.textContent === 'No links yet.'));
+  ok('PLB-P2 empty -> renders nothing', anchorsOf(c).length === 0 && c.children.length === 0);
 }
 // PLB-P3 — cold-load (dv.current() undefined, no active file): no throw, no anchors.
 {
@@ -105,7 +111,7 @@ const pageWith = (links) => ({ current: () => ({ file: { name: 'Links Hub', path
   const dv = Object.assign(pageWith([{ text: 'no url' }, null, { url: 'https://a.com', text: 'first' }, { url: 'https://a.com', text: 'second' }]), { container: c });
   panel && panel.render(dv);
   const a = anchorsOf(c);
-  ok('PLB-P5 dedup + drop urlless', a.length === 1 && a[0].href === 'https://a.com' && a[0].textContent === 'first');
+  ok('PLB-P5 dedup + drop urlless', a.length === 1 && a[0].href === 'https://a.com' && cardTitleOf(a[0]) === 'first');
 }
 
 // PLB-P6 — PR2 slice 2: on a type:project hub the panel mirrors the SIBLING
@@ -119,7 +125,7 @@ const pageWith = (links) => ({ current: () => ({ file: { name: 'Links Hub', path
   };
   panel && panel.render(dv);
   const a = anchorsOf(c);
-  ok('PLB-P6 project-hub mirrors sibling Link Hub links', a.length === 1 && a[0].href === 'https://a.com' && a[0].textContent === 'A');
+  ok('PLB-P6 project-hub mirrors sibling Link Hub links', a.length === 1 && a[0].href === 'https://a.com' && cardTitleOf(a[0]) === 'A');
 }
 // PLB-P7 — project-hub with no sibling links renders NOTHING (no clutter / no hint).
 {

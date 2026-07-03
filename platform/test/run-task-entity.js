@@ -502,6 +502,39 @@ ok('TTL-3 buildBands tolerates non-array input', () => {
   assert(Array.isArray(res.overdue) && res.overdue.length === 0, 'overdue empty array');
 });
 
+// TTL-4. buildBands EXCLUDES tasks that belong elsewhere (FIX 1 — dedup): a task
+// with a project_slug renders in its Project section, and a meeting-sourced task
+// renders in Meeting Tasks — so neither may ALSO show in the Today/Overdue bands
+// (that duplicate was the bug). Today/Overdue = open, scheduled, NO project, NOT
+// meeting-sourced (personal daily tasks only).
+ok('TTL-4 buildBands excludes project-connected + meeting-sourced tasks (dedup)', () => {
+  const res = TaskTodayList.buildBands([
+    // Scheduled today, but has a project → shown in its Project section, NOT today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Scheduled today, meeting-sourced → shown in Meeting Tasks, NOT today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain scheduled-today personal task (no project, source daily) → IN today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
+    // Overdue but has a project → excluded from overdue too.
+    { scheduled: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Overdue meeting-sourced → excluded from overdue too.
+    { scheduled: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain overdue personal task → IN overdue.
+    { scheduled: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
+  ], '2026-07-01');
+  assert(res.today.length === 1, 'today = the single plain personal 07-01: got ' + res.today.length);
+  assert(res.today[0].scheduled === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
+    'today band holds only the personal daily task');
+  assert(res.overdue.length === 1, 'overdue = the single plain personal 06-29: got ' + res.overdue.length);
+  assert(res.overdue[0].scheduled === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
+    'overdue band holds only the personal daily task');
+  // A whitespace-only project_slug is treated as "no project" (still shown in today).
+  const ws = TaskTodayList.buildBands([
+    { scheduled: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
+  ], '2026-07-01');
+  assert(ws.today.length === 1, 'whitespace-only project_slug → still a personal task: got ' + ws.today.length);
+});
+
 // ---------- Dataview DateTime coercion (FIX 1 — tasks-don't-render bug) ----------
 //
 // Dataview parses an UNQUOTED frontmatter date (`scheduled: 2026-07-01`) into a

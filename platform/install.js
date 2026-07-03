@@ -1230,6 +1230,9 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applyProjectNavButtonsSeparatorGap(tp, mech, variables, history, git); // removes the stray blank line between the ProjectNavButtons row and the `---` below it on existing project/card/doc/map/section notes (cleanup, idempotent, .sauce-backup)
+  await applyBoardCardBreadcrumbHeal(tp, mech, variables, history, git); // WS9 P0b chrome overhaul — stamps `type: task-hub` (or task-board-card) + injects a leading Breadcrumb on promoted board-card notes (tasks/<Task>/<Task>.md); MUST run BEFORE applyProjectChromeDividerHeal so the fresh type lets that heal reach these notes (insert-only, idempotent, .sauce-backup)
+  await applyProjectChromeDividerHeal(tp, mech, variables, history, git); // WS9 P0a chrome overhaul — strips legacy literal `---` chrome dividers BETWEEN consecutive customjs-guard chrome blocks + collapses doubled blank gaps on project-related notes (cleanup, idempotent, .sauce-backup; only chrome-bounded `---`, preserves content-boundary dividers)
+  await applyProjectHubWorkstreamRemovalHeal(tp, mech, variables, history, git); // WS9 P1 chrome overhaul — removes the redundant ProjectWorkstreamManager dataviewjs block from existing type:project hubs (workstream mgmt now lives on the Map); collapses the gap (cleanup, idempotent, .sauce-backup)
   await applyProjectsHubAllProjectsHeadingCleanup(tp, mech, variables, history, git); // strips the legacy `## All Projects` H2 from the all-projects hub so it uses the SectionLabel chrome pattern (cleanup, idempotent, .sauce-backup)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
@@ -2798,6 +2801,13 @@ async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history,
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
       if (before.includes('class: "DocBulkMoveActions"')) { skipped += 1; continue; }
+      // WS4 chrome overhaul: the S3 Docs hub renders Move-docs inside the
+      // ProjectDocsIndex.renderActionRow full-width action row (New Doc · New
+      // Section · Move docs), so a standalone DocBulkMoveActions block would
+      // duplicate the button. Skip healing hubs that already carry the action
+      // row. (The DBMH harness feeds a legacy HUB with neither string, so this
+      // guard is inert there.)
+      if (before.includes('method: "renderActionRow"')) { skipped += 1; continue; }
       const after = _injectDocBulkMoveActionsBody(before);
       if (after === before) {
         warned += 1;
@@ -3132,6 +3142,561 @@ async function applyProjectNavButtonsSeparatorGap(tp, manifest, variables, histo
     history.push({
       event: "info",
       step: "project_nav_buttons_separator_gap",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// PROJECT_CHROME_TYPES — the frontmatter `type:` values whose bodies the project
+// chrome overhaul (WS0-WS8, 2026-07-02) governs. applyProjectChromeDividerHeal +
+// applyBoardCardBreadcrumbHeal both scope to this set. Kept as a module-level
+// constant so the two heals + their unit harness read from one source.
+const PROJECT_CHROME_TYPES = [
+  "project", "project-todo", "docs-hub", "section-hub", "doc-note",
+  "map", "kanban", "task-note", "task-hub", "task-board-card", "links-hub",
+];
+
+// _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
+// chrome overhaul reversed the divider grammar: helpers now render their own
+// leading hairline (SectionLabel.divider()), so consecutive chrome dataviewjs
+// blocks must be separated by a SINGLE blank line and NO literal `---`. Legacy
+// notes still carry the old grammar: a `---` line (often blank-shielded) BETWEEN
+// two consecutive customjs-guard chrome blocks, and/or a doubled blank gap.
+//
+// This transform removes a `---` divider ONLY when it sits between two chrome
+// blocks (a customjs-guard dataviewjs fence closes above it — ignoring blanks —
+// AND a customjs-guard dataviewjs fence opens below it), and collapses the
+// surrounding blank-line gap down to exactly one blank line. A `---` adjacent to
+// a chrome block on ONE side but to prose / an `## H2` heading / a callout on the
+// other side is a CONTENT boundary and is preserved (e.g. the `---` above a
+// `## Mentions` heading, or below a BacklinkPanel before user notes).
+//
+// Fence-aware + column-0-only: a chrome block is recognized ONLY when its
+// ```dataviewjs opener starts at column 0 (so callout-embedded `> ```dataviewjs`
+// blocks and blocks nested inside another fence never count as chrome anchors,
+// and the leading frontmatter `---`/`---` YAML fence is never a chrome divider).
+// Idempotent: once collapsed the span is a single blank line with no `---`, which
+// re-matches to itself. Returns { changed, body }.
+function _stripProjectChromeDividers(body) {
+  const src = String(body == null ? "" : body);
+  const lines = src.split("\n");
+
+  // Skip the leading frontmatter block so its `---` fences are never candidates.
+  let start = 0;
+  if (lines[0] === "---") {
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === "---") { start = i + 1; break; }
+    }
+  }
+
+  // Classify each line's fence state at column 0 so we know which ``` opens a
+  // chrome (customjs-guard) dataviewjs block. isChromeClose[i] = true when line i
+  // is the closing ``` of a column-0 dataviewjs block that referenced
+  // customjs-guard. isChromeOpen[i] = true when line i is that opener.
+  const isChromeOpen = new Array(lines.length).fill(false);
+  const isChromeClose = new Array(lines.length).fill(false);
+  {
+    let inFence = false;   // inside a column-0 fenced block?
+    let openIdx = -1;      // line index of the current block's opener
+    let state = "none";    // "none" | "pending" (```dataviewjs opener, no guard ref yet) | "guard"
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // A column-0 fence line opens/closes a block. Skip inline triple-backtick
+      // spans (```lang``` on one line) — those aren't block fences.
+      const isFenceLine = /^```/.test(line) && !/^```[^`]*```/.test(line);
+      if (isFenceLine) {
+        if (!inFence) {
+          inFence = true;
+          openIdx = i;
+          state = /^```dataviewjs\s*$/.test(line) ? "pending" : "none";
+        } else {
+          // closing fence: mark the block as chrome only if a guard ref appeared.
+          if (state === "guard") {
+            isChromeOpen[openIdx] = true;
+            isChromeClose[i] = true;
+          }
+          inFence = false;
+          openIdx = -1;
+          state = "none";
+        }
+        continue;
+      }
+      if (inFence && state === "pending" && line.includes("customjs-guard")) {
+        state = "guard";
+      }
+    }
+  }
+
+  // Walk and drop `---` lines that sit between two chrome blocks, collapsing the
+  // blank gap to one blank line. We rebuild the output. `lastEmittedChromeClose`
+  // tracks whether the most recent non-blank emitted line was a chrome closing
+  // fence, so a `---`/gap is only collapsed when it's chrome-bounded on BOTH sides.
+  const out = [];
+  let changed = false;
+  let i = start;
+  // Emit the frontmatter verbatim.
+  for (let k = 0; k < start; k++) out.push(lines[k]);
+
+  while (i < lines.length) {
+    if (isChromeClose[i]) {
+      out.push(lines[i]);
+      i++;
+      // Look ahead: [blanks] ([---] [blanks])? — decide if the NEXT non-blank,
+      // non-`---` line opens a chrome block. If so, normalize the span to one
+      // blank line. Otherwise emit the span verbatim.
+      let j = i;
+      let sawDivider = false;
+      let dividerCount = 0;
+      while (j < lines.length && (lines[j].trim() === "" || lines[j].trim() === "---")) {
+        if (lines[j].trim() === "---") { sawDivider = true; dividerCount++; }
+        j++;
+      }
+      // j now points at the first "real" line after the gap (or EOF).
+      const nextIsChrome = j < lines.length && isChromeOpen[j];
+      const atEof = j >= lines.length;
+      // Collapse when the gap has AT MOST one `---` AND either the next real line
+      // opens a chrome block (chrome↔chrome divider), OR there's no content below
+      // at all (a trailing chrome `---` at EOF — orphaned chrome cruft). A `---`
+      // followed by prose / an `## H2` / a callout is a CONTENT boundary → kept.
+      // Multiple `---` in one gap is unusual content — left verbatim to avoid
+      // eating a user divider.
+      if ((nextIsChrome || (atEof && sawDivider)) && dividerCount <= 1) {
+        // Chrome↔chrome divider OR a trailing chrome `---` at EOF: normalize the
+        // span to exactly one blank line after the chrome fence.
+        const spanLen = j - i;
+        if (sawDivider || spanLen !== 1) changed = true;
+        out.push("");
+        i = j;
+      } else {
+        // Emit the span verbatim (content boundary or ambiguous).
+        for (; i < j; i++) out.push(lines[i]);
+      }
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+
+  const result = out.join("\n");
+  return { changed: changed && result !== src, body: result };
+}
+
+// applyProjectChromeDividerHeal — WS9 P0a. Walks spice/projects/** recursively
+// and applies _stripProjectChromeDividers to every project-related note (frontmatter
+// type ∈ PROJECT_CHROME_TYPES). Removes the legacy literal `---` chrome dividers
+// between consecutive customjs-guard chrome blocks + collapses doubled blank gaps,
+// so the helper-owned leading hairline is the sole separator. Cleanup-type:
+// idempotent (no-op once normalized), .sauce-backup snapshot before any write,
+// per-note try/catch (fails loud via history, never throws), history events. Safe
+// to run every install. Mirrors applyProjectNavButtonsSeparatorGap posture.
+async function applyProjectChromeDividerHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  async function collectMd(dir) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    let files = (listing.files || []).filter((p) => p.endsWith(".md"));
+    for (const sub of (listing.folders || [])) {
+      if (sub.includes("/.sauce-backup")) continue;  // never recurse our own backups
+      files = files.concat(await collectMd(sub));
+    }
+    return files;
+  }
+
+  let mdFiles;
+  try {
+    mdFiles = await collectMd(root);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_chrome_divider_heal",
+        reason: `walk failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of mdFiles) {
+    try {
+      const before = await adapter.read(notePath);
+      const type = _noteChromeFrontmatterType(before);
+      if (!PROJECT_CHROME_TYPES.includes(type)) { skipped += 1; continue; }
+      const { changed, body: after } = _stripProjectChromeDividers(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_chrome_divider_heal",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_chrome_divider_heal",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_chrome_divider_heal",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _injectBoardCardBreadcrumb — pure transform (WS9 P0b chrome overhaul). Promoted
+// board-card notes (the file at spice/projects/<slug>/tasks/<Task>/<Task>.md, or a
+// deeper board card at .../board/<Card>/<Card>.md) shipped BEFORE the chrome
+// overhaul with NO Breadcrumb block and often NO frontmatter `type:` (only tags:
+// kanban-card/project-card). The overhaul stamps a stable type + a Breadcrumb as
+// the first rendered block. This transform, given a `desiredType`:
+//   (1) Ensures frontmatter carries `type: <desiredType>`. install.js CANNOT use
+//       parseYaml (it runs in the Templater Node context, not Obsidian), so this
+//       is regex-based, mirroring the frontmatter idioms already used across the
+//       installer:
+//         - frontmatter present + a `type:` line already exists → left untouched
+//           (never overwrite a user/other type);
+//         - frontmatter present, no `type:` line → insert `type: <desiredType>`
+//           as the FIRST line inside the FM block;
+//         - no frontmatter at all → prepend a minimal `---\ntype: <t>\n---\n\n`.
+//   (2) Inserts a Breadcrumb dataviewjs block as the FIRST rendered block — right
+//       before the first `class: "SpaceNavButtons"` / `class: "ProjectNavButtons"`
+//       dataviewjs fence; if neither exists, immediately after the frontmatter.
+// Idempotent: if a `class: "Breadcrumb"` block is already present the breadcrumb
+// step is skipped; the type step only fires when the FM lacks a `type:`. Returns
+// { changed, body }.
+function _injectBoardCardBreadcrumb(body, desiredType) {
+  const src = String(body == null ? "" : body);
+  const type = String(desiredType || "task-hub");
+  let out = src;
+  let changed = false;
+
+  // ---- (1) frontmatter type: ----
+  const fmMatch = out.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/);
+  if (fmMatch) {
+    const fmBody = fmMatch[1];
+    // A `type:` key anywhere in the FM block (line-anchored) → leave it.
+    if (!/^\s*type\s*:/m.test(fmBody)) {
+      const nl = fmMatch[0].includes("\r\n") ? "\r\n" : "\n";
+      // Insert `type: <type>` as the first FM line, just after the opening `---`.
+      const openLen = ("---" + nl).length;
+      out = out.slice(0, openLen) + "type: " + type + nl + out.slice(openLen);
+      changed = true;
+    }
+  } else {
+    // No frontmatter → prepend a minimal block.
+    out = "---\ntype: " + type + "\n---\n\n" + out;
+    changed = true;
+  }
+
+  // ---- (2) Breadcrumb as first rendered block ----
+  if (!/class:\s*"Breadcrumb"/.test(out)) {
+    const bcBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n```';
+    // Anchor: the first SpaceNavButtons or ProjectNavButtons chrome fence.
+    let navIdx = out.indexOf('class: "SpaceNavButtons"');
+    if (navIdx === -1) navIdx = out.indexOf('class: "ProjectNavButtons"');
+    if (navIdx !== -1) {
+      const fence = out.lastIndexOf("```dataviewjs", navIdx);
+      if (fence !== -1) {
+        out = out.slice(0, fence) + bcBlock + "\n\n" + out.slice(fence);
+        changed = true;
+      }
+    } else {
+      // No nav block — insert right after the frontmatter (or at the top).
+      const fm2 = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+      if (fm2) {
+        out = out.slice(0, fm2[0].length) + "\n" + bcBlock + "\n" + out.slice(fm2[0].length);
+      } else {
+        out = bcBlock + "\n\n" + out;
+      }
+      changed = true;
+    }
+  }
+
+  return { changed: changed && out !== src, body: out };
+}
+
+// applyBoardCardBreadcrumbHeal — WS9 P0b. Walks spice/projects/** and heals
+// promoted board-card notes: a file whose basename === its parent folder name and
+// whose path contains a `/tasks/` segment. Two shapes:
+//   - spice/projects/<slug>/tasks/<Task>/<Task>.md              → type: task-hub
+//   - spice/projects/<slug>/tasks/<Task>/board/<Card>/<Card>.md → type: task-board-card
+// Injects `type` + a leading Breadcrumb via _injectBoardCardBreadcrumb. Insert-only
+// + idempotent (skips notes that already render a Breadcrumb AND carry a type),
+// .sauce-backup snapshot before any write, per-note try/catch (fails loud via
+// history, never throws). MUST run BEFORE applyProjectChromeDividerHeal so the
+// freshly-stamped type lets that heal reach these notes. Mirrors the
+// applyProjectNavButtonsSeparatorGap walk posture.
+async function applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  async function collectMd(dir) {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    let files = (listing.files || []).filter((p) => p.endsWith(".md"));
+    for (const sub of (listing.folders || [])) {
+      if (sub.includes("/.sauce-backup")) continue;
+      files = files.concat(await collectMd(sub));
+    }
+    return files;
+  }
+
+  // Classify a path as a promoted board card + return its desired type, else null.
+  //   .../tasks/<Task>/<Task>.md              → task-hub
+  //   .../tasks/<Task>/board/<Card>/<Card>.md → task-board-card
+  function boardCardType(notePath) {
+    const parts = notePath.split("/");
+    const file = parts[parts.length - 1];
+    if (!file.endsWith(".md")) return null;
+    const base = file.slice(0, -3);
+    const parent = parts[parts.length - 2];
+    if (parent !== base) return null;            // basename must === parent folder
+    if (parts.indexOf("tasks") === -1) return null;
+    // Deeper board card: .../board/<Card>/<Card>.md
+    if (parts[parts.length - 3] === "board") return "task-board-card";
+    // Promoted task hub: .../tasks/<Task>/<Task>.md
+    if (parts[parts.length - 3] === "tasks") return "task-hub";
+    return null;
+  }
+
+  let mdFiles;
+  try {
+    mdFiles = await collectMd(root);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "board_card_breadcrumb_heal",
+        reason: `walk failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const notePath of mdFiles) {
+    try {
+      const desiredType = boardCardType(notePath);
+      if (!desiredType) { skipped += 1; continue; }
+      const before = await adapter.read(notePath);
+      const { changed, body: after } = _injectBoardCardBreadcrumb(before, desiredType);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${notePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(notePath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "board_card_breadcrumb_heal",
+          target: notePath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "board_card_breadcrumb_heal",
+          reason: `${notePath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "board_card_breadcrumb_heal",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _removeWorkstreamManagerBlock — pure transform (WS9 P1 chrome overhaul). The
+// chrome overhaul consolidated workstream management onto the Map note, so the
+// ProjectWorkstreamManager block is redundant on the project HUB. This removes the
+// WHOLE `class: "ProjectWorkstreamManager"` dataviewjs fence (the ```dataviewjs
+// opener through its closing ```) from a hub body and collapses the surrounding
+// blank-line gap down to a single blank line, so no doubled blank / orphaned gap
+// remains. Fence-aware + column-0-only: only a top-level (column-0) dataviewjs
+// block naming that class is removed; a callout-embedded reference (`> ...`) is
+// left alone. Idempotent: once removed the class no longer appears → no-op.
+// Returns { changed, body }.
+function _removeWorkstreamManagerBlock(body) {
+  const src = String(body == null ? "" : body);
+  if (!/class:\s*"ProjectWorkstreamManager"/.test(src)) return { changed: false, body: src };
+  const lines = src.split("\n");
+  const out = [];
+  let changed = false;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // A column-0 ```dataviewjs opener: scan its block for the target class.
+    if (/^```dataviewjs\s*$/.test(line)) {
+      let j = i + 1;
+      let isTarget = false;
+      while (j < lines.length && !/^```\s*$/.test(lines[j])) {
+        if (lines[j].includes('class: "ProjectWorkstreamManager"')) isTarget = true;
+        j++;
+      }
+      // j points at the closing fence (or EOF if unterminated).
+      if (isTarget && j < lines.length) {
+        changed = true;
+        // Drop lines i..j (the whole fence). Then collapse the gap: if BOTH the
+        // last emitted line and the next surviving line are blank, drop one blank
+        // so the removal leaves exactly one blank separator, not two.
+        i = j + 1;
+        // Consume a single trailing blank that immediately followed the block so
+        // we don't leave a doubled blank when the line above `out`'s tail is blank.
+        const prevBlank = out.length > 0 && out[out.length - 1].trim() === "";
+        const nextBlank = i < lines.length && lines[i].trim() === "";
+        if (prevBlank && nextBlank) i++;  // skip one blank line
+        continue;
+      }
+    }
+    out.push(line);
+    i++;
+  }
+  const result = out.join("\n");
+  return { changed: changed && result !== src, body: result };
+}
+
+// applyProjectHubWorkstreamRemovalHeal — WS9 P1. Walks spice/projects/<slug>/ and
+// removes the redundant ProjectWorkstreamManager dataviewjs block from each
+// `type: project` hub note (workstream management now lives on the Map). Finds the
+// hub note the same way applyProjectMeetingsPanelHeal / applyProjectHubLegacyHeadingCleanup
+// do: the *.md directly inside each project dir whose frontmatter type is
+// `project`. Cleanup-type: idempotent (no-op once the block is gone), .sauce-backup
+// snapshot before any write, per-project try/catch (fails loud via history, never
+// throws), history events. Mirrors applyProjectHubLegacyHeadingCleanup posture.
+async function applyProjectHubWorkstreamRemovalHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_hub_workstream_removal_heal",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      const { changed, body: after } = _removeWorkstreamManagerBlock(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(hubPath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_hub_workstream_removal_heal",
+          target: hubPath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_hub_workstream_removal_heal",
+          reason: `${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_hub_workstream_removal_heal",
       name: "vault",
       reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
@@ -4710,8 +5275,11 @@ const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
 // (5) Meeting only: inject ACTION_ITEMS_MARKER above the Action Items
 // SectionLabel block (v0.127.0 §B; task-interactions appendTask anchor).
 // (6) To-do only: inject TODAY_CAPTURE_MARKER below the Today SectionLabel
-// block (v0.127.0 §F; TodayCaptureEditableList anchor). Returns the body
-// unchanged when nothing applies (driver relies on `after === before`).
+// block (v0.127.0 §F; TodayCaptureEditableList anchor). (7) To-do / meeting /
+// scratch-day: strip the redundant `---` bracketing the action block now that
+// the ToDoLeafActions/MeetingLeafActions/ScratchDayActions helper renders its own
+// <hr> dividers (see _stripDividersAroundActionBlock). Returns the body unchanged
+// when nothing applies (driver relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -4897,6 +5465,44 @@ function _healNoteChromeBody(body, type) {
       }
     }
   }
+  // Step 7 (action-bar dividers) — the daily to-do / meeting / scratch-day action
+  // helpers now render their OWN top+bottom <hr> dividers INSIDE their dataviewjs
+  // block (wiki methodology), so the literal `---` the old templates bracketed
+  // those blocks with is now a redundant double divider (and keeps the big
+  // inter-block gap the change was meant to close). Strip a `---` immediately
+  // before AND after the action block. Idempotent + tolerant of the current
+  // adjacent shape (```/---/```dataviewjs) and the older blank-padded shape.
+  if (type === 'to-do')       out = _stripDividersAroundActionBlock(out, 'ToDoLeafActions');
+  if (type === 'meeting')     out = _stripDividersAroundActionBlock(out, 'MeetingLeafActions');
+  if (type === 'scratch-day') out = _stripDividersAroundActionBlock(out, 'ScratchDayActions');
+  return out;
+}
+
+// _stripDividersAroundActionBlock — pure, idempotent. Removes a markdown `---`
+// divider immediately BEFORE and immediately AFTER a `class: "<className>"`
+// dataviewjs action block, collapsing each side to a single blank line. The
+// action helper now renders its own <hr> dividers (wiki methodology), so the
+// template `---` is redundant. Tolerant of both the current adjacent template
+// shape (```\n---\n```dataviewjs) and the older seed-fixture shape that padded
+// the `---` with blank lines (```\n\n---\n\n```dataviewjs). A `---` that is not
+// adjacent to the named action block is never touched. Mirrors the wiki heal's
+// trailing-divider strip (_healWikiChromeBody step 4), extended to both sides.
+function _stripDividersAroundActionBlock(body, className) {
+  if (typeof body !== "string") return body;
+  const q = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = body;
+  // BEFORE: a `---` (with any padding blank lines) directly preceding the action
+  // block → drop it, keeping exactly one blank line before the block.
+  out = out.replace(
+    new RegExp('\\n\\n-{3,}[ \\t]*\\n[ \\t\\r\\n]*(```dataviewjs\\n(?:\\/\\/[^\\n]*\\n)?await dv\\.view\\([^\\n]*class:\\s*"' + q + '")'),
+    '\n\n$1'
+  );
+  // AFTER: a `---` directly following the action block's closing fence → drop it,
+  // keeping one blank line after the block. (Same tail as _healWikiChromeBody.)
+  out = out.replace(
+    new RegExp('(class:\\s*"' + q + '"[\\s\\S]*?\\n```\\n)\\s*\\n?-{3,}[ \\t]*(\\r?\\n|$)'),
+    '$1'
+  );
   return out;
 }
 
@@ -8018,8 +8624,6 @@ function _linksHubBody(viewsPath) {
     '```dataviewjs',
     `await dv.view("${v}/customjs-guard", { class: "ProjectNavButtons" });`,
     '```',
-    '',
-    '---',
     '',
     '```dataviewjs',
     `await dv.view("${v}/customjs-guard", { class: "ProjectLinksManager" });`,
@@ -18373,12 +18977,25 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._linksHubBody = _linksHubBody;
     module.exports.applyProjectNavButtonsSeparatorGap = applyProjectNavButtonsSeparatorGap;
     module.exports._collapseNavButtonsSeparatorGap = _collapseNavButtonsSeparatorGap;
+    // WS9 P0a — project chrome literal-`---`-divider strip heal + pure transform
+    // (run-v0127-project-hub-heal.js CHR-DIV-*).
+    module.exports.applyProjectChromeDividerHeal = applyProjectChromeDividerHeal;
+    module.exports._stripProjectChromeDividers = _stripProjectChromeDividers;
+    // WS9 P0b — promoted board-card breadcrumb + type heal + pure transform
+    // (run-v0127-project-hub-heal.js BC-BC-*).
+    module.exports.applyBoardCardBreadcrumbHeal = applyBoardCardBreadcrumbHeal;
+    module.exports._injectBoardCardBreadcrumb = _injectBoardCardBreadcrumb;
+    // WS9 P1 — project-hub ProjectWorkstreamManager block removal heal + pure
+    // transform (run-v0127-project-hub-heal.js WSM-RM-*).
+    module.exports.applyProjectHubWorkstreamRemovalHeal = applyProjectHubWorkstreamRemovalHeal;
+    module.exports._removeWorkstreamManagerBlock = _removeWorkstreamManagerBlock;
     module.exports.applyProjectsHubAllProjectsHeadingCleanup = applyProjectsHubAllProjectsHeadingCleanup;
     module.exports._stripAllProjectsHeading = _stripAllProjectsHeading;
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
+    module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
@@ -18426,6 +19043,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
+    module.exports.applyProjectTodoOwnedTasksHeal = applyProjectTodoOwnedTasksHeal;
     module.exports._reorderProjectTodoOwnedTasksLast = _reorderProjectTodoOwnedTasksLast;
     module.exports.applyProjectTodoSectionReorderHeal = applyProjectTodoSectionReorderHeal;
     // trips-conformance heal — rename + canonicalize + breadcrumb for existing

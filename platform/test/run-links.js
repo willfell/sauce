@@ -149,6 +149,40 @@ const L = Cls ? new Cls() : null;
   ok('L17 render parses raw value', n === 1);
 }
 
+// ---- ProjectLinksPanel._linkCards() (pure; drives the responsive card grid) ----
+// The project Link Hub renders `links[]` as a responsive card grid; each card is
+// built from a pure { text, url, host } shape so the host label + text-fallback +
+// dedupe are unit-testable without a DOM. host = URL hostname (best-effort, never
+// throws on a malformed url); text falls back to the host when empty.
+{
+  const src = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'project-links-panel.js'), 'utf8');
+  const Panel = new Function(`${src}\nreturn ProjectLinksPanel;`)();
+  ok('LC0 ProjectLinksPanel class loads', typeof Panel === 'function');
+  const p = new Panel();
+
+  // LC1 — spec example: dedupe by url, host derived, text fallback to host.
+  const cards = p._linkCards([{ url: 'https://a.com/x', text: 'A' }, { url: 'https://b.com', text: '' }, { url: 'https://a.com/x', text: 'dupe' }]);
+  ok('LC1 dedupe removes duplicate url', cards.length === 2);
+  ok('LC1 card[0] {text,url,host}', cards[0].text === 'A' && cards[0].url === 'https://a.com/x' && cards[0].host === 'a.com');
+  ok('LC1 card[1] host parsed', cards[1].host === 'b.com');
+  ok('LC1 card[1] text falls back to host', cards[1].text === 'b.com');
+
+  // LC2 — insertion order preserved.
+  const ordered = p._linkCards([{ url: 'https://1.com' }, { url: 'https://2.com' }, { url: 'https://3.com' }]);
+  ok('LC2 insertion order preserved', ordered.map((x) => x.host).join(',') === '1.com,2.com,3.com');
+
+  // LC3 — bad / non-http url: host parsing never throws; text still resolves.
+  let threw = false;
+  let bad = [];
+  try { bad = p._linkCards([{ url: 'not a url', text: '' }, { url: 'mailto:x@y.com', text: 'Mail' }]); } catch (_e) { threw = true; }
+  ok('LC3 malformed url does not throw', !threw);
+  ok('LC3 malformed url still yields a card with a text', bad.length === 2 && bad[0].text.length > 0 && bad[1].text === 'Mail');
+
+  // LC4 — empty / garbage input -> [].
+  ok('LC4 empty input -> []', Array.isArray(p._linkCards([])) && p._linkCards([]).length === 0);
+  ok('LC4 non-array input -> []', Array.isArray(p._linkCards(null)) && p._linkCards(null).length === 0);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

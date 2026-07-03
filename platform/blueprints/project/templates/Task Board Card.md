@@ -21,6 +21,7 @@ const alias = projectSlug && taskFolder
     : cardName;
 -%>
 ---
+type: task-board-card
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 task_parent: <% taskParent %>
 source_board: <% sourceBoard %>
@@ -52,10 +53,12 @@ if (/\/tasks\/[^/]+\/board\//.test(newFilePath)) {
 -%>
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
 ```
 
----
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });

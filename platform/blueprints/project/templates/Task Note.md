@@ -17,8 +17,6 @@ await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
-
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```
