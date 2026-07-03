@@ -4408,157 +4408,6 @@
       }
     },
     {
-      "kind": "blueprint",
-      "name": "teams",
-      "current_version": "0.3.1",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 3,
-          "total": 3,
-          "methods": [
-            {
-              "cls": "TeamsHubCards",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TeamPageCards",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TeamActionButtons",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-teams-teamshubcards.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": false
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 2,
-          "total": 2,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Template, Team.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "teams",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 3,
-          "widgets": [
-            {
-              "widget": "TeamsHubCards",
-              "covered": false
-            },
-            {
-              "widget": "TeamPageCards",
-              "covered": false
-            },
-            {
-              "widget": "TeamActionButtons",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.7833333333333334,
-      "blast_radius": "low",
-      "blast_radius_rationale": "Not in active use by either consumer vault.",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.22499999999999998,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.22499999999999998,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
-      },
-      "qualitative": {
-        "validates_scores": "yes",
-        "false_positives": [
-          {
-            "axis": "integration_smoke",
-            "note": "Score 1.0 from substring matching on 'teams' in run-cowork-smoke.js (MCP tool variant) and run-migrate-frontmatter.js; teams blueprint primary flow (create -> assign products -> appear in hub) has zero coverage. Should be 0.0."
-          },
-          {
-            "axis": "manifest_schema",
-            "note": "customjs_classes field not asserted; 3 widget classes never mentioned in assertions (TEAM-1/2/3 cover files/nav/rule_fragments/depends_on only)"
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "widget_render",
-            "note": "All 3 customjs classes (TeamsHubCards, TeamPageCards, TeamActionButtons) have render() methods, scored 0.0; legitimately uncovered in run-renderer.js"
-          }
-        ],
-        "primary_user_flow": "Create a team, assign it one or more products, and verify it appears in Teams hub grouped by product with member projects rolled up.",
-        "qualitative_recommendation": "Low priority (0.583 composite, blast_radius=low, 0 recent_incidents). Recommend behavioral-runner for customjs_behavioral + widget_render gaps (candidate: run-teams-customjs.js). manifest_schema gap lower priority."
-      }
-    },
-    {
       "kind": "mechanism",
       "name": "breadcrumb",
       "current_version": "0.2.1",
@@ -6518,6 +6367,157 @@
         "score": 0.012499999999999989,
         "archetype": "hc-family",
         "target_file": "platform/test/run-helper-cases.js"
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "teams",
+      "current_version": "0.3.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 3,
+          "total": 3,
+          "methods": [
+            {
+              "cls": "TeamsHubCards",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TeamPageCards",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TeamActionButtons",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-teams-teamshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, Team.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "teams",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 3,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "TeamsHubCards",
+              "covered": true
+            },
+            {
+              "widget": "TeamPageCards",
+              "covered": true
+            },
+            {
+              "widget": "TeamActionButtons",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9833333333333334,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Not in active use by either consumer vault.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.012499999999999989,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.012499999999999989,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Score 1.0 from substring matching on 'teams' in run-cowork-smoke.js (MCP tool variant) and run-migrate-frontmatter.js; teams blueprint primary flow (create -> assign products -> appear in hub) has zero coverage. Should be 0.0."
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "customjs_classes field not asserted; 3 widget classes never mentioned in assertions (TEAM-1/2/3 cover files/nav/rule_fragments/depends_on only)"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "widget_render",
+            "note": "All 3 customjs classes (TeamsHubCards, TeamPageCards, TeamActionButtons) have render() methods, scored 0.0; legitimately uncovered in run-renderer.js"
+          }
+        ],
+        "primary_user_flow": "Create a team, assign it one or more products, and verify it appears in Teams hub grouped by product with member projects rolled up.",
+        "qualitative_recommendation": "Low priority (0.583 composite, blast_radius=low, 0 recent_incidents). Recommend behavioral-runner for customjs_behavioral + widget_render gaps (candidate: run-teams-customjs.js). manifest_schema gap lower priority."
       }
     },
     {
