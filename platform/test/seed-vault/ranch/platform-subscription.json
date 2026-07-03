@@ -79,7 +79,7 @@
     },
     {
       "name": "convenience",
-      "version": "0.5.1"
+      "version": "0.6.0"
     },
     {
       "name": "platform-claude",
@@ -109,7 +109,7 @@
     },
     {
       "name": "daily",
-      "version": "0.16.2"
+      "version": "0.17.0"
     },
     {
       "name": "meetings",
