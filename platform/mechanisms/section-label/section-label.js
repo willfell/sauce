@@ -35,8 +35,12 @@ class SectionLabel {
    */
   divider(dv) {
     const c = (dv && dv.container) || dv;
+    // 2026-07-03 UX pass: the bare hairline was 1px var(--background-modifier-border)
+    // at 12px — nearly invisible on dark themes, so button/search tiers read as one
+    // dense stack. Use --background-modifier-border-hover (clearly visible) + 18px
+    // breathing room so every tier boundary reads as a real separator.
     const hr = c.createEl("hr");
-    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 18px 0;";
     return hr;
   }
 }
