@@ -3676,6 +3676,68 @@ async function caseCP6NewTabDefaultPageFreshWrite() {
   }
 }
 
+async function caseCP7HomepageFreshWrite() {
+  console.log("\n--- Case CP7: applyCommunityPluginData writes homepage data.json (daily→reading) ---");
+  const scratchCP7 = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP7-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "homepage" }],
+      community_plugin_settings: [
+        {
+          id: "homepage",
+          settings: {
+            version: 4,
+            homepages: {
+              "Main Homepage": {
+                value: "",
+                kind: "Daily Note",
+                openOnStartup: false,
+                openMode: "Replace last note",
+                manualOpenMode: "Replace last note",
+                view: "Reading view",
+                revertView: true,
+                openWhenEmpty: false,
+                refreshDataview: true,
+                autoCreate: true,
+                autoScroll: false,
+                pin: false,
+                commands: [],
+                alwaysApply: false,
+                hideReleaseNotes: true,
+              },
+            },
+            separateMobile: false,
+          },
+        },
+      ],
+    });
+    await scaffoldVault(scratchCP7, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Seed plugin dir + community-plugins.json so the prereq gate passes.
+    const hpDir = path.join(scratchCP7, ".obsidian/plugins/homepage");
+    await fsp.mkdir(hpDir, { recursive: true });
+    const cpPath = path.join(scratchCP7, ".obsidian/community-plugins.json");
+    await fsp.writeFile(cpPath, JSON.stringify(["homepage"]), "utf8");
+    const result = await runHarness(scratchCP7);
+    assertTrue("CP7: install ran", result !== null);
+    const dataPath = path.join(scratchCP7, ".obsidian/plugins/homepage/data.json");
+    assertTrue("CP7: data.json written", fs.existsSync(dataPath));
+    const data = await readJson(dataPath);
+    const hp = data.homepages && data.homepages["Main Homepage"];
+    assertTrue("CP7: homepages['Main Homepage'] present", !!hp);
+    assertEq("CP7: kind=Daily Note", hp.kind, "Daily Note");
+    assertEq("CP7: view=Reading view", hp.view, "Reading view");
+    assertEq("CP7: refreshDataview true", hp.refreshDataview, true);
+    assertEq("CP7: openOnStartup false (button-first)", hp.openOnStartup, false);
+    assertEq("CP7: separateMobile false", data.separateMobile, false);
+  } finally {
+    await fsp.rm(scratchCP7, { recursive: true, force: true });
+  }
+}
+
 // -----------------------------------------------------------------------------
 // SF1-SF5 — scaffoldFoundationalPluginData (v0.26.0 P0-2)
 // Materializes Templater data.json defaults at install time when the plugin
@@ -15060,6 +15122,7 @@ async function caseHCV0128FinancePlanning() {
   await caseCP4MalformedJsonGuard();
   await caseCP5PathTraversalRejected();
   await caseCP6NewTabDefaultPageFreshWrite();
+  await caseCP7HomepageFreshWrite();
 
   // v0.26.0 first-run robustness — TDD-first cases for scaffoldFoundationalPluginData.
   await caseSF1AbsentDataJsonScaffolds();

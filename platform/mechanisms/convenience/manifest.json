@@ -2,18 +2,20 @@
   "name": "convenience",
   "version": "0.4.1",
   "kind": "mechanism",
-  "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- / Cmd+=) + Cmd+T -> today's daily + Dataview JS enable + Tasks plugin taskFormat=dataview (suppresses emoji suggester) + sauce-tasks-icons CSS snippet (legacy-emoji-task render fallback). v0.4.1 PATCH (v0.99.0): external_plugins[] -1 realclaudian — delisted from the upstream obsidian-releases index (verified 2026-06-12; only forks remain), so auto-install is impossible and the dead reference errored every install; already-installed copies are untouched (the installer never uninstalls). v0.4.0 MINOR (v0.94.0): external_plugins[] +1 entry realclaudian (YishenTu/claudian, plugin id \"realclaudian\") — embeds Claude Code / Codex / Opencode / Pi as AI coding-agent collaborators in the vault. No community_plugin_settings[] entry: claudian's settings are user-owned (Claude provider, auth, MCP servers). v0.3.0 MINOR (v0.93.3): external_plugins[] +1 entry new-tab-default-page (chrisgrieser/obsidian-new-tab-default-page) + community_plugin_settings[] +1 entry pinning whatToOpen=daily-notes / mode=reading-mode / filePath=\"\" / compatibilityMode=false — every new tab now opens today's daily note in reading mode, complementing alwaysOpenInNewTab + Cmd+T -> goto-today. v0.2.1 PATCH (v0.41.2): community_plugin_settings[] +1 entry obsidian-tasks-plugin taskFormat=dataview — switches Tasks plugin from tasksPluginEmoji format to dataview inline-field format; suggester popup shows text labels (\"due date\" / \"high priority\") instead of emoji-prefixed labels; new tasks stored as `[due:: 2026-05-13]` syntax; existing emoji-tasks remain parseable (backwards-compatible). Per-entry plugin-dir-absent guard means workshop without tasks plugin gets graceful skip. v0.2.0 MINOR (v0.41.0): hotkeys[] +1 entry binding Cmd+T to daily-notes:goto-today (inherits new-tab semantics from alwaysOpenInNewTab); NEW manifest field snippets[] + appearance.enabledCssSnippets[] piggybacks on existing applyAppearance helper to register sauce-tasks-icons; NEW installer helper applySnippets (helper count 13 -> 14) copies declared CSS assets to .obsidian/snippets/sauce-*.css mirroring applyVendoredThemes sha256-compare overwrite-with-backup posture; landmine #12 allowlist 17 -> 18 with carve-out narrowing user-owned snippets to anything NOT matching sauce-*.css. v0.21.1 origin (carried over): introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers.",
+  "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- / Cmd+=) + Cmd+T -> today's daily + Dataview JS enable + Tasks plugin taskFormat=dataview (suppresses emoji suggester) + sauce-tasks-icons CSS snippet (legacy-emoji-task render fallback). v0.4.1 PATCH (v0.99.0): external_plugins[] -1 realclaudian — delisted from the upstream obsidian-releases index (verified 2026-06-12; only forks remain), so auto-install is impossible and the dead reference errored every install; already-installed copies are untouched (the installer never uninstalls). v0.4.0 MINOR (v0.94.0): external_plugins[] +1 entry realclaudian (YishenTu/claudian, plugin id \"realclaudian\") — embeds Claude Code / Codex / Opencode / Pi as AI coding-agent collaborators in the vault. No community_plugin_settings[] entry: claudian's settings are user-owned (Claude provider, auth, MCP servers). v0.3.0 MINOR (v0.93.3): external_plugins[] +1 entry new-tab-default-page (chrisgrieser/obsidian-new-tab-default-page) + community_plugin_settings[] +1 entry pinning whatToOpen=daily-notes / mode=reading-mode / filePath=\"\" / compatibilityMode=false — every new tab now opens today's daily note in reading mode, complementing alwaysOpenInNewTab + Cmd+T -> goto-today. v0.2.1 PATCH (v0.41.2): community_plugin_settings[] +1 entry obsidian-tasks-plugin taskFormat=dataview — switches Tasks plugin from tasksPluginEmoji format to dataview inline-field format; suggester popup shows text labels (\"due date\" / \"high priority\") instead of emoji-prefixed labels; new tasks stored as `[due:: 2026-05-13]` syntax; existing emoji-tasks remain parseable (backwards-compatible). Per-entry plugin-dir-absent guard means workshop without tasks plugin gets graceful skip. v0.2.0 MINOR (v0.41.0): hotkeys[] +1 entry binding Cmd+T to daily-notes:goto-today (inherits new-tab semantics from alwaysOpenInNewTab); NEW manifest field snippets[] + appearance.enabledCssSnippets[] piggybacks on existing applyAppearance helper to register sauce-tasks-icons; NEW installer helper applySnippets (helper count 13 -> 14) copies declared CSS assets to .obsidian/snippets/sauce-*.css mirroring applyVendoredThemes sha256-compare overwrite-with-backup posture; landmine #12 allowlist 17 -> 18 with carve-out narrowing user-owned snippets to anything NOT matching sauce-*.css. v0.21.1 origin (carried over): introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers. MINOR: external_plugins[] +1 homepage (mirnovov/obsidian-homepage) + community_plugin_settings[] +1 homepage (kind=Daily Note, view=Reading view, refreshDataview=true, openOnStartup=false — button-first) + hotkeys[] +1 Mod+Shift+H -> homepage:open-homepage. Opens today's daily note rendered (Reading view) on demand; daily-notes autorun untouched. Phase 1 of the Homepage migration.",
   "depends_on": [],
   "external_plugins": [
     { "id": "dataview" },
-    { "id": "new-tab-default-page" }
+    { "id": "new-tab-default-page" },
+    { "id": "homepage" }
   ],
   "hotkeys": [
     { "command_id": "workspace:copy-full-path",          "modifiers": ["Mod"],         "key": "-" },
     { "command_id": "workspace:copy-path",               "modifiers": ["Mod"],         "key": "=" },
     { "command_id": "daily-notes:goto-today",            "modifiers": ["Mod"],         "key": "t" },
     { "command_id": "markdown:toggle-preview",           "modifiers": ["Mod"],         "key": "e" },
-    { "command_id": "obsidian-tasks-plugin:edit-task",   "modifiers": ["Mod","Shift"], "key": "t" }
+    { "command_id": "obsidian-tasks-plugin:edit-task",   "modifiers": ["Mod","Shift"], "key": "t" },
+    { "command_id": "homepage:open-homepage",            "modifiers": ["Mod","Shift"], "key": "h" }
   ],
   "community_plugin_settings": [
     {
@@ -36,6 +38,32 @@
         "filePath": "",
         "mode": "reading-mode",
         "compatibilityMode": false
+      }
+    },
+    {
+      "id": "homepage",
+      "settings": {
+        "version": 4,
+        "homepages": {
+          "Main Homepage": {
+            "value": "",
+            "kind": "Daily Note",
+            "openOnStartup": false,
+            "openMode": "Replace last note",
+            "manualOpenMode": "Replace last note",
+            "view": "Reading view",
+            "revertView": true,
+            "openWhenEmpty": false,
+            "refreshDataview": true,
+            "autoCreate": true,
+            "autoScroll": false,
+            "pin": false,
+            "commands": [],
+            "alwaysApply": false,
+            "hideReleaseNotes": true
+          }
+        },
+        "separateMobile": false
       }
     }
   ],
