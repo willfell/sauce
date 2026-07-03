@@ -115,22 +115,27 @@ class SpaceDailyDashboard {
    * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
    * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
    * render() `getTasks` closure is just the adapter passing the live dv +
-   * customJS.TaskEntity. Returns { open, done }:
-   *   open — parsed task objects (TaskEntity.parseNote), today-first then overdue,
-   *          each tagged `_overdue`. Partitioned by TaskEntity.queryToday, which is
-   *          SOURCE-AGNOSTIC (scheduled==today | scheduled<today; future + unscheduled
-   *          excluded). We use queryToday, NOT TaskTodayList.buildBands, because
-   *          buildBands drops project_slug/source==meeting tasks (they render in the
-   *          TO-DO note's own sections) — the dashboard mirror wants ALL sources.
-   *   done — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
-   *          only; all-done would grow unbounded with vault history).
+   * customJS.TaskEntity. Returns { open, overdue, done }:
+   *   open    — parsed task objects (TaskEntity.parseNote) for tasks made for TODAY
+   *             (scheduled == today). This is the ONLY set the panel LISTS — the
+   *             tasks on today's plate. Partitioned by TaskEntity.queryToday, which
+   *             is SOURCE-AGNOSTIC (scheduled==today | scheduled<today; future +
+   *             unscheduled excluded). We use queryToday, NOT TaskTodayList.buildBands,
+   *             because buildBands drops project_slug/source==meeting tasks (they
+   *             render in the TO-DO note's own sections) — the dashboard mirror wants
+   *             ALL sources.
+   *   overdue — COUNT of open task-notes scheduled BEFORE today (all sources). These
+   *             are NOT listed; they surface only as a red count pill so the day's
+   *             list stays scoped to what was made for today.
+   *   done    — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
+   *             only; all-done would grow unbounded with vault history).
    * Filtering is done in plain JS AFTER dv.pages() (not via DataArray .where) so a
    * plain-array dv-stub exercises the real path. No TE (cold load / mechanism not
-   * registered) → { open: [], done: 0 }; the panel simply hides. Never throws.
+   * registered) → { open: [], overdue: 0, done: 0 }; the panel simply hides. Never throws.
    */
   static selectTasks(dv, todayStr, TE) {
     if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
-      return { open: [], done: 0 };
+      return { open: [], done: 0, overdue: 0 };
     }
     const toArr = (q) => {
       try {
@@ -141,7 +146,7 @@ class SpaceDailyDashboard {
       } catch (_e) { return []; }
     };
 
-    // Open — all sources, excluding the _done/ + _trash/ archives.
+    // Open task-notes — all sources, excluding the _done/ + _trash/ archives.
     const openParsed = [];
     for (const p of toArr('"spice/tasks"')) {
       if (!p || p.type !== "task" || p.status !== "open") continue;
@@ -149,10 +154,10 @@ class SpaceDailyDashboard {
       if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
       openParsed.push(TE.parseNote(p));
     }
+    // LIST = today only (scheduled == today); overdue = COUNT only (red pill).
     const bands = TE.queryToday(openParsed, todayStr);
-    const open = [];
-    for (const t of bands.today)   open.push(Object.assign({}, t, { _overdue: false }));
-    for (const t of bands.overdue) open.push(Object.assign({}, t, { _overdue: true }));
+    const open = Array.isArray(bands.today) ? bands.today : [];
+    const overdue = Array.isArray(bands.overdue) ? bands.overdue.length : 0;
 
     // Done today — _done/ notes with completed_at date == today.
     let done = 0;
@@ -166,7 +171,7 @@ class SpaceDailyDashboard {
       if (TE._toDateStr(p.completed_at) === todayStr) done++;
     }
 
-    return { open, done };
+    return { open, done, overdue };
   }
 
   async render(dv) {
@@ -204,20 +209,21 @@ class SpaceDailyDashboard {
       return pages.array();
     };
 
-    // Note-per-task migration: the panel mirrors open task-NOTES scheduled today +
-    // overdue (all sources) + a done-today count. Data selection lives in the pure
-    // static selectTasks (Node-tested via SELTASK-1); this closure is just the dv
-    // adapter that passes the live customJS.TaskEntity.
+    // Note-per-task migration: the panel LISTS open task-NOTES made for today
+    // (scheduled == today, all sources) and surfaces overdue + done-today as red +
+    // green COUNT pills. Data selection lives in the pure static selectTasks
+    // (Node-tested via SELTASK-1); this closure is just the dv adapter that passes
+    // the live customJS.TaskEntity.
     const getTasks = () => {
       const TE = (typeof customJS !== "undefined" && customJS) ? customJS.TaskEntity : null;
       return SpaceDailyDashboard.selectTasks(dv, today, TE);
     };
 
     const meetings = getMeetings();
-    const { open: openTasks, done: doneCount } = getTasks();
+    const { open: openTasks, overdue: overdueCount, done: doneCount } = getTasks();
     const activityResult = await this._getActivityCount(dv, today);
     const activityCount = activityResult.total;
-    const hasContent = meetings.length > 0 || openTasks.length > 0 || doneCount > 0 || activityCount > 0;
+    const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || activityCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
     // render so the 3 _renderSection calls don't each hit the adapter.
@@ -254,24 +260,19 @@ class SpaceDailyDashboard {
       return;
     }
 
-    if (openTasks.length > 0 || doneCount > 0) {
+    if (openTasks.length > 0 || overdueCount > 0 || doneCount > 0) {
       // v0.13.3 (sauce v0.84.3): pills move out of the title text and into a
-      // right-aligned sauce-section-counts container. Three forms:
-      //   open > 0 && done > 0 → orange "N Open" + green "K Done"
-      //   open > 0 && done = 0 → orange "N Open" only
-      //   open = 0 && done > 0 → green "K Done" only (the empty body signals all-clear)
+      // right-aligned sauce-section-counts container. Up to three pills, each
+      // shown only when its count > 0, in a fixed left→right order:
+      //   orange "N Open"   — tasks made for today (the LIST below)
+      //   red    "M Overdue" — open tasks scheduled before today (COUNT only, not listed)
+      //   green  "K Done"    — tasks completed today
       // Numeric counts interpolated directly into rightHtml are XSS-safe; we control
-      // both arms of the conditional.
-      let tasksRightHtml;
-      if (openTasks.length > 0 && doneCount > 0) {
-        tasksRightHtml =
-          `<span class="sauce-section-open-pill">${openTasks.length} Open</span>` +
-          `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
-      } else if (openTasks.length > 0) {
-        tasksRightHtml = `<span class="sauce-section-open-pill">${openTasks.length} Open</span>`;
-      } else {
-        tasksRightHtml = `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
-      }
+      // every arm. The outer guard guarantees at least one pill renders.
+      let tasksRightHtml = "";
+      if (openTasks.length > 0) tasksRightHtml += `<span class="sauce-section-open-pill">${openTasks.length} Open</span>`;
+      if (overdueCount > 0)     tasksRightHtml += `<span class="sauce-section-overdue-pill">${overdueCount} Overdue</span>`;
+      if (doneCount > 0)        tasksRightHtml += `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
 
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
@@ -305,14 +306,6 @@ class SpaceDailyDashboard {
             TTL.renderInlineLinks(titleSpan, titleText, task.path);
           } else {
             titleSpan.textContent = titleText;
-          }
-
-          // Overdue marker — appended AFTER the title span (renderInlineLinks clears
-          // its target element, so a sibling tag survives the rebuild).
-          if (task && task._overdue) {
-            const tag = li.createEl("span");
-            tag.textContent = "overdue";
-            tag.style.cssText = "margin-left: 6px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-red, #e05252);";
           }
 
           // Row click → open the task NOTE (read-mostly mirror; the note carries its
