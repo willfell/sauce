@@ -108,6 +108,63 @@ class SaucePlugin extends Plugin {
       // Never throw out of onload — CustomJS fallback still populates window.customJS.
       console.error('[sauce] onload class-load failed (CustomJS fallback applies): ' + (e && e.message));
     }
+    // Faster reconciliation of Dataview views on background vault changes (below).
+    try { this._installReconciler(); } catch (e) { console.error('[sauce] reconciler install failed: ' + (e && e.message)); }
+  }
+
+  // ---------- Render reconciler ----------
+  // Escape Dataview's 2.5s refresh debounce for BACKGROUND changes: on a vault
+  // change to a file OTHER than the one being actively edited, fire Dataview's
+  // OWN scoped force-refresh (debounced) so hubs/dashboards reflect the change in
+  // ~500ms instead of ~2.5s. Safe-by-construction: Dataview stays the renderer AND
+  // its own 2.5s refresh stays enabled as the backstop (this only makes it happen
+  // sooner); the active-edit file is skipped so typing never triggers a refresh of
+  // the note you're in. Never throws; no-op if the force-refresh command is absent.
+
+  // Pure: reconcile only for a real change to a file that ISN'T the active one.
+  static shouldReconcile(changedPath, activePath) {
+    return !!changedPath && changedPath !== activePath;
+  }
+
+  _installReconciler() {
+    const app = this.app;
+    if (!app || typeof this.registerEvent !== 'function') return;
+    const onChanged = (file) => this._onVaultChange(file && file.path);
+    if (app.metadataCache && typeof app.metadataCache.on === 'function') {
+      this.registerEvent(app.metadataCache.on('changed', onChanged));
+    }
+    if (app.vault && typeof app.vault.on === 'function') {
+      this.registerEvent(app.vault.on('rename', onChanged));
+      this.registerEvent(app.vault.on('delete', onChanged));
+    }
+  }
+
+  _onVaultChange(changedPath) {
+    try {
+      const ws = this.app && this.app.workspace;
+      const active = ws && typeof ws.getActiveFile === 'function' ? ws.getActiveFile() : null;
+      if (!SaucePlugin.shouldReconcile(changedPath, active && active.path)) return;
+      this._scheduleReconcile();
+    } catch (_e) { /* never throw */ }
+  }
+
+  _scheduleReconcile() {
+    try {
+      const setT = this._setTimeoutFn || (typeof setTimeout !== 'undefined' ? setTimeout : null);
+      const clearT = this._clearTimeoutFn || (typeof clearTimeout !== 'undefined' ? clearTimeout : null);
+      if (!setT) return;
+      if (this._reconcileTimer != null && clearT) clearT(this._reconcileTimer);
+      this._reconcileTimer = setT(() => { this._reconcileTimer = null; this._fireReconcile(); }, this._reconcileDelayMs || 500);
+    } catch (_e) { /* never throw */ }
+  }
+
+  _fireReconcile() {
+    try {
+      const cmds = this.app && this.app.commands;
+      if (cmds && typeof cmds.executeCommandById === 'function') {
+        cmds.executeCommandById('dataview:dataview-force-refresh-views');
+      }
+    } catch (_e) { /* never throw */ }
   }
 }
 
@@ -118,3 +175,4 @@ module.exports.loadCustomJsClasses = loadCustomJsClasses;
 module.exports.registerAll = registerAll;
 module.exports.isClassFile = isClassFile;
 module.exports.resolveScriptsFolder = resolveScriptsFolder;
+module.exports.shouldReconcile = SaucePlugin.shouldReconcile;

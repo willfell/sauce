@@ -182,6 +182,64 @@ function makeApp(tree) {
     assert(vendored.id === 'sauce', 'other manifest fields preserved');
   });
 
+  // ---------- RC-*: render reconciler (faster reconcile on background changes) ----------
+  await ok('RC-1 shouldReconcile: background change yes, active-file no, null/empty no', async () => {
+    const mod = loadPluginModule();
+    assert(mod.shouldReconcile('spice/tasks/x.md', 'spice/daily/2026-07-03.md') === true, 'background → true');
+    assert(mod.shouldReconcile('spice/daily/2026-07-03.md', 'spice/daily/2026-07-03.md') === false, 'active file → false');
+    assert(mod.shouldReconcile('', 'a.md') === false, 'empty → false');
+    assert(mod.shouldReconcile(null, null) === false, 'null → false');
+  });
+
+  await ok('RC-2 background change → debounced reconcile that force-refreshes; bursts coalesce', async () => {
+    const SaucePlugin = loadPluginModule();
+    const scheduled = [], cleared = [], cmds = [];
+    const p = new SaucePlugin();
+    p.app = { workspace: { getActiveFile: () => ({ path: 'active.md' }) }, commands: { executeCommandById: (id) => cmds.push(id) } };
+    p._setTimeoutFn = (fn) => { scheduled.push(fn); return scheduled.length; };
+    p._clearTimeoutFn = (id) => { cleared.push(id); };
+    p._onVaultChange('bg1.md');
+    p._onVaultChange('bg2.md');   // burst → clears the first timer (coalesce)
+    assert(scheduled.length === 2 && cleared.length === 1, 'coalesced: scheduled=' + scheduled.length + ' cleared=' + cleared.length);
+    scheduled[scheduled.length - 1]();   // fire the latest timer
+    assert(cmds.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh fired: ' + JSON.stringify(cmds));
+  });
+
+  await ok('RC-3 a change to the ACTIVE file schedules NO reconcile (no typing thrash)', async () => {
+    const SaucePlugin = loadPluginModule();
+    const scheduled = [];
+    const p = new SaucePlugin();
+    p.app = { workspace: { getActiveFile: () => ({ path: 'active.md' }) }, commands: { executeCommandById: () => {} } };
+    p._setTimeoutFn = (fn) => { scheduled.push(fn); return scheduled.length; };
+    p._onVaultChange('active.md');
+    assert(scheduled.length === 0, 'active-file change must not schedule a reconcile');
+  });
+
+  await ok('RC-4 _fireReconcile with absent commands API → no throw', async () => {
+    const SaucePlugin = loadPluginModule();
+    const p = new SaucePlugin();
+    p.app = {};
+    let threw = false;
+    try { p._fireReconcile(); } catch (_e) { threw = true; }
+    assert(threw === false, 'fire must never throw when commands absent');
+  });
+
+  await ok('RC-5 onload wires listeners via registerEvent, never throws', async () => {
+    const SaucePlugin = loadPluginModule();
+    const events = [];
+    const p = new SaucePlugin();
+    p.registerEvent = (ref) => events.push(ref);
+    p.app = {
+      vault: { adapter: { list: async () => ({ files: [], folders: [] }), read: async () => '' }, on: (ev) => ({ ev }) },
+      metadataCache: { on: (ev) => ({ ev }) },
+      workspace: { getActiveFile: () => null },
+    };
+    let threw = false;
+    try { await p.onload(); } catch (_e) { threw = true; }
+    assert(threw === false, 'onload never throws');
+    assert(events.length >= 1, 'onload registered ≥1 event via registerEvent: ' + events.length);
+  });
+
   console.log(`\nrun-sauce-plugin: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-sauce-plugin threw:', e); process.exit(1); });
