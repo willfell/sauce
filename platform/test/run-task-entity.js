@@ -1392,6 +1392,99 @@ async function runRowActionTests() {
   global.Notice = prevNotice;
 }
 
+// ---------- Per-row single `⋯` menu (RTR-DOTS-1..4) ----------
+// When customJS.MenuPopover is available renderTaskRow collapses the row's edit +
+// delete icons into ONE `⋯` control that opens an anchored MenuPopover (Open note /
+// Edit / Delete). When MenuPopover is ABSENT (cold load) it falls back to the two
+// legacy inline icons. Drives the REAL renderTaskRow against the faithful tree stub
+// + a MenuPopover spy (same discipline as RACT-* / RTR-3).
+async function runDotsMenuTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('RTR-DOTS-1 with MenuPopover present, renders ONE `⋯` control (not two icons)', async () => {
+    const calls = [];
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: { MenuPopover: { open: (entries, opts) => { calls.push({ entries, opts }); } } },
+    };
+    const container = makeTreeNode('div');
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'spice/tasks/x.md' }, TD);
+    const actions = findByCls(row, 'sauce-task-today-actions');
+    assert(actions, 'actions group rendered');
+    const buttons = actions.children.filter((c) => c && c.tagName === 'BUTTON');
+    assert(buttons.length === 1, 'exactly ONE trailing action control: got ' + buttons.length);
+    const dots = findByCls(actions, 'sauce-task-action-more');
+    assert(dots, 'the single control is the `⋯` (sauce-task-action-more)');
+    assert(!findByCls(actions, 'sauce-task-action-edit'), 'no legacy edit icon when popover present');
+    assert(!findByCls(actions, 'sauce-task-action-delete'), 'no legacy delete icon when popover present');
+    assert(dots.attributes['aria-label'] === 'More actions', 'aria-label: ' + dots.attributes['aria-label']);
+    assert(calls.length === 0, 'popover NOT opened until clicked');
+  });
+
+  await okAsync('RTR-DOTS-2 clicking `⋯` opens MenuPopover once; entries = [Open note, Edit, Delete], Delete danger', async () => {
+    const calls = [];
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: { MenuPopover: { open: (entries, opts) => { calls.push({ entries, opts }); } } },
+    };
+    const container = makeTreeNode('div');
+    const path = 'spice/tasks/go through mail.md';
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'go through mail', path }, TD);
+    const dots = findByCls(row, 'sauce-task-action-more');
+    await fireClick(dots);
+    assert(calls.length === 1, 'MenuPopover.open called exactly once: ' + calls.length);
+    const entries = calls[0].entries;
+    const labels = entries.map((e) => e.label);
+    assert(JSON.stringify(labels) === JSON.stringify(['Open note', 'Edit', 'Delete']),
+      'entry labels in order: ' + JSON.stringify(labels));
+    const del = entries.find((e) => e.label === 'Delete');
+    assert(del && del.danger === true, 'Delete entry has danger:true');
+    assert(calls[0].opts && calls[0].opts.anchor === dots, 'popover anchored to the `⋯` button');
+  });
+
+  await okAsync('RTR-DOTS-3 the Delete entry onSelect calls TD.confirmDelete(path)', async () => {
+    const calls = [];
+    const confirmed = [];
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: { RenderSafe: { captureScroll: () => {} }, MenuPopover: { open: (entries) => { calls.push(entries); } } },
+    };
+    const container = makeTreeNode('div');
+    const path = 'spice/tasks/x.md';
+    const TD = { open() {}, confirmDelete: async (p) => { confirmed.push(p); return { ok: true }; } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path }, TD);
+    await fireClick(findByCls(row, 'sauce-task-action-more'));
+    const del = calls[0].find((e) => e.label === 'Delete');
+    await del.onSelect();
+    assert(confirmed.length === 1 && confirmed[0] === path,
+      'Delete onSelect → confirmDelete(path): ' + JSON.stringify(confirmed));
+  });
+
+  await okAsync('RTR-DOTS-4 cold load (no MenuPopover) falls back to the TWO legacy icons, no throw', async () => {
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: {} };
+    const container = makeTreeNode('div');
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
+    let threw = false;
+    let row = null;
+    try { row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'no throw when MenuPopover is absent');
+    const actions = findByCls(row, 'sauce-task-today-actions');
+    const edit = findByCls(actions, 'sauce-task-action-edit');
+    const del = findByCls(actions, 'sauce-task-action-delete');
+    assert(edit && del, 'both legacy edit + delete icons present on cold load');
+    assert(!findByCls(actions, 'sauce-task-action-more'), 'no `⋯` control on cold load');
+    assert(childIndex(actions, edit) < childIndex(actions, del), 'edit is LEFT of delete');
+  });
+
+  global.window = prevWindow;
+  global.Notice = prevNotice;
+}
+
 // ---------- TaskDialog.confirmDelete — yes/no delete modal (TDCD-1..4) ----------
 // confirmDelete(path) opens a small confirm overlay and resolves:
 //   { ok: true }                    after the user confirms AND markDeleted succeeds
@@ -1516,6 +1609,7 @@ function runReconcileTests() {
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
   await runRowActionTests();
+  await runDotsMenuTests();
   await runConfirmDeleteTests();
   runReconcileTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
