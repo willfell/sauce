@@ -85,6 +85,7 @@ const cjs = {
     SectionLabel: { render: () => {} },
     AccentButton: { render: () => {} },
     RenderSafe: new RenderSafeClass(),
+    TripSectionKinds: new (loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds'))(),
 };
 global.customJS = Object.assign(global.customJS || {}, cjs);
 global.app = {
@@ -148,6 +149,93 @@ function makeDv(embed, currentVal) {
         withFrontmatterType('trip', () => nav.detectContext('spice/trips/hawaii/Atlas.md', {}).context) === 'trip-atlas');
     ok('TC-8 <slug>/<file>.md with non-trip frontmatter → trip-section',
         withFrontmatterType('note', () => nav.detectContext('spice/trips/hawaii/Places.md', {}).context) === 'trip-section');
+
+    // ---------- TripSectionKinds registry (behavioral) ----------
+    const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
+    const tsk = new TripSectionKinds();
+    ok('TSK-1 all() has the 5 default kinds in order',
+        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes');
+    ok('TSK-2 order() ranks defaults, custom last',
+        tsk.order('flights') === 0 && tsk.order('notes') === 4 && tsk.order('custom') === 999);
+    ok('TSK-3 labelFor maps kind → display',
+        tsk.labelFor('packing-list') === 'Packing List' && tsk.labelFor('custom') === null);
+    ok('TSK-4 kindFromLegacyBasename maps old names',
+        tsk.kindFromLegacyBasename('Trip Flights') === 'flights'
+        && tsk.kindFromLegacyBasename('Trip Packing List') === 'packing-list'
+        && tsk.kindFromLegacyBasename('Honorees') === 'custom');
+    ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
+        tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
+
+    // ---------- TripNavButtons launcher partition (behavioral) ----------
+    const navP = new TripNavButtons();
+    navP._siblingsFor = () => ([
+        { basename: "Dave's Wedding",           path: "spice/trips/daves-wedding/Dave's Wedding.md",           fm: { type: "trip", name: "Dave's Wedding" } },
+        { basename: "Dave's Wedding — Notes",   path: "spice/trips/daves-wedding/Dave's Wedding — Notes.md",   fm: { type: "trip-section", section: "Notes",   section_kind: "notes" } },
+        { basename: "Dave's Wedding — Flights", path: "spice/trips/daves-wedding/Dave's Wedding — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+    ]);
+    navP._boardPathIfExists = () => null;
+    {
+        const ctx = { context: "trip-section", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
+        const { primary, entries } = navP._tripMenuEntries(ctx, "spice/trips/daves-wedding/Dave's Wedding — Flights.md");
+        ok('NAV-1 primary points at the atlas', primary && primary.path.endsWith("Dave's Wedding.md"));
+        ok('NAV-2 menu excludes current + orders by section_kind + ends with New Section',
+            entries.map(e => e.label || e.action).join('|') === 'Notes|new-section',
+            JSON.stringify(entries.map(e => e.label || e.action)));
+    }
+    {
+        const ctxA = { context: "trip-atlas", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
+        const { primary, entries } = navP._tripMenuEntries(ctxA, "spice/trips/daves-wedding/Dave's Wedding.md");
+        ok('NAV-3 on atlas: no primary, menu lists both sections + New Section',
+            primary === null && entries.map(e => e.label || e.action).join('|') === 'Flights|Notes|new-section',
+            JSON.stringify([primary, entries.map(e => e.label || e.action)]));
+    }
+
+    // ---------- create-flow naming + frontmatter (behavioral) ----------
+    {
+        const written = {};
+        const created = new Set();
+        const savedVault = global.app.vault;
+        global.app.vault = {
+            getAbstractFileByPath: (p) => (p === 'ranch/templates/Template, Trip Flights.md'
+                ? { path: p } : (created.has(p) ? { path: p } : null)),
+            async createFolder(p) { created.add(p); },
+            async create(p, body) { written[p] = body; created.add(p); },
+            async read() { return '---\ntype: trip-section\nsection_kind: flights\nsection: "Flights"\ntrip: "[[{{NAME}}]]"\ntrip_slug: {{SLUG}}\ncreated_at: "{{DATE}}"\n---\n'; },
+        };
+        const navC = new TripNavButtons();
+        const secPath = await navC._createTripSection('spice/trips/daves-wedding', 'Honorees', "Dave's Wedding", 'daves-wedding');
+        ok('CREATE-1 custom section filename is trip-prefixed',
+            secPath === "spice/trips/daves-wedding/Dave's Wedding — Honorees.md", secPath);
+        ok('CREATE-2 custom section frontmatter is canonical',
+            /type: trip-section/.test(written[secPath]) && /section_kind: custom/.test(written[secPath])
+            && /section: "Honorees"/.test(written[secPath]) && /trip: "\[\[Dave's Wedding\]\]"/.test(written[secPath])
+            && /trip_slug: daves-wedding/.test(written[secPath]), written[secPath]);
+        ok('CREATE-3 sanitizeFilename strips illegal chars, keeps apostrophe',
+            navC._sanitizeFilename('Q1: Kick/off "Trip"') === 'Q1 Kick off Trip'
+            && navC._sanitizeFilename("Dave's Wedding") === "Dave's Wedding");
+        global.app.vault = savedVault;
+    }
+
+    // ---------- TripSectionsCards frontmatter grouping (behavioral) ----------
+    {
+        const TripSectionsCards = loadWidget('platform/blueprints/trips/helpers/trip-sections-cards.js', 'TripSectionsCards');
+        const sc = new TripSectionsCards();
+        const rows = sc._buildRows([
+            { basename: "T — Notes",   path: "p/T — Notes.md",   fm: { type: "trip-section", section: "Notes",   section_kind: "notes" } },
+            { basename: "T — Flights", path: "p/T — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+            { basename: "T — Honorees",path: "p/T — Honorees.md",fm: { type: "trip-section", section: "Honorees",section_kind: "custom" } },
+        ], null);
+        ok('SECTIONS-1 defaults grouped + ordered by kind, custom in Additional',
+            rows.filter(r => r.group === 'Default Sections').map(r => r.title).join('|') === 'Flights|Notes'
+            && rows.filter(r => r.group === 'Additional Sections').map(r => r.title).join('|') === 'Honorees',
+            JSON.stringify(rows.map(r => [r.group, r.title])));
+        const rows2 = sc._buildRows([
+            { basename: "T — Flights", path: "p/T — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+        ], "p/board/t-board.md");
+        ok('SECTIONS-2 board appended last in Default with title "Trip Board"',
+            rows2.filter(r => r.group === 'Default Sections').map(r => r.title).join('|') === 'Flights|Trip Board',
+            JSON.stringify(rows2.map(r => [r.group, r.title])));
+    }
 
     // ---------- render() cold-load guards ----------
     const widgets = [

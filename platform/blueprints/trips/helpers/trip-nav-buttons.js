@@ -59,56 +59,85 @@ class TripNavButtons {
             await this._renderTripsHub(root);
             return;
         }
-        if (ctx.context === "trip-atlas" || ctx.context === "trip-section") {
-            await this._renderTripContext(root, ctx, filePath);
-            return;
-        }
-        if (ctx.context === "trip-board" || ctx.context === "trip-card") {
-            await this._renderBoardContext(root, ctx, filePath);
+        if (ctx.context === "trip-atlas" || ctx.context === "trip-section"
+            || ctx.context === "trip-board" || ctx.context === "trip-card") {
+            await this._renderTripNav(root, ctx, filePath, dv);
             return;
         }
         // non-trip → no render
     }
 
-    async _renderTripContext(root, ctx, currentPath) {
-        const folderObj = app.vault.getAbstractFileByPath(ctx.tripDir);
-        if (!folderObj || !folderObj.children) return;
+    // ── Menu-entry model (pure; tests stub _siblingsFor/_boardPathIfExists) ──
 
-        const siblings = folderObj.children.filter(f => f.extension === "md");
-        if (siblings.length === 0) return;
+    _sanitizeFilename(name) {
+        return String(name).replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+    }
 
-        let atlasFile = null;
-        for (const f of siblings) {
-            const cache = app.metadataCache.getFileCache(f);
-            if (cache?.frontmatter?.type === "trip") {
-                atlasFile = f;
-                break;
-            }
+    // Read the trip folder's .md children into a stub-friendly shape.
+    _siblingsFor(ctx) {
+        const folder = app.vault.getAbstractFileByPath(ctx.tripDir);
+        if (!folder || !folder.children) return [];
+        return folder.children
+            .filter(f => f.extension === "md")
+            .map(f => ({
+                basename: f.basename,
+                path: f.path,
+                fm: (app.metadataCache.getFileCache(f)?.frontmatter) || {},
+            }));
+    }
+
+    _boardPathIfExists(ctx) {
+        const p = `${ctx.tripDir}/board/${ctx.slug}-board.md`;
+        return app.vault.getAbstractFileByPath(p) ? p : null;
+    }
+
+    // Partition the trip folder into { primary (atlas), entries } for the launcher.
+    _tripMenuEntries(ctx, currentPath) {
+        const sibs = this._siblingsFor(ctx);
+        const atlas = sibs.find(s => s.fm.type === "trip") || null;
+
+        const primary = (ctx.context !== "trip-atlas" && atlas && atlas.path !== currentPath)
+            ? { label: atlas.basename, icon: this._icons().trip, path: atlas.path }
+            : null;
+
+        const sections = sibs
+            .filter(s => s.fm.type === "trip-section" && s.path !== currentPath)
+            .sort((a, b) => {
+                const oa = customJS.TripSectionKinds.order(a.fm.section_kind);
+                const ob = customJS.TripSectionKinds.order(b.fm.section_kind);
+                if (oa !== ob) return oa - ob;
+                return (a.fm.section || a.basename).localeCompare(b.fm.section || b.basename);
+            })
+            .map(s => ({
+                label: s.fm.section || s.basename,
+                icon: customJS.TripSectionKinds.iconFor(s.fm.section_kind),
+                path: s.path,
+            }));
+
+        const entries = [...sections];
+
+        const bp = this._boardPathIfExists(ctx);
+        if (bp && bp !== currentPath) {
+            entries.push({ label: "Trip Board", icon: this._icons().board, path: bp });
         }
 
-        const icons = this._icons();
-        const DEFAULT_ORDER = ["Trip Flights", "Trip Stay", "Trip Packing List", "Trip To Do", "Trip Notes"];
-        const sectionIconFor = (name) => {
-            const map = {
-                "Trip Flights": icons.flights,
-                "Trip Stay": icons.stay,
-                "Trip Packing List": icons.packing,
-                "Trip To Do": icons.todo,
-                "Trip Notes": icons.notes
-            };
-            return map[name] || icons.section;
-        };
+        // No `label` on the action entry: `label || action` resolves to the
+        // action so the launcher menu shows a "+ New Section" affordance last.
+        entries.push({ action: "new-section", displayLabel: "New Section", icon: this._plusIcon() });
 
-        const defaults = [];
-        const additional = [];
-        for (const f of siblings) {
-            if (f === atlasFile) continue;
-            if (DEFAULT_ORDER.includes(f.basename)) defaults.push(f);
-            else additional.push(f);
-        }
-        defaults.sort((a, b) => DEFAULT_ORDER.indexOf(a.basename) - DEFAULT_ORDER.indexOf(b.basename));
-        additional.sort((a, b) => a.name.localeCompare(b.name));
+        return { primary, entries };
+    }
 
+    _plusIcon() {
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+    }
+
+    // ── Per-trip nav render: SectionLabel band + primary + "Go to…" launcher ──
+    async _renderTripNav(root, ctx, currentPath, dv) {
+        const { primary, entries } = this._tripMenuEntries(ctx, currentPath);
+        if (!primary && entries.length === 0) return;
+
+        // "Trip" band — hand-drawn hairline + muted uppercase label (SectionLabel visual).
         const topDivider = root.createEl("hr");
         topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
 
@@ -116,76 +145,173 @@ class TripNavButtons {
         sectionLabel.textContent = "Trip";
         sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
 
-        const buildRow = (buttons, opts) => {
-            opts = opts || {};
-            if (buttons.length === 0) return;
-            const row = root.createEl("div");
-            row.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; overflow-x: auto;";
-            const padding = opts.fullWidth ? "9px 16px" : "6px 14px";
-            const fontSize = opts.fullWidth ? "0.9em" : "0.82em";
-            const fontWeight = opts.fullWidth ? "600" : "500";
-            const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: ${padding}; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: ${fontSize}; font-weight: ${fontWeight}; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
-            for (const btn of buttons) {
-                const el = row.createEl("button");
-                el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
-                el.style.cssText = btnStyle;
-                el.onmouseenter = () => {
-                    el.style.background = "var(--interactive-accent)";
-                    el.style.color = "var(--text-on-accent)";
-                    el.style.borderColor = "var(--interactive-accent)";
+        // Bind the new-section entry to a closure so the launcher can run the flow.
+        for (const e of entries) {
+            if (e.action === "new-section") {
+                e.onSelect = async () => {
+                    const title = await this._promptForSectionTitle(ctx.tripDir);
+                    if (!title) return;
+                    const atlas = this._siblingsFor(ctx).find(s => s.fm.type === "trip");
+                    const atlasBase = atlas ? atlas.basename : ctx.slug;
+                    const p = await this._createTripSection(ctx.tripDir, title, atlasBase, ctx.slug);
+                    if (p) {
+                        new Notice(`Created section: ${title}`);
+                        app.workspace.openLinkText(p, "");
+                    }
                 };
-                el.onmouseleave = () => {
-                    el.style.background = "var(--background-primary)";
-                    el.style.color = "var(--text-muted)";
-                    el.style.borderColor = "var(--background-modifier-border)";
-                };
-                el.onclick = () => app.workspace.openLinkText(btn.path, "");
             }
+        }
+
+        const row = root.createEl("div");
+        row.style.cssText = "display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;";
+
+        if (primary) {
+            const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.9em; font-weight: 600; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
+            const el = row.createEl("button");
+            el.innerHTML = primary.icon + `<span>${primary.label}</span>`;
+            el.style.cssText = btnStyle;
+            el.onmouseenter = () => { el.style.background = "var(--interactive-accent)"; el.style.color = "var(--text-on-accent)"; el.style.borderColor = "var(--interactive-accent)"; };
+            el.onmouseleave = () => { el.style.background = "var(--background-primary)"; el.style.color = "var(--text-muted)"; el.style.borderColor = "var(--background-modifier-border)"; };
+            el.onclick = () => app.workspace.openLinkText(primary.path, "");
+        }
+
+        this._renderPill(row, entries, dv, !primary);
+    }
+
+    // ── Launcher pill + overlay (ported from SpaceNavButtons) ────────────────
+
+    _stylePill(el) {
+        el.style.cssText = `
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--background-modifier-border);
+            background: var(--background-primary);
+            color: var(--text-muted);
+            font-size: 0.82em;
+            font-weight: 500;
+            font-family: inherit;
+            letter-spacing: 0.01em;
+            transition: all 0.15s ease;
+        `;
+        el.onmouseenter = () => {
+            el.style.background = "var(--interactive-accent)";
+            el.style.color = "var(--text-on-accent)";
+            el.style.borderColor = "var(--interactive-accent)";
         };
+        el.onmouseleave = () => {
+            el.style.background = "var(--background-primary)";
+            el.style.color = "var(--text-muted)";
+            el.style.borderColor = "var(--background-modifier-border)";
+        };
+    }
 
-        // Row 1 — atlas (full-width, only when not on atlas)
-        if (atlasFile && atlasFile.path !== currentPath) {
-            buildRow([{ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path }], { fullWidth: true });
+    // Render the "Go to…" pill; wire its click to the launcher overlay. When
+    // there is no primary (on the atlas) the pill spans the full row width.
+    _renderPill(row, menuEntries, dv, fullWidth) {
+        const pill = row.createEl("button");
+        const gridIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`;
+        const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+        pill.innerHTML = gridIcon + `<span>Go to…</span>` + chevronDown;
+        this._stylePill(pill);
+        if (fullWidth) { pill.style.flex = "1"; pill.style.justifyContent = "center"; pill.style.minWidth = "0"; }
+        pill.onclick = (evt) => this._openLauncher(evt, pill, menuEntries, dv);
+        return pill;
+    }
+
+    // Open the launcher as a viewport overlay appended to document.body (so it is
+    // never clipped by the note container): a full-width bottom sheet on mobile,
+    // an anchored dropdown on desktop. Backdrop-tap / Escape / re-tap closes it.
+    _openLauncher(evt, pill, menuEntries, dv) {
+        if (evt && evt.stopPropagation) evt.stopPropagation();
+        const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
+        if (!doc || !doc.body) return;
+
+        // Toggle: an already-open overlay means "close" — route through its own
+        // teardown (__navClose) so the keydown listener is removed too.
+        const open = doc.body.querySelector && doc.body.querySelector(".vault-nav-overlay");
+        if (open) { if (open.__navClose) open.__navClose(); else if (open.remove) open.remove(); return; }
+
+        const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
+
+        const overlay = doc.createElement("div");
+        overlay.className = "vault-nav-overlay";
+        overlay.style.cssText = `position: fixed; inset: 0; z-index: 1000;`
+            + (isMobile
+                ? " background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center;"
+                : " background: transparent;");
+
+        const panel = doc.createElement("div");
+        panel.className = "vault-nav-panel";
+        const panelBase = `box-sizing: border-box; background: var(--background-primary);`
+            + ` border: 1px solid var(--background-modifier-border);`
+            + ` box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;`
+            + ` display: flex; flex-direction: column;`;
+        if (isMobile) {
+            panel.style.cssText = panelBase
+                + ` width: 100%; max-width: 620px; max-height: 72vh;`
+                + ` border-radius: 16px 16px 0 0;`
+                + ` padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));`
+                + ` gap: 2px;`;
+            const handle = doc.createElement("div");
+            handle.style.cssText = `flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;`;
+            panel.appendChild(handle);
+        } else {
+            const rect = (pill && pill.getBoundingClientRect) ? pill.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+            const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
+            const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
+            let left = Math.round(rect.left || 0);
+            if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+            panel.style.cssText = panelBase
+                + ` position: fixed; top: ${Math.round((rect.bottom || 0) + 6)}px; left: ${left}px;`
+                + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
         }
 
-        // Row 2 — default sections + Trip Board; current self-hides
-        const defaultButtons = defaults
-            .filter(f => f.path !== currentPath)
-            .map(f => ({ label: f.basename, icon: sectionIconFor(f.basename), path: f.path }));
-        const boardPath = `${ctx.tripDir}/board/${ctx.slug}-board.md`;
-        if (app.vault.getAbstractFileByPath(boardPath)) {
-            defaultButtons.push({ label: "Trip Board", icon: icons.board, path: boardPath });
-        }
-        buildRow(defaultButtons);
+        // Single teardown for ALL dismiss paths (backdrop, Escape, re-tap toggle,
+        // row select) — removes the overlay AND the keydown listener so a stale
+        // capture-phase Escape handler can never swallow keys elsewhere.
+        const close = () => {
+            if (overlay.remove) overlay.remove();
+            if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
+        };
+        const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+        overlay.__navClose = close;
 
-        // Row 3 — additional sections (user-added); HIDDEN in trip-atlas context (cards grid covers it)
-        if (ctx.context !== "trip-atlas") {
-            const additionalButtons = additional
-                .filter(f => f.path !== currentPath)
-                .map(f => ({ label: f.basename, icon: icons.section, path: f.path }));
-            buildRow(additionalButtons);
+        for (const btn of menuEntries) {
+            panel.appendChild(this._buildOverlayRow(doc, btn, dv, close, isMobile));
         }
 
-        // "New Section" action button — atlas context only
-        if (ctx.context === "trip-atlas" && atlasFile) {
-            const divider = root.createEl("hr");
-            divider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+        overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+        if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
 
-            const actionRow = root.createEl("div");
-            actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
+        overlay.appendChild(panel);
+        doc.body.appendChild(overlay);
+    }
 
-            const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
-
-            this._renderActionButton(actionRow, "New Section", plusIcon, async () => {
-                const title = await this._promptForSectionTitle(ctx.tripDir);
-                if (!title) return;
-                const sectionPath = await this._createTripSection(ctx.tripDir, title, atlasFile.basename);
-                if (sectionPath) {
-                    new Notice(`Created section: ${title}`);
-                    app.workspace.openLinkText(sectionPath, "");
-                }
-            });
-        }
+    // Build a single overlay row (inline entry.icon + full label). New-section
+    // rows run their bound onSelect closure; every other row opens its note.
+    _buildOverlayRow(doc, entry, dv, close, isMobile) {
+        const row = doc.createElement("button");
+        const svg = entry.icon || "";
+        const label = entry.label || entry.displayLabel || "";
+        row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${svg}</span>`
+            + `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>`;
+        row.style.cssText = `cursor: pointer; display: flex; align-items: center; gap: 10px;`
+            + ` width: 100%; text-align: left; box-sizing: border-box; border: none;`
+            + ` border-radius: 8px; background: transparent; color: var(--text-normal);`
+            + ` font-family: inherit; line-height: 1.25;`
+            + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+        row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+        row.onmouseleave = () => { row.style.background = "transparent"; };
+        row.onclick = () => {
+            close();
+            if (entry.onSelect) return entry.onSelect();
+            return app.workspace.openLinkText(entry.path, "");
+        };
+        return row;
     }
 
     async _renderTripsHub(root) {
@@ -218,57 +344,8 @@ class TripNavButtons {
     _icons() {
         return {
             trip:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
-            section: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
-            flights: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
-            stay:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/></svg>`,
-            packing: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 10h8"/><path d="M8 18v-4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
-            todo:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
-            notes:   `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
             board:   `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
         };
-    }
-
-    async _renderBoardContext(root, ctx, currentPath) {
-        const folderObj = app.vault.getAbstractFileByPath(ctx.tripDir);
-        if (!folderObj || !folderObj.children) return;
-
-        let atlasFile = null;
-        for (const f of folderObj.children) {
-            if (f.extension !== "md") continue;
-            const cache = app.metadataCache.getFileCache(f);
-            if (cache?.frontmatter?.type === "trip") { atlasFile = f; break; }
-        }
-
-        const icons = this._icons();
-        const buttons = [];
-        if (atlasFile) {
-            buttons.push({ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path });
-        }
-
-        const boardPath = `${ctx.tripDir}/board/${ctx.slug}-board.md`;
-        if (ctx.context === "trip-card" && app.vault.getAbstractFileByPath(boardPath)) {
-            buttons.push({ label: "Trip Board", icon: icons.board, path: boardPath });
-        }
-        if (buttons.length === 0) return;
-
-        const topDivider = root.createEl("hr");
-        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
-
-        const sectionLabel = root.createEl("div");
-        sectionLabel.textContent = "Trip";
-        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
-
-        const row = root.createEl("div");
-        row.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px; overflow-x: auto;";
-        const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.9em; font-weight: 600; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
-        for (const btn of buttons) {
-            const el = row.createEl("button");
-            el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
-            el.style.cssText = btnStyle;
-            el.onmouseenter = () => { el.style.background = "var(--interactive-accent)"; el.style.color = "var(--text-on-accent)"; el.style.borderColor = "var(--interactive-accent)"; };
-            el.onmouseleave = () => { el.style.background = "var(--background-primary)"; el.style.color = "var(--text-muted)"; el.style.borderColor = "var(--background-modifier-border)"; };
-            el.onclick = () => app.workspace.openLinkText(btn.path, "");
-        }
     }
 
     async _promptForTripDetails() {
@@ -449,16 +526,24 @@ class TripNavButtons {
         });
     }
 
-    async _createTripSection(tripDir, title, atlasName) {
-        const targetPath = `${tripDir}/${title}.md`;
+    async _createTripSection(tripDir, title, tripName, tripSlug) {
+        const targetPath = `${tripDir}/${this._sanitizeFilename(tripName)} — ${this._sanitizeFilename(title)}.md`;
         if (app.vault.getAbstractFileByPath(targetPath)) return targetPath;
 
         const isoTz = this._isoWithTz(new Date());
 
         const body = `---
 type: trip-section
+section_kind: custom
+section: "${title}"
+trip: "[[${this._sanitizeFilename(tripName)}]]"
+trip_slug: ${tripSlug}
 created_at: "${isoTz}"
 ---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+\`\`\`
 
 \`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
@@ -484,16 +569,26 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
 
         const tplBase = "ranch/templates";
         const isoTz = this._isoWithTz(new Date());
+        const atlasBase = this._sanitizeFilename(name);
 
-        const subs = (s) => s
-            .replaceAll("{{NAME}}", name)
-            .replaceAll("{{SLUG}}", slug)
-            .replaceAll("{{DATE}}", isoTz)
-            .replaceAll("{{START_DATE}}", start_date)
-            .replaceAll("{{END_DATE}}", end_date)
-            .replaceAll("{{LOCATION}}", location);
+        // The atlas keeps the raw display `name` for {{NAME}} (its own frontmatter
+        // title). Section templates use {{NAME}} only inside `trip: "[[{{NAME}}]]"`,
+        // which must resolve to the atlas BASENAME (= sanitize(name)) so the link
+        // targets the actual atlas note.
+        // Function replacers — token values (name / location) are user free-form
+        // text; a string replacement would interpret `$&`/`$$` etc. inside them and
+        // corrupt trip names like "Cash $$ Run".
+        const makeSubs = (nameVal) => (s) => s
+            .replaceAll("{{NAME}}", () => nameVal)
+            .replaceAll("{{SLUG}}", () => slug)
+            .replaceAll("{{DATE}}", () => isoTz)
+            .replaceAll("{{START_DATE}}", () => start_date)
+            .replaceAll("{{END_DATE}}", () => end_date)
+            .replaceAll("{{LOCATION}}", () => location);
+        const subsAtlas = makeSubs(name);
+        const subsSection = makeSubs(atlasBase);
 
-        const writeTpl = async (tplName, destBasename) => {
+        const writeTpl = async (tplName, destBasename, subs) => {
             const tplFile = app.vault.getAbstractFileByPath(`${tplBase}/${tplName}`);
             if (!tplFile) {
                 new Notice(`Template missing: ${tplBase}/${tplName}`);
@@ -506,13 +601,11 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
             return targetPath;
         };
 
-        const atlasPath = await writeTpl("Template, Trip Atlas.md", "Trip Atlas.md");
-        await writeTpl("Template, Trip Flights.md", "Trip Flights.md");
-        await writeTpl("Template, Trip Stay.md", "Trip Stay.md");
-        await writeTpl("Template, Trip Packing List.md", "Trip Packing List.md");
-        await writeTpl("Template, Trip To Do.md", "Trip To Do.md");
-        await writeTpl("Template, Trip Notes.md", "Trip Notes.md");
-        await writeTpl("Template, Trip Board.md", `board/${slug}-board.md`);
+        const atlasPath = await writeTpl("Template, Trip Atlas.md", `${atlasBase}.md`, subsAtlas);
+        for (const s of customJS.TripSectionKinds.all()) {
+            await writeTpl(`Template, Trip ${s.label}.md`, `${atlasBase} — ${s.label}.md`, subsSection);
+        }
+        await writeTpl("Template, Trip Board.md", `board/${slug}-board.md`, subsAtlas);
 
         return atlasPath;
     }
