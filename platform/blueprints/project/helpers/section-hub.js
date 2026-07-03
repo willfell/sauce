@@ -87,11 +87,11 @@ class SectionHub {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
 
-    // Wiki parity (2026-07-02): the action row uses the wiki centered container
-    // style, but WITHOUT flex-wrap — the create/move buttons stay on ONE row (the
-    // wiki leaf action bar). Each button sized by _styleLeafBtn.
+    // Wiki parity: centered container WITH flex-wrap so the create/move buttons
+    // break 2-up on a phone (mirrors the core nav row) instead of clipping their
+    // labels. Each button sized by _styleLeafBtn (the shared _mobilize sizing).
     const btnRow = container.createEl("div");
-    btnRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px;";
+    btnRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
     // Cold-load race: poll for EntityCreate.
@@ -141,18 +141,15 @@ class SectionHub {
     }
   }
 
-  // Wiki-parity leaf-button sizing (mirrors WikiLeafActions._styleLeafBtn): each
-  // button takes an equal share of the centered one-row action bar (flex: 1 1 0)
-  // with a readable label + tap target; overflow hidden + nowrap so labels never
-  // wrap the row to two lines.
+  // Wiki hub-button sizing (matches ProjectNavButtons._mobilize + the core nav
+  // row): min-width 128 + 50% flex-basis so the container's flex-wrap breaks the
+  // buttons 2-up on a phone instead of clipping their labels. Readable + consistent.
   _styleLeafBtn(btn) {
     if (!btn || !btn.style) return btn;
-    btn.style.flex = "1 1 0";
-    btn.style.minWidth = "0";
-    btn.style.fontSize = "0.9em";
-    btn.style.padding = "8px 14px";
-    btn.style.overflow = "hidden";
-    btn.style.whiteSpace = "nowrap";
+    btn.style.flex = "1 1 calc(50% - 6px)";
+    btn.style.minWidth = "128px";
+    btn.style.fontSize = "0.92em";
+    btn.style.padding = "9px 14px";
     return btn;
   }
 
