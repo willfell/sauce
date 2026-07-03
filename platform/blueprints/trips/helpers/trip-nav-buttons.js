@@ -575,13 +575,16 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
         // title). Section templates use {{NAME}} only inside `trip: "[[{{NAME}}]]"`,
         // which must resolve to the atlas BASENAME (= sanitize(name)) so the link
         // targets the actual atlas note.
+        // Function replacers — token values (name / location) are user free-form
+        // text; a string replacement would interpret `$&`/`$$` etc. inside them and
+        // corrupt trip names like "Cash $$ Run".
         const makeSubs = (nameVal) => (s) => s
-            .replaceAll("{{NAME}}", nameVal)
-            .replaceAll("{{SLUG}}", slug)
-            .replaceAll("{{DATE}}", isoTz)
-            .replaceAll("{{START_DATE}}", start_date)
-            .replaceAll("{{END_DATE}}", end_date)
-            .replaceAll("{{LOCATION}}", location);
+            .replaceAll("{{NAME}}", () => nameVal)
+            .replaceAll("{{SLUG}}", () => slug)
+            .replaceAll("{{DATE}}", () => isoTz)
+            .replaceAll("{{START_DATE}}", () => start_date)
+            .replaceAll("{{END_DATE}}", () => end_date)
+            .replaceAll("{{LOCATION}}", () => location);
         const subsAtlas = makeSubs(name);
         const subsSection = makeSubs(atlasBase);
 

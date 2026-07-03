@@ -224,6 +224,7 @@ async function run() {
     ok('TRIPHEAL-7.2 all file contents identical after 2nd run', allEqual, firstDiff ? `diff at ${firstDiff}` : '');
 
     await runFrontmatterEdgeCases();
+    await runDollarAndCollisionCases();
 
     console.log(`\nrun-trips-heal.js: ${passed} passed, ${failed} failed`);
     process.exit(failed === 0 ? 0 : 1);
@@ -273,6 +274,63 @@ async function runFrontmatterEdgeCases() {
     ok('TRIPHEAL-8.7 idempotent across frontmatter edge cases', same);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// A trip whose name contains `$` (a `$`-special in JS replacement strings) must NOT
+// be corrupted (regression: string-replacement interpreted `$$`→`$`), AND two
+// sections computing the same rename target must NOT clobber each other.
+async function runDollarAndCollisionCases() {
+  // --- `$` in the trip name ---
+  {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trips-heal-dollar-'));
+    try {
+      const adapter = makeAdapter(tmpRoot);
+      const dir = 'spice/trips/vegas';
+      await adapter.write(`${dir}/Trip Atlas.md`,
+        `---\ntype: trip\nname: "Cash $$ Run"\nstart_date: "2026-05-01"\nend_date: "2026-05-03"\nlocation: "Vegas"\n---\nsee [[Trip Atlas]]`);
+      await adapter.write(`${dir}/Trip Flights.md`,
+        `---\ntype: note\ncreated: 2026-04-01\n---\nbook it [[Trip Atlas]]`);
+      const tp = { app: { vault: { adapter } } };
+      await applyTripsConformanceHeal(tp, [], { commit: 'x', tag: 'y', dirty: false });
+
+      ok('TRIPHEAL-9.1 `$`-name atlas renamed verbatim (no $$→$ corruption)',
+        await adapter.exists(`${dir}/Cash $$ Run.md`));
+      const fl = await adapter.exists(`${dir}/Cash $$ Run — Flights.md`)
+        ? await adapter.read(`${dir}/Cash $$ Run — Flights.md`) : '';
+      ok('TRIPHEAL-9.2 section trip link keeps literal `$$`',
+        /^trip:\s*"\[\[Cash \$\$ Run\]\]"\s*$/m.test(fl), fl.slice(0, 200));
+      ok('TRIPHEAL-9.3 `[[Trip Atlas]]` repaired to literal `$$` target',
+        fl.includes('[[Cash $$ Run]]') && !fl.includes('[[Cash $ Run]]'), fl.slice(-120));
+    } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
+  }
+
+  // --- duplicate rename target (two `flights` sections) must not clobber ---
+  {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trips-heal-collide-'));
+    try {
+      const adapter = makeAdapter(tmpRoot);
+      const dir = 'spice/trips/reno';
+      await adapter.write(`${dir}/Trip Atlas.md`,
+        `---\ntype: trip\nname: "Reno"\nstart_date: "2026-05-01"\nend_date: "2026-05-03"\nlocation: "Reno"\n---\nx`);
+      // Legacy `Trip Flights.md` (→ flights) AND a hand-authored note already tagged flights.
+      await adapter.write(`${dir}/Trip Flights.md`, `---\ntype: note\n---\nBODY-ALPHA`);
+      await adapter.write(`${dir}/Old Flights.md`,
+        `---\ntype: trip-section\nsection_kind: flights\nsection: "Flights"\n---\nBODY-BETA`);
+      const tp = { app: { vault: { adapter } } };
+      await applyTripsConformanceHeal(tp, [], { commit: 'x', tag: 'y', dirty: false });
+
+      const primary = await adapter.exists(`${dir}/Reno — Flights.md`)
+        ? await adapter.read(`${dir}/Reno — Flights.md`) : '';
+      const deconflicted = await adapter.exists(`${dir}/Reno — Flights (2).md`)
+        ? await adapter.read(`${dir}/Reno — Flights (2).md`) : '';
+      ok('TRIPHEAL-9.4 first flights section written', /BODY-(ALPHA|BETA)/.test(primary));
+      ok('TRIPHEAL-9.5 second flights section de-collided to " (2)" (no clobber)',
+        /BODY-(ALPHA|BETA)/.test(deconflicted) && primary !== deconflicted,
+        `primary=${primary.slice(-40)} decon=${deconflicted.slice(-40)}`);
+      const bodies = primary + '\n' + deconflicted;
+      ok('TRIPHEAL-9.6 BOTH original bodies survive', bodies.includes('BODY-ALPHA') && bodies.includes('BODY-BETA'));
+    } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
   }
 }
 

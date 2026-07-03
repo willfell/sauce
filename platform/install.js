@@ -10043,15 +10043,19 @@ function _tripHeadingToSectionLabel(body, heading) {
   const block =
     '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "' +
     heading + '" }] });\n```';
-  return body.replace(re, block);
+  // Function replacer — the replacement text is emitted verbatim (no `$&`/`$1`
+  // special-pattern interpretation, which would corrupt any value containing `$`).
+  return body.replace(re, () => block);
 }
 
 // Rewrite `[[Trip Atlas]]` and `[[Trip Atlas|<alias>]]` → the atlas basename.
 // Only the EXACT `Trip Atlas` target (never partial matches inside other links).
 function _tripRepairAtlasLinks(body, atlasBase) {
+  // Function replacers — atlasBase is user free-form text; a string replacement
+  // would interpret `$&`/`$$` etc. and corrupt names like "Cash $$ Run".
   return body
-    .replace(/\[\[Trip Atlas\|/g, `[[${atlasBase}|`)
-    .replace(/\[\[Trip Atlas\]\]/g, `[[${atlasBase}]]`);
+    .replace(/\[\[Trip Atlas\|/g, () => `[[${atlasBase}|`)
+    .replace(/\[\[Trip Atlas\]\]/g, () => `[[${atlasBase}]]`);
 }
 
 // Per-key replace-or-insert of `key: value` INSIDE the leading `---` block.
@@ -10063,7 +10067,9 @@ function _tripSetFmKey(body, key, valueLine) {
   if (parts.fm === null) return body; // no frontmatter — refuse to guess
   const keyRe = new RegExp(`^${key}\\s*:.*$`, "m");
   let fm = parts.fm;
-  if (keyRe.test(fm)) fm = fm.replace(keyRe, valueLine);
+  // Function replacer — valueLine embeds user text (section label / atlas name);
+  // a string replacement would misinterpret `$&`/`$1`/`$$` inside it.
+  if (keyRe.test(fm)) fm = fm.replace(keyRe, () => valueLine);
   else fm = fm + "\n" + valueLine;
   return `---\n${fm}\n---\n` + parts.rest;
 }
@@ -10085,7 +10091,7 @@ function _tripMigrateCreatedAt(body) {
       const off = _tripIsoWithTz(new Date()).slice(-6); // ±HH:MM from local tz
       val = `${val}T00:00:00${off}`;
     }
-    const newFm = fm.replace(/^created\s*:.*$/m, `created_at: "${val}"`);
+    const newFm = fm.replace(/^created\s*:.*$/m, () => `created_at: "${val}"`);
     return `---\n${newFm}\n---\n` + parts.rest;
   }
   const nowIso = _tripIsoWithTz(new Date());
@@ -10229,6 +10235,27 @@ async function applyTripsConformanceHeal(tp, history, git) {
       }
 
       if (plan.length === 0) { skipped += 1; continue; }
+
+      // --- Collision guard: two sources (e.g. a legacy `Trip Flights.md` + a
+      // hand-authored note already carrying section_kind: flights) can compute the
+      // SAME rename target. Applying blindly would overwrite the first note (only
+      // the backup would survive). De-collide the later target(s) with " (N)" so no
+      // note is clobbered. Edit-in-place steps (newPath === path) never contend. ---
+      const usedTargets = new Set();
+      for (const step of plan) {
+        if (step.newPath === step.path) continue;
+        if (usedTargets.has(step.newPath)) {
+          const base = step.newPath.replace(/\.md$/, "");
+          let n = 2;
+          while (usedTargets.has(`${base} (${n}).md`)) n++;
+          const target = `${base} (${n}).md`;
+          history?.push({ event: "warning", step: "trips_conformance_heal", name: slug,
+            reason: `${slug}: rename target ${step.newPath} already claimed — wrote to ${target} to avoid clobber`,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+          step.newPath = target;
+        }
+        usedTargets.add(step.newPath);
+      }
 
       // --- Backup once (BEFORE any write), only when a change is pending. ---
       await _copyDirRecursive(adapter, tripDir, `.sauce-backup/trips/${slug}/${ts}`);
