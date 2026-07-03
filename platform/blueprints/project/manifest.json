@@ -45,6 +45,10 @@
     {
       "name": "doc-search",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "menu-popover",
+      "range": ">=0.1.0"
     }
   ],
   "customjs_classes": [
@@ -68,7 +72,9 @@
     "DocBulkMoveActions",
     "ProjectLinksPanel",
     "ProjectLinksManager",
-    "WorkstreamSource"
+    "WorkstreamSource",
+    "ProjectChromeBar",
+    "ProjectCommandsInit"
   ],
   "pre_install": [
     {
@@ -216,10 +222,19 @@
     {
       "source": "helpers/workstream-source.js",
       "dest": "{{scripts_path}}/project/workstream-source.js"
+    },
+    {
+      "source": "helpers/project-chrome-bar.js",
+      "dest": "{{scripts_path}}/project/project-chrome-bar.js"
+    },
+    {
+      "source": "helpers/project-commands-init.js",
+      "dest": "{{scripts_path}}/project/project-commands-init.js"
     }
   ],
   "customjs_startup_scripts": [
-    "ProjectTaskCreateListenerInit"
+    "ProjectTaskCreateListenerInit",
+    "ProjectCommandsInit"
   ],
   "claude_surface": [
     {
