@@ -174,6 +174,62 @@ class SpaceDailyDashboard {
     return { open, done, overdue };
   }
 
+  /**
+   * Home command center count API (DRY): SELECT today's meeting notes for the
+   * dashboard's Meetings panel. Pure + Node-testable — the render() `getMeetings`
+   * closure is now just the adapter that passes the live dv. Returns the pages
+   * whose `file.name` CONTAINS today's date (covers both leading-date
+   * "2026-07-02 Foo.md" and trailing-date "Foo-2026-07-02.md" conventions),
+   * sorted by filename asc, as a plain array. Uses the DataArray .where/.sort/
+   * .array chain when present (byte-identical to the render closure), else a
+   * plain-array fallback so a plain-array dv-stub exercises the real path.
+   * Empty/blank today → []; any throw (cold load / bad dv) → []. Never throws.
+   */
+  static selectMeetings(dv, todayStr) {
+    const today = String(todayStr == null ? "" : todayStr).trim();
+    if (!today) return [];
+    try {
+      const r = dv.pages('"spice/meetings/notes"');
+      if (!r) return [];
+      // Dataview DataArray path — .where(...).sort(...).array() BYTE-IDENTICAL to
+      // the old render closure (a DataArray's .where returns a DataArray with
+      // .sort, whose .sort returns one with .array). Guard on .where only so a
+      // real DataArray (whose .sort lives on the .where RESULT, not the root)
+      // takes this path; a plain Array (no .where) takes the fallback.
+      if (typeof r.where === "function") {
+        return r
+          .where(p => p.file.name.includes(today))
+          .sort(p => p.file.name, "asc")
+          .array();
+      }
+      // Plain-array dv-stub fallback (Node harness): same filter + sort.
+      const arr = Array.isArray(r) ? r.slice() : Array.from(r);
+      return arr
+        .filter(p => p && p.file && String(p.file.name).includes(today))
+        .sort((a, b) => String(a.file.name).localeCompare(String(b.file.name)));
+    } catch (_e) {
+      return [];
+    }
+  }
+
+  /**
+   * Home command center count API (DRY): roll up the day's counts for the glance
+   * line. Composes selectTasks (→ { open[], overdue, done }) with selectMeetings
+   * (→ page[]) and returns integers only: { today, overdue, done, meetings }.
+   * Cold-load safe — no TE → tasks zeroed (selectTasks returns empties) but
+   * meetings are still counted. Never throws.
+   */
+  static computeCounts(dv, todayStr, TE) {
+    const t = SpaceDailyDashboard.selectTasks(dv, todayStr, TE);
+    const m = SpaceDailyDashboard.selectMeetings(dv, todayStr);
+    return {
+      today: Array.isArray(t.open) ? t.open.length : 0,
+      overdue: t.overdue || 0,
+      done: t.done || 0,
+      meetings: Array.isArray(m) ? m.length : 0,
+    };
+  }
+
   async render(dv, params) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
@@ -202,17 +258,12 @@ class SpaceDailyDashboard {
       meetingsPath: "spice/meetings/notes",
     };
 
-    const getMeetings = () => {
-      if (!config.meetingsPath) return [];
-      // v0.2.6: match meetings whose filename CONTAINS today's date (covers
-      // both leading-date "2026-05-12 Foo.md" and trailing-date "Foo-2026-05-12.md"
-      // conventions). Previously matched only leading-date — accuris-style
-      // trailing-date names were silently dropped.
-      const pages = dv.pages(`"${config.meetingsPath}"`)
-        .where(p => p.file.name.includes(today))
-        .sort(p => p.file.name, "asc");
-      return pages.array();
-    };
+    // v0.2.6: match meetings whose filename CONTAINS today's date (covers both
+    // leading-date "2026-05-12 Foo.md" and trailing-date "Foo-2026-05-12.md"
+    // conventions). Selection lives in the pure static selectMeetings (Node-tested
+    // via HC-SELMTG + shared with computeCounts for the Home glance line); this
+    // closure is just the dv adapter.
+    const getMeetings = () => SpaceDailyDashboard.selectMeetings(dv, today);
 
     // Note-per-task migration: the panel LISTS open task-NOTES made for today
     // (scheduled == today, all sources) and surfaces overdue + done-today as red +

@@ -968,5 +968,99 @@ ok('TLA-CPN-1 ToDoLeafActions._cleanProjectName mirrors the meeting extractor', 
   assert(ToDoLeafActionsClass._slugify('Global K8s') === 'global-k8s', 'slugify Global K8s');
 });
 
-console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
-process.exit(fails === 0 ? 0 : 1);
+// ---------- HC-TQC: TaskDialog.createQuick — modal-less one-file create ----------
+//
+// createQuick is the Home command center's inline "Jot a task…" capture path: a
+// modal-less one-gesture task create that reuses the SAME single-file _create
+// path. It grabs `app` from the runtime global (window.app / globalThis.app) and
+// reaches the real TaskEntity via window.customJS.TaskEntity + window.moment. We
+// stub those globals with a spying vault + a REAL TaskEntity instance (loaded from
+// source) so we exercise the ACTUAL compose → dedupe → create path.
+async function okAsync(name, fn) {
+  try { await fn(); console.log('ok ' + name); passes++; }
+  catch (e) { console.error('FAIL ' + name + ': ' + (e && e.message)); fails++; }
+}
+
+// Build a fresh spying app.vault. `taken` decides which paths getAbstractFileByPath
+// reports as existing (drives _uniqueName dedupe). Records every create call.
+function makeQuickApp(taken) {
+  const creates = [];
+  const folders = [];
+  return {
+    _creates: creates,
+    _folders: folders,
+    vault: {
+      getAbstractFileByPath: (p) => (taken && taken(p) ? { path: p } : null),
+      createFolder: async (p) => { folders.push(p); },
+      create: async (p, content) => { creates.push({ path: p, content }); return { path: p }; },
+    },
+  };
+}
+
+async function runCreateQuickTests() {
+  // Real TaskEntity instance (customJS stores instances) + a deterministic moment.
+  const TE = new TaskEntityClass();
+  const momentStub = () => ({
+    format: (f) => (f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-07-02T09:00:00-06:00' : '2026-07-02'),
+  });
+
+  // Install the runtime globals createQuick / _create read.
+  const prevWindow = global.window;
+  const prevGlobalApp = global.app;
+
+  await okAsync('HC-TQC-1 createQuick writes exactly ONE file at spice/tasks/<title>.md', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
+    assert(app._creates.length === 1, 'exactly one vault.create: got ' + app._creates.length);
+    assert(app._creates[0].path === 'spice/tasks/call dentist.md',
+      'path is readable "<title>.md": ' + app._creates[0].path);
+    const c = app._creates[0].content;
+    assert(/\ntype: task\n/.test(c), 'content carries type: task');
+    assert(/\nstatus: open\n/.test(c), 'content carries status: open');
+    assert(/\nscheduled: 2026-07-02\n/.test(c), 'content carries scheduled: 2026-07-02');
+    assert(/\nsource: daily\n/.test(c), 'content carries source: daily');
+  });
+
+  await okAsync('HC-TQC-2 blank / whitespace title → zero creates (no-op)', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    await TD.createQuick({ title: '', today: '2026-07-02', source: 'daily' });
+    await TD.createQuick({ title: '   ', today: '2026-07-02', source: 'daily' });
+    await TD.createQuick({ today: '2026-07-02', source: 'daily' }); // no title key
+    assert(app._creates.length === 0, 'blank titles create nothing: got ' + app._creates.length);
+  });
+
+  await okAsync('HC-TQC-3 filename collision dedupes to " 2.md"', async () => {
+    // The base name is taken once → _uniqueName bumps to "call dentist 2.md".
+    const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
+    assert(app._creates.length === 1, 'still one create: got ' + app._creates.length);
+    assert(app._creates[0].path === 'spice/tasks/call dentist 2.md',
+      'deduped path: ' + app._creates[0].path);
+  });
+
+  await okAsync('HC-TQC-4 no app (cold load) → no-op, never throws', async () => {
+    global.window = { app: null, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    // Should resolve without throwing and without creating anything.
+    await TD.createQuick({ title: 'orphan', today: '2026-07-02', source: 'daily' });
+  });
+
+  // Restore globals so nothing leaks into later modules.
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+}
+
+(async () => {
+  await runCreateQuickTests();
+  console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
+  process.exit(fails === 0 ? 0 : 1);
+})().catch((e) => {
+  console.error('run-task-entity threw:', e);
+  process.exit(1);
+});

@@ -130,3 +130,39 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   rationale: blueprint products axis widget_render: 3 uncovered
   status: done
   note: Added platform/test/run-products-render-guards.js (mirrors run-cowork-render-guards.js) driving ProductsHubCards / ProductPageCards / ProductActionButtons render() through the cold-load path (empty dv.pages) in normal + .markdown-embed contexts; wired into release:preflight. scoreWidgetRender now credits products 3/3. Mutation-verified: injecting a throw into a widget render() turns the harness RED.
+
+- id: cov-blueprint-project-installer-migration
+  title: Add coverage for project installer_migration (7/15)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint project axis installer_migration: 8 uncovered
+  status: done
+  note: Already covered — runProjectInstallerMigrationCoverageFamily (platform/test/run-seed-migrations.js, landed PR #256) drives all eight applyProject* installer_migration heals through faithful before/after + idempotency asserts. The 7/15 was a STALE coverage-matrix.json snapshot (last regenerated PR #224, before #256). PR #277 regenerates the snapshot (project installer_migration now 20/20) and teaches gate.js splitDiff that the generated matrix is not behavioral source. No new harness needed.
+
+- id: cov-mechanism-task-entity-customjs-behavioral
+  title: Add coverage for task-entity customjs_behavioral (14/19)
+  category: test
+  source: coverage-matrix
+  rationale: mechanism task-entity axis customjs_behavioral: 5 uncovered
+  status: proposed
+
+- id: cov-mechanism-task-entity-widget-render
+  title: Add coverage for task-entity widget_render (0/5)
+  category: test
+  source: coverage-matrix
+  rationale: mechanism task-entity axis widget_render: 5 uncovered
+  status: proposed
+
+- id: cov-blueprint-wiki-widget-render
+  title: Add coverage for wiki widget_render (0/3)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint wiki axis widget_render: 3 uncovered
+  status: proposed
+
+- id: cov-blueprint-trips-widget-render
+  title: Add coverage for trips widget_render (0/3)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint trips axis widget_render: 3 uncovered
+  status: proposed

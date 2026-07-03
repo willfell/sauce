@@ -845,6 +845,30 @@ class TaskDialog {
     }
 
     /**
+     * QUICK-CREATE — a modal-less one-gesture task create for the Home command
+     * center's inline "Jot a task…" capture. Builds the minimal payload from the
+     * typed title (scheduled = today, no priority/due/project) and reuses the SAME
+     * single-file `_create` path (composeNote → dedupe → one vault.create), so the
+     * one-file-write invariant holds and the note appears in the Tasks panel on
+     * the caller's re-render. `app` is grabbed from the runtime global (as
+     * open()/_render do). A blank / whitespace-only title, or a cold-load with no
+     * app, is a silent no-op. Returns a Promise (the caller awaits before it
+     * re-renders). Never touches any surface note.
+     */
+    async createQuick(opts) {
+        const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
+        const title = String((opts && opts.title) || '').trim();
+        if (!app || !title) return;
+        const payload = {
+            title,
+            scheduled: (opts && opts.today) || '',
+            source: (opts && opts.source) || 'daily',
+            links: [],
+        };
+        await this._create(app, payload, '');
+    }
+
+    /**
      * EDIT/SAVE — mutate ONLY this file's frontmatter via processFrontMatter,
      * then (if notes were edited) swap ONLY this file's body via vault.process.
      * Both writes touch the task's OWN file only — never a surface note — so the
