@@ -230,6 +230,32 @@ class SpaceDailyDashboard {
     };
   }
 
+  /**
+   * 2→1 sweep reduction: derive the segmented-accent byBlueprint map from the
+   * pages ActivityFeed.query(...) returns (the SAME coalesced/rolled-up set the
+   * cards render from). Buckets project-* → project and trip-* → trip so the
+   * accent colors resolve consistently. This is the exact `bucket()` logic that
+   * used to live inside the retired _getActivityCount; extracted to a pure
+   * static so it's Node-testable and driven directly by the real query output.
+   * @param {Array} pages — ActivityFeed.query(...).pages
+   * @returns {Object} byBlueprint count map
+   */
+  static bucketByBlueprint(pages) {
+    const bucket = (t) => {
+      if (!t) return "(unknown)";
+      const s = String(t);
+      if (s === "project" || s.startsWith("project-")) return "project";
+      if (s === "trip" || s.startsWith("trip-")) return "trip";
+      return s;
+    };
+    const byBlueprint = {};
+    for (const p of (Array.isArray(pages) ? pages : [])) {
+      const blueprint = bucket(p && p.type);
+      byBlueprint[blueprint] = (byBlueprint[blueprint] || 0) + 1;
+    }
+    return byBlueprint;
+  }
+
   async render(dv, params) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
@@ -277,8 +303,33 @@ class SpaceDailyDashboard {
 
     const meetings = getMeetings();
     const { open: openTasks, overdue: overdueCount, done: doneCount } = getTasks();
-    const activityResult = await this._getActivityCount(dv, today);
-    const activityCount = activityResult.total;
+
+    // 2→1 sweep reduction: the dashboard used to sweep the whole vault TWICE —
+    // once in _getActivityCount (gate pre-count + segmented-accent byBlueprint)
+    // and again inside ActivityFeed.render's own _query (the cards). Both
+    // computed the same set. We now build the ActivityFeed opts ONCE and call
+    // customJS.ActivityFeed.query(dv, opts) ONCE: .total drives the hasContent
+    // gate + the activityCount>0 guard + the count pill; .pages is handed back
+    // into the SAME ActivityFeed.render call via precomputed so render skips its
+    // own sweep. (The segmented-accent byBlueprint map that _getActivityCount
+    // used to return is now a pure static, bucketByBlueprint(query().pages),
+    // available to the accent should it return — the current grey accent does
+    // not consume it, so render behavior is unchanged.) Guarded for cold-load
+    // (customJS.ActivityFeed?.query). The resulting gate-count now equals the
+    // rendered card set exactly (previously the _getActivityCount
+    // `day`-authoritative predicate could drift from _query's tsKeys
+    // OR-semantics — the cards always used _query, so this unifies the count to
+    // what actually renders). Never throws.
+    const activityOpts = this._buildActivityOpts(dv, today, icons);
+    let activityPages = [];
+    if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.query === "function") {
+      try {
+        const q = customJS.ActivityFeed.query(dv, activityOpts);
+        if (q && Array.isArray(q.pages)) activityPages = q.pages;
+      } catch (_) { activityPages = []; }
+    }
+    const activityCount = activityPages.length;
+
     const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || activityCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
@@ -455,68 +506,14 @@ class SpaceDailyDashboard {
       // re-execution. Manual cache-bypass available via Cmd+P → "Sauce:
       // Re-sync kanban boards".
       if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
-        await customJS.ActivityFeed.render(activityShim, {
-          scope: "today",
-          asOf: today,
-          includeMtime: true,
-          groupBy: "blueprint",
-          blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
-          getTitle: (p) => this._resolveTitle(p),
-          // v0.10.0 (sauce v0.70.0) — framed renderer + cowork bucket + pin order + scratch closed
-          framed: true,
-          bucketRules: [
-            { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
-          ],
-          groupOrder: ["cowork", "project", "kanban", "trip"],
-          groupOrderBottom: ["scratch"],
-          // Scratch group now opens by default (was defaultClosed) and renders
-          // oldest-first so the day's scratch notes read in the order they were
-          // taken. See the "Daily Hub Scratch Notes" card.
-          defaultClosed: [],
-          ascendingGroups: ["scratch"],
-          colorByType: this._BLUEPRINT_COLORS,
-          rollUpRoots: this._buildRollupRules(dv),
-          metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
-          // v0.12.0 (sauce v0.72.0): kanban group surfaces cards moved today via
-          // status_changed_at OR created today via created_at. Activity-feed
-          // v0.6.0 tsKeys opt applies the OR semantics.
-          // v0.13.6 (sauce v0.96.2): prepend `day` so cowork atomic notes are
-          // bucketed by their semantic `day:` frontmatter field (canonical
-          // day-of-action) before falling back to wall-clock created_at /
-          // status_changed_at. Closes the timestamp-drift class where EOD cron
-          // firing past midnight (4am next morning) stamped created_at on the
-          // wrong calendar day. Activity-feed iterates tsKeys in order and
-          // OR-passes on the first in-window match, so `day` first gives the
-          // semantic value precedence without breaking kanban OR semantics.
-          tsKeys: ["day", "created_at", "status_changed_at"],
-          // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
-          // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
-          // semantics give metaBuilder precedence over getSubtitle (only one
-          // fires per row), so this opt is currently dormant — the actual
-          // cowork-summary surfacing happens inside _renderActivityMeta below.
-          // Plumbed here for clarity + future-proofing if metaBuilder is ever
-          // removed; activity-feed will then fall back to getSubtitle.
-          getSubtitle: (p) => {
-            if (p && p.type && typeof p.type === "string" &&
-                p.type.indexOf("cowork-") === 0 &&
-                typeof p.summary === "string" && p.summary.length > 0) {
-              return p.summary;
-            }
-            return "";
-          },
-          // v0.11.0 (sauce v0.71.0) — collapsed groups show a one-line preview
-          // from the most-recent page's summary. Activity-feed only invokes
-          // this builder for defaultClosed groups (currently scratch), so the
-          // cowork bucket (open by default) won't trigger it.
-          groupPreviewBuilder: (pages) => {
-            if (!Array.isArray(pages) || pages.length === 0) return "";
-            const top = pages[0];
-            if (top && typeof top.summary === "string") {
-              return top.summary;
-            }
-            return "";
-          },
-        });
+        // 2→1 sweep reduction: reuse the SAME opts we handed to query() above,
+        // adding precomputed:{ pages } so render() skips its own vault sweep and
+        // renders exactly the pages query() already produced. The rendered cards
+        // are byte-for-byte what a fresh render(opts) would have produced.
+        await customJS.ActivityFeed.render(
+          activityShim,
+          Object.assign({}, activityOpts, { precomputed: { pages: activityPages } })
+        );
       } else {
         const warn = activityBody.createEl("p");
         warn.style.cssText = "color: var(--text-muted); font-style: italic; margin: 0.5em 0;";
@@ -526,129 +523,84 @@ class SpaceDailyDashboard {
   }
 
   /**
-   * Pre-count activity matches for the hasContent gate. Mirrors
-   * ActivityFeed._query semantics but returns just the length, so we can
-   * short-circuit the dashboard render when nothing matches.
+   * 2→1 sweep reduction: build the SINGLE ActivityFeed opts object used for
+   * BOTH the coalesced customJS.ActivityFeed.query(dv, opts) count sweep AND
+   * the customJS.ActivityFeed.render(shim, opts + precomputed) card render.
+   * Extracted so the two calls can NEVER pass different opts (which would make
+   * the count diverge from the cards). This is byte-for-byte the opts object
+   * that used to be inlined in the render() ActivityFeed.render call.
+   *
+   * `dv` binds the rollUpRoots callbacks; `today` anchors the time window;
+   * `icons` supplies the square glyph the metaBuilder passes to
+   * _renderActivityMeta.
+   * @param {object} dv
+   * @param {string} today — YYYY-MM-DD
+   * @param {object} icons — render()'s icon table (needs icons.square)
+   * @returns {object} ActivityFeed opts
    */
-  async _getActivityCount(dv, today) {
-    const startIso = window.moment(today, "YYYY-MM-DD").startOf("day").format();
-    const endIso   = window.moment(today, "YYYY-MM-DD").endOf("day").format();
-    const allowed  = this._DEFAULT_DASHBOARD_BLUEPRINTS;
-    const rollupRules = this._buildRollupRules(dv);
-
-    // v0.10.7 (sauce v0.70.7): mirror activity-feed@0.4.1's strict
-    // created_at semantics — when created_at is present, it's authoritative
-    // and we do NOT fall through to mtime (which is unreliable on Obsidian
-    // Mobile after sync). mtime is consulted only for legacy pages without
-    // a created_at field.
-    // v0.13.6 (sauce v0.96.2): consult `day` (semantic YYYY-MM-DD frontmatter,
-    // canonical day-of-action) FIRST. When `day` is present it is fully
-    // authoritative — we do NOT also OR-check created_at / status_changed_at,
-    // because doing so would double-surface a page on both its canonical day
-    // (per `day:`) AND on the wall-clock day that created_at happens to land on
-    // (e.g. EOD cron firing 4am next morning). Only when `day` is absent do we
-    // fall back to created_at → status_changed_at OR-semantics (matching the
-    // pre-v0.13.6 behavior + activity-feed kanban OR semantics). mtime is the
-    // final fallback for legacy pages with NONE of these fields.
-    const inWindow = (p) => {
-      if (!p) return false;
-      // Authoritative path: `day:` frontmatter (semantic day-of-action).
-      if (p.day) {
-        const ts = String(p.day);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          return ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10);
+  _buildActivityOpts(dv, today, icons) {
+    return {
+      scope: "today",
+      asOf: today,
+      includeMtime: true,
+      groupBy: "blueprint",
+      blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
+      getTitle: (p) => this._resolveTitle(p),
+      // v0.10.0 (sauce v0.70.0) — framed renderer + cowork bucket + pin order + scratch closed
+      framed: true,
+      bucketRules: [
+        { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
+      ],
+      groupOrder: ["cowork", "project", "kanban", "trip"],
+      groupOrderBottom: ["scratch"],
+      // Scratch group now opens by default (was defaultClosed) and renders
+      // oldest-first so the day's scratch notes read in the order they were
+      // taken. See the "Daily Hub Scratch Notes" card.
+      defaultClosed: [],
+      ascendingGroups: ["scratch"],
+      colorByType: this._BLUEPRINT_COLORS,
+      rollUpRoots: this._buildRollupRules(dv),
+      metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
+      // v0.12.0 (sauce v0.72.0): kanban group surfaces cards moved today via
+      // status_changed_at OR created today via created_at. Activity-feed
+      // v0.6.0 tsKeys opt applies the OR semantics.
+      // v0.13.6 (sauce v0.96.2): prepend `day` so cowork atomic notes are
+      // bucketed by their semantic `day:` frontmatter field (canonical
+      // day-of-action) before falling back to wall-clock created_at /
+      // status_changed_at. Closes the timestamp-drift class where EOD cron
+      // firing past midnight (4am next morning) stamped created_at on the
+      // wrong calendar day. Activity-feed iterates tsKeys in order and
+      // OR-passes on the first in-window match, so `day` first gives the
+      // semantic value precedence without breaking kanban OR semantics.
+      tsKeys: ["day", "created_at", "status_changed_at"],
+      // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
+      // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
+      // semantics give metaBuilder precedence over getSubtitle (only one
+      // fires per row), so this opt is currently dormant — the actual
+      // cowork-summary surfacing happens inside _renderActivityMeta below.
+      // Plumbed here for clarity + future-proofing if metaBuilder is ever
+      // removed; activity-feed will then fall back to getSubtitle.
+      getSubtitle: (p) => {
+        if (p && p.type && typeof p.type === "string" &&
+            p.type.indexOf("cowork-") === 0 &&
+            typeof p.summary === "string" && p.summary.length > 0) {
+          return p.summary;
         }
-        return ts >= startIso && ts <= endIso;
-      }
-      // Legacy path: OR-check created_at + status_changed_at (matches activity-feed
-      // tsKeys semantics + pre-v0.13.6 dashboard behavior).
-      const FALLBACK_KEYS = ["created_at", "status_changed_at"];
-      let anyFieldPresent = false;
-      for (const key of FALLBACK_KEYS) {
-        const tsRaw = p[key];
-        if (!tsRaw) continue;
-        anyFieldPresent = true;
-        const ts = String(tsRaw);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          if (ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10)) return true;
-        } else {
-          if (ts >= startIso && ts <= endIso) return true;
+        return "";
+      },
+      // v0.11.0 (sauce v0.71.0) — collapsed groups show a one-line preview
+      // from the most-recent page's summary. Activity-feed only invokes
+      // this builder for defaultClosed groups (currently scratch), so the
+      // cowork bucket (open by default) won't trigger it.
+      groupPreviewBuilder: (pages) => {
+        if (!Array.isArray(pages) || pages.length === 0) return "";
+        const top = pages[0];
+        if (top && typeof top.summary === "string") {
+          return top.summary;
         }
-      }
-      if (anyFieldPresent) return false; // authoritative — at least one field present
-      if (p.file && p.file.mtime) {
-        const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
-        if (mIso >= startIso && mIso <= endIso) return true;
-      }
-      return false;
+        return "";
+      },
     };
-    // v0.8.1 (v0.67.1): apply ActivityFeed's rollup logic so the count + byBlueprint
-    // reflect the cards that will actually render. Pre-v0.8.1, count was raw filtered
-    // pages (e.g., project hub if edited) without rollup coalescing — when only
-    // project task children were edited (no direct hub edit), the project rollup
-    // card would render but `_getActivityCount` would miss it entirely, leading to
-    // a single-color segmented accent (FLN-v67-4 observed by user smoke).
-    //
-    // L5 (perf): ONE sweep of dv.pages() builds BOTH the direct-hit `filtered`
-    // set and the rolled-up roots — was two full-vault sweeps with inWindow
-    // computed twice per page. A page is EITHER a direct hit (allowed blueprint
-    // type, in-window) OR a rollup candidate (in-window child of a project/trip/
-    // board), never both, so the old `filtered.some(...)` de-dup is unnecessary.
-    // The per-project/-trip rollup rootPath scoped query (dv.pages('"spice/.../
-    // <slug>"')) is memoized by slug-prefix so it fires once per project, not
-    // once per matching child.
-    const filtered = [];
-    const rolledUpRoots = new Map(); // rootPath -> rule.type
-    const rootPathMemo = new Map();  // "type::spice/<kind>/<slug>" -> rootPath|null (per-render)
-    const memoRootPath = (rule, p) => {
-      const key = rule.type + "::" + String(p.file.path).split("/").slice(0, 3).join("/");
-      if (rootPathMemo.has(key)) return rootPathMemo.get(key);
-      let rp = null;
-      try { rp = rule.rootPath(p); } catch (_) { rp = null; }
-      rootPathMemo.set(key, rp);
-      return rp;
-    };
-    for (const p of dv.pages()) {
-      if (!inWindow(p)) continue;
-      const path = p && p.file && p.file.path;
-      // Direct hit: an allowed blueprint type, in-window (was the `inDay` loop).
-      if (allowed.indexOf(String(p.type)) >= 0) { filtered.push(p); continue; }
-      // Otherwise a rollup candidate: an in-window child of a project/trip/board.
-      if (!path) continue;
-      for (const rule of rollupRules) {
-        if (typeof rule.exclude === "function" && rule.exclude(p)) break;
-        if (typeof rule.childMatch !== "function" || !rule.childMatch(p)) continue;
-        const rootPath = memoRootPath(rule, p);
-        if (!rootPath) continue;
-        if (rootPath === path) continue;
-        if (!rolledUpRoots.has(rootPath)) rolledUpRoots.set(rootPath, rule.type);
-        break;
-      }
-    }
-
-    // Remove direct hits whose root is also being rolled up (avoid double-count)
-    const rolledRootPaths = new Set(rolledUpRoots.keys());
-    const survivors = filtered.filter(p => !(p.file && rolledRootPaths.has(p.file.path)));
-
-    // Final card-count = surviving direct hits + synthetic rollup roots
-    const byBlueprint = {};
-    const bucket = (t) => {
-      if (!t) return "(unknown)";
-      const s = String(t);
-      if (s === "project" || s.startsWith("project-")) return "project";
-      if (s === "trip" || s.startsWith("trip-")) return "trip";
-      return s;
-    };
-    for (const p of survivors) {
-      const blueprint = bucket(p && p.type);
-      byBlueprint[blueprint] = (byBlueprint[blueprint] || 0) + 1;
-    }
-    for (const [, type] of rolledUpRoots) {
-      const blueprint = bucket(type);
-      byBlueprint[blueprint] = (byBlueprint[blueprint] || 0) + 1;
-    }
-    const total = survivors.length + rolledUpRoots.size;
-    return { total, byBlueprint };
   }
 
   get _DEFAULT_DASHBOARD_BLUEPRINTS() {
