@@ -241,11 +241,15 @@ class TaskTodayList {
         };
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
-        // No flex-wrap: the chips (especially DUE) stay on the SAME row as the
-        // title even on a narrow (mobile) container. align-items:flex-start pins
-        // the chips to the top-right while a long title wraps within its own
-        // column (title = flex:1 min-width:0; chips = flex-shrink:0).
-        row.style.cssText = 'display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
+        // The right cluster (chips + action icons) sits beside the title when the
+        // row is wide enough, and WRAPS to its own right-aligned line when the title
+        // is long — flex-wrap + a title min-width floor. Without the floor a long
+        // title would collapse to one character per line to make room for the wide
+        // cluster (project + due chips + two icons); the floor keeps the title
+        // readable and forces the cluster to wrap instead. align-items:flex-start
+        // pins the cluster to the top of the first title line while a long title
+        // wraps within its own column.
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
@@ -305,11 +309,13 @@ class TaskTodayList {
         const titleText = (task && task.title) || '(untitled)';
         const title = row.createEl('span', { cls: 'sauce-task-today-title' });
         // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
-        // column (min-width:0 lets it shrink; break-word wraps long words) so the
-        // chips never get pushed off the row. The EXPLICIT line-height:1.5 must
-        // match the checkbox wrapper's 1.5em height so the checkbox centers on the
-        // first line of the title (see cbWrap above) regardless of theme defaults.
-        title.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
+        // column (break-word wraps long words). The min-width:8em FLOOR keeps a long
+        // title readable and forces the right cluster (chips + icons) to wrap to its
+        // own line rather than crushing the title to one character per line. The
+        // EXPLICIT line-height:1.5 must match the checkbox wrapper's 1.5em height so
+        // the checkbox centers on the first line of the title (see cbWrap above)
+        // regardless of theme defaults.
+        title.style.cssText = 'flex: 1 1 auto; min-width: 8em; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
         TaskTodayList.renderInlineLinks(title, titleText, path);
 
         // Title click → OPEN THE TASK NOTE (its TaskNoteView carries an Edit button
@@ -332,10 +338,16 @@ class TaskTodayList {
         };
         title.addEventListener('click', openNote);
 
+        // Right cluster — chips + action icons grouped so they wrap together (below
+        // the title, right-aligned) when the row is tight, instead of each squeezing
+        // the title independently. margin-left:auto hugs it to the right on line 1.
+        const rightCluster = row.createEl('div', { cls: 'sauce-task-today-right' });
+        rightCluster.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto;';
+
         // Metadata chips (only when set): project / priority / due. flex-shrink:0
-        // so the chips never shrink or wrap off — DUE stays on the task's row.
-        const chips = row.createEl('div', { cls: 'sauce-task-today-chips' });
-        chips.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; align-items: center; flex-shrink: 0;';
+        // so the chips never shrink or clip — DUE stays intact.
+        const chips = rightCluster.createEl('div', { cls: 'sauce-task-today-chips' });
+        chips.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0;';
         const addChip = (label) => {
             const chip = chips.createEl('span', { text: label });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
@@ -343,6 +355,70 @@ class TaskTodayList {
         if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
+
+        // Row actions (EDIT + DELETE) at the FAR-RIGHT end of the cluster. Two SUBTLE
+        // icon buttons (muted by default, brightening on hover/focus) so they read as
+        // secondary affordances without crowding the title. Wrapped in a fixed
+        // 1.5em-tall flex box that vertically centers the icons against the FIRST line
+        // of the (line-height:1.5) title — the same trick the checkbox wrapper uses —
+        // so the row stays aligned even when a long title wraps. Both buttons
+        // flex-shrink:0 so they never collapse.
+        //   - EDIT (pencil)  → TaskDialog.open({ edit: path })  (the edit dialog, NOT
+        //                       the note — the note opens via the title click)
+        //   - DELETE (trash) → TaskDialog.confirmDelete(path)   (yes/no modal; on
+        //                       confirm the row is removed optimistically)
+        // Every gesture is lazily resolved via getTD() + fully guarded, so a
+        // cold-load (customJS not ready) just no-ops the tap. Never throws.
+        const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+        const EDIT_ICON = svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>');
+        const TRASH_ICON = svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>');
+        const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions' });
+        actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
+        const ACTION_BASE = 'display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 100%; min-height: 24px; padding: 0; border: none; border-radius: var(--radius-s, 4px); background: transparent; color: var(--text-faint, #999); cursor: pointer; flex-shrink: 0; transition: background 120ms ease, color 120ms ease;';
+        const mkActionBtn = (cls, aria, icon, danger) => {
+            const b = actions.createEl('button', { cls: cls });
+            b.style.cssText = ACTION_BASE;
+            try { b.setAttribute('type', 'button'); b.setAttribute('aria-label', aria); b.setAttribute('title', aria); } catch (_e) {}
+            b.innerHTML = icon;
+            const hoverFg = danger ? 'var(--text-error, #e05561)' : 'var(--text-normal, #ddd)';
+            b.addEventListener('mouseenter', () => { b.style.background = 'var(--background-modifier-hover, rgba(255,255,255,0.06))'; b.style.color = hoverFg; });
+            b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.style.color = 'var(--text-faint, #999)'; });
+            b.addEventListener('focus', () => { b.style.outline = '2px solid var(--interactive-accent, #6a6abf)'; b.style.outlineOffset = '1px'; b.style.color = hoverFg; });
+            b.addEventListener('blur', () => { b.style.outline = 'none'; b.style.color = 'var(--text-faint, #999)'; });
+            return b;
+        };
+
+        // EDIT — open the edit dialog (never the note). stopPropagation so the tap
+        // doesn't bubble to the row / trigger the title-click note-open.
+        const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', EDIT_ICON, false);
+        editBtn.addEventListener('click', (ev) => {
+            try { ev.stopPropagation(); } catch (_e) {}
+            const TD = getTD();
+            if (!path || !TD || typeof TD.open !== 'function') return;
+            try { TD.open({ edit: path }); }
+            catch (e) { try { new Notice('Could not open task editor: ' + (e && (e.message || e)), 6000); } catch (_e) {} }
+        });
+
+        // DELETE — confirm via TaskDialog.confirmDelete(path) (yes/no modal). On a
+        // confirmed delete ({ ok: true }) remove the row optimistically (preserving
+        // scroll) so the gesture feels instant; the eventual Dataview re-render
+        // reconciles authoritatively. A cancel / failure leaves the row untouched.
+        const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', TRASH_ICON, true);
+        delBtn.addEventListener('click', async (ev) => {
+            try { ev.stopPropagation(); } catch (_e) {}
+            const TD = getTD();
+            if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
+            try {
+                const res = await TD.confirmDelete(path);
+                if (res && res.ok) {
+                    try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                    try { row.remove(); } catch (_e) {}
+                }
+            } catch (e) {
+                try { new Notice('Could not delete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            }
+        });
+
         return row;
     }
 
