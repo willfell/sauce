@@ -9,7 +9,7 @@
  *
  * Layout (v2.12.0): prev/next-day arrows on top (space-between, when the daily
  * blueprint is installed), then a fixed 3-COLUMN GRID of pinned quick-nav
- * buttons — Daily | To-Do | Scratch  /  Projects | Meetings | Go to… — where
+ * buttons — Home | To-Do | Scratch  /  Projects | Meetings | Go to… — where
  * the final cell is the "Go to…" launcher holding EVERY OTHER blueprint. Pins
  * are chosen by _partitionEntries via a fixed _source order; any pinned source
  * absent from the registry simply drops its cell (the grid reflows). Each pinned
@@ -91,7 +91,7 @@ class SpaceNavButtons {
   // menu. Only the first entry per source can claim a pin slot. Pure;
   // Node-testable. Returns { pinned: entry[], rest: entry[] }.
   _partitionEntries(entries) {
-    const PINNED_SOURCES = ["daily", "to-do", "scratch", "project", "meetings"];
+    const PINNED_SOURCES = ["home", "to-do", "scratch", "project", "meetings"];
     const firstBySource = {};
     for (const e of (entries || [])) {
       if (e && e._source && !firstBySource[e._source]) firstBySource[e._source] = e;
@@ -151,7 +151,7 @@ class SpaceNavButtons {
     const dailyMeta = await this._readDailyNotesMeta();
 
     // ── Chrome: prev/next-day arrows on top; a fixed 3-column grid below —
-    //    Daily | To-Do | Scratch  /  Projects | Meetings | Go to… (the rest). ──
+    //    Home | To-Do | Scratch  /  Projects | Meetings | Go to… (the rest). ──
     const chrome = container.createEl("div");
     chrome.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
 
@@ -221,7 +221,7 @@ class SpaceNavButtons {
     if (rest.length > 0) fillCell(this._renderPill(grid, rest, dv));
   }
 
-  // Shared pill styling (outline chip, accent on hover) for the Daily + Go to…
+  // Shared pill styling (outline chip, accent on hover) for the Home + Go to…
   // chrome buttons.
   _stylePill(el) {
     el.style.cssText = `
@@ -252,7 +252,7 @@ class SpaceNavButtons {
     };
   }
 
-  // Pinned quick-nav button for any entry (Daily / To-Do / Scratch / Projects /
+  // Pinned quick-nav button for any entry (Home / To-Do / Scratch / Projects /
   // Meetings). Dispatches the entry's own registry action via the unchanged
   // _dispatchAction. Label is ellipsised so it never overflows its grid cell.
   _renderEntryButton(row, entry, dv) {
