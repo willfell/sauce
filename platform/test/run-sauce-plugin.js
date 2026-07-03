@@ -155,6 +155,15 @@ function makeApp(tree) {
     assert(a._writes.length === 0, 'no writes when bundled_plugin is absent');
   });
 
+  await ok('BP-6 partial vendor (a file write fails) → plugin NOT enabled', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': JSON.stringify(['customjs']) });
+    const origWrite = a.write;
+    a.write = async (p, c) => { if (p.endsWith('/main.js')) throw new Error('disk full'); return origWrite(p, c); };
+    await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT);
+    const enabled = JSON.parse(a._store['.obsidian/community-plugins.json']);
+    assert(!enabled.includes('sauce'), 'sauce must NOT be enabled when a declared file failed to vendor');
+  });
+
   console.log(`\nrun-sauce-plugin: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-sauce-plugin threw:', e); process.exit(1); });

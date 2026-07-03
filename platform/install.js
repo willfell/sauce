@@ -7017,17 +7017,22 @@ async function applyBundledPlugin(tp, mech, vaultPath, workshopPath, history, gi
 
   const destDir = ".obsidian/plugins/" + bp.id;
   try { await adapter.mkdir(destDir); } catch (_e) { /* already exists — fine */ }
-  let wroteAny = false;
+  let wroteCount = 0;
   for (const f of bp.files) {
     try {
       const content = fs.readFileSync(path.join(srcDir, f), "utf8");
       await adapter.write(destDir + "/" + f, content);
-      wroteAny = true;
+      wroteCount++;
     } catch (e) {
       hist("error", { message: "vendor " + f + " failed: " + (e && e.message ? e.message : String(e)) });
     }
   }
-  if (!wroteAny) { return; }
+  // Enable ONLY once EVERY declared file vendored — never enable a half-written
+  // plugin dir (Obsidian would fail to load it; CustomJS fallback still applies).
+  if (wroteCount < bp.files.length) {
+    hist("warning", { message: "vendored " + wroteCount + "/" + bp.files.length + " files; not enabling" });
+    return;
+  }
 
   // Enable in community-plugins.json — preserve all other ids; safe on absent/malformed.
   const pluginsPath = ".obsidian/community-plugins.json";
