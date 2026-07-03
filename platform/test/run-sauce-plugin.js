@@ -91,6 +91,70 @@ function makeApp(tree) {
     assert(mod.isClassFile(fs.readFileSync(PLUGIN_MAIN, 'utf8')) === false, 'the plugin main.js is not a bare class → customJS scanners skip it');
   });
 
+  // ---------- BP-*: applyBundledPlugin installer step (vendor + enable) ----------
+  global.Notice = global.Notice || function () {};
+  const install = require(path.join(__dirname, '..', 'install.js'));
+  const WORKSHOP = path.resolve(__dirname, '..', '..');
+  const MECH = { name: 'sauce-plugin', bundled_plugin: { id: 'sauce', source_dir: 'plugin', files: ['manifest.json', 'main.js'] } };
+  const GIT = { commit: 'test', tag: 'v0', dirty: false };
+
+  function makeAdapter(initial) {
+    const store = Object.assign({}, initial);
+    const writes = [], mkdirs = [];
+    return {
+      _store: store, _writes: writes, _mkdirs: mkdirs,
+      exists: async (p) => Object.prototype.hasOwnProperty.call(store, p),
+      read: async (p) => { if (!(p in store)) throw new Error('ENOENT ' + p); return store[p]; },
+      write: async (p, c) => { store[p] = c; writes.push(p); },
+      mkdir: async (p) => { mkdirs.push(p); },
+    };
+  }
+  const tpWith = (adapter) => ({ app: { vault: { adapter } } });
+
+  await ok('BP-fn applyBundledPlugin is exported', async () => {
+    assert(typeof install.applyBundledPlugin === 'function', 'install.applyBundledPlugin must be exported');
+  });
+
+  await ok('BP-1 vendors manifest.json + main.js and enables "sauce" (preserving others)', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': JSON.stringify(['customjs', 'dataview']) });
+    await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT);
+    assert(typeof a._store['.obsidian/plugins/sauce/manifest.json'] === 'string' && a._store['.obsidian/plugins/sauce/manifest.json'].includes('"id": "sauce"'), 'manifest.json vendored');
+    assert(typeof a._store['.obsidian/plugins/sauce/main.js'] === 'string' && a._store['.obsidian/plugins/sauce/main.js'].includes('SaucePlugin'), 'main.js vendored');
+    const enabled = JSON.parse(a._store['.obsidian/community-plugins.json']);
+    assert(enabled.includes('sauce') && enabled.includes('customjs') && enabled.includes('dataview'), 'sauce enabled, others preserved: ' + JSON.stringify(enabled));
+  });
+
+  await ok('BP-2 idempotent — second run does not duplicate the "sauce" entry', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': JSON.stringify(['customjs']) });
+    await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT);
+    await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT);
+    const enabled = JSON.parse(a._store['.obsidian/community-plugins.json']);
+    assert(enabled.filter((x) => x === 'sauce').length === 1, 'exactly one "sauce" entry: ' + JSON.stringify(enabled));
+  });
+
+  await ok('BP-3 community-plugins.json absent → files still vendored, no throw', async () => {
+    const a = makeAdapter({});
+    let threw = false;
+    try { await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT); } catch (_e) { threw = true; }
+    assert(threw === false, 'must not throw when community-plugins.json is absent');
+    assert(typeof a._store['.obsidian/plugins/sauce/main.js'] === 'string', 'files still vendored');
+  });
+
+  await ok('BP-4 malformed community-plugins.json → files vendored, enable skipped, no throw', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': 'not json{' });
+    let threw = false;
+    try { await install.applyBundledPlugin(tpWith(a), MECH, WORKSHOP, WORKSHOP, [], GIT); } catch (_e) { threw = true; }
+    assert(threw === false, 'must not throw on malformed community-plugins.json');
+    assert(a._store['.obsidian/community-plugins.json'] === 'not json{', 'malformed file preserved untouched');
+    assert(typeof a._store['.obsidian/plugins/sauce/main.js'] === 'string', 'files still vendored');
+  });
+
+  await ok('BP-5 no bundled_plugin on the manifest → no-op', async () => {
+    const a = makeAdapter({ '.obsidian/community-plugins.json': JSON.stringify(['customjs']) });
+    await install.applyBundledPlugin(tpWith(a), { name: 'render-safe' }, WORKSHOP, WORKSHOP, [], GIT);
+    assert(a._writes.length === 0, 'no writes when bundled_plugin is absent');
+  });
+
   console.log(`\nrun-sauce-plugin: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-sauce-plugin threw:', e); process.exit(1); });
