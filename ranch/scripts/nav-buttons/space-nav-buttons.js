@@ -106,28 +106,51 @@ class SpaceNavButtons {
     return { pinned, rest };
   }
 
+  // Gate the prev/next-day arrow row (and its whole-vault getMarkdownFiles sweep)
+  // to notes actually INSIDE the daily folder — not every note merely because the
+  // daily blueprint is installed. Folder-path predicate (a basename date regex
+  // would leak meeting/scratch/to-do notes, which also carry date basenames).
+  // Pure + Node-testable.
+  static _shouldShowDayArrows(currentPath, dailyMeta) {
+    return !!(dailyMeta && dailyMeta.folder && currentPath
+      && String(currentPath).startsWith(dailyMeta.folder + "/"));
+  }
+
+  // Load + parse the nav-buttons registry, caching the parsed result for the
+  // session (the registry changes only on `sauce install`, which requires an
+  // Obsidian reload that resets this instance). Removes a ~2.8KB adapter.read from
+  // EVERY note render. Returns { ok:true, registry } | { ok:false, empty:true }
+  // (ENOENT / empty install → render nothing) | { ok:false, reason } (read/parse
+  // error → render a notice). Never throws.
+  async _loadRegistry(app) {
+    if (this._registryCache) return { ok: true, registry: this._registryCache };
+    let raw;
+    try {
+      raw = await app.vault.adapter.read("ranch/nav-buttons-registry.json");
+    } catch (readErr) {
+      const msg = (readErr && readErr.message) || String(readErr);
+      if (/ENOENT|not\s*found|no such file/i.test(msg)) return { ok: false, empty: true };
+      return { ok: false, reason: "read error: " + msg };
+    }
+    let registry;
+    try { registry = JSON.parse(raw); }
+    catch (parseErr) { return { ok: false, reason: "parse error: " + parseErr.message }; }
+    this._registryCache = registry;
+    return { ok: true, registry };
+  }
+
   async render(dv) {
     const fallbackIcon = (label) =>
       `<span class="nav-fallback-icon">${(label && label[0] || "?").toUpperCase()}</span>`;
 
-    // ── Read registry ────────────────────────────────────────────────────
-    const REGISTRY_PATH = "ranch/nav-buttons-registry.json";
-    let registry;
-    try {
-      const raw = await app.vault.adapter.read(REGISTRY_PATH);
-      try {
-        registry = JSON.parse(raw);
-      } catch (parseErr) {
-        dv.el("div", `[nav-buttons] registry parse error: ${parseErr.message}`, { cls: "nav-error" });
-        return;
-      }
-    } catch (readErr) {
-      const msg = (readErr && readErr.message) || String(readErr);
-      // ENOENT (or any "not found"-shaped error) → empty install, render nothing.
-      if (/ENOENT|not\s*found|no such file/i.test(msg)) return;
-      dv.el("div", `[nav-buttons] registry read error: ${msg}`, { cls: "nav-error" });
+    // ── Read registry (cached for the session via _loadRegistry) ─────────
+    const reg = await this._loadRegistry(app);
+    if (!reg.ok) {
+      if (reg.empty) return; // ENOENT / empty install → render nothing
+      dv.el("div", `[nav-buttons] registry ${reg.reason}`, { cls: "nav-error" });
       return;
     }
+    const registry = reg.registry;
 
     // ── Flatten + sort ───────────────────────────────────────────────────
     const entries = this._orderedEntries(registry);
@@ -171,12 +194,16 @@ class SpaceNavButtons {
     const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
     const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
 
-    // Row 1: prev/next-day arrows — only when the daily blueprint is installed.
-    if (dailyMeta) {
+    // Row 1: prev/next-day arrows — only when VIEWING a note inside the daily
+    // folder. Gating here (not merely on dailyMeta) avoids the whole-vault
+    // getMarkdownFiles() sweep + per-file moment parsing on every non-daily note;
+    // SpaceNavButtons renders on nearly every note.
+    const currentFile = dv.current && dv.current();
+    const curPath = (currentFile && currentFile.file && currentFile.file.path) || "";
+    if (SpaceNavButtons._shouldShowDayArrows(curPath, dailyMeta)) {
       const arrowRow = chrome.createEl("div");
       arrowRow.style.cssText = `display: flex; align-items: center; justify-content: space-between; gap: 6px;`;
 
-      const currentFile = dv.current && dv.current();
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
       const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
       const currentDate = dm ? window.moment(dm[1], "YYYY-MM-DD", true) : window.moment();

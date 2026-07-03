@@ -62,5 +62,37 @@ ok('NL-9 missing pins drop out; only first-per-source pins; extras → rest',
   partial.pinned.length === 1 && partial.pinned[0].id === 'h'
   && partial.rest.map(e => e.id).join(',') === 'x,h2');
 
-console.log(`\n  ${pass} pass · ${fail} fail`);
-process.exit(fail ? 1 : 0);
+// ── _shouldShowDayArrows: gate the prev/next-day arrow sweep to daily notes ──
+// The whole-vault getMarkdownFiles() sweep must fire ONLY when viewing a note
+// inside the daily folder — not on every note merely because the daily blueprint
+// is installed. Folder-PATH predicate (not basename regex: meeting/scratch/to-do
+// notes carry date basenames and would leak through a basename gate).
+ok('NL-ARROW-1 daily note in the daily folder → arrows shown',
+  SpaceNavButtons._shouldShowDayArrows('spice/daily/2026-07-03.md', { folder: 'spice/daily' }) === true);
+ok('NL-ARROW-2 non-daily note (even with a date basename) → NO arrows/sweep',
+  SpaceNavButtons._shouldShowDayArrows('spice/meetings/notes/2026-07-03 Standup.md', { folder: 'spice/daily' }) === false);
+ok('NL-ARROW-3 daily blueprint absent → no arrows',
+  SpaceNavButtons._shouldShowDayArrows('spice/daily/2026-07-03.md', null) === false);
+ok('NL-ARROW-4 empty path → no arrows, no throw',
+  SpaceNavButtons._shouldShowDayArrows('', { folder: 'spice/daily' }) === false);
+
+// ── _loadRegistry: cache the per-render 2.8KB registry disk-read (session) ──
+(async () => {
+  let reads = 0;
+  const appStub = { vault: { adapter: { read: async () => { reads++; return JSON.stringify({ contributions: {} }); } } } };
+  const i = new SpaceNavButtons();
+  const r1 = await i._loadRegistry(appStub);
+  const r2 = await i._loadRegistry(appStub);
+  ok('NL-REG-1 registry read memoized (1 read across 2 loads) + both ok', reads === 1 && r1.ok === true && r2.ok === true);
+
+  const enoent = new SpaceNavButtons();
+  const re = await enoent._loadRegistry({ vault: { adapter: { read: async () => { throw new Error('ENOENT: no such file'); } } } });
+  ok('NL-REG-2 ENOENT → {ok:false, empty:true} (render draws nothing)', re.ok === false && re.empty === true);
+
+  const bad = new SpaceNavButtons();
+  const rb = await bad._loadRegistry({ vault: { adapter: { read: async () => 'not json{' } } });
+  ok('NL-REG-3 parse error → {ok:false, reason:/parse/}', rb.ok === false && /parse/.test(rb.reason || ''));
+
+  console.log(`\n  ${pass} pass · ${fail} fail`);
+  process.exit(fail ? 1 : 0);
+})();

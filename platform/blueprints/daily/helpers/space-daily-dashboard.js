@@ -582,35 +582,43 @@ class SpaceDailyDashboard {
       }
       return false;
     };
-    const inDay = (p) => {
-      if (!p) return false;
-      if (allowed.indexOf(String(p.type)) < 0) return false;
-      return inWindow(p);
-    };
-
     // v0.8.1 (v0.67.1): apply ActivityFeed's rollup logic so the count + byBlueprint
     // reflect the cards that will actually render. Pre-v0.8.1, count was raw filtered
     // pages (e.g., project hub if edited) without rollup coalescing — when only
     // project task children were edited (no direct hub edit), the project rollup
     // card would render but `_getActivityCount` would miss it entirely, leading to
     // a single-color segmented accent (FLN-v67-4 observed by user smoke).
+    //
+    // L5 (perf): ONE sweep of dv.pages() builds BOTH the direct-hit `filtered`
+    // set and the rolled-up roots — was two full-vault sweeps with inWindow
+    // computed twice per page. A page is EITHER a direct hit (allowed blueprint
+    // type, in-window) OR a rollup candidate (in-window child of a project/trip/
+    // board), never both, so the old `filtered.some(...)` de-dup is unnecessary.
+    // The per-project/-trip rollup rootPath scoped query (dv.pages('"spice/.../
+    // <slug>"')) is memoized by slug-prefix so it fires once per project, not
+    // once per matching child.
     const filtered = [];
-    for (const p of dv.pages()) {
-      if (inDay(p)) filtered.push(p);
-    }
-
     const rolledUpRoots = new Map(); // rootPath -> rule.type
+    const rootPathMemo = new Map();  // "type::spice/<kind>/<slug>" -> rootPath|null (per-render)
+    const memoRootPath = (rule, p) => {
+      const key = rule.type + "::" + String(p.file.path).split("/").slice(0, 3).join("/");
+      if (rootPathMemo.has(key)) return rootPathMemo.get(key);
+      let rp = null;
+      try { rp = rule.rootPath(p); } catch (_) { rp = null; }
+      rootPathMemo.set(key, rp);
+      return rp;
+    };
     for (const p of dv.pages()) {
       if (!inWindow(p)) continue;
-      // Skip pages already in `filtered` — they're directly counted via their own type
       const path = p && p.file && p.file.path;
+      // Direct hit: an allowed blueprint type, in-window (was the `inDay` loop).
+      if (allowed.indexOf(String(p.type)) >= 0) { filtered.push(p); continue; }
+      // Otherwise a rollup candidate: an in-window child of a project/trip/board.
       if (!path) continue;
-      if (filtered.some(f => f.file && f.file.path === path)) continue;
       for (const rule of rollupRules) {
         if (typeof rule.exclude === "function" && rule.exclude(p)) break;
         if (typeof rule.childMatch !== "function" || !rule.childMatch(p)) continue;
-        let rootPath = null;
-        try { rootPath = rule.rootPath(p); } catch (_) {}
+        const rootPath = memoRootPath(rule, p);
         if (!rootPath) continue;
         if (rootPath === path) continue;
         if (!rolledUpRoots.has(rootPath)) rolledUpRoots.set(rootPath, rule.type);
