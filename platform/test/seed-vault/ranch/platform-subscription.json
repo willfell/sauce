@@ -39,7 +39,7 @@
     },
     {
       "name": "section-label",
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "name": "task-interactions",
@@ -125,7 +125,7 @@
     },
     {
       "name": "project",
-      "version": "1.40.0"
+      "version": "1.40.1"
     },
     {
       "name": "to-do",
