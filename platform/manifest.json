@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.181.1",
+  "workshop_version": "0.182.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -74,7 +74,7 @@
     },
     {
       "name": "doc-search",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "path": "mechanisms/doc-search"
     },
     {
@@ -94,7 +94,7 @@
     },
     {
       "name": "section-label",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "mechanisms/section-label"
     },
     {
@@ -196,12 +196,12 @@
     },
     {
       "name": "project",
-      "version": "1.39.2",
+      "version": "1.40.0",
       "path": "blueprints/project"
     },
     {
       "name": "to-do",
-      "version": "0.16.4",
+      "version": "0.17.0",
       "path": "blueprints/to-do"
     },
     {
