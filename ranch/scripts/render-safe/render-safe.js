@@ -37,4 +37,76 @@ class RenderSafe {
 
   filePath(dv) { const p = this.page(dv); return (p && p.file && p.file.path) || null; }
   fileName(dv) { const p = this.page(dv); return (p && p.file && p.file.name) || null; }
+
+  // ---------- L3: scroll preservation across a write→re-render ----------
+  // Find the active Reading-view scroll container. Robust: known reading-view
+  // selector, then a bare preview-view, then null. Never throws.
+  static _findScroller(doc) {
+    try {
+      if (!doc || typeof doc.querySelector !== 'function') return null;
+      return doc.querySelector('.workspace-leaf.mod-active .markdown-reading-view .markdown-preview-view')
+        || doc.querySelector('.workspace-leaf.mod-active .markdown-preview-view')
+        || doc.querySelector('.markdown-preview-view')
+        || null;
+    } catch (_e) { return null; }
+  }
+
+  // Capture the active scroller's scrollTop and install a one-shot watcher that
+  // restores it after the block tears down + rebuilds (Dataview clears the block,
+  // collapsing height, then repaints). Call BEFORE the write that triggers the
+  // re-render. Fully injectable for tests; never throws.
+  captureScroll(opts) {
+    opts = opts || {};
+    try {
+      const win = opts.win || (typeof window !== 'undefined' ? window : null);
+      const doc = opts.doc || (win && win.document) || (typeof document !== 'undefined' ? document : null);
+      if (!win || !doc) return null;
+      const scroller = RenderSafe._findScroller(doc);
+      if (!scroller) return null;
+      const y = Number(scroller.scrollTop) || 0;
+      if (y <= 0) return null; // already at top → nothing to preserve
+      const now = (typeof opts.now === 'number') ? opts.now
+        : (typeof Date !== 'undefined' && Date.now ? Date.now() : 0);
+      let path = opts.activePath;
+      if (path == null) {
+        try {
+          path = (typeof app !== 'undefined' && app.workspace && app.workspace.getActiveFile)
+            ? (app.workspace.getActiveFile() || {}).path : null;
+        } catch (_e) { path = null; }
+      }
+      win.__sauceScrollStash = { path: path || null, y: y, t: now };
+      RenderSafe._installRestore(scroller, y, win);
+      return win.__sauceScrollStash;
+    } catch (_e) { return null; }
+  }
+
+  // Instance alias so tests can call RenderSafe._findScroller(doc) on an instance.
+  _findScroller(doc) { return RenderSafe._findScroller(doc); }
+
+  // Install a one-shot MutationObserver on the scroller that re-applies
+  // scrollTop=y once the content rebuilds past y, then disconnects. rAF +
+  // timeout fallbacks. Never throws.
+  static _installRestore(scroller, y, win) {
+    try {
+      const MO = win.MutationObserver;
+      let done = false;
+      let obs = null;
+      const apply = () => {
+        try {
+          if (done) return;
+          if ((Number(scroller.scrollHeight) || 0) >= y) {
+            scroller.scrollTop = y;
+            if (Math.abs((Number(scroller.scrollTop) || 0) - y) <= 2) { done = true; if (obs) obs.disconnect(); }
+          }
+        } catch (_e) { done = true; }
+      };
+      if (typeof MO === 'function') {
+        obs = new MO(() => apply());
+        try { obs.observe(scroller, { childList: true, subtree: true }); } catch (_e) {}
+      }
+      const raf = win.requestAnimationFrame || ((fn) => (win.setTimeout ? win.setTimeout(fn, 16) : null));
+      raf(() => raf(apply));
+      if (win.setTimeout) win.setTimeout(() => { done = true; if (obs) { try { obs.disconnect(); } catch (_e) {} } }, 6000);
+    } catch (_e) { /* never throw */ }
+  }
 }
