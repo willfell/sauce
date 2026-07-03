@@ -356,11 +356,11 @@ const pages = [
   const dv = { container: makeEl3(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wikiPages }) };
   const TreeCls = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(fakeCustomJS, { moment: null });
   new TreeCls().render(dv);
-  const recentCall = bcCalls.find(c => c.meta && c.pages && c.pages[0] && c.pages[0].type === 'wiki-page' && /^in /.test(String(c.meta(c.pages[0]))));
-  ok('W10a recently-updated renders as BeaconCards (target + meta fns)',
-     !!recentCall && typeof recentCall.target === 'function');
-  ok('W10b recent card meta names the section it came from ("in testing")',
-     recentCall && recentCall.meta(recentCall.pages[0]) === 'in testing');
+  const recentCall = bcCalls.find(c => c.subtitle && c.pages && c.pages[0] && c.pages[0].type === 'wiki-page' && /^in /.test(String(c.subtitle(c.pages[0]))));
+  ok('W10a recently-updated renders as BeaconCards grid (target + subtitle fns)',
+     !!recentCall && typeof recentCall.target === 'function' && recentCall.layout === 'stacked' && recentCall.columns === 2);
+  ok('W10b recent card subtitle names the section it came from ("in testing")',
+     recentCall && recentCall.subtitle(recentCall.pages[0]) === 'in testing');
 }
 
 // ---------------------------------------------------------------------------
@@ -374,8 +374,11 @@ const pages = [
   const bcSrc   = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'breadcrumb.js'), 'utf8');
   const mobilizes = (s) => /_mobilize\(/.test(s) && /minWidth\s*=/.test(s) && /fontSize\s*=/.test(s);
   const hasHr = (s) => /createEl\("hr"\)/.test(s);
+  // Leaf uses _styleLeafBtn — buttons stretch to fill a centered row (flex:1), NOT
+  // Move-pushed-right (no margin-left:auto).
+  const stylesLeaf = (s) => /_styleLeafBtn\(/.test(s) && /flex\s*=\s*"1 1 0"/.test(s) && /fontSize\s*=/.test(s) && !/marginLeft\s*=\s*"auto"/.test(s);
   ok('W11a WikiHubActions: hr divider + _mobilize sizing', hasHr(hubSrc) && mobilizes(hubSrc));
-  ok('W11b WikiLeafActions: hr divider + _mobilize sizing', hasHr(leafSrc) && mobilizes(leafSrc));
+  ok('W11b WikiLeafActions: hr divider + centered width-filling buttons', hasHr(leafSrc) && stylesLeaf(leafSrc));
   ok('W11c wiki breadcrumb (path_walk) is prominent (font-size: 1em, wiki-breadcrumb class)',
      /wiki-breadcrumb/.test(bcSrc) && /"font-size: 1em; margin: 2px 0 10px 0; line-height: 1\.9;"/.test(bcSrc));
 }
@@ -415,9 +418,9 @@ const pages = [
      /const recentIcon = [^;]*M14 2H6a2/.test(treeSrc) && !/const recentIcon = [^;]*circle cx="12" cy="12" r="9"/.test(treeSrc));
   ok('W13c move dialog is an indented tree (depth), not a flat <select>',
      /opt\.depth/.test(leafSrc) && !/document\.createElement\("select"\)/.test(leafSrc));
-  ok('W13d divider margins tightened to 2px (no extra line gaps)',
-     /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(hubSrc) &&
-     /border-top: 1px solid var\(--background-modifier-border\); margin: 2px 0;/.test(leafSrc));
+  ok('W13d divider margins give breathing room (12px line-break, not squished)',
+     /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/.test(hubSrc) &&
+     /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/.test(leafSrc));
 }
 
 // ---------------------------------------------------------------------------
@@ -433,8 +436,8 @@ const pages = [
 
   ok('W14a "Up:" prefix removed from the up/section nav button (both helpers)',
      !/"Up: "/.test(leafSrc) && !/"Up: "/.test(hubSrc));
-  ok('W14b WikiTree cards use a 2-col grid (stacked + columns:2, no row layout)',
-     /layout: "stacked"/.test(treeSrc) && /columns: 2/.test(treeSrc) && !/layout: "row"/.test(treeSrc));
+  ok('W14b WikiTree section cards are ROWS; recent/pages stay a 2-col grid',
+     /layout: "row"/.test(treeSrc) && /layout: "stacked"/.test(treeSrc) && /columns: 2/.test(treeSrc));
   ok('W14c WikiLeafActions renders its own top AND bottom divider (2 hrs)',
      (leafSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
   ok('W14d page template no longer carries a trailing "---"',
@@ -507,6 +510,152 @@ const pages = [
        !/class:\s*"WikiHubActions"/.test(h1) && /class:\s*"WikiTree"/.test(h1) &&
        !/^-{3,}$/m.test(between) && h1 === h2);
   }
+}
+
+// ---------------------------------------------------------------------------
+// W16 — section cards as ROWS with rich metadata (sub-sections · docs · edited),
+// recent/pages stay a grid, and the leaf row is centered + width-filling.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
+
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const bc = [];
+  const cjs = {
+    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: (dv, opts) => bc.push(opts) },
+  };
+  // ems has 1 sub-section (other-stuff) + 2 docs (recursive); zeta is empty.
+  const wp = [
+    makePage('wiki-section', 'spice/wiki/ems/ems.md', 1000),
+    makePage('wiki-section', 'spice/wiki/ems/other-stuff/other-stuff.md', 1100),
+    makePage('wiki-page',    'spice/wiki/ems/doc0.md', 1200),
+    makePage('wiki-page',    'spice/wiki/ems/other-stuff/doc1.md', 1300),
+    makePage('wiki-section', 'spice/wiki/zeta/zeta.md', 900),
+  ];
+  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
+  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+  new Tree().render(dv);
+
+  const sectionsCall = bc.find(c => c.layout === 'row' && Array.isArray(c.pages) && c.pages.some(s => s && s.folder));
+  ok('W16a section cards render as a ROW (layout: "row"), not a grid', !!sectionsCall);
+  const ems = sectionsCall && sectionsCall.pages.find(s => s.folder === 'spice/wiki/ems');
+  ok('W16b _immediateChildFolders counts sub-sections + docs (recursive)',
+     !!ems && ems.subSectionCount === 1 && ems.pageCount === 2);
+  ok('W16c section meta reads "N section(s) · M docs" (+ edited when moment present)',
+     !!ems && sectionsCall.meta(ems) === '1 section · 2 docs');
+  const zeta = sectionsCall && sectionsCall.pages.find(s => s.folder === 'spice/wiki/zeta');
+  ok('W16d empty section still shows a doc count', !!zeta && sectionsCall.meta(zeta) === '0 docs');
+
+  // Leaf: centered row that stretches its buttons to fill the width (flex:1), NOT
+  // Move-pushed-right.
+  ok('W16e leaf row is centered + width-filling (max-width + justify center + flex:1, no Move-right)',
+     /max-width: 640px/.test(leafSrc.split('_styleLeafBtn')[0]) &&
+     /justify-content: center/.test(leafSrc.split('_styleLeafBtn')[0]) &&
+     /flex\s*=\s*"1 1 0"/.test(leafSrc) &&
+     !/marginLeft\s*=\s*"auto"/.test(leafSrc));
+}
+
+// ---------------------------------------------------------------------------
+// W17 — sections sort toggle (last-edited default, A–Z toggle) + search-gap match.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  // W17a — the search strip top gap is normalized to 12px (identical to the
+  // buttons↔divider gap the user wanted matched).
+  ok('W17a WikiTree matches the search strip top gap to 12px',
+     /\.doc-search-strip/.test(treeSrc) && /marginTop\s*=\s*"12px"/.test(treeSrc));
+  // W17d — toggle labels + persisted mode key present in source.
+  ok('W17d sections render a "Recent | A–Z" toggle backed by __wikiSectionSort',
+     /Recent/.test(treeSrc) && /A–Z/.test(treeSrc) && /__wikiSectionSort/.test(treeSrc));
+
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const bc = [];
+  const cjs = {
+    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: (dv, opts) => bc.push(opts) },
+  };
+  // beta (edited 9000) is alphabetically AFTER alpha (edited 1000) — last-edited
+  // default must put beta FIRST.
+  const wp = [
+    makePage('wiki-section', 'spice/wiki/alpha/alpha.md', 1000),
+    makePage('wiki-page',    'spice/wiki/alpha/p.md', 1000),
+    makePage('wiki-section', 'spice/wiki/beta/beta.md', 5000),
+    makePage('wiki-page',    'spice/wiki/beta/p.md', 9000),
+  ];
+  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
+  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+  new Tree().render(dv);
+  const rowCall = bc.find(c => c.layout === 'row' && Array.isArray(c.pages) && c.pages.some(s => s && s.folder));
+  ok('W17b section cards default to LAST-EDITED order (most recent first)',
+     !!rowCall && rowCall.pages[0] && rowCall.pages[0].folder === 'spice/wiki/beta');
+  ok('W17c BeaconCards keeps our order (sort: () => 0)',
+     !!rowCall && typeof rowCall.sort === 'function' && rowCall.sort({}, {}) === 0);
+}
+
+// ---------------------------------------------------------------------------
+// W18 — recursive search: an active query searches the current note's whole
+// subtree (flat Results grid, each tagged with its section trail); an empty query
+// falls through to the browse view.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const wp = [
+    makePage('wiki-section', 'spice/wiki/infra/infra.md', 100),
+    makePage('wiki-section', 'spice/wiki/infra/aws/aws.md', 110),
+    makePage('wiki-page',    'spice/wiki/infra/aws/VPC Peering.md', 500),
+    makePage('wiki-page',    'spice/wiki/infra/Overview.md', 400),
+    makePage('wiki-page',    'spice/wiki/ems/VPC notes.md', 600),
+  ];
+  function runTree(active) {
+    const bc = [], labels = [];
+    const cjs = {
+      DocSearch: {
+        render: () => ({ resultsContainer: el(), text: active ? 'vpc' : '', tags: new Set(), hasActiveFilter: !!active }),
+        matches: (p, c) => { if (!c || !c.hasActiveFilter) return true; const n = ((p.file && p.file.name) || '').toLowerCase(); return n.includes((c.text || '').toLowerCase()); },
+      },
+      SectionLabel: { render: (dv, o) => labels.push(o && o.text) },
+      BeaconCards: { render: (dv, opts) => bc.push(opts) },
+    };
+    const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
+    const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+    new Tree().render(dv);
+    return { bc, labels };
+  }
+  const s = runTree(true);
+  const resCall = s.bc.find(c => c.layout === 'stacked' && Array.isArray(c.pages) && c.pages.every(p => p.file));
+  ok('W18a active query → a single flat Results grid (browse view suppressed)',
+     s.bc.length === 1 && !!resCall && resCall.columns === 2 && s.labels.some(l => /^Results \(2\)/.test(l)));
+  ok('W18b results are RECURSIVE (2-level-deep doc matched, non-matches excluded)',
+     !!resCall && resCall.pages.some(p => p.file.path === 'spice/wiki/infra/aws/VPC Peering.md') &&
+     !resCall.pages.some(p => /Overview/.test(p.file.name)));
+  const vpcPeer  = resCall && resCall.pages.find(p => p.file.path === 'spice/wiki/infra/aws/VPC Peering.md');
+  const vpcNotes = resCall && resCall.pages.find(p => p.file.path === 'spice/wiki/ems/VPC notes.md');
+  ok('W18c subtitle shows the section trail relative to the search root',
+     !!vpcPeer && resCall.subtitle(vpcPeer) === 'in infra / aws' &&
+     !!vpcNotes && resCall.subtitle(vpcNotes) === 'in ems');
+  const b = runTree(false);
+  ok('W18d empty query falls through to browse (sections row, no Results label)',
+     b.bc.some(c => c.layout === 'row') && !b.labels.some(l => /^Results/.test(l)));
 }
 
 // ---------------------------------------------------------------------------

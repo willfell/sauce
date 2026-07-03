@@ -48,7 +48,10 @@ class TaskDialog {
     _replaceBody(fileText, newNotes) { return TaskDialog._replaceBody(fileText, newNotes); }
     _wikilink(name) { return TaskDialog._wikilink(name); }
     _mdLink(label, url) { return TaskDialog._mdLink(label, url); }
+    _addLink(links, entry) { return TaskDialog._addLink(links, entry); }
+    _removeLink(links, i) { return TaskDialog._removeLink(links, i); }
     _insertAt(text, insertion, start, end) { return TaskDialog._insertAt(text, insertion, start, end); }
+    renderNote(frontmatter, body) { return TaskDialog.renderNote(frontmatter, body); }
     _chromeBody() { return TaskDialog._chromeBody(); }
 
     // ---------- Static pure helpers ----------
@@ -161,6 +164,11 @@ class TaskDialog {
         const lines = ['---'];
         for (const key of Object.keys(fm)) {
             const raw = fm[key];
+            // Array-valued keys (FIX 5 — `links`) serialize as a YAML FLOW array
+            // (`["[[A]]", "[b](u)"]`), or a bare `[]` when empty, so a list of
+            // markdown link strings round-trips through Dataview/Obsidian and a
+            // later edit is a whole-field write. Everything else stays a scalar.
+            if (Array.isArray(raw)) { lines.push(key + ': ' + TaskDialog._yamlFlowArray(raw)); continue; }
             const val = raw == null ? '' : String(raw);
             if (val === '') { lines.push(key + ':'); continue; }
             lines.push(key + ': ' + TaskDialog._yamlScalar(val));
@@ -168,6 +176,24 @@ class TaskDialog {
         lines.push('---');
         const b = body == null ? '' : String(body);
         return lines.join('\n') + '\n' + (b ? b + '\n' : '');
+    }
+
+    /**
+     * Serialize a string array as a YAML FLOW array: `["a", "b"]` (or `[]` when
+     * empty). Each element is double-quoted with `"` and `\` escaped so a markdown
+     * link string containing brackets / colons / quotes round-trips. Non-string
+     * elements are coerced via String(); nullish elements are dropped. Pure. This
+     * is a compact, JSON-compatible YAML flow array — `JSON.parse` round-trips it.
+     */
+    static _yamlFlowArray(arr) {
+        const list = Array.isArray(arr) ? arr : [];
+        const parts = [];
+        for (const el of list) {
+            if (el == null) continue;
+            const s = String(el);
+            parts.push('"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"');
+        }
+        return '[' + parts.join(', ') + ']';
     }
 
     /** Quote a scalar iff it contains a YAML-hostile char or a leading space. */
@@ -202,6 +228,36 @@ class TaskDialog {
         if (!u) return '';
         const l = String(label == null ? '' : label).trim();
         return l ? '[' + l + '](' + u + ')' : '<' + u + '>';
+    }
+
+    /**
+     * Push a markdown link STRING onto the dialog's `links` chip list (FIX 5),
+     * returning a NEW array (never mutates the input). The entry is trimmed;
+     * blank / nullish entries and exact duplicates are no-ops (kept unique so the
+     * same link isn't added twice). A non-array base is treated as []. Pure — this
+     * is the add half of the chip-list model TaskNoteView renders inside the card.
+     */
+    static _addLink(links, entry) {
+        const base = Array.isArray(links) ? links.slice() : [];
+        const s = String(entry == null ? '' : entry).trim();
+        if (!s) return base;
+        if (base.indexOf(s) >= 0) return base;   // dedupe — no duplicate chips
+        base.push(s);
+        return base;
+    }
+
+    /**
+     * Remove the chip at index `i` from `links`, returning a NEW array (never
+     * mutates the input). An out-of-range / negative / non-integer index leaves
+     * the list unchanged (returns a clone). A non-array base yields []. Pure —
+     * the remove half of the chip-list model. This is what a chip's ✕ calls.
+     */
+    static _removeLink(links, i) {
+        const base = Array.isArray(links) ? links.slice() : [];
+        const idx = Number(i);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= base.length) return base;
+        base.splice(idx, 1);
+        return base;
     }
 
     /**
@@ -320,6 +376,10 @@ class TaskDialog {
             // project as a display name (strip [[ ]] if present)
             projectName: fm ? TaskDialog._stripWikilink(fm.project) : (defaults.project && defaults.project.name) || '',
             notes: '',
+            // Structured card links (FIX 5) — load the edit file's `links[]` (via
+            // TaskEntity._normLinks so a Dataview-array-of-Link-objects coerces to
+            // clean strings); create mode starts empty. Rendered as removable chips.
+            links: TaskDialog._loadLinks(fm),
             // carry create-only seeds forward into the payload
             source: fm ? (fm.source || '') : (defaults.source || 'manual'),
             source_note: fm ? (fm.source_note || '') : (defaults.source_note || ''),
@@ -376,7 +436,9 @@ class TaskDialog {
         titleInput.style.cssText = fieldCss;
         titleInput.value = state.title;
         titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
-        setTimeout(() => titleInput.focus(), 50);
+        // Autofocus the title ONLY in create mode (FIX 4) — opening the dialog on an
+        // existing task shouldn't grab focus (the title is already filled in).
+        if (!editPath) setTimeout(() => titleInput.focus(), 50);
 
         // Scheduled
         label('Scheduled (optional)');
@@ -458,14 +520,43 @@ class TaskDialog {
             }).catch(() => { /* leave notes blank on read failure */ });
         }
 
-        // ----- Link inserters (both modes) -----
-        // Two ghost buttons under the Notes textarea reveal a lightweight inline
-        // inserter that writes markdown at the cursor: a note picker ([[wikilink]])
-        // and a web-link mini-form ([label](url) / <url>). Insertion routes through
-        // the PURE statics (_wikilink / _mdLink / _insertAt) so the browser shell
-        // stays thin. Everything is guarded — a bad DOM/vault call never throws
-        // out of _render. Only ONE inserter is open at a time.
+        // ----- Structured LINKS (both modes) — FIX 5 -----
+        // The ＋Link note / ＋Web link buttons no longer splice into the Notes
+        // textarea; they PUSH a markdown link STRING onto state.links (via the pure
+        // _addLink), which TaskNoteView renders INSIDE the card. The current links
+        // show as small removable CHIPS (link text + an ✕). Insertion routes
+        // through the PURE statics (_wikilink / _mdLink / _addLink / _removeLink)
+        // so the browser shell stays thin. Everything is guarded — a bad DOM/vault
+        // call never throws out of _render. Only ONE inserter is open at a time.
         try {
+            label('Links (optional)');
+
+            // Chip list — one removable chip per entry in state.links, re-rendered
+            // in place whenever the list changes.
+            const chipsBox = host.createDiv();
+            chipsBox.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:2px;';
+            const renderChips = () => {
+                chipsBox.empty();
+                if (!state.links.length) {
+                    const empty = chipsBox.createDiv({ text: 'No links yet' });
+                    empty.style.cssText = 'font-size:12px; color:var(--text-muted,#999); padding:2px 0;';
+                    return;
+                }
+                state.links.forEach((entry, i) => {
+                    const chip = chipsBox.createDiv();
+                    chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; padding:3px 6px 3px 10px; border:1px solid var(--background-modifier-border,#444); border-radius:999px; background:var(--background-secondary,#2a2a2a); font-size:12px; line-height:1.3; color:var(--text-normal,#ddd);';
+                    const txt = chip.createEl('span', { text: entry });
+                    txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;';
+                    const x = chip.createEl('button', { text: '✕' });
+                    x.setAttribute('aria-label', 'Remove link');
+                    x.style.cssText = 'flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; border:none; border-radius:999px; background:transparent; color:var(--text-muted,#999); font-size:11px; line-height:1; cursor:pointer;';
+                    x.onmouseenter = () => { x.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.08))'; x.style.color = 'var(--text-error,#e05561)'; };
+                    x.onmouseleave = () => { x.style.background = 'transparent'; x.style.color = 'var(--text-muted,#999)'; };
+                    x.onclick = () => { state.links = TaskDialog._removeLink(state.links, i); renderChips(); };
+                });
+            };
+            renderChips();
+
             const linkRow = host.createDiv();
             linkRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;';
             // Small ghost buttons that match the footer button grammar (quiet,
@@ -489,27 +580,28 @@ class TaskDialog {
             let openKind = null;   // null | 'note' | 'web'
             const closeInserter = () => { inserterBox.empty(); openKind = null; };
 
-            // Splice `ins` into the Notes textarea at the caret (falling back to
-            // append), keep state.notes in sync, close the inserter, refocus.
-            const insertIntoNotes = (ins) => {
-                if (!ins) return;
-                const next = TaskDialog._insertAt(notesInput.value, ins, notesInput.selectionStart, notesInput.selectionEnd);
-                notesInput.value = next;
-                state.notes = next;
+            // Add `entry` to state.links (pure _addLink → new array), re-render the
+            // chips, close the inserter. Deduped + trimmed by _addLink.
+            const addLinkEntry = (entry) => {
+                if (!entry) return;
+                state.links = TaskDialog._addLink(state.links, entry);
+                renderChips();
                 closeInserter();
-                try { notesInput.focus(); } catch (_e) {}
             };
 
-            // ----- Note picker -----
+            // ----- Note picker (FIX 6 — sorted MOST-RECENTLY-EDITED first) -----
             const openNotePicker = () => {
                 if (openKind === 'note') { closeInserter(); return; }
                 closeInserter();
                 openKind = 'note';
-                // Build the candidate list ONCE, then filter in JS on each keystroke.
+                // Build the candidate list ONCE (basename + mtime), then filter in JS
+                // on each keystroke. Sorted by f.stat.mtime DESCENDING so the notes
+                // the user most recently touched surface at the top of the picker.
                 let names = [];
                 try {
                     const files = (app.vault && typeof app.vault.getMarkdownFiles === 'function')
                         ? app.vault.getMarkdownFiles() : [];
+                    const cand = [];
                     const seen = {};
                     for (const f of files) {
                         const p = (f && f.path) || '';
@@ -517,19 +609,24 @@ class TaskDialog {
                         if (editPath && p === editPath) continue;        // not the current file
                         const bn = (f && f.basename) || '';
                         if (!bn || seen[bn]) continue;
-                        seen[bn] = 1; names.push(bn);
+                        seen[bn] = 1;
+                        const mtime = (f && f.stat && typeof f.stat.mtime === 'number') ? f.stat.mtime : 0;
+                        cand.push({ name: bn, mtime: mtime });
                     }
-                    names.sort((a, b) => a.localeCompare(b));
+                    // Most-recently-edited first; tie-break by name for stability.
+                    cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
+                    names = cand.map((c) => c.name);
                 } catch (_e) { names = []; }
 
                 const filterInput = inserterBox.createEl('input', { type: 'text' });
-                filterInput.placeholder = 'Filter notes…';
+                filterInput.placeholder = 'Filter notes (recent first)…';
                 filterInput.style.cssText = fieldCss;
                 const results = inserterBox.createDiv();
                 results.style.cssText = 'margin-top:6px; max-height:160px; overflow-y:auto; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px);';
                 const renderResults = () => {
                     results.empty();
                     const q = (filterInput.value || '').trim().toLowerCase();
+                    // Filter preserves the mtime order (filter, then slice — no re-sort).
                     const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
                     if (!hits.length) {
                         const none = results.createDiv({ text: q ? 'No matches' : 'No notes' });
@@ -541,7 +638,7 @@ class TaskDialog {
                         row.style.cssText = 'padding:6px 8px; font-size:13px; cursor:pointer; color:var(--text-normal,#ddd);';
                         row.onmouseenter = () => { row.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; };
                         row.onmouseleave = () => { row.style.background = 'transparent'; };
-                        row.onclick = () => { insertIntoNotes(TaskDialog._wikilink(n)); };
+                        row.onclick = () => { addLinkEntry(TaskDialog._wikilink(n)); };
                     }
                 };
                 filterInput.oninput = renderResults;
@@ -560,15 +657,15 @@ class TaskDialog {
                 const labelInput = inserterBox.createEl('input', { type: 'text' });
                 labelInput.placeholder = 'Link text (optional)';
                 labelInput.style.cssText = fieldCss + ' margin-top:6px;';
-                const insertBtn = mkGhost(inserterBox, 'Insert');
+                const insertBtn = mkGhost(inserterBox, 'Add link');
                 insertBtn.style.cssText = GHOST_LINK + ' margin-top:8px;';
                 const doInsert = () => {
                     const ins = TaskDialog._mdLink(labelInput.value, urlInput.value);
                     if (!ins) { try { new Notice('Enter a URL first'); } catch (_e) {} return; }
-                    insertIntoNotes(ins);
+                    addLinkEntry(ins);
                 };
                 insertBtn.onclick = doInsert;
-                // Enter in either field inserts.
+                // Enter in either field adds.
                 const onKey = (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doInsert(); } };
                 urlInput.addEventListener('keydown', onKey);
                 labelInput.addEventListener('keydown', onKey);
@@ -577,7 +674,7 @@ class TaskDialog {
 
             noteBtn.onclick = openNotePicker;
             webBtn.onclick = openWebForm;
-        } catch (_e) { /* link inserters are best-effort; never abort the render */ }
+        } catch (_e) { /* link chips are best-effort; never abort the render */ }
 
         // ----- Footer -----
         // A two-group flex row: item actions (Open / Done / Delete) grouped on the
@@ -696,15 +793,20 @@ class TaskDialog {
 
     // Build a TaskEntity-shaped payload from the current form state.
     _payloadFromState(state) {
+        const s = state || {};
         const payload = {
-            title: state.title,
-            scheduled: state.scheduled || '',
-            due: state.due || '',
-            priority: state.priority || '',
-            source: state.source || 'manual',
-            source_note: state.source_note || '',
+            title: s.title,
+            scheduled: s.scheduled || '',
+            due: s.due || '',
+            priority: s.priority || '',
+            source: s.source || 'manual',
+            source_note: s.source_note || '',
+            // Structured card links (FIX 5) — always an array on the payload so the
+            // create path (composeNote) + the edit path (processFrontMatter) both
+            // write `links` deterministically.
+            links: Array.isArray(s.links) ? s.links.slice() : [],
         };
-        const name = (state.projectName || '').trim();
+        const name = (s.projectName || '').trim();
         if (name) payload.project = { name, slug: TaskDialog._slugify(name) };
         return payload;
     }
@@ -766,6 +868,10 @@ class TaskDialog {
                 fm.project = '';
                 fm.project_slug = '';
             }
+            // Structured card links (FIX 5) — a single-file frontmatter write,
+            // preserving the one-file-write invariant. Always set (even to []) so
+            // removing every chip persists as an empty list, not a stale value.
+            fm.links = Array.isArray(payload.links) ? payload.links.slice() : [];
         });
         // Persist the Notes body back into THIS file only. Prefer vault.process
         // (atomic read-modify-write of the single file); fall back to read+modify.
@@ -835,6 +941,29 @@ class TaskDialog {
         } catch (_e) {
             return null;
         }
+    }
+
+    /**
+     * Read the edit file's `links` frontmatter into a clean string array for the
+     * chip list (FIX 5). Prefers TaskEntity._normLinks (single source of truth —
+     * coerces an array of strings and/or Dataview Link objects); falls back to a
+     * local string-only coercion when customJS isn't ready. A null fm / absent
+     * links → []. Never throws.
+     */
+    static _loadLinks(fm) {
+        const raw = fm && fm.links;
+        try {
+            const TE = TaskDialog._taskEntity();
+            if (TE && typeof TE._normLinks === 'function') return TE._normLinks(raw);
+        } catch (_e) { /* fall through to the local coercion */ }
+        if (!Array.isArray(raw)) return [];
+        const out = [];
+        for (const entry of raw) {
+            if (entry == null) continue;
+            const s = typeof entry === 'string' ? entry.trim() : String(entry).trim();
+            if (s) out.push(s);
+        }
+        return out;
     }
 
     /** Strip surrounding `[[ ]]` from a wikilink for display in the edit form. */

@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.3.1"
+      "version": "0.3.4"
     },
     {
       "name": "breadcrumb",
@@ -63,7 +63,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "people-rendering",
@@ -109,11 +109,11 @@
     },
     {
       "name": "daily",
-      "version": "0.15.1"
+      "version": "0.16.0"
     },
     {
       "name": "meetings",
-      "version": "0.15.1"
+      "version": "0.16.1"
     },
     {
       "name": "people",
@@ -125,11 +125,11 @@
     },
     {
       "name": "project",
-      "version": "1.39.0"
+      "version": "1.39.2"
     },
     {
       "name": "to-do",
-      "version": "0.16.1"
+      "version": "0.16.4"
     },
     {
       "name": "journal",
@@ -145,7 +145,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.7.0"
+      "version": "0.7.2"
     },
     {
       "name": "teams",
@@ -153,7 +153,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.2.8"
+      "version": "0.3.0"
     }
   ]
 }

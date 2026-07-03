@@ -47,21 +47,28 @@ class TaskTodayList {
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
     renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
+    renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
+    _parseInlineLinks(text) { return TaskTodayList._parseInlineLinks(text); }
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
+    _projectChipText(v) { return TaskTodayList._projectChipText(v); }
 
     // ---------- Static pure helper ----------
 
     /**
      * Partition a list of ALREADY-PARSED task objects (parseNote output, or any
-     * object with `{ scheduled, status }`) relative to `todayStr` (YYYY-MM-DD).
-     * Mirrors TaskEntity.queryToday exactly, but is inlined here so the pure
-     * partition is Node-testable without loading TaskEntity. Open-only:
-     *   today   — status === "open" AND scheduled === todayStr
-     *   overdue — status === "open" AND scheduled truthy AND scheduled < todayStr
+     * object with `{ scheduled, status, project_slug, source }`) relative to
+     * `todayStr` (YYYY-MM-DD). Open-only, and PERSONAL-daily-only — a task that
+     * belongs to another daily section is EXCLUDED so it doesn't render twice:
+     *   today   — status "open", scheduled === todayStr, NO project, NOT meeting
+     *   overdue — status "open", scheduled < todayStr, NO project, NOT meeting
      * (string compare of zero-padded ISO dates is chronologically correct.)
-     * Future-scheduled + unscheduled open tasks land in NEITHER band. Tolerates
-     * a null/non-array input (→ empty bands); never throws.
+     * A task WITH a project_slug renders in its "Project Tasks" section
+     * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
+     * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
+     * task-notes, so excluding them here loses nothing. Future-scheduled +
+     * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
+     * input (→ empty bands); never throws.
      */
     static buildBands(parsedTasks, todayStr) {
         const today = [];
@@ -69,6 +76,15 @@ class TaskTodayList {
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
+            // Tasks that belong to another daily section are EXCLUDED here so they
+            // don't show TWICE (once in Today/Overdue, once below). A project task
+            // renders under its own "Project Tasks" section (ToDoDailyProjectGroups);
+            // a meeting-sourced task renders under "Meeting Tasks"
+            // (ToDoDailyUnassignedMeetings) — both of which surface ALL open matching
+            // task-notes, so nothing vanishes. Today/Overdue bands are therefore the
+            // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
+            if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
+            if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
             const sched = t.scheduled;
             if (!sched) continue;
             if (sched === todayStr) today.push(t);
@@ -145,8 +161,10 @@ class TaskTodayList {
         // daily). This widget only READS + partitions the task notes.
 
         // Today band FIRST — the tasks the user made for today are the primary
-        // focus; always shown, with an empty hint.
-        this._renderBand(wrap, 'Today', bands.today, 'No tasks scheduled today');
+        // focus; always shown, with an empty hint. The label is null because the
+        // daily template already renders a SectionLabel "Today" above this widget;
+        // a "Today" band caption here would show "Today" TWICE (FIX 2).
+        this._renderBand(wrap, null, bands.today, 'No tasks scheduled today');
 
         // Overdue / Carryover band below (only when non-empty).
         if (bands.overdue.length) {
@@ -156,15 +174,20 @@ class TaskTodayList {
 
     /**
      * Render one labeled band (a SectionLabel-ish caption + the task rows). When
-     * `tasks` is empty and `emptyHint` is provided, show a subtle hint instead of
-     * rows; when empty and no hint, render nothing (skips empty overdue bands).
+     * `label` is falsy the caption div is SKIPPED (the Today band relies on the
+     * template's SectionLabel "Today" — rendering a caption here too would double
+     * the "Today" heading; FIX 2). When `tasks` is empty and `emptyHint` is
+     * provided, show a subtle hint instead of rows; when empty and no hint, render
+     * nothing (skips empty overdue bands).
      */
     _renderBand(wrap, label, tasks, emptyHint) {
         const band = wrap.createEl('div', { cls: 'sauce-task-today-band' });
         band.style.cssText = 'display: flex; flex-direction: column; gap: 4px; width: 100%; box-sizing: border-box;';
 
-        const cap = band.createEl('div', { cls: 'sauce-task-today-label', text: label });
-        cap.style.cssText = 'font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted, #999); margin-bottom: 2px;';
+        if (label) {
+            const cap = band.createEl('div', { cls: 'sauce-task-today-label', text: label });
+            cap.style.cssText = 'font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted, #999); margin-bottom: 2px;';
+        }
 
         if (!tasks || !tasks.length) {
             if (!emptyHint) { band.remove(); return; }
@@ -229,7 +252,16 @@ class TaskTodayList {
         // change → delegate the write to TaskDialog.markDone(path); revert +
         // notice on failure. Stop propagation so the checkbox doesn't also
         // trigger the row-click editor.
-        const cb = row.createEl('input');
+        //
+        // The row stays align-items:flex-start (so the chips pin top-right and a
+        // long title wraps within its own column), but a bare checkbox then sits
+        // ABOVE the first line of the (line-height:1.5) title. Wrap the checkbox
+        // in a fixed 1.5em-tall flex box that centers it against that first line —
+        // the wrapper height MUST equal the title's first-line line-height so the
+        // math holds for BOTH a short title and a wrapping one.
+        const cbWrap = row.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+        cbWrap.style.cssText = 'display: flex; align-items: center; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
+        const cb = cbWrap.createEl('input');
         cb.type = 'checkbox';
         cb.checked = false;
         cb.style.cssText = 'margin: 0; cursor: pointer; flex-shrink: 0;';
@@ -252,17 +284,20 @@ class TaskTodayList {
         });
 
         // Title — clicking the row (not the checkbox) opens the editor. The title
-        // text is rendered as MARKDOWN so `[Chat](url)` + `[[wikilink]]` become
-        // clickable links (was plain text → they showed literally). Renders inline
-        // (block margins stripped) and falls back to plain text where the
-        // MarkdownRenderer API is unavailable.
+        // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,
+        // and bare `http(s)://` URLs become REAL clickable `<a>` elements. This is
+        // deterministic (builds anchors directly, no dependence on Obsidian's
+        // MarkdownRenderer — which is NOT a global in the customJS eval context, so
+        // the old MarkdownRenderer path always fell back to raw text).
         const titleText = (task && task.title) || '(untitled)';
         const title = row.createEl('span', { cls: 'sauce-task-today-title' });
         // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
         // column (min-width:0 lets it shrink; break-word wraps long words) so the
-        // chips never get pushed off the row.
-        title.style.cssText = 'flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
-        TaskTodayList._renderTitleMarkdown(title, titleText, path);
+        // chips never get pushed off the row. The EXPLICIT line-height:1.5 must
+        // match the checkbox wrapper's 1.5em height so the checkbox centers on the
+        // first line of the title (see cbWrap above) regardless of theme defaults.
+        title.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
+        TaskTodayList.renderInlineLinks(title, titleText, path);
 
         const openEditor = () => {
             const TD = getTD();
@@ -286,68 +321,167 @@ class TaskTodayList {
             const chip = chips.createEl('span', { text: label });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
-        if (task && task.project) addChip(TaskTodayList._stripWikilink(task.project));
+        if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
         return row;
     }
 
     /**
-     * Render `mdText` as inline MARKDOWN into `titleEl` so `[label](url)` +
-     * `[[wikilink]]` in a task title become CLICKABLE links (was plain text →
-     * they showed literally). SELF-CONTAINED + feature-guarded:
-     *   - Uses Obsidian's MarkdownRenderer.render(app, md, el, sourcePath, comp)
-     *     when present (newer API), falling back to the older
-     *     MarkdownRenderer.renderMarkdown(md, el, sourcePath, comp). `component`
-     *     is a lightweight no-op stub (Obsidian only needs addChild/register).
-     *   - If neither API is reachable (or the render throws), falls back to plain
-     *     text (titleEl.textContent = mdText) so a title always shows.
-     *   - Strips block margins on the injected <p> so the title stays on ONE row.
-     *   - Stops propagation on `<a>` clicks inside the title so following a real
-     *     link doesn't ALSO trigger the row-click edit dialog.
-     * `sourcePath` (the task-note path) resolves relative `[[wikilink]]` targets.
-     * Never throws.
+     * PURE, Node-testable inline-link PARSER. Scans `text` for these inline link
+     * forms ANYWHERE in the string and returns an ORDERED array of segments:
+     *   { type: 'text',     value }          — plain text between/around links
+     *   { type: 'wikilink', target, alias }  — `[[target]]` / `[[target|alias]]`
+     *   { type: 'mdlink',   label, url }     — `[label](url)`
+     *   { type: 'url',      url }            — a bare `http(s)://…` URL
+     * The three link forms are matched by a single alternation so their relative
+     * order in the source is preserved and the gaps between them become text
+     * segments. Null / non-string / empty input → a single-element list (empty
+     * text) or `[]` for empty; never throws. renderInlineLinks consumes these
+     * segments to build the DOM, so the DOM builder and the parser are testable
+     * independently.
+     */
+    static _parseInlineLinks(text) {
+        const s = String(text == null ? '' : text);
+        if (!s) return [];
+        const segs = [];
+        // Alternation (order matters): wikilink | markdown link | bare URL.
+        //   [[target]] or [[target|alias]]  — target/alias are non-`]`/non-`|` runs
+        //   [label](url)                    — label non-`]`, url non-`)`/non-space
+        //   http(s)://…                     — bare URL, stops at whitespace/`)`/`]`
+        const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]]+)/g;
+        let last = 0;
+        let m;
+        while ((m = re.exec(s)) !== null) {
+            if (m.index > last) segs.push({ type: 'text', value: s.slice(last, m.index) });
+            if (m[1] != null) {
+                // Wikilink. m[1] = target, m[2] = optional alias.
+                segs.push({ type: 'wikilink', target: m[1].trim(), alias: (m[2] != null ? m[2].trim() : null) });
+            } else if (m[3] != null && m[4] != null) {
+                // Markdown link. m[3] = label, m[4] = url.
+                segs.push({ type: 'mdlink', label: m[3], url: m[4] });
+            } else if (m[5] != null) {
+                // Bare URL.
+                segs.push({ type: 'url', url: m[5] });
+            }
+            last = re.lastIndex;
+        }
+        if (last < s.length) segs.push({ type: 'text', value: s.slice(last) });
+        return segs.length ? segs : [{ type: 'text', value: s }];
+    }
+
+    /**
+     * DETERMINISTIC inline-link RENDERER (FIX 1). Clears `el` and rebuilds it as a
+     * mix of plain-text nodes + REAL `<a>` anchors, parsing the inline link forms
+     * (`[[wikilink]]`, `[label](url)`, bare `http(s)://…`) via _parseInlineLinks.
+     * Builds anchors DIRECTLY — it does NOT depend on Obsidian's MarkdownRenderer
+     * (which is NOT a global in the customJS eval context, so the old
+     * MarkdownRenderer path always fell back to raw text). Anchors:
+     *   - wikilink → an `.internal-link` <a> with data-href = target; on click
+     *     preventDefault + stopPropagation + app.workspace.openLinkText(target,
+     *     sourcePath, false) (so a link click doesn't ALSO open the row editor).
+     *   - mdlink / url → an <a href=url target=_blank rel=noopener; on click just
+     *     stopPropagation (let the href navigate; don't open the editor).
+     * Fully guarded: on ANY failure, falls back to el.setText(text). Uses Obsidian
+     * DOM helpers (createEl / appendText / createSpan) with a document.createElement
+     * fallback so it also works under a DOM stub. Never throws.
+     */
+    static renderInlineLinks(el, text, sourcePath) {
+        if (!el) return;
+        const str = String(text == null ? '' : text);
+        // Plain-text fallback: prefer setText, then textContent.
+        const setPlain = () => {
+            try {
+                if (typeof el.setText === 'function') el.setText(str);
+                else el.textContent = str;
+            } catch (_e) { /* last-resort no-op */ }
+        };
+        // Resolve `app` from window / global (for openLinkText on wikilink click).
+        const appRef = (typeof window !== 'undefined' && window.app)
+            || (typeof app !== 'undefined' && app)
+            || null;
+        // Append a plain-text child (Obsidian appendText/createSpan, DOM fallback).
+        const appendText = (value) => {
+            if (!value) return;
+            if (typeof el.appendText === 'function') { el.appendText(value); return; }
+            if (typeof el.createSpan === 'function') { el.createSpan({ text: value }); return; }
+            if (typeof document !== 'undefined' && document.createTextNode && el.appendChild) {
+                el.appendChild(document.createTextNode(value)); return;
+            }
+            el.textContent = (el.textContent || '') + value;
+        };
+        // Build one <a> via createEl (Obsidian) or document.createElement fallback.
+        const makeAnchor = (opts) => {
+            if (typeof el.createEl === 'function') return el.createEl('a', opts);
+            if (typeof document !== 'undefined' && document.createElement && el.appendChild) {
+                const a = document.createElement('a');
+                if (opts) {
+                    if (opts.cls) a.className = opts.cls;
+                    if (opts.text != null) a.textContent = opts.text;
+                    if (opts.href != null) a.setAttribute('href', opts.href);
+                    if (opts.attr) { for (const k of Object.keys(opts.attr)) a.setAttribute(k, opts.attr[k]); }
+                }
+                el.appendChild(a);
+                return a;
+            }
+            return null;
+        };
+        try {
+            // Clear el (works for DOM nodes AND stubs exposing empty/setText).
+            if (typeof el.empty === 'function') el.empty();
+            else if (typeof el.setText === 'function') el.setText('');
+            else if ('textContent' in el) el.textContent = '';
+            while (el.firstChild) el.removeChild(el.firstChild);
+        } catch (_e) { /* clearing best-effort */ }
+        try {
+            const segs = TaskTodayList._parseInlineLinks(str);
+            for (const seg of segs) {
+                if (!seg) continue;
+                if (seg.type === 'text') { appendText(seg.value); continue; }
+                if (seg.type === 'wikilink') {
+                    const target = seg.target;
+                    const label = seg.alias || target;
+                    const a = makeAnchor({ cls: 'internal-link', text: label, href: '#' });
+                    if (!a) { appendText(label); continue; }
+                    try { if (a.dataset) a.dataset.href = target; else if (a.setAttribute) a.setAttribute('data-href', target); } catch (_e) { try { a.setAttribute('data-href', target); } catch (_e2) {} }
+                    if (typeof a.addEventListener === 'function') {
+                        a.addEventListener('click', (ev) => {
+                            try { ev.preventDefault(); ev.stopPropagation(); } catch (_e) {}
+                            try {
+                                const w = appRef;
+                                if (w && w.workspace && typeof w.workspace.openLinkText === 'function') {
+                                    w.workspace.openLinkText(target, sourcePath || '', false);
+                                }
+                            } catch (_e) { /* open best-effort */ }
+                        });
+                    }
+                    continue;
+                }
+                if (seg.type === 'mdlink' || seg.type === 'url') {
+                    const url = seg.url;
+                    const label = (seg.type === 'mdlink') ? seg.label : url;
+                    const a = makeAnchor({ text: label, href: url, attr: { target: '_blank', rel: 'noopener' } });
+                    if (!a) { appendText(label); continue; }
+                    if (typeof a.addEventListener === 'function') {
+                        a.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+                    }
+                    continue;
+                }
+            }
+        } catch (_e) {
+            setPlain();
+        }
+    }
+
+    /**
+     * DEPRECATED alias kept for source-compat — the title/LINKS renderers now use
+     * the deterministic renderInlineLinks. Delegates so any lingering caller still
+     * gets real clickable anchors (was a MarkdownRenderer path that always fell
+     * back to raw text in the customJS eval context). Never throws.
      */
     static _renderTitleMarkdown(titleEl, mdText, sourcePath) {
-        if (!titleEl) return;
-        const text = String(mdText == null ? '' : mdText);
-        const plain = () => { try { titleEl.textContent = text || '(untitled)'; } catch (_e) {} };
-        let MR = null;
-        try {
-            MR = (typeof MarkdownRenderer !== 'undefined' && MarkdownRenderer)
-                || (typeof window !== 'undefined' && window.MarkdownRenderer)
-                || null;
-        } catch (_e) { MR = null; }
-        const appRef = (typeof app !== 'undefined' && app)
-            || (typeof window !== 'undefined' && window.app)
-            || null;
-        // Lightweight Component stub — Obsidian's renderer only calls
-        // addChild/register/load on it; no-ops are fine for a transient row.
-        const comp = { addChild() {}, register() {}, load() {}, onload() {}, unload() {} };
-        let rendered = false;
-        try {
-            if (MR && typeof MR.render === 'function' && appRef) {
-                // Newer signature: render(app, markdown, el, sourcePath, component).
-                MR.render(appRef, text, titleEl, sourcePath || '', comp);
-                rendered = true;
-            } else if (MR && typeof MR.renderMarkdown === 'function') {
-                // Older signature: renderMarkdown(markdown, el, sourcePath, component).
-                MR.renderMarkdown(text, titleEl, sourcePath || '', comp);
-                rendered = true;
-            }
-        } catch (_e) { rendered = false; }
-        if (!rendered) { plain(); return; }
-        // Strip block margins so the rendered <p> sits inline on the row, and
-        // stop `<a>` click bubbling so a link click doesn't open the editor too.
-        try {
-            const kids = titleEl.querySelectorAll ? titleEl.querySelectorAll('p') : [];
-            kids.forEach((p) => { p.style.margin = '0'; p.style.display = 'inline'; });
-            const anchors = titleEl.querySelectorAll ? titleEl.querySelectorAll('a') : [];
-            anchors.forEach((a) => {
-                a.style.cursor = 'pointer';
-                a.addEventListener('click', (ev) => { ev.stopPropagation(); });
-            });
-        } catch (_e) { /* cosmetic — tolerate */ }
+        const text = String(mdText == null ? '' : mdText) || '(untitled)';
+        return TaskTodayList.renderInlineLinks(titleEl, text, sourcePath);
     }
 
     /** Strip surrounding `[[ ]]` from a wikilink for chip display (static). */
@@ -355,5 +489,43 @@ class TaskTodayList {
         const s = String(v == null ? '' : v).trim();
         const m = /^\[\[([^\]]+)\]\]$/.exec(s);
         return m ? m[1] : s;
+    }
+
+    /**
+     * Clean project label for the chip. Dataview resolves a `[[Connectors]]`
+     * frontmatter value to a full-path Link (`spice/projects/connectors/
+     * Connectors.md|Connectors`), so `_stripWikilink` alone would show the whole
+     * path. Prefer TaskEntity._linkText (the canonical basename extractor —
+     * handles Link objects + path + `|alias` + `.md`) so the chip reads
+     * `Connectors`. Falls back to a self-contained basename extract when
+     * TaskEntity isn't loaded (cold load / Node), so the chip is always clean.
+     * Never throws.
+     */
+    static _projectChipText(v) {
+        try {
+            const TE = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;
+            if (TE && typeof TE._linkText === 'function') {
+                const out = TE._linkText(v);
+                if (out) return out;
+            }
+        } catch (_e) { /* fall through to local extract */ }
+        // Local fallback: basename of a Link object / wikilink / path string.
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        if (v && typeof v === 'object' && ('path' in v || 'display' in v)) {
+            if (v.path != null && String(v.path).trim() !== '') return baseOf(v.path);
+            if (v.display != null) return String(v.display).trim();
+            return '';
+        }
+        let s = String(v == null ? '' : v).trim();
+        const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+        if (m) s = m[1].trim();
+        const pipe = s.indexOf('|');
+        if (pipe >= 0) s = s.slice(0, pipe).trim();
+        return baseOf(s);
     }
 }

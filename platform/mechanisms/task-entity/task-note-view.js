@@ -49,6 +49,9 @@ class TaskNoteView {
     _fieldRows(task) { return TaskNoteView._fieldRows(task); }
     _humanDate(value, todayStr) { return TaskNoteView._humanDate(value, todayStr); }
     _priorityMeta(priority) { return TaskNoteView._priorityMeta(priority); }
+    _linkEntries(task) { return TaskNoteView._linkEntries(task); }
+    _renderInlineMarkdown(el, mdText, sourcePath) { return TaskNoteView._renderInlineMarkdown(el, mdText, sourcePath); }
+    _renderInlineLinksLocal(el, mdText, sourcePath) { return TaskNoteView._renderInlineLinksLocal(el, mdText, sourcePath); }
 
     // ---------- Static pure helpers ----------
 
@@ -181,6 +184,146 @@ class TaskNoteView {
         return map[key] || { label: cap, color: 'var(--text-normal, #ccc)' };
     }
 
+    /**
+     * Build the LINKS section entries for a task (FIX 5): an array of RENDERABLE
+     * markdown link STRINGS read from the task's `links` frontmatter. Dataview may
+     * hand back an array of plain strings AND/OR Link objects (a `[[wikilink]]`
+     * inside a YAML array resolves to a Link object) — coerce each defensively:
+     *   - a string            → trimmed, as-is (a note link `[[Note]]`, a web link
+     *                           `[label](url)`, or `<url>`)
+     *   - a Dataview Link obj  → `[[basename]]` (prefer TaskEntity._linkText for
+     *                           the basename; local baseOf fallback on cold-load)
+     * Blank / nullish entries are DROPPED; a null / empty / non-array task → [].
+     * Pure + null-tolerant so one bad entry can't throw the card render.
+     */
+    static _linkEntries(task) {
+        const t = task || {};
+        const raw = t.links;
+        if (!Array.isArray(raw)) return [];
+        // Basename of a path-ish string (last `/` segment, trailing `.md` stripped).
+        const baseOf = (s) => {
+            let out = String(s == null ? '' : s).trim();
+            const slash = out.lastIndexOf('/');
+            if (slash >= 0) out = out.slice(slash + 1);
+            return out.replace(/\.md$/i, '');
+        };
+        const out = [];
+        for (const entry of raw) {
+            if (entry == null) continue;
+            let s = '';
+            try {
+                if (typeof entry === 'string') {
+                    s = entry.trim();
+                } else if (typeof entry === 'object'
+                    && ('path' in entry || 'display' in entry || 'subpath' in entry)) {
+                    // Prefer the shared coercion (basename); fall back to local baseOf.
+                    let base = '';
+                    try {
+                        const TE = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;
+                        if (TE && typeof TE._linkText === 'function') base = TE._linkText(entry);
+                    } catch (_e) { base = ''; }
+                    if (!base) {
+                        base = (entry.path != null && String(entry.path).trim() !== '')
+                            ? baseOf(entry.path)
+                            : String(entry.display == null ? '' : entry.display).trim();
+                    }
+                    s = base ? '[[' + base + ']]' : '';
+                } else {
+                    s = String(entry).trim();
+                }
+            } catch (_e) { s = ''; }
+            if (s) out.push(s);
+        }
+        return out;
+    }
+
+    /**
+     * Render a LINKS-section entry (`[[Note]]` / `[label](url)` / bare `http(s)`)
+     * as CLICKABLE (FIX 1). DELEGATES to the shared, deterministic
+     * TaskTodayList.renderInlineLinks (builds REAL <a> anchors, no dependence on
+     * Obsidian's MarkdownRenderer — which is NOT a global in the customJS eval
+     * context, so the old MarkdownRenderer path always fell back to raw text).
+     * When TaskTodayList isn't registered yet (cold load), a self-contained LOCAL
+     * copy renders the same anchors so a link is always clickable. `sourcePath`
+     * (the task-note path) resolves relative `[[wikilink]]` targets. Never throws.
+     */
+    static _renderInlineMarkdown(el, mdText, sourcePath) {
+        if (!el) return;
+        try {
+            const TTL = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
+            if (TTL && typeof TTL.renderInlineLinks === 'function') {
+                TTL.renderInlineLinks(el, mdText, sourcePath);
+                return;
+            }
+        } catch (_e) { /* fall through to the local copy */ }
+        TaskNoteView._renderInlineLinksLocal(el, mdText, sourcePath);
+    }
+
+    /**
+     * Self-contained cold-load fallback for _renderInlineMarkdown — a local copy of
+     * TaskTodayList.renderInlineLinks used ONLY when TaskTodayList isn't registered
+     * yet. Clears `el` and rebuilds it as plain-text nodes + real <a> anchors for
+     * `[[wikilink]]` / `[label](url)` / bare `http(s)://…`. Never throws.
+     */
+    static _renderInlineLinksLocal(el, mdText, sourcePath) {
+        if (!el) return;
+        const str = String(mdText == null ? '' : mdText);
+        const appRef = (typeof window !== 'undefined' && window.app)
+            || (typeof app !== 'undefined' && app) || null;
+        const appendText = (value) => {
+            if (!value) return;
+            if (typeof el.appendText === 'function') { el.appendText(value); return; }
+            if (typeof el.createSpan === 'function') { el.createSpan({ text: value }); return; }
+            el.textContent = (el.textContent || '') + value;
+        };
+        // Inline parser (mirror of TaskTodayList._parseInlineLinks).
+        const parse = (s) => {
+            const segs = [];
+            const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]]+)/g;
+            let last = 0; let m;
+            while ((m = re.exec(s)) !== null) {
+                if (m.index > last) segs.push({ type: 'text', value: s.slice(last, m.index) });
+                if (m[1] != null) segs.push({ type: 'wikilink', target: m[1].trim(), alias: (m[2] != null ? m[2].trim() : null) });
+                else if (m[3] != null && m[4] != null) segs.push({ type: 'mdlink', label: m[3], url: m[4] });
+                else if (m[5] != null) segs.push({ type: 'url', url: m[5] });
+                last = re.lastIndex;
+            }
+            if (last < s.length) segs.push({ type: 'text', value: s.slice(last) });
+            return segs.length ? segs : [{ type: 'text', value: s }];
+        };
+        try {
+            if (typeof el.empty === 'function') el.empty();
+            else if ('textContent' in el) el.textContent = '';
+            while (el.firstChild) el.removeChild(el.firstChild);
+        } catch (_e) { /* clearing best-effort */ }
+        try {
+            for (const seg of parse(str)) {
+                if (seg.type === 'text') { appendText(seg.value); continue; }
+                if (seg.type === 'wikilink') {
+                    const label = seg.alias || seg.target;
+                    const a = el.createEl ? el.createEl('a', { cls: 'internal-link', text: label, href: '#' }) : null;
+                    if (!a) { appendText(label); continue; }
+                    try { if (a.dataset) a.dataset.href = seg.target; else a.setAttribute('data-href', seg.target); } catch (_e) {}
+                    if (typeof a.addEventListener === 'function') {
+                        a.addEventListener('click', (ev) => {
+                            try { ev.preventDefault(); ev.stopPropagation(); } catch (_e) {}
+                            try { if (appRef && appRef.workspace && appRef.workspace.openLinkText) appRef.workspace.openLinkText(seg.target, sourcePath || '', false); } catch (_e) {}
+                        });
+                    }
+                    continue;
+                }
+                // mdlink / url
+                const url = seg.url;
+                const label = (seg.type === 'mdlink') ? seg.label : url;
+                const a = el.createEl ? el.createEl('a', { text: label, href: url, attr: { target: '_blank', rel: 'noopener' } }) : null;
+                if (!a) { appendText(label); continue; }
+                if (typeof a.addEventListener === 'function') a.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            }
+        } catch (_e) {
+            try { if (typeof el.setText === 'function') el.setText(str); else el.textContent = str; } catch (_e2) {}
+        }
+    }
+
     // ---------- Instance / browser render ----------
 
     /**
@@ -224,6 +367,10 @@ class TaskNoteView {
                 project: str(parsed ? parsed.project : page.project),
                 source_note: str(parsed ? parsed.source_note : page.source_note),
                 created_at: str(parsed ? parsed.created_at : page.created_at),
+                // Structured card links (FIX 5) — read from the parsed view (already
+                // normalized to a string array) or the raw page frontmatter (which
+                // Dataview may surface as strings and/or Link objects).
+                links: (parsed && Array.isArray(parsed.links)) ? parsed.links : page.links,
             };
             const filePath = (page.file && page.file.path) || (parsed && parsed.path) || null;
             let todayStr = '';
@@ -239,13 +386,23 @@ class TaskNoteView {
                 'background:var(--background-secondary)',
             ].join(';') + ';';
 
-            // ----- Header: status pill + title -----
+            // ----- Header: title LEFT, status pill RIGHT (single flex row) -----
+            // Title on the left (takes the row, wraps within its own column), pill
+            // pinned top-right (never shrinks). align-items:flex-start keeps the pill
+            // at the top of the first title line while a long title wraps below it.
             const header = card.createEl('div');
-            header.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+            header.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start; gap:12px;';
 
             const status = task.status.trim().toLowerCase();
+
+            // TITLE first (left column).
+            const titleEl = header.createEl('div', { text: task.title || '(untitled)' });
+            titleEl.style.cssText = 'flex:1 1 auto; min-width:0; font-size:1.3em; font-weight:700; line-height:1.25; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word; text-align:left;';
+
+            // PILL second (right column) — sits on the right, never shrinks. The
+            // color-coding is preserved (OPEN accent / DONE green / DELETED muted).
             const pill = header.createEl('span', { text: this._statusLabel(task.status).toUpperCase() });
-            const pillBase = 'align-self:flex-start; font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; padding:3px 10px; border-radius:999px; box-sizing:border-box;';
+            const pillBase = 'flex-shrink:0; font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; padding:3px 10px; border-radius:999px; box-sizing:border-box; white-space:nowrap;';
             if (status === 'done') {
                 pill.style.cssText = pillBase + 'background:var(--color-green, #4c9a5a); color:var(--text-on-accent, #fff);';
             } else if (status === 'deleted') {
@@ -253,9 +410,6 @@ class TaskNoteView {
             } else {
                 pill.style.cssText = pillBase + 'background:var(--interactive-accent, #6a6abf); color:var(--text-on-accent, #fff);';
             }
-
-            const titleEl = header.createEl('div', { text: task.title || '(untitled)' });
-            titleEl.style.cssText = 'font-size:1.3em; font-weight:700; line-height:1.25; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
 
             // ----- Divider -----
             const drawDivider = () => {
@@ -299,7 +453,14 @@ class TaskNoteView {
             const createdHuman = task.created_at ? TaskNoteView._humanDate(task.created_at, todayStr) : { text: '' };
             const hasCreated = !!createdHuman.text;
 
-            const anyDetails = hasScheduled || hasDue || !!prioMeta || hasProject || hasCreated;
+            // FIX 6 — DETAILS is gated on _fieldRows(task): the SINGLE source of truth
+            // for what the section contains (Scheduled / Due / Priority / Project).
+            // When _fieldRows is empty there are no set detail fields, so we render
+            // NEITHER the DETAILS label NOR an empty grid — the card goes straight
+            // from the header to SOURCE / LINKS / Edit. (Created is a trailing muted
+            // stamp shown INSIDE the section when present; it never resurrects an
+            // otherwise-empty DETAILS block.)
+            const anyDetails = TaskNoteView._fieldRows(task).length > 0;
             if (anyDetails) {
                 drawDivider();
 
@@ -414,6 +575,29 @@ class TaskNoteView {
                     }
                 } catch (_e) { /* source link best-effort */ }
             }
+
+            // ----- LINKS section (FIX 5) — structured links rendered INSIDE the card -----
+            // Each entry is a markdown link string ([[Note]] / [label](url) / <url>)
+            // rendered as CLICKABLE markdown so the user's added links live neatly in
+            // the card (not as raw text at the bottom of the note). One bad entry
+            // can't throw the card — _linkEntries + the per-entry try/catch guard it.
+            try {
+                const linkEntries = TaskNoteView._linkEntries(task);
+                if (linkEntries.length) {
+                    drawDivider();
+                    const linksLabel = card.createEl('div', { text: 'LINKS' });
+                    linksLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
+                    const linksWrap = card.createEl('div');
+                    linksWrap.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+                    for (const entry of linkEntries) {
+                        try {
+                            const row = linksWrap.createEl('div');
+                            row.style.cssText = 'font-size:0.95em; line-height:1.35; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
+                            TaskNoteView._renderInlineMarkdown(row, entry, filePath || '');
+                        } catch (_e) { /* one bad link must not break the card */ }
+                    }
+                }
+            } catch (_e) { /* LINKS section best-effort */ }
 
             // ----- Full-width primary "Edit task" button -----
             drawDivider();

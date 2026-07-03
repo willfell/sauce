@@ -15,13 +15,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
-
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "ToDoLeafActions" });
 ```
-
----
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });

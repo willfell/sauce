@@ -954,6 +954,43 @@ function seedVault(setup) {
 }
 
 // -------------------------------------------------------------------------
+// EC-PROJDROP-1/2 — the "Create Meeting" (and every all_projects) dialog's
+// project <select>: (1) options ALWAYS alphabetical (case-insensitive), and
+// (2) the <select> carries min-width: 0 so a long project name can shrink
+// inside the flex dialog row instead of overflowing the dialog's right padding.
+// -------------------------------------------------------------------------
+(() => {
+    // (1) sort — dv.pages() yields projects in vault/index order; the resolver
+    // must return them alphabetically. Stub a Dataview-DataArray-shaped chain.
+    const makeDv = (pages) => ({
+        pages() {
+            let a = pages.slice();
+            const c = {
+                where(f) { a = a.filter(f); return c; },
+                map(f) { a = a.map(f); return c; },
+                [Symbol.iterator]() { return a[Symbol.iterator](); },
+            };
+            return c;
+        },
+    });
+    const dv = makeDv([
+        { type: "project", file: { name: "Zebra" } },
+        { type: "project", file: { name: "apple" } },
+        { type: "project", file: { name: "Mango" } },
+        { type: "other",   file: { name: "NotAProject" } },
+    ]);
+    const opts = inst._resolveOptionsSource("all_projects", dv);
+    ok("EC-PROJDROP-1 all_projects options are alphabetical (case-insensitive), (none) first",
+        JSON.stringify(opts) === JSON.stringify(["(none)", "apple", "Mango", "Zebra"]),
+        `got ${JSON.stringify(opts)}`);
+
+    // (2) width — the project <select> carries min-width: 0 (no dialog overflow).
+    ok("EC-PROJDROP-2 project <select> style has min-width: 0 (no dialog overflow)",
+        /sel\.style\.cssText = "flex: 1; min-width: 0;/.test(ENTITY_SRC),
+        "expected `flex: 1; min-width: 0;` on the _promptSelect <select> style");
+})();
+
+// -------------------------------------------------------------------------
 // Drain pending promises before exiting. The audit walker tests + _loadSpec
 // tests are async; we await one tick by deferring the summary via setImmediate
 // chained twice to flush microtasks.

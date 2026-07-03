@@ -98,6 +98,9 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(fm.created_at === '2026-07-01T10:00:00-06:00', 'created_at from payload.now');
   assert(fm.due === '', 'absent due → empty string');
   assert(fm.completed_at === '', 'absent completed_at → empty string');
+  // FIX 5 — links is always present as an array (empty when none provided).
+  assert(Array.isArray(fm.links), 'links is an array');
+  assert(fm.links.length === 0, 'absent links → empty array');
   assert(out.path === 'spice/tasks/Call X.md', 'path is readable "<title>.md": ' + out.path);
   // Body is now the CHROME body (SpaceNavButtons + TaskNoteView + marker), not empty.
   assert(out.body.includes('<!-- TASK_NOTES -->'), 'body has the TASK_NOTES marker');
@@ -110,6 +113,37 @@ ok('TE-3 composeNote minimal payload → blank scheduled + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
   assert(out.frontmatter.scheduled === '', 'absent scheduled → empty string');
   assert(TaskEntity.validatePayload({ title: 'x' }).valid === true, 'minimal payload valid');
+});
+
+// 3a. composeNote — provided links[] flow through to the frontmatter (FIX 5).
+ok('TE-3a composeNote carries a provided links[] onto the frontmatter', () => {
+  const out = TaskEntity.composeNote({ title: 'x', links: ['[[Retro Notes]]', '[Scalr run](https://scalr.io/r/1)'] });
+  assert(Array.isArray(out.frontmatter.links), 'links is an array');
+  assert(out.frontmatter.links.length === 2, 'two links carried: ' + out.frontmatter.links.length);
+  assert(out.frontmatter.links[0] === '[[Retro Notes]]', 'note link preserved');
+  assert(out.frontmatter.links[1] === '[Scalr run](https://scalr.io/r/1)', 'web link preserved');
+  // Non-array / nullish links → normalized to [].
+  assert(Array.isArray(TaskEntity.composeNote({ title: 'x', links: null }).frontmatter.links), 'null links → []');
+  assert(TaskEntity.composeNote({ title: 'x', links: 'nope' }).frontmatter.links.length === 0, 'string links → []');
+  // Blank/nullish entries are dropped; strings are trimmed.
+  const cleaned = TaskEntity.composeNote({ title: 'x', links: ['  [[A]]  ', '', null, '[b](u)'] }).frontmatter.links;
+  assert(cleaned.length === 2 && cleaned[0] === '[[A]]' && cleaned[1] === '[b](u)', 'trims + drops blanks: ' + JSON.stringify(cleaned));
+});
+
+// 3b. renderNote serializes links[] as a YAML flow array that round-trips (FIX 5).
+ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
+  const out = TaskEntity.composeNote({ title: 'x', links: ['[[Retro Notes]]', '[Scalr run](https://scalr.io/r/1)'] });
+  const text = TaskDialog.renderNote(out.frontmatter, out.body);
+  // The links line is a bracketed flow array with quoted, escaped entries.
+  const m = /\nlinks: (\[.*\])\n/.exec(text);
+  assert(m, 'links flow-array line present: ' + JSON.stringify(text.split('\n').filter((l) => l.indexOf('links') === 0)));
+  const parsed = JSON.parse(m[1]);
+  assert(Array.isArray(parsed) && parsed.length === 2, 'round-trips to a 2-element array: ' + m[1]);
+  assert(parsed[0] === '[[Retro Notes]]', 'note link round-trips: ' + parsed[0]);
+  assert(parsed[1] === '[Scalr run](https://scalr.io/r/1)', 'web link round-trips: ' + parsed[1]);
+  // Empty links → an empty flow array `[]` (not omitted, not a bare key).
+  const empty = TaskDialog.renderNote(TaskEntity.composeNote({ title: 'x' }).frontmatter, '');
+  assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
@@ -266,6 +300,55 @@ ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
   assert(TaskDialog._insertAt('', 'X', null, null) === 'X', 'empty text append → just insertion (no leading space)');
 });
 
+// ---------- TaskDialog link-chip pure helpers (FIX 5) ----------
+//
+// The dialog's ＋Link note / ＋Web link buttons now PUSH a markdown link STRING
+// onto state.links (rendered as removable chips), instead of splicing into the
+// Notes textarea. The add/remove logic is factored into two PURE statics so the
+// browser chip UI is a thin shell. Called through an INSTANCE so a regression to
+// instance-less statics fails loudly.
+
+// TD-12. _addLink appends a trimmed, non-empty, DEDUPED entry (returns a new array).
+ok('TD-12 _addLink appends a trimmed non-empty deduped entry', () => {
+  assert(deepEq(TaskDialog._addLink([], '[[A]]'), ['[[A]]']), 'first add: ' + JSON.stringify(TaskDialog._addLink([], '[[A]]')));
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '  [b](u)  '), ['[[A]]', '[b](u)']), 'trims + appends');
+  // Duplicate entry is a no-op (kept unique).
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '[[A]]'), ['[[A]]']), 'dup ignored');
+  // Empty / nullish entry is a no-op.
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], ''), ['[[A]]']), 'empty ignored');
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], null), ['[[A]]']), 'null ignored');
+  assert(deepEq(TaskDialog._addLink(['[[A]]'], '   '), ['[[A]]']), 'whitespace ignored');
+  // Non-array base → treated as [].
+  assert(deepEq(TaskDialog._addLink(null, '[[A]]'), ['[[A]]']), 'null base → [entry]');
+  // Purity — the input array is not mutated.
+  const base = ['[[A]]'];
+  TaskDialog._addLink(base, '[b](u)');
+  assert(base.length === 1, 'input array not mutated');
+});
+
+// TD-13. _removeLink drops the entry at index i (returns a new array; oob → clone).
+ok('TD-13 _removeLink drops index i (out-of-range → unchanged clone)', () => {
+  assert(deepEq(TaskDialog._removeLink(['a', 'b', 'c'], 1), ['a', 'c']), 'drops middle');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], 0), ['b']), 'drops first');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], 5), ['a', 'b']), 'oob → unchanged');
+  assert(deepEq(TaskDialog._removeLink(['a', 'b'], -1), ['a', 'b']), 'negative → unchanged');
+  assert(deepEq(TaskDialog._removeLink(null, 0), []), 'null base → []');
+  // Purity — input not mutated.
+  const base = ['a', 'b'];
+  TaskDialog._removeLink(base, 0);
+  assert(base.length === 2, 'input array not mutated');
+});
+
+// TD-14. _payloadFromState carries state.links onto the payload (FIX 5).
+ok('TD-14 _payloadFromState includes state.links', () => {
+  const p = TaskDialog._payloadFromState({ title: 't', links: ['[[A]]', '[b](u)'] });
+  assert(Array.isArray(p.links) && p.links.length === 2, 'links on payload: ' + JSON.stringify(p.links));
+  assert(p.links[0] === '[[A]]' && p.links[1] === '[b](u)', 'link entries preserved');
+  // Missing state.links → an empty array on the payload (never undefined).
+  const p2 = TaskDialog._payloadFromState({ title: 't' });
+  assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
@@ -367,6 +450,29 @@ ok('TNV-6 _priorityMeta returns capitalized label + color (unset → null)', () 
   assert(weird && weird.label === 'Urgent', 'unknown → capitalized: ' + JSON.stringify(weird));
 });
 
+// TNV-7. _linkEntries returns renderable markdown strings for the LINKS section
+// (FIX 5). Coerces each frontmatter entry to a markdown string: a string as-is,
+// a Dataview Link object → `[[basename]]`. Drops blanks; null/empty task → [].
+ok('TNV-7 _linkEntries coerces links[] to renderable markdown strings', () => {
+  // Plain string entries (note link + web link) pass through, trimmed.
+  const rows = TaskNoteView._linkEntries({ links: ['  [[Retro Notes]]  ', '[Scalr run](https://scalr.io/r/1)'] });
+  assert(rows.length === 2, 'two entries: ' + JSON.stringify(rows));
+  assert(rows[0] === '[[Retro Notes]]', 'note link trimmed passthrough: ' + rows[0]);
+  assert(rows[1] === '[Scalr run](https://scalr.io/r/1)', 'web link passthrough');
+  // A Dataview Link object → `[[basename]]`.
+  const objRows = TaskNoteView._linkEntries({ links: [{ path: 'a/b/Retro Notes.md', display: 'Retro Notes' }] });
+  assert(objRows.length === 1 && objRows[0] === '[[Retro Notes]]', 'Link object → [[basename]]: ' + JSON.stringify(objRows));
+  // Blank / nullish entries are dropped.
+  const mixed = TaskNoteView._linkEntries({ links: ['[[A]]', '', null, '   ', '[b](u)'] });
+  assert(mixed.length === 2 && mixed[0] === '[[A]]' && mixed[1] === '[b](u)', 'drops blanks: ' + JSON.stringify(mixed));
+  // Null / empty / non-array links → [].
+  assert(TaskNoteView._linkEntries(null).length === 0, 'null task → []');
+  assert(TaskNoteView._linkEntries({}).length === 0, 'no links → []');
+  assert(TaskNoteView._linkEntries({ links: 'nope' }).length === 0, 'non-array links → []');
+  // A single object that already looks like a bare wikilink target string stays a wikilink.
+  assert(deepEq(TaskNoteView._linkEntries({ links: ['[[a/b/Baz.md|Baz]]'] }), ['[[a/b/Baz.md|Baz]]']), 'wikilink string kept verbatim');
+});
+
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   const res = TaskTodayList.buildBands([
@@ -394,6 +500,39 @@ ok('TTL-3 buildBands tolerates non-array input', () => {
   const res = TaskTodayList.buildBands(null, '2026-07-01');
   assert(Array.isArray(res.today) && res.today.length === 0, 'today empty array');
   assert(Array.isArray(res.overdue) && res.overdue.length === 0, 'overdue empty array');
+});
+
+// TTL-4. buildBands EXCLUDES tasks that belong elsewhere (FIX 1 — dedup): a task
+// with a project_slug renders in its Project section, and a meeting-sourced task
+// renders in Meeting Tasks — so neither may ALSO show in the Today/Overdue bands
+// (that duplicate was the bug). Today/Overdue = open, scheduled, NO project, NOT
+// meeting-sourced (personal daily tasks only).
+ok('TTL-4 buildBands excludes project-connected + meeting-sourced tasks (dedup)', () => {
+  const res = TaskTodayList.buildBands([
+    // Scheduled today, but has a project → shown in its Project section, NOT today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Scheduled today, meeting-sourced → shown in Meeting Tasks, NOT today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain scheduled-today personal task (no project, source daily) → IN today.
+    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
+    // Overdue but has a project → excluded from overdue too.
+    { scheduled: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Overdue meeting-sourced → excluded from overdue too.
+    { scheduled: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain overdue personal task → IN overdue.
+    { scheduled: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
+  ], '2026-07-01');
+  assert(res.today.length === 1, 'today = the single plain personal 07-01: got ' + res.today.length);
+  assert(res.today[0].scheduled === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
+    'today band holds only the personal daily task');
+  assert(res.overdue.length === 1, 'overdue = the single plain personal 06-29: got ' + res.overdue.length);
+  assert(res.overdue[0].scheduled === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
+    'overdue band holds only the personal daily task');
+  // A whitespace-only project_slug is treated as "no project" (still shown in today).
+  const ws = TaskTodayList.buildBands([
+    { scheduled: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
+  ], '2026-07-01');
+  assert(ws.today.length === 1, 'whitespace-only project_slug → still a personal task: got ' + ws.today.length);
 });
 
 // ---------- Dataview DateTime coercion (FIX 1 — tasks-don't-render bug) ----------
@@ -528,29 +667,149 @@ ok('RTR-1 renderTaskRow is a function (class + instance)', () => {
   assert(TaskTodayList._stripWikilink('[[Sauce]]') === 'Sauce', '_stripWikilink unwraps');
 });
 
-// ---------- _renderTitleMarkdown (B4 markdown title) ----------
+// RTR-2. _projectChipText extracts the CLEAN basename (FIX 2) — Dataview
+// resolves a `[[Connectors]]` project value to a FULL-PATH Link, so a bare
+// strip-wikilink would show `spice/projects/connectors/Connectors.md|Connectors`.
+// The chip must read `Connectors`. Without window.customJS (Node), the LOCAL
+// fallback path is exercised; it must still produce the basename.
+ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink)', () => {
+  assert(typeof TaskTodayListClass._projectChipText === 'function', 'static on the class');
+  assert(typeof TaskTodayList._projectChipText === 'function', 'delegator on the instance');
+  // Dataview Link object (path + display) → basename.
+  assert(TaskTodayList._projectChipText({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }) === 'Connectors',
+    'Link object → Connectors: ' + TaskTodayList._projectChipText({ path: 'spice/projects/connectors/Connectors.md', display: 'Connectors' }));
+  // Full-path wikilink string with pipe alias → basename.
+  assert(TaskTodayList._projectChipText('[[spice/projects/connectors/Connectors.md|Connectors]]') === 'Connectors',
+    'path+.md+pipe wikilink → Connectors: ' + TaskTodayList._projectChipText('[[spice/projects/connectors/Connectors.md|Connectors]]'));
+  // Simple wikilink → inner name.
+  assert(TaskTodayList._projectChipText('[[Sauce]]') === 'Sauce', 'simple wikilink → Sauce');
+  // Bare string passthrough.
+  assert(TaskTodayList._projectChipText('Sauce') === 'Sauce', 'bare string passthrough');
+  // Nullish → "".
+  assert(TaskTodayList._projectChipText(null) === '', 'null → ""');
+  assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
+});
+
+// ---------- _parseInlineLinks (FIX 1 — deterministic inline-link parser) ----------
 //
-// The title is now rendered as markdown so `[Chat](url)` + `[[wikilink]]` become
-// clickable. In Node there is no MarkdownRenderer / app, so the method must fall
-// back to plain text (titleEl.textContent) and never throw.
+// The title / LINKS renderer no longer depends on Obsidian's MarkdownRenderer
+// (which is NOT a global in the customJS eval context, so it always fell back to
+// raw text). renderInlineLinks now builds real <a> elements from an ordered
+// segment list produced by this PURE parser. Test the parser in isolation.
+ok('PIL-1 _parseInlineLinks is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass._parseInlineLinks === 'function', 'static on the class');
+  assert(typeof TaskTodayList._parseInlineLinks === 'function', 'delegator on the instance');
+});
+ok('PIL-2 _parseInlineLinks parses a bare wikilink (no alias)', () => {
+  const segs = TaskTodayList._parseInlineLinks('[[Thursday-2026-07-02]]');
+  assert(segs.length === 1, 'one segment: ' + JSON.stringify(segs));
+  assert(segs[0].type === 'wikilink', 'wikilink type: ' + segs[0].type);
+  assert(segs[0].target === 'Thursday-2026-07-02', 'target: ' + segs[0].target);
+  assert(segs[0].alias === null, 'no alias: ' + JSON.stringify(segs[0].alias));
+});
+ok('PIL-3 _parseInlineLinks parses a wikilink with an alias ([[A|B]])', () => {
+  const segs = TaskTodayList._parseInlineLinks('[[A|B]]');
+  assert(segs.length === 1 && segs[0].type === 'wikilink', 'one wikilink: ' + JSON.stringify(segs));
+  assert(segs[0].target === 'A', 'target A: ' + segs[0].target);
+  assert(segs[0].alias === 'B', 'alias B: ' + segs[0].alias);
+});
+ok('PIL-4 _parseInlineLinks parses a markdown link ([label](url))', () => {
+  const segs = TaskTodayList._parseInlineLinks('[testing](https://x.com)');
+  assert(segs.length === 1 && segs[0].type === 'mdlink', 'one mdlink: ' + JSON.stringify(segs));
+  assert(segs[0].label === 'testing', 'label testing: ' + segs[0].label);
+  assert(segs[0].url === 'https://x.com', 'url: ' + segs[0].url);
+});
+ok('PIL-5 _parseInlineLinks splits text + mdlink + text (3 segments)', () => {
+  const segs = TaskTodayList._parseInlineLinks('Take a look at X [here](https://y.com) done');
+  assert(segs.length === 3, '3 segments: ' + JSON.stringify(segs));
+  assert(segs[0].type === 'text' && segs[0].value === 'Take a look at X ', 'lead text: ' + JSON.stringify(segs[0]));
+  assert(segs[1].type === 'mdlink' && segs[1].label === 'here' && segs[1].url === 'https://y.com', 'mid mdlink: ' + JSON.stringify(segs[1]));
+  assert(segs[2].type === 'text' && segs[2].value === ' done', 'trail text: ' + JSON.stringify(segs[2]));
+});
+ok('PIL-6 _parseInlineLinks parses a bare http(s) URL', () => {
+  const segs = TaskTodayList._parseInlineLinks('https://z.com');
+  assert(segs.length === 1 && segs[0].type === 'url', 'one url: ' + JSON.stringify(segs));
+  assert(segs[0].url === 'https://z.com', 'url: ' + segs[0].url);
+});
+ok('PIL-7 _parseInlineLinks returns a single text segment for plain text', () => {
+  const segs = TaskTodayList._parseInlineLinks('just some plain text');
+  assert(segs.length === 1 && segs[0].type === 'text', 'one text seg: ' + JSON.stringify(segs));
+  assert(segs[0].value === 'just some plain text', 'value: ' + segs[0].value);
+  // Empty input → [] (no segments to render).
+  assert(TaskTodayList._parseInlineLinks('').length === 0, 'empty → []');
+  assert(TaskTodayList._parseInlineLinks(null).length === 0, 'null → []');
+});
+
+// ---------- renderInlineLinks (FIX 1 — DOM-stub test exercising the REAL fn) ----------
+//
+// THIS is the test that would have caught the original bug: it runs the ACTUAL
+// renderInlineLinks against a minimal fake `el` (capturing createEl'd children +
+// their tagName/attrs/text/href/dataset + addEventListener), NOT a hand-built
+// <a> replica. It asserts the built children include a real <a href> web anchor
+// AND a real <a data-href> internal-link anchor.
+ok('RIL-1 renderInlineLinks is a function (class + instance)', () => {
+  assert(typeof TaskTodayListClass.renderInlineLinks === 'function', 'static on the class');
+  assert(typeof TaskTodayList.renderInlineLinks === 'function', 'delegator on the instance');
+});
+ok('RIL-2 renderInlineLinks builds REAL <a> anchors (web + internal) via createEl', () => {
+  // Minimal fake element: captures createEl'd children + a fake app.workspace.
+  const opened = [];
+  const prevWindow = global.window;
+  global.window = { app: { workspace: { openLinkText: (t, sp) => opened.push([t, sp]) } } };
+  const texts = [];
+  const makeChild = (tag, opts) => {
+    const child = {
+      tagName: String(tag).toUpperCase(),
+      textContent: (opts && opts.text != null) ? opts.text : '',
+      cls: (opts && opts.cls) || '',
+      href: (opts && opts.href != null) ? opts.href : null,
+      attrs: Object.assign({}, (opts && opts.attr) || {}),
+      dataset: {},
+      _listeners: {},
+      setAttribute(k, v) { this.attrs[k] = v; },
+      addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    };
+    return child;
+  };
+  const el = {
+    children: [],
+    textContent: 'STALE',
+    createEl(tag, opts) { const c = makeChild(tag, opts); this.children.push(c); return c; },
+    appendText(v) { texts.push(v); this.children.push({ tagName: '#text', textContent: v }); },
+    createSpan(opts) { const c = makeChild('span', opts); this.children.push(c); return c; },
+    setText(v) { this.textContent = v; this.children = []; },
+  };
+  TaskTodayList.renderInlineLinks(el, 'Look [here](https://x.com) and [[Note]]', 'src.md');
+  const anchors = el.children.filter((c) => c.tagName === 'A');
+  assert(anchors.length === 2, 'two anchors built: ' + JSON.stringify(el.children.map((c) => c.tagName)));
+  const web = anchors.find((a) => a.href === 'https://x.com');
+  assert(web, 'web anchor with href https://x.com present: ' + JSON.stringify(anchors.map((a) => a.href)));
+  assert(web.textContent === 'here', 'web anchor text "here": ' + web.textContent);
+  assert(web.attrs.target === '_blank' && web.attrs.rel === 'noopener', 'web anchor opens in new tab: ' + JSON.stringify(web.attrs));
+  const internal = anchors.find((a) => a.dataset.href === 'Note' || a.attrs['data-href'] === 'Note');
+  assert(internal, 'internal anchor with data-href Note present');
+  assert(internal.cls === 'internal-link', 'internal-link class: ' + internal.cls);
+  assert(internal.textContent === 'Note', 'internal anchor text "Note": ' + internal.textContent);
+  // A wikilink click routes to app.workspace.openLinkText(target, sourcePath).
+  const clickFns = internal._listeners.click || [];
+  assert(clickFns.length === 1, 'internal anchor has a click handler');
+  clickFns[0]({ preventDefault() {}, stopPropagation() {} });
+  assert(opened.length === 1 && opened[0][0] === 'Note' && opened[0][1] === 'src.md',
+    'click opens the note via openLinkText(Note, src.md): ' + JSON.stringify(opened));
+  // Plain leading/joining text lands as text nodes (not swallowed).
+  assert(texts.indexOf('Look ') >= 0 && texts.indexOf(' and ') >= 0, 'plain text preserved: ' + JSON.stringify(texts));
+  global.window = prevWindow;
+});
+ok('RIL-3 renderInlineLinks tolerates a null element (never throws)', () => {
+  let threw = false;
+  try { TaskTodayList.renderInlineLinks(null, 'anything', 'src.md'); } catch (_e) { threw = true; }
+  assert(!threw, 'null element does not throw');
+});
+
+// ---------- _renderTitleMarkdown alias (delegates to renderInlineLinks) ----------
 ok('RTM-1 _renderTitleMarkdown is a function (class + instance)', () => {
   assert(typeof TaskTodayListClass._renderTitleMarkdown === 'function', 'static on the class');
   assert(typeof TaskTodayList._renderTitleMarkdown === 'function', 'delegator on the instance');
-});
-ok('RTM-2 _renderTitleMarkdown falls back to plain text when MarkdownRenderer absent', () => {
-  // Minimal fake element (no querySelectorAll → the anchor pass is skipped).
-  const el = { textContent: '' };
-  TaskTodayList._renderTitleMarkdown(el, 'See [Chat](https://x.test)', 'spice/tasks/a.md');
-  assert(el.textContent === 'See [Chat](https://x.test)', 'plain-text fallback keeps the raw text: ' + el.textContent);
-});
-ok('RTM-3 _renderTitleMarkdown tolerates null/blank title + null element', () => {
-  const el = { textContent: 'x' };
-  TaskTodayList._renderTitleMarkdown(el, '', 'spice/tasks/a.md');
-  assert(el.textContent === '(untitled)', 'blank → (untitled): ' + el.textContent);
-  // Null element must not throw.
-  let threw = false;
-  try { TaskTodayList._renderTitleMarkdown(null, 'anything'); } catch (_e) { threw = true; }
-  assert(!threw, 'null element does not throw');
 });
 
 // ---------- TaskMeetingList._matches (pure filter) ----------
@@ -575,6 +834,26 @@ ok('TPL-1 _matches keys off project_slug (raw plain-string equality)', () => {
   assert(TaskProjectList._matches({ project_slug: '' }, 'sauce') === false, 'blank slug → false');
   assert(TaskProjectList._matches({ project_slug: 'sauce' }, '') === false, 'blank target → false');
   assert(TaskProjectList._matches(null, 'sauce') === false, 'null task → false');
+});
+
+// TPL-2. _matches EXCLUDES meeting-sourced tasks (they render only in "From
+// Meetings"; including them in Project Tasks too would duplicate — FIX 3).
+ok('TPL-2 _matches excludes meeting-sourced tasks (dedup with From Meetings)', () => {
+  // Same matching slug, but source === 'meeting' → excluded from Project Tasks.
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'meeting' }, 'sauce') === false,
+    'meeting-sourced with matching slug → false');
+  // Non-meeting sources still match.
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'project' }, 'sauce') === true,
+    'project-sourced → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: 'daily' }, 'sauce') === true,
+    'daily-sourced → true');
+  // No source field (legacy / blank) → still matches (only 'meeting' is excluded).
+  assert(TaskProjectList._matches({ project_slug: 'sauce' }, 'sauce') === true,
+    'missing source → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: '' }, 'sauce') === true,
+    'blank source → true');
+  assert(TaskProjectList._matches({ project_slug: 'sauce', source: null }, 'sauce') === true,
+    'null source → true');
 });
 
 // ---------- MeetingLeafActions.cleanProjectName (B1 clean-name extractor) ----------

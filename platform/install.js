@@ -1245,6 +1245,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
+  await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
@@ -5273,8 +5274,11 @@ const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
 // (5) Meeting only: inject ACTION_ITEMS_MARKER above the Action Items
 // SectionLabel block (v0.127.0 §B; task-interactions appendTask anchor).
 // (6) To-do only: inject TODAY_CAPTURE_MARKER below the Today SectionLabel
-// block (v0.127.0 §F; TodayCaptureEditableList anchor). Returns the body
-// unchanged when nothing applies (driver relies on `after === before`).
+// block (v0.127.0 §F; TodayCaptureEditableList anchor). (7) To-do / meeting /
+// scratch-day: strip the redundant `---` bracketing the action block now that
+// the ToDoLeafActions/MeetingLeafActions/ScratchDayActions helper renders its own
+// <hr> dividers (see _stripDividersAroundActionBlock). Returns the body unchanged
+// when nothing applies (driver relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -5460,6 +5464,44 @@ function _healNoteChromeBody(body, type) {
       }
     }
   }
+  // Step 7 (action-bar dividers) — the daily to-do / meeting / scratch-day action
+  // helpers now render their OWN top+bottom <hr> dividers INSIDE their dataviewjs
+  // block (wiki methodology), so the literal `---` the old templates bracketed
+  // those blocks with is now a redundant double divider (and keeps the big
+  // inter-block gap the change was meant to close). Strip a `---` immediately
+  // before AND after the action block. Idempotent + tolerant of the current
+  // adjacent shape (```/---/```dataviewjs) and the older blank-padded shape.
+  if (type === 'to-do')       out = _stripDividersAroundActionBlock(out, 'ToDoLeafActions');
+  if (type === 'meeting')     out = _stripDividersAroundActionBlock(out, 'MeetingLeafActions');
+  if (type === 'scratch-day') out = _stripDividersAroundActionBlock(out, 'ScratchDayActions');
+  return out;
+}
+
+// _stripDividersAroundActionBlock — pure, idempotent. Removes a markdown `---`
+// divider immediately BEFORE and immediately AFTER a `class: "<className>"`
+// dataviewjs action block, collapsing each side to a single blank line. The
+// action helper now renders its own <hr> dividers (wiki methodology), so the
+// template `---` is redundant. Tolerant of both the current adjacent template
+// shape (```\n---\n```dataviewjs) and the older seed-fixture shape that padded
+// the `---` with blank lines (```\n\n---\n\n```dataviewjs). A `---` that is not
+// adjacent to the named action block is never touched. Mirrors the wiki heal's
+// trailing-divider strip (_healWikiChromeBody step 4), extended to both sides.
+function _stripDividersAroundActionBlock(body, className) {
+  if (typeof body !== "string") return body;
+  const q = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = body;
+  // BEFORE: a `---` (with any padding blank lines) directly preceding the action
+  // block → drop it, keeping exactly one blank line before the block.
+  out = out.replace(
+    new RegExp('\\n\\n-{3,}[ \\t]*\\n[ \\t\\r\\n]*(```dataviewjs\\n(?:\\/\\/[^\\n]*\\n)?await dv\\.view\\([^\\n]*class:\\s*"' + q + '")'),
+    '\n\n$1'
+  );
+  // AFTER: a `---` directly following the action block's closing fence → drop it,
+  // keeping one blank line after the block. (Same tail as _healWikiChromeBody.)
+  out = out.replace(
+    new RegExp('(class:\\s*"' + q + '"[\\s\\S]*?\\n```\\n)\\s*\\n?-{3,}[ \\t]*(\\r?\\n|$)'),
+    '$1'
+  );
   return out;
 }
 
@@ -8507,14 +8549,15 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
         `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoLeafActions" });`,
         '```',
         '',
+        // Section order (v0.179 UI polish): Project Tasks → From Meetings →
+        // Owned Tasks (legacy completed). Owned Tasks sits LAST. MUST stay in
+        // lockstep with platform/blueprints/to-do/templates/Project To-Do.md.
         '```dataviewjs',
-        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });`,
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Project Tasks", top: true }] });`,
         '```',
         '',
-        '<!-- OWNED_TASKS_MARKER -->',
-        '',
         '```dataviewjs',
-        `await dv.view("${viewsPath}/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });`,
+        `await dv.view("${viewsPath}/customjs-guard", { class: "TaskProjectList" });`,
         '```',
         '',
         '```dataviewjs',
@@ -8523,6 +8566,16 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
         '',
         '```dataviewjs',
         `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });`,
+        '```',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });`,
+        '```',
+        '',
+        '<!-- OWNED_TASKS_MARKER -->',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });`,
         '```',
         '',
       ].join('\n');
@@ -8763,6 +8816,102 @@ function _healProjectTodoOwnedTasksBody(body) {
     .concat(rebuilt)
     .concat(lines.slice(sectionEnd))
     .join("\n");
+}
+
+// _reorderProjectTodoOwnedTasksLast — pure body transform (v0.179 UI polish).
+// Section order on a project To-Do note must be Project Tasks → From Meetings →
+// Owned Tasks (legacy completed lines). Older notes were authored/healed with
+// Owned Tasks ABOVE From Meetings; this moves the WHOLE Owned Tasks block —
+// the "Owned Tasks" SectionLabel block + the `<!-- OWNED_TASKS_MARKER -->` + all
+// its raw task lines + the TodayCaptureEditableList(ownedTasks) block — to the
+// END (below From Meetings), as one unit.
+//
+// Idempotent: returns the body unchanged when there's no "From Meetings"
+// SectionLabel (nothing to reorder against) OR when the "Owned Tasks" label
+// already appears AFTER the "From Meetings" label (already last). Anchors on the
+// SectionLabel dataviewjs blocks by their `text:` label; tolerant of a `## Owned
+// Tasks` / `## From Meetings` H2 heading form too. Returns the ORIGINAL body on
+// any parse ambiguity (fails safe — never corrupts a note).
+function _reorderProjectTodoOwnedTasksLast(body) {
+  if (typeof body !== "string") return body;
+  const lines = body.split("\n");
+
+  // Locate the start line of the Owned Tasks header + the From Meetings header.
+  // A header is either a SectionLabel dataviewjs block opener (```dataviewjs) whose
+  // body carries text: "<label>", or a bare `## <label>` H2.
+  const findHeader = (label) => {
+    for (let i = 0; i < lines.length; i++) {
+      // SectionLabel dataviewjs block: opener is ```dataviewjs, look ahead to the
+      // closing fence for a matching text: "<label>".
+      if (/^\s*```dataviewjs\s*$/.test(lines[i])) {
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^\s*```\s*$/.test(lines[j])) break;
+          if (lines[j].includes('class: "SectionLabel"') &&
+              lines[j].includes('text: "' + label + '"')) {
+            return { start: i, kind: "block" };
+          }
+        }
+      }
+      // Bare H2 heading form.
+      if (new RegExp("^##\\s+" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$").test(lines[i])) {
+        return { start: i, kind: "h2" };
+      }
+    }
+    return null;
+  };
+
+  const owned = findHeader("Owned Tasks");
+  const meetings = findHeader("From Meetings");
+  // Nothing to reorder against, or no Owned Tasks section → leave as-is.
+  if (!owned || !meetings) return body;
+  // Already ordered (Owned Tasks after From Meetings) → idempotent no-op.
+  if (owned.start > meetings.start) return body;
+
+  // The Owned Tasks block runs from its header line up to (but not including) the
+  // NEXT section header — the opener of another SectionLabel dataviewjs block or
+  // the next `## ` heading — else EOF.
+  const isSectionStart = (i) => {
+    if (i <= owned.start) return false;
+    if (/^##\s+/.test(lines[i])) return true;
+    if (/^\s*```dataviewjs\s*$/.test(lines[i])) {
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s*```\s*$/.test(lines[j])) return false;
+        if (lines[j].includes('class: "SectionLabel"')) return true;
+      }
+    }
+    return false;
+  };
+  let ownedEnd = lines.length;
+  for (let i = owned.start + 1; i < lines.length; i++) {
+    if (isSectionStart(i)) { ownedEnd = i; break; }
+  }
+
+  // Sanity: the Owned Tasks block must end at-or-before the From Meetings header
+  // (they're distinct sections and Owned currently precedes Meetings). If the
+  // computed block would swallow the From Meetings header, bail (fail safe).
+  if (ownedEnd > meetings.start) return body;
+
+  // Extract the block, trimming trailing blank lines off it; re-append after a
+  // single blank separator at EOF.
+  const head = lines.slice(0, owned.start);
+  let block = lines.slice(owned.start, ownedEnd);
+  const tail = lines.slice(ownedEnd);
+
+  // Trim leading/trailing blank lines from the moved block so re-insertion is clean.
+  let bs = 0, be = block.length;
+  while (bs < be && block[bs].trim() === "") bs++;
+  while (be > bs && block[be - 1].trim() === "") be--;
+  block = block.slice(bs, be);
+  if (!block.length) return body;  // nothing substantive to move
+
+  // Rebuild: head + tail (with the Owned block removed), one blank separator,
+  // block, trailing newline.
+  const rest = head.concat(tail);
+  // Strip trailing blanks off `rest` so we control the separator.
+  let re = rest.length;
+  while (re > 0 && rest[re - 1].trim() === "") re--;
+  const out = rest.slice(0, re).concat([""], block, [""]);
+  return out.join("\n");
 }
 
 // _parseDailyTaskLine — pure minimal parser for a `- [ ] Title [k:: v]...` task
@@ -10012,12 +10161,23 @@ async function applyProjectTodoTaskListHeal(tp, history, git) {
         if (/class:\s*"TaskProjectList"/.test(before)) continue;  // idempotent skip
 
         let after;
-        // Prefer inserting before the "Owned Tasks" SectionLabel block so the
-        // Project Tasks list sits where the template puts it (above Owned Tasks).
+        // Section order (v0.179 UI polish) is Project Tasks → From Meetings →
+        // Owned Tasks, so Project Tasks goes at the TOP. Insert before whichever
+        // of the "From Meetings" / "Owned Tasks" SectionLabel blocks appears
+        // FIRST (the reorder heal runs after this, so pre-reorder notes may still
+        // have Owned Tasks above From Meetings — inserting before the earliest
+        // keeps Project Tasks first either way); fall back to the marker, else
+        // append.
+        const fromMeetingsRe = /```dataviewjs\r?\n[^`]*class:\s*"SectionLabel"[^`]*text:\s*"From Meetings"[\s\S]*?```\r?\n?/;
         const ownedLabelRe = /```dataviewjs\r?\n[^`]*class:\s*"SectionLabel"[^`]*text:\s*"Owned Tasks"[\s\S]*?```\r?\n?/;
+        const fm2 = fromMeetingsRe.exec(before);
         const om = ownedLabelRe.exec(before);
-        if (om) {
-          after = before.slice(0, om.index) + block + "\n" + before.slice(om.index);
+        let anchorIdx = -1;
+        if (fm2 && om) anchorIdx = Math.min(fm2.index, om.index);
+        else if (fm2) anchorIdx = fm2.index;
+        else if (om) anchorIdx = om.index;
+        if (anchorIdx >= 0) {
+          after = before.slice(0, anchorIdx) + block + "\n" + before.slice(anchorIdx);
         } else {
           const mi = before.indexOf(MARKER);
           if (mi >= 0) {
@@ -10338,6 +10498,61 @@ async function applyProjectTodoOwnedTasksHeal(tp, history, git) {
     }
   }
   history?.push({ event: "info", step: "project_todo_owned_tasks_heal", name: "vault",
+    summary: { healed, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
+// applyProjectTodoSectionReorderHeal — ungated backfill (v0.179 UI polish; runs
+// every install — moves NEW content into an existing note's canonical order, per
+// the migration-lifecycle rule, so NOT version-gated). Walks
+// spice/projects/<slug>/<Name> To-Do.md and reorders each note's sections to
+// Project Tasks → From Meetings → Owned Tasks via _reorderProjectTodoOwnedTasksLast
+// (moves the whole Owned Tasks block below From Meetings). Idempotent
+// (already-ordered notes are no-ops), .sauce-backup snapshot before any write,
+// per-note try/catch, fails-loud (history warning) but never throws. Must run
+// AFTER applyProjectTodoTaskListHeal + applyProjectTodoOwnedTasksHeal so the
+// Owned Tasks block is fully materialized (marker + editable list) before it
+// moves. Mirrors applyProjectTodoOwnedTasksHeal posture.
+async function applyProjectTodoSectionReorderHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const PROJ_ROOT = "spice/projects";
+  if (!(await adapter.exists(PROJ_ROOT))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+
+  let listing;
+  try { listing = await adapter.list(PROJ_ROOT); }
+  catch (_e) { return; }
+
+  for (const projDir of (listing.folders || [])) {
+    let subListing;
+    try { subListing = await adapter.list(projDir); }
+    catch (_e) { continue; }
+    for (const fpath of (subListing.files || [])) {
+      if (!/ To-Do\.md$/.test(fpath)) continue;
+      try {
+        const before = await adapter.read(fpath);
+        if (!/^type:\s*project-todo\b/m.test(before) && !/^type:\s*"project-todo"/m.test(before)) continue;
+        const after = _reorderProjectTodoOwnedTasksLast(before);
+        if (after === before) continue;
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        healed += 1;
+        history?.push({ event: "info", step: "project_todo_section_reorder_heal", target: fpath, action: "reordered",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "project_todo_section_reorder_heal",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+  history?.push({ event: "info", step: "project_todo_section_reorder_heal", name: "vault",
     summary: { healed, warned },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
@@ -18425,6 +18640,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
+    module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
@@ -18472,6 +18688,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
+    module.exports._reorderProjectTodoOwnedTasksLast = _reorderProjectTodoOwnedTasksLast;
+    module.exports.applyProjectTodoSectionReorderHeal = applyProjectTodoSectionReorderHeal;
     // task-entity — backup-first daily→note-per-task migration (for
     // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
     module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;

@@ -95,8 +95,20 @@ class ScratchDayActions {
         const homeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
         const pencilPlusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/><line x1="20" y1="2" x2="20" y2="8"/><line x1="23" y1="5" x2="17" y2="5"/></svg>`;
 
-        const row = dv.container.createEl("div");
-        row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+        // Chrome dividers owned by the helper (wiki methodology): render the action
+        // row bracketed by a top + bottom <hr> INSIDE this one dataviewjs block, so
+        // the separators hug the buttons (12px breathing room) instead of the big
+        // inter-block gap a template `---` leaves (two adjacent dataviewjs blocks
+        // always get an Obsidian inter-block gap no `---` can close). The Scratch
+        // Day Hub template carries no `---` around this block; a per-note install
+        // heal strips the legacy `---` from existing day-hub notes.
+        const DIVIDER = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+        const wrap = dv.container.createEl("div");
+        wrap.style.cssText = "margin: 0;";
+        wrap.createEl("hr").style.cssText = DIVIDER;
+
+        const row = wrap.createEl("div");
+        row.style.cssText = "display: flex; gap: 12px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
 
         const createScratch = () => {
             if (!customJS || !customJS.EntityCreate || typeof customJS.EntityCreate.create !== "function") {
@@ -111,5 +123,7 @@ class ScratchDayActions {
 
         customJS.AccentButton.render(row, { label: "+ New Scratch", icon: pencilPlusIcon, onClick: createScratch, flex: true });
         customJS.AccentButton.render(row, { label: "Hub", icon: homeIcon, onClick: goToHub, flex: true });
+
+        wrap.createEl("hr").style.cssText = DIVIDER;
     }
 }

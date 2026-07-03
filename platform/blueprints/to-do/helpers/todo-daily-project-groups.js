@@ -72,7 +72,8 @@ class ToDoDailyProjectGroups {
         if (!blocks.length) return;
 
         const TD = window.customJS && window.customJS.TaskDialog;
-        this._renderLabel(dv, 'Open Project Tasks');
+        // No "Open Project Tasks" umbrella label on the daily (FIX 3) — each project
+        // renders its own name/section label below, so the umbrella was redundant.
         for (const blk of blocks) {
             const anchor = document.createComment(` project-group-anchor-${blk.projSlug} `);
             dv.container.appendChild(anchor);

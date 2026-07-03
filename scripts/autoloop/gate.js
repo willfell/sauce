@@ -16,7 +16,15 @@ function splitDiff(paths) {
     const f = String(raw).trim();
     if (!f) continue;
     if (/^platform\/test\/run-.*\.js$/.test(f)) { testFiles.push(f); continue; }
-    if (/\.md$/.test(f) || f === 'autoloop-queue.md') continue;
+    // Docs, the queue ledger, and the package manifest/lockfile are excluded from
+    // behavioral source: a package.json change here is dependency or test-runner
+    // wiring (e.g. adding a new run-*.js harness to release:preflight), not a
+    // behavioral fix a regression test would exercise. Without this, any test-only
+    // harness addition — which MUST wire itself into package.json to run in CI —
+    // is miscounted as a source change, and the mutation check spuriously fails
+    // ("test passes without the source change") because the harness passes
+    // standalone regardless of the package.json edit.
+    if (/\.md$/.test(f) || f === 'autoloop-queue.md' || f === 'package.json' || f === 'package-lock.json') continue;
     sourceFiles.push(f);
   }
   return { testFiles, sourceFiles };
