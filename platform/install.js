@@ -7020,7 +7020,14 @@ async function applyBundledPlugin(tp, mech, vaultPath, workshopPath, history, gi
   let wroteCount = 0;
   for (const f of bp.files) {
     try {
-      const content = fs.readFileSync(path.join(srcDir, f), "utf8");
+      let content = fs.readFileSync(path.join(srcDir, f), "utf8");
+      // Stamp the mechanism version into the plugin's own manifest so Obsidian's
+      // plugin list shows the shipped version (the release bumper versions the
+      // MECHANISM, not this inner manifest, so they would otherwise drift).
+      if (f === "manifest.json" && mech.version) {
+        try { const j = JSON.parse(content); j.version = mech.version; content = JSON.stringify(j, null, 2) + "\n"; }
+        catch (_e) { /* leave content as-is if not parseable */ }
+      }
       await adapter.write(destDir + "/" + f, content);
       wroteCount++;
     } catch (e) {
