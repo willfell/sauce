@@ -19,20 +19,24 @@ When you change an existing helper or write a new one, read this file first.
 
 ## 2. Section ordering (project hub `<Project Name>.md`)
 
-Template, Project.md as of v0.109.0:
+Template, Project.md as of the 2026-07-02 chrome overhaul:
 
 1. `Breadcrumb`
 2. `SpaceNavButtons`
-3. `ProjectNavButtons`
-4. `ProjectStatusWidget` — **no SectionLabel**. The chip IS the at-a-glance signal; a label would be redundant.
-5. `ProjectMeetingsPanel` — emits its own `SectionLabel` "Meetings" only when meetings exist.
-6. `ProjectWorkstreamManager` — emits its own `SectionLabel` "Workstreams".
+3. `ProjectNavButtons` — core `Project · Board · Docs` (+ context `Task:`) + a `More ▾` overflow holding `Map · To-Do · Helpful Links` (see [`note-chrome.md`](note-chrome.md) §5).
+4. `ProjectStatusWidget` — **no SectionLabel, no leading hairline, no surrounding blank lines**. The chip IS the at-a-glance signal and hugs tight under the nav.
+5. `ProjectActivityPanel` — "Recent activity"; cards carry a type icon (meeting/doc/task) + doc `section` in the meta.
+6. `ProjectOpenTasks` — open tasks from the board.
+7. `ProjectMeetingsPanel` — emits its own `SectionLabel` "Meetings" only when meetings exist.
+8. `ProjectLinksPanel`.
+
+**Workstreams are NOT on the hub.** Workstream management was consolidated onto the **Project Map** note (`ProjectWorkstreamManager` + `ProjectWorkstreams` render there); the `Map` destination lives in the nav overflow. Existing hubs are healed by `applyProjectHubWorkstreamRemovalHeal`.
 
 Sections that follow Status each emit their own SectionLabel. Empty helper output renders NOTHING (no info callouts, no placeholder text). This rule is non-negotiable per v0.106.0.1 + v0.109.0.
 
 ## 3. Spacing rules
 
-- **No `---` horizontal rules** between sections in `Template, Project.md`. SectionLabel emits its own hairline above.
+- **Dividers are helper-owned hairlines, never literal `---`.** Use `customJS.SectionLabel.divider(el)` (`margin: 8px 0`) with **leading-hairline ownership** (each block renders its own top hairline → exactly one per boundary). Templates carry no literal `---` and no blank-line gaps between chrome blocks. Enforced by `scripts/lint-note-chrome.js` Rule 4 (project-scoped). See [`note-chrome.md`](note-chrome.md) §1a for the full grammar + the reversal rationale.
 - **No `## H2` headings** inside project-related templates. Helpers emit `SectionLabel` instead.
 - **Empty helper output = render NOTHING.** No info callouts. No placeholder strings. No "(empty state)" UI.
 
