@@ -224,7 +224,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint daily axis installer_migration: 1 uncovered
-  status: proposed
+  status: dismissed
+  note: Rubric artifact (4th of class, after scratch/breadcrumb/meetings). Lone uncovered fn = applyCustomJsStartupScripts — a GENERIC installer function (configures customJS startup scripts; not daily-specific, mis-attributed via module_directory) already genuinely tested in run-helper-cases.js (CSS-1..3: idempotent / preserves user entries / default-to-empty). scoreInstallerMigration only scans run-seed-migrations.js so it isn't credited. Adding a duplicate seed test = metric-gaming. Durable fix = the documented coverage-rubric.js scoreInstallerMigration improvement.
 
 - id: cov-mechanism-backlink-panel-widget-render
   title: Add coverage for backlink-panel widget_render (0/1)
