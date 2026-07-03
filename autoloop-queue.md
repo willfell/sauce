@@ -192,7 +192,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint scratch axis installer_migration: 2 uncovered
-  status: proposed
+  status: dismissed
+  note: Grep-artifact false gap, not honestly actionable. The 2 "uncovered" fns — applyRuleFragment + applyAppSettings — are GENERIC installer primitives (not scratch-specific migrations; the rubric mis-attributes them to scratch via the module_directory string match), and BOTH are already genuinely tested in run-helper-cases.js (applyRuleFragment HC-RF1/2/3 array-support asserts; applyAppSettings AS1-AS5 create/override/preserve/malformed/backup asserts). scoreInstallerMigration only scans run-seed-migrations.js, so it under-credits them. Adding duplicate seed tests would be metric-gaming. Durable fix = rubric improvement (teach scoreInstallerMigration to also credit run-helper-cases.js coverage AND/OR stop attributing generic install primitives to a blueprint surface), not a new harness.
 
 - id: cov-mechanism-breadcrumb-installer-migration
   title: Add coverage for breadcrumb installer_migration (1/3)
