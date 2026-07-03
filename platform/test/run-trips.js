@@ -166,6 +166,56 @@ function makeDv(embed, currentVal) {
     ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
         tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
 
+    // ---------- TripNavButtons launcher partition (behavioral) ----------
+    const navP = new TripNavButtons();
+    navP._siblingsFor = () => ([
+        { basename: "Dave's Wedding",           path: "spice/trips/daves-wedding/Dave's Wedding.md",           fm: { type: "trip", name: "Dave's Wedding" } },
+        { basename: "Dave's Wedding — Notes",   path: "spice/trips/daves-wedding/Dave's Wedding — Notes.md",   fm: { type: "trip-section", section: "Notes",   section_kind: "notes" } },
+        { basename: "Dave's Wedding — Flights", path: "spice/trips/daves-wedding/Dave's Wedding — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
+    ]);
+    navP._boardPathIfExists = () => null;
+    {
+        const ctx = { context: "trip-section", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
+        const { primary, entries } = navP._tripMenuEntries(ctx, "spice/trips/daves-wedding/Dave's Wedding — Flights.md");
+        ok('NAV-1 primary points at the atlas', primary && primary.path.endsWith("Dave's Wedding.md"));
+        ok('NAV-2 menu excludes current + orders by section_kind + ends with New Section',
+            entries.map(e => e.label || e.action).join('|') === 'Notes|new-section',
+            JSON.stringify(entries.map(e => e.label || e.action)));
+    }
+    {
+        const ctxA = { context: "trip-atlas", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
+        const { primary, entries } = navP._tripMenuEntries(ctxA, "spice/trips/daves-wedding/Dave's Wedding.md");
+        ok('NAV-3 on atlas: no primary, menu lists both sections + New Section',
+            primary === null && entries.map(e => e.label || e.action).join('|') === 'Flights|Notes|new-section',
+            JSON.stringify([primary, entries.map(e => e.label || e.action)]));
+    }
+
+    // ---------- create-flow naming + frontmatter (behavioral) ----------
+    {
+        const written = {};
+        const created = new Set();
+        const savedVault = global.app.vault;
+        global.app.vault = {
+            getAbstractFileByPath: (p) => (p === 'ranch/templates/Template, Trip Flights.md'
+                ? { path: p } : (created.has(p) ? { path: p } : null)),
+            async createFolder(p) { created.add(p); },
+            async create(p, body) { written[p] = body; created.add(p); },
+            async read() { return '---\ntype: trip-section\nsection_kind: flights\nsection: "Flights"\ntrip: "[[{{NAME}}]]"\ntrip_slug: {{SLUG}}\ncreated_at: "{{DATE}}"\n---\n'; },
+        };
+        const navC = new TripNavButtons();
+        const secPath = await navC._createTripSection('spice/trips/daves-wedding', 'Honorees', "Dave's Wedding", 'daves-wedding');
+        ok('CREATE-1 custom section filename is trip-prefixed',
+            secPath === "spice/trips/daves-wedding/Dave's Wedding — Honorees.md", secPath);
+        ok('CREATE-2 custom section frontmatter is canonical',
+            /type: trip-section/.test(written[secPath]) && /section_kind: custom/.test(written[secPath])
+            && /section: "Honorees"/.test(written[secPath]) && /trip: "\[\[Dave's Wedding\]\]"/.test(written[secPath])
+            && /trip_slug: daves-wedding/.test(written[secPath]), written[secPath]);
+        ok('CREATE-3 sanitizeFilename strips illegal chars, keeps apostrophe',
+            navC._sanitizeFilename('Q1: Kick/off "Trip"') === 'Q1 Kick off Trip'
+            && navC._sanitizeFilename("Dave's Wedding") === "Dave's Wedding");
+        global.app.vault = savedVault;
+    }
+
     // ---------- render() cold-load guards ----------
     const widgets = [
         { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },
