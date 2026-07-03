@@ -1458,3 +1458,33 @@ sauce update --bump-pins
 - **NEW PlanBand** flag injected atop every existing `Budget-*.md` (marker `<!-- plan-band-v0.10.0 -->`; `.sauce-backup` snapshot before write) — warns when planned spend exceeds the income-bound envelope.
 
 **Effect of running this upgrade:** `applyFinancePlanScaffolding` + `applyFinanceSavingsScaffolding` create the plan + savings entities (create-if-absent; existing data untouched), and `applyFinancePlanBandInjection` adds the PlanBand block to every Budget. Cmd+R to load the 5 new CustomJS classes. Additive + backcompat: zero new required fields on existing Budget/Paycheck/Debt notes; the dashboard shows a "set up your plan" prompt until you fill in `Finance Plan.md`.
+
+## Adding the `reader` blueprint (new blueprint — vX.Y.Z, pipeline-assigned)
+
+The **`reader` blueprint** (`spice/reader/`) is a flat reading queue for web articles clipped via the official **Obsidian Web Clipper**. A NEW blueprint is **not** added by `--bump-pins` alone — each vault subscribes a subset — so you must add it to the subscription and install with the **vault as the CWD**.
+
+```bash
+brew update && brew upgrade sauce
+```
+
+Then, in each vault that should have the reader — **add the blueprint to its subscription** (`ranch/platform-subscription.json` `blueprints[]`):
+
+```json
+{ "name": "reader", "version": "<pin>" }
+```
+
+...and install with the vault as the current directory (`SAUCE_VAULT` is ignored — cwd-ancestor detection wins):
+
+```bash
+cd /abs/path/to/vault
+sauce update --force
+```
+
+**What this adds:**
+
+- **NEW `spice/reader/Reader.md`** (`type: reader-hub`) — the render-only queue hub. `applyReaderScaffoldHeal` creates it if absent (else idempotently heals its chrome, sentinel `class: "ReaderQueue"`, preserving any free-write below the `READER_CONTENT` marker; `.sauce-backup/reader/` snapshot before any write; never throws).
+- **`reader-article` leaf notes** — flat in `spice/reader/`, never nested. The lifecycle `unread → reading → archived` is the frontmatter **`status`** field (a one-click toggle, never a folder move); the queue sorts by `captured_at`, not `mtime`.
+- **Global "Reader" nav button** (icon `book-open`) on every note; `/reader` command + `new-reader-article` skill.
+- **`spice/reader/reader-clip.json`** — a Web Clipper template artifact. **Import it once** into the browser's Obsidian Web Clipper (extension → templates → import); clips thereafter route straight to `spice/reader/` with the house frontmatter and (recommended, on a local Ollama) an Interpreter-generated **AI TL;DR** `summary`. The installer materializes the JSON into the vault but **cannot push it into the browser extension** — the one-time import is a manual step.
+
+**Effect of running this upgrade:** `applyReaderScaffoldHeal` scaffolds/heals the hub (additive, backcompat — no new required fields on any existing note); **Cmd+R** to load the 3 new CustomJS classes (`ReaderQueue` / `ReaderArticleActions` / `ReaderArticleView`). The queue is empty until you import the clip template and clip a page (or use the hub's `＋ New article` button).

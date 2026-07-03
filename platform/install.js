@@ -1249,6 +1249,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
+  await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
@@ -6011,6 +6012,66 @@ function _healHomeChromeBody(body) {
     userTail = raw.slice(markerIdx + marker.length);
   } else {
     const trimmed = raw.trim();
+    userTail = trimmed ? "\n\n" + trimmed : "";
+  }
+  return chrome + userTail;
+}
+
+// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Three
+// customjs-guard blocks (Breadcrumb → SpaceNavButtons → ReaderQueue). Kept in
+// lockstep with blueprints/reader/content/Reader Hub.md ({{views_path}} resolves
+// to ranch/views, so the paths are byte-identical after render). The hub template
+// has no content marker by default; any user free-write below a READER_CONTENT
+// marker is preserved by _healReaderChromeBody.
+const _READER_CHROME = [
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
+  '```',
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+  '```',
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "ReaderQueue" });',
+  '```',
+].join("\n");
+
+// _healReaderChromeBody — pure, idempotent body transform for spice/reader/Reader.md.
+// SELF-CONTAINED (no closure over module-level constants) so the behavioral harness
+// can slice its source out of install.js and eval it standalone, exactly like
+// _healHomeChromeBody.
+// - Chrome already present (`class: "ReaderQueue"` found): return the body
+//   UNCHANGED (idempotent no-op — never re-touch a healthy note).
+// - Chrome absent: rebuild the canonical chrome, preserving any user content that
+//   lived after a READER_CONTENT marker (or, for a bare pre-blueprint note with no
+//   marker at all, appending the whole thing below the fresh chrome).
+function _healReaderChromeBody(raw) {
+  const marker = "[//]: # (READER_CONTENT)";
+  const chrome = [
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
+    '```',
+    '',
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    '```',
+    '',
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "ReaderQueue" });',
+    '```',
+  ].join("\n");
+  const body = typeof raw === "string" ? raw : "";
+  // Healthy note — leave every byte alone.
+  if (/class:\s*"ReaderQueue"/.test(body)) return body;
+  // Split off any user content below the marker (there won't be chrome above it
+  // since ReaderQueue is absent, but a stray marker could still exist).
+  const markerIdx = body.indexOf(marker);
+  let userTail;
+  if (markerIdx >= 0) {
+    userTail = "\n\n" + marker + body.slice(markerIdx + marker.length);
+  } else {
+    const trimmed = body.trim();
     userTail = trimmed ? "\n\n" + trimmed : "";
   }
   return chrome + userTail;
@@ -11342,6 +11403,59 @@ async function applyHomeScaffoldHeal(tp, history, git) {
   } catch (e) {
     history?.push({ event: "warning", step: "home_scaffold_heal", name: "Home.md",
       reason: `home scaffold/heal failed: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+// applyReaderScaffoldHeal — ungated scaffold + chrome heal for the singleton
+// spice/reader/Reader.md reading-queue hub note. Runs every install (NOT
+// version-gated, per the migration-lifecycle rule, because it materializes +
+// heals a user-facing note). Posture mirrors applyHomeScaffoldHeal: guard on the
+// adapter, ensure the folder, backup-first before any overwrite, per-step
+// try/catch → history warning on fail / info on success, NEVER throws.
+//
+//   MISSING → write the canonical chrome body (a brand-new file needs no backup).
+//   PRESENT → read → _healReaderChromeBody → if changed, snapshot to a timestamped
+//             .sauce-backup copy FIRST, then write the healed body; a healthy note
+//             is a no-op (the pure helper returns it unchanged).
+//
+// Idempotent: once Reader.md carries the chrome, _healReaderChromeBody returns it
+// byte-for-byte, so a second install writes zero files.
+async function applyReaderScaffoldHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const READER_DIR = "spice/reader";
+  const READER_PATH = "spice/reader/Reader.md";
+  try {
+    // Ensure the module-directory namespace exists.
+    if (!(await adapter.exists(READER_DIR))) {
+      try { await adapter.mkdir(READER_DIR); } catch (_e) { /* already exists */ }
+    }
+
+    if (!(await adapter.exists(READER_PATH))) {
+      // Brand-new file — no backup needed. Frontmatter mirrors the hub template.
+      const fm = `---\ntype: reader-hub\ntitle: Reader\ndir: spice/reader\ncreated_at: "${new Date().toISOString()}"\ntags:\n  - reader-hub\n---\n\n`;
+      await adapter.write(READER_PATH, fm + _READER_CHROME + "\n");
+      history?.push({ event: "info", step: "reader_scaffold_heal", name: "Reader.md", action: "created",
+        reason: `scaffolded ${READER_PATH}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      return;
+    }
+
+    const before = await adapter.read(READER_PATH);
+    const after = _healReaderChromeBody(before);
+    if (after === before) return; // healthy note — no-op
+    const backupPath = `.sauce-backup/reader/Reader.md.${ts}`;
+    try { await adapter.mkdir(".sauce-backup/reader"); } catch (_e) { /* already exists */ }
+    try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+    await adapter.write(READER_PATH, after);
+    history?.push({ event: "info", step: "reader_scaffold_heal", name: "Reader.md", action: "healed",
+      reason: `healed ${READER_PATH} (backup at ${backupPath})`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "reader_scaffold_heal", name: "Reader.md",
+      reason: `reader scaffold/heal failed: ${e && e.message ? e.message : String(e)}`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
   }
 }
@@ -19492,6 +19606,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // is also extracted by regex in the harness; expose it explicitly too.
     module.exports.applyHomeScaffoldHeal = applyHomeScaffoldHeal;
     module.exports._healHomeChromeBody = _healHomeChromeBody;
+    // reader-scaffold heal — materialize + chrome-heal the singleton
+    // spice/reader/Reader.md reading-queue hub. The pure body transform is also
+    // extractable by regex in a harness; expose it explicitly too.
+    module.exports.applyReaderScaffoldHeal = applyReaderScaffoldHeal;
+    module.exports._healReaderChromeBody = _healReaderChromeBody;
     // task-entity — backup-first daily→note-per-task migration (for
     // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
     module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;
