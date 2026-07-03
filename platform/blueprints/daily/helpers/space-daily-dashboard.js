@@ -154,6 +154,61 @@ class SpaceDailyDashboard {
     return open;
   }
 
+  /**
+   * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
+   * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
+   * render() `getTasks` closure is just the adapter passing the live dv +
+   * customJS.TaskEntity. Returns { open, done }:
+   *   open — parsed task objects (TaskEntity.parseNote), today-first then overdue,
+   *          each tagged `_overdue`. Partitioned by TaskEntity.queryToday, which is
+   *          SOURCE-AGNOSTIC (scheduled==today | scheduled<today; future + unscheduled
+   *          excluded). We use queryToday, NOT TaskTodayList.buildBands, because
+   *          buildBands drops project_slug/source==meeting tasks (they render in the
+   *          TO-DO note's own sections) — the dashboard mirror wants ALL sources.
+   *   done — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
+   *          only; all-done would grow unbounded with vault history).
+   * Filtering is done in plain JS AFTER dv.pages() (not via DataArray .where) so a
+   * plain-array dv-stub exercises the real path. No TE (cold load / mechanism not
+   * registered) → { open: [], done: 0 }; the panel simply hides. Never throws.
+   */
+  static selectTasks(dv, todayStr, TE) {
+    if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
+      return { open: [], done: 0 };
+    }
+    const toArr = (q) => {
+      try {
+        const r = dv.pages(q);
+        if (!r) return [];
+        if (typeof r.array === "function") return r.array();
+        return Array.from(r);
+      } catch (_e) { return []; }
+    };
+
+    // Open — all sources, excluding the _done/ + _trash/ archives.
+    const openParsed = [];
+    for (const p of toArr('"spice/tasks"')) {
+      if (!p || p.type !== "task" || p.status !== "open") continue;
+      const path = p.file && p.file.path;
+      if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
+      openParsed.push(TE.parseNote(p));
+    }
+    const bands = TE.queryToday(openParsed, todayStr);
+    const open = [];
+    for (const t of bands.today)   open.push(Object.assign({}, t, { _overdue: false }));
+    for (const t of bands.overdue) open.push(Object.assign({}, t, { _overdue: true }));
+
+    // Done today — _done/ notes with completed_at date == today.
+    let done = 0;
+    for (const p of toArr('"spice/tasks/_done"')) {
+      if (!p || p.type !== "task") continue;
+      const path = p.file && p.file.path;
+      if (!path || path.includes("/_trash/")) continue;
+      if (TE._toDateStr(p.completed_at) === todayStr) done++;
+    }
+
+    return { open, done };
+  }
+
   async render(dv) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,

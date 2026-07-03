@@ -3126,6 +3126,69 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
   return pass;
 }
 
+// SELTASK-1 — faithful test of the note-per-task data seam. Loads the REAL
+// SpaceDailyDashboard + TaskEntity classes and drives SpaceDailyDashboard.selectTasks
+// through a plain-array dv-stub returning task-note-shaped pages. Exercises the ACTUAL
+// selection path (not a hand-built replica) — the class of bug this file exists to catch.
+async function testSelectTasksNotePerTask() {
+  const fs = require("fs");
+  const path = require("path");
+  const sddSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  const teSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/mechanisms/task-entity/task-entity.js"), "utf8");
+  const SDD = new Function(`${sddSrc}\nreturn SpaceDailyDashboard;`)();
+  const TaskEntity = new Function(`${teSrc}\nreturn TaskEntity;`)();
+  const TE = new TaskEntity(); // customJS stores INSTANCES; delegators call the statics
+
+  const today = "2026-07-02";
+  const pagesByQuery = {
+    '"spice/tasks"': [
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "daily today", source: "daily",   file: { path: "spice/tasks/daily-today.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "proj today",  source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-today.md" } },
+      { type: "task", status: "open", scheduled: "2026-06-30", title: "mtg overdue", source: "meeting",  file: { path: "spice/tasks/mtg-overdue.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-05", title: "future",       file: { path: "spice/tasks/future.md" } },
+      { type: "task", status: "open", scheduled: "",           title: "someday",      file: { path: "spice/tasks/someday.md" } },
+      { type: "task", status: "done", scheduled: "2026-07-02", title: "leaked done",  file: { path: "spice/tasks/_done/leaked.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "trashed",      file: { path: "spice/tasks/_trash/trashed.md" } },
+      { type: "note", status: "open", scheduled: "2026-07-02", title: "not a task",   file: { path: "spice/tasks/note.md" } },
+    ],
+    '"spice/tasks/_done"': [
+      { type: "task", status: "done", completed_at: "2026-07-02T09:15:00-06:00", title: "done today dt",   file: { path: "spice/tasks/_done/a.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-02",                title: "done today date", file: { path: "spice/tasks/_done/b.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-01T23:00:00-06:00", title: "done yesterday",  file: { path: "spice/tasks/_done/c.md" } },
+      { type: "task", status: "done", completed_at: "",                          title: "done no date",    file: { path: "spice/tasks/_done/d.md" } },
+      { type: "task", status: "done", completed_at: "2026-07-02",                title: "trashed done",    file: { path: "spice/tasks/_done/_trash/e.md" } },
+    ],
+  };
+  const fakeDv = { pages: (q) => pagesByQuery[q] || [] };
+
+  let ok = true;
+  const check = (label, cond) => { if (!cond) { ok = false; console.log(`  FAIL: SELTASK-1 ${label}`); } };
+
+  const res = SDD.selectTasks(fakeDv, today, TE);
+  const titles = res.open.map((t) => t.title);
+
+  check("open has exactly the 3 today/overdue tasks", res.open.length === 3);
+  check("all sources present (project + meeting NOT filtered out)",
+    titles.indexOf("proj today") >= 0 && titles.indexOf("mtg overdue") >= 0 && titles.indexOf("daily today") >= 0);
+  check("today band rendered first (2 today, then overdue)",
+    res.open[0].scheduled === "2026-07-02" && res.open[1].scheduled === "2026-07-02" && res.open[2].scheduled === "2026-06-30");
+  check("today rows tagged _overdue:false", res.open[0]._overdue === false && res.open[1]._overdue === false);
+  check("overdue row tagged _overdue:true", res.open[2]._overdue === true);
+  check("future excluded", titles.indexOf("future") < 0);
+  check("unscheduled excluded", titles.indexOf("someday") < 0);
+  check("_trash excluded from open", titles.indexOf("trashed") < 0);
+  check("_done leak excluded from open", titles.indexOf("leaked done") < 0);
+  check("non-task type excluded", titles.indexOf("not a task") < 0);
+  check("done == 2 (today incl datetime form; excl yesterday/no-date/trashed)", res.done === 2);
+
+  const cold = SDD.selectTasks(fakeDv, today, null);
+  check("cold-load (no TE) → empty open + zero done", cold.open.length === 0 && cold.done === 0);
+
+  return ok;
+}
+
 // ── REND-V067-TIME-1: SpaceDailyDashboard._formatTime duck-types Luxon + moment ──
 // v0.67.0: _formatTime must accept a Luxon DateTime (has .toFormat()), a
 // moment-compatible string, and return null for null/undefined.
@@ -3521,6 +3584,7 @@ async function testRendHasNotes() {
       }
     }
     if (which === 'daily' || which === 'all') {
+      results.push(['SELTASK-1 selectTasks note-per-task data seam', await testSelectTasksNotePerTask()]);
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
       results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
       results.push(['REND-V01241-LINK-1 _renderTaskHTML balanced-paren scan for link URLs', await testRendV01241Link1()]);
