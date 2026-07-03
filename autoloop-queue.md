@@ -170,3 +170,39 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   rationale: blueprint trips axis widget_render: 3 uncovered
   status: done
   note: NEW run-trips-render-guards.js drives TripsHubCards / TripNavButtons / TripSectionsCards render() through the cold-load path (RenderSafe.page/dv.current undefined+null → nav/sections early-return on `if (!page || !page.file) return`; TripsHubCards queries empty dv.pages → empty BeaconCards) in normal + .markdown-embed contexts, asserting no-throw (9 guards). Wired into release:preflight. coverage-matrix.json regenerated: trips widget_render now 3/3.
+
+- id: cov-blueprint-teams-widget-render
+  title: Add coverage for teams widget_render (0/3)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint teams axis widget_render: 3 uncovered
+  status: done
+  note: PR #297 — NEW run-teams-render-guards.js drives TeamsHubCards / TeamPageCards / TeamActionButtons render() through the cold-load path (embed guard + empty dv.pages empty-state) in normal + .markdown-embed contexts, asserting no-throw (9 guards). Wired into release:preflight; coverage-matrix.json regenerated to 3/3.
+
+- id: cov-blueprint-people-widget-render
+  title: Add coverage for people widget_render (0/2)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint people axis widget_render: 2 uncovered
+  status: proposed
+
+- id: cov-blueprint-scratch-installer-migration
+  title: Add coverage for scratch installer_migration (2/4)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint scratch axis installer_migration: 2 uncovered
+  status: proposed
+
+- id: cov-mechanism-breadcrumb-installer-migration
+  title: Add coverage for breadcrumb installer_migration (1/3)
+  category: test
+  source: coverage-matrix
+  rationale: mechanism breadcrumb axis installer_migration: 2 uncovered
+  status: proposed
+
+- id: cov-blueprint-meetings-installer-migration
+  title: Add coverage for meetings installer_migration (6/7)
+  category: test
+  source: coverage-matrix
+  rationale: blueprint meetings axis installer_migration: 1 uncovered
+  status: proposed
