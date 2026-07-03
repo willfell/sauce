@@ -152,35 +152,91 @@ class ActivityFeed {
     }).join(" ");
   }
   /**
-   * Render a time-windowed activity feed across blueprints.
-   * @param {object} dv  — Dataview API in dataviewjs scope
+   * v0.8.0 (sauce dashboard 2→1 sweep): parse the QUERY-affecting subset of
+   * opts into a normalized bundle. Extracted from render() so render() and the
+   * new public query() share one parser and can NEVER diverge on what set of
+   * pages a given opts produces. Render-only opts (groupBy / getTitle /
+   * collapsible / colorByType / metaBuilder / framing / grouping / labels) are
+   * NOT parsed here — they don't affect the queried page set.
    * @param {object} opts
+   * @returns {{scope,limit,useStatusChangedAt,asOf,includeMtime,rollUpRoots,blueprints}}
    */
-  async render(dv, opts) {
+  _parseQueryOpts(opts) {
     const safeOpts = opts || {};
     const scope = (safeOpts.scope === "week" || safeOpts.scope === "month")
       ? safeOpts.scope
       : "today";
-    const groupBy = (safeOpts.groupBy === "hour" || safeOpts.groupBy === "none")
-      ? safeOpts.groupBy
-      : "blueprint";
     const limit = typeof safeOpts.limit === "number" && safeOpts.limit > 0
       ? safeOpts.limit
       : 50;
     const useStatusChangedAt = safeOpts.useStatusChangedAt === true;
     const asOf = safeOpts.asOf;
     const includeMtime = safeOpts.includeMtime === true;
+    const rollUpRoots = Array.isArray(safeOpts.rollUpRoots) ? safeOpts.rollUpRoots : null;
+    const blueprints = Array.isArray(safeOpts.blueprints) && safeOpts.blueprints.length > 0
+      ? safeOpts.blueprints.map(String)
+      : this._DEFAULT_BLUEPRINTS;
+    return { scope, limit, useStatusChangedAt, asOf, includeMtime, rollUpRoots, blueprints };
+  }
+
+  /**
+   * v0.8.0 (sauce dashboard 2→1 sweep): public coalesced-sweep API. Returns
+   * { pages, total } — the SAME pages render() would surface for the SAME opts
+   * (identical _parseQueryOpts + _query), plus pages.length as `total`. Lets a
+   * caller (the daily/Home dashboard) sweep the vault ONCE, use `total` for its
+   * hasContent gate + count pill, and hand `pages` back to render() via
+   * opts.precomputed so render() skips its own internal _query. Never throws:
+   * a time-window resolve or query failure yields { pages: [], total: 0 }.
+   * @param {object} dv  — Dataview API in dataviewjs scope
+   * @param {object} opts — same opts shape render() accepts
+   * @returns {{pages: Array, total: number}}
+   */
+  query(dv, opts) {
+    const p = this._parseQueryOpts(opts);
+    let timeWindow;
+    try {
+      timeWindow = this._resolveTimeWindow(p.scope, p.asOf);
+    } catch (_) {
+      return { pages: [], total: 0 };
+    }
+    if (!timeWindow) return { pages: [], total: 0 };
+    let pages;
+    try {
+      pages = this._query(dv, p.blueprints, timeWindow, p.useStatusChangedAt, p.includeMtime, p.limit, p.rollUpRoots, opts);
+    } catch (_) {
+      return { pages: [], total: 0 };
+    }
+    const arr = Array.isArray(pages) ? pages : [];
+    return { pages: arr, total: arr.length };
+  }
+
+  /**
+   * Render a time-windowed activity feed across blueprints.
+   * @param {object} dv  — Dataview API in dataviewjs scope
+   * @param {object} opts
+   */
+  async render(dv, opts) {
+    const safeOpts = opts || {};
+    // v0.8.0: query-affecting opts come from the shared parser so render() and
+    // query() can never diverge on the page set.
+    const parsed = this._parseQueryOpts(safeOpts);
+    const scope = parsed.scope;
+    const limit = parsed.limit;
+    const useStatusChangedAt = parsed.useStatusChangedAt;
+    const asOf = parsed.asOf;
+    const includeMtime = parsed.includeMtime;
+    const rollUpRoots = parsed.rollUpRoots;
+    const blueprints = parsed.blueprints;
+    // Render-only opts (do not affect the queried page set).
+    const groupBy = (safeOpts.groupBy === "hour" || safeOpts.groupBy === "none")
+      ? safeOpts.groupBy
+      : "blueprint";
     // v0.1.2 additive opts
     const getTitle = typeof safeOpts.getTitle === "function" ? safeOpts.getTitle : null;
     const collapsible = safeOpts.collapsible === true;
     const colorByType = (safeOpts.colorByType && typeof safeOpts.colorByType === "object") ? safeOpts.colorByType : null;
     // v0.3.0 additive opts
     const metaBuilder = (typeof safeOpts.metaBuilder === "function" && safeOpts.metaBuilder.length >= 2) ? safeOpts.metaBuilder : null;
-    const rollUpRoots = Array.isArray(safeOpts.rollUpRoots) ? safeOpts.rollUpRoots : null;
-
-    const blueprints = Array.isArray(safeOpts.blueprints) && safeOpts.blueprints.length > 0
-      ? safeOpts.blueprints.map(String)
-      : this._DEFAULT_BLUEPRINTS;
 
     if (typeof safeOpts.title === "string" && safeOpts.title.length > 0) {
       const h = dv.container.createEl("h3");
@@ -200,12 +256,22 @@ class ActivityFeed {
       return;
     }
 
+    // v0.8.0 (sauce dashboard 2→1 sweep): when the caller has ALREADY produced
+    // the page set via query() (same _parseQueryOpts + same _query), it hands
+    // them back here so we skip our own vault sweep. Only honored when
+    // opts.precomputed.pages is a real array; otherwise (every non-dashboard
+    // caller — cowork's 4 blocks etc.) we _query as before. Everything after
+    // this point is unchanged.
     let pages;
-    try {
-      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots, opts);
-    } catch (e) {
-      new Notice("ActivityFeed: query failed — " + (e && e.message ? e.message : String(e)));
-      return;
+    if (safeOpts.precomputed && Array.isArray(safeOpts.precomputed.pages)) {
+      pages = safeOpts.precomputed.pages;
+    } else {
+      try {
+        pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots, opts);
+      } catch (e) {
+        new Notice("ActivityFeed: query failed — " + (e && e.message ? e.message : String(e)));
+        return;
+      }
     }
 
     if (!pages || pages.length === 0) {

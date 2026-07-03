@@ -3412,12 +3412,22 @@ async function runDashboardRender({ params, fileName }) {
   };
 
   // customJS stub: BeaconCards + ActivityFeed spies, TaskEntity returns no tasks.
+  // 2→1 sweep reduction: SpaceDailyDashboard.render now calls
+  // customJS.ActivityFeed.query(dv, opts) ONCE for the activity count (was the
+  // retired _getActivityCount). The query spy returns the activity pages whose
+  // `day` matches the derived asOf — total > 0 so the activity section renders
+  // and the render spy fires (letting REND-ASOF-A2/B2 observe the derived asOf).
   let capturedActivityAsOf = null;
   const customJS = {
     TaskEntity: { queryToday: () => ({ personal: [], all: [] }) },
     TaskTodayList: null,
     BeaconCards: { render: async () => {} },
     ActivityFeed: {
+      query: (_dv, opts) => {
+        const asOf = opts && opts.asOf;
+        const pages = activityPages.filter(p => p && p.day === asOf);
+        return { pages, total: pages.length };
+      },
       render: async (_shim, opts) => { capturedActivityAsOf = opts && opts.asOf; },
     },
   };

@@ -1,81 +1,212 @@
 'use strict';
 // run-daily-dashboard.js — behavioral harness for SpaceDailyDashboard perf-critical
-// query paths. Currently guards the L5 fusion: _getActivityCount must sweep
-// dv.pages() ONCE (was twice) and memoize the per-project/-trip rollup scoped
-// query by slug (was once per matching child), while producing byte-identical
-// {total, byBlueprint}. Drives the REAL _getActivityCount against a page stub.
+// query paths. Guards the 2→1 sweep reduction: the dashboard no longer runs its
+// own _getActivityCount sweep AND ActivityFeed.render's _query sweep. It now
+// calls customJS.ActivityFeed.query(dv, opts) ONCE (one unscoped dv.pages()
+// sweep), uses .total for the hasContent gate + count pill, derives the
+// segmented-accent byBlueprint from query().pages via bucketByBlueprint(), and
+// hands the same pages back into ActivityFeed.render via precomputed.
+//
+// These cases drive the REAL SpaceDailyDashboard.render against DOM/dv/customJS
+// stubs, plus the REAL static bucketByBlueprint() over the pages the REAL
+// ActivityFeed.query() (loaded from the mechanism source) produces for the same
+// fixture — so the count + byBlueprint parity with the old _getActivityCount is
+// asserted against the genuine query path, not a hand-rolled replica.
 
 const fs = require('fs');
 const path = require('path');
 
 const WORKSHOP = path.resolve(__dirname, '..', '..');
-const SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/helpers/space-daily-dashboard.js'), 'utf8');
-function loadClass() { return new Function(`${SRC}\n; return SpaceDailyDashboard;`)(); }
+const SDD_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/helpers/space-daily-dashboard.js'), 'utf8');
+const AF_SRC  = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/activity-feed/activity-feed.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, msg) { if (cond) { pass++; } else { fail++; console.log('  FAIL ' + msg); } }
 async function ok(name, fn) { try { await fn(); console.log('ok ' + name); } catch (e) { fail++; console.log('FAIL ' + name + ': ' + (e && e.message || e)); } }
 
-// A minimal Dataview `dv` stub. Unscoped dv.pages() returns an iterable of all
-// pages (counted); scoped dv.pages('"..."') returns a DataArray-ish with
-// .where(fn).array() (counted per distinct query string).
-function makeDv(allPages, scopedMap) {
-  const state = { noArg: 0, scoped: {} };
-  const dv = {
-    _state: state,
-    pages: (q) => {
-      if (q == null || q === '') { state.noArg++; return allPages.slice(); }
-      state.scoped[q] = (state.scoped[q] || 0) + 1;
-      const arr = (scopedMap[q] || []).slice();
-      return {
-        where: (fn) => ({ array: () => arr.filter(fn) }),
-        array: () => arr,
-        [Symbol.iterator]: function* () { yield* arr; },
-      };
-    },
+// ── Shared stubs ────────────────────────────────────────────────────────────
+
+// Deterministic moment stub: startOf/endOf('day').format() → today±time; also
+// supports .clone()/.valueOf() so both the dashboard AND activity-feed's _query
+// (which calls window.moment(iso).valueOf()) work.
+function makeMomentWindow() {
+  const wrap = (raw) => {
+    const iso = String(raw);
+    const datePart = iso.slice(0, 10);
+    return {
+      clone() { return wrap(iso); },
+      startOf() { return wrap(datePart + 'T00:00:00'); },
+      endOf() { return wrap(datePart + 'T23:59:59'); },
+      format() { return iso.length > 10 ? iso : datePart + 'T00:00:00'; },
+      valueOf() {
+        // Order-preserving numeric collapse: strip non-digits from the ISO.
+        return Number(iso.replace(/[^0-9]/g, '').padEnd(14, '0'));
+      },
+    };
   };
-  return dv;
+  return { moment: (d) => wrap(d) };
+}
+
+// Minimal DOM-element shim used by SpaceDailyDashboard.render.
+function makeDashEl() {
+  const el = {
+    _tag: 'div',
+    _children: [],
+    className: '',
+    dataset: {},
+    style: {},
+    _text: '',
+    _html: '',
+    open: false,
+    createEl(tag, _opts) { const c = makeDashEl(); c._tag = tag; this._children.push(c); return c; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+    remove() {},
+    get textContent() { return this._text + this._children.map(c => c.textContent).join(''); },
+    set textContent(v) { this._text = String(v == null ? '' : v); this._children = []; },
+    get innerHTML() { return this._html; },
+    set innerHTML(v) { this._html = String(v == null ? '' : v); },
+  };
+  Object.defineProperty(el.style, 'cssText', { value: '', writable: true, configurable: true });
+  return el;
+}
+
+// Load SpaceDailyDashboard with window + customJS injected (render/_readSectionState
+// guard `typeof app`, so app stays undefined and the shims fire).
+function loadDashboard(windowShim, customJS) {
+  return new Function('window', 'customJS', `${SDD_SRC}\nreturn SpaceDailyDashboard;`)(windowShim, customJS);
+}
+
+// Load the REAL ActivityFeed class from the mechanism source (same eval strategy
+// the activity-feed harness uses) so query()/bucketing parity is asserted
+// against the genuine query path.
+function loadActivityFeed(windowShim) {
+  return new Function('app', 'customJS', 'Notice', 'window', `${AF_SRC}\nreturn ActivityFeed;`)(
+    {}, { BeaconCards: { render() {} } }, function () {}, windowShim);
 }
 
 (async () => {
-  const SpaceDailyDashboard = loadClass();
-  const dash = new SpaceDailyDashboard();
-
-  // Deterministic moment stub: startOf/endOf('day').format() → today±time so the
-  // `day:`-frontmatter window check (ts.slice(0,10) between start/end slice(0,10)) works.
   const TODAY = '2026-07-03';
-  global.window = { moment: (d) => ({ startOf: () => ({ format: () => d + 'T00:00:00' }), endOf: () => ({ format: () => d + 'T23:59:59' }) }) };
 
+  // Fixture (unchanged from the pre-2→1 DASH-L5-3 scenario): one direct project
+  // hit (foo) + a project whose two task children roll up into its hub (bar).
+  // Expected activity: total 2 (foo direct + bar rollup root), byBlueprint {project:2}.
   const pages = [
-    { type: 'project', day: TODAY,        file: { path: 'spice/projects/foo/Foo.md', name: 'Foo.md' } }, // direct hit
-    { type: 'task',    day: TODAY,        file: { path: 'spice/projects/bar/tasks/t1.md', name: 't1.md' } }, // rollup child of bar
-    { type: 'task',    day: TODAY,        file: { path: 'spice/projects/bar/tasks/t2.md', name: 't2.md' } }, // rollup child of bar (same slug)
-    { type: 'project', day: '2020-01-01', file: { path: 'spice/projects/bar/Bar.md', name: 'Bar.md' } },  // rollup ROOT (out of window)
-    { type: 'note',    day: '2020-01-01', file: { path: 'spice/misc/x.md', name: 'x.md' } },              // ignored
+    { type: 'project', day: TODAY,        file: { path: 'spice/projects/foo/Foo.md', name: 'Foo.md' }, name: 'Foo' },
+    { type: 'task',    day: TODAY,        file: { path: 'spice/projects/bar/tasks/t1.md', name: 't1.md' } },
+    { type: 'task',    day: TODAY,        file: { path: 'spice/projects/bar/tasks/t2.md', name: 't2.md' } },
+    { type: 'project', day: TODAY,        file: { path: 'spice/projects/bar/Bar.md', name: 'Bar.md' }, name: 'Bar' },
+    { type: 'note',    day: '2020-01-01', file: { path: 'spice/misc/x.md', name: 'x.md' } },
   ];
   const scopedMap = {
-    '"spice/projects/bar"': [pages[3]], // the bar hub
+    '"spice/projects/bar"': [pages[3]],
     '"spice/projects/foo"': [pages[0]],
+    '"spice/meetings/notes"': [],
+    '"spice/tasks"': [],
+    '"spice/tasks/_done"': [],
   };
 
-  await ok('DASH-L5-1 _getActivityCount sweeps dv.pages() exactly ONCE', async () => {
-    const dv = makeDv(pages, scopedMap);
-    await dash._getActivityCount(dv, TODAY);
-    assert(dv._state.noArg === 1, 'expected 1 unscoped dv.pages() sweep, got ' + dv._state.noArg);
+  // Build a dv that counts unscoped sweeps + memoizable scoped sweeps and returns
+  // Dataview-DataArray-ish results (.where/.sort/.array + iterator).
+  function makeDv() {
+    const state = { noArg: 0, scoped: {} };
+    function chain(items) {
+      const c = {
+        _arr: items.slice(),
+        where(fn) { return chain(this._arr.filter(fn)); },
+        sort(fn, dir) {
+          const s = this._arr.slice();
+          try { s.sort((a, b) => { const av = fn(a), bv = fn(b); const r = av > bv ? 1 : av < bv ? -1 : 0; return dir === 'desc' ? -r : r; }); } catch (_) {}
+          return chain(s);
+        },
+        slice(a, b) { return chain(this._arr.slice(a, b)); },
+        array() { return this._arr.slice(); },
+      };
+      c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+      Object.defineProperty(c, 'length', { get() { return c._arr.length; } });
+      return c;
+    }
+    const dv = {
+      _state: state,
+      pages(q) {
+        if (q == null || q === '') { state.noArg++; return chain(pages); }
+        state.scoped[q] = (state.scoped[q] || 0) + 1;
+        return chain(scopedMap[q] || []);
+      },
+      page(p) { return pages.find(pg => pg && pg.file && pg.file.path === p) || null; },
+      el(tag) { const e = makeDashEl(); e._tag = tag; this.container._children.push(e); return e; },
+      current() { return { file: { name: 'Journal-' + TODAY } }; },
+      container: makeDashEl(),
+    };
+    return dv;
+  }
+
+  const windowShim = makeMomentWindow();
+  const RealActivityFeed = loadActivityFeed(windowShim);
+  const realAF = new RealActivityFeed();
+
+  // customJS stub whose ActivityFeed.query DELEGATES to the REAL ActivityFeed
+  // (so the sweep + rollup + bucketing are the genuine query path), while
+  // ActivityFeed.render is a spy that records whether it received precomputed
+  // pages. TaskEntity/TaskTodayList absent → tasks zeroed; BeaconCards no-op.
+  function makeCustomJS() {
+    const spy = { renderCalls: 0, renderPrecomputed: null, renderPages: null, queryCalls: 0 };
+    const customJS = {
+      TaskEntity: null,
+      TaskTodayList: null,
+      BeaconCards: { render: async () => {} },
+      ActivityFeed: {
+        query: (dv, opts) => { spy.queryCalls++; return realAF.query(dv, opts); },
+        render: async (_shim, opts) => {
+          spy.renderCalls++;
+          spy.renderPrecomputed = opts && opts.precomputed ? opts.precomputed : null;
+          spy.renderPages = spy.renderPrecomputed && Array.isArray(spy.renderPrecomputed.pages)
+            ? spy.renderPrecomputed.pages : null;
+        },
+      },
+    };
+    return { customJS, spy };
+  }
+
+  await ok('DASH-L5-1 dashboard sweeps dv.pages() exactly ONCE for activity (via ActivityFeed.query)', async () => {
+    const { customJS, spy } = makeCustomJS();
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, customJS);
+    await new Dash().render(dv, undefined);
+    assert(spy.queryCalls === 1, 'expected ActivityFeed.query called once, got ' + spy.queryCalls);
+    assert(dv._state.noArg === 1, 'expected exactly 1 unscoped dv.pages() sweep, got ' + dv._state.noArg);
   });
 
-  await ok('DASH-L5-2 rollup scoped query is memoized per slug (once for bar, not once per child)', async () => {
-    const dv = makeDv(pages, scopedMap);
-    await dash._getActivityCount(dv, TODAY);
-    assert(dv._state.scoped['"spice/projects/bar"'] === 1,
-      'expected bar scoped query memoized to 1, got ' + dv._state.scoped['"spice/projects/bar"']);
+  await ok('DASH-L5-2 dashboard hands the SAME pages back to ActivityFeed.render via precomputed', async () => {
+    const { customJS, spy } = makeCustomJS();
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, customJS);
+    await new Dash().render(dv, undefined);
+    assert(spy.renderCalls === 1, 'expected ActivityFeed.render called once, got ' + spy.renderCalls);
+    assert(spy.renderPrecomputed && Array.isArray(spy.renderPages),
+      'expected render to receive precomputed.pages array');
+    assert(spy.renderPages && spy.renderPages.length === 2,
+      'expected 2 precomputed pages (foo direct + bar rollup), got ' + (spy.renderPages && spy.renderPages.length));
   });
 
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
-    const dv = makeDv(pages, scopedMap);
-    const r = await dash._getActivityCount(dv, TODAY);
-    assert(r.total === 2, 'expected total 2 (foo direct + bar rollup), got ' + r.total);
-    assert(r.byBlueprint && r.byBlueprint.project === 2, 'expected byBlueprint.project === 2, got ' + JSON.stringify(r.byBlueprint));
+    // Drive the REAL ActivityFeed.query with the same opts the dashboard passes,
+    // then the REAL static bucketByBlueprint over those pages.
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    const opts = {
+      scope: 'today', asOf: TODAY, includeMtime: true, groupBy: 'blueprint',
+      blueprints: dash._DEFAULT_DASHBOARD_BLUEPRINTS,
+      tsKeys: ['day', 'created_at', 'status_changed_at'],
+      rollUpRoots: dash._buildRollupRules(dv),
+    };
+    const q = realAF.query(dv, opts);
+    assert(q.total === 2, 'expected total 2 (foo direct + bar rollup), got ' + q.total);
+    const byBlueprint = Dash.bucketByBlueprint(q.pages);
+    assert(byBlueprint && byBlueprint.project === 2,
+      'expected byBlueprint.project === 2, got ' + JSON.stringify(byBlueprint));
   });
 
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
