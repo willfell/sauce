@@ -263,6 +263,88 @@ function descendants(el) {
       `.sauce-home should precede the dashboard mount in the container; top-level cls = ${JSON.stringify(top.map((k) => k.cls))}`);
   }
 
+  // ── HOME-CAP: dispatch wiring per button ───────────────────────────────────
+  installMoment("2026-07-02", 6);
+  {
+    const dv = makeDv();
+
+    // Spies on the real APIs.
+    const calls = { taskOpen: [], entityCreate: [], commandIds: [] };
+    global.customJS = {
+      TaskDialog: { open: (opts) => calls.taskOpen.push(opts) },
+      EntityCreate: { create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); } },
+    };
+    global.app = { commands: { executeCommandById: (id) => calls.commandIds.push(id) } };
+    global.window.customJS = global.customJS;
+    global.window.app = global.app;
+
+    await home_.render(dv, {});
+
+    const home = dv.container.querySelector(".sauce-home");
+    const band = home ? home.children.find((k) => (k.cls || "").includes("sauce-home-capture")) : null;
+    const buttons = band ? descendants(band).filter((n) => n.tag === "button") : [];
+    assertEq("HOME-CAP-7 render wired 4 capture buttons", buttons.length, 4);
+
+    // Invoke each button's click handler and assert the dispatch.
+    const fire = (btn) => {
+      if (btn && typeof btn.onclick === "function") return btn.onclick({});
+      return undefined;
+    };
+
+    // Button 0 = todo → TaskDialog.open({ surface:'daily', today })
+    await fire(buttons[0]);
+    assertEq("HOME-CAP-8 todo → TaskDialog.open called once", calls.taskOpen.length, 1);
+    assertTrue("HOME-CAP-9 todo → open opts carry surface 'daily'",
+      calls.taskOpen[0] && calls.taskOpen[0].surface === "daily",
+      `expected TaskDialog.open({ surface:'daily', … }); got ${JSON.stringify(calls.taskOpen[0])}`);
+    assertTrue("HOME-CAP-10 todo → open opts carry today",
+      calls.taskOpen[0] && calls.taskOpen[0].today === "2026-07-02",
+      `expected today == '2026-07-02'; got ${JSON.stringify(calls.taskOpen[0])}`);
+
+    // Button 1 = meeting → EntityCreate.create({ instance:'meeting', dv })
+    await fire(buttons[1]);
+    // Button 2 = scratch → EntityCreate.create({ instance:'scratch', dv })
+    await fire(buttons[2]);
+    assertEq("HOME-CAP-11 meeting+scratch → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
+    assertEq("HOME-CAP-12 meeting → instance 'meeting'", calls.entityCreate[0] && calls.entityCreate[0].instance, "meeting");
+    assertEq("HOME-CAP-13 scratch → instance 'scratch'", calls.entityCreate[1] && calls.entityCreate[1].instance, "scratch");
+    assertTrue("HOME-CAP-14 EntityCreate.create receives dv",
+      calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
+      "EntityCreate.create must receive the live dv");
+
+    // Button 3 = openDaily → app.commands.executeCommandById('daily-notes')
+    await fire(buttons[3]);
+    assertEq("HOME-CAP-15 openDaily → executeCommandById once", calls.commandIds.length, 1);
+    assertEq("HOME-CAP-16 openDaily → command id 'daily-notes'", calls.commandIds[0], "daily-notes");
+
+    delete global.customJS;
+    delete global.app;
+  }
+
+  // ── HOME-CAP: graceful degrade (missing APIs must not throw) ────────────────
+  installMoment("2026-07-02", 6);
+  {
+    const dv = makeDv();
+    delete global.customJS;
+    delete global.app;
+    global.window.customJS = undefined;
+    global.window.app = undefined;
+    let threw = false;
+    try {
+      await home_.render(dv, {});
+      const home = dv.container.querySelector(".sauce-home");
+      const band = home ? home.children.find((k) => (k.cls || "").includes("sauce-home-capture")) : null;
+      const buttons = band ? descendants(band).filter((n) => n.tag === "button") : [];
+      for (const b of buttons) {
+        if (b && typeof b.onclick === "function") await b.onclick({});
+      }
+    } catch (_e) {
+      threw = true;
+    }
+    assertTrue("HOME-CAP-17 buttons no-op gracefully when APIs absent", !threw,
+      "a missing customJS/app must make the capture buttons no-op, never throw");
+  }
+
   // ── Summary ────────────────────────────────────────────────────────────────
   console.log("\n=== Summary ===");
   for (const [name, ok] of results) console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);

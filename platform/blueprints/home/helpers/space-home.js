@@ -199,12 +199,53 @@ class SpaceHome {
   }
 
   /**
-   * Dispatch a capture key. Wired to the verified programmatic APIs in Task 3;
-   * for now a guarded no-op placeholder so the capture band renders in Task 2.
+   * Dispatch a capture key to the verified programmatic API. Each arm is guarded
+   * so a not-yet-registered mechanism (cold load) no-ops instead of throwing out
+   * of the click handler. Grep-verified entrypoints:
+   *   todo      → customJS.TaskDialog.open({ surface:'daily', today })
+   *               (platform/blueprints/to-do/helpers/todo-leaf-actions.js:125)
+   *   meeting   → customJS.EntityCreate.create({ instance:'meeting', dv })
+   *   scratch   → customJS.EntityCreate.create({ instance:'scratch', dv })
+   *   openDaily → app.commands.executeCommandById("daily-notes")
    */
   static _dispatch(key, dv, today) {
-    // Task 3 wires: todo → TaskDialog.open; meeting/scratch → EntityCreate.create;
-    // openDaily → app.commands.executeCommandById("daily-notes").
-    void key; void dv; void today;
+    const cjs = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const appRef = (typeof app !== "undefined" && app)
+      || (typeof window !== "undefined" && window.app)
+      || null;
+    try {
+      if (key === "todo") {
+        if (cjs && cjs.TaskDialog && typeof cjs.TaskDialog.open === "function") {
+          cjs.TaskDialog.open({ surface: "daily", today: today });
+        }
+        return;
+      }
+      if (key === "meeting") {
+        if (cjs && cjs.EntityCreate && typeof cjs.EntityCreate.create === "function") {
+          cjs.EntityCreate.create({ instance: "meeting", dv: dv });
+        }
+        return;
+      }
+      if (key === "scratch") {
+        if (cjs && cjs.EntityCreate && typeof cjs.EntityCreate.create === "function") {
+          cjs.EntityCreate.create({ instance: "scratch", dv: dv });
+        }
+        return;
+      }
+      if (key === "openDaily") {
+        if (appRef && appRef.commands && typeof appRef.commands.executeCommandById === "function") {
+          appRef.commands.executeCommandById("daily-notes");
+        }
+        return;
+      }
+    } catch (e) {
+      try {
+        if (typeof console !== "undefined" && console.debug) {
+          console.debug("SpaceHome capture dispatch failed for " + key + ": " + (e && (e.message || e)));
+        }
+      } catch (_e) { /* ignore */ }
+    }
   }
 }
