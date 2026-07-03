@@ -1,6 +1,6 @@
 {
   "name": "scratch",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
