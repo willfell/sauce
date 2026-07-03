@@ -200,7 +200,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: mechanism breadcrumb axis installer_migration: 2 uncovered
-  status: proposed
+  status: dismissed
+  note: Rubric scan-limitation artifact (same class as cov-blueprint-scratch-installer-migration). applyDocNoteBreadcrumbMarkerCleanup is genuinely tested — run-v0109-projects-overhaul.js CLN-B-0..5 edge cases + run-wiki-to-docs-migration.js (3 direct calls) — but scoreInstallerMigration only scans run-seed-migrations.js so it isn't credited. applyBreadcrumb is a GENERIC install-time registry aggregator (reads each mechanism's manifest.breadcrumb -> ranch/breadcrumb-registry.json) run for every mechanism on every install, so its happy path is exercised by every full-install test (run-seed.js/run-install.js); a direct edge-case unit test is absent but marginal, and crediting it here would need exporting applyBreadcrumb from install.js + a full Gate B panel — disproportionate. Durable fix = teach scoreInstallerMigration to credit run-helper-cases.js/run-v0109/run-wiki-to-docs + stop attributing generic install primitives to a surface (a coverage-rubric.js change with a run-coverage-rubric.js CRUB assert), not per-fn seed duplicates.
 
 - id: cov-blueprint-meetings-installer-migration
   title: Add coverage for meetings installer_migration (6/7)
