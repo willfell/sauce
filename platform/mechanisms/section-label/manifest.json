@@ -1,6 +1,6 @@
 {
   "name": "section-label",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shared section-label primitive. customJS.SectionLabel.render(dv, { text, top? }) renders a small uppercase muted label + hairline divider above — the canonical replacement for ## H2 section headings across every blueprint. Promoted verbatim from the project blueprint helper (sauce v0.109.0 S2) into a mechanism at v0.122.0 so non-project blueprints no longer depend on the project blueprint for it. Class name unchanged (SectionLabel) — existing dv.view + customJS.SectionLabel.render callers keep working.",
   "depends_on": [
     {
