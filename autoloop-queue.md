@@ -232,7 +232,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: mechanism backlink-panel axis widget_render: 1 uncovered
-  status: proposed
+  status: done
+  note: NEW run-backlink-panel-render-guards.js drives BacklinkPanel.render(dv, {entityType:'project'}) through the cold-load path (_reverseQuery guards dv.current()?.file -> [] -> _renderEmpty) in normal + .markdown-embed contexts, asserting no-throw (3 guards; needs a valid entityType + a no-op Notice stub). Wired into release:preflight. coverage-matrix.json regenerated: backlink-panel widget_render now 1/1.
 
 - id: cov-blueprint-home-installer-migration
   title: Add coverage for home installer_migration (0/1)
