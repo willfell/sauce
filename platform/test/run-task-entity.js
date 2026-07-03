@@ -690,6 +690,55 @@ ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink
   assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
 });
 
+// RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
+// edit dialog. Drives the REAL renderTaskRow against a DOM stub + a fake app +
+// a TaskDialog spy — the same faithful pattern as RIL-2 (not a hand-built replica).
+// The checkbox keeps its markDone gesture; only the title/row click changed target.
+ok('RTR-3 renderTaskRow: title click opens the task NOTE, not the edit dialog', () => {
+  const opened = [];
+  const openDialogCalls = [];
+  const prevWindow = global.window;
+  global.window = { app: { workspace: { openLinkText: (t, sp, nl) => opened.push([t, sp, nl]) } } };
+  const mkEl = () => ({
+    style: {}, dataset: {}, textContent: '', type: '', checked: false, cls: '',
+    children: [], _listeners: {},
+    createEl(tag, opts) {
+      const c = mkEl();
+      c.tagName = String(tag).toUpperCase();
+      if (opts) { if (opts.cls) c.cls = opts.cls; if (opts.text != null) c.textContent = opts.text; }
+      this.children.push(c);
+      return c;
+    },
+    createSpan(opts) { return this.createEl('span', opts); },
+    appendText(v) { this.children.push({ tagName: '#text', textContent: v }); },
+    setText(v) { this.textContent = v; this.children = []; },
+    empty() { this.children = []; },
+    setAttribute(k, v) { this.dataset[k] = v; },
+    addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    removeChild() {},
+    get firstChild() { return null; },
+  });
+  const container = mkEl();
+  const path = 'spice/tasks/go through mail.md';
+  const TD = { open: (a) => openDialogCalls.push(a), markDone: () => ({ ok: true }) };
+  const row = TaskTodayList.renderTaskRow(container, { title: 'go through mail', path }, TD);
+  const findByCls = (node, cls) => {
+    if (!node || !node.children) return null;
+    for (const c of node.children) { if (c.cls === cls) return c; const d = findByCls(c, cls); if (d) return d; }
+    return null;
+  };
+  const title = findByCls(row, 'sauce-task-today-title');
+  assert(title, 'title element rendered');
+  const clickFns = title._listeners.click || [];
+  assert(clickFns.length >= 1, 'title has a click handler');
+  clickFns[0]({ target: {}, preventDefault() {}, stopPropagation() {} });
+  assert(opened.length === 1 && opened[0][0] === path,
+    'title click opens the task note via openLinkText(path): ' + JSON.stringify(opened));
+  assert(openDialogCalls.length === 0,
+    'title click must NOT open the edit dialog: ' + JSON.stringify(openDialogCalls));
+  global.window = prevWindow;
+});
+
 // ---------- _parseInlineLinks (FIX 1 — deterministic inline-link parser) ----------
 //
 // The title / LINKS renderer no longer depends on Obsidian's MarkdownRenderer

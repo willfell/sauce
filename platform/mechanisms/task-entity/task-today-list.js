@@ -14,7 +14,8 @@
  * directly. That keeps the single-file-write invariant (a bad write can only
  * ever touch one task's file) entirely inside TaskDialog:
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
- *   - row click       → TaskDialog.open({ edit: path })
+ *   - title click     → app.workspace.openLinkText(path)  (opens the task NOTE;
+ *                       its TaskNoteView carries the Edit button for editing)
  *
  * COLD-LOAD SAFETY (landmines #1-2): Dataview can run this block before the
  * embedding note is indexed. We resolve the page via the render-safe mechanism
@@ -221,7 +222,7 @@ class TaskTodayList {
      * `window.customJS.TaskTodayList.renderTaskRow(container, task)` cross-class.
      * Draws:
      *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail)
-     *   - a title (row/title click → TaskDialog.open({ edit: path }))
+     *   - a title (title click → opens the task NOTE via app.workspace.openLinkText(path))
      *   - metadata chips for project(name) / priority / due when present.
      * `TDref` is an OPTIONAL TaskDialog reference; when omitted the method reads
      * `window.customJS.TaskDialog` at click-time (both markDone + open are lazily
@@ -251,7 +252,7 @@ class TaskTodayList {
         // Functional done-checkbox — starts UNCHECKED (open tasks only). On
         // change → delegate the write to TaskDialog.markDone(path); revert +
         // notice on failure. Stop propagation so the checkbox doesn't also
-        // trigger the row-click editor.
+        // trigger the title-click note-open.
         //
         // The row stays align-items:flex-start (so the chips pin top-right and a
         // long title wraps within its own column), but a bare checkbox then sits
@@ -283,7 +284,7 @@ class TaskTodayList {
             }
         });
 
-        // Title — clicking the row (not the checkbox) opens the editor. The title
+        // Title — clicking the title (not the checkbox) opens the task NOTE. The
         // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,
         // and bare `http(s)://` URLs become REAL clickable `<a>` elements. This is
         // deterministic (builds anchors directly, no dependence on Obsidian's
@@ -299,19 +300,25 @@ class TaskTodayList {
         title.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
         TaskTodayList.renderInlineLinks(title, titleText, path);
 
-        const openEditor = () => {
-            const TD = getTD();
-            if (!path || !TD || typeof TD.open !== 'function') return;
+        // Title click → OPEN THE TASK NOTE (its TaskNoteView carries an Edit button
+        // for editing). Resolve `app` from window/global (same as renderInlineLinks)
+        // and route through openLinkText(path). A click on a real `<a>` link inside
+        // the title is handled by renderInlineLinks' stopPropagation, so opening a
+        // link doesn't ALSO open the note. Cold-load / no app → no-op (never throws).
+        const openNote = () => {
+            if (!path) return;
             try {
-                TD.open({ edit: path });
+                const appRef = (typeof window !== 'undefined' && window.app)
+                    || (typeof app !== 'undefined' && app)
+                    || null;
+                if (appRef && appRef.workspace && typeof appRef.workspace.openLinkText === 'function') {
+                    appRef.workspace.openLinkText(path, '', false);
+                }
             } catch (e) {
                 try { new Notice('Could not open task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         };
-        // Row/title click → open the editor, EXCEPT a click on a real `<a>` link
-        // inside the title (handled by _renderTitleMarkdown's stopPropagation), so
-        // opening a link doesn't ALSO pop the edit dialog.
-        title.addEventListener('click', openEditor);
+        title.addEventListener('click', openNote);
 
         // Metadata chips (only when set): project / priority / due. flex-shrink:0
         // so the chips never shrink or wrap off — DUE stays on the task's row.
