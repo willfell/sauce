@@ -1558,6 +1558,133 @@ try {
   assertTrue("AF-ASC-3: daily dashboard wiring", false, e && e.message);
 }
 
+// ── Pass 9: query() coalesced-sweep API + precomputed render short-circuit ──
+//
+// The daily/Home dashboard used to sweep the whole vault TWICE per render
+// (_getActivityCount pre-count + ActivityFeed.render's own _query). The new
+// public query(dv, opts) exposes the SAME pages _query produces for the SAME
+// opts (via a shared _parseQueryOpts helper), so the dashboard can sweep ONCE
+// and hand the pages back to render via opts.precomputed.
+
+console.log("\n--- Pass 9: query() + precomputed render short-circuit ---");
+
+// AF-QUERY-1: query(dv, opts) returns { pages, total } with total === pages.length
+// AND pages equal to what render would have surfaced (same opts). We assert the
+// pages by title against a direct render capture using the same opts.
+try {
+  const seed = [
+    { file: { path: "spice/p/a.md", name: "a" }, type: "project", created_at: "2026-05-22T10:00:00Z" },
+    { file: { path: "spice/p/b.md", name: "b" }, type: "project", created_at: "2026-05-22T11:00:00Z" },
+    { file: { path: "spice/p/x.md", name: "x" }, type: "project", created_at: "2026-05-20T09:00:00Z" }, // out of window
+    { file: { path: "spice/p/z.md", name: "z" }, type: "note",    created_at: "2026-05-22T12:00:00Z" }, // wrong blueprint
+  ];
+  const opts = { scope: "today", asOf: "2026-05-22", blueprints: ["project"] };
+  const dv = v066_makeFakeDv(seed);
+  const af = new (v066_loadAF())();
+  const q = af.query(dv, opts);
+  assertTrue("AF-QUERY-1a: query returns an object", q && typeof q === "object");
+  assertTrue("AF-QUERY-1b: query.pages is an array", q && Array.isArray(q.pages));
+  assertTrue("AF-QUERY-1c: query.total === query.pages.length", q && q.total === q.pages.length);
+  const paths = (q.pages || []).map(p => p.file.path).sort();
+  assertEq("AF-QUERY-1d: query surfaces exactly the in-window allowlisted pages",
+    paths, ["spice/p/a.md", "spice/p/b.md"]);
+} catch (e) {
+  assertTrue("AF-QUERY-1: query() returns { pages, total }", false, e && e.message);
+}
+
+// AF-QUERY-2: query() produces the SAME pages that _query produces for the same
+// opts (the whole point of the shared _parseQueryOpts). We compare query().pages
+// against a direct _query invocation reconstructed from the parsed opts.
+try {
+  const seed = [
+    { file: { path: "spice/p/a.md", name: "a" }, type: "project", created_at: "2026-05-22T10:00:00Z" },
+    { file: { path: "spice/p/b.md", name: "b" }, type: "project", created_at: "2026-05-22T11:00:00Z" },
+  ];
+  const opts = { scope: "today", asOf: "2026-05-22", blueprints: ["project"], tsKeys: ["day", "created_at"] };
+  const dv = v066_makeFakeDv(seed);
+  const af = new (v066_loadAF())();
+  const q = af.query(dv, opts);
+  // Reconstruct _query via the same parsed opts + resolved window.
+  const parsed = af._parseQueryOpts(opts);
+  const tw = af._resolveTimeWindow(parsed.scope, parsed.asOf);
+  const direct = af._query(dv, parsed.blueprints, tw, parsed.useStatusChangedAt, parsed.includeMtime, parsed.limit, parsed.rollUpRoots, opts);
+  const qPaths = q.pages.map(p => p.file.path);
+  const dPaths = direct.map(p => p.file.path);
+  assertEq("AF-QUERY-2: query().pages equals _query output for the same opts", qPaths, dPaths);
+} catch (e) {
+  assertTrue("AF-QUERY-2: query() == _query for same opts", false, e && e.message);
+}
+
+// AF-PRECOMP-1: render(dv, { ..., precomputed: { pages } }) does NOT call _query,
+// and renders exactly the precomputed pages. We spy by wrapping _query.
+try {
+  const seed = [
+    { file: { path: "spice/p/a.md", name: "a" }, type: "project", created_at: "2026-05-22T10:00:00Z" },
+  ];
+  // Precomputed pages that DIFFER from what a fresh _query sweep would produce —
+  // if render ignores precomputed and re-queries, it would render "a"; if it
+  // honors precomputed, it renders only "precomp-page".
+  const precomputedPages = [
+    { file: { path: "spice/pre/precomp-page.md", name: "precomp-page" }, type: "project", created_at: "2026-05-22T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(seed);
+  const af = new (v066_loadAF())();
+  let queryCalls = 0;
+  const origQuery = af._query.bind(af);
+  af._query = function (...args) { queryCalls++; return origQuery(...args); };
+  af.render(dv, {
+    scope: "today", asOf: "2026-05-22", blueprints: ["project"], framed: true, groupBy: "blueprint",
+    precomputed: { pages: precomputedPages },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-PRECOMP-1a: render does NOT call _query when precomputed.pages present", queryCalls === 0);
+  assertTrue("AF-PRECOMP-1b: render surfaces the precomputed page", html.indexOf("precomp-page") >= 0);
+  assertTrue("AF-PRECOMP-1c: render does NOT surface a freshly-queried page", html.indexOf(">a<") < 0 && html.indexOf('"a"') < 0);
+} catch (e) {
+  assertTrue("AF-PRECOMP-1: precomputed short-circuits _query", false, e && e.message);
+}
+
+// AF-PRECOMP-2 (regression — cowork path): render(dv, opts) with NO precomputed
+// STILL calls _query. cowork's 4 ActivityFeed blocks + every non-dashboard caller
+// pass no precomputed and must behave exactly as before.
+try {
+  const seed = [
+    { file: { path: "spice/c/a.md", name: "cowork-a" }, type: "cowork", created_at: "2026-05-22T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(seed);
+  const af = new (v066_loadAF())();
+  let queryCalls = 0;
+  const origQuery = af._query.bind(af);
+  af._query = function (...args) { queryCalls++; return origQuery(...args); };
+  af.render(dv, {
+    scope: "today", asOf: "2026-05-22", blueprints: ["cowork"], framed: true, groupBy: "blueprint",
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-PRECOMP-2a: render calls _query exactly once when no precomputed", queryCalls === 1);
+  assertTrue("AF-PRECOMP-2b: render surfaces the queried page", html.indexOf("cowork-a") >= 0);
+} catch (e) {
+  assertTrue("AF-PRECOMP-2: no-precomputed still queries (cowork path)", false, e && e.message);
+}
+
+// AF-PRECOMP-3: precomputed with a non-array pages is ignored (falls back to _query).
+try {
+  const seed = [
+    { file: { path: "spice/p/a.md", name: "a" }, type: "project", created_at: "2026-05-22T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(seed);
+  const af = new (v066_loadAF())();
+  let queryCalls = 0;
+  const origQuery = af._query.bind(af);
+  af._query = function (...args) { queryCalls++; return origQuery(...args); };
+  af.render(dv, {
+    scope: "today", asOf: "2026-05-22", blueprints: ["project"], framed: true, groupBy: "blueprint",
+    precomputed: { pages: "not-an-array" },
+  });
+  assertTrue("AF-PRECOMP-3: malformed precomputed.pages falls back to _query", queryCalls === 1);
+} catch (e) {
+  assertTrue("AF-PRECOMP-3: malformed precomputed falls back", false, e && e.message);
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\nrun-activity-feed.js: ${pass} pass · ${fail} fail`);
