@@ -85,6 +85,7 @@ const cjs = {
     SectionLabel: { render: () => {} },
     AccentButton: { render: () => {} },
     RenderSafe: new RenderSafeClass(),
+    TripSectionKinds: new (loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds'))(),
 };
 global.customJS = Object.assign(global.customJS || {}, cjs);
 global.app = {
@@ -148,6 +149,22 @@ function makeDv(embed, currentVal) {
         withFrontmatterType('trip', () => nav.detectContext('spice/trips/hawaii/Atlas.md', {}).context) === 'trip-atlas');
     ok('TC-8 <slug>/<file>.md with non-trip frontmatter → trip-section',
         withFrontmatterType('note', () => nav.detectContext('spice/trips/hawaii/Places.md', {}).context) === 'trip-section');
+
+    // ---------- TripSectionKinds registry (behavioral) ----------
+    const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
+    const tsk = new TripSectionKinds();
+    ok('TSK-1 all() has the 5 default kinds in order',
+        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes');
+    ok('TSK-2 order() ranks defaults, custom last',
+        tsk.order('flights') === 0 && tsk.order('notes') === 4 && tsk.order('custom') === 999);
+    ok('TSK-3 labelFor maps kind → display',
+        tsk.labelFor('packing-list') === 'Packing List' && tsk.labelFor('custom') === null);
+    ok('TSK-4 kindFromLegacyBasename maps old names',
+        tsk.kindFromLegacyBasename('Trip Flights') === 'flights'
+        && tsk.kindFromLegacyBasename('Trip Packing List') === 'packing-list'
+        && tsk.kindFromLegacyBasename('Honorees') === 'custom');
+    ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
+        tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
 
     // ---------- render() cold-load guards ----------
     const widgets = [

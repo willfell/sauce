@@ -31,6 +31,7 @@
     }
   ],
   "customjs_classes": [
+    "TripSectionKinds",
     "TripsHubCards",
     "TripNavButtons",
     "TripSectionsCards"
@@ -67,6 +68,10 @@
     {
       "source": "templates/Trip Board Card.md",
       "dest": "{{templates_path}}/Template, Trip Board Card.md"
+    },
+    {
+      "source": "helpers/trip-section-kinds.js",
+      "dest": "{{scripts_path}}/trips/trip-section-kinds.js"
     },
     {
       "source": "helpers/trips-hub-cards.js",
