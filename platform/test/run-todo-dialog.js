@@ -777,6 +777,88 @@ function reloadWithDom() {
         `submitted title = ${JSON.stringify(submittedTitle)}`);
 })();
 
+// --- TDLG-REOPEN-1: _submitEdit same-file — openFile must NOT be called ---
+// When the note being edited is already the active file, the reopen guard
+// (L10) must bail out before calling leaf.openFile (avoid scroll-to-top).
+(() => {
+    const env = reloadWithDom();
+    let openFileCalled = false;
+    const fakeLeaf = { openFile: async () => { openFileCalled = true; } };
+    env.sharedWindow.customJS = {
+        TaskInteractions: {
+            replaceTaskAt: async () => ({ ok: true }),
+        },
+        OpenHelpers: { forceLeafPreview: () => {} },
+    };
+    env.sharedWindow.app = {
+        vault: {
+            getAbstractFileByPath: (p) => (p === 'spice/to-do/2026/06-June/ToDo-2026-06-23.md' ? { path: p } : null),
+        },
+        workspace: {
+            // Same path as the editExisting.filePath → guard should fire.
+            getActiveFile: () => ({ path: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md' }),
+            getLeaf: () => fakeLeaf,
+        },
+    };
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+            lineIdx: 3,
+            parsed: { title: 'Same file task', priority: null, due: null, scheduled: null, project: null },
+        },
+    });
+    const titleInput = env.getTitleInput();
+    if (titleInput) { titleInput.value = 'Same file task'; titleInput.oninput && titleInput.oninput(); }
+    const submit = env.getSubmitBtn();
+    pendingAsync.push(Promise.resolve(submit && submit.onclick && submit.onclick({})).then(() => {
+        ok('TDLG-REOPEN-1 same-file edit: openFile NOT called',
+            !openFileCalled,
+            'openFile was called on the already-open note (scroll-to-top bug)');
+    }));
+})();
+
+// --- TDLG-REOPEN-2: _submitEdit different-file — openFile MUST be called ---
+// When the user is editing a task note that is NOT currently open, normal
+// navigation should proceed (openFile must be called).
+(() => {
+    const env = reloadWithDom();
+    let openFileCalled = false;
+    const fakeLeaf = { openFile: async () => { openFileCalled = true; } };
+    env.sharedWindow.customJS = {
+        TaskInteractions: {
+            replaceTaskAt: async () => ({ ok: true }),
+        },
+        OpenHelpers: { forceLeafPreview: () => {} },
+    };
+    env.sharedWindow.app = {
+        vault: {
+            getAbstractFileByPath: (p) => (p === 'spice/to-do/2026/06-June/ToDo-2026-06-23.md' ? { path: p } : null),
+        },
+        workspace: {
+            // Different path → guard should NOT fire, openFile should be called.
+            getActiveFile: () => ({ path: 'spice/to-do/2026/06-June/ToDo-2026-06-22.md' }),
+            getLeaf: () => fakeLeaf,
+        },
+    };
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+            lineIdx: 3,
+            parsed: { title: 'Different file task', priority: null, due: null, scheduled: null, project: null },
+        },
+    });
+    const titleInput = env.getTitleInput();
+    if (titleInput) { titleInput.value = 'Different file task'; titleInput.oninput && titleInput.oninput(); }
+    const submit = env.getSubmitBtn();
+    pendingAsync.push(Promise.resolve(submit && submit.onclick && submit.onclick({})).then(() => {
+        ok('TDLG-REOPEN-2 different-file edit: openFile WAS called',
+            openFileCalled,
+            'openFile was NOT called when navigating to a different note');
+    }));
+})();
+
 // Allow all async EDIT-* cases to settle before final tally.
 Promise.all(pendingAsync).then(() => {
     console.log('');

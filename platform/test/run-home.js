@@ -490,6 +490,83 @@ function descendants(el) {
       "a missing customJS/app must make the + toggle, items, and inline jot no-op, never throw");
   }
 
+  // ── HOME-DAY: the home no longer freezes on a stale day ────────────────────
+  // Root cause: Dataview only re-renders a block when its index revision changes
+  // AND the view is shown; a quiet vault never re-runs the clock-only Home block
+  // when you return on a new day, so the date + asOf-today dashboard freeze. Fix:
+  // render() installs (once, deduped) an active-leaf-change watcher that force-
+  // refreshes Dataview when the Home leaf becomes active on a new day.
+  assertTrue("HOME-DAY-1a _shouldDayRefresh true for Home leaf + changed day",
+    SpaceHome._shouldDayRefresh("spice/home/Home.md", "2026-07-03", "2026-07-04") === true);
+  assertTrue("HOME-DAY-1b _shouldDayRefresh false same day",
+    SpaceHome._shouldDayRefresh("spice/home/Home.md", "2026-07-04", "2026-07-04") === false);
+  assertTrue("HOME-DAY-1c _shouldDayRefresh false for a non-Home leaf",
+    SpaceHome._shouldDayRefresh("spice/x.md", "2026-07-03", "2026-07-04") === false);
+  assertTrue("HOME-DAY-1d _shouldDayRefresh false / safe on null path",
+    SpaceHome._shouldDayRefresh(null, "a", "b") === false);
+
+  {
+    installMoment("2026-07-02", 6);
+    const listeners = [];
+    const cmds = [];
+    let activeFile = { path: "spice/home/Home.md" };
+    const app = {
+      workspace: {
+        on: (ev, fn) => { listeners.push({ ev, fn }); return { ev, fn }; },
+        getActiveFile: () => activeFile,
+      },
+      commands: { executeCommandById: (id) => cmds.push(id) },
+    };
+    global.app = app;
+    global.window.app = app;
+    global.window.__sauceHomeDayWatcher = undefined;   // clean slate for the dedup assertion
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) } };
+    global.window.customJS = global.customJS;
+
+    await home_.render(makeDv(), {});
+    await home_.render(makeDv(), {});               // second render must NOT add a 2nd listener
+
+    assertEq("HOME-DAY-2a render stamps window.__sauceHomeRenderDay", global.window.__sauceHomeRenderDay, "2026-07-02");
+    const alc = listeners.filter((l) => l.ev === "active-leaf-change");
+    assertEq("HOME-DAY-2b exactly one active-leaf-change watcher after 2 renders (deduped)", alc.length, 1);
+
+    const watcher = alc[0] && alc[0].fn;
+    // (a) Home active + a NEW day → force-refresh fires.
+    installMoment("2026-07-03", 6);
+    activeFile = { path: "spice/home/Home.md" };
+    cmds.length = 0;
+    if (typeof watcher === "function") watcher({});
+    assertTrue("HOME-DAY-3a Home active on a new day → Dataview force-refresh",
+      cmds.indexOf("dataview:dataview-force-refresh-views") >= 0,
+      `expected force-refresh; got ${JSON.stringify(cmds)}`);
+
+    // (b) same day → no refresh.
+    global.window.__sauceHomeRenderDay = "2026-07-03";
+    cmds.length = 0;
+    if (typeof watcher === "function") watcher({});
+    assertEq("HOME-DAY-3b same day → no force-refresh", cmds.length, 0);
+
+    // (c) non-Home leaf → no refresh.
+    activeFile = { path: "spice/daily/x.md" };
+    global.window.__sauceHomeRenderDay = "2026-07-02";
+    cmds.length = 0;
+    if (typeof watcher === "function") watcher({});
+    assertEq("HOME-DAY-3c non-Home active leaf → no force-refresh", cmds.length, 0);
+
+    // (d) missing commands API → no throw.
+    let threw = false;
+    activeFile = { path: "spice/home/Home.md" };
+    app.commands = undefined;
+    try { if (typeof watcher === "function") watcher({}); } catch (_e) { threw = true; }
+    assertTrue("HOME-DAY-3d missing commands API → watcher no-ops, never throws", !threw);
+
+    delete global.app;
+    global.window.app = undefined;
+    global.window.__sauceHomeDayWatcher = undefined;
+    delete global.customJS;
+    global.window.customJS = undefined;
+  }
+
   // ── HOME-HEAL: pure _healHomeChromeBody(body) string transform ─────────────
   // Load the pure helper the same way run-wiki.js loads _healWikiChromeBody:
   // slice its source out of install.js and eval it as a standalone function

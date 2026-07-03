@@ -71,5 +71,92 @@ ok('RS-5 filePath + fileName derive from page', () => {
   });
 });
 
+// ---------- L3 scroll capture/restore ----------
+let observers = [], rafs = [], timeouts = [];
+function makeScroller(overflow, sh, ch) {
+  return { scrollTop: 0, scrollHeight: sh, clientHeight: ch, _cs: { overflowY: overflow } };
+}
+function makeWin() {
+  return {
+    __sauceScrollStash: undefined,
+    MutationObserver: function (cb) { this.cb = cb; this._disconnected = false; this.observe = () => {}; this.disconnect = () => { this._disconnected = true; }; observers.push(this); },
+    requestAnimationFrame: (fn) => { rafs.push(fn); return rafs.length; },
+    getComputedStyle: (el) => (el && el._cs) || { overflowY: 'visible' },
+    setTimeout: (fn, ms) => { timeouts.push({ fn, ms }); return timeouts.length; },
+    clearTimeout: () => {},
+  };
+}
+
+ok('RS-CAP-1 captureScroll stashes {path,y,t} from the active scroller + installs observer', () => {
+  observers = []; rafs = []; timeouts = [];
+  const scroller = makeScroller('auto', 2000, 800); scroller.scrollTop = 640;
+  const doc = { querySelector: (sel) => (String(sel).includes('markdown-preview-view') ? scroller : null) };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 111, activePath: 'spice/home/Home.md' });
+  assert(win.__sauceScrollStash && win.__sauceScrollStash.y === 640, 'y captured');
+  assert(win.__sauceScrollStash.path === 'spice/home/Home.md', 'path captured');
+  assert(win.__sauceScrollStash.t === 111, 't captured');
+  assert(observers.length === 1, 'restore observer installed');
+});
+
+ok('RS-CAP-2 no scroller → no stash, no throw', () => {
+  observers = [];
+  const doc = { querySelector: () => null };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 1, activePath: 'x.md' });
+  assert(win.__sauceScrollStash === undefined, 'no stash written');
+});
+
+ok('RS-CAP-3 already at top (scrollTop 0) → no stash (nothing to preserve)', () => {
+  const scroller = makeScroller('auto', 2000, 800); scroller.scrollTop = 0;
+  const doc = { querySelector: () => scroller };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 1, activePath: 'x.md' });
+  assert(win.__sauceScrollStash === undefined, 'no stash at top');
+});
+
+ok('RS-REST-1 restore watcher sets scrollTop=y once scrollHeight recovers past y', () => {
+  observers = [];
+  const scroller = makeScroller('auto', 2000, 800); scroller.scrollTop = 500;
+  const doc = { querySelector: () => scroller };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 5, activePath: 'a.md' });
+  scroller.scrollHeight = 40; scroller.scrollTop = 0;   // teardown: collapsed
+  observers[0].cb();                                    // mutation while collapsed → no restore
+  assert(scroller.scrollTop === 0, 'not restored while collapsed');
+  scroller.scrollHeight = 2000;                         // rebuild: tall again
+  observers[0].cb();                                    // mutation after rebuild → restore
+  assert(scroller.scrollTop === 500, 'scrollTop restored once tall enough');
+});
+
+ok('RS-REST-EARLY an early rAF nudge before any teardown must NOT restore/disconnect (regression)', () => {
+  // Regression for the real-browser bug: the rAF fallback fires ~2 frames after
+  // capture, BEFORE the Dataview teardown clamps scrollTop. A naive "tall enough
+  // → done + disconnect" completed trivially there (scrollTop still == y), so the
+  // observer was gone by the time the real teardown+rebuild landed → scroll lost.
+  observers = []; rafs = [];
+  const scroller = makeScroller('auto', 2000, 800); scroller.scrollTop = 500;
+  const doc = { querySelector: () => scroller };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 9, activePath: 'e.md' });
+  // Fire the early rAF nudges while the content is still intact (no teardown yet).
+  for (let i = 0; i < 5 && rafs.length; i++) { const fn = rafs.shift(); fn(); }
+  assert(observers[0]._disconnected === false, 'early nudge must NOT disconnect before a teardown is seen');
+  assert(scroller.scrollTop === 500, 'no spurious scroll change before teardown');
+  // Now the real teardown → clamp → rebuild.
+  scroller.scrollHeight = 40; scroller.scrollTop = 0; observers[0].cb();
+  assert(scroller.scrollTop === 0, 'still not restored while collapsed');
+  scroller.scrollHeight = 2000; observers[0].cb();
+  assert(scroller.scrollTop === 500, 'restored to y after the real teardown→rebuild');
+  assert(observers[0]._disconnected === true, 'observer disconnects only after the real restore');
+});
+
+ok('RS-FIND finder returns a scroller or null and never throws', () => {
+  const scroller = makeScroller('scroll', 900, 300);
+  const picked = RenderSafe._findScroller({ querySelector: (s) => (String(s).includes('preview') ? null : scroller) });
+  assert(picked === scroller || picked === null, 'finder returns scroller or null');
+  assert(RenderSafe._findScroller(null) === null, 'null doc → null, no throw');
+});
+
 console.log(`\nrun-render-safe: ${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

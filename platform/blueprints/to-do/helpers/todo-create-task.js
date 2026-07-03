@@ -554,6 +554,10 @@ class ToDoCreateTask {
             if (!vault) return;
             const file = vault.getAbstractFileByPath(editExisting.filePath);
             if (!file) return;
+            // L10: skip the reopen when editing the note already in view (bare
+            // openFile on the active note scrolls to top).
+            const cur = window.app.workspace.getActiveFile && window.app.workspace.getActiveFile();
+            if (cur && cur.path === editExisting.filePath) return;
             const leaf = window.app.workspace.getLeaf(false);
             await leaf.openFile(file);
             window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
@@ -599,9 +603,14 @@ class ToDoCreateTask {
         // Open the TFile on a captured leaf so the deferred read-mode flip
         // targets THIS note even if focus moves first.
         if (payload.mode !== 'recurring') {
-            const leaf = window.app.workspace.getLeaf(false);
-            await leaf.openFile(file);
-            window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+            // L10: only (re)open the destination when it isn't the note already
+            // open — a bare openFile on the active note scrolls the reader to top.
+            const cur = window.app.workspace.getActiveFile && window.app.workspace.getActiveFile();
+            if (!cur || cur.path !== file.path) {
+                const leaf = window.app.workspace.getLeaf(false);
+                await leaf.openFile(file);
+                window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+            }
         }
     }
 

@@ -270,16 +270,28 @@ class TaskTodayList {
         cb.addEventListener('change', async () => {
             const TD = getTD();
             if (!path || !TD || typeof TD.markDone !== 'function') { cb.checked = false; return; }
+            // Optimistic (L2): preserve scroll, then detach the row NOW so the
+            // gesture feels instant — do NOT wait for the write + Dataview's
+            // re-render. Re-insert at the original DOM index on failure. The
+            // eventual re-render (natural or forced) reconciles authoritatively;
+            // RenderSafe holds the scroll across it.
+            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+            const parent = row.parentNode;
+            const next = row.nextSibling;
+            const revert = () => {
+                cb.checked = false;
+                if (parent) { try { parent.insertBefore(row, next); } catch (_e) {} }
+            };
+            try { row.remove(); } catch (_e) {}
             try {
                 const res = await TD.markDone(path);
                 if (res && res.ok === false) {
-                    cb.checked = false;
+                    revert();
                     try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
                 }
-                // On success the file moves to _done/; the live query drops it
-                // and re-renders this block without the row.
+                // On success the file moves to _done/; the row is already gone.
             } catch (e) {
-                cb.checked = false;
+                revert();
                 try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         });

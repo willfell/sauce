@@ -208,6 +208,16 @@ class SpaceHome {
     el.className = next;
   }
 
+  /**
+   * Pure predicate: should the Home re-render on this active-leaf-change? True
+   * iff the newly-active leaf IS the Home note AND the day has rolled over since
+   * the Home last rendered. Node-testable; never reads the wall clock.
+   */
+  static _shouldDayRefresh(activePath, renderDay, today) {
+    return !!activePath && activePath === "spice/home/Home.md"
+      && !!renderDay && !!today && renderDay !== today;
+  }
+
   // ---------- Instance / browser render ----------
 
   /**
@@ -224,6 +234,34 @@ class SpaceHome {
       || (typeof window !== "undefined" && window.moment)
       || null;
     const today = M ? M().format("YYYY-MM-DD") : "";
+
+    // Day-refresh watcher: Dataview only re-renders a block on an index-revision
+    // bump while shown, so a quiet vault leaves this clock-only block frozen at
+    // its last-render day (the "stuck on Friday" bug). Record today's render day
+    // and install — ONCE for the app lifetime (deduped via a window flag) — an
+    // active-leaf-change listener that force-refreshes Dataview when the Home
+    // becomes active on a NEW day. Never throws; degrades to today's behavior.
+    try {
+      const w = (typeof window !== "undefined" && window) || null;
+      if (w) {
+        w.__sauceHomeRenderDay = today;
+        const A = (typeof app !== "undefined" && app) || w.app || null;
+        if (A && A.workspace && typeof A.workspace.on === "function" && !w.__sauceHomeDayWatcher) {
+          w.__sauceHomeDayWatcher = A.workspace.on("active-leaf-change", () => {
+            try {
+              const M2 = (typeof moment !== "undefined" && moment) || w.moment || null;
+              const now = M2 ? M2().format("YYYY-MM-DD") : "";
+              const af = (A.workspace.getActiveFile && A.workspace.getActiveFile()) || null;
+              const p = af && af.path;
+              if (SpaceHome._shouldDayRefresh(p, w.__sauceHomeRenderDay, now)
+                && A.commands && typeof A.commands.executeCommandById === "function") {
+                A.commands.executeCommandById("dataview:dataview-force-refresh-views");
+              }
+            } catch (_e) { /* never throw */ }
+          });
+        }
+      }
+    } catch (_e) { /* never throw */ }
 
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.

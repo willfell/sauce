@@ -842,6 +842,45 @@ class TaskDialog {
         await this._ensureFolder(app, 'spice/tasks');
         await app.vault.create(path, content);
         try { new Notice('Task created'); } catch (_e) {}
+        try { this._reconcileAfterCreate(app, path); } catch (_e) {}
+    }
+
+    /**
+     * L4: after a create, reconcile the surface WITHOUT waiting for Dataview's
+     * ~2.5s refresh tick. Gate a Dataview force-refresh on the metadataCache
+     * 'changed' event for the just-created file (so it never runs against a stale
+     * index and misses the new row), with a timeout fallback if the event is
+     * missed. Preserves scroll first. NEVER throws — degrades to the natural tick.
+     */
+    _reconcileAfterCreate(app, path) {
+        try { (typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe
+            && window.customJS.RenderSafe.captureScroll && window.customJS.RenderSafe.captureScroll()); } catch (_e) {}
+        try {
+            if (!app) return;
+            const fire = () => {
+                try {
+                    if (app.commands && typeof app.commands.executeCommandById === 'function') {
+                        app.commands.executeCommandById('dataview:dataview-force-refresh-views');
+                    }
+                } catch (_e) { /* ignore */ }
+            };
+            let done = false;
+            let ref = null;
+            const off = () => {
+                done = true;
+                try { if (ref && app.metadataCache && typeof app.metadataCache.offref === 'function') app.metadataCache.offref(ref); } catch (_e) {}
+            };
+            if (app.metadataCache && typeof app.metadataCache.on === 'function') {
+                ref = app.metadataCache.on('changed', (f) => {
+                    if (done) return;
+                    if (f && f.path === path) { fire(); off(); }
+                });
+            }
+            const setT = app._setTimeout
+                || (typeof window !== 'undefined' && window.setTimeout)
+                || (typeof setTimeout !== 'undefined' ? setTimeout : null);
+            if (typeof setT === 'function') setT(() => { if (done) return; fire(); off(); }, 1200);
+        } catch (_e) { /* never throw */ }
     }
 
     /**
