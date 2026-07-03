@@ -18,7 +18,9 @@
  *                  AND the toggle key (re-open with the same anchor closes the
  *                  prior overlay and opens none).
  *       doc      = document (default global document) — tests inject a stub.
- *       isMobile = force layout; default derives from _isMobile(doc).
+ *       isMobile = force layout; when omitted, derives from Obsidian's
+ *                  app.isMobile, falling back to _isMobile(doc) when `app` is
+ *                  absent (Node tests / cold load).
  *       title    = optional muted header shown at the top of the panel.
  *     Returns the overlay element (with __navClose attached), or null on no-op.
  */
@@ -42,6 +44,9 @@ class MenuPopover {
   }
 
   // clientWidth <= 600 ⇒ mobile. Guarded; default false when doc/body absent.
+  // This is only the FALLBACK: open() prefers explicit opts.isMobile, then
+  // Obsidian's app.isMobile platform flag, and reaches for this heuristic only
+  // when `app` is absent (Node tests / cold load).
   static _isMobile(doc) {
     try {
       const cw = doc && doc.body && doc.body.clientWidth;
@@ -90,7 +95,7 @@ class MenuPopover {
     row.onmouseleave = () => { row.style.background = "transparent"; };
     row.onclick = () => {
       close();
-      try { if (entry && typeof entry.onSelect === "function") return entry.onSelect(); }
+      try { if (entry && typeof entry.onSelect === "function") entry.onSelect(); }
       catch (_e) { /* never-throw: a bad handler must not wedge the popup */ }
     };
     return row;
@@ -124,7 +129,14 @@ class MenuPopover {
       return null;
     }
 
-    const isMobile = (typeof opts.isMobile === "boolean") ? opts.isMobile : MenuPopover._isMobile(doc);
+    // Mobile flag precedence (match the source overlays): explicit opts.isMobile
+    // → Obsidian's app.isMobile platform flag → the _isMobile(doc) clientWidth
+    // fallback (used only when `app` is absent, e.g. Node tests / cold load).
+    const isMobile = (typeof opts.isMobile === "boolean")
+      ? opts.isMobile
+      : ((typeof app !== "undefined" && app && typeof app.isMobile === "boolean")
+          ? app.isMobile
+          : MenuPopover._isMobile(doc));
 
     const overlay = doc.createElement("div");
     overlay.className = "menu-popover-overlay";

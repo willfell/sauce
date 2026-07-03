@@ -214,6 +214,50 @@ const MP = loadClass(MECH, 'MenuPopover');
   ok('MP-6 re-open with same anchor toggles to zero overlays', pass);
 }
 
+// --------------------------------------------------------------------------- MP-7
+// Explicit opts.isMobile threads through open() regardless of doc width — this
+// locks the precedence (opts.isMobile wins over the _isMobile(doc) fallback).
+// A wide doc + isMobile:true MUST render the mobile bottom-sheet (handle bar +
+// backdrop overlay); a wide doc + isMobile:false MUST render the desktop
+// dropdown (no handle, transparent overlay). We assert via the explicit
+// opts.isMobile path only (no global `app` in the Node harness).
+{
+  let pass = false;
+  if (MP) {
+    // The mobile panel prepends a "handle" bar: a div whose cssText carries the
+    // 40px x 4px pill. Detect it by walking the overlay subtree.
+    const hasHandle = (overlay) => {
+      const found = [];
+      const walk = (node) => {
+        for (const c of node.children || []) {
+          const cs = (c.style && c.style.cssText) || '';
+          if (cs.indexOf('width: 40px') >= 0 && cs.indexOf('height: 4px') >= 0) found.push(c);
+          walk(c);
+        }
+      };
+      walk(overlay);
+      return found.length > 0;
+    };
+
+    // Wide doc, force mobile → mobile branch (handle bar + backdrop overlay).
+    const docA = makeDoc({ clientWidth: 1400 });
+    const overlayMobile = MP.open([{ label: 'Board', onSelect() {} }],
+      { doc: docA, anchor: makeEl('button'), isMobile: true });
+    const mobileCss = (overlayMobile.style && overlayMobile.style.cssText) || '';
+    const mobileRan = hasHandle(overlayMobile) && mobileCss.indexOf('rgba(0,0,0,0.45)') >= 0;
+
+    // Wide doc, force desktop → desktop branch (no handle + transparent overlay).
+    const docB = makeDoc({ clientWidth: 1400 });
+    const overlayDesktop = MP.open([{ label: 'Board', onSelect() {} }],
+      { doc: docB, anchor: makeEl('button'), isMobile: false });
+    const desktopCss = (overlayDesktop.style && overlayDesktop.style.cssText) || '';
+    const desktopRan = !hasHandle(overlayDesktop) && desktopCss.indexOf('background: transparent') >= 0;
+
+    pass = mobileRan && desktopRan;
+  }
+  ok('MP-7 opts.isMobile precedence: true→mobile, false→desktop (wide doc)', pass);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);
