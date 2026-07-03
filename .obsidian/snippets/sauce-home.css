@@ -8,6 +8,7 @@
 /* ── Sharp motion vocabulary ───────────────────────────────────────────── */
 .sauce-home {
   --sh-ease: cubic-bezier(0.2, 0.9, 0.25, 1);   /* snappy, faint overshoot */
+  --sh-spring: cubic-bezier(0.34, 1.56, 0.5, 1); /* bouncy overshoot for the "pop" moments */
   --sh-radius: 7px;
   position: relative;
   z-index: 5;                     /* keep the open dropdown above the dashboard below */
@@ -72,7 +73,7 @@
     background 0.15s var(--sh-ease), transform 0.18s var(--sh-ease),
     box-shadow 0.15s var(--sh-ease);
 }
-.sauce-home .sauce-home-add svg { display: block; transition: transform 0.2s var(--sh-ease); }
+.sauce-home .sauce-home-add svg { display: block; transition: transform 0.4s var(--sh-spring); }
 @media (hover: hover) {
   .sauce-home .sauce-home-add:hover {
     color: var(--text-normal);
@@ -87,7 +88,7 @@
   background: var(--interactive-accent);
   border-color: var(--interactive-accent);
 }
-.sauce-home .sauce-home-add.is-open svg { transform: rotate(45deg); }
+.sauce-home .sauce-home-add.is-open svg { transform: rotate(135deg); }
 
 /* ── The dropdown menu ─────────────────────────────────────────────────── */
 .sauce-home .sauce-home-add-menu {
@@ -110,7 +111,7 @@
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: scale(0.96) translateY(-4px);
+  transform: scale(0.9) translateY(-10px);
   transform-origin: top right;
   transition: opacity 0.14s var(--sh-ease), transform 0.16s var(--sh-ease),
     visibility 0s linear 0.16s;
@@ -120,9 +121,23 @@
   visibility: visible;
   pointer-events: auto;
   transform: scale(1) translateY(0);
-  transition: opacity 0.15s var(--sh-ease), transform 0.18s var(--sh-ease),
+  transition: opacity 0.16s var(--sh-ease), transform 0.34s var(--sh-spring),
     visibility 0s linear 0s;
 }
+/* Each row cascades in when the menu opens — the input, then the actions. Uses an
+ * animation keyed on .is-open so it re-fires every open; the natural (no-anim)
+ * state is fully visible, so the reduced-motion off-switch is automatically safe. */
+@keyframes sauceHomeItemIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+.sauce-home .sauce-home-add-menu.is-open > * {
+  animation: sauceHomeItemIn 0.26s var(--sh-spring) both;
+}
+.sauce-home .sauce-home-add-menu.is-open > *:nth-child(1) { animation-delay: 0.03s; }
+.sauce-home .sauce-home-add-menu.is-open > *:nth-child(2) { animation-delay: 0.09s; }
+.sauce-home .sauce-home-add-menu.is-open > *:nth-child(3) { animation-delay: 0.14s; }
+.sauce-home .sauce-home-add-menu.is-open > *:nth-child(4) { animation-delay: 0.19s; }
 
 /* Task-capture input row inside the menu. */
 .sauce-home .sauce-home-add-input-row {
@@ -252,36 +267,48 @@
 .sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill .sauce-home-glance-label {
   color: var(--color-red);
 }
-.sauce-home .sauce-home-glance-clear { color: var(--text-muted); font-style: italic; }
-
-/* ── Entrance animation — sharp staggered reveal (GPU-only, < 300ms) ────── */
+/* ── Entrance choreography — a clean "focus in": blur→sharp + rise + settle,
+ *    staggered across the header → glance → dashboard. GPU-friendly. ──────── */
 @keyframes sauceHomeReveal {
-  from { opacity: 0; transform: translateY(9px); }
-  to   { opacity: 1; transform: none; }
+  0%   { opacity: 0; transform: translateY(16px) scale(0.985); filter: blur(6px); }
+  60%  { filter: blur(0); }
+  100% { opacity: 1; transform: none; filter: blur(0); }
 }
-.sauce-home > * { animation: sauceHomeReveal 0.28s var(--sh-ease) both; }
-.sauce-home > *:nth-child(1) { animation-delay: 0s; }
-.sauce-home > *:nth-child(2) { animation-delay: 0.06s; }
-.sauce-home > *:nth-child(3) { animation-delay: 0.12s; }
-.sauce-home > *:nth-child(4) { animation-delay: 0.18s; }
-/* The accent eyebrow tick draws in crisply. */
+.sauce-home > * { animation: sauceHomeReveal 0.52s var(--sh-ease) backwards; }
+.sauce-home > *:nth-child(1) { animation-delay: 0.02s; }
+.sauce-home > *:nth-child(2) { animation-delay: 0.10s; }
+.sauce-home > *:nth-child(3) { animation-delay: 0.18s; }
+.sauce-home > *:nth-child(4) { animation-delay: 0.26s; }
+
+/* The accent tick draws in, then pulses a soft glow — the surface's signature. */
 @keyframes sauceHomeTick { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes sauceHomeTickGlow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  40%      { box-shadow: 0 0 11px 1px var(--interactive-accent); }
+}
 .sauce-home .sauce-home-greeting-date::before {
   transform-origin: left center;
-  animation: sauceHomeTick 0.3s var(--sh-ease) 0.14s both;
+  animation: sauceHomeTick 0.34s var(--sh-spring) 0.16s both,
+             sauceHomeTickGlow 1.15s ease-out 0.5s both;
 }
 
-/* Count pills pop once on mount. */
+/* Glance count chips bounce in; the overdue chip additionally flashes red. */
 @keyframes sauceHomePillPop {
-  0%   { transform: scale(0.85); }
-  55%  { transform: scale(1.07); }
+  0%   { transform: scale(0.72); }
+  60%  { transform: scale(1.14); }
   100% { transform: scale(1); }
 }
-.sauce-home .sauce-section-overdue-pill,
-.sauce-home .sauce-section-open-pill,
-.sauce-home .sauce-section-done-pill,
-.sauce-home .sauce-section-count-pill {
-  animation: sauceHomePillPop 0.22s var(--sh-ease) both;
+@keyframes sauceHomeOverdueGlow {
+  0%   { text-shadow: 0 0 0 transparent; }
+  45%  { text-shadow: 0 0 11px var(--color-red); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
+.sauce-home .sauce-home-glance-chip {
+  animation: sauceHomePillPop 0.34s var(--sh-spring) 0.16s both;
+}
+.sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill {
+  animation: sauceHomePillPop 0.34s var(--sh-spring) 0.16s both,
+             sauceHomeOverdueGlow 1.25s ease-out 0.45s both;
 }
 
 /* ── Mobile pass ───────────────────────────────────────────────────────── */
