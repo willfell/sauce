@@ -131,6 +131,10 @@
     {
       "name": "wiki",
       "version": "0.3.0"
+    },
+    {
+      "name": "home",
+      "version": "0.1.0"
     }
   ]
 }

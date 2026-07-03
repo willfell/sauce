@@ -1,0 +1,140 @@
+/* sauce-home.css — Home command center layout + animation layer.
+ * Materialized to .obsidian/snippets/sauce-home.css via the installer's
+ * applySnippets helper (convenience mech plumbing). Scopes ALL rules under
+ * .sauce-home so nothing leaks. Native Obsidian tokens throughout; matches the
+ * sauce-daily-dashboard.css vocabulary (--background-modifier-border,
+ * --interactive-*, --text-*, 8px radius, tabular-nums, @media max-width:480px). */
+
+/* ── Wrapper ───────────────────────────────────────────────────────────── */
+.sauce-home {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin: 4px 0 12px 0;
+}
+
+/* ── Greeting header ───────────────────────────────────────────────────── *
+ * A prominent line ("Good morning") over a muted date subtitle
+ * ("Thursday, Jul 2, 2026 · Today"). */
+.sauce-home .sauce-home-greeting {
+  margin: 0 0 16px 0;
+}
+.sauce-home .sauce-home-greeting-line {
+  font-size: 1.7em;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--text-normal);
+}
+.sauce-home .sauce-home-greeting-date {
+  margin-top: 3px;
+  font-size: 0.92em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* ── Quick-capture band ────────────────────────────────────────────────── *
+ * Desktop: responsive auto-fit grid. Mobile: one full-width button per row
+ * (see @media below). Buttons are ≥44px tall tap targets, icon + label
+ * centered, native Obsidian tokens, rounded. */
+.sauce-home .sauce-home-capture {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px 0;
+}
+.sauce-home .sauce-home-capture-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  font-size: 0.92em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.sauce-home .sauce-home-capture-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.sauce-home .sauce-home-capture-icon svg { display: block; }
+.sauce-home .sauce-home-capture-label {
+  white-space: nowrap;
+}
+.sauce-home .sauce-home-capture-btn:active { transform: scale(0.98); }
+
+/* Hover only on real pointer devices (no sticky :hover on touch). */
+@media (hover: hover) {
+  .sauce-home button:hover,
+  .sauce-home .sauce-home-capture-btn:hover {
+    background: var(--interactive-hover);
+    border-color: var(--background-modifier-border-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* ── Animation layer (GPU-only transform/opacity; total < 300ms) ───────── *
+ * Direct children of .sauce-home fade + rise on mount, staggered so the
+ * greeting, capture band, and dashboard cascade in. */
+@keyframes sauceHomeFadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.sauce-home > * {
+  animation: sauceHomeFadeUp 0.2s ease-out both;
+}
+.sauce-home > *:nth-child(1) { animation-delay: 0s; }
+.sauce-home > *:nth-child(2) { animation-delay: 0.05s; }
+.sauce-home > *:nth-child(3) { animation-delay: 0.1s; }
+.sauce-home > *:nth-child(4) { animation-delay: 0.15s; }
+
+/* Count pills (e.g. the dashboard's red overdue pill) pop once on mount. */
+@keyframes sauceHomePillPop {
+  0%   { transform: scale(0.85); }
+  60%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.sauce-home .sauce-section-overdue-pill,
+.sauce-home .sauce-section-open-pill,
+.sauce-home .sauce-section-done-pill,
+.sauce-home .sauce-section-count-pill {
+  animation: sauceHomePillPop 0.22s ease-out both;
+}
+
+/* ── Mobile pass — narrow viewports ────────────────────────────────────── *
+ * One full-width capture button per row; tighter greeting. */
+@media (max-width: 480px) {
+  .sauce-home .sauce-home-capture {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .sauce-home .sauce-home-greeting-line { font-size: 1.45em; }
+  .sauce-home .sauce-home-greeting { margin-bottom: 12px; }
+  .sauce-home .sauce-home-capture-btn { min-height: 46px; }
+}
+
+/* ── Reduced-motion off-switch ─────────────────────────────────────────── *
+ * Honour the OS accessibility preference: kill every animation/transition/
+ * transform under .sauce-home so nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .sauce-home *,
+  .sauce-home > * {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

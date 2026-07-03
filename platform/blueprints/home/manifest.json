@@ -1,0 +1,100 @@
+{
+  "name": "home",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "home",
+  "skills_dir": ".claude/skills/home",
+  "description": "Home command center at spice/home/Home.md — greeting, quick-capture, and today's dashboard. Rendered by the SpaceHome customJS class; set as the vault homepage. Reuses nav-buttons, task-entity, activity-feed, entity-create, meetings, scratch, and daily.",
+  "depends_on": [
+    {
+      "name": "nav-buttons",
+      "range": ">=2.13.0"
+    },
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "convenience",
+      "range": ">=0.5.1"
+    },
+    {
+      "name": "activity-feed",
+      "range": ">=0.8.0"
+    },
+    {
+      "name": "task-entity",
+      "range": ">=0.3.4"
+    },
+    {
+      "name": "entity-create",
+      "range": ">=0.8.1"
+    },
+    {
+      "name": "meetings",
+      "range": ">=0.16.1"
+    },
+    {
+      "name": "scratch",
+      "range": ">=0.7.2"
+    },
+    {
+      "name": "daily",
+      "range": ">=0.16.2"
+    }
+  ],
+  "snippets": [
+    {
+      "source": "helpers/sauce-home.css",
+      "name": "sauce-home"
+    }
+  ],
+  "appearance": {
+    "enabledCssSnippets": [
+      "sauce-home"
+    ]
+  },
+  "customjs_classes": [
+    "SpaceHome"
+  ],
+  "files": [
+    {
+      "source": "helpers/space-home.js",
+      "dest": "{{scripts_path}}/home/space-home.js"
+    }
+  ],
+  "claude_surface": [
+    {
+      "kind": "command",
+      "source": "commands/home.md",
+      "dest": ".claude/commands/home.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/open-home/SKILL.md",
+      "dest": "{{skills_dir}}/open-home/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Home",
+        "path": "{{module_directory}}",
+        "command": "/home"
+      }
+    }
+  ],
+  "nav_buttons": [
+    {
+      "id": "home-open",
+      "label": "Home",
+      "icon": "home",
+      "order": 40,
+      "action": {
+        "type": "invoke_command",
+        "command_id": "homepage:open-homepage",
+        "read_mode_after": true
+      }
+    }
+  ]
+}

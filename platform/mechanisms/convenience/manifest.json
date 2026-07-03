@@ -90,9 +90,9 @@
         "version": 4,
         "homepages": {
           "Main Homepage": {
-            "value": "",
-            "kind": "Daily Note",
-            "openOnStartup": false,
+            "value": "spice/home/Home.md",
+            "kind": "File",
+            "openOnStartup": true,
             "openMode": "Replace last note",
             "manualOpenMode": "Replace last note",
             "view": "Reading view",
@@ -102,7 +102,9 @@
             "autoCreate": true,
             "autoScroll": false,
             "pin": false,
-            "commands": [],
+            "commands": [
+              { "id": "dataview:refresh-views", "period": "Both" }
+            ],
             "alwaysApply": false,
             "hideReleaseNotes": true
           }
