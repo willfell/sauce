@@ -1280,10 +1280,53 @@ async function runOptimisticRemovalTests() {
   global.Notice = prevNotice;
 }
 
+// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..3) ----------
+// _reconcileAfterCreate registers a one-shot metadataCache 'changed' listener for
+// the new file's path → fires the Dataview force-refresh command → detaches. A
+// timeout fallback fires anyway. Never throws (absent APIs degrade to the natural
+// ~2.5s tick). No live spike: gating on the index event avoids the stale-index race.
+function runReconcileTests() {
+  ok('TD-REC-1 reconcile force-refreshes when the new file is indexed, then detaches', () => {
+    const calls = { cmd: [], on: 0, off: 0 };
+    let handler = null;
+    const app = {
+      metadataCache: { on: (ev, fn) => { calls.on++; handler = { ev, fn }; return { ev }; }, offref: () => { calls.off++; } },
+      commands: { executeCommandById: (id) => { calls.cmd.push(id); return true; } },
+      _setTimeout: () => 0,   // never auto-fire the fallback in this case
+    };
+    new TaskDialogClass()._reconcileAfterCreate(app, 'spice/tasks/x.md');
+    assert(calls.on === 1 && handler && handler.ev === 'changed', 'one changed-listener registered');
+    handler.fn({ path: 'spice/tasks/other.md' });
+    assert(calls.cmd.length === 0, 'no refresh for a different path');
+    handler.fn({ path: 'spice/tasks/x.md' });
+    assert(calls.cmd.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh fired on the matching path');
+    assert(calls.off === 1, 'listener detached after firing');
+  });
+
+  ok('TD-REC-2 timeout fallback force-refreshes if the event never fires', () => {
+    const calls = [];
+    const app = {
+      metadataCache: { on: () => ({}), offref: () => {} },
+      commands: { executeCommandById: (id) => calls.push(id) },
+      _setTimeout: (fn) => { fn(); return 0; },   // fire the fallback immediately
+    };
+    new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');
+    assert(calls.indexOf('dataview:dataview-force-refresh-views') >= 0, 'fallback fired the force-refresh');
+  });
+
+  ok('TD-REC-3 absent commands/API → no throw', () => {
+    const app = { metadataCache: { on: () => ({}), offref: () => {} }, _setTimeout: () => 0 };
+    new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');   // must not throw
+    new TaskDialogClass()._reconcileAfterCreate(null, 'p.md');  // null app → no throw
+    assert(true, 'no throw');
+  });
+}
+
 (async () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
+  runReconcileTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
