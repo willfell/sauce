@@ -18688,6 +18688,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
+    module.exports.applyProjectTodoOwnedTasksHeal = applyProjectTodoOwnedTasksHeal;
     module.exports._reorderProjectTodoOwnedTasksLast = _reorderProjectTodoOwnedTasksLast;
     module.exports.applyProjectTodoSectionReorderHeal = applyProjectTodoSectionReorderHeal;
     // task-entity — backup-first daily→note-per-task migration (for

@@ -3294,6 +3294,276 @@ async function runProjectChromeMigrateFamily() {
     }
 }
 
+// =============================================================================
+// Project installer-migration coverage family (HC-PROJ-MIG-COV-*). Direct
+// before/after harness for the eight project-blueprint install heals that had
+// no regression coverage: applyProjectMeetingsPanelHeal,
+// applyProjectLinksManagerBackfill, applyProjectHubLegacyHeadingCleanup,
+// applyProjectNavButtonsSeparatorGap, applyProjectsHubAllProjectsHeadingCleanup,
+// applyProjectActivityPanelsHeal, applyProjectLinksHubBackfill,
+// applyProjectTodoOwnedTasksHeal. Each heal runs in its OWN throwaway vault so
+// the type:project scanners (Meetings/ActivityPanels/LegacyHeading) never
+// cross-contaminate each other's fixtures. Every block asserts the real end
+// state (heal applied), a .sauce-backup snapshot where the heal rewrites in
+// place, and idempotency (a second run is a byte-identical no-op). The three
+// heals with pure string helpers also assert the helper transform directly.
+// =============================================================================
+async function runProjectInstallerMigrationCoverageFamily() {
+    const install = require("../install.js");
+    const git = { commit: "test", tag: "test", dirty: false };
+    const roots = [];
+    const freshVault = () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-proj-mig-cov-"));
+        roots.push(root);
+        return root;
+    };
+    const writeFixture = (root, rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const readVault = (root, rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const existsVault = (root, rel) => fs.existsSync(path.join(root, rel));
+    const backupExistsIn = (root, nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+    const dv = (cls, args) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '"' +
+        (args ? ", args: " + args : "") + " });\n```";
+    const mkTp = (root) => ({ app: { vault: { adapter: makeFsAdapter(root) } } });
+
+    try {
+        // ----- 1. applyProjectMeetingsPanelHeal -----
+        {
+            const root = freshVault();
+            const HUB = "spice/projects/mp-heal/Mp Heal.md";
+            writeFixture(root, HUB, [
+                "---", "type: project", "---", "",
+                dv("ProjectStatusWidget"), "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectMeetingsPanelHeal(tp, {}, {}, history, git);
+            const after = readVault(root, HUB);
+            ok("HC-PROJ-MIG-COV-1a MeetingsPanel injected into type:project hub",
+               after.includes('class: "ProjectMeetingsPanel"'));
+            ok("HC-PROJ-MIG-COV-1b MeetingsPanel sits after the ProjectStatusWidget anchor",
+               after.indexOf('class: "ProjectMeetingsPanel"') > after.indexOf('class: "ProjectStatusWidget"'));
+            ok("HC-PROJ-MIG-COV-1c .sauce-backup snapshot of the healed hub exists",
+               backupExistsIn(root, /Mp Heal\.md$/));
+            await install.applyProjectMeetingsPanelHeal(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-1d second run is a byte-identical no-op (idempotent)",
+               readVault(root, HUB) === after);
+            ok("HC-PROJ-MIG-COV-1e exactly one MeetingsPanel block after two runs",
+               (readVault(root, HUB).match(/class: "ProjectMeetingsPanel"/g) || []).length === 1);
+        }
+
+        // ----- 2. applyProjectLinksManagerBackfill (+ _injectProjectLinksManagerBody) -----
+        {
+            const root = freshVault();
+            const LH = "spice/projects/lm-backfill/Lm Links Hub.md";
+            writeFixture(root, LH, [
+                "---", "type: links-hub", "---", "",
+                dv("ProjectLinksPanel"), "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectLinksManagerBackfill(tp, {}, {}, history, git);
+            const after = readVault(root, LH);
+            ok("HC-PROJ-MIG-COV-2a LinksManager injected into type:links-hub note",
+               after.includes('class: "ProjectLinksManager"'));
+            ok("HC-PROJ-MIG-COV-2b LinksManager sits ABOVE the ProjectLinksPanel it anchors on",
+               after.indexOf('class: "ProjectLinksManager"') < after.indexOf('class: "ProjectLinksPanel"'));
+            ok("HC-PROJ-MIG-COV-2c .sauce-backup snapshot exists",
+               backupExistsIn(root, /Lm Links Hub\.md$/));
+            await install.applyProjectLinksManagerBackfill(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-2d second run is a byte-identical no-op (idempotent)",
+               readVault(root, LH) === after);
+            // pure helper: injects on an anchored body, no-ops without an anchor
+            const injected = install._injectProjectLinksManagerBody(dv("ProjectLinksPanel"));
+            ok("HC-PROJ-MIG-COV-2e _injectProjectLinksManagerBody adds the manager block",
+               injected.includes('class: "ProjectLinksManager"'));
+            ok("HC-PROJ-MIG-COV-2f _injectProjectLinksManagerBody no-ops without a ProjectLinksPanel anchor",
+               install._injectProjectLinksManagerBody("no anchor here") === "no anchor here");
+        }
+
+        // ----- 3. applyProjectHubLegacyHeadingCleanup -----
+        {
+            const root = freshVault();
+            const HUB = "spice/projects/legacy-head/Legacy Head.md";
+            writeFixture(root, HUB, [
+                "---", "type: project", "---", "",
+                "## Status", "", dv("ProjectStatusWidget"), "",
+                "## Workstreams", "", dv("ProjectWorkstreamManager"), "",
+                "## Status", "", "User-authored notes below a real heading.", "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            const before = readVault(root, HUB);
+            ok("HC-PROJ-MIG-COV-3-pre two ## Status headings + one ## Workstreams before heal",
+               (before.match(/^## Status$/gm) || []).length === 2 && /^## Workstreams$/m.test(before));
+            await install.applyProjectHubLegacyHeadingCleanup(tp, {}, {}, history, git);
+            const after = readVault(root, HUB);
+            ok("HC-PROJ-MIG-COV-3a widget-labelling ## Status stripped (2 -> 1)",
+               (after.match(/^## Status$/gm) || []).length === 1);
+            ok("HC-PROJ-MIG-COV-3b widget-labelling ## Workstreams stripped",
+               !/^## Workstreams$/m.test(after));
+            ok("HC-PROJ-MIG-COV-3c user-authored ## Status (over prose) preserved",
+               after.includes("User-authored notes below a real heading."));
+            ok("HC-PROJ-MIG-COV-3d both widget blocks still present",
+               after.includes('class: "ProjectStatusWidget"') && after.includes('class: "ProjectWorkstreamManager"'));
+            ok("HC-PROJ-MIG-COV-3e .sauce-backup snapshot exists",
+               backupExistsIn(root, /Legacy Head\.md$/));
+            await install.applyProjectHubLegacyHeadingCleanup(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-3f second run is a byte-identical no-op (idempotent)",
+               readVault(root, HUB) === after);
+        }
+
+        // ----- 4. applyProjectNavButtonsSeparatorGap (+ _collapseNavButtonsSeparatorGap) -----
+        {
+            const root = freshVault();
+            const NOTE = "spice/projects/navgap/Navgap Map.md";
+            writeFixture(root, NOTE, [
+                dv("ProjectNavButtons"), "", "---", "", "body", "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectNavButtonsSeparatorGap(tp, {}, {}, history, git);
+            const after = readVault(root, NOTE);
+            ok("HC-PROJ-MIG-COV-4a separator gap collapsed (fence hugs the --- rule)",
+               after.includes("```\n---") && !after.includes("```\n\n---"));
+            ok("HC-PROJ-MIG-COV-4b .sauce-backup snapshot exists",
+               backupExistsIn(root, /Navgap Map\.md$/));
+            await install.applyProjectNavButtonsSeparatorGap(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-4c second run is a byte-identical no-op (idempotent)",
+               readVault(root, NOTE) === after);
+            // pure helper: collapses a gap, no-ops on an already-hugged rule
+            ok("HC-PROJ-MIG-COV-4d _collapseNavButtonsSeparatorGap flags a real gap as changed",
+               install._collapseNavButtonsSeparatorGap(dv("ProjectNavButtons") + "\n\n---").changed === true);
+            ok("HC-PROJ-MIG-COV-4e _collapseNavButtonsSeparatorGap no-ops when there is no gap",
+               install._collapseNavButtonsSeparatorGap(dv("ProjectNavButtons") + "\n---").changed === false);
+        }
+
+        // ----- 5. applyProjectsHubAllProjectsHeadingCleanup (+ _stripAllProjectsHeading) -----
+        {
+            const root = freshVault();
+            const HUB = "spice/projects/Projects.md";
+            writeFixture(root, HUB, [
+                "---", "type: projects-hub", "---", "",
+                "## All Projects", "", dv("ProjectsHubCards"), "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectsHubAllProjectsHeadingCleanup(tp, {}, {}, history, git);
+            const after = readVault(root, HUB);
+            ok("HC-PROJ-MIG-COV-5a legacy ## All Projects heading stripped from projects-hub",
+               !/^## All Projects$/m.test(after));
+            ok("HC-PROJ-MIG-COV-5b hub cards widget preserved",
+               after.includes('class: "ProjectsHubCards"'));
+            ok("HC-PROJ-MIG-COV-5c .sauce-backup snapshot exists",
+               backupExistsIn(root, /Projects\.md$/));
+            await install.applyProjectsHubAllProjectsHeadingCleanup(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-5d second run is a byte-identical no-op (idempotent)",
+               readVault(root, HUB) === after);
+            // pure helper
+            ok("HC-PROJ-MIG-COV-5e _stripAllProjectsHeading flags the heading as changed",
+               install._stripAllProjectsHeading("## All Projects\n\nx").changed === true);
+            ok("HC-PROJ-MIG-COV-5f _stripAllProjectsHeading no-ops when the heading is absent",
+               install._stripAllProjectsHeading("no heading here").changed === false);
+        }
+
+        // ----- 6. applyProjectActivityPanelsHeal -----
+        {
+            const root = freshVault();
+            const HUB = "spice/projects/activity/Activity.md";
+            writeFixture(root, HUB, [
+                "---", "type: project", "---", "",
+                dv("ProjectStatusWidget"), "",
+                dv("ProjectMeetingsPanel"), "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectActivityPanelsHeal(tp, {}, {}, history, git);
+            const after = readVault(root, HUB);
+            ok("HC-PROJ-MIG-COV-6a ActivityPanel injected",
+               after.includes('class: "ProjectActivityPanel"'));
+            ok("HC-PROJ-MIG-COV-6b OpenTasks injected alongside ActivityPanel",
+               after.includes('class: "ProjectOpenTasks"'));
+            ok("HC-PROJ-MIG-COV-6c both panels sit ABOVE the MeetingsPanel anchor",
+               after.indexOf('class: "ProjectActivityPanel"') < after.indexOf('class: "ProjectMeetingsPanel"') &&
+               after.indexOf('class: "ProjectOpenTasks"') < after.indexOf('class: "ProjectMeetingsPanel"'));
+            ok("HC-PROJ-MIG-COV-6d .sauce-backup snapshot exists",
+               backupExistsIn(root, /Activity\.md$/));
+            await install.applyProjectActivityPanelsHeal(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-6e second run is a byte-identical no-op (idempotent)",
+               readVault(root, HUB) === after);
+        }
+
+        // ----- 7. applyProjectLinksHubBackfill -----
+        {
+            const root = freshVault();
+            writeFixture(root, "spice/projects/linkshub/Linkshub.md", [
+                "---", "type: project", "---", "", dv("ProjectNavButtons"), "",
+            ].join("\n"));
+            // A project dir with NO type:project hub must NOT get a Links Hub.
+            writeFixture(root, "spice/projects/nohub/Some Note.md", [
+                "---", "type: note", "---", "", "not a hub", "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectLinksHubBackfill(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-7a Links Hub created for the project with a hub note",
+               existsVault(root, "spice/projects/linkshub/Links Hub.md"));
+            const lh = existsVault(root, "spice/projects/linkshub/Links Hub.md")
+                ? readVault(root, "spice/projects/linkshub/Links Hub.md") : "";
+            ok("HC-PROJ-MIG-COV-7b created Links Hub carries type:links-hub + project name + slug",
+               lh.includes("type: links-hub") && lh.includes('project: "[[Linkshub]]"') && lh.includes("project_slug: linkshub"));
+            ok("HC-PROJ-MIG-COV-7c project WITHOUT a hub note gets no Links Hub",
+               !existsVault(root, "spice/projects/nohub/Links Hub.md"));
+            await install.applyProjectLinksHubBackfill(tp, {}, {}, history, git);
+            ok("HC-PROJ-MIG-COV-7d second run does not recreate/duplicate the Links Hub (idempotent)",
+               readVault(root, "spice/projects/linkshub/Links Hub.md") === lh);
+        }
+
+        // ----- 8. applyProjectTodoOwnedTasksHeal (+ _healProjectTodoOwnedTasksBody) -----
+        {
+            const root = freshVault();
+            const TODO = "spice/projects/todo/Todo To-Do.md";
+            writeFixture(root, TODO, [
+                "---", "type: project-todo", "---", "",
+                dv("SectionLabel", '[{ text: "Owned Tasks" }]'), "",
+                "- [ ] a legacy owned task", "",
+            ].join("\n"));
+            const tp = mkTp(root), history = [];
+            await install.applyProjectTodoOwnedTasksHeal(tp, history, git);
+            const after = readVault(root, TODO);
+            ok("HC-PROJ-MIG-COV-8a OWNED_TASKS_MARKER injected below the Owned Tasks label",
+               after.includes("<!-- OWNED_TASKS_MARKER -->"));
+            ok("HC-PROJ-MIG-COV-8b ownedTasks editable-list renderer injected",
+               after.includes('anchor: "ownedTasks"'));
+            ok("HC-PROJ-MIG-COV-8c raw legacy task line preserved",
+               after.includes("- [ ] a legacy owned task"));
+            ok("HC-PROJ-MIG-COV-8d .sauce-backup snapshot exists",
+               backupExistsIn(root, /Todo To-Do\.md$/));
+            await install.applyProjectTodoOwnedTasksHeal(tp, history, git);
+            ok("HC-PROJ-MIG-COV-8e second run is a byte-identical no-op (idempotent)",
+               readVault(root, TODO) === after);
+            // pure helper: a body already carrying marker + renderer is returned unchanged
+            ok("HC-PROJ-MIG-COV-8f _healProjectTodoOwnedTasksBody no-ops on an already-healed body",
+               install._healProjectTodoOwnedTasksBody(after) === after);
+        }
+    } finally {
+        for (const r of roots) {
+            if (KEEP) console.log(`  KEEP_SEED_VAULT=1: ${r}`);
+            else { try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) {} }
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -3361,6 +3631,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01790-SEED-MIGRATE-CHROME-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01790-SEED-MIGRATE-CHROME-FAMILY");
+    })
+    .then(() => runProjectInstallerMigrationCoverageFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-PROJ-MIG-COV-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-PROJ-MIG-COV-FAMILY");
     })
     .finally(() => {
         console.log("");
