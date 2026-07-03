@@ -160,6 +160,9 @@ class SpaceDailyDashboard {
       if (!p || p.type !== "task") continue;
       const path = p.file && p.file.path;
       if (!path || path.includes("/_trash/")) continue;
+      // Compare the RAW page field: parseNote does not date-coerce completed_at
+      // (it blankToNulls it but keeps the raw string/Luxon), so route it through
+      // _toDateStr here (handles string / datetime-with-offset / Luxon → YYYY-MM-DD).
       if (TE._toDateStr(p.completed_at) === todayStr) done++;
     }
 
