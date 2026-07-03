@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.184.5",
+  "workshop_version": "0.184.6",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
@@ -39,6 +39,6 @@
     "platform-claude": "0.1.3",
     "smart-connections-bridge": "0.2.0",
     "render-safe": "0.2.0",
-    "task-entity": "0.3.4"
+    "task-entity": "0.3.5"
   }
 }
