@@ -160,7 +160,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint wiki axis widget_render: 3 uncovered
-  status: proposed
+  status: done
+  note: NEW run-wiki-render-guards.js drives WikiTree / WikiLeafActions / WikiHubActions render() through the cold-load path (dv.current undefined+null → each early-returns on its `if (!cur || !cur.file) return` + wiki-type guard) in normal + .markdown-embed contexts, asserting no-throw (9 guards). Wired into release:preflight. coverage-matrix.json regenerated: wiki widget_render now 3/3.
 
 - id: cov-blueprint-trips-widget-render
   title: Add coverage for trips widget_render (0/3)
