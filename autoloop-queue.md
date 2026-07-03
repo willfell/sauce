@@ -152,7 +152,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: mechanism task-entity axis widget_render: 5 uncovered
-  status: proposed
+  status: done
+  note: NEW run-task-entity-render-guards.js drives all 4 task-entity render widgets (TaskTodayList, TaskNoteView, TaskMeetingList, TaskProjectList) through render() on the cold-load path (RenderSafe.page/dv.current undefined+null, empty dv.pages) in normal + .markdown-embed contexts, asserting no-throw — the render-safe net the to-do/cowork/project/scratch widgets already have. Wired into release:preflight. coverage-matrix.json regenerated: task-entity widget_render now 4/4.
 
 - id: cov-blueprint-wiki-widget-render
   title: Add coverage for wiki widget_render (0/3)

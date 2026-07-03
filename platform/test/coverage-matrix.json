@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.185.2",
+  "generated_at": "0.187.0",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -738,7 +738,7 @@
     {
       "kind": "blueprint",
       "name": "daily",
-      "current_version": "0.17.0",
+      "current_version": "0.18.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -2342,7 +2342,7 @@
     {
       "kind": "blueprint",
       "name": "home",
-      "current_version": "0.2.1",
+      "current_version": "0.4.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -4181,119 +4181,6 @@
     },
     {
       "kind": "mechanism",
-      "name": "breadcrumb",
-      "current_version": "0.2.1",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "Breadcrumb",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-breadcrumb-breadcrumb.js"
-        },
-        "installer_migration": {
-          "score": 0.3333333333333333,
-          "covered": 1,
-          "total": 3,
-          "migrations": [
-            {
-              "fn": "applyBreadcrumb",
-              "covered": false
-            },
-            {
-              "fn": "applyBoardCardBreadcrumbHeal",
-              "covered": true
-            },
-            {
-              "fn": "applyDocNoteBreadcrumbMarkerCleanup",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": false
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": null,
-          "reason": "no templates or rule_fragments",
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "Breadcrumb",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.65,
-      "blast_radius": "low",
-      "blast_radius_rationale": "unassigned",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.22499999999999998,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.22499999999999998,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
-      }
-    },
-    {
-      "kind": "mechanism",
       "name": "people-identity",
       "current_version": "0.1.0",
       "axes": {
@@ -4990,145 +4877,64 @@
     },
     {
       "kind": "mechanism",
-      "name": "task-entity",
-      "current_version": "0.3.5",
+      "name": "breadcrumb",
+      "current_version": "0.2.1",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
-          "covered": 20,
-          "total": 20,
+          "covered": 1,
+          "total": 1,
           "methods": [
             {
-              "cls": "TaskEntity",
-              "method": "taskFilename",
-              "covered": true
-            },
-            {
-              "cls": "TaskEntity",
-              "method": "composeNote",
-              "covered": true
-            },
-            {
-              "cls": "TaskEntity",
-              "method": "parseNote",
-              "covered": true
-            },
-            {
-              "cls": "TaskEntity",
-              "method": "queryToday",
-              "covered": true
-            },
-            {
-              "cls": "TaskEntity",
-              "method": "validatePayload",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "defaultsForSurface",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "trashPath",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "donePath",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "renderNote",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "open",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "markDone",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "markDeleted",
-              "covered": true
-            },
-            {
-              "cls": "TaskDialog",
-              "method": "createQuick",
-              "covered": true
-            },
-            {
-              "cls": "TaskTodayList",
-              "method": "buildBands",
-              "covered": true
-            },
-            {
-              "cls": "TaskTodayList",
-              "method": "renderTaskRow",
-              "covered": true
-            },
-            {
-              "cls": "TaskTodayList",
-              "method": "renderInlineLinks",
-              "covered": true
-            },
-            {
-              "cls": "TaskTodayList",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TaskNoteView",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TaskMeetingList",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TaskProjectList",
+              "cls": "Breadcrumb",
               "method": "render",
               "covered": true
             }
           ],
           "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-task-entity-taskentity.js"
+          "suggested_target_file": "platform/test/run-breadcrumb-breadcrumb.js"
         },
         "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
+          "score": 0.3333333333333333,
+          "covered": 1,
+          "total": 3,
+          "migrations": [
+            {
+              "fn": "applyBreadcrumb",
+              "covered": false
+            },
+            {
+              "fn": "applyBoardCardBreadcrumbHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyDocNoteBreadcrumbMarkerCleanup",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
         },
         "manifest_schema": {
-          "score": 0.5,
-          "manifest_ratio": 0,
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
           "schema_ratio": 1,
           "manifest_fields": [
             {
               "field": "name",
-              "asserted": false
+              "asserted": true
             },
             {
               "field": "version",
-              "asserted": false
+              "asserted": true
             },
             {
               "field": "customjs_classes",
-              "asserted": false
+              "asserted": true
             },
             {
               "field": "files",
-              "asserted": false
+              "asserted": true
             },
             {
               "field": "rule_fragments",
@@ -5136,7 +4942,7 @@
             },
             {
               "field": "depends_on",
-              "asserted": false
+              "asserted": true
             }
           ],
           "schema_owned": 0,
@@ -5150,25 +4956,13 @@
           "suggested_target_file": null
         },
         "widget_render": {
-          "score": 0.25,
+          "score": 1,
           "covered": 1,
-          "total": 4,
+          "total": 1,
           "widgets": [
             {
-              "widget": "TaskTodayList",
+              "widget": "Breadcrumb",
               "covered": true
-            },
-            {
-              "widget": "TaskNoteView",
-              "covered": false
-            },
-            {
-              "widget": "TaskMeetingList",
-              "covered": false
-            },
-            {
-              "widget": "TaskProjectList",
-              "covered": false
             }
           ],
           "suggested_archetype": "renderer-extend",
@@ -5182,16 +4976,16 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.6875,
+      "composite_score": 0.85,
       "blast_radius": "low",
       "blast_radius_rationale": "unassigned",
       "recent_incidents_30d": 0,
-      "priority_score": 0.16874999999999998,
+      "priority_score": 0.2,
       "top_gap": {
-        "axis": "widget_render",
-        "score": 0.16874999999999998,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
+        "axis": "installer_migration",
+        "score": 0.2,
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
       }
     },
     {
@@ -5945,6 +5739,212 @@
         ],
         "primary_user_flow": "Click EntityCreate-rendered button in hub note -> prompts loop -> frontmatter template hydration + seed_from_defaults injection -> create new note at routed destination -> open in editor",
         "qualitative_recommendation": "Strong on pure logic (customjs_behavioral 1.0, schema 0.917, widget 1.0) but critical gap in installer_migration (0.0). The two apply* fns run on every install and materialize the registry or rewrite vault notes; their behavior must be directly asserted in the seed harness. Single gap carries high blast radius (installs touch every vault)."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "task-entity",
+      "current_version": "0.4.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 20,
+          "total": 20,
+          "methods": [
+            {
+              "cls": "TaskEntity",
+              "method": "taskFilename",
+              "covered": true
+            },
+            {
+              "cls": "TaskEntity",
+              "method": "composeNote",
+              "covered": true
+            },
+            {
+              "cls": "TaskEntity",
+              "method": "parseNote",
+              "covered": true
+            },
+            {
+              "cls": "TaskEntity",
+              "method": "queryToday",
+              "covered": true
+            },
+            {
+              "cls": "TaskEntity",
+              "method": "validatePayload",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "defaultsForSurface",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "trashPath",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "donePath",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "renderNote",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "open",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "markDone",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "markDeleted",
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "createQuick",
+              "covered": true
+            },
+            {
+              "cls": "TaskTodayList",
+              "method": "buildBands",
+              "covered": true
+            },
+            {
+              "cls": "TaskTodayList",
+              "method": "renderTaskRow",
+              "covered": true
+            },
+            {
+              "cls": "TaskTodayList",
+              "method": "renderInlineLinks",
+              "covered": true
+            },
+            {
+              "cls": "TaskTodayList",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TaskNoteView",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TaskMeetingList",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TaskProjectList",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-task-entity-taskentity.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5,
+          "manifest_ratio": 0,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "widgets": [
+            {
+              "widget": "TaskTodayList",
+              "covered": true
+            },
+            {
+              "widget": "TaskNoteView",
+              "covered": true
+            },
+            {
+              "widget": "TaskMeetingList",
+              "covered": true
+            },
+            {
+              "widget": "TaskProjectList",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.875,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.075,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.075,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
       }
     },
     {
