@@ -3146,7 +3146,9 @@ async function testSelectTasksNotePerTask() {
     '"spice/tasks"': [
       { type: "task", status: "open", scheduled: "2026-07-02", title: "daily today", source: "daily",   file: { path: "spice/tasks/daily-today.md" } },
       { type: "task", status: "open", scheduled: "2026-07-02", title: "proj today",  source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-today.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "mtg today",   source: "meeting",  file: { path: "spice/tasks/mtg-today.md" } },
       { type: "task", status: "open", scheduled: "2026-06-30", title: "mtg overdue", source: "meeting",  file: { path: "spice/tasks/mtg-overdue.md" } },
+      { type: "task", status: "open", scheduled: "2026-06-29", title: "proj overdue", source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-overdue.md" } },
       { type: "task", status: "open", scheduled: "2026-07-05", title: "future",       file: { path: "spice/tasks/future.md" } },
       { type: "task", status: "open", scheduled: "",           title: "someday",      file: { path: "spice/tasks/someday.md" } },
       { type: "task", status: "done", scheduled: "2026-07-02", title: "leaked done",  file: { path: "spice/tasks/_done/leaked.md" } },
@@ -3169,22 +3171,23 @@ async function testSelectTasksNotePerTask() {
   const res = SDD.selectTasks(fakeDv, today, TE);
   const titles = res.open.map((t) => t.title);
 
-  check("open has exactly the 3 today/overdue tasks", res.open.length === 3);
-  check("all sources present (project + meeting NOT filtered out)",
-    titles.indexOf("proj today") >= 0 && titles.indexOf("mtg overdue") >= 0 && titles.indexOf("daily today") >= 0);
-  check("today band rendered first (2 today, then overdue)",
-    res.open[0].scheduled === "2026-07-02" && res.open[1].scheduled === "2026-07-02" && res.open[2].scheduled === "2026-06-30");
-  check("today rows tagged _overdue:false", res.open[0]._overdue === false && res.open[1]._overdue === false);
-  check("overdue row tagged _overdue:true", res.open[2]._overdue === true);
-  check("future excluded", titles.indexOf("future") < 0);
-  check("unscheduled excluded", titles.indexOf("someday") < 0);
+  // open == TODAY ONLY (scheduled == today); overdue is a COUNT, not in the list.
+  check("open list is today-only (3 tasks scheduled today)", res.open.length === 3);
+  check("every open row is scheduled today", res.open.every((t) => t.scheduled === "2026-07-02"));
+  check("all sources present in the today list (daily + project + meeting)",
+    titles.indexOf("daily today") >= 0 && titles.indexOf("proj today") >= 0 && titles.indexOf("mtg today") >= 0);
+  check("overdue tasks are NOT in the open list", titles.indexOf("mtg overdue") < 0 && titles.indexOf("proj overdue") < 0);
+  check("overdue == 2 (all sources counted: meeting + project)", res.overdue === 2);
+  check("future excluded from open", titles.indexOf("future") < 0);
+  check("unscheduled excluded from open", titles.indexOf("someday") < 0);
   check("_trash excluded from open", titles.indexOf("trashed") < 0);
   check("_done leak excluded from open", titles.indexOf("leaked done") < 0);
-  check("non-task type excluded", titles.indexOf("not a task") < 0);
+  check("non-task type excluded from open", titles.indexOf("not a task") < 0);
   check("done == 2 (today incl datetime form; excl yesterday/no-date/trashed)", res.done === 2);
 
   const cold = SDD.selectTasks(fakeDv, today, null);
-  check("cold-load (no TE) → empty open + zero done", cold.open.length === 0 && cold.done === 0);
+  check("cold-load (no TE) → empty open + zero overdue + zero done",
+    cold.open.length === 0 && cold.overdue === 0 && cold.done === 0);
 
   return ok;
 }
@@ -3555,9 +3558,9 @@ async function testRendHasNotes() {
     const fs = require("fs");
     const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
 
-    assertTrue("HC-V0843-A1 selectTasks is the note-per-task data seam returning { open, done }",
-      /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*\}/.test(sddSrc),
-      "selectTasks must select task-notes and return an open list + a done count (pills read openTasks.length + doneCount)");
+    assertTrue("HC-V0843-A1 selectTasks is the note-per-task data seam returning { open, done, overdue }",
+      /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*,\s*overdue\s*\}/.test(sddSrc),
+      "selectTasks must select task-notes and return a today-only open list + a done count + an overdue count (pills read openTasks.length + overdueCount + doneCount)");
 
     assertTrue("HC-V0843-A1b selectTasks queries spice/tasks (open) + _done (done-today) via queryToday",
       /"spice\/tasks"/.test(sddSrc) && /"spice\/tasks\/_done"/.test(sddSrc) && /queryToday/.test(sddSrc),
@@ -3579,6 +3582,10 @@ async function testRendHasNotes() {
       /sauce-section-done-pill/.test(sddSrc),
       "Tasks rightHtml must build a <span class=\"sauce-section-done-pill\">…</span> for the done count");
 
+    assertTrue("HC-V0843-A4b Tasks call site references sauce-section-overdue-pill (red overdue count)",
+      /sauce-section-overdue-pill/.test(sddSrc) && /overdueCount/.test(sddSrc),
+      "Tasks rightHtml must build a <span class=\"sauce-section-overdue-pill\">…</span> carrying the overdueCount (overdue tasks are surfaced only as a red count pill, not as list rows)");
+
     assertTrue("HC-V0843-A5 Meetings call site uses title 'Meetings' + sauce-section-count-pill",
       /title:\s*["']Meetings["']/.test(sddSrc) && /sauce-section-count-pill[\s\S]{0,300}meetings\.length/.test(sddSrc),
       "Meetings _renderSection must pass title: 'Meetings' and a rightHtml containing sauce-section-count-pill with the meetings.length value");
@@ -3599,12 +3606,17 @@ async function testRendHasNotes() {
       "../../platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
     const cssSrc = fs.readFileSync(CSS_PATH, "utf8");
 
-    assertTrue("HC-V0843-A9 CSS defines all three pill classes + counts container",
+    assertTrue("HC-V0843-A9 CSS defines all pill classes + counts container (incl. red overdue)",
       /\.sauce-section-counts\s*\{/.test(cssSrc) &&
       /\.sauce-section-open-pill\s*\{/.test(cssSrc) &&
+      /\.sauce-section-overdue-pill\s*\{/.test(cssSrc) &&
       /\.sauce-section-done-pill\s*\{/.test(cssSrc) &&
       /\.sauce-section-count-pill\s*\{/.test(cssSrc),
-      "sauce-daily-dashboard.css must define .sauce-section-counts, .sauce-section-open-pill, .sauce-section-done-pill, .sauce-section-count-pill");
+      "sauce-daily-dashboard.css must define .sauce-section-counts, .sauce-section-open-pill, .sauce-section-overdue-pill, .sauce-section-done-pill, .sauce-section-count-pill");
+
+    assertTrue("HC-V0843-A9b overdue pill is themed red (var(--color-red))",
+      /\.sauce-section-overdue-pill\s*\{[^}]*var\(--color-red\)/.test(cssSrc),
+      "the .sauce-section-overdue-pill rule must colour itself with var(--color-red) so overdue reads as a red count");
 
     assertTrue("HC-V0843-A10 retired .sauce-tasks-done is gone from CSS",
       !/\.sauce-tasks-done\s*\{/.test(cssSrc),

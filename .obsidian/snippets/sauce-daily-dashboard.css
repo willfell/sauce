@@ -311,6 +311,33 @@
   background: var(--color-orange);
 }
 
+/* Overdue pill — red tint + glow: a count of open tasks scheduled before today
+   (not listed in the panel; the list stays scoped to tasks made for today). */
+.space-daily-dashboard .sauce-section-overdue-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-red) 12%, transparent);
+  border: 1px solid var(--color-red);
+  color: var(--color-red);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-red) 35%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.space-daily-dashboard .sauce-section-overdue-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-red);
+}
+
 /* Done-tasks pill — green tint, no glow (acknowledgment, not call-to-action). */
 .space-daily-dashboard .sauce-section-done-pill {
   display: inline-flex;
@@ -387,6 +414,7 @@
   .space-daily-dashboard .sauce-drill-time { margin-left: 8px; }
   .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
   .space-daily-dashboard .sauce-section-open-pill,
+  .space-daily-dashboard .sauce-section-overdue-pill,
   .space-daily-dashboard .sauce-section-done-pill,
   .space-daily-dashboard .sauce-section-count-pill { padding: 1px 6px; font-size: 0.82em; }
   .space-daily-dashboard .sauce-section-counts { gap: 4px; }
