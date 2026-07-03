@@ -38,7 +38,7 @@ The Home note renders a `SpaceHome` panel via CustomJS:
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceHome" });
 ```
 
-The panel shows a greeting, a quick-capture row (New To-Do, New Meeting, New Scratch, and Open today's daily), and a compact today's-dashboard view (tasks, meetings, recent activity). If the panel does not render (or appears with stale data), trigger Cmd+R after install to re-register the `SpaceHome` CustomJS class.
+The panel shows a greeting (with a glance count line), a subtle **＋ quick-add** at the top-right that opens a dropdown (jot a task, or New Meeting / New Scratch / Open today's daily), and a compact today's-dashboard view (tasks, meetings, recent activity). If the panel does not render (or appears with stale data), trigger Cmd+R after install to re-register the `SpaceHome` CustomJS class.
 
 ## Refresh or audit
 

@@ -1,54 +1,245 @@
-/* sauce-home.css — Home command center layout + animation layer.
+/* sauce-home.css — Home command center: a sharp, precision-editorial surface.
  * Materialized to .obsidian/snippets/sauce-home.css via the installer's
- * applySnippets helper (convenience mech plumbing). Scopes ALL rules under
- * .sauce-home so nothing leaks. Native Obsidian tokens throughout; matches the
- * sauce-daily-dashboard.css vocabulary (--background-modifier-border,
- * --interactive-*, --text-*, 8px radius, tabular-nums, @media max-width:480px). */
+ * applySnippets helper. ALL rules scoped under .sauce-home. Native Obsidian
+ * tokens throughout (--text-*, --interactive-*, --background-*, --color-red) so
+ * it holds across every theme + light/dark. Sharp = tight type, crisp hairlines,
+ * small radii, snappy easing. Capture hides behind one quiet "+" dropdown. */
 
-/* ── Wrapper ───────────────────────────────────────────────────────────── */
+/* ── Sharp motion vocabulary ───────────────────────────────────────────── */
 .sauce-home {
+  --sh-ease: cubic-bezier(0.2, 0.9, 0.25, 1);   /* snappy, faint overshoot */
+  --sh-radius: 7px;
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
-  margin: 4px 0 12px 0;
+  margin: 4px 0 14px 0;
 }
 
-/* ── Greeting header ───────────────────────────────────────────────────── *
- * A prominent line ("Good morning") over a muted date subtitle
- * ("Thursday, Jul 2, 2026 · Today"). */
-.sauce-home .sauce-home-greeting {
-  margin: 0 0 16px 0;
+/* ── Header: greeting (left) + "+" quick-add (right) ───────────────────── */
+.sauce-home .sauce-home-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px 0;
 }
-.sauce-home .sauce-home-greeting-line {
-  font-size: 1.7em;
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  color: var(--text-normal);
-}
+.sauce-home .sauce-home-greeting { min-width: 0; }
+
+/* Eyebrow (the date) — small, uppercase, widely tracked, muted, with a short
+ * accent tick before it as the surface's signature. */
 .sauce-home .sauce-home-greeting-date {
-  margin-top: 3px;
-  font-size: 0.92em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7em;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+}
+.sauce-home .sauce-home-greeting-date::before {
+  content: "";
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+  flex: 0 0 auto;
 }
 
+/* Greeting — large, heavy, tightly tracked. The one bold typographic gesture. */
+.sauce-home .sauce-home-greeting-line {
+  margin-top: 5px;
+  font-size: 1.85em;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  color: var(--text-normal);
+}
+
+/* ── "+" quick-add button ──────────────────────────────────────────────── */
+.sauce-home .sauce-home-add-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.sauce-home .sauce-home-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--sh-radius);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s var(--sh-ease), border-color 0.15s var(--sh-ease),
+    background 0.15s var(--sh-ease), transform 0.18s var(--sh-ease),
+    box-shadow 0.15s var(--sh-ease);
+}
+.sauce-home .sauce-home-add svg { display: block; transition: transform 0.2s var(--sh-ease); }
+@media (hover: hover) {
+  .sauce-home .sauce-home-add:hover {
+    color: var(--text-normal);
+    border-color: var(--background-modifier-border-hover);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
+  }
+}
+.sauce-home .sauce-home-add:active { transform: scale(0.94); }
+/* Open state: becomes an accent "×" (the + glyph rotates 45°). */
+.sauce-home .sauce-home-add.is-open {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+.sauce-home .sauce-home-add.is-open svg { transform: rotate(45deg); }
+
+/* ── The dropdown menu ─────────────────────────────────────────────────── */
+.sauce-home .sauce-home-add-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  min-width: 244px;
+  max-width: min(84vw, 320px);
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: calc(var(--sh-radius) + 2px);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+  /* Hidden by default; shown via .is-open. Visibility/opacity gate it so the
+   * reduced-motion off-switch (which kills transform) still shows/hides it. */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.96) translateY(-4px);
+  transform-origin: top right;
+  transition: opacity 0.14s var(--sh-ease), transform 0.16s var(--sh-ease),
+    visibility 0s linear 0.16s;
+}
+.sauce-home .sauce-home-add-menu.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: scale(1) translateY(0);
+  transition: opacity 0.15s var(--sh-ease), transform 0.18s var(--sh-ease),
+    visibility 0s linear 0s;
+}
+
+/* Task-capture input row inside the menu. */
+.sauce-home .sauce-home-add-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 2px 2px 6px 2px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.sauce-home .sauce-home-capture-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 11px;
+  border-radius: var(--sh-radius);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  line-height: 1.3;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sauce-home .sauce-home-capture-input::placeholder { color: var(--text-faint); }
+.sauce-home .sauce-home-capture-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+.sauce-home .sauce-home-capture-add {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: var(--sh-radius);
+  border: 1px solid var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 0.85em;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 0.15s var(--sh-ease), transform 0.12s var(--sh-ease);
+}
+.sauce-home .sauce-home-capture-add:active { transform: scale(0.97); }
+@media (hover: hover) {
+  .sauce-home .sauce-home-capture-add:hover { background: var(--interactive-accent-hover); }
+}
+
+/* Menu action rows — icon + label; sharp accent-slide on hover. */
+.sauce-home .sauce-home-add-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 11px;
+  border: none;
+  border-radius: var(--sh-radius);
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 0.9em;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.13s var(--sh-ease), padding-left 0.13s var(--sh-ease);
+}
+.sauce-home .sauce-home-add-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+  opacity: 0;
+  transition: opacity 0.13s var(--sh-ease);
+}
+@media (hover: hover) {
+  .sauce-home .sauce-home-add-item:hover {
+    background: var(--background-modifier-hover);
+    padding-left: 15px;
+  }
+  .sauce-home .sauce-home-add-item:hover::before { opacity: 1; }
+}
+.sauce-home .sauce-home-add-item:active { background: var(--background-modifier-active-hover); }
+.sauce-home .sauce-home-capture-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.sauce-home .sauce-home-capture-icon svg { display: block; }
+.sauce-home .sauce-home-capture-label { white-space: nowrap; }
+
 /* ── Glance line ───────────────────────────────────────────────────────── *
- * A rolled-up, muted count line ("N today · M overdue · K meetings · J done"),
- * or a single "Clear day — nothing scheduled" when the day is empty. Chips wrap
- * on narrow widths; tabular-nums so the numbers align. */
+ * "N today · M overdue · K meetings · J done", or a "Clear day…" fallback. */
 .sauce-home .sauce-home-glance {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: 7px;
   margin: 0 0 16px 0;
-  font-size: 0.95em;
+  font-size: 0.94em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
 }
 .sauce-home .sauce-home-glance-chip {
   display: inline-flex;
@@ -56,15 +247,8 @@
   gap: 1px;
   white-space: nowrap;
 }
-.sauce-home .sauce-home-glance-n {
-  font-weight: 700;
-  color: var(--text-normal);
-}
-.sauce-home .sauce-home-glance-sep {
-  color: var(--text-faint);
-}
-/* The overdue chip reuses the dashboard's red overdue pill token for its number
- * so an overdue count reads as a warning at a glance. */
+.sauce-home .sauce-home-glance-n { font-weight: 750; color: var(--text-normal); }
+.sauce-home .sauce-home-glance-sep { color: var(--text-faint); }
 .sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill {
   background: none;
   padding: 0;
@@ -74,162 +258,56 @@
 .sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill .sauce-home-glance-label {
   color: var(--color-red);
 }
-.sauce-home .sauce-home-glance-clear {
-  color: var(--text-muted);
-  font-style: italic;
-}
+.sauce-home .sauce-home-glance-clear { color: var(--text-muted); font-style: italic; }
 
-/* ── Quick-capture band ────────────────────────────────────────────────── *
- * A full-width inline "Jot a task…" input + Add row on top, then a responsive
- * auto-fit grid of buttons. Mobile: one full-width button per row (see @media
- * below). Inputs + buttons are ≥44px tall tap targets, native Obsidian tokens. */
-.sauce-home .sauce-home-capture {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  margin: 0 0 18px 0;
-}
-
-/* Inline capture row spans the FULL band width (all grid columns) so the input
- * gets the whole line; the Add button hugs the right. */
-.sauce-home .sauce-home-capture-input-row {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.sauce-home .sauce-home-capture-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 44px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: 0.95em;
-  line-height: 1.3;
-  box-sizing: border-box;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.sauce-home .sauce-home-capture-input::placeholder {
-  color: var(--text-faint);
-}
-.sauce-home .sauce-home-capture-input:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 1px var(--interactive-accent);
-}
-.sauce-home .sauce-home-capture-add {
-  flex: 0 0 auto;
-  min-height: 44px;
-  padding: 10px 18px;
-  border-radius: 8px;
-  border: 1px solid var(--interactive-accent);
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  font-size: 0.92em;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  box-sizing: border-box;
-  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
-}
-.sauce-home .sauce-home-capture-add:active { transform: scale(0.98); }
-@media (hover: hover) {
-  .sauce-home .sauce-home-capture-add:hover {
-    background: var(--interactive-accent-hover);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  }
-}
-.sauce-home .sauce-home-capture-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--interactive-normal);
-  color: var(--text-normal);
-  font-size: 0.92em;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  box-sizing: border-box;
-  width: 100%;
-  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-}
-.sauce-home .sauce-home-capture-icon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-.sauce-home .sauce-home-capture-icon svg { display: block; }
-.sauce-home .sauce-home-capture-label {
-  white-space: nowrap;
-}
-.sauce-home .sauce-home-capture-btn:active { transform: scale(0.98); }
-
-/* Hover only on real pointer devices (no sticky :hover on touch). */
-@media (hover: hover) {
-  .sauce-home button:hover,
-  .sauce-home .sauce-home-capture-btn:hover {
-    background: var(--interactive-hover);
-    border-color: var(--background-modifier-border-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  }
-}
-
-/* ── Animation layer (GPU-only transform/opacity; total < 300ms) ───────── *
- * Direct children of .sauce-home fade + rise on mount, staggered so the
- * greeting, capture band, and dashboard cascade in. */
-@keyframes sauceHomeFadeUp {
-  from { opacity: 0; transform: translateY(8px); }
+/* ── Entrance animation — sharp staggered reveal (GPU-only, < 300ms) ────── */
+@keyframes sauceHomeReveal {
+  from { opacity: 0; transform: translateY(9px); }
   to   { opacity: 1; transform: none; }
 }
-.sauce-home > * {
-  animation: sauceHomeFadeUp 0.2s ease-out both;
-}
+.sauce-home > * { animation: sauceHomeReveal 0.28s var(--sh-ease) both; }
 .sauce-home > *:nth-child(1) { animation-delay: 0s; }
-.sauce-home > *:nth-child(2) { animation-delay: 0.05s; }
-.sauce-home > *:nth-child(3) { animation-delay: 0.1s; }
-.sauce-home > *:nth-child(4) { animation-delay: 0.15s; }
+.sauce-home > *:nth-child(2) { animation-delay: 0.06s; }
+.sauce-home > *:nth-child(3) { animation-delay: 0.12s; }
+.sauce-home > *:nth-child(4) { animation-delay: 0.18s; }
+/* The accent eyebrow tick draws in crisply. */
+@keyframes sauceHomeTick { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.sauce-home .sauce-home-greeting-date::before {
+  transform-origin: left center;
+  animation: sauceHomeTick 0.3s var(--sh-ease) 0.14s both;
+}
 
-/* Count pills (e.g. the dashboard's red overdue pill) pop once on mount. */
+/* Count pills pop once on mount. */
 @keyframes sauceHomePillPop {
   0%   { transform: scale(0.85); }
-  60%  { transform: scale(1.06); }
+  55%  { transform: scale(1.07); }
   100% { transform: scale(1); }
 }
 .sauce-home .sauce-section-overdue-pill,
 .sauce-home .sauce-section-open-pill,
 .sauce-home .sauce-section-done-pill,
 .sauce-home .sauce-section-count-pill {
-  animation: sauceHomePillPop 0.22s ease-out both;
+  animation: sauceHomePillPop 0.22s var(--sh-ease) both;
 }
 
-/* ── Mobile pass — narrow viewports ────────────────────────────────────── *
- * One full-width capture button per row; tighter greeting. */
+/* ── Mobile pass ───────────────────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .sauce-home .sauce-home-capture {
-    grid-template-columns: 1fr;
-    gap: 8px;
+  .sauce-home .sauce-home-greeting-line { font-size: 1.55em; }
+  .sauce-home .sauce-home-head { margin-bottom: 12px; }
+  /* Dropdown widens to a near-full-width sheet, still anchored under the "+". */
+  .sauce-home .sauce-home-add-menu {
+    min-width: 0;
+    width: min(88vw, 340px);
+    max-width: 88vw;
   }
-  .sauce-home .sauce-home-greeting-line { font-size: 1.45em; }
-  .sauce-home .sauce-home-greeting { margin-bottom: 12px; }
-  .sauce-home .sauce-home-capture-btn { min-height: 46px; }
+  .sauce-home .sauce-home-add-item { min-height: 44px; }
+  .sauce-home .sauce-home-capture-input,
+  .sauce-home .sauce-home-capture-add { min-height: 42px; }
 }
 
 /* ── Reduced-motion off-switch ─────────────────────────────────────────── *
- * Honour the OS accessibility preference: kill every animation/transition/
- * transform under .sauce-home so nothing moves. */
+ * Kill every animation/transition/transform; visibility/opacity still gate the
+ * menu so it snaps open/closed without motion. */
 @media (prefers-reduced-motion: reduce) {
   .sauce-home *,
   .sauce-home > * {
@@ -237,4 +315,5 @@
     transition: none !important;
     transform: none !important;
   }
+  .sauce-home .sauce-home-greeting-date::before { transform: none !important; }
 }
