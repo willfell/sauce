@@ -110,7 +110,7 @@
   ],
   "breadcrumb": {
     "types": {
-      "trips-hub": { "current": { "label": "lit:Trips" } },
+      "trips-hub": { "ancestors": [], "current": { "label": "lit:Trips" } },
       "trip": {
         "ancestors": [ { "label": "lit:Trips", "link": "spice/trips/Trips.md" } ],
         "current": { "label": "fm:name|file:basename" }
