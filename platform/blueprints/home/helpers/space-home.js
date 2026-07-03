@@ -4,9 +4,13 @@
  * Renders the persistent `spice/home/Home.md` page in Reading view:
  *   1. a GREETING header  — "Good morning" / "afternoon" / "evening" (by hour)
  *                            + a human date ("Thursday, Jul 2, 2026 · Today"),
- *   2. a QUICK-CAPTURE band — 4 one-tap buttons: ＋ To-Do, ＋ Meeting, ＋ Scratch,
- *                            Open today's daily,
- *   3. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
+ *   2. a GLANCE line      — a rolled-up count line ("N today · M overdue ·
+ *                            K meetings · J done"; zeros hidden; all-zero →
+ *                            "Clear day — nothing scheduled"),
+ *   3. a QUICK-CAPTURE band — an inline "Jot a task…" input + Add (one-gesture
+ *                            task create, no modal), then 3 one-tap buttons:
+ *                            ＋ Meeting, ＋ Scratch, Open today's daily,
+ *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
  *                            date, unchanged).
@@ -34,7 +38,8 @@
  * Static API (Node-testable, pure):
  *   SpaceHome._greeting(hour)          → "Good morning" | "Good afternoon" | "Good evening"
  *   SpaceHome._humanDate(iso, todayIso)→ "Thursday, Jul 2, 2026 · Today" (pure day-math)
- *   SpaceHome._captureSpec()           → [{ key, label, icon }, …] (the 4 capture buttons)
+ *   SpaceHome._captureSpec()           → [{ key, label, icon }, …] (the 3 capture buttons)
+ *   SpaceHome._glanceChips(counts)     → { empty, text } | { empty:false, chips:[{n,label,cls}] }
  */
 class SpaceHome {
 
@@ -131,20 +136,55 @@ class SpaceHome {
   }
 
   /**
-   * The 4 quick-capture buttons, in fixed DOM order. Each entry:
+   * The 3 quick-capture BUTTONS, in fixed DOM order. Each entry:
    *   { key, label, icon }  — icon is an inline lucide-style SVG string.
    * The dispatch per key is wired in render() (kept out of the spec so the spec
    * stays pure + Node-testable).
+   *
+   * NOTE: the `todo` entry was REMOVED — task capture is now an inline
+   * "Jot a task…" input + Add button (built in render, wired to
+   * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
+   * 3 remaining buttons: ＋ Meeting, ＋ Scratch, Open today's daily.
    */
   static _captureSpec() {
     const svg = (inner) =>
       `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
     return [
-      { key: "todo",      label: "＋ To-Do",           icon: svg(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/>`) },
       { key: "meeting",   label: "＋ Meeting",          icon: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`) },
       { key: "scratch",   label: "＋ Scratch",          icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
       { key: "openDaily", label: "Open today’s daily", icon: svg(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`) },
     ];
+  }
+
+  /**
+   * Pure chip descriptor for the glance line. Input: the { today, overdue, done,
+   * meetings } roll-up (each coerced to a non-negative int, default 0). Output:
+   *   - every count 0 → { empty: true, text: "Clear day — nothing scheduled" }
+   *   - else → { empty: false, chips: [{ n, label, cls }, …] } holding ONLY the
+   *     counts > 0, in fixed order today / overdue / meetings / done:
+   *       today    → label "today"                     (no cls)
+   *       overdue  → label "overdue", cls "sauce-section-overdue-pill" (red)
+   *       meetings → label "meeting" (n===1) | "meetings"
+   *       done     → label "done"
+   * PURE + Node-testable — render() builds the DOM from this descriptor. `cls` is
+   * "" when there's no special class so the caller can append unconditionally.
+   */
+  static _glanceChips(counts) {
+    const c = counts || {};
+    const toInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
+    const today = toInt(c.today);
+    const overdue = toInt(c.overdue);
+    const meetings = toInt(c.meetings);
+    const done = toInt(c.done);
+    if (!today && !overdue && !meetings && !done) {
+      return { empty: true, text: "Clear day — nothing scheduled" };
+    }
+    const chips = [];
+    if (today > 0)    chips.push({ n: today,    label: "today",                              cls: "" });
+    if (overdue > 0)  chips.push({ n: overdue,  label: "overdue",                            cls: "sauce-section-overdue-pill" });
+    if (meetings > 0) chips.push({ n: meetings, label: meetings === 1 ? "meeting" : "meetings", cls: "" });
+    if (done > 0)     chips.push({ n: done,     label: "done",                               cls: "" });
+    return { empty: false, chips };
   }
 
   // ---------- Instance / browser render ----------
@@ -154,6 +194,10 @@ class SpaceHome {
    * host injection); the composer resolves its own live `today`/`hour`.
    */
   async render(dv, params) {
+    // Capture `this` for the async re-render after an inline task capture (the
+    // input/Add handlers await createQuick then call self.render to refresh).
+    const self = this;
+
     // The ONLY live-clock reads. moment is a runtime global (window.moment).
     const M = (typeof moment !== "undefined" && moment)
       || (typeof window !== "undefined" && window.moment)
@@ -175,8 +219,85 @@ class SpaceHome {
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
     sub.textContent = SpaceHome._humanDate(today, today);
 
-    // 2) Quick-capture band ──────────────────────────────────────────────────
+    // 2) Glance counts ───────────────────────────────────────────────────────
+    // A rolled-up count line ("N today · M overdue · K meetings · J done").
+    // Counts route through SpaceDailyDashboard.computeCounts (the DRY seam),
+    // guarded exactly like _dispatch so a not-yet-registered dashboard/task-entity
+    // (cold load) yields zeros instead of throwing out of render. _glanceChips is
+    // the PURE descriptor; this block just paints it.
+    const cjs = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const SDD = cjs && cjs.SpaceDailyDashboard;
+    const TE = cjs && cjs.TaskEntity;
+    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
+    try {
+      if (SDD && typeof SDD.computeCounts === "function") {
+        counts = SDD.computeCounts(dv, today, TE) || counts;
+      }
+    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+
+    const glance = home.createEl("div", { cls: "sauce-home-glance" });
+    const g = SpaceHome._glanceChips(counts);
+    if (g.empty) {
+      const clear = glance.createEl("span", { cls: "sauce-home-glance-clear" });
+      clear.textContent = g.text;
+    } else {
+      g.chips.forEach((chip, i) => {
+        if (i > 0) {
+          const sep = glance.createEl("span", { cls: "sauce-home-glance-sep" });
+          sep.textContent = "·";
+        }
+        const chipEl = glance.createEl("span", { cls: "sauce-home-glance-chip" + (chip.cls ? " " + chip.cls : "") });
+        const nEl = chipEl.createEl("span", { cls: "sauce-home-glance-n" });
+        nEl.textContent = String(chip.n);
+        const lEl = chipEl.createEl("span", { cls: "sauce-home-glance-label" });
+        lEl.textContent = " " + chip.label;
+      });
+    }
+
+    // 3) Quick-capture band ──────────────────────────────────────────────────
     const band = home.createEl("div", { cls: "sauce-home-capture" });
+
+    // 3a) Inline one-gesture task capture — a full-width "Jot a task…" input +
+    // Add button. Submitting (Enter or Add) with non-empty trimmed text calls
+    // TaskDialog.createQuick (guarded, no-op on cold load) then re-renders so the
+    // new task appears in the Tasks panel and the `today` glance chip ticks up.
+    // NO autofocus (home opens on every launch — autofocus would pop the mobile
+    // keyboard each time).
+    const captureRow = band.createEl("div", { cls: "sauce-home-capture-input-row" });
+    const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
+    input.setAttribute("type", "text");
+    input.setAttribute("placeholder", "Jot a task…");
+    const addBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
+    addBtn.setAttribute("type", "button");
+    addBtn.textContent = "Add";
+
+    const submitCapture = async () => {
+      const text = input.value;
+      if (!(typeof text === "string" && text.trim())) return;
+      const cjsNow = (typeof customJS !== "undefined" && customJS)
+        || (typeof window !== "undefined" && window.customJS)
+        || null;
+      const td = cjsNow && cjsNow.TaskDialog;
+      try {
+        if (td && typeof td.createQuick === "function") {
+          await td.createQuick({ title: text, today, source: "daily" });
+        }
+      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
+      // Re-render (idempotent) so the Tasks panel + glance reflect the new task.
+      // Clears the input (a fresh empty one is rebuilt).
+      await self.render(dv, params);
+    };
+    addBtn.onclick = () => { submitCapture(); };
+    input.addEventListener("keydown", (ev) => {
+      if (ev && ev.key === "Enter" && !ev.isComposing) {
+        if (typeof ev.preventDefault === "function") ev.preventDefault();
+        submitCapture();
+      }
+    });
+
+    // 3b) The remaining capture BUTTONS: ＋ Meeting, ＋ Scratch, Open today's daily.
     for (const item of SpaceHome._captureSpec()) {
       const btn = band.createEl("button", { cls: "sauce-home-capture-btn" });
       btn.setAttribute("type", "button");
@@ -188,7 +309,7 @@ class SpaceHome {
       btn.onclick = () => { SpaceHome._dispatch(item.key, dv, today); };
     }
 
-    // 3) Daily dashboard (asOf = today) ───────────────────────────────────────
+    // 4) Daily dashboard (asOf = today) ───────────────────────────────────────
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
     // it appends below them, into dv.container (the guard renders there).
@@ -202,11 +323,11 @@ class SpaceHome {
    * Dispatch a capture key to the verified programmatic API. Each arm is guarded
    * so a not-yet-registered mechanism (cold load) no-ops instead of throwing out
    * of the click handler. Grep-verified entrypoints:
-   *   todo      → customJS.TaskDialog.open({ surface:'daily', today })
-   *               (platform/blueprints/to-do/helpers/todo-leaf-actions.js:125)
    *   meeting   → customJS.EntityCreate.create({ instance:'meeting', dv })
    *   scratch   → customJS.EntityCreate.create({ instance:'scratch', dv })
    *   openDaily → app.commands.executeCommandById("daily-notes")
+   * (The former `todo` button is gone — task capture is now the inline
+   * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
    */
   static _dispatch(key, dv, today) {
     const cjs = (typeof customJS !== "undefined" && customJS)
@@ -216,12 +337,6 @@ class SpaceHome {
       || (typeof window !== "undefined" && window.app)
       || null;
     try {
-      if (key === "todo") {
-        if (cjs && cjs.TaskDialog && typeof cjs.TaskDialog.open === "function") {
-          cjs.TaskDialog.open({ surface: "daily", today: today });
-        }
-        return;
-      }
       if (key === "meeting") {
         if (cjs && cjs.EntityCreate && typeof cjs.EntityCreate.create === "function") {
           cjs.EntityCreate.create({ instance: "meeting", dv: dv });

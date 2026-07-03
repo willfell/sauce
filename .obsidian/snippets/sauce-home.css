@@ -35,15 +35,115 @@
   letter-spacing: 0.01em;
 }
 
+/* ── Glance line ───────────────────────────────────────────────────────── *
+ * A rolled-up, muted count line ("N today · M overdue · K meetings · J done"),
+ * or a single "Clear day — nothing scheduled" when the day is empty. Chips wrap
+ * on narrow widths; tabular-nums so the numbers align. */
+.sauce-home .sauce-home-glance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 16px 0;
+  font-size: 0.95em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.sauce-home .sauce-home-glance-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  white-space: nowrap;
+}
+.sauce-home .sauce-home-glance-n {
+  font-weight: 700;
+  color: var(--text-normal);
+}
+.sauce-home .sauce-home-glance-sep {
+  color: var(--text-faint);
+}
+/* The overdue chip reuses the dashboard's red overdue pill token for its number
+ * so an overdue count reads as a warning at a glance. */
+.sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill {
+  background: none;
+  padding: 0;
+  border: none;
+}
+.sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill .sauce-home-glance-n,
+.sauce-home .sauce-home-glance-chip.sauce-section-overdue-pill .sauce-home-glance-label {
+  color: var(--color-red);
+}
+.sauce-home .sauce-home-glance-clear {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* ── Quick-capture band ────────────────────────────────────────────────── *
- * Desktop: responsive auto-fit grid. Mobile: one full-width button per row
- * (see @media below). Buttons are ≥44px tall tap targets, icon + label
- * centered, native Obsidian tokens, rounded. */
+ * A full-width inline "Jot a task…" input + Add row on top, then a responsive
+ * auto-fit grid of buttons. Mobile: one full-width button per row (see @media
+ * below). Inputs + buttons are ≥44px tall tap targets, native Obsidian tokens. */
 .sauce-home .sauce-home-capture {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
   margin: 0 0 18px 0;
+}
+
+/* Inline capture row spans the FULL band width (all grid columns) so the input
+ * gets the whole line; the Add button hugs the right. */
+.sauce-home .sauce-home-capture-input-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.sauce-home .sauce-home-capture-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.95em;
+  line-height: 1.3;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sauce-home .sauce-home-capture-input::placeholder {
+  color: var(--text-faint);
+}
+.sauce-home .sauce-home-capture-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+.sauce-home .sauce-home-capture-add {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 0.92em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+.sauce-home .sauce-home-capture-add:active { transform: scale(0.98); }
+@media (hover: hover) {
+  .sauce-home .sauce-home-capture-add:hover {
+    background: var(--interactive-accent-hover);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  }
 }
 .sauce-home .sauce-home-capture-btn {
   display: inline-flex;
