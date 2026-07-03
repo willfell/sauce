@@ -3192,6 +3192,110 @@ async function testSelectTasksNotePerTask() {
   return ok;
 }
 
+// HC-SELMTG — SpaceDailyDashboard.selectMeetings filters meeting pages by
+// filename-CONTAINS-today (covers both leading-date "2026-07-02 Foo" and
+// trailing-date "Foo-2026-07-02" conventions), drops others, sorts asc; empty
+// today / bad dv → []. Loads the REAL class via the bare-class eval.
+async function testSelectMeetings() {
+  const fs = require("fs");
+  const path = require("path");
+  const sddSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  const SDD = new Function(`${sddSrc}\nreturn SpaceDailyDashboard;`)();
+
+  const today = "2026-07-02";
+  const pages = [
+    { file: { name: "2026-07-02 Standup", path: "spice/meetings/notes/2026-07-02 Standup.md" } }, // leading-date
+    { file: { name: "Retro-2026-07-02",   path: "spice/meetings/notes/Retro-2026-07-02.md" } },   // trailing-date
+    { file: { name: "1:1-2026-07-01",     path: "spice/meetings/notes/1:1-2026-07-01.md" } },     // yesterday → drop
+    { file: { name: "Planning-2026-07-05", path: "spice/meetings/notes/Planning-2026-07-05.md" } },// future → drop
+    { file: { name: "Undated",            path: "spice/meetings/notes/Undated.md" } },            // no date → drop
+  ];
+  const fakeDv = { pages: (q) => (q === '"spice/meetings/notes"' ? pages : []) };
+
+  let ok = true;
+  const check = (label, cond) => { if (!cond) { ok = false; console.log(`  FAIL: HC-SELMTG ${label}`); } };
+
+  const res = SDD.selectMeetings(fakeDv, today);
+  const names = res.map((p) => p.file.name);
+  check("returns exactly 2 today meetings", res.length === 2);
+  check("keeps the leading-date name", names.indexOf("2026-07-02 Standup") >= 0);
+  check("keeps the trailing-date name", names.indexOf("Retro-2026-07-02") >= 0);
+  check("drops yesterday", names.indexOf("1:1-2026-07-01") < 0);
+  check("drops future", names.indexOf("Planning-2026-07-05") < 0);
+  check("drops undated", names.indexOf("Undated") < 0);
+  check("sorted by filename asc", names[0] === "2026-07-02 Standup" && names[1] === "Retro-2026-07-02");
+
+  // Blank / null today → [] (no over-broad match).
+  check("blank today → []", SDD.selectMeetings(fakeDv, "").length === 0);
+  check("null today → []", SDD.selectMeetings(fakeDv, null).length === 0);
+  // Bad dv → [] (never throws).
+  check("throwing dv → []", SDD.selectMeetings({ pages: () => { throw new Error("boom"); } }, today).length === 0);
+
+  return ok;
+}
+
+// HC-COUNTS — SpaceDailyDashboard.computeCounts rolls up { today, overdue, done,
+// meetings } as integers, composing selectTasks + selectMeetings. dv-stub + a real
+// TaskEntity ref → integers match the stub; cold load (no TE) → tasks zeroed but
+// meetings still counted; never throws.
+async function testComputeCounts() {
+  const fs = require("fs");
+  const path = require("path");
+  const sddSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  const teSrc = fs.readFileSync(path.resolve(__dirname,
+    "../../platform/mechanisms/task-entity/task-entity.js"), "utf8");
+  const SDD = new Function(`${sddSrc}\nreturn SpaceDailyDashboard;`)();
+  const TaskEntity = new Function(`${teSrc}\nreturn TaskEntity;`)();
+  const TE = new TaskEntity();
+
+  const today = "2026-07-02";
+  const pagesByQuery = {
+    '"spice/tasks"': [
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "a", source: "daily",   file: { path: "spice/tasks/a.md" } },
+      { type: "task", status: "open", scheduled: "2026-07-02", title: "b", source: "project",  file: { path: "spice/tasks/b.md" } },
+      { type: "task", status: "open", scheduled: "2026-06-30", title: "od", source: "meeting",  file: { path: "spice/tasks/od.md" } },
+    ],
+    '"spice/tasks/_done"': [
+      { type: "task", status: "done", completed_at: "2026-07-02", title: "done1", file: { path: "spice/tasks/_done/d1.md" } },
+    ],
+    '"spice/meetings/notes"': [
+      { file: { name: "Standup-2026-07-02", path: "spice/meetings/notes/Standup-2026-07-02.md" } },
+      { file: { name: "Retro-2026-07-02",   path: "spice/meetings/notes/Retro-2026-07-02.md" } },
+      { file: { name: "Old-2026-07-01",     path: "spice/meetings/notes/Old-2026-07-01.md" } },
+    ],
+  };
+  const fakeDv = { pages: (q) => pagesByQuery[q] || [] };
+
+  let ok = true;
+  const check = (label, cond) => { if (!cond) { ok = false; console.log(`  FAIL: HC-COUNTS ${label}`); } };
+
+  const c = SDD.computeCounts(fakeDv, today, TE);
+  check("today === 2 (two tasks scheduled today)", c.today === 2);
+  check("overdue === 1 (one open task before today)", c.overdue === 1);
+  check("done === 1 (one done-today)", c.done === 1);
+  check("meetings === 2 (two today meetings)", c.meetings === 2);
+  check("all counts are integers", [c.today, c.overdue, c.done, c.meetings].every((n) => Number.isInteger(n)));
+
+  // Cold load (no TE) → tasks zeroed, meetings still counted.
+  const cold = SDD.computeCounts(fakeDv, today, null);
+  check("cold-load today === 0", cold.today === 0);
+  check("cold-load overdue === 0", cold.overdue === 0);
+  check("cold-load done === 0", cold.done === 0);
+  check("cold-load meetings still counted (=== 2)", cold.meetings === 2);
+
+  // Throwing dv → all zeros, never throws.
+  let threw = false;
+  let z = null;
+  try { z = SDD.computeCounts({ pages: () => { throw new Error("boom"); } }, today, TE); }
+  catch (_e) { threw = true; }
+  check("throwing dv does not throw", !threw);
+  check("throwing dv → all zeros", z && z.today === 0 && z.overdue === 0 && z.done === 0 && z.meetings === 0);
+
+  return ok;
+}
+
 // ── REND-ASOF — optional asOf/live inject on SpaceDailyDashboard.render ──────
 // Drives the REAL async render(dv, params) end-to-end through a DOM+dv stub so
 // the observed "today" is whatever the render's date-derivation actually chose.
@@ -3700,6 +3804,8 @@ async function testRendHasNotes() {
     }
     if (which === 'daily' || which === 'all') {
       results.push(['SELTASK-1 selectTasks note-per-task data seam', await testSelectTasksNotePerTask()]);
+      results.push(['HC-SELMTG selectMeetings filters by filename-contains-today', await testSelectMeetings()]);
+      results.push(['HC-COUNTS computeCounts rolls up {today,overdue,done,meetings}', await testComputeCounts()]);
       results.push(['REND-ASOF-A render(dv,{asOf}) scopes to caller date', await testRendAsOfCallerOverride()]);
       results.push(['REND-ASOF-B render(dv) no-params filename-date regression lock', await testRendAsOfNoParamsRegression()]);
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
