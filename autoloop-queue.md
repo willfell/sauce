@@ -168,4 +168,5 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint trips axis widget_render: 3 uncovered
-  status: proposed
+  status: done
+  note: NEW run-trips-render-guards.js drives TripsHubCards / TripNavButtons / TripSectionsCards render() through the cold-load path (RenderSafe.page/dv.current undefined+null → nav/sections early-return on `if (!page || !page.file) return`; TripsHubCards queries empty dv.pages → empty BeaconCards) in normal + .markdown-embed contexts, asserting no-throw (9 guards). Wired into release:preflight. coverage-matrix.json regenerated: trips widget_render now 3/3.

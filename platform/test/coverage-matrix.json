@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.187.1",
+  "generated_at": "0.188.0",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -2374,7 +2374,7 @@
     {
       "kind": "mechanism",
       "name": "nav-buttons",
-      "current_version": "2.13.0",
+      "current_version": "2.14.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -4559,224 +4559,6 @@
       }
     },
     {
-      "kind": "blueprint",
-      "name": "trips",
-      "current_version": "0.5.0",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 9,
-          "total": 9,
-          "methods": [
-            {
-              "cls": "TripSectionKinds",
-              "method": "all",
-              "covered": true
-            },
-            {
-              "cls": "TripSectionKinds",
-              "method": "order",
-              "covered": true
-            },
-            {
-              "cls": "TripSectionKinds",
-              "method": "labelFor",
-              "covered": true
-            },
-            {
-              "cls": "TripSectionKinds",
-              "method": "kindFromLegacyBasename",
-              "covered": true
-            },
-            {
-              "cls": "TripSectionKinds",
-              "method": "iconFor",
-              "covered": true
-            },
-            {
-              "cls": "TripsHubCards",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TripNavButtons",
-              "method": "detectContext",
-              "covered": true
-            },
-            {
-              "cls": "TripNavButtons",
-              "method": "render",
-              "covered": true
-            },
-            {
-              "cls": "TripSectionsCards",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-trips-tripsectionkinds.js"
-        },
-        "installer_migration": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "migrations": [
-            {
-              "fn": "applyTripsConformanceHeal",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.8333333333333333,
-          "manifest_ratio": 0.6666666666666666,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": false
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 10,
-          "total": 10,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Trip Atlas.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Flights.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Stay.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Packing List.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip To Do.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Notes.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Board.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Trip Board Card.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "trips",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "trips",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 3,
-          "widgets": [
-            {
-              "widget": "TripsHubCards",
-              "covered": false
-            },
-            {
-              "widget": "TripNavButtons",
-              "covered": false
-            },
-            {
-              "widget": "TripSectionsCards",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.8055555555555555,
-      "blast_radius": "low",
-      "blast_radius_rationale": "Niche use; rare touches.",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.22499999999999998,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.22499999999999998,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [
-          {
-            "axis": "integration_smoke",
-            "note": "Scorer matches 'trip' substring in 'midday-tripwire' (cowork cadence) in run-cowork-smoke.js; actual trips user flow has zero end-to-end test coverage. Should be 0.0."
-          }
-        ],
-        "false_negatives": [],
-        "primary_user_flow": "Create a new trip with dates and location, then view its sections (atlas, flights, stay, packing list, to-do, notes) via BeaconCards and TripSectionsCards widget.",
-        "qualitative_recommendation": "Thin test coverage: zero widget render tests, zero behavioral tests for three customJS classes. Template_lockstep score is artificially high from infrastructure tests. Substring-collision false-positive on integration_smoke."
-      }
-    },
-    {
       "kind": "mechanism",
       "name": "breadcrumb",
       "current_version": "0.2.1",
@@ -6263,6 +6045,224 @@
         "false_negatives": [],
         "primary_user_flow": "Create kanban board from nav button; kanban-plugin renders To-Do-Board.md; create card auto-routes to spice/boards/cards/YYYY/MM-MMMM/title.md via Templater rule_fragment.",
         "qualitative_recommendation": "Validates cleanly. 0.9 composite reflects minor manifest_schema gap (3 fields lack HC asserts). Low priority given blast_radius=low and strong external-plugin coupling. Closing the gap via 3-field HC-family extension is low-lift."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "trips",
+      "current_version": "0.5.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 9,
+          "total": 9,
+          "methods": [
+            {
+              "cls": "TripSectionKinds",
+              "method": "all",
+              "covered": true
+            },
+            {
+              "cls": "TripSectionKinds",
+              "method": "order",
+              "covered": true
+            },
+            {
+              "cls": "TripSectionKinds",
+              "method": "labelFor",
+              "covered": true
+            },
+            {
+              "cls": "TripSectionKinds",
+              "method": "kindFromLegacyBasename",
+              "covered": true
+            },
+            {
+              "cls": "TripSectionKinds",
+              "method": "iconFor",
+              "covered": true
+            },
+            {
+              "cls": "TripsHubCards",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TripNavButtons",
+              "method": "detectContext",
+              "covered": true
+            },
+            {
+              "cls": "TripNavButtons",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "TripSectionsCards",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-trips-tripsectionkinds.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyTripsConformanceHeal",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 10,
+          "total": 10,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Trip Atlas.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Flights.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Stay.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Packing List.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip To Do.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Notes.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "trips",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "trips",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 3,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "TripsHubCards",
+              "covered": true
+            },
+            {
+              "widget": "TripNavButtons",
+              "covered": true
+            },
+            {
+              "widget": "TripSectionsCards",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9722222222222222,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Niche use; rare touches.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.025000000000000012,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.025000000000000012,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Scorer matches 'trip' substring in 'midday-tripwire' (cowork cadence) in run-cowork-smoke.js; actual trips user flow has zero end-to-end test coverage. Should be 0.0."
+          }
+        ],
+        "false_negatives": [],
+        "primary_user_flow": "Create a new trip with dates and location, then view its sections (atlas, flights, stay, packing list, to-do, notes) via BeaconCards and TripSectionsCards widget.",
+        "qualitative_recommendation": "Thin test coverage: zero widget render tests, zero behavioral tests for three customJS classes. Template_lockstep score is artificially high from infrastructure tests. Substring-collision false-positive on integration_smoke."
       }
     },
     {
