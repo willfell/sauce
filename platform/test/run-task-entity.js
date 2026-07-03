@@ -1056,8 +1056,109 @@ async function runCreateQuickTests() {
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
 }
 
+// ---------- TaskDialog.markDone / markDeleted (path-based, no dialog) ----------
+// These are the one-tap complete/delete internals surface widgets call (e.g.
+// TaskTodayList's row checkbox → markDone) — they resolve { app, file } from
+// window.app/globalThis.app, stamp frontmatter (status + completed_at / deleted),
+// ensure the _done/_trash folder, and renameFile the note there. Exercised here
+// through an INSTANCE (dialog.markDone(path)) with a spying app so the real
+// frontmatter mutation + move + {ok} contract is asserted (not just the pure
+// path helpers TD-4/TD-5).
+function makeDialogApp(taskPath, initialFm) {
+  const file = { path: taskPath, _fm: Object.assign({}, initialFm || {}) };
+  const app = {
+    _file: file,
+    _renamed: null,
+    _createdFolders: [],
+    vault: {
+      // Only the seeded task path resolves; the _done/_trash folder lookups
+      // return null so _ensureFolder records a createFolder call.
+      getAbstractFileByPath: (p) => (p === taskPath ? file : null),
+      createFolder: async (p) => { app._createdFolders.push(p); },
+    },
+    fileManager: {
+      processFrontMatter: async (f, fn) => { await fn(f._fm); },
+      renameFile: async (f, newPath) => { app._renamed = { from: f.path, to: newPath }; f.path = newPath; },
+    },
+  };
+  return app;
+}
+
+async function runMarkDoneDeletedTests() {
+  const momentStub = () => ({
+    format: (f) => (f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-07-03T08:00:00-06:00' : '2026-07-03'),
+  });
+  const prevWindow = global.window;
+  const prevGlobalApp = global.app;
+
+  await okAsync('TD-MD-1 markDone stamps status=done + completed_at and moves the note into _done', async () => {
+    const app = makeDialogApp('spice/tasks/task-x.md', { title: 'x', status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    const res = await dialog.markDone('spice/tasks/task-x.md');
+    assert(res && res.ok === true, '{ok:true} expected, got ' + JSON.stringify(res));
+    assert(app._file._fm.status === 'done', 'status→done: ' + app._file._fm.status);
+    assert(typeof app._file._fm.completed_at === 'string' && app._file._fm.completed_at.length > 0,
+      'completed_at stamped: ' + app._file._fm.completed_at);
+    assert(app._renamed && app._renamed.to === 'spice/tasks/_done/task-x.md',
+      'renamed into _done via donePath: ' + JSON.stringify(app._renamed));
+    assert(app._createdFolders.includes('spice/tasks/_done'), '_done folder ensured: ' + JSON.stringify(app._createdFolders));
+  });
+
+  await okAsync('TD-MD-2 markDone with no app (cold load) → {ok:false, app unavailable}, never throws', async () => {
+    global.window = { app: null };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    const res = await dialog.markDone('spice/tasks/task-x.md');
+    assert(res && res.ok === false && /app unavailable/.test(res.reason || ''),
+      'expected app-unavailable, got ' + JSON.stringify(res));
+  });
+
+  await okAsync('TD-MD-3 markDone with an unknown path → {ok:false, task file not found}, no rename', async () => {
+    const app = makeDialogApp('spice/tasks/task-x.md', { status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    const res = await dialog.markDone('spice/tasks/DOES-NOT-EXIST.md');
+    assert(res && res.ok === false && /task file not found/.test(res.reason || ''),
+      'expected file-not-found, got ' + JSON.stringify(res));
+    assert(app._renamed === null, 'no rename when the file is missing');
+    assert(app._file._fm.status === 'open', 'seeded note untouched: ' + app._file._fm.status);
+  });
+
+  await okAsync('TD-MD-4 markDeleted stamps status=deleted and moves the note into _trash', async () => {
+    const app = makeDialogApp('spice/tasks/task-y.md', { status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    const res = await dialog.markDeleted('spice/tasks/task-y.md');
+    assert(res && res.ok === true, '{ok:true} expected, got ' + JSON.stringify(res));
+    assert(app._file._fm.status === 'deleted', 'status→deleted: ' + app._file._fm.status);
+    assert(app._renamed && app._renamed.to === 'spice/tasks/_trash/task-y.md',
+      'renamed into _trash via trashPath: ' + JSON.stringify(app._renamed));
+    assert(app._createdFolders.includes('spice/tasks/_trash'), '_trash folder ensured: ' + JSON.stringify(app._createdFolders));
+  });
+
+  await okAsync('TD-MD-5 markDeleted with an unknown path → {ok:false, task file not found}, never throws', async () => {
+    const app = makeDialogApp('spice/tasks/task-y.md', { status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    const res = await dialog.markDeleted('spice/tasks/nope.md');
+    assert(res && res.ok === false && /task file not found/.test(res.reason || ''),
+      'expected file-not-found, got ' + JSON.stringify(res));
+    assert(app._renamed === null, 'no rename when the file is missing');
+  });
+
+  // Restore globals so nothing leaks into later modules.
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+}
+
 (async () => {
   await runCreateQuickTests();
+  await runMarkDoneDeletedTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
