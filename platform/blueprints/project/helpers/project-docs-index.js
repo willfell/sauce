@@ -6,9 +6,9 @@
 //     • renderActionRow(dv) — from the `// entity-create:doc-note` marker block.
 //       A single full-width action row: New Doc · New Section · Move docs,
 //       bracketed above by a helper-owned hairline (SectionLabel.divider).
-//     • render(dv) — the search tier (a bare text input: hideTags +
-//       hideNativeSearch + persist:false) and the sections + docs list, each
-//       preceded by its own leading hairline.
+//     • render(dv) — the search tier (a text input + scoped "Search" button:
+//       hideTags + persist:false, wiki-aligned) and the sections + docs list,
+//       each preceded by its own leading hairline.
 //   The dashboard chip strip (docs/meetings/status/task/recent/tag chips) was
 //   REMOVED — it isn't part of the requested S3 layout.
 //
@@ -124,9 +124,10 @@ class ProjectDocsIndex {
     if (!ctx) return;
     const { projectSlug, projectPath, docsFolder, scopePath } = ctx;
 
-    // Tier 2 — simple search strip: a bare text input (no tag chips, no native
-    // scoped-search button, never persisted → starts empty on every visit).
-    // Leading hairline owns the tier boundary.
+    // Tier 2 — search strip: a text input + scoped "Search" button (wiki parity,
+    // 2026-07-02: hideNativeSearch dropped so the scoped-search button shows, just
+    // like the wiki). No tag chips (hideTags), never persisted (starts empty on
+    // every visit). Leading hairline owns the tier boundary.
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
     const filterCtx = customJS.DocSearch.render(dv, {
@@ -134,7 +135,6 @@ class ProjectDocsIndex {
       scopePath,
       recursive: true,
       hideTags: true,
-      hideNativeSearch: true,
       persist: false,
       entityType: "doc-note",
       onChange: (c) => {
@@ -143,6 +143,9 @@ class ProjectDocsIndex {
         this._renderResults(dv, projectSlug, projectPath, docsFolder, c);
       },
     });
+    // Wiki parity: normalize the shared search strip's top gap to 12px (it ships
+    // a 2px top margin) so the space above the search matches the divider grammar.
+    try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
     if (this._currentCtx) {
       Object.assign(filterCtx, this._currentCtx);
     }

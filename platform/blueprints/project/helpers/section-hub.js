@@ -8,8 +8,9 @@
 //   (SectionLabel.divider):
 //     1. action row — New Doc · New Sub-Section (depth-1 only) · Move docs, a
 //        single full-width row.
-//     2. simple search — a bare text input (hideTags + hideNativeSearch +
-//        persist:false); starts empty on every visit, re-renders on input.
+//     2. search — a text input + scoped "Search" button (hideTags +
+//        persist:false, wiki-aligned); starts empty on every visit, re-renders
+//        on input.
 //     3. list — sub-sections (depth-1 only) + docs cards.
 //   The Section Hub template ships NO entity-create marker blocks (retired at
 //   v0.124.1) — the create buttons are rendered inline here.
@@ -52,12 +53,14 @@ class SectionHub {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
+    // Search strip: text input + scoped "Search" button (wiki parity, 2026-07-02:
+    // hideNativeSearch dropped so the scoped-search button shows). No tag chips,
+    // never persisted (starts empty on every visit).
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
       recursive: depth === 1,
       hideTags: true,
-      hideNativeSearch: true,
       persist: false,
       entityType: "doc-note",
       onChange: (ctx) => {
@@ -66,6 +69,8 @@ class SectionHub {
         this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, ctx);
       },
     });
+    // Wiki parity: normalize the shared search strip's top gap to 12px.
+    try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
     if (this._currentCtx) {
       Object.assign(filterCtx, this._currentCtx);
     }
