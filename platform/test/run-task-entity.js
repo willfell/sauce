@@ -1156,9 +1156,134 @@ async function runMarkDoneDeletedTests() {
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
 }
 
+// ---------- L2: optimistic row removal on complete (RTR-4..7 + RTR-CAP) ----------
+// Drives the REAL renderTaskRow checkbox `change` handler against a self-contained
+// DOM stub with true tree semantics (parentNode / nextSibling / insertBefore /
+// remove) — the same faithful-not-replica discipline as RTR-3. The handler must
+// detach the row BEFORE awaiting markDone (instant feedback) and re-insert it at
+// its original index on {ok:false}/throw.
+function makeTreeNode(tag) {
+  const n = {
+    tagName: String(tag || 'div').toUpperCase(),
+    style: {}, dataset: {}, attributes: {}, type: '', checked: false, cls: '',
+    _textContent: '', children: [], parentNode: null, _listeners: {},
+    get textContent() { return this._textContent; },
+    set textContent(v) { this._textContent = String(v == null ? '' : v); this.children = []; },
+    createEl(t, opts) {
+      const c = makeTreeNode(t);
+      if (opts) { if (opts.cls) c.cls = opts.cls; if (opts.text != null) c.textContent = opts.text; }
+      this.appendChild(c);
+      return c;
+    },
+    createSpan(opts) { return this.createEl('span', opts); },
+    appendText(v) { this.children.push({ tagName: '#text', textContent: String(v == null ? '' : v), parentNode: this }); },
+    setText(v) { this.textContent = v; this.children = []; },
+    empty() { this.children = []; },
+    setAttribute(k, v) { this.attributes[k] = v; this.dataset[k] = v; },
+    addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
+    insertBefore(node, ref) {
+      node.parentNode = this;
+      if (ref == null) { this.children.push(node); return node; }
+      const i = this.children.indexOf(ref);
+      if (i < 0) this.children.push(node); else this.children.splice(i, 0, node);
+      return node;
+    },
+    removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); if (c) c.parentNode = null; return c; },
+    remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const i = this.parentNode.children.indexOf(this);
+      return (i >= 0 && i + 1 < this.parentNode.children.length) ? this.parentNode.children[i + 1] : null;
+    },
+    get firstChild() { return this.children[0] || null; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+  };
+  return n;
+}
+function findInput(node) {
+  if (!node || !node.children) return null;
+  for (const c of node.children) { if (c.tagName === 'INPUT') return c; const d = findInput(c); if (d) return d; }
+  return null;
+}
+function fireChange(cb) { const fns = (cb._listeners && cb._listeners.change) || []; return fns[0] ? fns[0]() : Promise.resolve(); }
+
+async function runOptimisticRemovalTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+
+  await okAsync('RTR-4 complete detaches the row BEFORE markDone is awaited, stays removed on ok', async () => {
+    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    const container = makeTreeNode('div');
+    let removedAtCall = null, resolveMD;
+    const TD = { markDone: () => { removedAtCall = (container.children.indexOf(row) < 0); return new Promise((r) => { resolveMD = () => r({ ok: true }); }); } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'spice/tasks/x.md' }, TD);
+    const cb = findInput(row); cb.checked = true;
+    const p = fireChange(cb);
+    assert(removedAtCall === true, 'row detached BEFORE markDone awaited');
+    resolveMD(); await p;
+    assert(container.children.indexOf(row) < 0, 'row stays removed on success');
+  });
+
+  await okAsync('RTR-5 {ok:false} re-inserts the row at its original index + unchecks + Notice', async () => {
+    const notices = [];
+    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.Notice = function (m) { notices.push(String(m)); };
+    const container = makeTreeNode('div');
+    let resolveMD;
+    const TD = { markDone: () => new Promise((r) => { resolveMD = () => r({ ok: false, reason: 'collision' }); }) };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    const sib = container.createEl('div');           // sibling after the row
+    const cb = findInput(row); cb.checked = true;
+    const p = fireChange(cb);
+    assert(container.children.indexOf(row) < 0, 'row removed during the pending write');
+    resolveMD(); await p;
+    assert(container.children.indexOf(row) === 0, 're-inserted at original index (before sibling)');
+    assert(container.children.indexOf(sib) === 1, 'sibling order preserved');
+    assert(cb.checked === false, 'unchecked on failure');
+    assert(notices.some((m) => /complete/i.test(m)), 'Notice shown: ' + JSON.stringify(notices));
+  });
+
+  await okAsync('RTR-6 markDone throwing re-inserts + unchecks (no unhandled rejection)', async () => {
+    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.Notice = function () {};
+    const container = makeTreeNode('div');
+    const TD = { markDone: async () => { throw new Error('boom'); } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    const cb = findInput(row); cb.checked = true;
+    await fireChange(cb);
+    assert(container.children.indexOf(row) === 0 && cb.checked === false, 'reverted on throw');
+  });
+
+  await okAsync('RTR-7 cold load (no TD) unchecks, no removal, no throw', async () => {
+    global.window = { customJS: {} };
+    const container = makeTreeNode('div');
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, null);
+    const cb = findInput(row); cb.checked = true;
+    await fireChange(cb);
+    assert(container.children.indexOf(row) === 0 && cb.checked === false, 'no-op revert (row untouched)');
+  });
+
+  await okAsync('RTR-CAP captureScroll is invoked before markDone', async () => {
+    const events = [];
+    global.window = { customJS: { RenderSafe: { captureScroll: () => events.push('capture') } } };
+    const container = makeTreeNode('div');
+    const TD = { markDone: async () => { events.push('markDone'); return { ok: true }; } };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    const cb = findInput(row); cb.checked = true;
+    await fireChange(cb);
+    assert(events[0] === 'capture' && events.indexOf('markDone') > 0, 'captureScroll ran before markDone: ' + JSON.stringify(events));
+  });
+
+  global.window = prevWindow;
+  global.Notice = prevNotice;
+}
+
 (async () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
+  await runOptimisticRemovalTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
