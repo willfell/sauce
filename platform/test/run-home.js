@@ -210,14 +210,14 @@ function descendants(el) {
     `2026-07-01 is a Wednesday; got ${JSON.stringify(hd2)}`);
 
   // ── HOME-GLANCE: _glanceChips() pure descriptor ────────────────────────────
-  // All-zero → empty sentinel with the "Clear day" text.
+  // All-zero → empty sentinel with NO message (the "Clear day" text was removed).
   {
     const z = SpaceHome._glanceChips({ today: 0, overdue: 0, done: 0, meetings: 0 });
     assertTrue("HOME-GLANCE-1 all-zero → empty sentinel", z && z.empty === true,
       `all-zero counts should yield { empty:true }; got ${JSON.stringify(z)}`);
-    assertTrue("HOME-GLANCE-2 empty sentinel carries the 'Clear day' text",
-      z && typeof z.text === "string" && z.text.includes("Clear day"),
-      `empty sentinel text should mention "Clear day"; got ${JSON.stringify(z)}`);
+    assertTrue("HOME-GLANCE-2 empty sentinel carries NO text/chips (silent empty day)",
+      z && z.text === undefined && z.chips === undefined,
+      `empty sentinel should be a bare { empty:true } with no message; got ${JSON.stringify(z)}`);
     // Missing / undefined counts also → empty.
     const z2 = SpaceHome._glanceChips(undefined);
     assertTrue("HOME-GLANCE-3 undefined counts → empty sentinel", z2 && z2.empty === true,
@@ -274,6 +274,9 @@ function descendants(el) {
   installMoment("2026-07-02", 6);
   {
     const dv = makeDv();
+    // Non-zero counts so the (now-conditional) glance line renders.
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 2, overdue: 1, done: 0, meetings: 1 }) } };
+    global.window.customJS = global.customJS;
     await home_.render(dv, {});
 
     // (a) exactly one customjs-guard view call for SpaceDailyDashboard with asOf/live.
@@ -336,6 +339,24 @@ function descendants(el) {
     assertTrue("HOME-RENDER-9 dashboard mount is appended below the .sauce-home block",
       homeIdx >= 0 && mountIdx > homeIdx,
       `.sauce-home should precede the dashboard mount in the container; top-level cls = ${JSON.stringify(top.map((k) => k.cls))}`);
+    delete global.customJS;
+    global.window.customJS = undefined;
+  }
+
+  // ── HOME-GLANCE render: an empty day renders NO glance element ─────────────
+  installMoment("2026-07-02", 6);
+  {
+    const dv = makeDv();
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) } };
+    global.window.customJS = global.customJS;
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const glance = home ? descendants(home).find((n) => hasCls(n, "sauce-home-glance")) : null;
+    assertTrue("HOME-GLANCE-19 empty day renders NO glance element", !glance,
+      "with all-zero counts the .sauce-home-glance element must not render (silent empty day)");
+    delete global.customJS;
+    global.window.customJS = undefined;
   }
 
   // ── HOME-CAP: "+" toggle + per-item dispatch + inline capture ───────────────

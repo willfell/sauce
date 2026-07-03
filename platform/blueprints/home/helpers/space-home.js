@@ -176,7 +176,7 @@ class SpaceHome {
     const meetings = toInt(c.meetings);
     const done = toInt(c.done);
     if (!today && !overdue && !meetings && !done) {
-      return { empty: true, text: "Clear day — nothing scheduled" };
+      return { empty: true };
     }
     const chips = [];
     if (today > 0)    chips.push({ n: today,    label: "today",                              cls: "" });
@@ -343,12 +343,11 @@ class SpaceHome {
       }
     } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
 
-    const glance = home.createEl("div", { cls: "sauce-home-glance" });
+    // Glance count line — rendered ONLY when there's something to show. An empty
+    // day shows NOTHING (no "Clear day" message, no empty element).
     const g = SpaceHome._glanceChips(counts);
-    if (g.empty) {
-      const clear = glance.createEl("span", { cls: "sauce-home-glance-clear" });
-      clear.textContent = g.text;
-    } else {
+    if (!g.empty) {
+      const glance = home.createEl("div", { cls: "sauce-home-glance" });
       g.chips.forEach((chip, i) => {
         if (i > 0) {
           const sep = glance.createEl("span", { cls: "sauce-home-glance-sep" });
