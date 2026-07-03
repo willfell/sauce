@@ -83,30 +83,45 @@ class RenderSafe {
   // Instance alias so tests can call RenderSafe._findScroller(doc) on an instance.
   _findScroller(doc) { return RenderSafe._findScroller(doc); }
 
-  // Install a one-shot MutationObserver on the scroller that re-applies
-  // scrollTop=y once the content rebuilds past y, then disconnects. rAF +
-  // timeout fallbacks. Never throws.
+  // Watch the scroller and restore scrollTop=y ONCE the teardown→rebuild has run.
+  // Two-phase (this is the subtle part): the Dataview re-render clears the block a
+  // few frames AFTER we capture, which CLAMPS scrollTop below y. We must NOT
+  // "restore" (and disconnect) on an early nudge that fires BEFORE that teardown —
+  // at that point scrollTop is still y and the content is still tall, so a naive
+  // "tall enough → done" check completes trivially and disconnects, losing the
+  // scroll when the real teardown lands. So: wait until we OBSERVE a drift below y
+  // (the clamp), THEN restore once the content is tall enough again, then stop.
+  // rAF nudges cover the no-MutationObserver case; the timeout is a hard cap.
+  // Never throws.
   static _installRestore(scroller, y, win) {
     try {
       const MO = win.MutationObserver;
       let done = false;
+      let sawDrift = false;
       let obs = null;
-      const apply = () => {
+      const step = () => {
         try {
           if (done) return;
-          if ((Number(scroller.scrollHeight) || 0) >= y) {
+          const top = Number(scroller.scrollTop) || 0;
+          const h = Number(scroller.scrollHeight) || 0;
+          if (top < y - 2) sawDrift = true;                 // teardown clamped us below y
+          if (sawDrift && h >= y) {                          // content tall enough again → restore once
             scroller.scrollTop = y;
-            if (Math.abs((Number(scroller.scrollTop) || 0) - y) <= 2) { done = true; if (obs) obs.disconnect(); }
+            if ((Number(scroller.scrollTop) || 0) >= y - 2) { done = true; if (obs) obs.disconnect(); }
           }
         } catch (_e) { done = true; }
       };
       if (typeof MO === 'function') {
-        obs = new MO(() => apply());
+        obs = new MO(() => step());
         try { obs.observe(scroller, { childList: true, subtree: true }); } catch (_e) {}
       }
+      // rAF nudges for a bounded number of frames (covers the no-observer path);
+      // NEVER disconnects — only step() on a real restore disconnects.
       const raf = win.requestAnimationFrame || ((fn) => (win.setTimeout ? win.setTimeout(fn, 16) : null));
-      raf(() => raf(apply));
-      if (win.setTimeout) win.setTimeout(() => { done = true; if (obs) { try { obs.disconnect(); } catch (_e) {} } }, 6000);
+      let frames = 0;
+      const tick = () => { if (done) return; step(); if (++frames < 90) raf(tick); };
+      raf(tick);
+      if (win.setTimeout) win.setTimeout(() => { done = true; if (obs) { try { obs.disconnect(); } catch (_e) {} } }, 3000);
     } catch (_e) { /* never throw */ }
   }
 }

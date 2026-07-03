@@ -79,7 +79,7 @@ function makeScroller(overflow, sh, ch) {
 function makeWin() {
   return {
     __sauceScrollStash: undefined,
-    MutationObserver: function (cb) { this.cb = cb; this.observe = () => {}; this.disconnect = () => {}; observers.push(this); },
+    MutationObserver: function (cb) { this.cb = cb; this._disconnected = false; this.observe = () => {}; this.disconnect = () => { this._disconnected = true; }; observers.push(this); },
     requestAnimationFrame: (fn) => { rafs.push(fn); return rafs.length; },
     getComputedStyle: (el) => (el && el._cs) || { overflowY: 'visible' },
     setTimeout: (fn, ms) => { timeouts.push({ fn, ms }); return timeouts.length; },
@@ -127,6 +127,28 @@ ok('RS-REST-1 restore watcher sets scrollTop=y once scrollHeight recovers past y
   scroller.scrollHeight = 2000;                         // rebuild: tall again
   observers[0].cb();                                    // mutation after rebuild → restore
   assert(scroller.scrollTop === 500, 'scrollTop restored once tall enough');
+});
+
+ok('RS-REST-EARLY an early rAF nudge before any teardown must NOT restore/disconnect (regression)', () => {
+  // Regression for the real-browser bug: the rAF fallback fires ~2 frames after
+  // capture, BEFORE the Dataview teardown clamps scrollTop. A naive "tall enough
+  // → done + disconnect" completed trivially there (scrollTop still == y), so the
+  // observer was gone by the time the real teardown+rebuild landed → scroll lost.
+  observers = []; rafs = [];
+  const scroller = makeScroller('auto', 2000, 800); scroller.scrollTop = 500;
+  const doc = { querySelector: () => scroller };
+  const win = makeWin();
+  RenderSafe.captureScroll({ doc, win, now: 9, activePath: 'e.md' });
+  // Fire the early rAF nudges while the content is still intact (no teardown yet).
+  for (let i = 0; i < 5 && rafs.length; i++) { const fn = rafs.shift(); fn(); }
+  assert(observers[0]._disconnected === false, 'early nudge must NOT disconnect before a teardown is seen');
+  assert(scroller.scrollTop === 500, 'no spurious scroll change before teardown');
+  // Now the real teardown → clamp → rebuild.
+  scroller.scrollHeight = 40; scroller.scrollTop = 0; observers[0].cb();
+  assert(scroller.scrollTop === 0, 'still not restored while collapsed');
+  scroller.scrollHeight = 2000; observers[0].cb();
+  assert(scroller.scrollTop === 500, 'restored to y after the real teardown→rebuild');
+  assert(observers[0]._disconnected === true, 'observer disconnects only after the real restore');
 });
 
 ok('RS-FIND finder returns a scroller or null and never throws', () => {
