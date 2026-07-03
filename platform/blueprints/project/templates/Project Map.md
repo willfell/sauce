@@ -8,19 +8,11 @@ workstreams: []
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager", args: [{ contentOnly: true }] });
 ```
 
 ```dataviewjs

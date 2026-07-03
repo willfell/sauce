@@ -141,7 +141,16 @@ class ProjectWorkstreamManager {
         });
     }
 
-    async render(dv) {
+    async render(dv, opts = {}) {
+        // contentOnly (v0.191 chrome-bar refactor): the Project Map's chrome bar
+        // (ProjectChromeBar) now owns the Add / Remove workstream affordances as
+        // its primary + ⋯ overflow actions, so the Map template calls this helper
+        // in { contentOnly: true } mode to render ONLY the workstream content
+        // (label + progress summary + per-workstream cards + unassigned note) and
+        // suppress the redundant Add / Remove button row. The Add/Remove flows
+        // themselves stay as instance methods (addWorkstream / removeWorkstream)
+        // which the chrome bar dispatches directly.
+        const contentOnly = !!(opts && opts.contentOnly);
         const current = dv && dv.current ? dv.current() : null;
         // v0.119.0 PATCH: bail when Dataview hasn't indexed the file yet
         // (typically the first render after EntityCreate.openFile on a newly
@@ -229,14 +238,19 @@ class ProjectWorkstreamManager {
 
         const root = dv.container.createEl("div");
 
-        const btnRow = root.createEl("div");
-        btnRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 10px;";
+        // Action row (Add / Remove) — suppressed in contentOnly mode: the chrome
+        // bar owns these affordances. In legacy (non-chrome-bar) callers the row
+        // still renders so behavior is unchanged there.
+        if (!contentOnly) {
+            const btnRow = root.createEl("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 10px;";
 
-        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
-        const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
+            const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
+            const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
 
-        customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: () => this.addWorkstream(dv) });
-        customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: () => this.removeWorkstream(dv) });
+            customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: () => this.addWorkstream(dv) });
+            customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: () => this.removeWorkstream(dv) });
+        }
 
         if (totalAll > 0) {
             const pct = Math.round((completedAll / totalAll) * 100);

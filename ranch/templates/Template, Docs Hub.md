@@ -9,23 +9,8 @@ tags:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
-```
-
-```dataviewjs
-// entity-create:doc-note — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "doc-note" }] });
-```
-
----
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex" });

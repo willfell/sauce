@@ -41,7 +41,14 @@ class SectionHub {
     if (!projectSlug || !sectionSlug) return;
 
     // ── Tier 1: action row (leading hairline + full-width row) ────────────────
-    await this._renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName);
+    // contentOnly (v0.191 chrome-bar refactor): the Section Hub template's chrome
+    // bar (ProjectChromeBar) now owns New Doc / New Sub-Section / Move docs as its
+    // primary + ⋯ overflow actions, so the template calls this helper in
+    // { contentOnly: true } mode to render ONLY the search strip + list and
+    // suppress the redundant action row.
+    if (!(opts && opts.contentOnly)) {
+      await this._renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName);
+    }
 
     // ── Tier 2: simple search strip (leading hairline + bare text input) ──────
     const parentSlugForScope = depth === 2

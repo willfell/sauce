@@ -53,13 +53,5 @@ if (/\/tasks\/[^/]+\/board\//.test(newFilePath)) {
 -%>
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
