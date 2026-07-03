@@ -34,7 +34,7 @@
         "folder": "{{module_directory}}",
         "format": "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
         "template": "{{templates_path}}/Daily Note.md",
-        "autorun": true
+        "autorun": false
       }
     }
   ],
