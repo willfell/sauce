@@ -1243,6 +1243,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
+  await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
@@ -9953,6 +9954,333 @@ async function applyProjectTodoSectionReorderHeal(tp, history, git) {
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
+// ===========================================================================
+// applyTripsConformanceHeal — ungated backfill (runs every install; NOT
+// version-gated, per the migration-lifecycle rule, because it renames + back-
+// injects canonical shape into EXISTING trip notes). Migrates PRE-refactor
+// trips (folder-generic note names `Trip Atlas.md` / `Trip <Section>.md`, no
+// Breadcrumb chrome, legacy `created:` + `tags: [trip]` section frontmatter) to
+// the collision-free canonical shape the current create flow emits:
+//   atlas   → `<sanitized name>.md`
+//   section → `<sanitized name> — <Section>.md`  (canonical trip-section FM)
+// plus Breadcrumb/SectionLabel chrome and `[[Trip Atlas]]` link repair.
+//
+// Highest-risk heal (renames real user notes) → backup-first + idempotent +
+// never-throws are mandatory. Posture mirrors applyProjectTodoOwnedTasksHeal
+// (ungated, per-item try/catch → history warning on fail / info on success,
+// final summary info event) + applyWikiToDocsMigration (.sauce-backup copy via
+// _copyDirRecursive BEFORE any write; regex frontmatter rewrite since install.js
+// cannot use Obsidian's parseYaml).
+//
+// Idempotency contract: a SECOND run writes ZERO files. All change-detection is
+// existence/substring/regex based against the ALREADY-canonical state (canonical
+// names, `type: trip-section`, canonical fields, `class: "Breadcrumb"` present,
+// `## All Trips`/`## Mentions` already converted), so no-ops cleanly.
+// ===========================================================================
+
+// Node copy of platform/blueprints/trips/helpers/trip-section-kinds.js — KEEP IN
+// LOCKSTEP with that file (install.js can't load customjs classes).
+const TRIP_SECTION_KINDS = [
+  { kind: "flights",      label: "Flights",      legacy: "Trip Flights" },
+  { kind: "stay",         label: "Stay",         legacy: "Trip Stay" },
+  { kind: "packing-list", label: "Packing List", legacy: "Trip Packing List" },
+  { kind: "to-do",        label: "To Do",        legacy: "Trip To Do" },
+  { kind: "notes",        label: "Notes",        legacy: "Trip Notes" },
+];
+
+// Mirrors TripNavButtons._sanitizeFilename / TripSectionKinds helpers.
+function _tripSanitize(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+}
+function _tripKindFromLegacy(basename) {
+  const e = TRIP_SECTION_KINDS.find((k) => k.legacy === basename);
+  return e ? e.kind : "custom";
+}
+function _tripLabelForKind(kind) {
+  const e = TRIP_SECTION_KINDS.find((k) => k.kind === kind);
+  return e ? e.label : null;
+}
+
+// ISO-8601 with local TZ offset (±HH:MM). Matches TripNavButtons._isoWithTz.
+function _tripIsoWithTz(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  const oa = Math.abs(off);
+  const oh = pad(Math.floor(oa / 60));
+  const om = pad(oa % 60);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${oh}:${om}`;
+}
+
+// The canonical Breadcrumb block (fenced dataviewjs) + a trailing blank line.
+const _TRIP_BREADCRUMB_BLOCK =
+  '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n```\n\n';
+
+// Split a body into { fm, rest } where fm is the inner text of the leading
+// `---\n...\n---\n` block (null if none) and rest is everything after it.
+function _tripSplitFrontmatter(body) {
+  const m = body.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!m) return { fm: null, rest: body, raw: null };
+  return { fm: m[1], rest: body.slice(m[0].length), raw: m[0] };
+}
+
+// Insert the Breadcrumb block immediately after the closing `---\n` of
+// frontmatter, iff the body doesn't already contain `class: "Breadcrumb"`.
+// Idempotent via the substring check. No-op (returns input) if no frontmatter.
+function _tripInjectBreadcrumb(body) {
+  if (body.includes('class: "Breadcrumb"')) return body;
+  const m = body.match(/^---\n[\s\S]*?\n---\n/);
+  if (!m) return body;
+  const head = m[0];
+  return head + _TRIP_BREADCRUMB_BLOCK + body.slice(head.length);
+}
+
+// Replace a `## <Heading>` line with a SectionLabel dataviewjs block. Idempotent:
+// once converted the `## <Heading>` line is gone so the regex no longer matches.
+function _tripHeadingToSectionLabel(body, heading) {
+  const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  if (!re.test(body)) return body;
+  const block =
+    '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "' +
+    heading + '" }] });\n```';
+  return body.replace(re, block);
+}
+
+// Rewrite `[[Trip Atlas]]` and `[[Trip Atlas|<alias>]]` → the atlas basename.
+// Only the EXACT `Trip Atlas` target (never partial matches inside other links).
+function _tripRepairAtlasLinks(body, atlasBase) {
+  return body
+    .replace(/\[\[Trip Atlas\|/g, `[[${atlasBase}|`)
+    .replace(/\[\[Trip Atlas\]\]/g, `[[${atlasBase}]]`);
+}
+
+// Per-key replace-or-insert of `key: value` INSIDE the leading `---` block.
+// Preserves all body content after frontmatter. Returns the full new body.
+// If the key exists (single-line `key:` form), its line is replaced; otherwise
+// the key line is appended to the end of the frontmatter block.
+function _tripSetFmKey(body, key, valueLine) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body; // no frontmatter — refuse to guess
+  const keyRe = new RegExp(`^${key}\\s*:.*$`, "m");
+  let fm = parts.fm;
+  if (keyRe.test(fm)) fm = fm.replace(keyRe, valueLine);
+  else fm = fm + "\n" + valueLine;
+  return `---\n${fm}\n---\n` + parts.rest;
+}
+
+// Migrate a legacy `created:` FM key → `created_at:` inside the leading block.
+// - If `created_at` already present → leave everything (return unchanged).
+// - Else if a `created:` line exists → rename to `created_at:`, coercing a
+//   date-only `YYYY-MM-DD` value to `YYYY-MM-DDT00:00:00±HH:MM` (local tz).
+// - Else (neither present) → insert a fresh `created_at` (now, ISO+TZ).
+function _tripMigrateCreatedAt(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  const fm = parts.fm;
+  if (/^created_at\s*:/m.test(fm)) return body; // already canonical
+  const m = fm.match(/^created\s*:\s*(.*)$/m);
+  if (m) {
+    let val = m[1].trim().replace(/^["']|["']$/g, "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      const off = _tripIsoWithTz(new Date()).slice(-6); // ±HH:MM from local tz
+      val = `${val}T00:00:00${off}`;
+    }
+    const newFm = fm.replace(/^created\s*:.*$/m, `created_at: "${val}"`);
+    return `---\n${newFm}\n---\n` + parts.rest;
+  }
+  const nowIso = _tripIsoWithTz(new Date());
+  const newFm = fm + `\ncreated_at: "${nowIso}"`;
+  return `---\n${newFm}\n---\n` + parts.rest;
+}
+
+// Remove a legacy `tags:` block that is EXACTLY the single `trip` tag. Leaves any
+// other tags (block form with >1 entry, or a different single tag) untouched.
+function _tripStripLoneTripTag(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  // Match a `tags:` block whose ONLY list entry is `- trip`. The trailing
+  // boundary is asserted with a NEGATIVE lookahead against another indented
+  // `  - <tag>` list item, so a multi-tag block (e.g. `- trip` + `- hotels`) is
+  // left untouched. What may follow is a new top-level key line or end-of-block
+  // (note: a bare `$` under /m matches before every newline, which is why we use
+  // an explicit negative lookahead here instead of `\n?$`).
+  const re = /^tags:[ \t]*\n[ \t]*-[ \t]*trip[ \t]*(?!\n[ \t]+-)(?=\n\S|\s*$)/m;
+  if (!re.test(parts.fm)) return body;
+  let newFm = parts.fm.replace(re, "");
+  newFm = newFm.replace(/\n{2,}/g, "\n").replace(/^\n+|\n+$/g, "");
+  return `---\n${newFm}\n---\n` + parts.rest;
+}
+
+async function applyTripsConformanceHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const TRIPS_ROOT = "spice/trips";
+  if (!(await adapter.exists(TRIPS_ROOT))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0, skipped = 0;
+
+  let rootListing;
+  try { rootListing = await adapter.list(TRIPS_ROOT); }
+  catch (_e) { return; }
+
+  const tripFolders = (rootListing.folders || []).filter((d) => {
+    const base = d.split("/").pop();
+    return base !== "attachments" && !d.includes(".sauce-backup");
+  });
+
+  for (const tripDir of tripFolders) {
+    const slug = tripDir.split("/").pop();
+    try {
+      let subListing;
+      try { subListing = await adapter.list(tripDir); }
+      catch (_e) { continue; }
+      const mdFiles = (subListing.files || []).filter((f) => f.endsWith(".md"));
+      if (mdFiles.length === 0) { skipped += 1; continue; }
+
+      // Locate the atlas: the file whose leading frontmatter block has type: trip.
+      let atlasPath = null, atlasBody = null, tripName = null;
+      for (const f of mdFiles) {
+        let body;
+        try { body = await adapter.read(f); } catch (_e) { continue; }
+        const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch) continue;
+        if (!/^type:\s*["']?trip["']?\s*$/m.test(fmMatch[1])) continue;
+        const nm = fmMatch[1].match(/^name\s*:\s*(.*)$/m);
+        if (!nm) continue;
+        atlasPath = f;
+        atlasBody = body;
+        tripName = nm[1].trim().replace(/^["']|["']$/g, "");
+        break;
+      }
+      if (!atlasPath || !tripName) {
+        warned += 1;
+        history?.push({ event: "warning", step: "trips_conformance_heal",
+          reason: `${slug}: no atlas (type: trip + name:) found — skipping folder untouched`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+
+      const atlasBase = _tripSanitize(tripName);
+
+      // --- Compute all planned writes first (so a no-op run skips the backup) ---
+      const plan = []; // { path, newPath, newBody } — newPath===path means edit-in-place
+      const atlasCurBase = atlasPath.split("/").pop().replace(/\.md$/, "");
+
+      // Atlas transforms.
+      let newAtlasBody = atlasBody;
+      newAtlasBody = _tripInjectBreadcrumb(newAtlasBody);
+      // Only convert `## Mentions` when BOTH the heading and a BacklinkPanel exist.
+      if (/^##\s+Mentions\s*$/m.test(newAtlasBody) && /BacklinkPanel/.test(newAtlasBody)) {
+        newAtlasBody = _tripHeadingToSectionLabel(newAtlasBody, "Mentions");
+      }
+      newAtlasBody = _tripRepairAtlasLinks(newAtlasBody, atlasBase);
+      const atlasNewPath = `${tripDir}/${atlasBase}.md`;
+      if (atlasNewPath !== atlasPath || newAtlasBody !== atlasBody) {
+        plan.push({ path: atlasPath, newPath: atlasNewPath, newBody: newAtlasBody });
+      }
+
+      // Section transforms (every OTHER top-level .md).
+      for (const f of mdFiles) {
+        if (f === atlasPath) continue;
+        let body;
+        try { body = await adapter.read(f); } catch (_e) { continue; }
+        const legacy = f.split("/").pop().replace(/\.md$/, "");
+        // Prefer the note's OWN canonical frontmatter (section_kind + section) when
+        // present — this is what makes a re-run idempotent: once the file is renamed
+        // to `<atlas> — <Label>.md` the basename no longer matches a legacy name, so
+        // deriving kind/label from the basename would corrupt an already-migrated
+        // note. The frontmatter is authoritative; the legacy-basename path is only
+        // the first-migration fallback.
+        const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+        const fmInner = fmMatch ? fmMatch[1] : "";
+        const fmKindM = fmInner.match(/^section_kind\s*:\s*(.*)$/m);
+        const fmSectionM = fmInner.match(/^section\s*:\s*(.*)$/m);
+        const fmKind = fmKindM ? fmKindM[1].trim().replace(/^["']|["']$/g, "") : null;
+        const fmSection = fmSectionM ? fmSectionM[1].trim().replace(/^["']|["']$/g, "") : null;
+        let kind, sectionLabel;
+        if (fmKind) {
+          kind = fmKind;
+          sectionLabel = fmSection || (_tripLabelForKind(kind) || legacy.replace(/^Trip\s+/, ""));
+        } else {
+          kind = _tripKindFromLegacy(legacy);
+          sectionLabel = kind === "custom"
+            ? legacy.replace(/^Trip\s+/, "")
+            : _tripLabelForKind(kind);
+        }
+
+        let nb = body;
+        // Canonical frontmatter (per-key replace-or-insert).
+        nb = _tripMigrateCreatedAt(nb);
+        nb = _tripStripLoneTripTag(nb);
+        nb = _tripSetFmKey(nb, "type", "type: trip-section");
+        nb = _tripSetFmKey(nb, "section_kind", `section_kind: ${kind}`);
+        nb = _tripSetFmKey(nb, "section", `section: "${sectionLabel}"`);
+        nb = _tripSetFmKey(nb, "trip", `trip: "[[${atlasBase}]]"`);
+        nb = _tripSetFmKey(nb, "trip_slug", `trip_slug: ${slug}`);
+        // Chrome + link repair.
+        nb = _tripInjectBreadcrumb(nb);
+        nb = _tripRepairAtlasLinks(nb, atlasBase);
+
+        const newBase = `${atlasBase} — ${sectionLabel}`;
+        const newPath = `${tripDir}/${newBase}.md`;
+        if (newPath !== f || nb !== body) {
+          plan.push({ path: f, newPath, newBody: nb });
+        }
+      }
+
+      if (plan.length === 0) { skipped += 1; continue; }
+
+      // --- Backup once (BEFORE any write), only when a change is pending. ---
+      await _copyDirRecursive(adapter, tripDir, `.sauce-backup/trips/${slug}/${ts}`);
+
+      // --- Apply. Rename = write new path + remove old (adapter has no rename). ---
+      for (const step of plan) {
+        await adapter.write(step.newPath, step.newBody);
+        if (step.newPath !== step.path) {
+          try { await adapter.remove(step.path); } catch (_e) { /* best-effort */ }
+        }
+      }
+
+      healed += 1;
+      history?.push({ event: "info", step: "trips_conformance_heal", name: slug,
+        reason: `healed ${slug}: atlas → ${atlasBase}.md + ${plan.length - 1} section(s); backup at .sauce-backup/trips/${slug}/${ts}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "trips_conformance_heal", name: slug,
+        reason: `heal failed for ${slug}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  // Heal the hub once (outside the per-trip loop).
+  try {
+    const hubPath = `${TRIPS_ROOT}/Trips.md`;
+    if (await adapter.exists(hubPath)) {
+      const hubBody = await adapter.read(hubPath);
+      let nh = _tripInjectBreadcrumb(hubBody);
+      nh = _tripHeadingToSectionLabel(nh, "All Trips");
+      if (nh !== hubBody) {
+        const backupPath = `.sauce-backup/trips/Trips.md.${ts}`;
+        try { await adapter.write(backupPath, hubBody); } catch (_e) { /* best-effort */ }
+        await adapter.write(hubPath, nh);
+        history?.push({ event: "info", step: "trips_conformance_heal", name: "hub",
+          reason: `healed Trips.md (breadcrumb + All Trips SectionLabel)`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  } catch (e) {
+    warned += 1;
+    history?.push({ event: "warning", step: "trips_conformance_heal", name: "hub",
+      reason: `hub heal failed: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+
+  history?.push({ event: "info", step: "trips_conformance_heal", name: "vault",
+    summary: { healed, warned, skipped },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
 // applyEntityCreateGuardMigration — v0.110.1. Heals the cold-vault load race
 // where dataviewjs blocks call `customJS.EntityCreate.render(dv, {...})`
 // before the CustomJS plugin has registered EntityCreate. Direct calls throw
@@ -18073,6 +18401,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
     module.exports._reorderProjectTodoOwnedTasksLast = _reorderProjectTodoOwnedTasksLast;
     module.exports.applyProjectTodoSectionReorderHeal = applyProjectTodoSectionReorderHeal;
+    // trips-conformance heal — rename + canonicalize + breadcrumb for existing
+    // trips (for run-trips-heal.js TRIPHEAL-*). Pure additive.
+    module.exports.applyTripsConformanceHeal = applyTripsConformanceHeal;
     // task-entity — backup-first daily→note-per-task migration (for
     // run-seed-migrations.js HC-DAILYTASK-* + run-helper-cases structural asserts).
     module.exports.applyDailyTasksToEntityMigration = applyDailyTasksToEntityMigration;
