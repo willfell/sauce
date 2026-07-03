@@ -161,6 +161,19 @@
       "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Paycheck is month-keyed: requires `month` (^\\d{4}-\\d{2}$), naming `^Paycheck-\\d{4}-\\d{2}\\.md$`, optional `deposits[]` ({date, amount}); each `expenses[]` row carries a 1-based `deposit` index tying it to which check pays it. Legacy `pay_period_start`/`pay_period_end` are downgraded to optional (archived/pre-cutover notes). paycheck-defaults carries a `deposit_schedule[]` ({day, amount}) that seeds a new month's deposits. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 — per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
     },
     {
+      "id": "reader-rule-fragments",
+      "kind": "rule-fragment-bundle",
+      "owner": { "type": "blueprint", "name": "reader" },
+      "source": "platform/blueprints/reader/manifest.json",
+      "validator": "platform/install.js",
+      "consumers": [
+        "platform/blueprints/reader/helpers/reader-queue.js",
+        "platform/blueprints/reader/helpers/reader-article-actions.js",
+        "platform/blueprints/reader/helpers/reader-article-view.js"
+      ],
+      "notes": "2 rule_fragments (reader-hub path-exact, reader-article glob) validating the type frontmatter for the reader blueprint."
+    },
+    {
       "id": "cowork-rule-fragments",
       "kind": "rule-fragment-bundle",
       "owner": { "type": "blueprint", "name": "cowork" },
