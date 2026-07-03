@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.184.5",
+  "generated_at": "0.185.2",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -738,16 +738,26 @@
     {
       "kind": "blueprint",
       "name": "daily",
-      "current_version": "0.16.2",
+      "current_version": "0.17.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
-          "covered": 2,
-          "total": 2,
+          "covered": 4,
+          "total": 4,
           "methods": [
             {
               "cls": "SpaceDailyDashboard",
               "method": "selectTasks",
+              "covered": true
+            },
+            {
+              "cls": "SpaceDailyDashboard",
+              "method": "selectMeetings",
+              "covered": true
+            },
+            {
+              "cls": "SpaceDailyDashboard",
+              "method": "computeCounts",
               "covered": true
             },
             {
@@ -1499,7 +1509,7 @@
     {
       "kind": "blueprint",
       "name": "project",
-      "current_version": "1.40.3",
+      "current_version": "1.40.4",
       "axes": {
         "customjs_behavioral": {
           "score": 0.9555555555555556,
@@ -2239,7 +2249,7 @@
     {
       "kind": "mechanism",
       "name": "convenience",
-      "current_version": "0.5.1",
+      "current_version": "0.6.0",
       "axes": {
         "customjs_behavioral": {
           "score": null,
@@ -2327,6 +2337,107 @@
         ],
         "primary_user_flow": "Install convenience mechanism to auto-enable workspace hotkeys (Cmd+T for daily, Cmd+- for full path copy, Cmd+= for path copy) + Dataview JS support + Tasks emoji-to-icon CSS snippet.",
         "qualitative_recommendation": "Low blast radius (0.315 priority). Real debt is missing happy-path smoke; close by extending run-integration-smoke.js with a hotkey-registration verify case."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "home",
+      "current_version": "0.2.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "SpaceHome",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-home-spacehome.js"
+        },
+        "installer_migration": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyHomeScaffoldHeal",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.7,
+          "manifest_ratio": 0.4,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceHome",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.54,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.3,
+      "top_gap": {
+        "axis": "installer_migration",
+        "score": 0.3,
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
       }
     },
     {
@@ -4407,7 +4518,7 @@
     {
       "kind": "mechanism",
       "name": "section-label",
-      "current_version": "0.2.1",
+      "current_version": "0.2.2",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -4880,12 +4991,12 @@
     {
       "kind": "mechanism",
       "name": "task-entity",
-      "current_version": "0.3.4",
+      "current_version": "0.3.5",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.8947368421052632,
-          "covered": 17,
-          "total": 19,
+          "score": 1,
+          "covered": 20,
+          "total": 20,
           "methods": [
             {
               "cls": "TaskEntity",
@@ -4940,12 +5051,17 @@
             {
               "cls": "TaskDialog",
               "method": "markDone",
-              "covered": false
+              "covered": true
             },
             {
               "cls": "TaskDialog",
               "method": "markDeleted",
-              "covered": false
+              "covered": true
+            },
+            {
+              "cls": "TaskDialog",
+              "method": "createQuick",
+              "covered": true
             },
             {
               "cls": "TaskTodayList",
@@ -5066,7 +5182,7 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.6611842105263158,
+      "composite_score": 0.6875,
       "blast_radius": "low",
       "blast_radius_rationale": "unassigned",
       "recent_incidents_30d": 0,

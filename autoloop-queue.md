@@ -144,7 +144,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: mechanism task-entity axis customjs_behavioral: 5 uncovered
-  status: proposed
+  status: done
+  note: run-task-entity.js TD-MD-1..5 exercise TaskDialog.markDone / markDeleted through an instance (the two previously-uncovered methods) with a spying app — asserting the real frontmatter stamp (status=done+completed_at / status=deleted), the _done/_trash move via donePath/trashPath, and the {ok:false} cold-load + file-not-found branches. coverage-matrix.json regenerated: task-entity customjs_behavioral now 20/20.
 
 - id: cov-mechanism-task-entity-widget-render
   title: Add coverage for task-entity widget_render (0/5)
