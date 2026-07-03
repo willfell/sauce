@@ -243,6 +243,11 @@
       "name": "home",
       "version": "0.4.1",
       "path": "blueprints/home"
+    },
+    {
+      "name": "reader",
+      "version": "0.1.0",
+      "path": "blueprints/reader"
     }
   ]
 }

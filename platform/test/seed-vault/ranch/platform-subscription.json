@@ -154,6 +154,10 @@
     {
       "name": "wiki",
       "version": "0.3.0"
+    },
+    {
+      "name": "reader",
+      "version": "0.1.0"
     }
   ]
 }

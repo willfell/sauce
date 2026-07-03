@@ -135,6 +135,10 @@
     {
       "name": "home",
       "version": "0.4.1"
+    },
+    {
+      "name": "reader",
+      "version": "0.1.0"
     }
   ]
 }

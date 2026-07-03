@@ -1,0 +1,207 @@
+{
+  "name": "reader",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "reader",
+  "skills_dir": ".claude/skills/reader",
+  "description": "Flat reading queue for web articles clipped via the Obsidian Web Clipper. spice/reader/ root hub (reader-hub) → reader-article leaves (flat, never nested). Status (unread/reading/archived) lives in frontmatter, never a folder. Reuses nav-buttons, entity-create, section-label, breadcrumb (ancestors mode), cards, accent-button, render-safe, open-helpers, doc-search. ReaderQueue renders the hub's status-grouped queue; ReaderArticleActions renders per-article status controls; ReaderArticleView renders the article card. Icon: book-open.",
+  "depends_on": [
+    {
+      "name": "nav-buttons",
+      "range": ">=2.8.0"
+    },
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "cards",
+      "range": ">=0.2.6"
+    },
+    {
+      "name": "accent-button",
+      "range": ">=0.1.3"
+    },
+    {
+      "name": "entity-create",
+      "range": ">=0.7.4"
+    },
+    {
+      "name": "section-label",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "breadcrumb",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "doc-search",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "render-safe",
+      "range": ">=0.2.0"
+    },
+    {
+      "name": "open-helpers",
+      "range": ">=0.1.1"
+    },
+    {
+      "name": "platform-claude",
+      "range": ">=0.1.3"
+    }
+  ],
+  "breadcrumb": {
+    "types": {
+      "reader-hub": {
+        "ancestors": [],
+        "current": {
+          "label": "lit:Reader"
+        }
+      },
+      "reader-article": {
+        "ancestors": [
+          {
+            "label": "lit:Reader",
+            "link": "spice/reader/Reader.md"
+          }
+        ],
+        "current": {
+          "label": "fm:title|file:basename"
+        }
+      }
+    }
+  },
+  "customjs_classes": [
+    "ReaderQueue",
+    "ReaderArticleActions",
+    "ReaderArticleView"
+  ],
+  "files": [
+    {
+      "source": "templates/Reader.md",
+      "dest": "{{templates_path}}/Reader.md"
+    },
+    {
+      "source": "templates/Reader Article.md",
+      "dest": "{{templates_path}}/Reader Article.md"
+    },
+    {
+      "source": "content/Reader Hub.md",
+      "dest": "{{module_directory}}/Reader.md"
+    },
+    {
+      "source": "helpers/reader-queue.js",
+      "dest": "{{scripts_path}}/reader/reader-queue.js"
+    },
+    {
+      "source": "helpers/reader-article-actions.js",
+      "dest": "{{scripts_path}}/reader/reader-article-actions.js"
+    },
+    {
+      "source": "helpers/reader-article-view.js",
+      "dest": "{{scripts_path}}/reader/reader-article-view.js"
+    },
+    {
+      "source": "assets/reader-clip.json",
+      "dest": "{{module_directory}}/reader-clip.json"
+    }
+  ],
+  "claude_surface": [
+    {
+      "kind": "command",
+      "source": "commands/reader.md",
+      "dest": ".claude/commands/reader.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/new-reader-article/SKILL.md",
+      "dest": "{{skills_dir}}/new-reader-article/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Reader",
+        "path": "{{module_directory}}",
+        "command": "/reader"
+      }
+    }
+  ],
+  "nav_buttons": [
+    {
+      "id": "reader-hub",
+      "label": "Reader",
+      "icon": "book-open",
+      "order": 140,
+      "action": {
+        "type": "openLink",
+        "target": "{{module_directory}}/Reader.md"
+      }
+    }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "reader-article",
+      "label": "+ New article",
+      "icon": "file-plus",
+      "prompts": [
+        {
+          "key": "title",
+          "label": "Article title",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "{{module_directory}}",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "reader-article",
+        "title": "{{prompts.title}}",
+        "status": "unread",
+        "url": "",
+        "summary": "",
+        "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": [
+          "reader-article"
+        ]
+      },
+      "body_template": "Reader Article.md"
+    }
+  ],
+  "rule_fragments": [
+    {
+      "target": "reader-hub",
+      "fragment": {
+        "scope": {
+          "path_glob": "spice/reader/Reader.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "equals": "reader-hub"
+          }
+        }
+      }
+    },
+    {
+      "target": "reader-article",
+      "fragment": {
+        "scope": {
+          "path_glob": "spice/reader/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}
