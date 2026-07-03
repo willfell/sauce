@@ -1221,7 +1221,8 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
   await applyDocLeafActionsBackfill(tp, mech, variables, history, git);   // NEW (Project Doc Updating Wiring PR4) — injects the DocLeafActions Move-button block into existing type:doc-note notes lacking it (insert-only after the ProjectNavButtons `---` divider, idempotent, .sauce-backup before write)
-  await applyDocBulkMoveActionsBackfill(tp, mech, variables, history, git); // NEW (Project Doc Updating Wiring PR5) — injects the DocBulkMoveActions Move-docs block into existing type:docs-hub notes lacking it (insert-only after the entity-create doc-note block, idempotent, .sauce-backup before write)
+  await applyDocBulkMoveActionsBackfill(tp, mech, variables, history, git); // (Project Doc Updating Wiring PR5) — NEUTERED for docs-hub: Move docs now lives in renderActionRow; this no longer injects the standalone block (skips every docs-hub note)
+  await applyDocsHubModernizeHeal(tp, mech, variables, history, git);       // NEW (docs-hub modernize) — rewrites legacy docs-hub bodies to the renderActionRow chrome shape (removes standalone DocBulkMoveActions + doubled `---`, injects Breadcrumb + renderActionRow, idempotent, .sauce-backup before write). MUST run AFTER the neutered backfill above.
   await applyProjectLinksManagerBackfill(tp, mech, variables, history, git); // NEW (Project Links Wiring PR4) — injects the ProjectLinksManager Add/Manage-links block into existing type:links-hub notes lacking it (insert-only before the ProjectLinksPanel block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
@@ -2773,12 +2774,17 @@ function _injectDocBulkMoveActionsBody(body) {
   return body.slice(0, afterFence) + block + body.slice(afterFence);
 }
 
-// applyDocBulkMoveActionsBackfill — Project Doc Updating Wiring PR5. Injects the
-// bulk "Move docs" button (DocBulkMoveActions) into pre-existing docs-hub notes
-// lacking it, so the affordance PR3 shipped for NEW Docs hubs (via the template)
-// also reaches hubs users already have. Walks spice/projects/**, filters
-// type:docs-hub, applies _injectDocBulkMoveActionsBody. Insert-only + idempotent;
-// .sauce-backup before write; per-note try/catch, never throws; ungated. Mirrors
+// applyDocBulkMoveActionsBackfill — Project Doc Updating Wiring PR5. Historically
+// injected the standalone "Move docs" block (DocBulkMoveActions) into pre-existing
+// docs-hub notes lacking it. NEUTERED at the docs-hub-modernize cycle: "Move docs"
+// now lives INSIDE the renderActionRow block (ProjectDocsIndex.renderActionRow draws
+// New Doc · New Section · Move docs in one full-width row), and applyDocsHubModernizeHeal
+// REMOVES the standalone block from legacy bodies. So this backfill must NOT
+// re-inject the block into docs-hub notes — it would undo the modernize heal. It
+// now skips every docs-hub note. The function + its exports are retained (the
+// no_anchor_found / non-docs-hub behaviours are still exercised by the harness),
+// but the docs-hub injection path is dead. Insert-only + idempotent; .sauce-backup
+// before write; per-note try/catch, never throws; ungated. Mirrors
 // applyDocLeafActionsBackfill.
 async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
@@ -2799,15 +2805,15 @@ async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history,
   for (const fpath of files) {
     try {
       const before = await adapter.read(fpath);
+      // NEUTERED: docs-hub notes are now modernized by applyDocsHubModernizeHeal
+      // (Move docs lives in renderActionRow). Never re-inject the standalone block
+      // here — it would undo that heal. Skip every docs-hub note outright.
+      if (_noteChromeFrontmatterType(before) === "docs-hub") { skipped += 1; continue; }
+      // Only docs-hub notes were ever eligible, so with docs-hub excluded this
+      // loop no longer injects anything; the remaining code is inert but kept for
+      // the retained history/skip semantics.
       if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
       if (before.includes('class: "DocBulkMoveActions"')) { skipped += 1; continue; }
-      // WS4 chrome overhaul: the S3 Docs hub renders Move-docs inside the
-      // ProjectDocsIndex.renderActionRow full-width action row (New Doc · New
-      // Section · Move docs), so a standalone DocBulkMoveActions block would
-      // duplicate the button. Skip healing hubs that already carry the action
-      // row. (The DBMH harness feeds a legacy HUB with neither string, so this
-      // guard is inert there.)
-      if (before.includes('method: "renderActionRow"')) { skipped += 1; continue; }
       const after = _injectDocBulkMoveActionsBody(before);
       if (after === before) {
         warned += 1;
@@ -2832,6 +2838,232 @@ async function applyDocBulkMoveActionsBackfill(tp, manifest, variables, history,
   }
 
   history?.push({ event: "info", step: "doc_bulk_move_actions_backfill", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
+// The modern renderActionRow block (New Doc · New Section · Move docs). Kept as a
+// module-level constant so the pure transform, the heal driver, and the tests all
+// reference ONE canonical string. Mirrors platform/blueprints/project/templates/Docs Hub.md.
+const DOCS_HUB_ACTION_ROW_BLOCK = [
+  "```dataviewjs",
+  "// entity-create:doc-note — installer-managed; do not delete this comment",
+  "// renderActionRow draws the full-width action row: New Doc · New Section · Move docs.",
+  'await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex", method: "renderActionRow" });',
+  "```",
+].join("\n");
+const DOCS_HUB_BREADCRUMB_BLOCK = [
+  "```dataviewjs",
+  'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
+  "```",
+].join("\n");
+const DOCS_HUB_INDEX_BLOCK = [
+  "```dataviewjs",
+  'await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex" });',
+  "```",
+].join("\n");
+
+// _modernizeDocsHubBody — PURE, idempotent transform: rewrites a legacy docs-hub
+// body to the modern chrome shape (Breadcrumb → SpaceNavButtons → ProjectNavButtons
+// → renderActionRow block → plain ProjectDocsIndex block). Regex/fence-walking only
+// (install.js has no parseYaml at runtime). Returns { changed, body }. The legacy
+// shape (headspace) is:
+//   [fm] → SpaceNavButtons → ProjectNavButtons → DocBulkMoveActions → --- → --- → ProjectDocsIndex
+// (no Breadcrumb, standalone narrow "Move docs", doubled literal dividers). Steps:
+//   1. Remove the entire `class: "DocBulkMoveActions"` dataviewjs block (fence-to-fence).
+//   2. Remove literal `---` thematic-break lines OUTSIDE the frontmatter that are
+//      adjacent to chrome dataviewjs blocks (incl. consecutive/doubled ones).
+//   3. Ensure the renderActionRow block is present, inserted immediately AFTER the
+//      ProjectNavButtons block if absent. Idempotent via the `method: "renderActionRow"`
+//      substring guard.
+//   4. Ensure a Breadcrumb block is the FIRST rendered block (before SpaceNavButtons).
+//   5. Ensure a plain ProjectDocsIndex (render) block is present at the end.
+// A note already in modern shape → { changed:false }. User content AFTER the
+// ProjectDocsIndex block is preserved (never dropped).
+function _modernizeDocsHubBody(body) {
+  if (typeof body !== "string") return { changed: false, body };
+  const original = body;
+
+  // Split leading frontmatter off so the divider strip never touches the FM close.
+  let fmPart = "";
+  let rest = body;
+  const fmMatch = body.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n)/);
+  if (fmMatch) { fmPart = fmMatch[1]; rest = body.slice(fmMatch[1].length); }
+
+  const nl = rest.includes("\r\n") ? "\r\n" : "\n";
+  let lines = rest.split(/\r?\n/);
+
+  // Classify each line: which fenced code block (if any) it belongs to, and — for
+  // a dataviewjs chrome block — the customJS class it invokes. We walk fences so a
+  // literal "---" inside a code block is never treated as a thematic break.
+  function classify(ls) {
+    const info = ls.map(() => ({ inFence: false, fenceOpen: false, fenceClose: false }));
+    let inFence = false;
+    for (let i = 0; i < ls.length; i++) {
+      const t = ls[i].trim();
+      const isFence = /^(```|~~~)/.test(t);
+      if (isFence && !inFence) { inFence = true; info[i] = { inFence: true, fenceOpen: true, fenceClose: false }; continue; }
+      if (isFence && inFence) { inFence = false; info[i] = { inFence: true, fenceOpen: false, fenceClose: true }; continue; }
+      info[i] = { inFence, fenceOpen: false, fenceClose: false };
+    }
+    return info;
+  }
+
+  // ── Step 1: remove the DocBulkMoveActions block (fence-to-fence). ──────────────
+  {
+    let info = classify(lines);
+    let removeFrom = -1, removeTo = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (info[i].fenceOpen) {
+        // Scan the block body for the DocBulkMoveActions class ref.
+        let j = i + 1; let isTarget = false; let close = -1;
+        for (; j < lines.length; j++) {
+          if (info[j].fenceClose) { close = j; break; }
+          if (lines[j].includes('class: "DocBulkMoveActions"')) isTarget = true;
+        }
+        if (isTarget && close !== -1) { removeFrom = i; removeTo = close; break; }
+        i = close === -1 ? lines.length : close;
+      }
+    }
+    if (removeFrom !== -1) {
+      lines.splice(removeFrom, removeTo - removeFrom + 1);
+      // Drop one immediately-trailing blank line so we don't leave a double blank.
+      if (removeFrom < lines.length && lines[removeFrom].trim() === "") lines.splice(removeFrom, 1);
+    }
+  }
+
+  // ── Step 2: strip literal `---` thematic breaks OUTSIDE fences that are adjacent
+  //    to a chrome dataviewjs block (or to another such divider — doubled case). We
+  //    only remove a `---` whose nearest non-blank neighbour (up OR down, skipping
+  //    blanks) is a code-fence line or another strippable divider. This removes the
+  //    doubled literal dividers of the legacy body without disturbing a user's own
+  //    `---` buried in prose. ──────────────────────────────────────────────────
+  {
+    let info = classify(lines);
+    const isDivider = (i) => {
+      if (i < 0 || i >= lines.length) return false;
+      if (info[i].inFence) return false;
+      return /^-{3,}[ \t]*$/.test(lines[i]);
+    };
+    // A neighbour index (skipping blanks) in direction dir (+1/-1). Divider lines
+    // themselves count as "chrome-adjacent" so a run of doubled dividers all strip.
+    const neighbourIsChrome = (start, dir) => {
+      let i = start + dir;
+      while (i >= 0 && i < lines.length && lines[i].trim() === "") i += dir;
+      if (i < 0 || i >= lines.length) return false;
+      if (info[i].fenceOpen || info[i].fenceClose) return true;   // touches a code block
+      if (isDivider(i)) return true;                              // doubled divider
+      return false;
+    };
+    const drop = new Set();
+    for (let i = 0; i < lines.length; i++) {
+      if (!isDivider(i)) continue;
+      if (neighbourIsChrome(i, -1) || neighbourIsChrome(i, +1)) drop.add(i);
+    }
+    if (drop.size) {
+      lines = lines.filter((_, i) => !drop.has(i));
+      // Collapse any double blank lines the removal left behind.
+      const collapsed = [];
+      for (const l of lines) {
+        if (l.trim() === "" && collapsed.length && collapsed[collapsed.length - 1].trim() === "") continue;
+        collapsed.push(l);
+      }
+      lines = collapsed;
+    }
+  }
+
+  let workBody = lines.join(nl);
+
+  // ── Step 3: ensure the renderActionRow block, after ProjectNavButtons. ────────
+  if (!/method:\s*"renderActionRow"/.test(workBody)) {
+    const navIdx = workBody.indexOf('class: "ProjectNavButtons"');
+    let inserted = false;
+    if (navIdx !== -1) {
+      const fenceClose = workBody.indexOf("\n```", navIdx);
+      if (fenceClose !== -1) {
+        const afterFence = fenceClose + 4; // just past "\n```"
+        workBody = workBody.slice(0, afterFence) + "\n\n" + DOCS_HUB_ACTION_ROW_BLOCK + workBody.slice(afterFence);
+        inserted = true;
+      }
+    }
+    if (!inserted) {
+      // No ProjectNavButtons anchor — fall back to before the ProjectDocsIndex block.
+      const idxIdx = workBody.indexOf('class: "ProjectDocsIndex"');
+      if (idxIdx !== -1) {
+        const openFence = workBody.lastIndexOf("```dataviewjs", idxIdx);
+        if (openFence !== -1) workBody = workBody.slice(0, openFence) + DOCS_HUB_ACTION_ROW_BLOCK + "\n\n" + workBody.slice(openFence);
+      }
+    }
+  }
+
+  // ── Step 4: ensure a Breadcrumb block is the FIRST rendered block. ────────────
+  if (!/class:\s*"Breadcrumb"/.test(workBody)) {
+    const navIdx = workBody.indexOf('class: "SpaceNavButtons"');
+    if (navIdx !== -1) {
+      const openFence = workBody.lastIndexOf("```dataviewjs", navIdx);
+      if (openFence !== -1) workBody = workBody.slice(0, openFence) + DOCS_HUB_BREADCRUMB_BLOCK + "\n\n" + workBody.slice(openFence);
+    } else {
+      // No nav block at all — prepend the breadcrumb to the body top.
+      workBody = DOCS_HUB_BREADCRUMB_BLOCK + "\n\n" + workBody.replace(/^\s+/, "");
+    }
+  }
+
+  // ── Step 5: ensure a plain ProjectDocsIndex (render) block at the end. ────────
+  // The renderActionRow block also names ProjectDocsIndex, so match the render
+  // form specifically ({ class: "ProjectDocsIndex" } with NO method).
+  if (!/\{\s*class:\s*"ProjectDocsIndex"\s*\}/.test(workBody)) {
+    workBody = workBody.replace(/\s*$/, "") + "\n\n" + DOCS_HUB_INDEX_BLOCK + "\n";
+  }
+
+  const finalBody = fmPart + workBody;
+  return { changed: finalBody !== original, body: finalBody };
+}
+
+// applyDocsHubModernizeHeal — walks every type:docs-hub note and rewrites a legacy
+// body to the modern renderActionRow chrome shape via _modernizeDocsHubBody. The
+// deferred WS4 reshape heal: existing hubs (e.g. headspace Docs.md) still carry the
+// pre-renderActionRow body (standalone DocBulkMoveActions + doubled `---` + no
+// Breadcrumb). Runs AFTER applyDocBulkMoveActionsBackfill (now neutered for docs-hub)
+// so nothing re-adds the standalone block. Idempotent (no write when unchanged);
+// .sauce-backup before every write; per-note try/catch, never throws; ungated.
+// Mirrors applyDocBulkMoveActionsBackfill's posture.
+async function applyDocsHubModernizeHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "docs_hub_modernize_heal", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
+      const { changed, body: after } = _modernizeDocsHubBody(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "docs_hub_modernize_heal", target: fpath, action: "modernized",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "docs_hub_modernize_heal", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "docs_hub_modernize_heal", name: "vault", summary: { healed, skipped, warned },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
@@ -18965,6 +19197,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // backfill heal + its pure body transform (run-doc-bulk-move-heal.js DBMH-*).
     module.exports.applyDocBulkMoveActionsBackfill = applyDocBulkMoveActionsBackfill;
     module.exports._injectDocBulkMoveActionsBody = _injectDocBulkMoveActionsBody;
+    // docs-hub modernize — legacy docs-hub body → renderActionRow chrome shape.
+    module.exports.applyDocsHubModernizeHeal = applyDocsHubModernizeHeal;
+    module.exports._modernizeDocsHubBody = _modernizeDocsHubBody;
     // Project Links Wiring PR4 — existing Link-Hub ProjectLinksManager backfill
     // heal + its pure body transform (run-project-links-manager-heal.js PLMH-*).
     module.exports.applyProjectLinksManagerBackfill = applyProjectLinksManagerBackfill;

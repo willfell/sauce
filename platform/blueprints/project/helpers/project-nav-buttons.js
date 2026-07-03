@@ -934,14 +934,17 @@ class ProjectNavButtons {
             const notesFolder = `${projectDir}/tasks/${ctx.taskFolder}/notes`;
             const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
 
-            // Divider between project nav row and task action row
-            const divider = root.createEl("hr");
-            divider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+            // Divider between project nav row and task action row — helper-owned
+            // hairline (SectionLabel.divider) to match the vault-wide chrome
+            // grammar, replacing the raw <hr>. Guarded against a cold-loading helper.
+            if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(root);
 
+            // Wiki-parity hub container: match the core nav row width + centering so
+            // the task action buttons line up with the project nav buttons above.
             const actionRow = root.createEl("div");
-            actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
+            actionRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
-            customJS.AccentButton.render(actionRow, {
+            this._mobilize(customJS.AccentButton.render(actionRow, {
                 label: "New Note",
                 icon: plusIcon,
                 onClick: async () => {
@@ -954,7 +957,7 @@ class ProjectNavButtons {
                     }
                 },
                 flex: true
-            });
+            }));
 
             if (ctx.context === "task-hub" || ctx.context === "task-note") {
                 const boardPath = `${projectDir}/tasks/${ctx.taskFolder}/board/${ctx.taskFolder}-board.md`;
@@ -962,16 +965,16 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    customJS.AccentButton.render(actionRow, {
+                    this._mobilize(customJS.AccentButton.render(actionRow, {
                         label: "Open Board",
                         icon: boardIcon,
                         onClick: async () => {
                             await this._openAsKanban(boardPath);
                         },
                         flex: true
-                    });
+                    }));
                 } else {
-                    customJS.AccentButton.render(actionRow, {
+                    this._mobilize(customJS.AccentButton.render(actionRow, {
                         label: "Create Board",
                         icon: boardIcon,
                         onClick: async () => {
@@ -982,7 +985,7 @@ class ProjectNavButtons {
                             }
                         },
                         flex: true
-                    });
+                    }));
                 }
             }
         }

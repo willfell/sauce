@@ -1765,6 +1765,91 @@ async function runProjectMigrateFamily() {
     }
 }
 
+// =============================================================================
+// HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-* — docs-hub modernize heal.
+//
+// applyDocsHubModernizeHeal rewrites a LEGACY docs-hub body (standalone
+// DocBulkMoveActions + doubled literal `---` + no Breadcrumb + no renderActionRow)
+// to the modern chrome shape. Self-contained: copies the committed
+// docshub-legacy fixture into a throwaway tmp vault and DIRECTLY INVOKES the heal
+// (the seed install short-circuits on project version match, so per-blueprint
+// apply* fns never fire against seed fixtures). Asserts post-heal shape,
+// .sauce-backup, and byte-identical idempotency on a second pass.
+//
+// Fixture: spice/projects/docshub-legacy/docs/Docs.md
+// =============================================================================
+async function runDocsHubModernizeFamily() {
+    const { applyDocsHubModernizeHeal } = require("../install.js");
+
+    const dhRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-docshub-"));
+    try {
+        const DH_PROJ_DIR = "spice/projects/docshub-legacy";
+        const SEED_DH = path.join(SEED_DIR, DH_PROJ_DIR);
+        helpers.copyDir(SEED_DH, path.join(dhRoot, DH_PROJ_DIR));
+
+        const DOCS = path.join(dhRoot, DH_PROJ_DIR, "docs/Docs.md");
+        const before = fs.readFileSync(DOCS, "utf8");
+
+        const adapter = makeFsAdapter(dhRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        // Sanity: the committed fixture really is the legacy shape.
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A0 fixture is legacy shape (DocBulkMoveActions + doubled ---)",
+            before.includes('class: "DocBulkMoveActions"') && /-{3,}\s*\n\s*-{3,}/.test(before.replace(/^---[\s\S]*?\n---\n/, "")));
+
+        await applyDocsHubModernizeHeal(tp, manifest, variables, history, git);
+        const after = fs.readFileSync(DOCS, "utf8");
+
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A1 standalone DocBulkMoveActions block removed",
+            !after.includes('class: "DocBulkMoveActions"'));
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A2 no doubled --- left in body",
+            !/-{3,}\s*\n\s*-{3,}/.test(after.replace(/^---[\s\S]*?\n---\n/, "")));
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A3 renderActionRow block present",
+            /method:\s*"renderActionRow"/.test(after) && after.includes("entity-create:doc-note"));
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A4 Breadcrumb present (before SpaceNavButtons)",
+            /class:\s*"Breadcrumb"/.test(after) && after.indexOf("Breadcrumb") < after.indexOf("SpaceNavButtons"));
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A5 plain ProjectDocsIndex block present",
+            /\{\s*class:\s*"ProjectDocsIndex"\s*\}/.test(after));
+
+        // .sauce-backup snapshot written before the write.
+        const backupRoot = path.join(dhRoot, ".sauce-backup");
+        const listBackups = (dir) => {
+            const out = [];
+            let entries = [];
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_e) { return out; }
+            for (const e of entries) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) out.push(...listBackups(full));
+                else out.push(full);
+            }
+            return out;
+        };
+        const backupExists = fs.existsSync(backupRoot)
+            && listBackups(backupRoot).some((f) => f.replace(/\\/g, "/").endsWith("/docs/Docs.md"));
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A6 .sauce-backup snapshot written", backupExists);
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-A7 modernized history event recorded",
+            history.some((h) => h && h.step === "docs_hub_modernize_heal" && h.action === "modernized"));
+
+        // Idempotency — second pass is a byte-identical no-op.
+        const history2 = [];
+        await applyDocsHubModernizeHeal(tp, manifest, variables, history2, git);
+        const afterSecond = fs.readFileSync(DOCS, "utf8");
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-F1 second pass byte-identical (idempotent)", after === afterSecond);
+        ok("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-F2 second pass records skipped, heals nothing",
+            history2.some((h) => h && h.summary && h.summary.skipped >= 1 && h.summary.healed === 0));
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${dhRoot}`);
+        } else {
+            try { fs.rmSync(dhRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // ===== HC-DOCSEC-BACKFILL-* — PR1 project-doc-updating-wiring =====
 //
 // applyDocSectionBackfill (ungated, idempotent) backfills MISSING
@@ -3693,6 +3778,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-DOCSEC-BACKFILL-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-DOCSEC-BACKFILL-FAMILY");
+    })
+    .then(() => runDocsHubModernizeFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-FAMILY");
     })
     .then(() => runFinanceMigrateFamily())
     .catch((e) => {

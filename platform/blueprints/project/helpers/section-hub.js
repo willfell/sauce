@@ -59,7 +59,7 @@ class SectionHub {
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
-      recursive: depth === 1,
+      recursive: true,
       hideTags: true,
       persist: false,
       entityType: "doc-note",
@@ -183,6 +183,18 @@ class SectionHub {
     const container = filterCtx.resultsContainer;
     const proxyDv = this._makeProxyDv(dv, container);
 
+    // SEARCH MODE — with an active query, search THIS section's whole subtree
+    // recursively (mirrors WikiTree._renderResults): a flat most-recent-first
+    // list of every matching doc-note, each tagged with the sub-section it lives
+    // in. Empty query falls through to the normal browse (sub-sections + docs).
+    if (filterCtx && filterCtx.hasActiveFilter) {
+      const scopePath = depth === 1
+        ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
+        : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
+      this._renderSearchResults(dv, proxyDv, scopePath, filterCtx);
+      return;
+    }
+
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
 
     // Sub-sections list — depth === 1 only.
@@ -252,6 +264,76 @@ class SectionHub {
         return created ? `created ${created} · edited ${edited}` : `edited ${edited}`;
       },
     });
+  }
+
+  // SEARCH MODE renderer — a flat, most-recent-first list of every matching
+  // doc-note across THIS section's whole subtree (scopePath), each captioned
+  // with the sub-section it lives in. Replaces the browse view while a query is
+  // active. Mirrors WikiTree._renderSearchResults + ProjectDocsIndex._renderSearchResults.
+  _renderSearchResults(dv, proxyDv, scopePath, filterCtx) {
+    const rawPages = dv.pages(`"${scopePath}"`);
+    const pages = rawPages.array ? rawPages.array() : Array.from(rawPages);
+
+    // folder → section display title, for the "in <trail>" subtitle. Built from
+    // the section-hub notes in the subtree (their own folder → their `section`).
+    const sectionByFolder = {};
+    for (const p of pages) {
+      if (p && p.type === "section-hub" && p.file && p.file.path) {
+        const f = String(p.file.folder != null ? p.file.folder : p.file.path.slice(0, p.file.path.lastIndexOf("/")));
+        const label = this._stripLink(p.section) || (p.file.name ? String(p.file.name).replace(/\.md$/, "") : "");
+        if (label) sectionByFolder[f] = label;
+      }
+    }
+
+    const matches = pages
+      .filter((p) => p && p.type === "doc-note" && p.file && p.file.path && customJS.DocSearch.matches(p, filterCtx))
+      .sort((a, b) => {
+        const at = a.file.mtime && a.file.mtime.ts != null ? a.file.mtime.ts : 0;
+        const bt = b.file.mtime && b.file.mtime.ts != null ? b.file.mtime.ts : 0;
+        return bt - at;
+      });
+
+    customJS.SectionLabel.render(proxyDv, { text: `Results (${matches.length})` });
+    if (!matches.length) {
+      const empty = proxyDv.container.createEl("div");
+      empty.style.cssText = "padding: 16px; text-align: center; color: var(--text-faint); font-style: italic; border: 1px dashed var(--background-modifier-border); border-radius: 8px; margin-top: 8px;";
+      empty.textContent = "No matching docs in this section or below.";
+      return;
+    }
+    const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+    customJS.BeaconCards.render(proxyDv, {
+      pages: matches,
+      layout: "stacked",
+      columns: 2,
+      sort: () => 0,   // keep OUR most-recent-first order
+      title: (p) => p.file.name,
+      icon: () => fileIcon,
+      target: (p) => p.file.path,
+      subtitle: (p) => {
+        const where = this._sectionTrail(p, scopePath, sectionByFolder);
+        const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
+        if (where) return ago ? `${where} · ${ago}` : where;
+        return ago ? `edited ${ago}` : "";
+      },
+    });
+  }
+
+  // "in <sub-section> / ..." trail for a doc-note, relative to the search root
+  // (scopePath). Uses each folder's section-hub display title, falling back to
+  // the folder slug. A doc directly in scopePath reads "here".
+  // Mirrors WikiTree._sectionTrail.
+  _sectionTrail(p, scopePath, sectionByFolder) {
+    const folder = String(p.file.folder != null ? p.file.folder : p.file.path.slice(0, p.file.path.lastIndexOf("/")));
+    if (folder === scopePath) return "here";
+    if (!folder.startsWith(scopePath + "/")) return "";
+    const rel = folder.slice(scopePath.length + 1).split("/");
+    const parts = [];
+    let acc = scopePath;
+    for (const seg of rel) {
+      acc = acc + "/" + seg;
+      parts.push((sectionByFolder && sectionByFolder[acc]) || seg);
+    }
+    return "in " + parts.join(" / ");
   }
 
   // synthetic dv-proxy that routes dv.container + dv.el + dv.header +
