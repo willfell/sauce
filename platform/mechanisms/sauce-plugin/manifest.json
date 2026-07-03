@@ -1,6 +1,6 @@
 {
   "name": "sauce-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Ships the first-party Sauce Obsidian plugin (a bundled_plugin vendored into .obsidian/plugins/sauce/). The plugin registers customJS renderer classes on window.customJS at onload() so dataviewjs views dispatched via customjs-guard render on first paint — killing the ~2s cold-load 'loading…' flash. Instantiation-only (no startup inits — those stay owned by CustomJS); the CustomJS community plugin remains enabled as the fallback, so this cannot regress. Vendored + enabled idempotently by applyBundledPlugin in install.js.",
   "files": [],
   "post_install": [],
