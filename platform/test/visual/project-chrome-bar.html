@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Project chrome-bar — visual harness (THROWAWAY test artifact)</title>
+<!--
+  THROWAWAY VISUAL HARNESS — not shipped, not in any manifest files[], not wired
+  into preflight. Faithfully replicates the RENDERED output of the new project
+  chrome so it can be screenshot-compared (light + dark) at 390px + 1024px.
+
+  Every inline style block below is copied VERBATIM from the four source helpers:
+    - platform/mechanisms/accent-button/accent-button.js       (baseCss + hover)
+    - platform/mechanisms/menu-popover/menu-popover.js          (overlay/panel/row/section/title/handle)
+    - platform/blueprints/project/helpers/project-chrome-bar.js (bar/breadcrumb/right-zone/touch)
+    - platform/mechanisms/task-entity/task-today-list.js        (renderTaskRow row/cbwrap/title/chips/actions)
+
+  Toggle theme with ?theme=dark / ?theme=light (default: BOTH columns side by side).
+  Resize the viewport to 390 and 1024 to catch clip/wrap/hairline issues.
+-->
+<style>
+  /* ── Two complete Obsidian-like CSS variable sets ─────────────────────────
+     Faithful DARK theme with FAINT border vars — the whole point of the harness
+     is to catch invisible-hairline / low-contrast issues on dark themes. */
+  .theme-light {
+    --background-primary: #ffffff;
+    --background-secondary: #f6f6f6;
+    --background-modifier-border: #dcddde;
+    --background-modifier-border-hover: #c4c5c8;
+    --background-modifier-hover: rgba(0, 0, 0, 0.05);
+    --text-normal: #1e1e1e;
+    --text-muted: #6e6e6e;
+    --text-faint: #999999;
+    --text-error: #c0392b;
+    --interactive-accent: #7c6cf5;
+    --text-on-accent: #ffffff;
+    --radius-s: 4px;
+  }
+  .theme-dark {
+    --background-primary: #1e1e1e;
+    --background-secondary: #252525;
+    --background-modifier-border: #333333;
+    --background-modifier-border-hover: #484848;
+    --background-modifier-hover: rgba(255, 255, 255, 0.06);
+    --text-normal: #dcddde;
+    --text-muted: #888888;
+    --text-faint: #666666;
+    --text-error: #e5534b;
+    --interactive-accent: #7c6cf5;
+    --text-on-accent: #ffffff;
+    --radius-s: 4px;
+  }
+
+  /* Harness page chrome (NOT part of the replicated components). */
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .columns {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .theme-col {
+    flex: 1 1 480px;
+    min-width: 320px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    padding: 20px 16px 60px;
+    box-sizing: border-box;
+  }
+  .theme-col h1 {
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin: 0 0 20px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+  .panel {
+    margin: 0 0 28px;
+    padding: 14px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary);
+  }
+  .panel-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  .panel-note {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-style: italic;
+    margin: 8px 0 0;
+  }
+  /* Inline (non-overlay) rendering of the MenuPopover panels so both the open
+     Go ▾ launcher and the ⋯ row-menu are visible in a single screenshot. The
+     popover styles themselves are copied verbatim; only the fixed/overlay
+     positioning is neutralized so the panel sits in the page flow. */
+  .popover-static {
+    position: static !important;
+    inset: auto !important;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.30);
+    max-width: 620px;
+  }
+  .popover-static-desktop {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    max-width: 320px;
+  }
+</style>
+</head>
+<body>
+<div class="columns" id="columns"></div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────────────────
+   Verbatim CSS strings copied from the four source helpers. Each replicates the
+   `style.cssText` (or innerHTML template) the real customJS emits.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* accent-button.js:54 — baseCss (resting). The chrome bar's touch() then
+   overrides minHeight:44px + padding:9px 14px, applied here inline. */
+const ACCENT_BASE =
+  "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; overflow: hidden;";
+/* project-chrome-bar.js touch(): min-height 44px + padding 9px 14px. */
+const ACCENT_TOUCH = " min-height: 44px; padding: 9px 14px;";
+/* accent-button.js:51 — the label span inside the button. */
+const ACCENT_LABEL_SPAN = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;";
+/* accent-button.js hover state (onmouseenter): background+color flip. */
+const ACCENT_HOVER = " background: var(--interactive-accent); color: var(--text-on-accent);";
+
+/* Chevron-down icon used for the Go ▾ button — project-chrome-bar.js:815. */
+const CHEVRON_DOWN =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+/* plus icon — project-chrome-bar.js:54 (ICON.plus). */
+const ICON_PLUS =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>';
+
+/* project-chrome-bar.js glyphs used by the Go launcher rows. */
+const ICON = {
+  project: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
+  map: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>',
+  board: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>',
+  docs: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>',
+  todo: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  links: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+};
+
+/* task-today-list.js:377-383 — the row action icons (open/edit/trash/dots). */
+const TASK_SVG = (inner) =>
+  '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+const TASK_ICON = {
+  edit: TASK_SVG('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>'),
+  trash: TASK_SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+  open: TASK_SVG('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
+  dots: TASK_SVG('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
+};
+
+/* ── Helpers that emit the exact DOM the real helpers build ──────────────── */
+
+// project-chrome-bar.js:816-857 — an AccentButton with the touch() override.
+// hover=true samples the onmouseenter state.
+function accentButton(label, iconHtml, opts) {
+  opts = opts || {};
+  const btn = document.createElement("button");
+  btn.innerHTML = (iconHtml || "") + '<span style="' + ACCENT_LABEL_SPAN + '">' + label + "</span>";
+  let css = ACCENT_BASE + ACCENT_TOUCH;
+  if (opts.hover) css += ACCENT_HOVER;
+  btn.style.cssText = css;
+  return btn;
+}
+
+// project-chrome-bar.js:764-802 — the single flex chrome bar (breadcrumb left,
+// controls right). `crumbs` = array of {label, link?}. `controls` = HTMLElements.
+function chromeBar(crumbs, controls) {
+  const bar = document.createElement("div");
+  bar.style.cssText = "display: flex; align-items: center; gap: 10px; flex-wrap: wrap;";
+
+  // LEFT — breadcrumb crumbs (project-chrome-bar.js:775-797).
+  const left = document.createElement("div");
+  left.className = "project-breadcrumb";
+  left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;";
+  crumbs.forEach((seg, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.textContent = " / ";
+      sep.style.cssText = "opacity: 0.5; margin: 0 2px;";
+      left.appendChild(sep);
+    }
+    if (seg.link) {
+      const a = document.createElement("a");
+      a.textContent = seg.label;
+      a.style.cssText = "color: var(--text-muted); cursor: pointer; text-decoration: none;";
+      left.appendChild(a);
+    } else {
+      const cur = document.createElement("span");
+      cur.textContent = seg.label;
+      cur.style.cssText = "color: var(--text-muted);";
+      left.appendChild(cur);
+    }
+  });
+  bar.appendChild(left);
+
+  // RIGHT — controls, margin-left:auto (project-chrome-bar.js:801-802).
+  const right = document.createElement("div");
+  right.style.cssText = "margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
+  controls.forEach((c) => right.appendChild(c));
+  bar.appendChild(right);
+
+  return bar;
+}
+
+/* ── MenuPopover panel (menu-popover.js) rendered inline (overlay stripped) ── */
+
+// menu-popover.js:58-66 — one muted uppercase section-header row.
+function popoverSection(doc, label, isMobile) {
+  const hdr = doc.createElement("div");
+  hdr.className = "menu-popover-section";
+  hdr.textContent = String(label == null ? "" : label);
+  hdr.style.cssText = "flex: 0 0 auto; text-transform: uppercase; letter-spacing: 0.05em;"
+    + " color: var(--text-muted); font-weight: 600; opacity: 0.75;"
+    + (isMobile ? " font-size: 0.7em; padding: 8px 12px 4px;" : " font-size: 0.66em; padding: 6px 10px 2px;");
+  return hdr;
+}
+
+// menu-popover.js:71-102 — one actionable row button (icon + label).
+function popoverRow(doc, entry, isMobile) {
+  const row = doc.createElement("button");
+  const icon = entry.icon || "";
+  const label = entry.label || "";
+  const danger = !!entry.danger;
+  const sublabel = entry.sublabel || "";
+  const labelColor = danger ? "var(--text-error)" : "var(--text-normal)";
+  const labelSpan = '<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:' + labelColor + ';">' + label + "</span>";
+  const iconSpan = '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">' + icon + "</span>";
+  if (sublabel) {
+    row.innerHTML = iconSpan
+      + '<span style="display:flex;flex-direction:column;min-width:0;flex:1 1 auto;">'
+      + labelSpan
+      + '<span style="color:var(--text-muted);font-size:0.8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + sublabel + "</span>"
+      + "</span>";
+  } else {
+    row.innerHTML = iconSpan + labelSpan;
+  }
+  row.style.cssText = "cursor: pointer; display: flex; align-items: center; gap: 10px;"
+    + " width: 100%; text-align: left; box-sizing: border-box; border: none;"
+    + " border-radius: 8px; background: transparent; color: var(--text-normal);"
+    + " font-family: inherit; line-height: 1.25;"
+    + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+  return row;
+}
+
+// menu-popover.js:141-205 — the panel (mobile bottom-sheet or desktop dropdown),
+// title header, handle bar, sections + rows. Overlay/fixed positioning removed so
+// the panel renders in the page flow for a single side-by-side screenshot.
+function menuPopover(entries, opts) {
+  opts = opts || {};
+  const doc = document;
+  const isMobile = !!opts.isMobile;
+
+  const panel = doc.createElement("div");
+  panel.className = "menu-popover-panel " + (isMobile ? "popover-static" : "popover-static-desktop");
+  const panelBase = "box-sizing: border-box; background: var(--background-primary);"
+    + " border: 1px solid var(--background-modifier-border);"
+    + " box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;"
+    + " display: flex; flex-direction: column;";
+  if (isMobile) {
+    panel.style.cssText = panelBase
+      + " width: 100%; max-width: 620px; max-height: 72vh;"
+      + " border-radius: 16px 16px 0 0;"
+      + " padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));"
+      + " gap: 2px;";
+    const handle = doc.createElement("div");
+    handle.style.cssText = "flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;";
+    panel.appendChild(handle);
+  } else {
+    panel.style.cssText = panelBase
+      + " width: 300px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;";
+  }
+
+  // menu-popover.js:187-194 — optional muted title header.
+  if (opts.title) {
+    const titleEl = doc.createElement("div");
+    titleEl.className = "menu-popover-title";
+    titleEl.textContent = String(opts.title);
+    titleEl.style.cssText = "flex: 0 0 auto; color: var(--text-muted); font-weight: 600;"
+      + (isMobile ? " font-size: 0.9em; padding: 4px 12px 6px;" : " font-size: 0.8em; padding: 2px 10px 4px;");
+    panel.appendChild(titleEl);
+  }
+
+  // menu-popover.js:196-205 — sections (leading header when named) + rows.
+  entries.forEach((e) => {
+    if (e && "section" in e && !("label" in e)) {
+      panel.appendChild(popoverSection(doc, e.section, isMobile));
+    } else {
+      panel.appendChild(popoverRow(doc, e, isMobile));
+    }
+  });
+
+  return panel;
+}
+
+/* ── task-today-list.js:231-455 — renderTaskRow (verbatim styles) ──────────── */
+function taskRow(task) {
+  const row = document.createElement("div");
+  row.className = "sauce-task-today-row";
+  row.style.cssText = "display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;";
+
+  // cbWrap + checkbox (:267-272).
+  const cbWrap = document.createElement("div");
+  cbWrap.className = "sauce-task-today-cbwrap";
+  cbWrap.style.cssText = "display: flex; align-items: center; flex-shrink: 0; height: 1.5em; min-height: 1.5em;";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = false;
+  cb.style.cssText = "margin: 0; cursor: pointer; flex-shrink: 0;";
+  cbWrap.appendChild(cb);
+  row.appendChild(cbWrap);
+
+  // title (:310-318).
+  const title = document.createElement("span");
+  title.className = "sauce-task-today-title";
+  title.style.cssText = "flex: 1 1 auto; min-width: 8em; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;";
+  title.textContent = task.title || "(untitled)";
+  row.appendChild(title);
+
+  // rightCluster (:344-345).
+  const rightCluster = document.createElement("div");
+  rightCluster.className = "sauce-task-today-right";
+  rightCluster.style.cssText = "display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto;";
+
+  // chips (:349-357).
+  const chips = document.createElement("div");
+  chips.className = "sauce-task-today-chips";
+  chips.style.cssText = "display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0;";
+  const addChip = (label) => {
+    const chip = document.createElement("span");
+    chip.textContent = label;
+    chip.style.cssText = "font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);";
+    chips.appendChild(chip);
+  };
+  if (task.project) addChip(task.project);
+  if (task.priority) addChip(task.priority);
+  if (task.due) addChip("due: " + task.due);
+  rightCluster.appendChild(chips);
+
+  // actions cluster + single ⋯ dots button (:384-445).
+  const actions = document.createElement("div");
+  actions.className = "sauce-task-today-actions";
+  actions.style.cssText = "display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;";
+  const ACTION_BASE = "display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 100%; min-height: 24px; padding: 0; border: none; border-radius: var(--radius-s, 4px); background: transparent; color: var(--text-faint, #999); cursor: pointer; flex-shrink: 0; transition: background 120ms ease, color 120ms ease;";
+  const dotsBtn = document.createElement("button");
+  dotsBtn.className = "sauce-task-action-more";
+  dotsBtn.style.cssText = ACTION_BASE;
+  dotsBtn.setAttribute("type", "button");
+  dotsBtn.setAttribute("aria-label", "More actions");
+  dotsBtn.setAttribute("title", "More actions");
+  dotsBtn.innerHTML = TASK_ICON.dots;
+  actions.appendChild(dotsBtn);
+  rightCluster.appendChild(actions);
+
+  row.appendChild(rightCluster);
+  return row;
+}
+
+/* ── Panel scaffolding ─────────────────────────────────────────────────────── */
+function makePanel(label, node, note) {
+  const p = document.createElement("div");
+  p.className = "panel";
+  const l = document.createElement("div");
+  l.className = "panel-label";
+  l.textContent = label;
+  p.appendChild(l);
+  p.appendChild(node);
+  if (note) {
+    const n = document.createElement("p");
+    n.className = "panel-note";
+    n.textContent = note;
+    p.appendChild(n);
+  }
+  return p;
+}
+
+/* ── Build all panels into a themed column ─────────────────────────────────── */
+function buildColumn(theme) {
+  const col = document.createElement("div");
+  col.className = "theme-col theme-" + theme;
+
+  const h = document.createElement("h1");
+  h.textContent = theme + " theme";
+  col.appendChild(h);
+
+  // Panel 1 — Project hub bar: Go ▾ + primary ＋New Task + ⋯ (hover sample on Go).
+  col.appendChild(makePanel(
+    "1. Project hub bar",
+    chromeBar(
+      [{ label: "All Projects", link: true }, { label: "Connectors" }],
+      [
+        accentButton("Go", CHEVRON_DOWN, { hover: true }),
+        accentButton("New Task", ICON_PLUS),
+        accentButton("⋯", ""),
+      ]
+    ),
+    "Go ▾ shown in HOVER state (accent fill). primary + ⋯ at rest."
+  ));
+
+  // Panel 2 — Docs hub bar: Go ▾ + ＋New Doc + ⋯.
+  col.appendChild(makePanel(
+    "2. Docs hub bar",
+    chromeBar(
+      [{ label: "All Projects", link: true }, { label: "Connectors", link: true }, { label: "Docs" }],
+      [
+        accentButton("Go", CHEVRON_DOWN),
+        accentButton("New Doc", ICON_PLUS),
+        accentButton("⋯", ""),
+      ]
+    )
+  ));
+
+  // Panel 3 — Doc-note leaf bar: Go ▾ + ⋯ (NO primary).
+  col.appendChild(makePanel(
+    "3. Doc-note leaf bar (no primary)",
+    chromeBar(
+      [{ label: "All Projects", link: true }, { label: "Connectors", link: true }, { label: "Docs", link: true }, { label: "API Keys" }],
+      [
+        accentButton("Go", CHEVRON_DOWN),
+        accentButton("⋯", ""),
+      ]
+    ),
+    "Leaf surface: Go ▾ + ⋯ only — no primary AccentButton."
+  ));
+
+  // Panel 4 — Task list: short rows + one long-title row that wraps.
+  const list = document.createElement("div");
+  list.className = "sauce-task-today";
+  list.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin: 4px 0; width: 100%;";
+  list.appendChild(taskRow({ title: "Draft the Connectors API onboarding doc", project: "Connectors", due: "Jul 8" }));
+  list.appendChild(taskRow({ title: "Review PR #312", priority: "high" }));
+  list.appendChild(taskRow({ title: "Email the vendor about SSO", project: "Connectors" }));
+  list.appendChild(taskRow({
+    title: "Follow up with the platform team on the long-outstanding cross-vault migration blocker and confirm the rollback plan before Friday",
+    project: "Connectors", priority: "high", due: "Jul 5",
+  }));
+  col.appendChild(makePanel(
+    "4. Task list (last row: long title wraps; chips + ⋯ stay aligned)",
+    list,
+    "Long title should wrap in its own column while the checkbox stays on the first line and chips + ⋯ wrap to a right-aligned line."
+  ));
+
+  // Panel 5 — Open Go ▾ launcher (mobile bottom sheet) with two sections.
+  col.appendChild(makePanel(
+    "5. Go ▾ launcher — mobile bottom sheet",
+    menuPopover(
+      [
+        { section: "This project" },
+        { label: "Project Board", icon: ICON.board },
+        { label: "Docs", icon: ICON.docs },
+        { label: "Map", icon: ICON.map },
+        { label: "To-Do", icon: ICON.todo },
+        { label: "Helpful Links", icon: ICON.links },
+        { section: "Vault" },
+        { label: "Home", icon: ICON.project },
+        { label: "Daily", icon: ICON.todo },
+        { label: "Meetings", icon: ICON.board },
+        { label: "Scratch", icon: ICON.docs },
+        { label: "All Projects", icon: ICON.map },
+      ],
+      { isMobile: true, title: "Go to" }
+    ),
+    "Bottom-sheet: handle bar on top, 'Go to' title, 'This project' + 'Vault' section headers, radius 16 16 0 0."
+  ));
+
+  // Panel 6 — Open ⋯ row menu (desktop dropdown, small): Open note / Edit / Delete.
+  col.appendChild(makePanel(
+    "6. ⋯ row menu (Open note · Edit · Delete)",
+    menuPopover(
+      [
+        { label: "Open note", icon: TASK_ICON.open },
+        { label: "Edit", icon: TASK_ICON.edit },
+        { label: "Delete", icon: TASK_ICON.trash, danger: true },
+      ],
+      { isMobile: false }
+    ),
+    "Delete row uses var(--text-error). Desktop dropdown (min-width 300 → clamped to 320 for the harness)."
+  ));
+
+  return col;
+}
+
+/* ── Render one or both theme columns per ?theme= ──────────────────────────── */
+(function () {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme");
+  const root = document.getElementById("columns");
+  const themes = (theme === "dark" || theme === "light") ? [theme] : ["light", "dark"];
+  themes.forEach((t) => root.appendChild(buildColumn(t)));
+})();
+</script>
+</body>
+</html>
