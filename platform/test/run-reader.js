@@ -266,6 +266,44 @@ function art(title, status, capturedAt, extra) {
 }
 
 // ---------------------------------------------------------------------------
+// HC-READER-12 — reader fixes: launcher icon resolves, + New article dialog
+// captures the URL, and the article renders the "Open article" access link.
+// ---------------------------------------------------------------------------
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(RDIR, 'manifest.json'), 'utf8'));
+
+  // (a) Nav-button icon resolves via the icons mechanism Tier-1 (so the Reader
+  //     entry in the Go-to launcher shows an icon, not a blank).
+  const navIcon = (manifest.nav_buttons && manifest.nav_buttons[0] && manifest.nav_buttons[0].icon) || '';
+  let iconSvg = null, iconErr = '';
+  try {
+    const iconsSrc = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'icons', 'icons.js'), 'utf8');
+    const Icons = new Function(iconsSrc + '\nreturn Icons;')();
+    iconSvg = new Icons().resolve(navIcon);
+  } catch (e) { iconErr = String(e && e.message || e); }
+  ok('HC-READER-12a Reader nav icon "book-open" resolves via icons Tier-1',
+     navIcon === 'book-open' && typeof iconSvg === 'string' && iconSvg.length > 0,
+     iconErr || ('navIcon=' + navIcon + ' svg=' + (iconSvg ? iconSvg.length : 'NULL')));
+
+  // (b) "+ New article" dialog prompts for BOTH title and (optional) url; url feeds frontmatter.
+  const btn = (manifest.new_entity_buttons || []).find((b) => b.id === 'reader-article') || {};
+  const prompts = btn.prompts || [];
+  const urlPrompt = prompts.find((p) => p.key === 'url');
+  ok('HC-READER-12b + New article prompts for title + optional url → frontmatter url',
+     prompts.some((p) => p.key === 'title') &&
+     !!urlPrompt && urlPrompt.type === 'string' && urlPrompt.required === false &&
+     !!btn.frontmatter_template && btn.frontmatter_template.url === '{{prompts.url}}',
+     'prompts=' + prompts.map((p) => p.key).join(',') + ' fmUrl=' + (btn.frontmatter_template && btn.frontmatter_template.url));
+
+  // (c) The article action row builds the "Open article ↗" external link (real <a>,
+  //     target=_blank) gated on a non-empty url.
+  const actSrc = fs.readFileSync(ACT_SRC, 'utf8');
+  ok('HC-READER-12c article renders the "Open article ↗" access link (a target=_blank)',
+     actSrc.includes('Open article ↗') && !actSrc.includes('Open source ↗') &&
+     /createEl\('a'|createEl\("a"/.test(actSrc) && /target:\s*'_blank'|target="_blank"/.test(actSrc));
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

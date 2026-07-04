@@ -3,7 +3,7 @@
  * class of the reader blueprint. Renders the navigation + status-control row at
  * the top of a `type: reader-article` note, as ONE centered horizontal row whose
  * buttons stretch to fill the width evenly (mirrors WikiLeafActions):
- *   [ Open source ↗ ] [ Mark reading ] [ Mark read ] [ Reader hub ]
+ *   [ Open article ↗ ] [ Mark reading ] [ Mark read ] [ Reader hub ]
  * The status buttons shown depend on the article's current status; a status write
  * routes through `_setStatus(path, next)` (processFrontMatter, this file only —
  * mirrors the to-do markDone write). An owned top+bottom hairline gives the row
@@ -147,7 +147,7 @@ class ReaderArticleActions {
 
     /**
      * Entry point invoked by customjs-guard: `render(dv)`. Guards `reader-article`,
-     * then draws the centered action row (Open source ↗ / status buttons / Reader
+     * then draws the centered action row (Open article ↗ / status buttons / Reader
      * hub), owned top+bottom hairlines around it. Fully guarded — returns quietly
      * on cold-load. Never throws.
      */
@@ -193,14 +193,14 @@ class ReaderArticleActions {
             } catch (_e) { /* open best-effort */ }
         };
 
-        // Open source ↗ — a real <a> ONLY when url is a non-empty string.
+        // Open article ↗ — a real <a> ONLY when url is a non-empty string.
         const url = (cur.url != null) ? String(cur.url).trim() : '';
         if (url) {
             // AccentButton renders a <button>; for a real external link we build an
             // <a href target=_blank> styled to MATCH the leaf buttons so it reads as
             // one row. rel=noopener for safety.
             const link = row.createEl('a', { text: '', href: url, attr: { target: '_blank', rel: 'noopener' } });
-            link.innerHTML = externalIcon + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">Open source ↗</span>';
+            link.innerHTML = externalIcon + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">Open article ↗</span>';
             link.style.cssText = 'cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.9em; font-weight: 500; text-decoration: none; flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap;';
             link.addEventListener('mouseenter', () => { link.style.background = 'var(--interactive-accent)'; link.style.color = 'var(--text-on-accent)'; });
             link.addEventListener('mouseleave', () => { link.style.background = 'var(--background-primary)'; link.style.color = 'var(--interactive-accent)'; });

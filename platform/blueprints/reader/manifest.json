@@ -152,6 +152,12 @@
           "type": "string",
           "required": true,
           "validate": "safe-filename"
+        },
+        {
+          "key": "url",
+          "label": "Article URL (optional)",
+          "type": "string",
+          "required": false
         }
       ],
       "destination": {
@@ -162,7 +168,7 @@
         "type": "reader-article",
         "title": "{{prompts.title}}",
         "status": "unread",
-        "url": "",
+        "url": "{{prompts.url}}",
         "summary": "",
         "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "tags": [
