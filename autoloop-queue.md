@@ -248,7 +248,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint home axis widget_render: 1 uncovered
-  status: proposed
+  status: done
+  note: NEW run-home-render-guards.js drives SpaceHome.render(dv,{}) through the cold-load path (empty dv.pages; SpaceHome is never-throw + uses `today` from moment not dv.current(), degrades when SpaceDailyDashboard/document/workspace.on absent) in normal + .markdown-embed contexts, asserting no-throw (3 guards; needs a no-op Notice + SpaceDailyDashboard stub). SpaceHome is cold-load-SAFE (unlike MeetingsHubCards). Wired into release:preflight. coverage-matrix.json regenerated: home widget_render now 1/1.
 
 - id: bug-meetings-hub-cards-cold-load-guard
   title: MeetingsHubCards.render() throws on cold-load (no dv.current() guard)
