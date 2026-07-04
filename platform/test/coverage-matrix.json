@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.191.0",
+  "generated_at": "0.193.0",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -1173,12 +1173,12 @@
     {
       "kind": "blueprint",
       "name": "project",
-      "current_version": "1.40.4",
+      "current_version": "1.41.0",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.9555555555555556,
-          "covered": 43,
-          "total": 45,
+          "score": 0.9230769230769231,
+          "covered": 48,
+          "total": 52,
           "methods": [
             {
               "cls": "ProjectNavButtons",
@@ -1198,6 +1198,16 @@
             {
               "cls": "ProjectWorkstreams",
               "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "ProjectWorkstreamManager",
+              "method": "addWorkstream",
+              "covered": true
+            },
+            {
+              "cls": "ProjectWorkstreamManager",
+              "method": "removeWorkstream",
               "covered": true
             },
             {
@@ -1404,15 +1414,40 @@
               "cls": "WorkstreamSource",
               "method": "resolve",
               "covered": true
+            },
+            {
+              "cls": "ProjectChromeBar",
+              "method": "ICON",
+              "covered": false
+            },
+            {
+              "cls": "ProjectChromeBar",
+              "method": "detectContext",
+              "covered": true
+            },
+            {
+              "cls": "ProjectChromeBar",
+              "method": "navTarget",
+              "covered": false
+            },
+            {
+              "cls": "ProjectChromeBar",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "ProjectCommandsInit",
+              "method": "invoke",
+              "covered": true
             }
           ],
           "suggested_archetype": "behavioral-runner",
           "suggested_target_file": "platform/test/run-project-projectnavbuttons.js"
         },
         "installer_migration": {
-          "score": 1,
+          "score": 0.9523809523809523,
           "covered": 20,
-          "total": 20,
+          "total": 21,
           "migrations": [
             {
               "fn": "applyProjectMeetingsPanelHeal",
@@ -1433,6 +1468,10 @@
             {
               "fn": "applyProjectChromeDividerHeal",
               "covered": true
+            },
+            {
+              "fn": "applyProjectChromeBarHeal",
+              "covered": false
             },
             {
               "fn": "applyProjectHubWorkstreamRemovalHeal",
@@ -1622,9 +1661,9 @@
           "suggested_target_file": "platform/test/run-helper-cases.js"
         },
         "widget_render": {
-          "score": 0.75,
+          "score": 0.7058823529411765,
           "covered": 12,
-          "total": 16,
+          "total": 17,
           "widgets": [
             {
               "widget": "ProjectNavButtons",
@@ -1689,6 +1728,10 @@
             {
               "widget": "ProjectLinksManager",
               "covered": true
+            },
+            {
+              "widget": "ProjectChromeBar",
+              "covered": false
             }
           ],
           "suggested_archetype": "renderer-extend",
@@ -1702,14 +1745,14 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.950925925925926,
+      "composite_score": 0.9302233713998419,
       "blast_radius": "high",
       "blast_radius_rationale": "Docs hub + sections + section hubs + search arc; load-bearing.",
       "recent_incidents_30d": 23,
-      "priority_score": 0.375,
+      "priority_score": 0.4411764705882352,
       "top_gap": {
         "axis": "widget_render",
-        "score": 0.375,
+        "score": 0.4411764705882352,
         "archetype": "renderer-extend",
         "target_file": "platform/test/run-renderer.js"
       },
@@ -1826,107 +1869,6 @@
         ],
         "primary_user_flow": "Install convenience mechanism to auto-enable workspace hotkeys (Cmd+T for daily, Cmd+- for full path copy, Cmd+= for path copy) + Dataview JS support + Tasks emoji-to-icon CSS snippet.",
         "qualitative_recommendation": "Low blast radius (0.315 priority). Real debt is missing happy-path smoke; close by extending run-integration-smoke.js with a hotkey-registration verify case."
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "home",
-      "current_version": "0.4.1",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "SpaceHome",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-home-spacehome.js"
-        },
-        "installer_migration": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "migrations": [
-            {
-              "fn": "applyHomeScaffoldHeal",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.7,
-          "manifest_ratio": 0.4,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": false
-            },
-            {
-              "field": "files",
-              "asserted": false
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": null,
-          "reason": "no templates or rule_fragments",
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "SpaceHome",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.54,
-      "blast_radius": "low",
-      "blast_radius_rationale": "unassigned",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.3,
-      "top_gap": {
-        "axis": "installer_migration",
-        "score": 0.3,
-        "archetype": "seed-migrate",
-        "target_file": "platform/test/run-seed-migrations.js"
       }
     },
     {
@@ -3452,8 +3394,8 @@
           "suggested_target_file": null
         },
         "manifest_schema": {
-          "score": 0.625,
-          "manifest_ratio": 0.25,
+          "score": 0.5,
+          "manifest_ratio": 0,
           "schema_ratio": 1,
           "manifest_fields": [
             {
@@ -3462,7 +3404,7 @@
             },
             {
               "field": "version",
-              "asserted": true
+              "asserted": false
             },
             {
               "field": "files",
@@ -3497,7 +3439,7 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.3125,
+      "composite_score": 0.25,
       "blast_radius": "low",
       "blast_radius_rationale": "unassigned",
       "recent_incidents_30d": 0,
@@ -3728,6 +3670,98 @@
         }
       },
       "composite_score": 0.5,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.22499999999999998,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.22499999999999998,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "menu-popover",
+      "current_version": "0.2.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "MenuPopover",
+              "method": "open",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-menu-popover-menupopover.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.6666666666666666,
+          "manifest_ratio": 0.3333333333333333,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no render() widgets",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.5555555555555555,
       "blast_radius": "low",
       "blast_radius_rationale": "unassigned",
       "recent_incidents_30d": 0,
@@ -4247,6 +4281,172 @@
       }
     },
     {
+      "kind": "blueprint",
+      "name": "reader",
+      "current_version": "0.2.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.5714285714285714,
+          "covered": 4,
+          "total": 7,
+          "methods": [
+            {
+              "cls": "ReaderQueue",
+              "method": "selectArticles",
+              "covered": true
+            },
+            {
+              "cls": "ReaderQueue",
+              "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "ReaderQueue",
+              "method": "nextStatus",
+              "covered": true
+            },
+            {
+              "cls": "ReaderArticleActions",
+              "method": "statusTransitions",
+              "covered": true
+            },
+            {
+              "cls": "ReaderArticleActions",
+              "method": "renderCreateRow",
+              "covered": false
+            },
+            {
+              "cls": "ReaderArticleActions",
+              "method": "render",
+              "covered": false
+            },
+            {
+              "cls": "ReaderArticleView",
+              "method": "render",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-reader-readerqueue.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyReaderScaffoldHeal",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.5,
+          "manifest_ratio": 0,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Reader.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Reader Article.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "reader-hub",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "reader-article",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "ReaderQueue",
+              "covered": false
+            },
+            {
+              "widget": "ReaderArticleActions",
+              "covered": false
+            },
+            {
+              "widget": "ReaderArticleView",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.6785714285714285,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.22499999999999998,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.22499999999999998,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      }
+    },
+    {
       "kind": "mechanism",
       "name": "section-label",
       "current_version": "0.2.2",
@@ -4351,9 +4551,9 @@
       }
     },
     {
-      "kind": "mechanism",
-      "name": "breadcrumb",
-      "current_version": "0.2.1",
+      "kind": "blueprint",
+      "name": "home",
+      "current_version": "0.4.1",
       "axes": {
         "customjs_behavioral": {
           "score": 1,
@@ -4361,8 +4561,114 @@
           "total": 1,
           "methods": [
             {
+              "cls": "SpaceHome",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-home-spacehome.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyHomeScaffoldHeal",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.7,
+          "manifest_ratio": 0.4,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceHome",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.74,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.22499999999999998,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.22499999999999998,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "breadcrumb",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "methods": [
+            {
               "cls": "Breadcrumb",
               "method": "render",
+              "covered": true
+            },
+            {
+              "cls": "Breadcrumb",
+              "method": "buildSegments",
               "covered": true
             }
           ],
@@ -5224,7 +5530,7 @@
     {
       "kind": "mechanism",
       "name": "task-entity",
-      "current_version": "0.5.0",
+      "current_version": "0.6.0",
       "axes": {
         "customjs_behavioral": {
           "score": 1,

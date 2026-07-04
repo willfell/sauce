@@ -3831,6 +3831,103 @@ async function runProjectInstallerMigrationCoverageFamily() {
     }
 }
 
+// =============================================================================
+// Home scaffold/heal family (HC-HOME-SCAFFOLD-*). Direct before/after harness for
+// applyHomeScaffoldHeal — the home blueprint's install-time scaffold+heal for the
+// singleton spice/home/Home.md, previously the sole uncovered home
+// installer_migration fn. (1) MISSING -> scaffolds Home.md with type: home
+// frontmatter + SpaceHome/SpaceNavButtons chrome, idempotent on a 2nd run.
+// (2) PRESENT-but-unhealthy (no SpaceHome) -> rebuilds the chrome, preserves the
+// user free-write below the HOME_CHROME_END marker, writes a .sauce-backup
+// snapshot FIRST, idempotent afterwards. Drives the REAL exported fn against a
+// throwaway fs-adapter vault.
+// =============================================================================
+async function runHomeScaffoldHealFamily() {
+    const install = require("../install.js");
+    const git = { commit: "test", tag: "test", dirty: false };
+    const roots = [];
+    const freshVault = () => {
+        const r = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-home-scaffold-"));
+        roots.push(r);
+        return r;
+    };
+    const readVault = (root, rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const existsVault = (root, rel) => fs.existsSync(path.join(root, rel));
+    const writeFixture = (root, rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const backupExistsIn = (root, nameRe) => {
+        const backupRoot = path.join(root, ".sauce-backup");
+        if (!fs.existsSync(backupRoot)) return false;
+        const stack = [backupRoot];
+        while (stack.length) {
+            const dir = stack.pop();
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) stack.push(p);
+                else if (nameRe.test(e.name)) return true;
+            }
+        }
+        return false;
+    };
+    const mkTp = (root) => ({ app: { vault: { adapter: makeFsAdapter(root) } } });
+    const HOME = "spice/home/Home.md";
+
+    try {
+        // ----- 1. MISSING -> scaffolded + idempotent -----
+        {
+            const root = freshVault();
+            const tp = mkTp(root), history = [];
+            ok("HC-HOME-SCAFFOLD-1-pre Home.md absent before heal", !existsVault(root, HOME));
+            await install.applyHomeScaffoldHeal(tp, history, git);
+            ok("HC-HOME-SCAFFOLD-1a Home.md scaffolded when missing", existsVault(root, HOME));
+            const body = existsVault(root, HOME) ? readVault(root, HOME) : "";
+            ok("HC-HOME-SCAFFOLD-1b carries type: home frontmatter",
+               /^type:\s*home\s*$/m.test(body), body.slice(0, 120));
+            ok("HC-HOME-SCAFFOLD-1c has SpaceHome + SpaceNavButtons chrome",
+               /class:\s*"SpaceHome"/.test(body) && /class:\s*"SpaceNavButtons"/.test(body));
+            await install.applyHomeScaffoldHeal(tp, history, git);
+            ok("HC-HOME-SCAFFOLD-1d second run is a byte-identical no-op (healthy note)",
+               readVault(root, HOME) === body);
+        }
+
+        // ----- 2. PRESENT-but-unhealthy -> rebuilt + tail preserved + backup -----
+        {
+            const root = freshVault();
+            const marker = "[//]: # (HOME_CHROME_END)";
+            const legacy = [
+                "---", "type: home", "---", "",
+                "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });', "```", "",
+                marker, "",
+                "My personal home free-write.",
+            ].join("\n");
+            writeFixture(root, HOME, legacy);
+            const tp = mkTp(root), history = [];
+            ok("HC-HOME-SCAFFOLD-2-pre unhealthy Home.md has NO SpaceHome",
+               !/class:\s*"SpaceHome"/.test(readVault(root, HOME)));
+            await install.applyHomeScaffoldHeal(tp, history, git);
+            const healed = readVault(root, HOME);
+            ok("HC-HOME-SCAFFOLD-2a unhealthy Home.md rebuilt with SpaceHome chrome",
+               /class:\s*"SpaceHome"/.test(healed));
+            ok("HC-HOME-SCAFFOLD-2b user free-write below the marker preserved",
+               healed.includes("My personal home free-write."));
+            ok("HC-HOME-SCAFFOLD-2c .sauce-backup snapshot written before the heal",
+               backupExistsIn(root, /^Home\.md\./));
+            const before2 = readVault(root, HOME);
+            await install.applyHomeScaffoldHeal(tp, history, git);
+            ok("HC-HOME-SCAFFOLD-2d healed note is idempotent (2nd run no-op)",
+               readVault(root, HOME) === before2);
+        }
+    } finally {
+        for (const r of roots) {
+            if (KEEP) console.log(`  KEEP_SEED_VAULT=1: ${r}`);
+            else { try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) {} }
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -3910,6 +4007,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-PROJ-MIG-COV-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-PROJ-MIG-COV-FAMILY");
+    })
+    .then(() => runHomeScaffoldHealFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-HOME-SCAFFOLD-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-HOME-SCAFFOLD-FAMILY");
     })
     .finally(() => {
         console.log("");

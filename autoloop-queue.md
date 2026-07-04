@@ -240,7 +240,8 @@ Scout-discovered, **safe-category** work items (the loop drains this when the bo
   category: test
   source: coverage-matrix
   rationale: blueprint home axis installer_migration: 1 uncovered
-  status: proposed
+  status: done
+  note: GENUINE gap (not a rubric artifact — applyHomeScaffoldHeal is home-specific + was untested anywhere). NEW runHomeScaffoldHealFamily in run-seed-migrations.js (HC-HOME-SCAFFOLD-1..2) drives the real exported fn against a throwaway fs-adapter vault: (1) MISSING -> scaffolds Home.md with type:home + SpaceHome/SpaceNavButtons chrome, idempotent; (2) PRESENT-but-unhealthy (no SpaceHome) -> rebuilds chrome, preserves user free-write below the HOME_CHROME_END marker, writes .sauce-backup first, idempotent. 10 asserts. coverage-matrix.json regenerated: home installer_migration now 1/1.
 
 - id: cov-blueprint-home-widget-render
   title: Add coverage for home widget_render (0/1)
