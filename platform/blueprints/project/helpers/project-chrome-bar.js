@@ -19,8 +19,14 @@
  * Per-surface config lives in the pure, Node-testable _surfaceSpec(context); the
  * context classifier detectContext(filePath, dv) is copied verbatim from
  * ProjectNavButtons so the 15 project contexts classify identically. _dispatch is
- * a STUB in this task (a single switch on id emitting a Notice) — Task 4 wires
- * each case to its real helper.
+ * the complete action router: a single switch on the surface-action id that
+ * delegates each case to the EXACT helper the old action-row button fired
+ * (EntityCreate.create for new-doc/-section/-project, TaskDialog.open for
+ * new-task, ProjectNavButtons' create methods for task notes/boards, the
+ * Doc/Link/Workstream managers for move/link/workstream actions), so behavior is
+ * byte-faithful. Every branch is cold-load-guarded → a graceful Notice, never a
+ * throw. ProjectCommandsInit reuses the same _dispatch + navTarget so the command
+ * palette mirror stays in lockstep with the buttons.
  *
  * customJS class — NO imports/exports; loaded by the filesystem scan. Every
  * method is never-throw + cold-load-safe (customJS.RenderSafe.page guards render;

@@ -12,31 +12,54 @@ When you change an existing helper or write a new one, read this file first.
 
 | Primitive | What it does | Where it ships | Consumers (today) |
 | --- | --- | --- | --- |
-| `Breadcrumb` | Clickable parent trail rendered as the FIRST block of every project-related note. Type-dispatched on `cur.type` (project / docs-hub / section-hub / doc-note / map / kanban / task-note). Path-based fallback when frontmatter is missing the `project` / `project_slug` fields. | `platform/blueprints/project/helpers/breadcrumb.js` | Every project-related template (added at v0.109.0 S7 for Map / Board / Task Note). |
+| `ProjectChromeBar` | **The single per-surface chrome renderer** (button-nav-refactor). ONE `dv.view` per template = breadcrumb (left, up-nav) + `Go ▾` launcher + one primary `AccentButton` + `⋯` overflow, replacing the Breadcrumb + SpaceNavButtons + ProjectNavButtons + action-row stack. Per-surface controls come from the pure `_surfaceSpec(context)` (`{ primary, overflow, leaf }`); `_dispatch(dv, ctx, id)` routes each action id to its existing helper; `_navEntries` / `navTarget` build the `Go ▾` destinations. `detectContext` is copied verbatim from `ProjectNavButtons`. | `platform/blueprints/project/helpers/project-chrome-bar.js` | Every migrated project template (hub / Docs / section hub / doc-note / Map / Board / Task hub / Task note / Links hub / project-todo). |
+| `MenuPopover` | **Shared popup primitive.** `customJS.MenuPopover.open(entries, opts)` → desktop-anchored dropdown / mobile bottom-sheet appended to `document.body`; `{ section }` markers render muted group headers, `danger` rows color the label; ONE `close()` removes the overlay AND the Escape listener (no leak). Powers the `Go ▾` launcher, the `⋯` overflow, and per-row task menus. The DRY extraction of the old `_openLauncher` / `_openMoreMenu` overlays. | `platform/mechanisms/menu-popover/menu-popover.js` | `ProjectChromeBar` (Go ▾ + ⋯); available to any blueprint via `depends_on: menu-popover`. |
+| `ProjectCommandsInit` | **Command mirror.** A customjs startup script registering each `Go ▾` / primary / `⋯` action as an Obsidian command (Cmd+P + hotkey-bindable). Every callback resolves the active file + Dataview api, builds `ctx` via `ProjectChromeBar.detectContext`, then delegates to the SAME `ProjectChromeBar._dispatch` (actions) / `navTarget` + `_openNavTarget` (nav) — no path/action logic is reimplemented. | `platform/blueprints/project/helpers/project-commands-init.js` | Registered via the project manifest's `customjs_startup_scripts[]`. |
+| `ProjectNavButtons` | **RETAINED as a method library** (button-nav-refactor). Its `render()` is the LEGACY stacked project-nav chrome, superseded by `ProjectChromeBar` and appearing only on un-migrated notes. The class is kept because `ProjectChromeBar._dispatch` + `ProjectCommandsInit` reuse its create/nav methods unchanged: `_promptForTitle` / `_createTaskNote` / `_createTaskBoard` / `_openNavTarget` / `_resolveProjectName`. Keep `detectContext` in sync with the verbatim copy in `project-chrome-bar.js`. | `platform/blueprints/project/helpers/project-nav-buttons.js` | `ProjectChromeBar` + `ProjectCommandsInit` (methods); legacy templates (render). |
+| `Breadcrumb` | Clickable parent trail. On migrated surfaces `ProjectChromeBar` consumes `Breadcrumb.buildSegments` directly (renders the crumbs in the bar's left zone); the standalone `Breadcrumb` view remains the FIRST block only on un-migrated notes. Type-dispatched on `cur.type` (project / docs-hub / section-hub / doc-note / map / kanban / task-note). Path-based fallback when frontmatter is missing the `project` / `project_slug` fields. | `platform/blueprints/project/helpers/breadcrumb.js` | `ProjectChromeBar` (buildSegments); every un-migrated project template (added at v0.109.0 S7). |
 | `SectionLabel` | Small uppercase muted label + hairline divider above. Replaces every `dv.header(3, ...)` call. Helpers own the label for their section; templates do NOT carry `## H2` headings anymore. | `platform/mechanisms/section-label/section-label.js` (promoted to a shared mechanism at v0.122.0) | `ProjectMeetingsPanel`, `ProjectWorkstreamManager`, `ProjectDocsIndex`, `SectionHub`, plus `to-do` helpers; available to any blueprint that declares `depends_on: section-label`. |
 | `DocSearch` | Entity-agnostic filter strip — text input + dynamic tag chips + scoped-Obsidian-search button + 150ms debounce + localStorage state keyed by `scopePath`. Pass `entityType` opt to scope to any blueprint type. | `platform/blueprints/project/helpers/doc-search.js` | `ProjectDocsIndex`, `SectionHub`, `ProjectsHubCards` (entityType: project at v0.109.0 S3). |
 | `EntityCreate` (mechanism, not a blueprint helper) | Canonical `+ New <thing>` button. Always rendered ABOVE the cards it would seed; always available even on empty surfaces. | `platform/mechanisms/entity-create/` | Every blueprint that exposes a `+ New X` button. |
 
 ## 2. Section ordering (project hub `<Project Name>.md`)
 
-Template, Project.md as of the 2026-07-02 chrome overhaul:
+Template, Project.md as of the button-nav-refactor (the old `Breadcrumb` + `SpaceNavButtons` + `ProjectNavButtons` chrome trio is now the single `ProjectChromeBar`):
 
-1. `Breadcrumb`
-2. `SpaceNavButtons`
-3. `ProjectNavButtons` — core `Project · Board · Docs` (+ context `Task:`) + a `More ▾` overflow holding `Map · To-Do · Helpful Links` (see [`note-chrome.md`](note-chrome.md) §5).
-4. `ProjectStatusWidget` — **no SectionLabel, no leading hairline, no surrounding blank lines**. The chip IS the at-a-glance signal and hugs tight under the nav.
-5. `ProjectActivityPanel` — "Recent activity"; cards carry a type icon (meeting/doc/task) + doc `section` in the meta.
-6. `ProjectOpenTasks` — open tasks from the board.
-7. `ProjectMeetingsPanel` — emits its own `SectionLabel` "Meetings" only when meetings exist.
-8. `ProjectLinksPanel`.
+1. `ProjectChromeBar` — breadcrumb + `Go ▾` launcher + primary `New Task` + `⋯` (`New Doc`). The single chrome unit; see §2a for the per-surface spec and [`note-chrome.md`](note-chrome.md) §1c.
+2. `ProjectStatusWidget` — **no SectionLabel, no leading hairline, no surrounding blank lines**. The chip IS the at-a-glance signal and hugs tight under the bar.
+3. `ProjectActivityPanel` — "Recent activity"; cards carry a type icon (meeting/doc/task) + doc `section` in the meta.
+4. `ProjectOpenTasks` — open tasks from the board.
+5. `ProjectMeetingsPanel` — emits its own `SectionLabel` "Meetings" only when meetings exist.
+6. `ProjectLinksPanel`.
 
-**Workstreams are NOT on the hub.** Workstream management was consolidated onto the **Project Map** note (`ProjectWorkstreamManager` + `ProjectWorkstreams` render there); the `Map` destination lives in the nav overflow. Existing hubs are healed by `applyProjectHubWorkstreamRemovalHeal`.
+**Workstreams are NOT on the hub.** Workstream management was consolidated onto the **Project Map** note (`ProjectWorkstreamManager` + `ProjectWorkstreams` render there); the `Map` destination lives in the `Go ▾` launcher. Existing hubs are healed by `applyProjectHubWorkstreamRemovalHeal`.
 
 Sections that follow Status each emit their own SectionLabel. Empty helper output renders NOTHING (no info callouts, no placeholder text). This rule is non-negotiable per v0.106.0.1 + v0.109.0.
 
+## 2a. Per-surface chrome + content ordering
+
+Every project surface leads with the **single `ProjectChromeBar` block**, then its content sections (SectionLabel-led). The bar's controls come from `_surfaceSpec(context)`:
+
+| Surface (context) | Primary | `⋯` overflow | Content below the bar |
+| --- | --- | --- | --- |
+| project hub / project-todo | New Task | New Doc | Status · Activity · Open Tasks · Meetings · Links |
+| projects-hub (`Projects.md`) | New Project | Sort A–Z / Recent | `ProjectsHubCards` |
+| docs-hub (`Docs.md`) | New Doc | New Section · Move docs | `ProjectDocsIndex` (render) + simple `DocSearch` |
+| section-hub | New Doc | New Sub-Section · Move docs | `SectionHub` in **`contentOnly`** mode (search strip + list only) |
+| project map | Add workstream | Remove workstream (danger) | `ProjectWorkstreamManager` in **`contentOnly`** mode + `ProjectWorkstreams` |
+| task hub | New Note | Create/Open Board | task-note tiles |
+| links hub | Add link | Manage links | `ProjectLinksPanel` |
+| doc-note (leaf) | — | Move | doc body |
+| board / task-note / card (leaf) | — | — | note body |
+
+**`contentOnly` render mode** (button-nav-refactor): `SectionHub` and `ProjectWorkstreamManager` each render BOTH an action row AND content. The migrated templates invoke them as `args: [{ contentOnly: true }]` so they render ONLY their content (search strip + list / workstream list) — the chrome bar's primary + `⋯` own the create/move/add/remove actions. The install heal rewrites the legacy invocations to `contentOnly: true` in place (drops only the action row, keeps the block).
+
+Leaf surfaces render the bar (breadcrumb + `Go ▾`, optional `⋯`) with `_surfaceSpec` returning `leaf: true` — no primary button.
+
 ## 3. Spacing rules
 
-- **Dividers are helper-owned hairlines, never literal `---`.** Use `customJS.SectionLabel.divider(el)` (`margin: 8px 0`) with **leading-hairline ownership** (each block renders its own top hairline → exactly one per boundary). Templates carry no literal `---` and no blank-line gaps between chrome blocks. Enforced by `scripts/lint-note-chrome.js` Rule 4 (project-scoped). See [`note-chrome.md`](note-chrome.md) §1a for the full grammar + the reversal rationale.
+- **The `ProjectChromeBar` is a single unit** — it renders no divider between the breadcrumb and its controls, and no leading hairline above the first content section. The §1a leading-hairline grammar applies only BETWEEN the content sections below the bar.
+- **Dividers are helper-owned hairlines, never literal `---`.** Use `customJS.SectionLabel.divider(el)` with **leading-hairline ownership** (each content block renders its own top hairline → exactly one per boundary). Templates carry no literal `---` and no blank-line gaps between chrome blocks. Enforced by `scripts/lint-note-chrome.js` Rule 4 (project-scoped). See [`note-chrome.md`](note-chrome.md) §1a for the full grammar + the reversal rationale.
 - **No `## H2` headings** inside project-related templates. Helpers emit `SectionLabel` instead.
 - **Empty helper output = render NOTHING.** No info callouts. No placeholder strings. No "(empty state)" UI.
 

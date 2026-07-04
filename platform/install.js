@@ -3788,7 +3788,15 @@ function _projectChromeBarBody(body, type) {
   // classification (chrome fences still present) so a `---` that sat between a
   // to-be-dropped chrome block and content is recognized as chrome-adjacent BEFORE
   // the block deletion erases its chrome neighbour. Mirrors _modernizeDocsHubBody
-  // Step 2. Content `---` (adjacent to prose / ## H2 on both sides) is preserved.
+  // Step 2. Actual behavior (the neighbourIsChrome test below): a `---` is dropped
+  // when its nearest non-blank neighbour on EITHER side is a fence line (any
+  // rendered widget's open/close ```) or another `---`. So a `---` between two
+  // prose paragraphs is preserved, but a `---` sitting immediately adjacent to a
+  // KEPT widget block's fence (not just a dropped chrome block) is treated as
+  // chrome-adjacent and removed too. This is intentional — chrome-hugging dividers
+  // are noise under the single bar — but it means a user `---` placed right against
+  // a widget's close fence can be dropped. The pre-write .sauce-backup snapshot
+  // makes that fully recoverable.
   const dividerDrop = new Set();
   {
     const info = cl.info;
