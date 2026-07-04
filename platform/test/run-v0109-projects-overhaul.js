@@ -579,17 +579,17 @@ async function testProjectDocsIndexSort() {
 async function testTemplateIntegrity() {
   console.log("\n=== S6 Template integrity behavioral ===");
 
-  // TPL-B-1: Project.md section order (strict) — Breadcrumb → SpaceNavButtons
-  // → ProjectNavButtons → ProjectStatusWidget → ProjectMeetingsPanel →
-  // ProjectLinksPanel. Other orderings would surface the regression.
-  // Chrome overhaul WS2.1: the Workstreams section (ProjectWorkstreamManager)
-  // was removed from the hub template — workstream management now lives on the
-  // Map note — so the trailing assertion targets ProjectLinksPanel (the new
-  // last block) instead.
+  // TPL-B-1: Project.md section order (strict) — ProjectChromeBar →
+  // ProjectStatusWidget → ProjectMeetingsPanel → ProjectLinksPanel. Other
+  // orderings would surface the regression.
+  // button-nav refactor: the stacked chrome tiers (Breadcrumb + SpaceNavButtons
+  // + ProjectNavButtons) are replaced by the single ProjectChromeBar block that
+  // leads the note. Workstreams (WS2.1) already moved to the Map, so the trailing
+  // assertion targets ProjectLinksPanel (the last block).
   {
     console.log("\n--- Case TPL-B-1: Project.md strict section order ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Project.md"), "utf8");
-    const expectedOrder = ["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectLinksPanel"];
+    const expectedOrder = ["ProjectChromeBar", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectLinksPanel"];
     const positions = expectedOrder.map((cls) => ({ cls, idx: tpl.indexOf(`class: "${cls}"`) }));
     for (let i = 0; i < positions.length; i++) {
       ok(`TPL-B-1.${i + 1} ${positions[i].cls} present`, positions[i].idx >= 0,
@@ -614,10 +614,12 @@ async function testTemplateIntegrity() {
     }
   }
 
-  // TPL-B-3: All 4 breadcrumbed templates carry Breadcrumb as first dataviewjs block
-  // (after frontmatter, where present).
+  // TPL-B-3: All 4 chrome-bearing templates carry ProjectChromeBar as the first
+  // dataviewjs block (after frontmatter, where present).
+  // button-nav refactor: the single ProjectChromeBar block leads each note,
+  // replacing the old stacked-Breadcrumb-first grammar.
   {
-    console.log("\n--- Case TPL-B-3: breadcrumb-bearing templates ship Breadcrumb at the top ---");
+    console.log("\n--- Case TPL-B-3: chrome-bearing templates ship ProjectChromeBar at the top ---");
     const templates = ["Project.md", "Project Map.md", "Task Note.md", "Project Board.md"];
     for (const t of templates) {
       const body = fs.readFileSync(path.join(TPLDIR, t), "utf8");
@@ -625,11 +627,11 @@ async function testTemplateIntegrity() {
       let payload = body;
       const fmMatch = body.match(/^---\n[\s\S]*?\n---\n+/m);
       if (fmMatch) payload = body.slice(fmMatch[0].length);
-      const firstBlockMatch = payload.match(/```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "([^"]+)" \}\);\n```/);
+      const firstBlockMatch = payload.match(/```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "([^"]+)"(?:, args: \[[^\]]*\])? \}\);\n```/);
       ok(`TPL-B-3 ${t}: has a dataviewjs block in body`, !!firstBlockMatch,
         `no dataviewjs block found in ${t} body`);
       if (firstBlockMatch) {
-        eq(`TPL-B-3 ${t}: first body block is Breadcrumb`, firstBlockMatch[1], "Breadcrumb");
+        eq(`TPL-B-3 ${t}: first body block is ProjectChromeBar`, firstBlockMatch[1], "ProjectChromeBar");
       }
     }
   }
@@ -645,61 +647,47 @@ async function testTemplateIntegrity() {
     ok("TPL-B-4.5 has ## Blocked column", body.includes("## Blocked"));
     ok("TPL-B-4.6 has ## Completed column", body.includes("## Completed"));
     ok("TPL-B-4.7 kanban:settings block preserved", body.includes("kanban:settings"));
-    // Breadcrumb block sits ABOVE all columns.
-    const bcIdx = body.indexOf('class: "Breadcrumb"');
+    // button-nav refactor: the single ProjectChromeBar block sits ABOVE all columns.
+    const bcIdx = body.indexOf('class: "ProjectChromeBar"');
     const colIdx = body.indexOf("## In Planning");
-    ok("TPL-B-4.8 Breadcrumb above first column", bcIdx >= 0 && bcIdx < colIdx);
+    ok("TPL-B-4.8 ProjectChromeBar above first column", bcIdx >= 0 && bcIdx < colIdx);
   }
 
-  // TPL-B-5: Section Hub.md + Doc Note.md + Docs Hub.md — Breadcrumb preserved.
+  // TPL-B-5: Section Hub.md + Doc Note.md + Docs Hub.md — ProjectChromeBar chrome.
+  // button-nav refactor: the single ProjectChromeBar block replaces Breadcrumb chrome.
   {
-    console.log("\n--- Case TPL-B-5: section / doc hub templates still ship Breadcrumb ---");
+    console.log("\n--- Case TPL-B-5: section / doc hub templates ship ProjectChromeBar ---");
     const inheritedTemplates = ["Section Hub.md", "Doc Note.md", "Docs Hub.md"];
     for (const t of inheritedTemplates) {
       const body = fs.readFileSync(path.join(TPLDIR, t), "utf8");
-      ok(`TPL-B-5 ${t}: invokes Breadcrumb`, /class:\s*"Breadcrumb"/.test(body));
+      ok(`TPL-B-5 ${t}: invokes ProjectChromeBar`, /class:\s*"ProjectChromeBar"/.test(body));
     }
   }
 
-  // TPL-B-6: Template, Kanban Card.md nav-tier divider hygiene. ProjectNavButtons
-  // emits its OWN topDivider <hr> at the top of its render (project-nav-buttons.js),
-  // so a literal `---` between the SpaceNavButtons and ProjectNavButtons blocks
-  // renders a DOUBLED divider — the bug reported in the "Board Note Template Fix
-  // from Projects Board" card. The chrome must carry NO literal `---` between the
-  // two nav tiers.
-  //
-  // TPL-B-6.5 (RETIRED — chrome overhaul 2026-07-02, WS0-WS8): the old grammar
-  // required a TRAILING `---` after ProjectNavButtons to separate chrome from
-  // content. That grammar is REVERSED — helpers now own their dividers
-  // (SectionLabel.divider / ProjectNavButtons' own hairline), so project
-  // templates carry NO literal chrome `---`. The Kanban Card template dropped its
-  // trailing `---` in WS0-WS8. "No literal chrome `---` in project templates" is
-  // now enforced by scripts/lint-note-chrome.js (Rule 4, project-scoped); the
-  // WS9 applyProjectChromeDividerHeal heal (run-v0127-project-hub-heal.js
-  // CHR-DIV-*) strips the same trailing `---` from LEGACY on-disk notes. The
-  // reversed assert is replaced below by TPL-B-6.5 locking the NEW grammar.
+  // TPL-B-6: Template, Kanban Card.md chrome + divider hygiene.
+  // button-nav refactor: the old two-tier nav chrome (SpaceNavButtons +
+  // ProjectNavButtons) is replaced by the single ProjectChromeBar block. The
+  // original bug this case guarded — a DOUBLED `---` divider between the two nav
+  // tiers — can no longer occur (there is one block), but the "no literal chrome
+  // `---`" intent still holds: the Kanban Card carries NO literal chrome `---`
+  // after its single ProjectChromeBar block (helpers own their dividers now; also
+  // enforced by scripts/lint-note-chrome.js Rule 4, project-scoped).
   {
-    console.log("\n--- Case TPL-B-6: Kanban Card template nav-tier divider hygiene ---");
+    console.log("\n--- Case TPL-B-6: Kanban Card template chrome + divider hygiene ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Kanban Card.md"), "utf8");
-    const spaceIdx = tpl.indexOf('class: "SpaceNavButtons"');
-    const projIdx = tpl.indexOf('class: "ProjectNavButtons"');
-    ok("TPL-B-6.1 SpaceNavButtons present", spaceIdx >= 0);
-    ok("TPL-B-6.2 ProjectNavButtons present", projIdx >= 0);
-    ok("TPL-B-6.3 SpaceNavButtons before ProjectNavButtons", spaceIdx >= 0 && projIdx > spaceIdx);
-    // Region from the SpaceNavButtons block's closing fence up to the
-    // ProjectNavButtons class line: must contain NO standalone `---` line.
-    const spaceFenceClose = tpl.indexOf("```", spaceIdx);
-    const between = tpl.slice(spaceFenceClose, projIdx);
-    ok("TPL-B-6.4 no literal --- between the two nav tiers (ProjectNavButtons emits its own topDivider)",
-      !/^---\s*$/m.test(between),
-      `unexpected literal --- between SpaceNavButtons and ProjectNavButtons: ${JSON.stringify(between)}`);
-    // NEW grammar: NO literal chrome `---` anywhere after the ProjectNavButtons
+    const chromeIdx = tpl.indexOf('class: "ProjectChromeBar"');
+    ok("TPL-B-6.1 ProjectChromeBar present", chromeIdx >= 0);
+    ok("TPL-B-6.2 no legacy SpaceNavButtons tier (folded into ProjectChromeBar)",
+      tpl.indexOf('class: "SpaceNavButtons"') === -1);
+    ok("TPL-B-6.3 no legacy ProjectNavButtons tier (folded into ProjectChromeBar)",
+      tpl.indexOf('class: "ProjectNavButtons"') === -1);
+    // NEW grammar: NO literal chrome `---` anywhere after the ProjectChromeBar
     // block's closing fence (helpers own dividers now).
-    const projFenceClose = tpl.indexOf("```", projIdx);
-    const afterProj = tpl.slice(projFenceClose + 3);
-    ok("TPL-B-6.5 no trailing chrome --- after ProjectNavButtons (reversed grammar; helpers own dividers)",
-      !/^---\s*$/m.test(afterProj),
-      `unexpected trailing --- after the ProjectNavButtons block: ${JSON.stringify(afterProj)}`);
+    const chromeFenceClose = tpl.indexOf("```", chromeIdx);
+    const afterChrome = tpl.slice(chromeFenceClose + 3);
+    ok("TPL-B-6.4 no trailing chrome --- after ProjectChromeBar (helpers own dividers)",
+      !/^---\s*$/m.test(afterChrome),
+      `unexpected trailing --- after the ProjectChromeBar block: ${JSON.stringify(afterChrome)}`);
   }
 }
 
