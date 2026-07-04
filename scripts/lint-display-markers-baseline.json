@@ -142,12 +142,12 @@
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 36,
+      "line": 178,
       "snippet": "if (line.startsWith(\"## \")) {"
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 37,
+      "line": 179,
       "snippet": "currentLane = line.replace(\"## \", \"\").trim();"
     },
     {
