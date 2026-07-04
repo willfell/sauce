@@ -1,6 +1,6 @@
 {
   "name": "reader",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "reader",
   "skills_dir": ".claude/skills/reader",
@@ -152,6 +152,12 @@
           "type": "string",
           "required": true,
           "validate": "safe-filename"
+        },
+        {
+          "key": "url",
+          "label": "Article URL (optional)",
+          "type": "string",
+          "required": false
         }
       ],
       "destination": {
@@ -162,7 +168,7 @@
         "type": "reader-article",
         "title": "{{prompts.title}}",
         "status": "unread",
-        "url": "",
+        "url": "{{prompts.url}}",
         "summary": "",
         "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "tags": [

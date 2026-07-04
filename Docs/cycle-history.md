@@ -6,6 +6,10 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## reader fixes — icons + reader MINOR (2026-07-04)
+
+Three user-requested polish fixes to the `reader` blueprint (shipped v0.192.0): (1) **launcher icon** — added a distinct `book-open` glyph to the **`icons`** mechanism Tier-1 vendored map so the Reader entry in the Go-to launcher renders an icon (was blank; `book-open` was absent from Tier-1 and not reliably resolved by the Tier-2 `setIcon()` overlay path, which has no letter fallback); (2) **+ New article dialog** now prompts for the article **URL** as well as the title (`new_entity_buttons` gains an optional `url` string prompt → `frontmatter_template.url = {{prompts.url}}`); (3) the article's **access button** relabeled "Open source ↗" → "Open article ↗" and now reliably shows for dialog-created articles (it was gated on a non-empty `url` the dialog previously never captured). `run-reader.js` 25/25 (+`HC-READER-12a/b/c`); full preflight + preflight-bumped + workshop dogfood green. Bumps: `icons 0.1.1→0.2.0`, `reader 0.2.0→0.3.0`. See `Docs/plans/2026-07-04-reader-fixes-result.md`.
+
 ## v0.163.0 — wiki blueprint + doc-search mechanism MINOR (2026-07-01)
 
 New standalone **`wiki` blueprint** (`spice/wiki/`): arbitrary-depth, folder-is-truth knowledge base (types `wiki-hub` / `wiki-section` / `wiki-page`) with a global "Wiki" nav button, `WikiTree` hub+section renderer (DocSearch strip + section cards + recent-updates + page lists), folder-relative `+ New Section` / `+ New Page` create dialogs (arbitrary nesting via a `dir` frontmatter routing field), `WikiMove` (relocate via `app.fileManager.renameFile`), `/wiki` command + `new-wiki-page` skill. Fills the gap the project blueprint's project-bound docs structurally can't hold (cross-project standing reference).

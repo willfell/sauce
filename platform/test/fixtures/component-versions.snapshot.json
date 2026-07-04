@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.193.0",
+  "workshop_version": "0.194.0",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
@@ -16,7 +16,7 @@
     "teams": "0.3.1",
     "wiki": "0.3.0",
     "home": "0.4.1",
-    "reader": "0.2.0",
+    "reader": "0.3.0",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
     "activity-feed": "0.8.1",
@@ -32,7 +32,7 @@
     "links": "0.2.0",
     "task-interactions": "0.2.0",
     "open-helpers": "0.1.1",
-    "icons": "0.1.1",
+    "icons": "0.2.0",
     "entity-create": "0.8.2",
     "people-rendering": "0.1.0",
     "people-identity": "0.1.0",
