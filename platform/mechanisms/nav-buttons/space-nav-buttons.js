@@ -361,11 +361,20 @@ class SpaceNavButtons {
     const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
     overlay.__navClose = close;
 
+    // Opening-gesture guard (mobile): a tap synthesizes a delayed "ghost" click
+    // at the tap coordinates ~300ms after touchend; the full-screen backdrop now
+    // covers that point, so it lands on the backdrop and self-dismisses the
+    // just-opened sheet (opens-then-closes = "tapping does nothing"). Ignore any
+    // backdrop dismiss within the opening window so only a deliberate later tap
+    // closes it (Escape / re-tap / row-select still close immediately).
+    const openedAt = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+    const withinOpeningGesture = () => openedAt && ((typeof Date !== "undefined" && Date.now ? Date.now() : 0) - openedAt < 400);
+
     for (const btn of menuEntries) {
       panel.appendChild(this._buildOverlayRow(doc, btn, dv, close, isMobile));
     }
 
-    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    overlay.onclick = (e) => { if (e && e.target === overlay && !withinOpeningGesture()) close(); };
     if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
 
     overlay.appendChild(panel);

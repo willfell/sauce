@@ -6,6 +6,10 @@
     {
       "name": "customjs-guard",
       "range": ">=1.0.0"
+    },
+    {
+      "name": "render-safe",
+      "range": ">=0.2.0"
     }
   ],
   "customjs_classes": [

@@ -35,8 +35,27 @@
 // declare the same `type`, the first one in iteration order wins; a one-time
 // console.warn is logged. Frontmatter type values are globally unique today.
 class Breadcrumb {
+  // Resolve the current page ROBUSTLY. Dataview's dv.current() is null (or lacks
+  // frontmatter) on mobile cold-load — the note renders before the DV index is
+  // ready — which left the breadcrumb trail empty on phones (type unresolved →
+  // no matching registry entry → no crumbs) even though the note clearly has a
+  // `type`. RenderSafe.page falls back to app.workspace.getActiveFile() +
+  // metadataCache frontmatter, so the type + fields resolve. Falls back to raw
+  // dv.current() when RenderSafe isn't loaded (cold customJS / Node tests).
+  // Never throws.
+  _page(dv) {
+    try {
+      if (typeof customJS !== "undefined" && customJS.RenderSafe
+          && typeof customJS.RenderSafe.page === "function") {
+        return customJS.RenderSafe.page(dv);
+      }
+    } catch (_e) { /* fall through to raw dv.current() */ }
+    try { return (dv && typeof dv.current === "function") ? dv.current() : null; }
+    catch (_e) { return null; }
+  }
+
   async render(dv) {
-    const cur = dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return;
 
     const registry = await this._loadRegistry();
@@ -65,7 +84,7 @@ class Breadcrumb {
   // there is no matching type entry, on cold load (no cur/file), or when the
   // trail resolves empty — so callers can guard with a simple length check.
   async buildSegments(dv) {
-    const cur = dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return [];
 
     const registry = await this._loadRegistry();
@@ -144,7 +163,7 @@ class Breadcrumb {
   // Resolve a path_walk trail into [{ label, link|null }]. Shared by
   // _renderPathWalk() and buildSegments() so the walked trail is defined once.
   _buildPathWalkSegments(dv, pw) {
-    const cur = dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return [];
 
     const filePath = cur.file.path;
@@ -319,7 +338,7 @@ class Breadcrumb {
     }
     if (atom.startsWith("fm:")) {
       const field = atom.slice(3);
-      const cur = dv.current();
+      const cur = this._page(dv);
       if (!cur) return "";
       return this._stripLink(cur[field]);
     }
@@ -329,14 +348,14 @@ class Breadcrumb {
       // indexing for parity with the legacy helper's projectSlug resolution.
       const n = parseInt(atom.slice(5), 10);
       if (!Number.isFinite(n) || n < 0) return "";
-      const cur = dv.current();
+      const cur = this._page(dv);
       const filePath = (cur && cur.file && cur.file.path) || "";
       const segs = String(filePath).split("/");
       const v = segs[n];
       return v == null ? "" : String(v);
     }
     if (atom === "file:basename" || atom === "file:stem") {
-      const cur = dv.current();
+      const cur = this._page(dv);
       return (cur && cur.file && cur.file.name) ? String(cur.file.name) : "";
     }
     if (atom.startsWith("lit:")) {
@@ -382,7 +401,7 @@ class Breadcrumb {
         return false;
       }
       const field = key.slice(3);
-      const cur = dv.current();
+      const cur = this._page(dv);
       const raw = cur ? cur[field] : undefined;
       const stripped = this._stripLink(raw);
       if (pred === "present") {

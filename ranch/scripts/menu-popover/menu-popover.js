@@ -183,6 +183,21 @@ class MenuPopover {
     const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
     overlay.__navClose = close;
 
+    // Opening-gesture guard (mobile). A tap synthesizes a delayed "ghost" click
+    // at the tap coordinates ~300ms after touchend; the full-screen backdrop now
+    // covers that point, so that click lands on the backdrop and self-dismisses
+    // the just-opened sheet (opens-then-closes = "tapping does nothing"). Ignore
+    // any backdrop dismiss within the opening window so only a deliberate later
+    // tap / Escape / re-open closes it. Belt-and-suspenders vs the trigger's own
+    // click (sync callers) AND the ~300ms ghost (both sync + async callers).
+    const openedAt = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+    const withinOpeningGesture = () => {
+      if (!openedAt) return false;
+      const now = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+      return now - openedAt < 400;
+    };
+    overlay.__navOpenedAt = openedAt;
+
     // Optional muted title header at the very top of the panel.
     if (opts.title) {
       const titleEl = doc.createElement("div");
@@ -204,7 +219,11 @@ class MenuPopover {
       }
     }
 
-    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    overlay.onclick = (e) => {
+      if (!e || e.target !== overlay) return;
+      if (withinOpeningGesture()) return; // ignore the opening tap's ghost/bleed-through click
+      close();
+    };
     if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
 
     overlay.appendChild(panel);

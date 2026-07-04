@@ -675,6 +675,34 @@ async function runAsync(fn) { return await fn(); }
       console.log('    BC-SEG-3 got: ' + JSON.stringify(segsNoType) + ' renderedNothing=' + renderedNothing);
   }
 
+  // BC-COLD — mobile cold-load regression. On a phone the note renders before the
+  // Dataview index is ready, so dv.current() is null → the old raw-dv.current()
+  // resolution left the trail EMPTY (no breadcrumb on mobile). The fix routes the
+  // page through Breadcrumb._page, which prefers customJS.RenderSafe.page (active
+  // file + metadataCache frontmatter). With dv.current()=null but RenderSafe
+  // supplying the page, buildSegments must resolve the SAME trail as BC-SEG-1.
+  {
+    const coldPage = {
+      project_name: 'test-project', project: 'test-project', project_slug: 'test-project',
+      type: 'doc-note', section: 'Knowledge',
+      file: { path: 'spice/projects/test-project/docs/knowledge/Architecture.md', name: 'Architecture' }
+    };
+    const dvCold = makeDv(null); // dv.current() → null (cold load)
+    const savedCustomJS = global.customJS;
+    global.customJS = { RenderSafe: { page: () => coldPage } };
+    let segs = [];
+    try { segs = await new NewBreadcrumb().buildSegments(dvCold); }
+    finally { global.customJS = savedCustomJS; }
+    const expected = [
+      { label: 'test-project', link: 'spice/projects/test-project/test-project.md' },
+      { label: 'Docs',         link: 'spice/projects/test-project/docs/Docs.md' },
+      { label: 'Knowledge',    link: 'spice/projects/test-project/docs/knowledge/Knowledge.md' },
+      { label: 'Architecture', link: null },
+    ];
+    ok('BC-COLD dv.current()=null → RenderSafe.page recovers the trail', segEq(segs, expected));
+    if (!segEq(segs, expected)) console.log('    BC-COLD got: ' + JSON.stringify(segs));
+  }
+
   finish();
 })().catch(err => {
   console.error('harness error:', err);
