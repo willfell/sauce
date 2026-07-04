@@ -258,6 +258,35 @@ const MP = loadClass(MECH, 'MenuPopover');
   ok('MP-7 opts.isMobile precedence: true→mobile, false→desktop (wide doc)', pass);
 }
 
+// --------------------------------------------------------------------------- MP-8
+// Opening-gesture guard (the mobile ghost-click fix). On a phone the tap that
+// opens the sheet synthesizes a delayed "ghost" click at the tap coordinates;
+// the full-screen backdrop now covers that point, so the click lands on the
+// backdrop and self-dismissed the just-opened sheet (opens-then-closes =
+// "tapping does nothing"). A backdrop dismiss WITHIN the opening window must be
+// ignored; a deliberate tap AFTER the window must still close.
+{
+  let pass = false;
+  if (MP) {
+    const doc = makeDoc();
+    const anchor = makeEl('button');
+    const overlay = MP.open([{ label: 'Board', onSelect() {} }], { doc, anchor });
+    // Immediately (within the opening window): a backdrop click must NOT close.
+    if (overlay.onclick) overlay.onclick({ target: overlay });
+    const survivedGhost = doc.body.children.length === 1 && overlay._removed !== true;
+    // Past the 400ms window: the same backdrop click DOES close it.
+    const realNow = Date.now;
+    let closedLater = false;
+    try {
+      Date.now = () => realNow() + 500;
+      if (overlay.onclick) overlay.onclick({ target: overlay });
+      closedLater = overlay._removed === true || doc.body.children.length === 0;
+    } finally { Date.now = realNow; }
+    pass = survivedGhost && closedLater;
+  }
+  ok('MP-8 backdrop dismiss ignored during opening gesture, honored after', pass);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);
