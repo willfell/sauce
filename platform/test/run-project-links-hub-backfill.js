@@ -124,8 +124,8 @@ async function run() {
     ok("HC-PLHB-A.empty-links", /^links:\s*\[\]\s*$/m.test(got || ""), "links must default to []");
     ok("HC-PLHB-A.tag", /- links-hub\s*$/m.test(got || ""), "missing links-hub tag");
     ok("HC-PLHB-A.panel", (got || "").includes('class: "ProjectLinksPanel"'), "missing ProjectLinksPanel block");
-    ok("HC-PLHB-A.nav", (got || "").includes('class: "ProjectNavButtons"') && (got || "").includes('class: "SpaceNavButtons"') && (got || "").includes('class: "Breadcrumb"'),
-      "missing the standard chrome blocks");
+    ok("HC-PLHB-A.nav", (got || "").includes('class: "ProjectChromeBar"') && (got || "").includes('class: "ProjectLinksPanel"'),
+      "missing the ProjectChromeBar chrome + ProjectLinksPanel blocks");
     ok("HC-PLHB-A.history-created",
       history.some((h) => h.step === "project_links_hub_backfill" && h.action === "created" && h.path === p),
       "no created history entry");

@@ -5200,7 +5200,12 @@ function _healDocsHubBody(body) {
 
 // _sectionHubBody — canonical Section Hub note body. Frontmatter declares
 // type: section-hub + project + section + depth + parent_section (depth 2);
-// body invokes Breadcrumb, SpaceNavButtons, ProjectNavButtons, then SectionHub.
+// body invokes the single ProjectChromeBar chrome block, then SectionHub in
+// contentOnly mode (chrome is owned by the bar, so the helper renders only the
+// search strip + list). The button-nav refactor folded the old stacked chrome
+// (Breadcrumb + SpaceNavButtons + ProjectNavButtons + a literal `---`) into
+// ProjectChromeBar — this matches the migrated Section Hub.md template + the
+// project manifest's Section Hub entity-create inline_body.
 function _sectionHubBody({ projectName, projectSlug, section, sectionSlug, parentSection, depth }) {
   return `---
 type: section-hub
@@ -5216,21 +5221,11 @@ tags:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
-\`\`\`
-
----
-
-\`\`\`dataviewjs
-await customJS.SectionHub.render(dv);
+await customJS.SectionHub.render(dv, { contentOnly: true });
 \`\`\`
 `;
 }
@@ -9371,28 +9366,20 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
 // byte-identical to the project blueprint's entity-create scaffold for a NEW
 // project's `Links Hub.md` (manifest new_entity_buttons[0].extra_files[] →
 // filename_pattern "Links Hub.md" inline_body). Keeping this a single source
-// means backfilled hubs render exactly like freshly-created ones. `viewsPath`
-// defaults to "ranch/views" (the shipped default); passing the installer's
-// resolved views_path keeps the dv.view() paths correct on relocated vaults.
-// run-project-links-hub-backfill.js pins body↔entity-create parity so a future
-// edit to one without the other fails the harness.
+// means backfilled hubs render exactly like freshly-created ones. The
+// button-nav refactor folded the old stacked chrome (Breadcrumb +
+// SpaceNavButtons + ProjectNavButtons + ProjectLinksManager) into the single
+// ProjectChromeBar block, so the body is now just ProjectChromeBar +
+// ProjectLinksPanel — matching the migrated manifest inline_body + template.
+// `viewsPath` defaults to "ranch/views" (the shipped default); passing the
+// installer's resolved views_path keeps the dv.view() paths correct on
+// relocated vaults. run-project-links-hub-backfill.js pins body↔entity-create
+// parity so a future edit to one without the other fails the harness.
 function _linksHubBody(viewsPath) {
   const v = viewsPath || "ranch/views";
   return [
     '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "Breadcrumb" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "SpaceNavButtons" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "ProjectNavButtons" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "ProjectLinksManager" });`,
+    `await dv.view("${v}/customjs-guard", { class: "ProjectChromeBar" });`,
     '```',
     '',
     '```dataviewjs',
