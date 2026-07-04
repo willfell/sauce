@@ -4286,8 +4286,8 @@
       "current_version": "0.2.0",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.5714285714285714,
-          "covered": 4,
+          "score": 0.8571428571428571,
+          "covered": 6,
           "total": 7,
           "methods": [
             {
@@ -4318,12 +4318,12 @@
             {
               "cls": "ReaderArticleActions",
               "method": "render",
-              "covered": false
+              "covered": true
             },
             {
               "cls": "ReaderArticleView",
               "method": "render",
-              "covered": false
+              "covered": true
             }
           ],
           "suggested_archetype": "behavioral-runner",
@@ -4434,7 +4434,7 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.6785714285714285,
+      "composite_score": 0.7261904761904763,
       "blast_radius": "low",
       "blast_radius_rationale": "unassigned",
       "recent_incidents_30d": 0,
@@ -4548,107 +4548,6 @@
         "score": 0.22499999999999998,
         "archetype": "behavioral-runner",
         "target_file": "platform/test/run-integration-smoke.js"
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "home",
-      "current_version": "0.4.1",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "SpaceHome",
-              "method": "render",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-home-spacehome.js"
-        },
-        "installer_migration": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "migrations": [
-            {
-              "fn": "applyHomeScaffoldHeal",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.7,
-          "manifest_ratio": 0.4,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": false
-            },
-            {
-              "field": "files",
-              "asserted": false
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": null,
-          "reason": "no templates or rule_fragments",
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "SpaceHome",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.74,
-      "blast_radius": "low",
-      "blast_radius_rationale": "unassigned",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.22499999999999998,
-      "top_gap": {
-        "axis": "widget_render",
-        "score": 0.22499999999999998,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
       }
     },
     {
@@ -5734,6 +5633,107 @@
       "top_gap": {
         "axis": "manifest_schema",
         "score": 0.075,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "home",
+      "current_version": "0.4.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "SpaceHome",
+              "method": "render",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-home-spacehome.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyHomeScaffoldHeal",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.7,
+          "manifest_ratio": 0.4,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceHome",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9400000000000001,
+      "blast_radius": "low",
+      "blast_radius_rationale": "unassigned",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.045000000000000005,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.045000000000000005,
         "archetype": "hc-family",
         "target_file": "platform/test/run-helper-cases.js"
       }
