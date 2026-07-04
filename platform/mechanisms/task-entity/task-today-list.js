@@ -356,22 +356,31 @@ class TaskTodayList {
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
 
-        // Row actions (EDIT + DELETE) at the FAR-RIGHT end of the cluster. Two SUBTLE
-        // icon buttons (muted by default, brightening on hover/focus) so they read as
-        // secondary affordances without crowding the title. Wrapped in a fixed
-        // 1.5em-tall flex box that vertically centers the icons against the FIRST line
-        // of the (line-height:1.5) title — the same trick the checkbox wrapper uses —
-        // so the row stays aligned even when a long title wraps. Both buttons
-        // flex-shrink:0 so they never collapse.
-        //   - EDIT (pencil)  → TaskDialog.open({ edit: path })  (the edit dialog, NOT
-        //                       the note — the note opens via the title click)
-        //   - DELETE (trash) → TaskDialog.confirmDelete(path)   (yes/no modal; on
-        //                       confirm the row is removed optimistically)
-        // Every gesture is lazily resolved via getTD() + fully guarded, so a
-        // cold-load (customJS not ready) just no-ops the tap. Never throws.
+        // Row actions at the FAR-RIGHT end of the cluster. When the shared
+        // MenuPopover primitive is available we collapse the row's three controls
+        // (checkbox stays; Open-note + Edit + Delete) into ONE subtle `⋯` button
+        // that opens an anchored popover — Open note / Edit / Delete (danger). When
+        // it is NOT available (cold load, customJS not ready) we fall back to the
+        // LEGACY two inline icons (pencil = edit, trash = delete) so nothing
+        // regresses. Either way the controls live in a fixed 1.5em-tall flex box
+        // that vertically centers them against the FIRST line of the
+        // (line-height:1.5) title — the same trick the checkbox wrapper uses — so
+        // the row stays aligned even when a long title wraps, and every button is
+        // flex-shrink:0 so it never collapses.
+        //   - Open note → app.workspace.openLinkText(path) (same as the title click)
+        //   - Edit      → TaskDialog.open({ edit: path })   (the edit dialog, NOT
+        //                 the note — the note opens via the title click)
+        //   - Delete    → TaskDialog.confirmDelete(path)     (yes/no modal; on
+        //                 confirm the row is removed optimistically)
+        // Every gesture is lazily resolved (getTD() / window at click-time) + fully
+        // guarded, so a cold-load just no-ops the tap. Never throws.
         const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
-        const EDIT_ICON = svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>');
-        const TRASH_ICON = svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>');
+        const ICON = {
+            edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>'),
+            trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+            open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
+            dots: svg('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
+        };
         const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions' });
         actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
         const ACTION_BASE = 'display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 100%; min-height: 24px; padding: 0; border: none; border-radius: var(--radius-s, 4px); background: transparent; color: var(--text-faint, #999); cursor: pointer; flex-shrink: 0; transition: background 120ms ease, color 120ms ease;';
@@ -388,24 +397,17 @@ class TaskTodayList {
             return b;
         };
 
-        // EDIT — open the edit dialog (never the note). stopPropagation so the tap
-        // doesn't bubble to the row / trigger the title-click note-open.
-        const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', EDIT_ICON, false);
-        editBtn.addEventListener('click', (ev) => {
-            try { ev.stopPropagation(); } catch (_e) {}
+        // The two row gestures, factored out so BOTH the `⋯` popover entries and the
+        // legacy inline icons share one wiring (edit dialog / confirm-delete +
+        // optimistic row removal). Each is lazily resolved via getTD() + fully
+        // guarded → a cold-load tap is a silent no-op.
+        const doEdit = () => {
             const TD = getTD();
             if (!path || !TD || typeof TD.open !== 'function') return;
             try { TD.open({ edit: path }); }
             catch (e) { try { new Notice('Could not open task editor: ' + (e && (e.message || e)), 6000); } catch (_e) {} }
-        });
-
-        // DELETE — confirm via TaskDialog.confirmDelete(path) (yes/no modal). On a
-        // confirmed delete ({ ok: true }) remove the row optimistically (preserving
-        // scroll) so the gesture feels instant; the eventual Dataview re-render
-        // reconciles authoritatively. A cancel / failure leaves the row untouched.
-        const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', TRASH_ICON, true);
-        delBtn.addEventListener('click', async (ev) => {
-            try { ev.stopPropagation(); } catch (_e) {}
+        };
+        const doDelete = async () => {
             const TD = getTD();
             if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
             try {
@@ -417,7 +419,37 @@ class TaskTodayList {
             } catch (e) {
                 try { new Notice('Could not delete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
-        });
+        };
+
+        // Decide at RENDER time which affordance to draw: the single `⋯` popover
+        // menu when MenuPopover is available, else the legacy pencil + trash icons.
+        // This keeps the cold-load path on the exact prior behavior (nothing
+        // regresses when customJS isn't ready yet).
+        const MP = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || null;
+        const hasPopover = !!(MP && typeof MP.open === 'function');
+
+        if (hasPopover) {
+            // Single `⋯` button → anchored MenuPopover (Open note / Edit / Delete).
+            const dotsBtn = mkActionBtn('sauce-task-action-more', 'More actions', ICON.dots, false);
+            dotsBtn.addEventListener('click', (ev) => {
+                try { ev.stopPropagation(); } catch (_e) {}
+                const entries = [
+                    { label: 'Open note', icon: ICON.open, onSelect: () => openNote() },
+                    { label: 'Edit', icon: ICON.edit, onSelect: () => doEdit() },
+                    { label: 'Delete', icon: ICON.trash, danger: true, onSelect: () => { doDelete(); } },
+                ];
+                try {
+                    const popover = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || MP;
+                    if (popover && typeof popover.open === 'function') popover.open(entries, { anchor: dotsBtn });
+                } catch (_e) { /* never throw */ }
+            });
+        } else {
+            // LEGACY fallback — two inline icons (pencil = edit, trash = delete).
+            const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.edit, false);
+            editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
+            const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
+            delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
+        }
 
         return row;
     }

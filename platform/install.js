@@ -1247,6 +1247,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
+  await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
@@ -2728,6 +2729,14 @@ async function applyDocLeafActionsBackfill(tp, manifest, variables, history, git
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "doc-note") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated doc-note
+      // renders the single ProjectChromeBar block, whose `⋯` overflow OWNS the
+      // per-doc Move action. Injecting a standalone DocLeafActions Move block would
+      // duplicate it. (On the new shape there's no ProjectNavButtons anchor so the
+      // transform already no-ops, but the guard makes the intent explicit and skips
+      // the spurious no_anchor_found warning.) Legacy old-shape doc-notes still
+      // backfill below.
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       if (before.includes('class: "DocLeafActions"')) { skipped += 1; continue; }
       const after = _injectDocLeafActionsBody(before);
       if (after === before) {
@@ -3049,6 +3058,12 @@ async function applyDocsHubModernizeHeal(tp, manifest, variables, history, git) 
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "docs-hub") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated docs-hub
+      // renders the single ProjectChromeBar block, which OWNS the breadcrumb + the
+      // New Doc / New Section / Move docs actions. _modernizeDocsHubBody would
+      // re-inject a second Breadcrumb + a renderActionRow block onto it → duplicate
+      // chrome. Skip it (legacy old-shape hubs still modernize below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       const { changed, body: after } = _modernizeDocsHubBody(before);
       if (!changed || after === before) { skipped += 1; continue; }
       const backupPath = `.sauce-backup/${ts}/${fpath}`;
@@ -3115,6 +3130,12 @@ async function applyProjectLinksManagerBackfill(tp, manifest, variables, history
     try {
       const before = await adapter.read(fpath);
       if (_noteChromeFrontmatterType(before) !== "links-hub") continue;
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated links-hub
+      // renders the single ProjectChromeBar block, which OWNS the Add link / Manage
+      // links actions (its primary + overflow). _injectProjectLinksManagerBody would
+      // inject a second ProjectLinksManager action row above the panel → double row.
+      // Skip it (legacy old-shape hubs still backfill below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       if (before.includes('class: "ProjectLinksManager"')) { skipped += 1; continue; }
       const after = _injectProjectLinksManagerBody(before);
       if (after === before) {
@@ -3390,9 +3411,23 @@ async function applyProjectNavButtonsSeparatorGap(tp, manifest, variables, histo
 // applyBoardCardBreadcrumbHeal both scope to this set. Kept as a module-level
 // constant so the two heals + their unit harness read from one source.
 const PROJECT_CHROME_TYPES = [
-  "project", "project-todo", "docs-hub", "section-hub", "doc-note",
+  "project", "projects-hub", "project-todo", "docs-hub", "section-hub", "doc-note",
   "map", "kanban", "task-note", "task-hub", "task-board-card", "links-hub",
 ];
+
+// _hasChromeBar — true when a note body already renders the single ProjectChromeBar
+// chrome block (the button/nav refactor shape: one `class: "ProjectChromeBar"`
+// dv.view call replaces the old stacked Breadcrumb + SpaceNavButtons +
+// ProjectNavButtons + per-surface action row). Every legacy project-chrome heal
+// that would INJECT a breadcrumb / nav row / action row guards on this so it
+// NO-OPs on a migrated note (ProjectChromeBar owns that chrome — re-injecting
+// would double it). Legacy (old-shape) notes lack the substring, so those heals
+// still run on them until the forward migration (Pass 9b) reshapes them.
+// Substring match (install.js has no parseYaml at runtime); mirrors the many
+// `body.includes('class: "X"')` idempotency guards already used across the heals.
+function _hasChromeBar(body) {
+  return typeof body === "string" && body.includes('class: "ProjectChromeBar"');
+}
 
 // _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
 // chrome overhaul reversed the divider grammar: helpers now render their own
@@ -3613,6 +3648,262 @@ async function applyProjectChromeDividerHeal(tp, manifest, variables, history, g
   }
 }
 
+// PROJECT_CHROME_BAR_BLOCK — the canonical single chrome block the button/nav
+// refactor introduced. ProjectChromeBar owns the breadcrumb + core-nav + `⋯`
+// overflow + the surface's primary action button, replacing the old stacked
+// Breadcrumb + SpaceNavButtons + ProjectNavButtons + per-surface action row.
+const PROJECT_CHROME_BAR_BLOCK =
+  '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });\n```';
+
+// _projectChromeBarBody — PURE, idempotent forward-migration transform (button/nav
+// refactor Pass 9b). Converts an EXISTING project-surface note body from any
+// old/partial stacked-chrome shape to the canonical single-ProjectChromeBar shape:
+//
+//   ```dataviewjs
+//   await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
+//   ```
+//   <remaining content widgets, SectionHub/WorkstreamManager now contentOnly>
+//
+// Rules (see the migrated templates under platform/blueprints/project/templates/):
+//   1. Idempotency — a body already carrying `class: "ProjectChromeBar"` returns
+//      { changed:false } unchanged.
+//   2. Surface-scope — only bodies whose frontmatter `type` ∈ PROJECT_CHROME_TYPES
+//      are eligible. `type` is passed in (the driver reads it once). A non-project
+//      surface → { changed:false }.
+//   3. Conservatism — the transform only acts when it finds at least one legacy
+//      chrome MARKER block to drop (Breadcrumb / SpaceNavButtons / ProjectNavButtons).
+//      A body with NO such marker is left alone (return { changed:false }); we would
+//      rather leave an unrecognized note untouched than corrupt it.
+//   4. DROP action-row / nav chrome blocks (fence-to-fence): the Breadcrumb,
+//      SpaceNavButtons, ProjectNavButtons nav blocks; the DocLeafActions,
+//      ProjectLinksManager, ToDoLeafActions action rows; and the ProjectDocsIndex
+//      block whose method is renderActionRow (the docs-hub action row). Their
+//      affordances are subsumed by ProjectChromeBar's primary + overflow.
+//   5. CONVERT to contentOnly — SectionHub and ProjectWorkstreamManager render BOTH
+//      an action row AND content; rewrite their invocation to
+//      `args: [{ contentOnly: true }]` (keep the block, drop only its action row).
+//   6. KEEP everything else — the plain ProjectDocsIndex (render) block,
+//      ProjectLinksPanel, ProjectStatusWidget, ProjectActivityPanel, ProjectOpenTasks,
+//      ProjectMeetingsPanel, ProjectWorkstreams, ProjectsHubCards, SectionLabel /
+//      search strips, `## Column` kanban headings, all user prose.
+//   7. Strip literal `---` chrome dividers left between removed chrome blocks
+//      (fence-adjacent, outside content), then collapse doubled blank gaps.
+//   8. Prepend exactly ONE ProjectChromeBar block at the top (where the old chrome
+//      header sat — after the frontmatter, before the first remaining block).
+//
+// Regex/fence-walking only (install.js has no parseYaml at runtime). Returns
+// { changed, body }.
+function _projectChromeBarBody(body, type) {
+  if (typeof body !== "string") return { changed: false, body };
+  // 1. Idempotency — already the single-bar shape.
+  if (body.includes('class: "ProjectChromeBar"')) return { changed: false, body };
+  // 2. Surface-scope.
+  if (!PROJECT_CHROME_TYPES.includes(type)) return { changed: false, body };
+
+  const original = body;
+
+  // Split leading frontmatter off so its `---` fences are never candidates.
+  let fmPart = "";
+  let rest = body;
+  const fmMatch = body.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n)/);
+  if (fmMatch) { fmPart = fmMatch[1]; rest = body.slice(fmMatch[1].length); }
+
+  const nl = rest.includes("\r\n") ? "\r\n" : "\n";
+  let lines = rest.split(/\r?\n/);
+
+  // Fence-classify: for each column-0 fenced block, record its open/close indices,
+  // whether it is a customjs-guard dataviewjs block, and the customJS class it
+  // invokes (plus whether it carries method: "renderActionRow").
+  function classifyBlocks(ls) {
+    const info = ls.map(() => ({ inFence: false, fenceOpen: false, fenceClose: false }));
+    const blocks = []; // { open, close, cls, isRenderActionRow }
+    let inFence = false, openIdx = -1, isDv = false, blockText = "";
+    for (let i = 0; i < ls.length; i++) {
+      const line = ls[i];
+      const isFenceLine = /^(```|~~~)/.test(line) && !/^(```|~~~)[^`~]*(```|~~~)/.test(line);
+      if (isFenceLine && !inFence) {
+        inFence = true; openIdx = i; isDv = /^```dataviewjs\s*$/.test(line); blockText = "";
+        info[i] = { inFence: true, fenceOpen: true, fenceClose: false };
+        continue;
+      }
+      if (isFenceLine && inFence) {
+        info[i] = { inFence: true, fenceOpen: false, fenceClose: true };
+        if (isDv) {
+          const clsM = blockText.match(/class:\s*"([A-Za-z0-9_]+)"/);
+          blocks.push({
+            open: openIdx,
+            close: i,
+            cls: clsM ? clsM[1] : null,
+            isRenderActionRow: /method:\s*"renderActionRow"/.test(blockText),
+          });
+        }
+        inFence = false; openIdx = -1; isDv = false; blockText = "";
+        continue;
+      }
+      info[i] = { inFence, fenceOpen: false, fenceClose: false };
+      if (inFence) blockText += line + "\n";
+    }
+    return { info, blocks };
+  }
+
+  const DROP_CLASSES = new Set([
+    "Breadcrumb", "SpaceNavButtons", "ProjectNavButtons",
+    "DocLeafActions", "ProjectLinksManager", "ToDoLeafActions",
+  ]);
+  const NAV_MARKER_CLASSES = new Set(["Breadcrumb", "SpaceNavButtons", "ProjectNavButtons"]);
+  const CONTENT_ONLY_CLASSES = new Set(["SectionHub", "ProjectWorkstreamManager"]);
+
+  let cl = classifyBlocks(lines);
+
+  // 3. Conservatism — require at least one legacy nav marker to act.
+  const hasNavMarker = cl.blocks.some((b) => b.cls && NAV_MARKER_CLASSES.has(b.cls));
+  if (!hasNavMarker) return { changed: false, body: original };
+
+  // 4 + 5: mark blocks for drop (fence-to-fence) or contentOnly-rewrite.
+  const dropRanges = []; // [openLine, closeLine]
+  const contentOnlyOpens = new Set(); // open-line indices to rewrite
+  for (const b of cl.blocks) {
+    if (!b.cls) continue;
+    if (DROP_CLASSES.has(b.cls)) { dropRanges.push([b.open, b.close]); continue; }
+    if (b.cls === "ProjectDocsIndex" && b.isRenderActionRow) { dropRanges.push([b.open, b.close]); continue; }
+    if (CONTENT_ONLY_CLASSES.has(b.cls)) contentOnlyOpens.add(b.open);
+  }
+
+  // Rewrite contentOnly invocations in place (before we delete lines, so indices
+  // stay valid). The invocation line is always the single dv.view line inside the
+  // block (line open+1 for the canonical one-line-body block).
+  for (const openLine of contentOnlyOpens) {
+    for (let i = openLine + 1; i < lines.length; i++) {
+      if (cl.info[i] && cl.info[i].fenceClose) break;
+      const m = lines[i].match(/class:\s*"([A-Za-z0-9_]+)"/);
+      if (m && CONTENT_ONLY_CLASSES.has(m[1])) {
+        if (!/contentOnly/.test(lines[i])) {
+          lines[i] = `await dv.view("ranch/views/customjs-guard", { class: "${m[1]}", args: [{ contentOnly: true }] });`;
+        }
+        break;
+      }
+    }
+  }
+
+  // 7. Identify literal `---` chrome dividers to drop. Computed against the ORIGINAL
+  // classification (chrome fences still present) so a `---` that sat between a
+  // to-be-dropped chrome block and content is recognized as chrome-adjacent BEFORE
+  // the block deletion erases its chrome neighbour. Mirrors _modernizeDocsHubBody
+  // Step 2. Actual behavior (the neighbourIsChrome test below): a `---` is dropped
+  // when its nearest non-blank neighbour on EITHER side is a fence line (any
+  // rendered widget's open/close ```) or another `---`. So a `---` between two
+  // prose paragraphs is preserved, but a `---` sitting immediately adjacent to a
+  // KEPT widget block's fence (not just a dropped chrome block) is treated as
+  // chrome-adjacent and removed too. This is intentional — chrome-hugging dividers
+  // are noise under the single bar — but it means a user `---` placed right against
+  // a widget's close fence can be dropped. The pre-write .sauce-backup snapshot
+  // makes that fully recoverable.
+  const dividerDrop = new Set();
+  {
+    const info = cl.info;
+    const isDivider = (i) => {
+      if (i < 0 || i >= lines.length) return false;
+      if (info[i].inFence) return false;
+      return /^-{3,}[ \t]*$/.test(lines[i]);
+    };
+    const neighbourIsChrome = (start, dir) => {
+      let i = start + dir;
+      while (i >= 0 && i < lines.length && lines[i].trim() === "") i += dir;
+      if (i < 0 || i >= lines.length) return false;
+      if (info[i].fenceOpen || info[i].fenceClose) return true;
+      if (isDivider(i)) return true;
+      return false;
+    };
+    for (let i = 0; i < lines.length; i++) {
+      if (!isDivider(i)) continue;
+      if (neighbourIsChrome(i, -1) || neighbourIsChrome(i, +1)) dividerDrop.add(i);
+    }
+  }
+
+  // Delete the drop ranges + chrome dividers (bottom-up so indices stay valid).
+  // For each block range, also drop one immediately-trailing blank line to avoid
+  // leaving a doubled gap. Chrome-divider lines are single-line drops.
+  const rangeSet = new Set();
+  for (const [o, c] of dropRanges) {
+    let end = c;
+    if (end + 1 < lines.length && lines[end + 1].trim() === "") end += 1;
+    for (let i = o; i <= end; i++) rangeSet.add(i);
+  }
+  for (const i of dividerDrop) rangeSet.add(i);
+  lines = lines.filter((_, i) => !rangeSet.has(i));
+
+  // Collapse doubled blank lines.
+  {
+    const collapsed = [];
+    for (const l of lines) {
+      if (l.trim() === "" && collapsed.length && collapsed[collapsed.length - 1].trim() === "") continue;
+      collapsed.push(l);
+    }
+    lines = collapsed;
+  }
+
+  // 8. Prepend exactly one ProjectChromeBar block, then the remaining content
+  // (leading blanks trimmed so the bar sits directly under the header gap). When a
+  // frontmatter block precedes, insert a single blank line between its close and the
+  // bar (matches the migrated templates: `---\n\n```dataviewjs`).
+  let workBody = lines.join(nl).replace(/^\s+/, "");
+  const gap = fmPart ? nl : "";
+  const finalBody = fmPart + gap + PROJECT_CHROME_BAR_BLOCK + (workBody ? nl + nl + workBody : nl);
+
+  return { changed: finalBody !== original, body: finalBody };
+}
+
+// applyProjectChromeBarHeal — button/nav refactor Pass 9b forward migration. Walks
+// spice/projects/** recursively and reshapes every project-surface note (frontmatter
+// type ∈ PROJECT_CHROME_TYPES) from any old/partial stacked-chrome shape to the
+// canonical single-ProjectChromeBar shape via _projectChromeBarBody. Runs LAST in
+// the project heal chain so it normalizes whatever earlier heals produced. Migration-
+// type (reshapes pre-existing legacy content); ungated is safe because the transform
+// is doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no
+// legacy nav marker is present). .sauce-backup snapshot before every write; per-note
+// try/catch, never throws; history events. Mirrors applyProjectChromeDividerHeal.
+async function applyProjectChromeBarHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "project_chrome_bar_heal", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      const type = _noteChromeFrontmatterType(before);
+      if (!PROJECT_CHROME_TYPES.includes(type)) { skipped += 1; continue; }
+      const { changed, body: after } = _projectChromeBarBody(before, type);
+      if (!changed || after === before) { skipped += 1; continue; }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "project_chrome_bar_heal", target: fpath, action: "migrated",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "project_chrome_bar_heal", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "project_chrome_bar_heal", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
 // _injectBoardCardBreadcrumb — pure transform (WS9 P0b chrome overhaul). Promoted
 // board-card notes (the file at spice/projects/<slug>/tasks/<Task>/<Task>.md, or a
 // deeper board card at .../board/<Card>/<Card>.md) shipped BEFORE the chrome
@@ -3754,6 +4045,13 @@ async function applyBoardCardBreadcrumbHeal(tp, manifest, variables, history, gi
       const desiredType = boardCardType(notePath);
       if (!desiredType) { skipped += 1; continue; }
       const before = await adapter.read(notePath);
+      // ProjectChromeBar guard (button/nav refactor Pass 9a): a migrated promoted
+      // board-card / task-hub renders the single ProjectChromeBar block, which OWNS
+      // the breadcrumb. _injectBoardCardBreadcrumb would inject a SECOND leading
+      // Breadcrumb block above it → duplicate breadcrumb. Skip it (the note's `type`
+      // is already stamped by the template; legacy typeless/breadcrumb-less notes
+      // still heal below).
+      if (_hasChromeBar(before)) { skipped += 1; continue; }
       const { changed, body: after } = _injectBoardCardBreadcrumb(before, desiredType);
       if (!changed || after === before) { skipped += 1; continue; }
 
@@ -4902,7 +5200,12 @@ function _healDocsHubBody(body) {
 
 // _sectionHubBody — canonical Section Hub note body. Frontmatter declares
 // type: section-hub + project + section + depth + parent_section (depth 2);
-// body invokes Breadcrumb, SpaceNavButtons, ProjectNavButtons, then SectionHub.
+// body invokes the single ProjectChromeBar chrome block, then SectionHub in
+// contentOnly mode (chrome is owned by the bar, so the helper renders only the
+// search strip + list). The button-nav refactor folded the old stacked chrome
+// (Breadcrumb + SpaceNavButtons + ProjectNavButtons + a literal `---`) into
+// ProjectChromeBar — this matches the migrated Section Hub.md template + the
+// project manifest's Section Hub entity-create inline_body.
 function _sectionHubBody({ projectName, projectSlug, section, sectionSlug, parentSection, depth }) {
   return `---
 type: section-hub
@@ -4918,21 +5221,11 @@ tags:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
-\`\`\`
-
----
-
-\`\`\`dataviewjs
-await customJS.SectionHub.render(dv);
+await customJS.SectionHub.render(dv, { contentOnly: true });
 \`\`\`
 `;
 }
@@ -6782,6 +7075,32 @@ async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, h
     body = await adapter.read(targetPath);
   } catch (e) {
     return pushErr(`read failed for ${targetPath}: ${e.message}`);
+  }
+
+  // ProjectChromeBar guard (button/nav refactor Pass 9a): a hub that renders the
+  // single ProjectChromeBar block OWNS entity creation (the bar's primary + `⋯`
+  // route through EntityCreate.create). Such hubs intentionally carry NO
+  // `// entity-create:<id>` marker — the marker + this verify pass predate
+  // ProjectChromeBar. Treat a ProjectChromeBar target as satisfied (record an info
+  // event, no missing_skip_inject warning) so the retired project-hub markers don't
+  // spam every install. Non-ProjectChromeBar hubs (people, finance, meetings,
+  // scratch) still verify their marker below.
+  if (_hasChromeBar(body)) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "entity_create_block_verified",
+        name: sourceName,
+        target: targetPath,
+        instance: instanceId,
+        action: "owned_by_project_chrome_bar",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
   }
 
   const sentinel = `// entity-create:${instanceId}`;
@@ -9047,28 +9366,20 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
 // byte-identical to the project blueprint's entity-create scaffold for a NEW
 // project's `Links Hub.md` (manifest new_entity_buttons[0].extra_files[] →
 // filename_pattern "Links Hub.md" inline_body). Keeping this a single source
-// means backfilled hubs render exactly like freshly-created ones. `viewsPath`
-// defaults to "ranch/views" (the shipped default); passing the installer's
-// resolved views_path keeps the dv.view() paths correct on relocated vaults.
-// run-project-links-hub-backfill.js pins body↔entity-create parity so a future
-// edit to one without the other fails the harness.
+// means backfilled hubs render exactly like freshly-created ones. The
+// button-nav refactor folded the old stacked chrome (Breadcrumb +
+// SpaceNavButtons + ProjectNavButtons + ProjectLinksManager) into the single
+// ProjectChromeBar block, so the body is now just ProjectChromeBar +
+// ProjectLinksPanel — matching the migrated manifest inline_body + template.
+// `viewsPath` defaults to "ranch/views" (the shipped default); passing the
+// installer's resolved views_path keeps the dv.view() paths correct on
+// relocated vaults. run-project-links-hub-backfill.js pins body↔entity-create
+// parity so a future edit to one without the other fails the harness.
 function _linksHubBody(viewsPath) {
   const v = viewsPath || "ranch/views";
   return [
     '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "Breadcrumb" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "SpaceNavButtons" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "ProjectNavButtons" });`,
-    '```',
-    '',
-    '```dataviewjs',
-    `await dv.view("${v}/customjs-guard", { class: "ProjectLinksManager" });`,
+    `await dv.view("${v}/customjs-guard", { class: "ProjectChromeBar" });`,
     '```',
     '',
     '```dataviewjs',
@@ -19533,6 +19844,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // (run-v0127-project-hub-heal.js CHR-DIV-*).
     module.exports.applyProjectChromeDividerHeal = applyProjectChromeDividerHeal;
     module.exports._stripProjectChromeDividers = _stripProjectChromeDividers;
+    // button/nav refactor Pass 9b — forward migration of existing project-surface
+    // notes to the single ProjectChromeBar shape (run-project-chrome-bar-heal.js).
+    module.exports.applyProjectChromeBarHeal = applyProjectChromeBarHeal;
+    module.exports._projectChromeBarBody = _projectChromeBarBody;
+    module.exports.PROJECT_CHROME_TYPES = PROJECT_CHROME_TYPES;
     // WS9 P0b — promoted board-card breadcrumb + type heal + pure transform
     // (run-v0127-project-hub-heal.js BC-BC-*).
     module.exports.applyBoardCardBreadcrumbHeal = applyBoardCardBreadcrumbHeal;
@@ -19546,6 +19862,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
     module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
+    // button/nav refactor Pass 9a — ProjectChromeBar-shape guard predicate.
+    // Every legacy project-chrome heal that would re-inject breadcrumb/nav/action
+    // chrome guards on this so it no-ops on a migrated note
+    // (run-project-chrome-heal-guard.js).
+    module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.

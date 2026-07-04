@@ -7,6 +7,10 @@ tags:
   - task-board
 ---
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
+```
+
 ## Planning
 
 ## In Progress

@@ -9,21 +9,7 @@ tags:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
-```
-
-```dataviewjs
-// entity-create:doc-note — installer-managed; do not delete this comment
-// renderActionRow draws the full-width action row: New Doc · New Section · Move docs.
-await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex", method: "renderActionRow" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
 
 ```dataviewjs

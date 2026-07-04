@@ -8072,7 +8072,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 26, "HC-V0890-VERSION-D: mechanism count = 26 (+sauce-plugin mechanism, L8 native-plugin cold-load fix)");
+  assertEqual(mechCount, 27, "HC-V0890-VERSION-D: mechanism count = 27 (+menu-popover mechanism, project button-nav refactor)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8625,7 +8625,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 26, "HC-V0891-VERSION-D: mechanism count = 26 (+sauce-plugin mechanism, L8 native-plugin cold-load fix)");
+  assertEqual(mechs.length, 27, "HC-V0891-VERSION-D: mechanism count = 27 (+menu-popover mechanism, project button-nav refactor)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
@@ -11046,11 +11046,13 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
       || /customJS\.ProjectDocsIndex\.render/.test(body));
   assertTrue("HC-V01020-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsCards",
     !/ProjectDocsCards/.test(body));
-  // v0.110.0 reverses this: Docs Hub.md NOW carries the entity-create:doc-note sentinel
-  // again so injectAccentButtonBlock's verify pass finds an anchor (no more "no sentinel"
-  // warnings on every install). Re-added with the canonical EntityCreate.render call.
-  assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub carries entity-create:doc-note sentinel (re-added v0.110.0)",
-    /entity-create:doc-note/.test(body));
+  // button-nav refactor SUPERSEDES v0.110.0: the entity-create:doc-note sentinel
+  // was removed from Docs Hub.md — the single ProjectChromeBar chrome block now
+  // owns doc creation (no more standalone EntityCreate anchor). Assert the sentinel
+  // is gone AND the chrome bar is present so creation is still wired.
+  assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub drops entity-create:doc-note sentinel — ProjectChromeBar owns creation",
+    !/entity-create:doc-note/.test(body)
+      && /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectChromeBar["']/.test(body));
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
@@ -11651,15 +11653,18 @@ async function caseV01030ProjTpl1DocsHubInvokesIndex() {
     /customJS\.ProjectDocsIndex\.render/.test(docsHub) || /class:\s*["']ProjectDocsIndex["']/.test(docsHub));
   assertTrue("HC-V01030-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsSections",
     !/ProjectDocsSections/.test(docsHub));
-  assertTrue("HC-V01030-PROJ-TPL-1c: Docs Hub invokes Breadcrumb",
-    /class:\s*["']Breadcrumb["']/.test(docsHub));
+  // button-nav refactor: stacked chrome (Breadcrumb + SpaceNavButtons + …) is
+  // replaced by the single ProjectChromeBar block. Docs Hub now leads with it.
+  assertTrue("HC-V01030-PROJ-TPL-1c: Docs Hub invokes ProjectChromeBar",
+    /class:\s*["']ProjectChromeBar["']/.test(docsHub));
 
   assertTrue("HC-V01030-PROJ-TPL-1d: Section Hub.md template exists", fs.existsSync(_PROJ_SECTION_HUB_TPL));
   const secHub = fs.readFileSync(_PROJ_SECTION_HUB_TPL, "utf8");
   assertTrue("HC-V01030-PROJ-TPL-1e: Section Hub invokes SectionHub via customjs-guard",
     /class:\s*["']SectionHub["']/.test(secHub));
-  assertTrue("HC-V01030-PROJ-TPL-1f: Section Hub invokes Breadcrumb",
-    /class:\s*["']Breadcrumb["']/.test(secHub));
+  // button-nav refactor: Section Hub leads with the single ProjectChromeBar block.
+  assertTrue("HC-V01030-PROJ-TPL-1f: Section Hub invokes ProjectChromeBar",
+    /class:\s*["']ProjectChromeBar["']/.test(secHub));
   // v0.105.0 (Issue 5): Section Hub template no longer ships its own leading
   // frontmatter block — entity-create's frontmatter_template provides type +
   // depth + project + section etc. The template body now starts with the
@@ -11686,8 +11691,9 @@ async function caseV01030ProjTpl2DocNoteBreadcrumb() {
   const installSrc = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
   assertTrue("HC-V01030-PROJ-TPL-2b: install.js _migrateDocNote still references the marker (migration path intact)",
     installSrc.includes("<!-- breadcrumb-v1.17.0 -->"));
-  assertTrue("HC-V01030-PROJ-TPL-2c: Doc Note invokes Breadcrumb via customjs-guard",
-    /class:\s*["']Breadcrumb["']/.test(body));
+  // button-nav refactor: Doc Note leads with the single ProjectChromeBar block.
+  assertTrue("HC-V01030-PROJ-TPL-2c: Doc Note invokes ProjectChromeBar via customjs-guard",
+    /class:\s*["']ProjectChromeBar["']/.test(body));
 }
 
 // v0.103.0 S3.2 — ProjectNavButtons grows section-hub branches (depth 1 + 2).
@@ -13266,8 +13272,12 @@ async function caseV0110ProjectTemplateSentinels() {
     path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"), "utf8");
   const sectionHub = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/templates/Section Hub.md"), "utf8");
-  assertTrue("V0110-PROJ-SENT-1: Docs Hub.md has // entity-create:doc-note sentinel",
-    /\/\/\s*entity-create:doc-note/.test(docsHub));
+  // button-nav refactor: the // entity-create:doc-note sentinel is removed from
+  // Docs Hub — the single ProjectChromeBar chrome block owns doc creation. Assert
+  // the sentinel is gone AND the chrome bar is wired so creation still ships.
+  assertTrue("V0110-PROJ-SENT-1: Docs Hub.md drops the // entity-create:doc-note sentinel — ProjectChromeBar owns creation",
+    !/\/\/\s*entity-create:doc-note/.test(docsHub)
+      && /class:\s*["']ProjectChromeBar["']/.test(docsHub));
   // v0.124.1 Task B2: the standalone "+ New Section" / "+ New Sub-Section"
   // entity-create blocks are removed from the Section Hub template — the
   // SectionHub view renders "+ New Doc" / "+ New Sub-Section" inline, and the
@@ -13280,8 +13290,9 @@ async function caseV0110ProjectTemplateSentinels() {
   // the Breadcrumb chrome both survive the block removal.
   assertTrue("V0110-PROJ-SENT-4: Section Hub.md still invokes the SectionHub view (inline create buttons intact)",
     /class:\s*["']SectionHub["']/.test(sectionHub));
-  assertTrue("V0110-PROJ-SENT-5: Section Hub.md still invokes Breadcrumb chrome",
-    /class:\s*["']Breadcrumb["']/.test(sectionHub));
+  // button-nav refactor: Breadcrumb chrome is replaced by the single ProjectChromeBar block.
+  assertTrue("V0110-PROJ-SENT-5: Section Hub.md still invokes ProjectChromeBar chrome",
+    /class:\s*["']ProjectChromeBar["']/.test(sectionHub));
 }
 
 async function caseV01101EntityCreateGuardMigration() {
@@ -14711,22 +14722,27 @@ async function caseV01090Bc2PathFallback() {
 }
 
 async function caseV01090TplMapHasBreadcrumb() {
-  console.log("\n--- Case HC-V01090-TPL-MAP-BC: Project Map.md ships Breadcrumb block ---");
+  console.log("\n--- Case HC-V01090-TPL-MAP-BC: Project Map.md leads with the ProjectChromeBar block ---");
   const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Map.md"), "utf8");
-  assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes Breadcrumb before SpaceNavButtons",
-    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+  // button-nav refactor: the stacked chrome (Breadcrumb + SpaceNavButtons +
+  // ProjectNavButtons) is replaced by a single ProjectChromeBar block that leads
+  // the note, ABOVE the workstream section.
+  assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes ProjectChromeBar before ProjectWorkstreamManager",
+    /class: "ProjectChromeBar"[\s\S]*?class: "ProjectWorkstreamManager"/.test(t));
+  assertTrue("HC-V01090-TPL-MAP-BC: Project Map no longer ships stacked SpaceNavButtons/Breadcrumb chrome",
+    !/class:\s*"SpaceNavButtons"/.test(t) && !/class:\s*"Breadcrumb"/.test(t));
   // Chrome overhaul WS-Workstreams: workstream MANAGEMENT (Add/Remove) was
   // consolidated onto the Map note. The Map now invokes ProjectWorkstreamManager
   // (management UI) ABOVE ProjectWorkstreams (grouped view). Both read the same
   // note's workstreams[] when rendered on the Map (dv.current() === the Map),
   // so adding a workstream then reloading surfaces it in the grouped view.
-  const idxNav  = t.indexOf('class: "ProjectNavButtons"');
-  const idxMgr  = t.indexOf('class: "ProjectWorkstreamManager"');
-  const idxView = t.indexOf('class: "ProjectWorkstreams"');
+  const idxChrome = t.indexOf('class: "ProjectChromeBar"');
+  const idxMgr    = t.indexOf('class: "ProjectWorkstreamManager"');
+  const idxView   = t.indexOf('class: "ProjectWorkstreams"');
   assertTrue("HC-V01090-TPL-MAP-WSM: Map invokes ProjectWorkstreamManager", idxMgr >= 0);
   assertTrue("HC-V01090-TPL-MAP-WSV: Map invokes ProjectWorkstreams", idxView >= 0);
-  assertTrue("HC-V01090-TPL-MAP-ORDER: NavButtons < WorkstreamManager < ProjectWorkstreams",
-    idxNav >= 0 && idxNav < idxMgr && idxMgr < idxView);
+  assertTrue("HC-V01090-TPL-MAP-ORDER: ChromeBar < WorkstreamManager < ProjectWorkstreams",
+    idxChrome >= 0 && idxChrome < idxMgr && idxMgr < idxView);
   // Chrome grammar: helpers own dividers now — no literal `---` chrome divider
   // between the nav row and the workstream section (the manager's SectionLabel
   // emits its own leading hairline). Check the BODY only (frontmatter fences
@@ -14738,27 +14754,33 @@ async function caseV01090TplMapHasBreadcrumb() {
 }
 
 async function caseV01090TplTaskHasBreadcrumb() {
-  console.log("\n--- Case HC-V01090-TPL-TASK-BC: Task Note.md ships Breadcrumb block ---");
+  console.log("\n--- Case HC-V01090-TPL-TASK-BC: Task Note.md leads with the ProjectChromeBar block ---");
   const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Task Note.md"), "utf8");
-  assertTrue("HC-V01090-TPL-TASK-BC: Task Note invokes Breadcrumb before SpaceNavButtons",
-    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+  // button-nav refactor: Task Note leads with the single ProjectChromeBar block,
+  // replacing the stacked Breadcrumb + SpaceNavButtons chrome.
+  assertTrue("HC-V01090-TPL-TASK-BC: Task Note invokes ProjectChromeBar",
+    /class: "ProjectChromeBar"/.test(t));
+  assertTrue("HC-V01090-TPL-TASK-BC: Task Note no longer ships stacked SpaceNavButtons/Breadcrumb chrome",
+    !/class:\s*"SpaceNavButtons"/.test(t) && !/class:\s*"Breadcrumb"/.test(t));
 }
 
 async function caseV01090TplBoardHasBreadcrumb() {
-  console.log("\n--- Case HC-V01090-TPL-BOARD-BC: Project Board.md ships Breadcrumb block above columns ---");
+  console.log("\n--- Case HC-V01090-TPL-BOARD-BC: Project Board.md ships ProjectChromeBar block above columns ---");
   const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Board.md"), "utf8");
-  assertTrue("HC-V01090-TPL-BOARD-BC: Project Board invokes Breadcrumb",
-    /class: "Breadcrumb"/.test(t));
-  assertTrue("HC-V01090-TPL-BOARD-BC: Breadcrumb sits above ## In Planning column",
-    t.indexOf('class: "Breadcrumb"') < t.indexOf("## In Planning"));
+  // button-nav refactor: the single ProjectChromeBar block replaces Breadcrumb chrome.
+  assertTrue("HC-V01090-TPL-BOARD-BC: Project Board invokes ProjectChromeBar",
+    /class: "ProjectChromeBar"/.test(t));
+  assertTrue("HC-V01090-TPL-BOARD-BC: ProjectChromeBar sits above ## In Planning column",
+    t.indexOf('class: "ProjectChromeBar"') < t.indexOf("## In Planning"));
 }
 
-// S6 — Template, Project.md rewrite.
+// S6 — Template, Project.md rewrite. button-nav refactor: the first block is now
+// the single ProjectChromeBar chrome bar (was stacked Breadcrumb + SpaceNavButtons).
 async function caseV01090TplBreadcrumbFirst() {
-  console.log("\n--- Case HC-V01090-TPL-BC: Template, Project.md has Breadcrumb as first block ---");
+  console.log("\n--- Case HC-V01090-TPL-BC: Template, Project.md has ProjectChromeBar as first block ---");
   const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
-  assertTrue("HC-V01090-TPL-BC: first block invokes Breadcrumb",
-    /^```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "Breadcrumb" \}\);\n```/.test(tpl));
+  assertTrue("HC-V01090-TPL-BC: first block invokes ProjectChromeBar",
+    /^```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "ProjectChromeBar" \}\);\n```/.test(tpl));
 }
 
 async function caseV01090TplNoStatusH2() {

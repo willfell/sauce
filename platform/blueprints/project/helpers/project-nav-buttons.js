@@ -3,7 +3,17 @@
  * Renders project-context buttons matching vault nav button styling.
  * Auto-hides the button for the current note type.
  *
- * Usage in DataviewJS:
+ * SUPERSEDED CHROME (button-nav-refactor): render() is the LEGACY stacked
+ * project-nav chrome. Migrated project templates render the single
+ * `ProjectChromeBar` bar instead (breadcrumb + Go ▾ launcher + primary + ⋯), so
+ * render() only appears on un-migrated notes. It is retained for backward compat.
+ * The class stays as a METHOD LIBRARY: ProjectChromeBar._dispatch and
+ * ProjectCommandsInit reuse its create/nav helpers unchanged —
+ * _promptForTitle / _createTaskNote / _createTaskBoard / _openNavTarget /
+ * _resolveProjectName. Do not delete those; keep detectContext in sync with the
+ * verbatim copy in project-chrome-bar.js.
+ *
+ * Usage in DataviewJS (legacy templates only):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:

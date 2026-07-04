@@ -7,6 +7,10 @@ tags:
   - task-board
 ---
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
+```
+
 ## Planning
 
 ## In Progress
@@ -17,6 +21,6 @@ tags:
 
 %% kanban:settings
 ```
-{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"{{NEW_NOTE_FOLDER}}","new-note-template":"ranch/templates/Template, Task Board Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"{{NEW_NOTE_FOLDER}}","new-note-template":"{{templates_path}}/Template, Task Board Card.md"}
 ```
 %%

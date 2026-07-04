@@ -294,13 +294,5 @@ if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
 -%>
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```

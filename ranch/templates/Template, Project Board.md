@@ -11,7 +11,7 @@ tags:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
 
 ## In Planning
@@ -24,6 +24,6 @@ await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
 
 %% kanban:settings
 ```
-{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"spice/projects/{{prompts.slug}}/tasks","new-note-template":"ranch/templates/Template, Kanban Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"spice/projects/{{prompts.slug}}/tasks","new-note-template":"{{templates_path}}/Template, Kanban Card.md"}
 ```
 %%

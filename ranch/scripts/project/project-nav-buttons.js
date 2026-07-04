@@ -3,7 +3,17 @@
  * Renders project-context buttons matching vault nav button styling.
  * Auto-hides the button for the current note type.
  *
- * Usage in DataviewJS:
+ * SUPERSEDED CHROME (button-nav-refactor): render() is the LEGACY stacked
+ * project-nav chrome. Migrated project templates render the single
+ * `ProjectChromeBar` bar instead (breadcrumb + Go ▾ launcher + primary + ⋯), so
+ * render() only appears on un-migrated notes. It is retained for backward compat.
+ * The class stays as a METHOD LIBRARY: ProjectChromeBar._dispatch and
+ * ProjectCommandsInit reuse its create/nav helpers unchanged —
+ * _promptForTitle / _createTaskNote / _createTaskBoard / _openNavTarget /
+ * _resolveProjectName. Do not delete those; keep detectContext in sync with the
+ * verbatim copy in project-chrome-bar.js.
+ *
+ * Usage in DataviewJS (legacy templates only):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
@@ -16,6 +26,21 @@
  * For sub-notes, prepends a "Task: <X>" button only if <X>.md exists in that folder.
  */
 class ProjectNavButtons {
+    // Slice 1.5 — canonical Map-note identity. The per-project Map note is
+    // `Project Map.md` carrying `type: map` frontmatter (24 of 25 real notes);
+    // detecting it by the stale `basename.endsWith("- Map")` suffix missed ~96%
+    // of projects, so the "Map" nav button never rendered and Slice 2's Map-note
+    // read would have resolved to undefined → silent hub-fallback. Detect by
+    // `type: map` first; keep the legacy `- Map` suffix as a non-lossy fallback
+    // for the one un-migrated note (accuris `denali`) until the Slice-4 heal.
+    // Mirrors project-workstream-manager.js's `cache?.frontmatter?.type === "map"`.
+    // `type` is the note's frontmatter `type` (page.type for the current note,
+    // cache.frontmatter.type for a sibling file).
+    _isMapNote(type, basename) {
+        return type === "map"
+            || (typeof basename === "string" && basename.endsWith("- Map"));
+    }
+
     detectContext(filePath, dv) {
         const pathParts = filePath.split("/");
         const planningIdx = pathParts.indexOf("projects");
@@ -26,8 +51,9 @@ class ProjectNavButtons {
         const projectDir = pathParts.slice(0, planningIdx + 2).join("/");
         const tasksIdx = planningIdx + 2;
 
-        const basename = dv.current().file.name;
-        const isMap = basename.endsWith("- Map");
+        const page = customJS.RenderSafe.page(dv);
+        const basename = page.file.name;
+        const isMap = this._isMapNote(page.type, basename);
 
         // Project board: <slug>-board.md directly under project dir
         if (basename.endsWith("-board") && pathParts.length === planningIdx + 3) {
@@ -88,7 +114,7 @@ class ProjectNavButtons {
         //   depth 1: spice/projects/<slug>/docs/<section_slug>/<Section Name>.md
         //   depth 2: spice/projects/<slug>/docs/<parent_slug>/<sub_slug>/<Sub Name>.md
         if (pathParts[tasksIdx] === "docs" && pathParts.length >= planningIdx + 5) {
-            const fcache = app.metadataCache.getFileCache(dv.current().file);
+            const fcache = app.metadataCache.getFileCache(page.file);
             const ffm = fcache?.frontmatter || {};
             if (ffm.type === "section-hub") {
                 const depth = Number(ffm.depth) || 1;
@@ -122,7 +148,7 @@ class ProjectNavButtons {
         // post-canonical-vocab atlas notes have type:project but no longer carry
         // the 'project' tag — checking tag-only previously left atlas pages in
         // unknown context with zero rendered buttons.
-        const cache = app.metadataCache.getFileCache(dv.current().file);
+        const cache = app.metadataCache.getFileCache(page.file);
         const fm = cache?.frontmatter || {};
         const tags = fm.tags || [];
         const isAtlasShape = fm.type === "project"
@@ -137,12 +163,169 @@ class ProjectNavButtons {
             return { context: "project-todo", pathParts, planningIdx, projectSlug, projectDir };
         }
 
+        // Project Links, PR1 — Link Hub note: "Links Hub.md" directly under the
+        // project dir. Basename-based (mirrors the map/board detection above) so
+        // it does not depend on the metadata cache being warm; the nav row +
+        // breadcrumb render on the hub note, and the "Helpful Links" button
+        // self-hides here.
+        if (basename === "Links Hub" && pathParts.length === planningIdx + 3) {
+            return { context: "links-hub", pathParts, planningIdx, projectSlug, projectDir };
+        }
+
         // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
         if (pathParts.length === planningIdx + 2 && basename === "Projects") {
             return { context: "projects-hub", pathParts, planningIdx };
         }
 
         return { context: "unknown", pathParts, planningIdx, projectSlug, projectDir };
+    }
+
+    // Project Links, PR1 — pure helper for the "Helpful Links" nav button.
+    // Returns { label, path } for the per-project Link Hub note, or null when the
+    // button must be hidden: on the Link Hub note itself (self-hide) or when the
+    // hub note does not exist yet (exists(path) is false). Kept pure + separate
+    // from render() so the path string + both gates are unit-testable (see
+    // run-project-links.js PLB-D4/D5) without stubbing the full Obsidian render.
+    // The "Links Hub.md" basename MUST match detectContext's links-hub branch and
+    // the entity-create extra_files filename_pattern.
+    _linksHubButton(projectDir, ctx, exists) {
+        if (!projectDir || !ctx || ctx.context === "links-hub") return null;
+        const path = `${projectDir}/Links Hub.md`;
+        if (typeof exists === "function" && !exists(path)) return null;
+        return { label: "Helpful Links", path };
+    }
+
+    // WS3 (nav consolidation) — pure classifier splitting the built nav buttons
+    // into a `core` row (rendered inline) and an `overflow` set (folded behind a
+    // "More" menu). Overflow = the secondary destinations Map / To-Do / Helpful
+    // Links, matched by EXACT label so a near-miss ("To-Do List", "Sitemap")
+    // stays in core. Input order is preserved within both partitions. Kept pure
+    // + separate from render() so the split is unit-testable (run-project-nav-
+    // buttons.js PNB-1..5) without stubbing the full Obsidian render.
+    _partitionButtons(buttons) {
+        const OVERFLOW = new Set(["Map", "To-Do", "Helpful Links"]);
+        const core = [];
+        const overflow = [];
+        for (const btn of (buttons || [])) {
+            if (btn && OVERFLOW.has(btn.label)) overflow.push(btn);
+            else core.push(btn);
+        }
+        return { core, overflow };
+    }
+
+    // WS3 — overflow "More" menu, rewritten (2026-07-02) to MIRROR the Space-nav
+    // Go-to launcher (space-nav-buttons.js _openLauncher). A document.body-appended
+    // overlay (so it is never clipped by the note's scroll container). On DESKTOP
+    // it is a transparent overlay with a panel positioned `fixed`, anchored to the
+    // "More" button's getBoundingClientRect (dropdown under the trigger); on MOBILE
+    // a dim backdrop + bottom sheet with a handle bar. Re-tapping "More" while the
+    // overlay is open TOGGLES it closed. A SINGLE close() removes the overlay AND
+    // the capture-phase Escape keydown listener — never leave a dangling listener
+    // (the leak a prior nav-launcher review caught). Backdrop click (target ===
+    // overlay) closes too. Uses activeDocument (multi-window) with a document
+    // fallback. Defensive against a missing document / customJS / app.isMobile.
+    //
+    // triggerEl = the rendered "More" AccentButton element (for desktop anchoring).
+    _openMoreMenu(entries, triggerEl) {
+        const doc = (typeof activeDocument !== "undefined" && activeDocument) || (typeof document !== "undefined" ? document : null);
+        if (!doc || !doc.body || !Array.isArray(entries) || entries.length === 0) return;
+
+        // Toggle: an already-open overlay means "close" — route through its own
+        // teardown (__navClose) so the keydown listener is removed too.
+        const alreadyOpen = doc.body.querySelector && doc.body.querySelector(".pnb-more-overlay");
+        if (alreadyOpen) { if (alreadyOpen.__navClose) alreadyOpen.__navClose(); else if (alreadyOpen.remove) alreadyOpen.remove(); return; }
+
+        const isMobile = !!(typeof app !== "undefined" && app && app.isMobile);
+
+        const overlay = doc.createElement("div");
+        overlay.className = "pnb-more-overlay";
+        overlay.style.cssText = "position: fixed; inset: 0; z-index: 1000;"
+            + (isMobile
+                ? " background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center;"
+                : " background: transparent;");
+
+        const panel = doc.createElement("div");
+        const panelBase = "box-sizing: border-box; background: var(--background-primary);"
+            + " border: 1px solid var(--background-modifier-border);"
+            + " box-shadow: 0 8px 30px rgba(0,0,0,0.30); overflow-y: auto;"
+            + " display: flex; flex-direction: column;";
+        if (isMobile) {
+            panel.style.cssText = panelBase
+                + " width: 100%; max-width: 620px; max-height: 72vh;"
+                + " border-radius: 16px 16px 0 0;"
+                + " padding: 8px 8px calc(10px + env(safe-area-inset-bottom, 0px));"
+                + " gap: 2px;";
+            const handle = doc.createElement("div");
+            handle.style.cssText = "flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--background-modifier-border); margin: 4px auto 8px;";
+            panel.appendChild(handle);
+        } else {
+            const rect = (triggerEl && triggerEl.getBoundingClientRect) ? triggerEl.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
+            const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
+            const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
+            let left = Math.round(rect.left || 0);
+            if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+            panel.style.cssText = panelBase
+                + ` position: fixed; top: ${Math.round((rect.bottom || 0) + 6)}px; left: ${left}px;`
+                + ` width: ${width}px; max-height: 60vh; border-radius: 8px; padding: 6px; gap: 1px;`;
+        }
+
+        // Single teardown for ALL dismiss paths (backdrop, Escape, re-tap toggle,
+        // row select) — removes the overlay AND the capture-phase keydown listener
+        // so a stale Escape handler can never swallow keys elsewhere.
+        const close = () => {
+            if (overlay.remove) overlay.remove();
+            else if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
+        };
+        const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
+        overlay.__navClose = close;
+
+        for (const entry of entries) {
+            const row = doc.createElement("button");
+            const icon = (entry && entry.icon) || "";
+            row.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${icon}</span>`
+                + `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(entry && entry.label) || ""}</span>`;
+            row.style.cssText = "cursor: pointer; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; box-sizing: border-box; border: none; border-radius: 8px; background: transparent; color: var(--text-normal); font-family: inherit; line-height: 1.25;"
+                + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+            row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
+            row.onmouseleave = () => { row.style.background = "transparent"; };
+            row.onclick = () => { close(); this._openNavTarget(entry.path); };
+            panel.appendChild(row);
+        }
+
+        overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+        if (doc.addEventListener) doc.addEventListener("keydown", onKey, true);
+
+        overlay.appendChild(panel);
+        doc.body.appendChild(overlay);
+    }
+
+    // Wiki-parity hub-button sizing (mirrors WikiHubActions._mobilize): each
+    // button takes ~half the row (min 128px) so a phone wraps them 2-up instead
+    // of shrinking every label to an ellipsis. Layered on AccentButton's flex:1
+    // base. Applied to the core nav buttons AND the "More" button (2-up wrap).
+    _mobilize(btn) {
+        if (!btn || !btn.style) return btn;
+        btn.style.flex = "1 1 calc(50% - 6px)";
+        btn.style.minWidth = "128px";
+        btn.style.fontSize = "0.92em";
+        btn.style.padding = "9px 14px";
+        return btn;
+    }
+
+    // Open an ABSOLUTE vault path safely: resolve to the TFile and openFile it
+    // (bypasses the link resolver, which can double an absolute path against the
+    // current note's folder on a cold cache — the doubled-path bug). Falls back
+    // to openLinkText only when the file isn't in the vault index yet.
+    _openNavTarget(vaultPath) {
+        try {
+            const f = app.vault.getAbstractFileByPath(vaultPath);
+            if (f && app.workspace && typeof app.workspace.getLeaf === "function") {
+                app.workspace.getLeaf(false).openFile(f);
+                return;
+            }
+        } catch (_e) { /* fall through to openLinkText */ }
+        app.workspace.openLinkText(vaultPath, "");
     }
 
     async _promptForTitle(notesFolder) {
@@ -220,7 +403,7 @@ class ProjectNavButtons {
     }
 
     async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath, projectDir) {
-        const tplPath = "ranch/templates/Template, Task Note.md";
+        const tplPath = "{{templates_path}}/Template, Task Note.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
             new Notice(`Template missing: ${tplPath}`);
@@ -269,14 +452,14 @@ class ProjectNavButtons {
                 if (!f.path.startsWith(prefix)) continue;
                 if (f.path.slice(prefix.length).includes("/")) continue;
                 const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-                if (fm && fm.type === "project") return f.basename;
+                if (fm && fm.type === "project") return (fm.name || f.basename);
             }
         } catch (_e) { /* best-effort — fall back to slug */ }
         return null;
     }
 
     async _createTaskBoard(projectDir, taskFolder) {
-        const tplPath = "ranch/templates/Template, Task Board.md";
+        const tplPath = "{{templates_path}}/Template, Task Board.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
             new Notice(`Template missing: ${tplPath}`);
@@ -368,8 +551,8 @@ class ProjectNavButtons {
         // metadata cache catches up. Reported on accuris 2026-06-16 when
         // creating a new project from + New Project. See landmine #28 / the
         // dispatcher-contracts subsection of code-conventions.md.
-        const cur = dv && dv.current ? dv.current() : null;
-        if (!cur || !cur.file) return;
+        const page = customJS.RenderSafe.page(dv);
+        if (!page || !page.file) return;
 
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
@@ -377,10 +560,11 @@ class ProjectNavButtons {
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
             docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`,
-            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`
+            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+            links: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`
         };
 
-        const filePath = dv.current().file.path;
+        const filePath = page.file.path;
         const ctx = this.detectContext(filePath, dv);
         if (ctx.context === "non-project" || ctx.context === "unknown" || ctx.context === "projects-hub") return;
 
@@ -409,11 +593,13 @@ class ProjectNavButtons {
                 || (Array.isArray(tags) && tags.includes("project"));
         });
 
-        const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));
+        const mapNote = projectFiles.find(f =>
+            this._isMapNote(app.metadataCache.getFileCache(f)?.frontmatter?.type, f.basename)
+        );
 
         const isMainNote = mainNote && filePath === mainNote.path;
-        const isMap = dv.current().file.name.endsWith("- Map");
-        const isBoard = dv.current().file.name.endsWith("-board");
+        const isMap = this._isMapNote(page.type, page.file.name);
+        const isBoard = page.file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
         // Path shape for a sub-note: spice/projects/<slug>/tasks/<TaskName>/<other>.md
@@ -429,7 +615,7 @@ class ProjectNavButtons {
             pathParts[tasksIdx] === "tasks"
         ) {
             taskFolderName = pathParts[tasksIdx + 1];
-            const currentBasename = dv.current().file.name;
+            const currentBasename = page.file.name;
             if (currentBasename !== taskFolderName) {
                 const taskNoteCandidate = pathParts.slice(0, tasksIdx + 2).join("/") + "/" + taskFolderName + ".md";
                 if (app.vault.getAbstractFileByPath(taskNoteCandidate)) {
@@ -463,11 +649,27 @@ class ProjectNavButtons {
         // mainNote.basename + " To-Do.md" so the filename convention stays consistent
         // with applyProjectTodoBackfill + entity-create extra_files entry.
         if (ctx.context !== "project-todo" && mainNote) {
-            const toDoPath = `${projectDir}/${mainNote.basename} To-Do.md`;
+            // Derive the To-Do path from mainNote.PATH (source of truth) rather
+            // than re-joining projectDir + basename. mainNote.path already carries
+            // the correct project folder, so slicing off its filename and appending
+            // "<basename> To-Do.md" can never double the "spice/projects/<slug>/"
+            // prefix even if projectDir was mis-derived from a malformed current
+            // path (the doubled-link bug: projectDir + a value already containing
+            // the project dir → spice/projects/<slug>/spice/projects/<slug>/…).
+            const mainDir = mainNote.path.slice(0, mainNote.path.lastIndexOf("/"));
+            const toDoPath = `${mainDir}/${mainNote.basename} To-Do.md`;
             if (app.vault.getAbstractFileByPath(toDoPath)) {
                 buttons.push({ label: "To-Do", icon: icons.todo, path: toDoPath });
             }
         }
+        // Project Links, PR1 — "Helpful Links" button opens the per-project Link
+        // Hub note. Logic lives in the pure, unit-tested _linksHubButton: shown on
+        // every project context EXCEPT the Link Hub itself, and only when the hub
+        // note exists (new projects scaffold it via entity-create; existing
+        // projects get it via the PR3 backfill heal) — so it never dangles on a
+        // project without a hub yet.
+        const linksHubBtn = this._linksHubButton(projectDir, ctx, (p) => !!app.vault.getAbstractFileByPath(p));
+        if (linksHubBtn) buttons.push({ ...linksHubBtn, icon: icons.links });
 
         // Task-note context: ensure a Task: <X> button leads back to the parent task hub.
         // Legacy code already handles this for legacy sub-notes via the regex; task-note is
@@ -555,35 +757,63 @@ class ProjectNavButtons {
         if (previousRoot) previousRoot.remove();
         const root = dv.container.createEl("div", { cls: "pnb-root" });
 
-        const topDivider = root.createEl("hr");
-        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 14px 0;";
+        // WS3 — leading hairline via the canonical SectionLabel.divider primitive
+        // (owns the chrome hairline spacing in one place; see note-chrome.md).
+        // Guarded so a cold-load where the section-label mechanism hasn't
+        // registered yet can't throw and blank the whole nav row.
+        if (customJS && customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+            customJS.SectionLabel.divider(root);
+        }
 
-        const sectionLabel = root.createEl("div");
-        sectionLabel.textContent = "Project";
-        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
-
+        // Wiki parity (2026-07-02): NO uppercase "Project" label above the row
+        // (the wiki hub/leaf action rows carry no label), and the core button row
+        // uses the wiki hub container style — a centered, max-width, wrapping flex
+        // row — with each button sized by _mobilize so a phone wraps them 2-up
+        // rather than ellipsising every label.
         const container = root.createEl("div");
-        container.style.cssText = `
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-bottom: 4px;
-        `;
+        container.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+
+        // WS3 — split the built nav row into a `core` row (rendered inline) and
+        // an `overflow` set (Map / To-Do / Helpful Links) folded behind a "More"
+        // menu, keeping the primary destinations one tap away without wrapping.
+        const { core, overflow } = this._partitionButtons(buttons);
 
         // v0.100.0 — nav buttons delegate to the shared AccentButton mechanism:
         // identical styling to the New Doc / New Note buttons by construction,
         // flex: true stretches the row across the full note width.
-        for (const btn of buttons) {
-            customJS.AccentButton.render(container, {
+        // btn.path is an ABSOLUTE vault path. _openNavTarget resolves it to the
+        // TFile and opens that directly — openLinkText treats its first arg as a
+        // LINK TEXT (linkpath) resolved relative to the sourcePath, which on a cold
+        // metadata cache can re-prefix an absolute path with the current note's
+        // folder (the doubled-path bug: spice/projects/<slug>/spice/projects/<slug>/…).
+        // openFile bypasses the link resolver entirely; openLinkText is the fallback
+        // only when the file isn't indexed yet.
+        for (const btn of core) {
+            this._mobilize(customJS.AccentButton.render(container, {
                 label: btn.label,
                 icon: btn.icon,
-                onClick: () => app.workspace.openLinkText(btn.path, ""),
+                onClick: () => this._openNavTarget(btn.path),
+                flex: true
+            }));
+        }
+
+        // WS3 — "More ▾" opens an overlay listing the overflow destinations.
+        // Rendered only when there is at least one overflow button. Capture the
+        // rendered element so the launcher (mirroring the Go-to launcher) can
+        // anchor its desktop dropdown to it via getBoundingClientRect.
+        if (overflow.length > 0) {
+            const moreIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+            const moreBtn = customJS.AccentButton.render(container, {
+                label: "More",
+                icon: moreIcon,
+                onClick: () => this._openMoreMenu(overflow, moreBtn),
                 flex: true
             });
+            this._mobilize(moreBtn);
         }
 
         // --- Workstream widget (card notes only) ---
-        const isCardNote = !isMainNote && !isMap && !isBoard && dv.current().source_board;
+        const isCardNote = !isMainNote && !isMap && !isBoard && page.source_board;
         if (isCardNote && mainNote) {
             // (Dedupe handled by the root-level cleanup at the top of render.)
             const atlasCache = app.metadataCache.getFileCache(mainNote);
@@ -593,7 +823,7 @@ class ProjectNavButtons {
             }
             if (!Array.isArray(workstreams)) workstreams = [];
 
-            const currentWsId = String(dv.current().workstream || "");
+            const currentWsId = String(page.workstream || "");
             const matched = workstreams.find(w => w.id === currentWsId);
 
             const wsRow = root.createEl("div", { cls: "workstream-widget" });
@@ -714,14 +944,17 @@ class ProjectNavButtons {
             const notesFolder = `${projectDir}/tasks/${ctx.taskFolder}/notes`;
             const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
 
-            // Divider between project nav row and task action row
-            const divider = root.createEl("hr");
-            divider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+            // Divider between project nav row and task action row — helper-owned
+            // hairline (SectionLabel.divider) to match the vault-wide chrome
+            // grammar, replacing the raw <hr>. Guarded against a cold-loading helper.
+            if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(root);
 
+            // Wiki-parity hub container: match the core nav row width + centering so
+            // the task action buttons line up with the project nav buttons above.
             const actionRow = root.createEl("div");
-            actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
+            actionRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
 
-            customJS.AccentButton.render(actionRow, {
+            this._mobilize(customJS.AccentButton.render(actionRow, {
                 label: "New Note",
                 icon: plusIcon,
                 onClick: async () => {
@@ -734,7 +967,7 @@ class ProjectNavButtons {
                     }
                 },
                 flex: true
-            });
+            }));
 
             if (ctx.context === "task-hub" || ctx.context === "task-note") {
                 const boardPath = `${projectDir}/tasks/${ctx.taskFolder}/board/${ctx.taskFolder}-board.md`;
@@ -742,16 +975,16 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    customJS.AccentButton.render(actionRow, {
+                    this._mobilize(customJS.AccentButton.render(actionRow, {
                         label: "Open Board",
                         icon: boardIcon,
                         onClick: async () => {
                             await this._openAsKanban(boardPath);
                         },
                         flex: true
-                    });
+                    }));
                 } else {
-                    customJS.AccentButton.render(actionRow, {
+                    this._mobilize(customJS.AccentButton.render(actionRow, {
                         label: "Create Board",
                         icon: boardIcon,
                         onClick: async () => {
@@ -762,7 +995,7 @@ class ProjectNavButtons {
                             }
                         },
                         flex: true
-                    });
+                    }));
                 }
             }
         }

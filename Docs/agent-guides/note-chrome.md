@@ -30,7 +30,9 @@ Rules:
 - **The one exception:** the project-hub `ProjectStatusWidget` renders no leading hairline and no surrounding blank lines — it hugs tight under the nav.
 - **Templates carry no literal `---` and no blank-line gaps between chrome dataviewjs blocks.** Enforced by `scripts/lint-note-chrome.js` **Rule 4** (`checkNoLiteralChromeDivider`, scoped to `opts.blueprint === 'project'`; other adopted blueprints retrofit in later cycles). Existing consumer-vault notes are healed at install by `applyProjectChromeDividerHeal` (strips the literal `---` + collapses gaps; `.sauce-backup`-first, idempotent).
 
-### 1b. Chrome order (project surfaces)
+### 1b. Chrome order (project surfaces) — SUPERSEDED, see §1c
+
+> **SUPERSEDED FOR THE PROJECT BLUEPRINT (button-nav-refactor).** The stacked chrome below — Breadcrumb + SpaceNavButtons + ProjectNavButtons (core + More▾) + per-surface action rows + search strip — is replaced on project surfaces by the single `ProjectChromeBar` in §1c. It is kept here as historical reference for un-migrated notes and for the install heal that reshapes them. **Other adopted blueprints (wiki / finance / trips / meetings / scratch / to-do) still follow this stacked grammar — they did NOT change.**
 
 ```
 Breadcrumb            ← no divider (one unit with nav)
@@ -45,6 +47,26 @@ ProjectNavButtons     ← core buttons + More▾ overflow (see §5)
 [content]             ← SectionLabel-led sections
 ```
 Surfaces without an action row or search omit those tiers; the ownership rule keeps spacing correct.
+
+### 1c. ProjectChromeBar — the breadcrumb-driven single bar (project blueprint; button-nav-refactor)
+
+The project blueprint replaces the whole §1b stack with **one** `ProjectChromeBar` block per surface — a single flex row rendered from `platform/blueprints/project/helpers/project-chrome-bar.js`. It subsumes Breadcrumb + SpaceNavButtons + ProjectNavButtons + the per-surface action row into one control:
+
+```
+[ Project / Docs / <crumb> …            Go ▾   [Primary]   ⋯ ]
+  └─ breadcrumb (left, up-nav)          └─ controls (right, margin-left:auto)
+[content]                               ← SectionLabel-led sections, no chrome divider above
+```
+
+- **Left — breadcrumb.** The `customJS.Breadcrumb.buildSegments` trail rendered as `/`-joined clickable crumbs (ancestors link via `_openNavTarget`; the current crumb is plain muted text). This is the sole up-nav affordance.
+- **Right — `Go ▾` launcher.** ONE unified launcher replacing both SpaceNavButtons and ProjectNavButtons. It opens a `MenuPopover` listing a **This project** section (the project's OTHER destinations — atlas / Board / Map / Docs / To-Do / Helpful Links, current surface omitted, each existence-gated) then a **Vault** section (the pinned registry sources home/to-do/scratch/project/meetings). There is no separate `More ▾` on the project blueprint any more.
+- **Right — one primary action.** A single `AccentButton` on non-leaf surfaces (New Task / New Doc / Add workstream / New Project / Add link / …), from the pure `_surfaceSpec(context)`.
+- **Right — `⋯` overflow.** A `MenuPopover` of the surface's secondary actions (New Section / Move docs / Remove workstream / Manage links / …). Suppressed when the surface declares no overflow.
+- **Leaf / entity surfaces are nav-only** — doc-notes, task-notes, boards, cards: breadcrumb + `Go ▾` + optional `⋯` (e.g. a doc-note's Move), no primary button.
+- **Per-row task actions use a single `⋯`** (the shared `MenuPopover`), not a spread of inline row buttons.
+- A **command mirror** (`ProjectCommandsInit`) registers each `Go ▾` / primary / `⋯` action as an Obsidian command (Cmd+P + hotkey-bindable), delegating to the SAME `ProjectChromeBar._dispatch` / `navTarget`, so every action is reachable without a button.
+
+The bar renders its own controls with no leading `SectionLabel.divider` above the first content section — it is a single unit, so the §1a leading-hairline ownership applies only between the *content* sections below it. The no-`## H2` rule (§2), breadcrumb-declaration schema (§3), open-mode rule (§4), and marker conventions stay in force. Existing project notes are migrated by `applyProjectChromeBarHeal` (`_projectChromeBarBody`; `.sauce-backup`-first, idempotent, conservative no-op when no legacy nav marker is present). For the full primitive + per-surface-spec detail see [`project-blueprint-ui.md`](project-blueprint-ui.md).
 
 ## 2. No `## H2` rule + the SectionLabel tradeoff
 
@@ -103,8 +125,8 @@ Brand-new notes open in **read / preview**, never edit-with-title-selected. The 
 
 - **Nav-buttons row:** `flex-wrap: wrap`, and each label gets `text-overflow: ellipsis` + `overflow: hidden` + `white-space: nowrap` + `min-width: 0` so long labels truncate instead of overflowing the button.
 - **Accent-button hover:** mutate individual style props (`style.background` / `style.color`). NEVER rebuild `cssText` on hover — that caused button jitter (fixed at `accent-button` v0.1.2).
-- **Core + overflow nav (project blueprint):** a project surface shows a few **core** destinations inline + a **`More ▾`** button that opens a `document.body` overlay menu for the rest — never a single wrapping row of 6+ buttons (that truncated to "…" on phone). `ProjectNavButtons` core = `Project · Board · Docs` (+ a context `Task: <X>`); overflow = `Map · To-Do · Helpful Links`. The overlay uses ONE `close()` that removes the node **and** the Escape keydown listener (no leak). Suppress `More ▾` when overflow is empty.
-- **Action rows:** a set of sibling actions (New Doc·New Section·Move / Add link·Manage links / New Task·Recurring) render as **ONE full-width row**: `display:flex; gap:8px; flex-wrap:wrap;` with each button `flex:1 1 0; min-width:96px;`. The row renders a leading hairline (§1a).
+- **Core + overflow nav — SUPERSEDED for the project blueprint (button-nav-refactor).** The project blueprint no longer renders a `core row + More ▾`; the single `Go ▾` launcher in §1c is the project nav. This rule still describes the pattern on **un-migrated** project notes and the shared overlay teardown reused by `MenuPopover`. (Original: a project surface showed a few **core** destinations inline + a **`More ▾`** button opening a `document.body` overlay for the rest — never a wrapping row of 6+ buttons. `ProjectNavButtons` core = `Project · Board · Docs` (+ a context `Task: <X>`); overflow = `Map · To-Do · Helpful Links`. The overlay uses ONE `close()` that removes the node **and** the Escape keydown listener — no leak; suppress `More ▾` when overflow is empty.)
+- **Action rows — SUPERSEDED for the project blueprint (button-nav-refactor).** The project blueprint folds these sibling actions into the §1c bar's one primary `AccentButton` + the `⋯` overflow menu, not a full-width row. This rule still holds for the other adopted blueprints (wiki / finance / trips / meetings / scratch) and un-migrated project notes. (Original: a set of sibling actions render as **ONE full-width row**: `display:flex; gap:8px; flex-wrap:wrap;` with each button `flex:1 1 0; min-width:96px;`; the row renders a leading hairline per §1a.)
 - **Simple search (docs/section hubs):** pass `DocSearch.render(dv, { hideTags:true, hideNativeSearch:true, persist:false })` — a bare text input, no tag chips, no scoped-search button, empty on every return.
 
 ## 6. Migration posture

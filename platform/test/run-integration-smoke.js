@@ -250,6 +250,17 @@ withTempHomeAndVault(({ home, vault }) => {
         paycheck: "spice/finance/paychecks/Paychecks.md",
         invoice:  "spice/finance/invoices/Invoices.md",
     };
+    // button/nav refactor Pass 9a — hubs that render the single ProjectChromeBar
+    // block OWN entity creation (the bar's primary + `⋯` route through
+    // EntityCreate.create). Those hubs intentionally carry NO
+    // `// entity-create:<id>` marker (retired in the refactor). For a
+    // ProjectChromeBar hub we assert the bar is present exactly once instead of the
+    // marker; every OTHER (marker-based) hub still asserts its marker. This keeps
+    // the check meaningful for people/finance/meetings/scratch, which still ship
+    // markers.
+    const ecChromeBarHubs = new Set(["project"]);
+    const hasChromeBarBlock = (body) =>
+        (body.match(/```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?\n```/g) || []).length;
     let allMarkersPresent = true;
     let missingMarker = null;
     for (const e of ecEntries) {
@@ -259,6 +270,16 @@ withTempHomeAndVault(({ home, vault }) => {
         const tp = path.join(vault, rel);
         if (!fs.existsSync(tp)) { allMarkersPresent = false; missingMarker = `${e.id}: hub file missing at ${rel}`; break; }
         const body = fs.readFileSync(tp, "utf8");
+        if (ecChromeBarHubs.has(e.id)) {
+            // ProjectChromeBar-owned hub: no marker; assert the bar renders once.
+            const barCount = hasChromeBarBlock(body);
+            if (barCount !== 1) {
+                allMarkersPresent = false;
+                missingMarker = `${e.id}: ProjectChromeBar block count=${barCount} in ${rel} (ProjectChromeBar-owned hub; expected 1)`;
+                break;
+            }
+            continue;
+        }
         const escId = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const markerCount = (body.match(new RegExp("```dataviewjs[\\s\\S]*?// entity-create:" + escId + "[\\s\\S]*?\\n```", "g")) || []).length;
         if (markerCount !== 1) {
@@ -284,6 +305,13 @@ withTempHomeAndVault(({ home, vault }) => {
             const tp = path.join(vault, rel);
             if (!fs.existsSync(tp)) continue;
             const body = fs.readFileSync(tp, "utf8");
+            if (ecChromeBarHubs.has(e.id)) {
+                // ProjectChromeBar-owned hub: the bar must stay at exactly one across
+                // installs (no heal re-injects a second bar / breadcrumb / action row).
+                const barCount = hasChromeBarBlock(body);
+                if (barCount !== 1) { idempotent = false; dupTarget = `${e.id}: ProjectChromeBar block count=${barCount} in ${rel} after 2nd install`; break; }
+                continue;
+            }
             const escId = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             const markerCount = (body.match(new RegExp("```dataviewjs[\\s\\S]*?// entity-create:" + escId + "[\\s\\S]*?\\n```", "g")) || []).length;
             if (markerCount !== 1) { idempotent = false; dupTarget = `${e.id}: marker count=${markerCount} in ${rel} after 2nd install`; break; }
