@@ -626,6 +626,78 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V0RDR-SEED-READER-* — reader blueprint seed coverage =====
+    // The seed carries three flat reader-article notes under spice/reader/ with
+    // DISTINCT statuses (unread / reading / archived) and distinct captured_at
+    // timestamps. The reader-hub note (spice/reader/Reader.md) is deliberately NOT
+    // seeded — the installer's files[] (content/Reader Hub.md) + applyReaderScaffoldHeal
+    // must produce it, so these asserts exercise that scaffold/heal path end-to-end.
+    // These asserts verify that after install:
+    //   1. The hub note exists with the ReaderQueue chrome (scaffold + heal ran).
+    //   2. The three seed articles survive with type: reader-article.
+    //   3. Their frontmatter status values survive (one archived, one unread).
+    {
+        // READER-1: the reader-hub was scaffolded/healed and carries the ReaderQueue
+        // chrome block (proves files[] install + applyReaderScaffoldHeal produced it —
+        // it is NOT in the seed).
+        let readerHubBody = "";
+        let readerHubFm = {};
+        try {
+            readerHubBody = helpers.readNote(vault, "spice/reader/Reader.md");
+            readerHubFm = helpers.parseFrontmatter(readerHubBody).frontmatter;
+        } catch (e) {}
+        ok(
+            "HC-V0RDR-SEED-READER-1 spice/reader/Reader.md exists (scaffolded) with type: reader-hub and ReaderQueue chrome",
+            helpers.fileExists(vault, "spice/reader/Reader.md") &&
+                readerHubFm.type === "reader-hub" &&
+                /class:\s*"ReaderQueue"/.test(readerHubBody),
+            `type=${readerHubFm.type} hasQueue=${/class:\s*"ReaderQueue"/.test(readerHubBody)}`
+        );
+
+        // READER-2: all three seed articles survive install with type: reader-article.
+        const articleRels = [
+            "spice/reader/The Unix Philosophy Revisited.md",
+            "spice/reader/Notes on Distributed Consensus.md",
+            "spice/reader/A History of the Modular Synthesizer.md",
+        ];
+        const articleFms = {};
+        for (const rel of articleRels) {
+            try { articleFms[rel] = helpers.parseFrontmatter(helpers.readNote(vault, rel)).frontmatter; }
+            catch (e) { articleFms[rel] = {}; }
+        }
+        const allExist = articleRels.every((rel) => helpers.fileExists(vault, rel));
+        const allTyped = articleRels.every((rel) => articleFms[rel].type === "reader-article");
+        ok(
+            "HC-V0RDR-SEED-READER-2 all three seed articles survive with type: reader-article",
+            allExist && allTyped,
+            `exist=${allExist} typed=${articleRels.map((r) => articleFms[r].type).join(",")}`
+        );
+
+        // READER-3: distinct statuses survived install (proves article frontmatter is
+        // preserved, not rewritten) — one unread, one reading, one archived.
+        const statuses = articleRels.map((rel) => articleFms[rel].status);
+        const hasUnread = statuses.includes("unread");
+        const hasReading = statuses.includes("reading");
+        const hasArchived = statuses.includes("archived");
+        ok(
+            "HC-V0RDR-SEED-READER-3 seed article statuses survive (unread + reading + archived all present)",
+            hasUnread && hasReading && hasArchived,
+            `statuses=${JSON.stringify(statuses)}`
+        );
+
+        // READER-4: the entity-create-registry carries the reader-article contribution
+        // (proves the reader blueprint's new_entity_buttons registered on install).
+        let ecReg = null;
+        try { ecReg = helpers.readJson(vault, "ranch/entity-create-registry.json"); } catch (e) {}
+        const readerEc = ecReg && ecReg.contributions && ecReg.contributions.reader;
+        const readerEcIds = readerEc ? readerEc.map((e) => e.id) : [];
+        ok(
+            "HC-V0RDR-SEED-READER-4 entity-create-registry has the reader-article contribution",
+            readerEcIds.includes("reader-article"),
+            `reader contributions=${JSON.stringify(readerEcIds)}`
+        );
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
