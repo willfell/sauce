@@ -1029,6 +1029,85 @@ function seedVault(setup) {
 })();
 
 // -------------------------------------------------------------------------
+// EC-PROJSLUG-1..4 — project_slug fallback for notes invoked directly from the
+// project-hub (atlas) note. That note's identity IS its folder, so it never
+// carries a project_slug frontmatter field (only its docs-hub/section-hub/
+// doc-note descendants do, stamped at project-creation time). ProjectChromeBar
+// added a "+ New Doc" overflow action reachable straight from the project-hub;
+// before this fix, {{current_file.frontmatter.project_slug}} resolved empty
+// there, collapsing the doc-note destination folder_prefix
+// "spice/projects/{{...project_slug}}/docs/..." to "spice/projects/docs/..."
+// (root-caused via a live vault repro: "+ New Doc" from a project hub created
+// spice/projects/docs/knowledge/<title>.md instead of
+// spice/projects/<slug>/docs/knowledge/<title>.md).
+// -------------------------------------------------------------------------
+
+// 1. _projectSlugFromPath derives the slug segment right after spice/projects/.
+ok("EC-PROJSLUG-1 _projectSlugFromPath derives the slug from a project path",
+    inst._projectSlugFromPath("spice/projects/global-k8s/Global K8s.md") === "global-k8s"
+    && inst._projectSlugFromPath("spice/projects/global-k8s/docs/knowledge/Testing.md") === "global-k8s"
+    && inst._projectSlugFromPath("spice/wiki/Some Page.md") === null);
+
+// 2. _readCurrentFrontmatter falls back to the path-derived slug when the
+// project-hub note's own frontmatter has no project_slug field at all.
+{
+    const cf = {
+        type: "project",
+        file: { path: "spice/projects/global-k8s/Global K8s.md", frontmatter: { type: "project" } },
+    };
+    const v = inst._readCurrentFrontmatter(baseCtx({ current_file: cf }), "project_slug");
+    ok("EC-PROJSLUG-2 _readCurrentFrontmatter(project_slug) falls back to the path-derived slug on a project-hub note",
+        v === "global-k8s", `got ${JSON.stringify(v)}`);
+}
+
+// 3. End-to-end: the doc-note destination folder_prefix template resolves
+// correctly when {{current_file}} is the project-hub note itself (the exact
+// regression scenario), not just when invoked from a docs-hub/section-hub
+// descendant that already carries project_slug.
+{
+    const dest = {
+        folder_prefix: "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}",
+        filename_prefix: "{{prompts.title}}",
+    };
+    const cf = {
+        type: "project",
+        file: { path: "spice/projects/global-k8s/Global K8s.md", frontmatter: { type: "project" } },
+    };
+    const ctx = baseCtx({ current_file: cf, prompts: { title: "Testing out a doc", section_slug: "knowledge" } });
+    const folder = inst._substitute(inst._destFolder(dest), ctx);
+    const full = inst._substitute(inst._joinDestination(dest), ctx);
+    ok("EC-PROJSLUG-3 doc-note destination resolves under the project's OWN folder from a project-hub note",
+        folder === "spice/projects/global-k8s/docs/knowledge"
+        && full === "spice/projects/global-k8s/docs/knowledge/Testing out a doc.md",
+        `folder=${JSON.stringify(folder)} full=${JSON.stringify(full)}`);
+}
+
+// 4. _resolveOptionsSource("current_project_sections") discovers sections via
+// the path-derived slug (not the atlas note's display-name basename, which can
+// differ from the folder slug, e.g. "Global K8s" vs "global-k8s") when invoked
+// directly on the project-hub note.
+{
+    const makeDv = (hubPages) => ({
+        current: () => ({ type: "project", file: { path: "spice/projects/global-k8s/Global K8s.md", name: "Global K8s" } }),
+        pages(source) {
+            let a = (source === '"spice/projects/global-k8s/docs"') ? hubPages.slice() : [];
+            const c = {
+                where(f) { a = a.filter(f); return c; },
+                map(f) { a = a.map(f); return c; },
+                [Symbol.iterator]() { return a[Symbol.iterator](); },
+            };
+            return c;
+        },
+    });
+    const dv = makeDv([
+        { type: "section-hub", depth: 1, section: "Knowledge", file: { name: "Knowledge" } },
+    ]);
+    const opts = inst._resolveOptionsSource("current_project_sections", dv);
+    ok("EC-PROJSLUG-4 current_project_sections discovers sections via the path-derived slug on a project-hub note",
+        JSON.stringify(opts) === JSON.stringify(["Knowledge"]), `got ${JSON.stringify(opts)}`);
+}
+
+// -------------------------------------------------------------------------
 // Drain pending promises before exiting. The audit walker tests + _loadSpec
 // tests are async; we await one tick by deferring the summary via setImmediate
 // chained twice to flush microtasks.

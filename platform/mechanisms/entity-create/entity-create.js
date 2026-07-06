@@ -353,7 +353,8 @@ class EntityCreate {
                 // resolver only read sections[] frontmatter, so newly-created
                 // sections didn't appear in the + New Doc picker until the project
                 // note was manually updated. Filesystem is source of truth.
-                const projectSlug = cur.project_slug || (cur.type === "project" ? (cur.file && cur.file.name) : null);
+                const projectSlug = cur.project_slug
+                    || (cur.type === "project" ? this._projectSlugFromPath(cur.file && cur.file.path) : null);
                 if (!projectSlug) return [];
                 const docsRoot = `spice/projects/${projectSlug}/docs`;
                 const discovered = new Set();
@@ -736,7 +737,29 @@ class EntityCreate {
         if (cf.file && cf.file.frontmatter && Object.prototype.hasOwnProperty.call(cf.file.frontmatter, key)) {
             return this._coerceFrontmatterValue(cf.file.frontmatter[key]);
         }
+        // project_slug fallback: the project-hub (atlas) note's own identity IS
+        // its folder, so it never carries a project_slug frontmatter field
+        // (only its docs-hub/section-hub/doc-note descendants do, stamped at
+        // project-creation time). Invoking "+ New Doc" directly from the
+        // project-hub — a surface ProjectChromeBar added — left this key
+        // unresolved, collapsing the destination folder_prefix
+        // "spice/projects/{{current_file.frontmatter.project_slug}}/docs/..."
+        // to "spice/projects/docs/..." (empty slug segment). Every note under
+        // spice/projects/<slug>/... can recover the slug from its own path, so
+        // fall back to that for this key specifically.
+        if (key === "project_slug") {
+            const slug = this._projectSlugFromPath(cf.file && cf.file.path);
+            if (slug) return slug;
+        }
         return null;
+    }
+
+    // Derive the project slug from a vault path of the form
+    // "spice/projects/<slug>/...". Returns null when the path doesn't match.
+    _projectSlugFromPath(filePath) {
+        if (typeof filePath !== "string") return null;
+        const m = filePath.match(/(?:^|\/)spice\/projects\/([^/]+)\//);
+        return m ? m[1] : null;
     }
 
     _coerceFrontmatterValue(v) {

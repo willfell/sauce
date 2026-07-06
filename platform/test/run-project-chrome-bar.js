@@ -499,8 +499,51 @@ function allDescendants(el) {
     const hasCurrentDest = projEntries.some((e) => e._navTarget === docsHubPath || e.label === 'Docs');
     ok('PCB-NAV-1f current surface (Docs) omitted from project destinations', !hasCurrentDest);
 
+    await runNav2();
     finish();
   })();
+}
+
+// ── PCB-NAV-2 — vault destination icons resolve via customJS.Icons ──────────
+// Regression: the "home" vault destination's icon came back blank in the real
+// Go ▾ launcher because Icons had no Tier-1 entry for "home" (unlike to-do/
+// scratch/project/meetings, which all did) — _navEntries' iconFor() degrades
+// to "" on any resolve failure, so the button silently rendered no icon at
+// all (not an error, just a blank slot). Lock that a registered Icons.resolve
+// is actually consulted per vault entry and its result flows through.
+async function runNav2() {
+  const registryJson = JSON.stringify({
+    schema_version: 1,
+    contributions: {
+      home: [{ id: 'home-open', label: 'Home', icon: 'home', order: 40, action: { type: 'invoke_command', command_id: 'homepage:open-homepage' } }],
+    },
+  });
+  const prevApp = global.app;
+  const prevCustomJS = global.customJS;
+  global.app = {
+    isMobile: false,
+    vault: {
+      adapter: { read: async (p) => (p === 'ranch/nav-buttons-registry.json' ? registryJson : (() => { throw new Error('ENOENT'); })()) },
+      getAbstractFileByPath: () => null,
+    },
+    workspace: { openLinkText: () => {} },
+  };
+  const resolveCalls = [];
+  global.customJS = {
+    SpaceNavButtons: { _dispatchAction: () => {} },
+    Icons: { resolve: (name) => { resolveCalls.push(name); return name === 'home' ? '<svg>home</svg>' : null; } },
+  };
+
+  const ctx = { context: 'projects-hub' };
+  const dv = { current: () => ({ file: { path: 'spice/projects/Projects.md' } }) };
+  const entries = await inst._navEntries(dv, ctx);
+  global.app = prevApp;
+  global.customJS = prevCustomJS;
+
+  const homeEntry = entries.find((e) => e && e.label === 'Home');
+  ok('PCB-NAV-2a Icons.resolve is consulted for the "home" vault destination', resolveCalls.includes('home'));
+  ok('PCB-NAV-2b the "Home" launcher entry carries a non-empty icon',
+    !!(homeEntry && homeEntry.icon && homeEntry.icon.length > 0), `got icon=${JSON.stringify(homeEntry && homeEntry.icon)}`);
 }
 
 // ── render() cases run after the async NAV block; defer the summary. ──────────
@@ -564,6 +607,14 @@ function runRenderCases() {
 
   const restore = () => { global.app = prevApp; global.customJS = prevCustomJS; global.activeDocument = prevActiveDocument; };
 
+  // The bar's 3 controls (Go ▾ / primary / ⋯) are rendered via the bar's own
+  // _renderChromeButton (icon-first, Go/⋯ icon-only — no "Go"/"⋯" text), NOT
+  // customJS.AccentButton, so render-case detection below finds them by their
+  // pcb-btn-{go,primary,dots} class in the real DOM tree rather than spying on
+  // accentCalls labels.
+  const findByVariant = (container, variant) =>
+    allDescendants(container).find((e) => e.className && String(e.className).includes(`pcb-btn-${variant}`));
+
   // PCB-RENDER-1 — doc-note (leaf): breadcrumb + Go ▾ + ⋯, NO primary.
   const doDocNote = () => {
     accentCalls.length = 0; popoverCalls.length = 0;
@@ -573,12 +624,10 @@ function runRenderCases() {
       current: () => ({ file: { path: 'spice/projects/connectors/docs/Some Doc.md', name: 'Some Doc' }, type: 'doc-note' }),
     };
     return inst.render(dv).then(() => {
-      const labels = accentCalls.map((c) => c.label);
-      const hasGo = labels.some((l) => /Go/.test(l));
-      const hasDots = labels.some((l) => l === '⋯');
-      // NO primary button labelled New * on a leaf surface.
-      const hasPrimary = labels.some((l) => /^New /.test(l) || /workstream/i.test(l) || /Add link/.test(l));
       const desc = allDescendants(container);
+      const hasGo = !!findByVariant(container, 'go');
+      const hasDots = !!findByVariant(container, 'dots');
+      const hasPrimary = !!findByVariant(container, 'primary');
       const hasBreadcrumbDiv = desc.some((e) => e.className && String(e.className).includes('project-breadcrumb'));
       ok('PCB-RENDER-1a doc-note renders a Go ▾ control', hasGo);
       ok('PCB-RENDER-1b doc-note renders a ⋯ overflow control', hasDots);
@@ -596,10 +645,11 @@ function runRenderCases() {
       current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }),
     };
     return inst.render(dv).then(() => {
-      const labels = accentCalls.map((c) => c.label);
-      ok('PCB-RENDER-2a docs-hub renders primary "New Doc"', labels.some((l) => l === 'New Doc'));
-      ok('PCB-RENDER-2b docs-hub renders a Go ▾ control', labels.some((l) => /Go/.test(l)));
-      ok('PCB-RENDER-2c docs-hub renders a ⋯ overflow control', labels.some((l) => l === '⋯'));
+      const primaryBtn = findByVariant(container, 'primary');
+      ok('PCB-RENDER-2a docs-hub renders primary "New Doc"',
+        !!primaryBtn && String(primaryBtn.innerHTML).includes('New Doc'));
+      ok('PCB-RENDER-2b docs-hub renders a Go ▾ control', !!findByVariant(container, 'go'));
+      ok('PCB-RENDER-2c docs-hub renders a ⋯ overflow control', !!findByVariant(container, 'dots'));
     });
   };
 
@@ -612,10 +662,10 @@ function runRenderCases() {
       current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }),
     };
     return inst.render(dv).then(async () => {
-      const goBtn = accentCalls.find((c) => /Go/.test(c.label));
-      ok('PCB-RENDER-3a a Go ▾ control with an onClick exists', !!(goBtn && typeof goBtn.onClick === 'function'));
-      if (goBtn && typeof goBtn.onClick === 'function') {
-        await goBtn.onClick();
+      const goBtn = findByVariant(container, 'go');
+      ok('PCB-RENDER-3a a Go ▾ control with an onClick exists', !!(goBtn && typeof goBtn.onclick === 'function'));
+      if (goBtn && typeof goBtn.onclick === 'function') {
+        await goBtn.onclick();
       }
       ok('PCB-RENDER-3b clicking Go ▾ calls MenuPopover.open exactly once', popoverCalls.length === 1);
       const passed = popoverCalls[0] && popoverCalls[0].entries;
@@ -623,6 +673,37 @@ function runRenderCases() {
         && passed.some((e) => e && e.section === 'This project')
         && passed.some((e) => e && e.section === 'Vault');
       ok('PCB-RENDER-3c Go ▾ entries include the section markers', hasMarkers);
+    });
+  };
+
+  // PCB-STYLE-1 — the bar's visual redesign: icon-only Go/⋯ (no "Go"/"⋯" text),
+  // a header→content gap (≥10px root bottom margin), and the hover-lift +
+  // press-scale micro-motion (transition + mousedown/mouseup wiring) on all 3
+  // controls, mirroring the Home "+" button's animated feel.
+  const doStyleChecks = () => {
+    accentCalls.length = 0; popoverCalls.length = 0;
+    const container = makeEl('div');
+    const dv = {
+      container,
+      current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }),
+    };
+    return inst.render(dv).then(() => {
+      const root = container.children.find((e) => e.className && String(e.className).includes('pcb-root'));
+      ok('PCB-STYLE-1a .pcb-root carries a >= 10px bottom margin (header→content gap)',
+        !!root && /margin-bottom:\s*(\d+)px/.exec(root.style.cssText) && Number(/margin-bottom:\s*(\d+)px/.exec(root.style.cssText)[1]) >= 10);
+
+      const goBtn = findByVariant(container, 'go');
+      const dotsBtn = findByVariant(container, 'dots');
+      const primaryBtn = findByVariant(container, 'primary');
+      ok('PCB-STYLE-1b Go ▾ control is icon-only — no "Go" text in its markup',
+        !!goBtn && !/>Go</.test(goBtn.innerHTML) && !/^Go$/.test(String(goBtn.innerHTML).trim()));
+      ok('PCB-STYLE-1c ⋯ control is icon-only — no literal "⋯" glyph in its markup',
+        !!dotsBtn && !dotsBtn.innerHTML.includes('⋯'));
+      ok('PCB-STYLE-1d all 3 controls carry a CSS transition (animated, not instant)',
+        [goBtn, dotsBtn, primaryBtn].every((b) => b && /transition:/.test(b.style.cssText)));
+      ok('PCB-STYLE-1e all 3 controls wire hover-lift + press-scale handlers',
+        [goBtn, dotsBtn, primaryBtn].every((b) => b
+          && typeof b.onmouseenter === 'function' && typeof b.onmousedown === 'function' && typeof b.onmouseup === 'function'));
     });
   };
 
@@ -651,6 +732,7 @@ function runRenderCases() {
   return doDocNote()
     .then(doDocsHub)
     .then(doGoClick)
+    .then(doStyleChecks)
     .then(doCrumbClick)
     .then(() => { restore(); return dispatch8Fn(); })
     .then(() => { summarize(); })

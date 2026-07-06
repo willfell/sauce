@@ -56,6 +56,9 @@ class ProjectChromeBar {
       gear: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h2l.4 2.3a7 7 0 0 1 2 1.2l2.2-.9 1 1.7-1.7 1.5a7 7 0 0 1 0 2.4l1.7 1.5-1 1.7-2.2-.9a7 7 0 0 1-2 1.2L13 20h-2l-.4-2.3a7 7 0 0 1-2-1.2l-2.2.9-1-1.7 1.7-1.5a7 7 0 0 1 0-2.4L3.4 8.3l1-1.7 2.2.9a7 7 0 0 1 2-1.2z"/><circle cx="12" cy="12" r="3"/></svg>`,
       move: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 11 15 14"/></svg>`,
       sort: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>`,
+      compass: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>`,
+      chevronDown: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+      moreHorizontal: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
     };
   }
 
@@ -735,8 +738,58 @@ class ProjectChromeBar {
     } catch (_e) { /* never throw */ }
   }
 
+  // ── _renderChromeButton — the bar's own button look ─────────────────────────
+  // A tighter, more professional take on AccentButton's outline-accent look,
+  // used ONLY by the bar's 3 controls (Go ▾ / primary / ⋯) while this look is
+  // trialed before wider adoption: shorter (32px) + wider (more horizontal
+  // padding) than AccentButton's touch-sized 44px, icon-only when `label` is
+  // omitted (the Go launcher drops its old "Go" text for a compass glyph), and
+  // adds the hover-lift + press-scale micro-motion the Home "+" button uses
+  // (sauce-home.css `--sh-ease` / `--sh-spring` timing curves) — a hover
+  // background fill + shadow lift, and a mousedown/mouseup press-scale.
+  // `variant` is a bare CSS class suffix (go / primary / dots) so callers
+  // (and tests) can find a specific control without depending on its label.
+  _renderChromeButton(parent, opts) {
+    const btn = parent.createEl("button", { cls: `pcb-btn pcb-btn-${opts.variant || "default"}` });
+    const hasLabel = !!opts.label;
+    const iconHtml = opts.icon || "";
+    const labelHtml = hasLabel
+      ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${opts.label}</span>`
+      : "";
+    btn.innerHTML = iconHtml + labelHtml;
+    const EASE = "cubic-bezier(0.2, 0.9, 0.25, 1)";
+    btn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center;"
+      + " gap: 6px; height: 32px; box-sizing: border-box;"
+      + ` padding: 0 ${hasLabel ? "16" : "12"}px;`
+      + (hasLabel ? "" : " min-width: 38px;")
+      + " border-radius: 8px; border: 1px solid var(--interactive-accent);"
+      + " background: var(--background-primary); color: var(--interactive-accent);"
+      + " font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em;"
+      + " overflow: hidden; transform: scale(1); box-shadow: none;"
+      + ` transition: background 0.15s ${EASE}, color 0.15s ${EASE}, border-color 0.15s ${EASE},`
+      + ` box-shadow 0.15s ${EASE}, transform 0.15s ${EASE};`;
+    btn.onmouseenter = () => {
+      if (btn.disabled) return;
+      btn.style.background = "var(--interactive-accent)";
+      btn.style.color = "var(--text-on-accent)";
+      btn.style.boxShadow = "0 2px 10px rgba(0, 0, 0, 0.14)";
+    };
+    btn.onmouseleave = () => {
+      if (btn.disabled) return;
+      btn.style.background = "var(--background-primary)";
+      btn.style.color = "var(--interactive-accent)";
+      btn.style.boxShadow = "none";
+      btn.style.transform = "scale(1)";
+    };
+    btn.onmousedown = () => { if (!btn.disabled) btn.style.transform = "scale(0.94)"; };
+    btn.onmouseup = () => { if (!btn.disabled) btn.style.transform = "scale(1)"; };
+    btn.onclick = opts.onClick;
+    return btn;
+  }
+
   // ── render — the single chrome bar ─────────────────────────────────────────
   async render(dv) {
+    const ICON = ProjectChromeBar.ICON;
     // Cold-load guard (mirror doc-leaf-actions.js): bail on missing page/file or
     // an embedded render context.
     const page = customJS.RenderSafe.page(dv);
@@ -759,6 +812,10 @@ class ProjectChromeBar {
       if (prev && prev.remove) prev.remove();
     } catch (_e) { /* best-effort */ }
     const root = container0.createEl("div", { cls: "pcb-root" });
+    // At least 10px between the bar and whatever the template renders next
+    // (status widgets, panels, indexes …) — pre-redesign the bar had zero
+    // bottom margin and butted directly against the next block.
+    root.style.cssText = "margin-bottom: 12px;";
 
     // Single flex bar: breadcrumb left, controls right.
     const bar = root.createEl("div");
@@ -801,21 +858,11 @@ class ProjectChromeBar {
     const right = bar.createEl("div");
     right.style.cssText = "margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
 
-    // Touch-target sizing: every control ≥44px tall (padding). Applied after the
-    // AccentButton base so it wins.
-    const touch = (btn) => {
-      if (btn && btn.style) {
-        btn.style.minHeight = "44px";
-        btn.style.padding = "9px 14px";
-      }
-      return btn;
-    };
-
-    // 1. Go ▾ launcher.
-    const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
-    const goBtn = touch(customJS.AccentButton.render(right, {
-      label: "Go",
-      icon: chevronDown,
+    // 1. Go ▾ launcher — icon-only (compass + a small caret), no "Go" text.
+    const goIcon = `<span style="display:inline-flex;align-items:center;gap:2px;">${ICON.compass}${ICON.chevronDown}</span>`;
+    const goBtn = this._renderChromeButton(right, {
+      variant: "go",
+      icon: goIcon,
       onClick: async () => {
         try {
           const navEntries = await this._navEntries(dv, ctx);
@@ -824,23 +871,24 @@ class ProjectChromeBar {
           }
         } catch (_e) { /* never throw */ }
       },
-    }));
+    });
 
-    // 2. Primary AccentButton — non-leaf surfaces only.
+    // 2. Primary button — non-leaf surfaces only.
     if (!spec.leaf && spec.primary) {
       const p = spec.primary;
-      touch(customJS.AccentButton.render(right, {
+      this._renderChromeButton(right, {
+        variant: "primary",
         label: p.label,
         icon: p.icon,
         onClick: () => this._dispatch(dv, ctx, p.id),
-      }));
+      });
     }
 
     // 3. ⋯ overflow menu — when the surface declares overflow actions.
     if (Array.isArray(spec.overflow) && spec.overflow.length > 0) {
-      const dotsBtn = touch(customJS.AccentButton.render(right, {
-        label: "⋯",
-        icon: "",
+      const dotsBtn = this._renderChromeButton(right, {
+        variant: "dots",
+        icon: ICON.moreHorizontal,
         onClick: () => {
           try {
             const menu = spec.overflow.map((o) => ({
@@ -854,7 +902,7 @@ class ProjectChromeBar {
             }
           } catch (_e) { /* never throw */ }
         },
-      }));
+      });
     }
   }
 }
