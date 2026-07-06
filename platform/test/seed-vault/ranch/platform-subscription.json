@@ -100,7 +100,8 @@
     {
       "name": "menu-popover",
       "version": "0.3.0"
-    }
+    },
+    { "name": "chrome-bar", "version": "0.1.0" }
   ],
   "blueprints": [
     {

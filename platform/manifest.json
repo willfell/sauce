@@ -171,7 +171,8 @@
       "name": "menu-popover",
       "version": "0.3.0",
       "path": "mechanisms/menu-popover"
-    }
+    },
+    { "name": "chrome-bar", "version": "0.1.0", "path": "mechanisms/chrome-bar" }
   ],
   "blueprints": [
     {
