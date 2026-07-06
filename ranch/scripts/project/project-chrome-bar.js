@@ -440,35 +440,51 @@ class ProjectChromeBar {
     }
 
     // ── Vault ─────────────────────────────────────────────────────────────────
-    // Pinned registry sources, in the SpaceNavButtons PINNED_SOURCES order. Read
-    // ranch/nav-buttons-registry.json; openLink actions resolve to openLinkText,
-    // everything else delegates to SpaceNavButtons._dispatchAction so Templater /
-    // command actions behave identically to the vault nav bar.
+    // EVERY registered blueprint/mechanism source in the registry, not just
+    // SpaceNavButtons' 5 PINNED_SOURCES — that pin list exists ONLY because
+    // SpaceNavButtons' vault-wide nav bar is a fixed 3x2 grid with limited
+    // visible slots (the rest live behind its own "Go to…" overflow). The
+    // Go ▾ launcher here is already a dropdown with no such constraint, so it
+    // lists everything (daily, cowork, people, wiki, reader, … alongside
+    // home/to-do/scratch/project/meetings), ordered the same way
+    // SpaceNavButtons orders its own entries: (order, source, id). Read
+    // ranch/nav-buttons-registry.json; openLink actions resolve to
+    // openLinkText, everything else delegates to SpaceNavButtons._dispatchAction
+    // so Templater / command actions behave identically to the vault nav bar.
     let registry = null;
     try {
       const raw = await app.vault.adapter.read("ranch/nav-buttons-registry.json");
       registry = JSON.parse(raw);
     } catch (_e) { registry = null; }
 
-    const PINNED = ["home", "to-do", "scratch", "project", "meetings"];
     const vaultDests = [];
     if (registry && registry.contributions && typeof registry.contributions === "object") {
       const iconFor = (name) => {
         try { return (customJS.Icons && customJS.Icons.resolve && customJS.Icons.resolve(name)) || ""; }
         catch (_e) { return ""; }
       };
-      for (const src of PINNED) {
-        const list = registry.contributions[src];
+      // First entry per source claims the slot (mirrors SpaceNavButtons'
+      // _partitionEntries firstBySource rule), ordered by (order, source, id)
+      // so this list matches the vault-wide nav's canonical ordering.
+      const bySource = [];
+      for (const [src, list] of Object.entries(registry.contributions)) {
         if (!Array.isArray(list) || list.length === 0) continue;
-        const entry = list[0]; // first entry per source claims the pin slot
-        const action = (entry && entry.action) || {};
-        const label = entry.label || src;
+        bySource.push({ ...list[0], _source: src });
+      }
+      bySource.sort((a, b) =>
+        (a.order ?? 100) - (b.order ?? 100)
+        || a._source.localeCompare(b._source)
+        || String(a.id || "").localeCompare(String(b.id || "")));
+
+      for (const entry of bySource) {
+        const action = entry.action || {};
+        const label = entry.label || entry._source;
         const icon = iconFor(entry.icon);
         if (action.type === "openLink" && action.target) {
           const target = action.target;
           vaultDests.push({ label, icon, onSelect: () => open(target) });
         } else {
-          const dispatchEntry = { ...entry, _source: src };
+          const dispatchEntry = entry;
           vaultDests.push({ label, icon, onSelect: () => {
             try {
               if (customJS && customJS.SpaceNavButtons && typeof customJS.SpaceNavButtons._dispatchAction === "function") {

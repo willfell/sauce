@@ -500,6 +500,7 @@ function allDescendants(el) {
     ok('PCB-NAV-1f current surface (Docs) omitted from project destinations', !hasCurrentDest);
 
     await runNav2();
+    await runNav3();
     finish();
   })();
 }
@@ -544,6 +545,57 @@ async function runNav2() {
   ok('PCB-NAV-2a Icons.resolve is consulted for the "home" vault destination', resolveCalls.includes('home'));
   ok('PCB-NAV-2b the "Home" launcher entry carries a non-empty icon',
     !!(homeEntry && homeEntry.icon && homeEntry.icon.length > 0), `got icon=${JSON.stringify(homeEntry && homeEntry.icon)}`);
+}
+
+// ── PCB-NAV-3 — Vault section lists EVERY registered source, not just
+// SpaceNavButtons' 5 PINNED_SOURCES. That pin list exists only because
+// SpaceNavButtons' vault-wide nav bar is a fixed 3x2 grid with limited visible
+// slots; the Go ▾ launcher is already a plain dropdown with no such
+// constraint, so daily/cowork/people/wiki/reader (previously entirely absent)
+// must appear alongside home/to-do/scratch/project/meetings, ordered by
+// (order, source, id) — the same ordering SpaceNavButtons itself uses.
+async function runNav3() {
+  const registryJson = JSON.stringify({
+    schema_version: 1,
+    contributions: {
+      project:  [{ id: 'projects-hub', label: 'Projects', icon: 'projects', order: 100, action: { type: 'openLink', target: 'spice/projects/Projects.md' } }],
+      daily:    [{ id: 'daily-open', label: 'Daily', icon: 'daily', order: 50, action: { type: 'openLink', target: 'spice/daily/Daily.md' } }],
+      meetings: [{ id: 'meetings-open', label: 'Meetings', icon: 'meetings', order: 120, action: { type: 'openLink', target: 'spice/meetings/Meetings.md' } }],
+      scratch:  [{ id: 'scratch-open', label: 'Scratch', icon: 'scratch', order: 130, action: { type: 'openLink', target: 'spice/scratch/Scratch.md' } }],
+      cowork:   [{ id: 'cowork-open', label: 'Cowork', icon: 'briefcase', order: 51, action: { type: 'openLink', target: 'spice/cowork/Cowork.md' } }],
+      people:   [{ id: 'people-open', label: 'People', icon: 'people', order: 60, action: { type: 'openLink', target: 'spice/people/People.md' } }],
+      'to-do':  [{ id: 'todo-today', label: 'To Do', icon: 'todo', order: 110, action: { type: 'openLink', target: 'spice/to-do/Today To-Do.md' } }],
+      wiki:     [{ id: 'wiki-open', label: 'Wiki', icon: 'journal', order: 135, action: { type: 'openLink', target: 'spice/wiki/Wiki.md' } }],
+      home:     [{ id: 'home-open', label: 'Home', icon: 'home', order: 40, action: { type: 'invoke_command', command_id: 'homepage:open-homepage' } }],
+      reader:   [{ id: 'reader-open', label: 'Reader', icon: 'book-open', order: 140, action: { type: 'openLink', target: 'spice/reader/Reader.md' } }],
+    },
+  });
+  const prevApp = global.app;
+  const prevCustomJS = global.customJS;
+  global.app = {
+    isMobile: false,
+    vault: {
+      adapter: { read: async (p) => (p === 'ranch/nav-buttons-registry.json' ? registryJson : (() => { throw new Error('ENOENT'); })()) },
+      getAbstractFileByPath: () => null,
+    },
+    workspace: { openLinkText: () => {} },
+  };
+  global.customJS = { SpaceNavButtons: { _dispatchAction: () => {} }, Icons: { resolve: () => '<svg/>' } };
+
+  const ctx = { context: 'projects-hub' };
+  const dv = { current: () => ({ file: { path: 'spice/projects/Projects.md' } }) };
+  const entries = await inst._navEntries(dv, ctx);
+  global.app = prevApp;
+  global.customJS = prevCustomJS;
+
+  const vaultIdx = entries.findIndex((e) => e && e.section === 'Vault');
+  const vaultEntries = entries.slice(vaultIdx + 1).filter((e) => e && !('section' in e));
+  const labels = vaultEntries.map((e) => e.label);
+  const expectedAll = ['Home', 'Daily', 'Cowork', 'People', 'Projects', 'To Do', 'Meetings', 'Scratch', 'Wiki', 'Reader'];
+  ok('PCB-NAV-3a Vault section includes all 10 registered sources (not just the 5 SpaceNavButtons pins)',
+    expectedAll.every((l) => labels.includes(l)), `got ${JSON.stringify(labels)}`);
+  ok('PCB-NAV-3b Vault section is ordered by (order, source, id), matching SpaceNavButtons',
+    JSON.stringify(labels) === JSON.stringify(expectedAll), `got ${JSON.stringify(labels)}`);
 }
 
 // ── render() cases run after the async NAV block; defer the summary. ──────────
