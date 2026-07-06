@@ -33,6 +33,11 @@ const ProjectChromeBar = loadClass(
   'platform/blueprints/project/helpers/project-chrome-bar.js',
   'ProjectChromeBar'
 );
+// The bar now delegates its render + Vault-section to the shared chrome-bar
+// mechanism, which delegates ordering to nav-buttons. Load both REAL classes so
+// the render + _navEntries cases exercise the true end-to-end wiring (not stubs).
+const ChromeBar = loadClass('platform/mechanisms/chrome-bar/chrome-bar.js', 'ChromeBar');
+const SpaceNavButtons = loadClass('platform/mechanisms/nav-buttons/space-nav-buttons.js', 'SpaceNavButtons');
 
 const results = [];
 const ok = (n, c) => { results.push([n, !!c]); console.log(`  ${c ? 'PASS' : 'FAIL'} — ${n}`); };
@@ -466,7 +471,7 @@ function allDescendants(el) {
     },
     workspace: { openLinkText: (p) => openedLinks.push(p) },
   };
-  global.customJS = { SpaceNavButtons: { _dispatchAction: () => {} } };
+  global.customJS = { ChromeBar: new ChromeBar(), SpaceNavButtons: new SpaceNavButtons() };
 
   const ctx = {
     context: 'docs-hub',
@@ -533,7 +538,8 @@ async function runNav2() {
   };
   const resolveCalls = [];
   global.customJS = {
-    SpaceNavButtons: { _dispatchAction: () => {} },
+    ChromeBar: new ChromeBar(),
+    SpaceNavButtons: new SpaceNavButtons(),
     Icons: { resolve: (name) => { resolveCalls.push(name); return name === 'home' ? '<svg>home</svg>' : null; } },
   };
 
@@ -582,7 +588,7 @@ async function runNav3() {
     },
     workspace: { openLinkText: () => {} },
   };
-  global.customJS = { SpaceNavButtons: { _dispatchAction: () => {} }, Icons: { resolve: () => '<svg/>' } };
+  global.customJS = { ChromeBar: new ChromeBar(), SpaceNavButtons: new SpaceNavButtons(), Icons: { resolve: () => '<svg/>' } };
 
   const ctx = { context: 'projects-hub' };
   const dv = { current: () => ({ file: { path: 'spice/projects/Projects.md' } }) };
@@ -650,7 +656,12 @@ function runRenderCases() {
       },
     },
     MenuPopover: { open: (entries, opts) => { popoverCalls.push({ entries, opts }); return makeEl('div'); } },
-    SpaceNavButtons: { _dispatchAction: () => {} },
+    // The bar delegates its render to the REAL ChromeBar, which delegates the
+    // Vault section to the REAL SpaceNavButtons.firstEntryPerSource — load both so
+    // the render cases exercise true end-to-end wiring + byte-identical DOM.
+    ChromeBar: new ChromeBar(),
+    SpaceNavButtons: new SpaceNavButtons(),
+    Icons: { resolve: () => '<svg/>' },
   };
   // _navEntries reads the registry via app.vault.adapter.read; supply a stub so
   // the Go ▾ click can build entries without throwing.

@@ -76,6 +76,29 @@ ok('NL-ARROW-3 daily blueprint absent → no arrows',
 ok('NL-ARROW-4 empty path → no arrows, no throw',
   SpaceNavButtons._shouldShowDayArrows('', { folder: 'spice/daily' }) === false);
 
+// ── firstEntryPerSource: ONE representative per source, sorted (order, source, id) ──
+{
+  const reg = { contributions: {
+    zeta:  [{ id: 'z1', label: 'Z', order: 100, action: { type: 'openLink', target: 'z.md' } }],
+    alpha: [{ id: 'a1', label: 'A', order: 100, action: { type: 'openLink', target: 'a.md' } },
+            { id: 'a2', label: 'A2', order: 100, action: { type: 'openLink', target: 'a2.md' } }],
+    mid:   [{ id: 'm1', label: 'M', order: 50,  action: { type: 'openLink', target: 'm.md' } }],
+  } };
+  const reps = inst.firstEntryPerSource(reg);
+  ok('NL-FEPS-1 one entry per source (a source with 2 contributions yields 1 rep)',
+    reps.length === 3);
+  ok('NL-FEPS-2 each rep is tagged with its _source',
+    reps.every((r) => typeof r._source === 'string') &&
+    reps.filter((r) => r._source === 'alpha').length === 1);
+  ok('NL-FEPS-3 the alpha rep is that source\'s registry list[0] (id a1, not a2)',
+    (reps.find((r) => r._source === 'alpha') || {}).id === 'a1');
+  ok('NL-FEPS-4 ordered by (order, source, id): mid(50) first, then alpha, then zeta',
+    reps[0]._source === 'mid' && reps[1]._source === 'alpha' && reps[2]._source === 'zeta');
+  ok('NL-FEPS-5 empty/absent contributions → []',
+    inst.firstEntryPerSource({}).length === 0 &&
+    inst.firstEntryPerSource({ contributions: {} }).length === 0);
+}
+
 // ── nav_button icon uniqueness + Tier-1 resolvability (Go-to launcher) ──
 // Every nav_button across all manifests must carry a DISTINCT icon so the
 // Go-to launcher never renders two buttons with the same glyph. Regression
