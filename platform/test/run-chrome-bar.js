@@ -43,6 +43,57 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
 
 // ── (Task 3 appends CB-BTN-*, Task 4 CB-VAULT-*, Task 5 CB-RENDER-* here) ──
 // PLACEHOLDER-ANCHOR: additional cases inserted above the summary block below.
+// ── CB-VAULT-1..5 — vaultEntries reads the registry, delegates ordering to
+// SpaceNavButtons.firstEntryPerSource, emits a { section:"Vault", layout:"grid" }
+// marker + one entry per source, openLink→open / else→_dispatchAction, []-when-empty.
+async function cbVaultCases() {
+  const registryJson = JSON.stringify({ schema_version: 1, contributions: {
+    project:  [{ id: 'projects-hub', label: 'Projects', icon: 'projects', order: 100, action: { type: 'openLink', target: 'spice/projects/Projects.md' } }],
+    'to-do':  [{ id: 'todo-today', label: 'To Do', icon: 'todo', order: 110, action: { type: 'runTemplaterTemplate', template_source: 'x' } }],
+  } });
+  const opened = [];
+  const dispatched = [];
+  const prevApp = global.app, prevCJS = global.customJS;
+  global.app = { vault: { adapter: { read: async (p) => (p === 'ranch/nav-buttons-registry.json' ? registryJson : (() => { throw new Error('ENOENT'); })()) } } };
+  global.customJS = {
+    Icons: { resolve: () => '<svg/>' },
+    SpaceNavButtons: {
+      firstEntryPerSource: (reg) => {
+        const reps = [];
+        for (const [src, list] of Object.entries((reg && reg.contributions) || {})) {
+          if (Array.isArray(list) && list.length) reps.push({ ...list[0], _source: src });
+        }
+        return reps.sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a._source.localeCompare(b._source));
+      },
+      _dispatchAction: (entry) => dispatched.push(entry),
+    },
+  };
+  const entries = await inst.vaultEntries({ current: () => ({ file: { path: 'x.md' } }) }, (p) => opened.push(p));
+
+  ok('CB-VAULT-1 first element is the { section:"Vault", layout:"grid" } marker',
+    entries[0] && entries[0].section === 'Vault' && entries[0].layout === 'grid');
+  const rows = entries.filter((e) => e && !('section' in e));
+  ok('CB-VAULT-2 one row per registry source', rows.length === 2);
+  ok('CB-VAULT-3 every row carries an onSelect handler', rows.every((e) => typeof e.onSelect === 'function'));
+  const projRow = rows.find((e) => e.label === 'Projects');
+  const todoRow = rows.find((e) => e.label === 'To Do');
+  // Invoke onSelect while the customJS stub is STILL installed — vaultEntries reads
+  // customJS.SpaceNavButtons._dispatchAction lazily inside the closure (verbatim to
+  // the source), so restore globals only AFTER these calls.
+  if (projRow) projRow.onSelect();
+  if (todoRow) todoRow.onSelect();
+  global.app = prevApp; global.customJS = prevCJS;
+  ok('CB-VAULT-4 openLink→open(target), non-openLink→_dispatchAction',
+    opened.length === 1 && opened[0] === 'spice/projects/Projects.md' && dispatched.length === 1);
+}
+async function cbVaultEmpty() {
+  const prevApp = global.app, prevCJS = global.customJS;
+  global.app = { vault: { adapter: { read: async () => { throw new Error('ENOENT'); } } } };
+  global.customJS = { SpaceNavButtons: { firstEntryPerSource: () => [] }, Icons: { resolve: () => '' } };
+  const entries = await inst.vaultEntries({ current: () => ({ file: { path: 'x.md' } }) }, () => {});
+  global.app = prevApp; global.customJS = prevCJS;
+  ok('CB-VAULT-5 no registry / no sources → [] (no Vault marker)', Array.isArray(entries) && entries.length === 0);
+}
 // ── CB-BTN-1..5 — renderChromeButton: caller-supplied cls, icon-only vs labeled,
 // onClick wiring, hover/press motion handlers.
 {
@@ -71,4 +122,8 @@ function summarize() {
   if (failed.length) { console.error(`FAILED: ${failed.map(([n]) => n).join(', ')}`); process.exit(1); }
   process.exit(0);
 }
-summarize();
+(async () => {
+  await cbVaultCases();
+  await cbVaultEmpty();
+  summarize();
+})();

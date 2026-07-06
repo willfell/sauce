@@ -67,4 +67,58 @@ class ChromeBar {
     btn.onclick = o.onClick;
     return btn;
   }
+
+  // ── vaultEntries — the Go launcher's Vault section ──────────────────────────
+  // Reads ranch/nav-buttons-registry.json (raw — no cache, matching the prior
+  // inline read), delegates ordering to SpaceNavButtons.firstEntryPerSource (the
+  // single ordering rule), maps each source's representative entry to
+  // { label, icon, onSelect } (openLink → open(target); else →
+  // SpaceNavButtons._dispatchAction so Templater/command actions behave exactly
+  // like the vault nav bar), and returns [{ section:"Vault", layout:"grid" },
+  // ...dests] — or [] when the registry is absent/empty. Never throws.
+  async vaultEntries(dv, open) {
+    let registry = null;
+    try {
+      const raw = await app.vault.adapter.read("ranch/nav-buttons-registry.json");
+      registry = JSON.parse(raw);
+    } catch (_e) { registry = null; }
+
+    const iconFor = (name) => {
+      try { return (customJS.Icons && customJS.Icons.resolve && customJS.Icons.resolve(name)) || ""; }
+      catch (_e) { return ""; }
+    };
+    let reps = [];
+    try {
+      if (customJS && customJS.SpaceNavButtons && typeof customJS.SpaceNavButtons.firstEntryPerSource === "function") {
+        reps = customJS.SpaceNavButtons.firstEntryPerSource(registry) || [];
+      }
+    } catch (_e) { reps = []; }
+
+    const vaultDests = [];
+    for (const entry of reps) {
+      const action = (entry && entry.action) || {};
+      const label = (entry && entry.label) || (entry && entry._source) || "";
+      const icon = iconFor(entry && entry.icon);
+      if (action.type === "openLink" && action.target) {
+        const target = action.target;
+        vaultDests.push({ label, icon, onSelect: () => { try { open(target); } catch (_e) {} } });
+      } else {
+        const dispatchEntry = entry;
+        vaultDests.push({ label, icon, onSelect: () => {
+          try {
+            if (customJS && customJS.SpaceNavButtons && typeof customJS.SpaceNavButtons._dispatchAction === "function") {
+              customJS.SpaceNavButtons._dispatchAction(dispatchEntry, dv);
+            }
+          } catch (_e) { /* never throw */ }
+        } });
+      }
+    }
+
+    const out = [];
+    if (vaultDests.length > 0) {
+      out.push({ section: "Vault", layout: "grid" });
+      for (const d of vaultDests) out.push(d);
+    }
+    return out;
+  }
 }
