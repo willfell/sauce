@@ -150,7 +150,7 @@
     {
       "id": "wiki-hub",
       "label": "Wiki",
-      "icon": "journal",
+      "icon": "library",
       "order": 135,
       "action": {
         "type": "openLink",
