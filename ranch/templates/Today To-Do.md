@@ -23,14 +23,8 @@ await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });
 ```
 
-<!-- TODAY_CAPTURE_MARKER -->
-
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyCarryover" });
+await dv.view("ranch/views/customjs-guard", { class: "TaskTodayList" });
 ```
 
 ```dataviewjs
@@ -43,4 +37,8 @@ await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" })
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyUnassignedMeetings" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TaskDoneTodayList" });
 ```

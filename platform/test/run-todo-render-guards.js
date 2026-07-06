@@ -161,6 +161,23 @@ const variants = [
             });
         }
     }
+    // TaskDoneArchive — cold-load: dependencies not registered, dv.pages empty
+    await guard('TDARCH-RENDER-1 TaskDoneArchive.render() does not throw on cold-load (normal container)', async () => {
+        const TaskDoneArchiveClass = loadWidget('platform/blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive');
+        const w = new TaskDoneArchiveClass();
+        const dv = makeDv(false, null);
+        global.window = { customJS: { RenderSafe: { page: () => null } }, moment: momentFn };
+        await w.render(dv);   // must not throw
+    });
+
+    await guard('TDARCH-RENDER-2 TaskDoneArchive.render() returns early inside .markdown-embed', async () => {
+        const TaskDoneArchiveClass = loadWidget('platform/blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive');
+        const w = new TaskDoneArchiveClass();
+        const dv = makeDv(true, undefined);
+        global.window = { customJS: {} };
+        await w.render(dv);   // must not throw
+    });
+
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();

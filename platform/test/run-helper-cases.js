@@ -7680,9 +7680,9 @@ async function caseHCV01174TodoManifest() {
     "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskParser",
     "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
     "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
-    "ToDoCreateTaskInit", "TodayCaptureEditableList",
+    "ToDoCreateTaskInit", "TodayCaptureEditableList", "TaskDoneArchive",
   ];
-  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 12-element array (order; +TodayCaptureEditableList in v0.127.0)",
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 13-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive)",
     JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
     `got: ${JSON.stringify(m.customjs_classes)}`);
 
