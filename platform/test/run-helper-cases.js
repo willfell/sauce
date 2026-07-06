@@ -8072,7 +8072,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 27, "HC-V0890-VERSION-D: mechanism count = 27 (+menu-popover mechanism, project button-nav refactor)");
+  assertEqual(mechCount, 28, "HC-V0890-VERSION-D: mechanism count = 28 (+chrome-bar mechanism, ProjectChromeBar extraction)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8625,7 +8625,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 27, "HC-V0891-VERSION-D: mechanism count = 27 (+menu-popover mechanism, project button-nav refactor)");
+  assertEqual(mechs.length, 28, "HC-V0891-VERSION-D: mechanism count = 28 (+chrome-bar mechanism, ProjectChromeBar extraction)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
