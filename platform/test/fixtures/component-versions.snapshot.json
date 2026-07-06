@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.194.2",
+  "workshop_version": "0.194.3",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
@@ -7,7 +7,7 @@
     "meetings": "0.16.1",
     "people": "0.6.2",
     "products": "0.3.1",
-    "project": "1.41.0",
+    "project": "1.41.1",
     "to-do": "0.17.1",
     "journal": "0.2.0",
     "trips": "0.5.0",
@@ -32,8 +32,8 @@
     "links": "0.2.0",
     "task-interactions": "0.2.0",
     "open-helpers": "0.1.1",
-    "icons": "0.2.0",
-    "entity-create": "0.8.2",
+    "icons": "0.2.1",
+    "entity-create": "0.8.3",
     "people-rendering": "0.1.0",
     "people-identity": "0.1.0",
     "styling": "0.2.1",
