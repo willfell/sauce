@@ -15,7 +15,8 @@
     "TaskTodayList",
     "TaskNoteView",
     "TaskMeetingList",
-    "TaskProjectList"
+    "TaskProjectList",
+    "TaskDoneTodayList"
   ],
   "files": [
     {
@@ -41,6 +42,10 @@
     {
       "source": "task-project-list.js",
       "dest": "{{scripts_path}}/task-entity/task-project-list.js"
+    },
+    {
+      "source": "task-done-today-list.js",
+      "dest": "{{scripts_path}}/task-entity/task-done-today-list.js"
     }
   ],
   "post_install": [],

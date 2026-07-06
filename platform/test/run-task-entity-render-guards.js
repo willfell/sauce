@@ -160,6 +160,24 @@ const variants = [
             });
         }
     }
+    // TaskDoneTodayList — cold-load: TE/TTL not registered, dv.pages empty
+    await guard('TDTL-RENDER-1 TaskDoneTodayList.render() does not throw on cold-load (normal container)', async () => {
+        const TaskDoneTodayListClass = loadWidget('platform/mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+        const w = new TaskDoneTodayListClass();
+        const cont = makeEl(null);
+        const dv = { container: cont, pages: () => emptyData(), current: () => null };
+        global.window = { customJS: { RenderSafe: { page: () => null } }, moment: makeMoment() };
+        await w.render(dv);   // must not throw
+    });
+
+    await guard('TDTL-RENDER-2 TaskDoneTodayList.render() returns early inside .markdown-embed', async () => {
+        const TaskDoneTodayListClass = loadWidget('platform/mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+        const w = new TaskDoneTodayListClass();
+        const dv = makeDv(true, null);
+        global.window = { customJS: {} };
+        await w.render(dv);   // must not throw
+    });
+
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();

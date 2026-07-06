@@ -1604,6 +1604,115 @@ function runReconcileTests() {
   });
 }
 
+// ---------- TDTL: TaskDoneTodayList static helpers ----------
+function runTaskDoneTodayListTests() {
+  const TaskDoneTodayListClass = loadClass(
+    'mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+  const TDTL = new TaskDoneTodayListClass();
+
+  ok('TDTL-1 filterToday returns tasks where completed_at === todayStr', () => {
+    const tasks = [
+      { title: 'A', completed_at: '2026-07-06' },
+      { title: 'B', completed_at: '2026-07-06' },
+      { title: 'C', completed_at: '2026-07-05' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 2, 'expected 2 tasks, got ' + result.length);
+    assert(result[0].title === 'A', 'first task title');
+    assert(result[1].title === 'B', 'second task title');
+  });
+
+  ok('TDTL-2 filterToday excludes tasks completed on other dates', () => {
+    const tasks = [
+      { title: 'Yesterday', completed_at: '2026-07-05' },
+      { title: 'Old', completed_at: '2026-06-01' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 0, 'expected 0, got ' + result.length);
+  });
+
+  ok('TDTL-3 filterToday excludes tasks with null completed_at', () => {
+    const tasks = [
+      { title: 'NullDate', completed_at: null },
+      { title: 'EmptyDate', completed_at: '' },
+      { title: 'Today', completed_at: '2026-07-06' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 1, 'expected 1, got ' + result.length);
+    assert(result[0].title === 'Today', 'only Today task returned');
+  });
+
+  ok('TDTL-4 filterToday returns [] on null/empty input', () => {
+    assert(TDTL.filterToday(null, '2026-07-06').length === 0, 'null input');
+    assert(TDTL.filterToday([], '2026-07-06').length === 0, 'empty array');
+    assert(TDTL.filterToday([{ title: 'X', completed_at: '2026-07-06' }], '').length === 0, 'empty todayStr');
+    assert(TDTL.filterToday([{ title: 'X', completed_at: '2026-07-06' }], null).length === 0, 'null todayStr');
+  });
+}
+
+// ---------- TDARCH: TaskDoneArchive static helpers ----------
+function runTaskDoneArchiveTests() {
+  const TaskDoneArchiveClass = loadClass(
+    'blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive');
+  const TDARCH = new TaskDoneArchiveClass();
+
+  ok('TDARCH-1 groupByDate groups tasks by completed_at sorted desc', () => {
+    const tasks = [
+      { title: 'A', completed_at: '2026-07-04' },
+      { title: 'B', completed_at: '2026-07-06' },
+      { title: 'C', completed_at: '2026-07-06' },
+      { title: 'D', completed_at: '2026-07-05' },
+    ];
+    const map = TDARCH.groupByDate(tasks);
+    const keys = [...map.keys()];
+    assert(keys[0] === '2026-07-06', 'first key is newest: ' + keys[0]);
+    assert(keys[1] === '2026-07-05', 'second key: ' + keys[1]);
+    assert(keys[2] === '2026-07-04', 'third key: ' + keys[2]);
+    assert(map.get('2026-07-06').length === 2, '2 tasks on Jul 6');
+  });
+
+  ok('TDARCH-2 groupByDate drops tasks with null completed_at', () => {
+    const tasks = [
+      { title: 'A', completed_at: null },
+      { title: 'B', completed_at: '' },
+      { title: 'C', completed_at: '2026-07-06' },
+    ];
+    const map = TDARCH.groupByDate(tasks);
+    assert(map.size === 1, 'only 1 date group: ' + map.size);
+    assert(map.get('2026-07-06').length === 1, '1 task on Jul 6');
+  });
+
+  ok('TDARCH-3 groupByDate returns empty Map on null/empty input', () => {
+    assert(TDARCH.groupByDate(null).size === 0, 'null input');
+    assert(TDARCH.groupByDate([]).size === 0, 'empty array');
+  });
+
+  ok('TDARCH-4 filterByText returns tasks whose title includes text (case-insensitive)', () => {
+    const tasks = [
+      { title: 'Fix Dev CDC' },
+      { title: 'Deploy staging' },
+      { title: 'fix login bug' },
+    ];
+    const result = TDARCH.filterByText(tasks, 'fix');
+    assert(result.length === 2, 'expected 2, got ' + result.length);
+    assert(result[0].title === 'Fix Dev CDC', 'first match');
+    assert(result[1].title === 'fix login bug', 'second match');
+  });
+
+  ok('TDARCH-5 filterByText returns all tasks when text is empty/blank', () => {
+    const tasks = [{ title: 'A' }, { title: 'B' }];
+    assert(TDARCH.filterByText(tasks, '').length === 2, 'empty string returns all');
+    assert(TDARCH.filterByText(tasks, '   ').length === 2, 'blank string returns all');
+    assert(TDARCH.filterByText(tasks, null).length === 2, 'null returns all');
+  });
+
+  ok('TDARCH-6 filterByText returns [] when no titles match', () => {
+    const tasks = [{ title: 'Foo' }, { title: 'Bar' }];
+    const result = TDARCH.filterByText(tasks, 'zzz-no-match');
+    assert(result.length === 0, 'no matches');
+  });
+}
+
 (async () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
@@ -1612,6 +1721,8 @@ function runReconcileTests() {
   await runDotsMenuTests();
   await runConfirmDeleteTests();
   runReconcileTests();
+  runTaskDoneTodayListTests();
+  runTaskDoneArchiveTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
