@@ -166,15 +166,14 @@ const variants = [
         const w = new TaskDoneTodayListClass();
         const cont = makeEl(null);
         const dv = { container: cont, pages: () => emptyData(), current: () => null };
-        global.window = { customJS: {}, moment: makeMoment() };
+        global.window = { customJS: { RenderSafe: { page: () => null } }, moment: makeMoment() };
         await w.render(dv);   // must not throw
     });
 
     await guard('TDTL-RENDER-2 TaskDoneTodayList.render() returns early inside .markdown-embed', async () => {
         const TaskDoneTodayListClass = loadWidget('platform/mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
         const w = new TaskDoneTodayListClass();
-        const cont = makeEl(() => ({ classList: { contains: () => true } }));
-        const dv = { container: cont, pages: () => emptyData() };
+        const dv = makeDv(true, null);
         global.window = { customJS: {} };
         await w.render(dv);   // must not throw
     });

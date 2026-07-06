@@ -19,6 +19,11 @@ class TaskDoneTodayList {
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
+        const page = window.customJS && window.customJS.RenderSafe
+            ? window.customJS.RenderSafe.page(dv)
+            : (dv.current && dv.current());
+        if (!page) return;
+
         const TE = window.customJS && window.customJS.TaskEntity;
         const TTL = window.customJS && window.customJS.TaskTodayList;
         if (!TE || typeof TE.parseNote !== 'function' || !TTL || typeof TTL.renderTaskRow !== 'function') return;
