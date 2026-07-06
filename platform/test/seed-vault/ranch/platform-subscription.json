@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.14.2"
+      "version": "2.15.0"
     },
     {
       "name": "cards",
@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "breadcrumb",
@@ -101,7 +101,10 @@
       "name": "menu-popover",
       "version": "0.3.0"
     },
-    { "name": "chrome-bar", "version": "0.1.0" }
+    {
+      "name": "chrome-bar",
+      "version": "0.2.0"
+    }
   ],
   "blueprints": [
     {
@@ -130,7 +133,7 @@
     },
     {
       "name": "project",
-      "version": "1.43.0"
+      "version": "1.44.0"
     },
     {
       "name": "to-do",
