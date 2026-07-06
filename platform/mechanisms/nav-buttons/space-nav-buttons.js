@@ -69,8 +69,18 @@ class SpaceNavButtons {
     return window.moment().format("YYYY-MM-DD");
   }
 
+  // The ONE canonical nav comparator — null-safe. Sorts a COPY by
+  // (order ?? 100, source, id). Identical output to the prior inline comparators
+  // for well-formed registries (every _source/id present). Pure; Node-testable.
+  _sortNavEntries(entries) {
+    return (entries || []).slice().sort((a, b) =>
+      (a.order ?? 100) - (b.order ?? 100)
+      || String(a._source || "").localeCompare(String(b._source || ""))
+      || String(a.id || "").localeCompare(String(b.id || "")));
+  }
+
   // Flatten registry.contributions.<source>[] into a single array tagged with
-  // _source, sorted by (order ?? 100, source, id). Pure; Node-testable.
+  // _source, sorted by (order, source, id). Pure; Node-testable.
   _orderedEntries(registry) {
     const entries = [];
     const contributions = (registry && registry.contributions) || {};
@@ -78,12 +88,21 @@ class SpaceNavButtons {
       if (!Array.isArray(btns)) continue;
       for (const btn of btns) entries.push({ ...btn, _source: source });
     }
-    entries.sort((a, b) =>
-      (a.order ?? 100) - (b.order ?? 100) ||
-      a._source.localeCompare(b._source) ||
-      a.id.localeCompare(b.id)
-    );
-    return entries;
+    return this._sortNavEntries(entries);
+  }
+
+  // ONE representative entry per source (the registry's list[0]), tagged _source,
+  // sorted by (order, source, id). This is exactly what a Go-launcher Vault
+  // section needs; consumed by ChromeBar.vaultEntries so the ordering rule lives
+  // in one place. Pure; Node-testable.
+  firstEntryPerSource(registry) {
+    const reps = [];
+    const contributions = (registry && registry.contributions) || {};
+    for (const [src, list] of Object.entries(contributions)) {
+      if (!Array.isArray(list) || list.length === 0) continue;
+      reps.push({ ...list[0], _source: src });
+    }
+    return this._sortNavEntries(reps);
   }
 
   // Partition ordered entries into the fixed set of PINNED quick-nav buttons
