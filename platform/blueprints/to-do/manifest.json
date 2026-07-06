@@ -71,7 +71,8 @@
     "ToDoDailyUnassignedMeetings",
     "ToDoCreateTask",
     "ToDoCreateTaskInit",
-    "TodayCaptureEditableList"
+    "TodayCaptureEditableList",
+    "TaskDoneArchive"
   ],
   "customjs_startup_scripts": [
     "ToDoCreateTaskInit"
@@ -96,6 +97,11 @@
     {
       "source": "templates/Recurring Tasks.md",
       "dest": "{{module_directory}}/Recurring Tasks.md",
+      "materialize_once": true
+    },
+    {
+      "source": "templates/Completed Tasks.md",
+      "dest": "{{module_directory}}/Completed Tasks.md",
       "materialize_once": true
     },
     {
@@ -145,6 +151,10 @@
     {
       "source": "helpers/today-capture-editable-list.js",
       "dest": "{{scripts_path}}/to-do/today-capture-editable-list.js"
+    },
+    {
+      "source": "helpers/task-done-archive.js",
+      "dest": "{{scripts_path}}/to-do/task-done-archive.js"
     }
   ],
   "nav_buttons": [
