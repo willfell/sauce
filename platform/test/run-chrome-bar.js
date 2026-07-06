@@ -43,6 +43,27 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
 
 // ── (Task 3 appends CB-BTN-*, Task 4 CB-VAULT-*, Task 5 CB-RENDER-* here) ──
 // PLACEHOLDER-ANCHOR: additional cases inserted above the summary block below.
+// ── CB-BTN-1..5 — renderChromeButton: caller-supplied cls, icon-only vs labeled,
+// onClick wiring, hover/press motion handlers.
+{
+  const parent = makeEl('div');
+  let clicked = 0;
+  const btn = inst.renderChromeButton(parent, { cls: 'pcb-btn pcb-btn-go', icon: '<svg id="i"/>', onClick: () => { clicked += 1; } });
+  ok('CB-BTN-1 button carries the caller-supplied cls verbatim', btn.className === 'pcb-btn pcb-btn-go');
+  ok('CB-BTN-2 icon-only (no label) → innerHTML has the icon, no label span',
+    (btn.innerHTML || '').indexOf('<svg id="i"/>') >= 0 && (btn.innerHTML || '').indexOf('<span') < 0);
+  if (typeof btn.onclick === 'function') btn.onclick();
+  ok('CB-BTN-3 onClick is wired to btn.onclick', clicked === 1);
+  ok('CB-BTN-4 wires hover-lift + press-scale handlers + a CSS transition',
+    typeof btn.onmouseenter === 'function' && typeof btn.onmouseleave === 'function' &&
+    typeof btn.onmousedown === 'function' && typeof btn.onmouseup === 'function' &&
+    /transition:/.test(btn.style.cssText || ''));
+}
+{
+  const parent = makeEl('div');
+  const btn = inst.renderChromeButton(parent, { cls: 'pcb-btn pcb-btn-primary', label: 'New Task', icon: '<svg/>', onClick: () => {} });
+  ok('CB-BTN-5 labeled button renders the label inside a span', (btn.innerHTML || '').indexOf('New Task') >= 0 && (btn.innerHTML || '').indexOf('<span') >= 0);
+}
 
 function summarize() {
   const failed = results.filter(([, c]) => !c);
