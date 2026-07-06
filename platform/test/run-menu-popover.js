@@ -313,6 +313,78 @@ const MP = loadClass(MECH, 'MenuPopover');
   ok('MP-9 methods reachable on a customJS INSTANCE (not static) + opens', pass);
 }
 
+// --------------------------------------------------------------------------- MP-10..13
+// layout:"grid" — a section marker opting into a 2-column grid (added to make
+// the project-chrome-bar Go ▾ launcher's long Vault list scannable instead of
+// one tall stacked column). Opt-in per section: every OTHER marker/caller
+// (untouched by this change) keeps the original stacked-list rendering.
+function allDescendants(el) {
+  const out = [];
+  for (const c of (el.children || [])) { out.push(c); out.push(...allDescendants(c)); }
+  return out;
+}
+const gridEntries = [
+  { section: 'This project' },
+  { label: 'Board', onSelect() {} },
+  { section: 'Vault', layout: 'grid' },
+  { label: 'Home', onSelect() {} },
+  { label: 'Daily', onSelect() {} },
+  { label: 'Wiki', onSelect() {} },
+];
+
+// MP-10 — desktop: the grid section's rows land inside a display:grid wrapper
+// (not appended straight to the panel), while the ungridded "This project"
+// section's row is a direct panel child.
+{
+  const inst = new MP();
+  const doc = makeDoc({ clientWidth: 1400 });
+  const overlay = inst.open(gridEntries, { doc, anchor: makeEl('button'), isMobile: false });
+  const panel = overlay.children.find((c) => c.className === 'menu-popover-panel');
+  const gridWrapper = panel.children.find((c) => /display:\s*grid/.test(c.style.cssText || ''));
+  const boardIsDirectChild = panel.children.some((c) => c.tag === 'button' && /Board/.test(c.innerHTML));
+  const wrapperRowLabels = gridWrapper ? allDescendants(gridWrapper).filter((c) => c.tag === 'button').map((c) => c.innerHTML) : [];
+  ok('MP-10a desktop grid section renders rows inside a display:grid wrapper',
+    !!gridWrapper && wrapperRowLabels.length === 3);
+  ok('MP-10b the ungridded section\'s row is still a direct panel child (unchanged)', boardIsDirectChild);
+}
+
+// MP-11 — mobile: layout:"grid" is desktop-only; the bottom-sheet stays a
+// single stacked column (no grid wrapper) so long labels don't get cramped.
+{
+  const inst = new MP();
+  const doc = makeDoc({ clientWidth: 390 });
+  const overlay = inst.open(gridEntries, { doc, anchor: makeEl('button'), isMobile: true });
+  const panel = overlay.children.find((c) => c.className === 'menu-popover-panel');
+  const hasGridWrapper = panel.children.some((c) => /display:\s*grid/.test(c.style.cssText || ''));
+  ok('MP-11 mobile ignores layout:"grid" — no grid wrapper, stays single-column', !hasGridWrapper);
+}
+
+// MP-12 — the desktop dropdown widens (>=340px) when a grid section is present
+// vs the existing 300px floor when none is.
+{
+  const inst = new MP();
+  const doc1 = makeDoc({ clientWidth: 1400 });
+  const ov1 = inst.open(gridEntries, { doc: doc1, anchor: makeEl('button'), isMobile: false });
+  const w1 = parseInt(/width:\s*(\d+)px/.exec(ov1.children.find((c) => c.className === 'menu-popover-panel').style.cssText)[1], 10);
+
+  const inst2 = new MP();
+  const doc2 = makeDoc({ clientWidth: 1400 });
+  const ov2 = inst2.open([{ label: 'Board', onSelect() {} }], { doc: doc2, anchor: makeEl('button'), isMobile: false });
+  const w2 = parseInt(/width:\s*(\d+)px/.exec(ov2.children.find((c) => c.className === 'menu-popover-panel').style.cssText)[1], 10);
+
+  ok('MP-12 desktop panel widens to >=340px when a grid section is present (vs 300px floor otherwise)',
+    w1 >= 340 && w2 === 300, `w1=${w1} w2=${w2}`);
+}
+
+// MP-13 — _partitionSections carries the `layout` hint through untouched for
+// non-grid markers (undefined), proving the change is additive.
+{
+  const inst = new MP();
+  const parts = inst._partitionSections([{ section: 'This project' }, { label: 'Board', onSelect() {} }]);
+  ok('MP-13 _partitionSections leaves layout undefined for a plain section marker',
+    parts[0] && parts[0].layout === undefined);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);
