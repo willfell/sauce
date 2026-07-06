@@ -16,7 +16,7 @@
     {
       "id": "journal-today",
       "label": "Journal",
-      "icon": "journal",
+      "icon": "notebook",
       "order": 120,
       "action": {
         "type": "runTemplaterTemplate",

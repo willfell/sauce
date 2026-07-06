@@ -76,6 +76,50 @@ ok('NL-ARROW-3 daily blueprint absent → no arrows',
 ok('NL-ARROW-4 empty path → no arrows, no throw',
   SpaceNavButtons._shouldShowDayArrows('', { folder: 'spice/daily' }) === false);
 
+// ── nav_button icon uniqueness + Tier-1 resolvability (Go-to launcher) ──
+// Every nav_button across all manifests must carry a DISTINCT icon so the
+// Go-to launcher never renders two buttons with the same glyph. Regression
+// guard for the wiki/journal/reader collision (all read as "book").
+{
+  const navIcons = []; // { icon, label, manifest }
+  for (const kind of ['blueprints', 'mechanisms']) {
+    const base = path.join(__dirname, '..', kind);
+    for (const name of fs.readdirSync(base)) {
+      const mf = path.join(base, name, 'manifest.json');
+      if (!fs.existsSync(mf)) continue;
+      let man;
+      try { man = JSON.parse(fs.readFileSync(mf, 'utf8')); } catch (_e) { continue; }
+      for (const btn of (man.nav_buttons || [])) {
+        navIcons.push({ icon: btn.icon, label: btn.label, manifest: man.name || name });
+      }
+    }
+  }
+  const seen = new Map(); // icon -> first {label, manifest}
+  const dups = [];
+  for (const e of navIcons) {
+    if (seen.has(e.icon)) dups.push(`${e.icon} (${seen.get(e.icon).manifest}/${seen.get(e.icon).label} ↔ ${e.manifest}/${e.label})`);
+    else seen.set(e.icon, e);
+  }
+  ok(`NL-ICON-1 all nav_button icons are unique (found ${navIcons.length}; dups: ${dups.join('; ') || 'none'})`, dups.length === 0);
+
+  // The three previously-colliding book-family buttons must be pairwise distinct.
+  const iconOf = (mfName) => { const f = navIcons.find(e => e.manifest === mfName); return f ? f.icon : null; };
+  const wiki = iconOf('wiki'), journal = iconOf('journal'), reader = iconOf('reader');
+  ok('NL-ICON-2 wiki / journal / reader carry three distinct icons',
+    wiki && journal && reader && wiki !== journal && journal !== reader && wiki !== reader);
+
+  // Each of the three must resolve via Icons Tier-1 (Tier-2 setIcon() is
+  // unavailable in the launcher overlay path — book-open lesson v0.194.0).
+  const ICONS_SRC = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'icons', 'icons.js'), 'utf8');
+  const Icons = new Function(`return (${ICONS_SRC});`)();
+  const iconsInst = new Icons();
+  for (const [nm, ic] of [['wiki', wiki], ['journal', journal], ['reader', reader]]) {
+    const svg = iconsInst.resolve(ic);
+    ok(`NL-ICON-3 ${nm} icon "${ic}" resolves via Icons Tier-1 (non-empty svg)`,
+      typeof svg === 'string' && svg.length > 0);
+  }
+}
+
 // ── _loadRegistry: cache the per-render 2.8KB registry disk-read (session) ──
 (async () => {
   let reads = 0;
