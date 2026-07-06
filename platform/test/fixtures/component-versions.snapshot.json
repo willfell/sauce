@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.194.1",
+  "workshop_version": "0.194.2",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.3",
@@ -43,6 +43,6 @@
     "render-safe": "0.2.1",
     "sauce-plugin": "0.3.0",
     "task-entity": "0.6.0",
-    "menu-popover": "0.2.1"
+    "menu-popover": "0.2.2"
   }
 }

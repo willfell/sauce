@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.194.1",
+  "workshop_version": "0.194.2",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -100,7 +100,7 @@
     },
     {
       "name": "menu-popover",
-      "version": "0.2.1"
+      "version": "0.2.2"
     }
   ],
   "blueprints": [
