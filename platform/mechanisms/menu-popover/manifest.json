@@ -1,6 +1,6 @@
 {
   "name": "menu-popover",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "kind": "mechanism",
   "description": "Shared popup primitive. customJS.MenuPopover.open(entries, opts) renders a desktop-anchored dropdown / mobile bottom-sheet overlay appended to document.body — the DRY extraction of the _openLauncher / _openMoreMenu overlay that space-nav-buttons, project-nav-buttons and trip-nav-buttons each duplicated. Single close() teardown removes the overlay AND the capture-phase Escape listener (no listener leak); dismiss on backdrop tap / Escape / same-anchor re-open toggle; danger rows color the label var(--text-error); { section } marker entries render muted uppercase group headers. Powers the Go launcher, hub menus, and per-row task menus.",
   "depends_on": [],

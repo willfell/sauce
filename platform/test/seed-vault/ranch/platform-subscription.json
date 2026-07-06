@@ -99,7 +99,7 @@
     },
     {
       "name": "menu-popover",
-      "version": "0.2.2"
+      "version": "0.3.0"
     }
   ],
   "blueprints": [
@@ -129,7 +129,7 @@
     },
     {
       "name": "project",
-      "version": "1.42.0"
+      "version": "1.43.0"
     },
     {
       "name": "to-do",
