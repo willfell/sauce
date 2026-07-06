@@ -496,7 +496,12 @@ class ProjectChromeBar {
       }
     }
     if (vaultDests.length > 0) {
-      entries.push({ section: "Vault" });
+      // layout:"grid" — the Vault list now spans every registered blueprint
+      // (up to 10+), too long to scan as a single stacked column; MenuPopover
+      // renders a grid:true section as a 2-column grid on desktop (mobile stays
+      // single-column). "This project" above is left as a single column — it's
+      // short (<=5 entries) and stacked reads fine at that length.
+      entries.push({ section: "Vault", layout: "grid" });
       for (const d of vaultDests) entries.push(d);
     }
 

@@ -486,6 +486,8 @@ function allDescendants(el) {
     const vaultIdx = entries.findIndex((e) => e && e.section === 'Vault');
     ok('PCB-NAV-1a has a "This project" section marker', projIdx >= 0);
     ok('PCB-NAV-1b has a "Vault" section marker after the project marker', vaultIdx > projIdx);
+    ok('PCB-NAV-1g the "Vault" marker requests MenuPopover\'s 2-column grid layout (long list)',
+      entries[vaultIdx] && entries[vaultIdx].layout === 'grid');
 
     const projEntries = entries.slice(projIdx + 1, vaultIdx).filter((e) => e && !('section' in e));
     const vaultEntries = entries.slice(vaultIdx + 1).filter((e) => e && !('section' in e));

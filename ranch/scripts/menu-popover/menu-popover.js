@@ -13,6 +13,9 @@
  *   MenuPopover.open(entries, opts)
  *     entries: [{ label, icon?, onSelect(), danger?, sublabel? }]
  *              — a bare { section: "This project" } marker starts a new group.
+ *              — { section: "Vault", layout: "grid" } renders THAT section's
+ *                rows in a 2-column grid instead of a stacked full-width list
+ *                (opt-in per section; every other marker/caller is unaffected).
  *     opts: { anchor?, doc?, isMobile?, title? }
  *       anchor   = trigger element for desktop getBoundingClientRect positioning
  *                  AND the toggle key (re-open with the same anchor closes the
@@ -35,19 +38,22 @@ class MenuPopover {
   // "Dispatcher contracts". (Unit tests must therefore drive `new MenuPopover()`, not
   // the class — MP.open is undefined on the class now.)
 
-  // Group entries by preceding { section } marker → [{ section, rows }].
+  // Group entries by preceding { section } marker → [{ section, layout, rows }].
   // Rows that appear before any marker land in a leading section with section:null.
+  // `layout` carries the marker's opt-in layout hint ("grid" | undefined) through
+  // untouched — undefined for every existing caller, so behavior is unchanged
+  // unless a caller explicitly asks for a grid section.
   _partitionSections(entries) {
     const list = Array.isArray(entries) ? entries : [];
     const out = [];
     let current = null;
     for (const e of list) {
       if (e && typeof e === "object" && "section" in e && !("label" in e) && !("onSelect" in e)) {
-        current = { section: e.section, rows: [] };
+        current = { section: e.section, layout: e.layout, rows: [] };
         out.push(current);
         continue;
       }
-      if (!current) { current = { section: null, rows: [] }; out.push(current); }
+      if (!current) { current = { section: null, layout: undefined, rows: [] }; out.push(current); }
       current.rows.push(e);
     }
     return out;
@@ -77,8 +83,9 @@ class MenuPopover {
 
   // Build one actionable row button: icon + label (+ optional sublabel). Clicking
   // it closes the overlay first, then runs the entry's onSelect. danger:true
-  // colors the label var(--text-error).
-  _buildRow(doc, entry, close, isMobile) {
+  // colors the label var(--text-error). `compact` (grid sections) trims the
+  // padding/gap slightly so 2-up rows don't feel cramped in a narrower column.
+  _buildRow(doc, entry, close, isMobile, compact) {
     const row = doc.createElement("button");
     const icon = (entry && entry.icon) || "";
     const label = (entry && entry.label) || "";
@@ -96,11 +103,13 @@ class MenuPopover {
     } else {
       row.innerHTML = iconSpan + labelSpan;
     }
-    row.style.cssText = "cursor: pointer; display: flex; align-items: center; gap: 10px;"
+    row.style.cssText = `cursor: pointer; display: flex; align-items: center; gap: ${compact ? "8" : "10"}px;`
       + " width: 100%; text-align: left; box-sizing: border-box; border: none;"
       + " border-radius: 8px; background: transparent; color: var(--text-normal);"
       + " font-family: inherit; line-height: 1.25;"
-      + (isMobile ? " padding: 12px; font-size: 1em;" : " padding: 8px 10px; font-size: 0.9em;");
+      + (isMobile
+        ? " padding: 12px; font-size: 1em;"
+        : (compact ? " padding: 8px; font-size: 0.88em;" : " padding: 8px 10px; font-size: 0.9em;"));
     row.onmouseenter = () => { row.style.background = "var(--background-modifier-hover)"; };
     row.onmouseleave = () => { row.style.background = "transparent"; };
     row.onclick = () => {
@@ -124,6 +133,10 @@ class MenuPopover {
     if (list.length === 0) return null;
 
     const anchor = opts.anchor || null;
+    // A grid section needs 2 real columns of room; widen the desktop dropdown's
+    // minimum width so neither column feels squeezed (mobile is already a
+    // near-full-width sheet — untouched).
+    const hasGridSection = list.some((e) => e && typeof e === "object" && "section" in e && e.layout === "grid");
 
     // Toggle: if an overlay from THIS anchor is already open, close it and open
     // none — route through its own teardown (__navClose) so the keydown listener
@@ -174,7 +187,8 @@ class MenuPopover {
     } else {
       const rect = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : { left: 0, bottom: 0, width: 0 };
       const vw = (typeof window !== "undefined" && window.innerWidth) || 1024;
-      const width = Math.min(vw - 16, Math.max(300, Math.round(rect.width) || 0));
+      const minWidth = hasGridSection ? 340 : 300;
+      const width = Math.min(vw - 16, Math.max(minWidth, Math.round(rect.width) || 0));
       let left = Math.round(rect.left || 0);
       if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
       panel.style.cssText = panelBase
@@ -219,13 +233,23 @@ class MenuPopover {
     }
 
     // Render each section (a leading header when named) followed by its rows.
+    // A section marked layout:"grid" (desktop only — mobile's near-full-width
+    // sheet keeps a single stacked column, where 2-up would cramp long labels)
+    // renders its rows into a 2-column grid wrapper instead of appending them
+    // straight to the panel.
     const sections = this._partitionSections(list);
     for (const sec of sections) {
       if (sec.section != null && sec.section !== "") {
         panel.appendChild(this._sectionHeader(doc, sec.section, isMobile));
       }
+      const useGrid = sec.layout === "grid" && !isMobile;
+      const rowHost = useGrid ? doc.createElement("div") : panel;
+      if (useGrid) {
+        rowHost.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px;";
+        panel.appendChild(rowHost);
+      }
       for (const entry of sec.rows) {
-        panel.appendChild(this._buildRow(doc, entry, close, isMobile));
+        rowHost.appendChild(this._buildRow(doc, entry, close, isMobile, useGrid));
       }
     }
 
