@@ -1604,6 +1604,52 @@ function runReconcileTests() {
   });
 }
 
+// ---------- TDTL: TaskDoneTodayList static helpers ----------
+function runTaskDoneTodayListTests() {
+  const TaskDoneTodayListClass = loadClass(
+    'mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+  const TDTL = new TaskDoneTodayListClass();
+
+  ok('TDTL-1 filterToday returns tasks where completed_at === todayStr', () => {
+    const tasks = [
+      { title: 'A', completed_at: '2026-07-06' },
+      { title: 'B', completed_at: '2026-07-06' },
+      { title: 'C', completed_at: '2026-07-05' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 2, 'expected 2 tasks, got ' + result.length);
+    assert(result[0].title === 'A', 'first task title');
+    assert(result[1].title === 'B', 'second task title');
+  });
+
+  ok('TDTL-2 filterToday excludes tasks completed on other dates', () => {
+    const tasks = [
+      { title: 'Yesterday', completed_at: '2026-07-05' },
+      { title: 'Old', completed_at: '2026-06-01' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 0, 'expected 0, got ' + result.length);
+  });
+
+  ok('TDTL-3 filterToday excludes tasks with null completed_at', () => {
+    const tasks = [
+      { title: 'NullDate', completed_at: null },
+      { title: 'EmptyDate', completed_at: '' },
+      { title: 'Today', completed_at: '2026-07-06' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 1, 'expected 1, got ' + result.length);
+    assert(result[0].title === 'Today', 'only Today task returned');
+  });
+
+  ok('TDTL-4 filterToday returns [] on null/empty input', () => {
+    assert(TDTL.filterToday(null, '2026-07-06').length === 0, 'null input');
+    assert(TDTL.filterToday([], '2026-07-06').length === 0, 'empty array');
+    assert(TDTL.filterToday([{ title: 'X', completed_at: '2026-07-06' }], '').length === 0, 'empty todayStr');
+    assert(TDTL.filterToday([{ title: 'X', completed_at: '2026-07-06' }], null).length === 0, 'null todayStr');
+  });
+}
+
 (async () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
@@ -1612,6 +1658,7 @@ function runReconcileTests() {
   await runDotsMenuTests();
   await runConfirmDeleteTests();
   runReconcileTests();
+  runTaskDoneTodayListTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
