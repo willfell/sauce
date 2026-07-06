@@ -68,6 +68,14 @@ class TaskDoneTodayList {
 
     static filterToday(parsedTasks, todayStr) {
         if (!Array.isArray(parsedTasks) || !todayStr) return [];
-        return parsedTasks.filter(t => t && t.completed_at === todayStr);
+        return parsedTasks.filter(t => {
+            if (!t || !t.completed_at) return false;
+            const val = t.completed_at;
+            // Dataview parses ISO datetime frontmatter into Luxon DateTime objects.
+            if (typeof val === 'object' && val !== null && typeof val.toFormat === 'function') {
+                return val.toFormat('yyyy-MM-dd') === todayStr;
+            }
+            return String(val).slice(0, 10) === todayStr;
+        });
     }
 }

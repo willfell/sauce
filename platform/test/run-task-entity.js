@@ -1610,7 +1610,7 @@ function runTaskDoneTodayListTests() {
     'mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
   const TDTL = new TaskDoneTodayListClass();
 
-  ok('TDTL-1 filterToday returns tasks where completed_at === todayStr', () => {
+  ok('TDTL-1 filterToday returns tasks where completed_at === todayStr (plain string)', () => {
     const tasks = [
       { title: 'A', completed_at: '2026-07-06' },
       { title: 'B', completed_at: '2026-07-06' },
@@ -1620,6 +1620,27 @@ function runTaskDoneTodayListTests() {
     assert(result.length === 2, 'expected 2 tasks, got ' + result.length);
     assert(result[0].title === 'A', 'first task title');
     assert(result[1].title === 'B', 'second task title');
+  });
+
+  ok('TDTL-1b filterToday matches ISO timestamp strings (Dataview stores full ISO in frontmatter)', () => {
+    const tasks = [
+      { title: 'Done', completed_at: '2026-07-06T15:08:14-06:00' },
+      { title: 'Yesterday', completed_at: '2026-07-05T09:00:00-06:00' },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 1, 'expected 1, got ' + result.length);
+    assert(result[0].title === 'Done', 'ISO timestamp task returned');
+  });
+
+  ok('TDTL-1c filterToday matches Luxon-style DateTime objects (Dataview parses ISO datetime frontmatter)', () => {
+    const makeLuxon = (dateStr) => ({ toFormat: (fmt) => fmt === 'yyyy-MM-dd' ? dateStr : '' });
+    const tasks = [
+      { title: 'DvTask', completed_at: makeLuxon('2026-07-06') },
+      { title: 'OldTask', completed_at: makeLuxon('2026-07-05') },
+    ];
+    const result = TDTL.filterToday(tasks, '2026-07-06');
+    assert(result.length === 1, 'expected 1, got ' + result.length);
+    assert(result[0].title === 'DvTask', 'Luxon DateTime task returned');
   });
 
   ok('TDTL-2 filterToday excludes tasks completed on other dates', () => {
