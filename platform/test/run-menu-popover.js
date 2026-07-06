@@ -100,8 +100,8 @@ const MP = loadClass(MECH, 'MenuPopover');
 {
   const wide = { body: { clientWidth: 1200 } };
   const narrow = { body: { clientWidth: 390 } };
-  const passWide = MP ? MP._isMobile(wide) === false : false;
-  const passNarrow = MP ? MP._isMobile(narrow) === true : false;
+  const passWide = MP ? (new MP())._isMobile(wide) === false : false;
+  const passNarrow = MP ? (new MP())._isMobile(narrow) === true : false;
   ok('MP-1 _isMobile false wide / true narrow', passWide && passNarrow);
 }
 
@@ -110,7 +110,7 @@ const MP = loadClass(MECH, 'MenuPopover');
 {
   let pass = false;
   if (MP) {
-    const parts = MP._partitionSections([
+    const parts = (new MP())._partitionSections([
       { section: 'This project' },
       { label: 'Board', onSelect() {} },
       { section: 'Vault' },
@@ -133,7 +133,7 @@ const MP = loadClass(MECH, 'MenuPopover');
     const doc = makeDoc();
     const anchor = makeEl('button');
     const entries = [{ label: 'Board', onSelect() {} }];
-    const overlay = MP.open(entries, { doc, anchor });
+    const overlay = (new MP()).open(entries, { doc, anchor });
     const overlays = doc.body.children;
     pass = overlays.length === 1 &&
       overlays[0] === overlay &&
@@ -152,7 +152,7 @@ const MP = loadClass(MECH, 'MenuPopover');
     const anchor = makeEl('button');
     let selectCount = 0;
     const entries = [{ label: 'Board', onSelect() { selectCount += 1; } }];
-    const overlay = MP.open(entries, { doc, anchor });
+    const overlay = (new MP()).open(entries, { doc, anchor });
     // Find the row button by walking the overlay subtree for a clickable el
     // whose innerHTML mentions the label.
     const collect = (node, acc) => {
@@ -184,7 +184,7 @@ const MP = loadClass(MECH, 'MenuPopover');
     const origRemove = doc.removeEventListener;
     doc.addEventListener = (type, fn, capture) => { added.push({ type, fn, capture }); return origAdd(type, fn, capture); };
     doc.removeEventListener = (type, fn, capture) => { removed.push({ type, fn, capture }); return origRemove(type, fn, capture); };
-    const overlay = MP.open([{ label: 'Board', onSelect() {} }], { doc, anchor });
+    const overlay = (new MP()).open([{ label: 'Board', onSelect() {} }], { doc, anchor });
     const keyAdd = added.find(a => a.type === 'keydown');
     overlay.__navClose();
     const keyRemove = removed.find(r => r.type === 'keydown');
@@ -205,9 +205,9 @@ const MP = loadClass(MECH, 'MenuPopover');
     const doc = makeDoc();
     const anchor = makeEl('button');
     const entries = [{ label: 'Board', onSelect() {} }];
-    MP.open(entries, { doc, anchor });
+    (new MP()).open(entries, { doc, anchor });
     const afterFirst = doc.body.children.length;
-    MP.open(entries, { doc, anchor });
+    (new MP()).open(entries, { doc, anchor });
     const afterSecond = doc.body.children.length;
     pass = afterFirst === 1 && afterSecond === 0;
   }
@@ -241,14 +241,14 @@ const MP = loadClass(MECH, 'MenuPopover');
 
     // Wide doc, force mobile → mobile branch (handle bar + backdrop overlay).
     const docA = makeDoc({ clientWidth: 1400 });
-    const overlayMobile = MP.open([{ label: 'Board', onSelect() {} }],
+    const overlayMobile = (new MP()).open([{ label: 'Board', onSelect() {} }],
       { doc: docA, anchor: makeEl('button'), isMobile: true });
     const mobileCss = (overlayMobile.style && overlayMobile.style.cssText) || '';
     const mobileRan = hasHandle(overlayMobile) && mobileCss.indexOf('rgba(0,0,0,0.45)') >= 0;
 
     // Wide doc, force desktop → desktop branch (no handle + transparent overlay).
     const docB = makeDoc({ clientWidth: 1400 });
-    const overlayDesktop = MP.open([{ label: 'Board', onSelect() {} }],
+    const overlayDesktop = (new MP()).open([{ label: 'Board', onSelect() {} }],
       { doc: docB, anchor: makeEl('button'), isMobile: false });
     const desktopCss = (overlayDesktop.style && overlayDesktop.style.cssText) || '';
     const desktopRan = !hasHandle(overlayDesktop) && desktopCss.indexOf('background: transparent') >= 0;
@@ -270,7 +270,7 @@ const MP = loadClass(MECH, 'MenuPopover');
   if (MP) {
     const doc = makeDoc();
     const anchor = makeEl('button');
-    const overlay = MP.open([{ label: 'Board', onSelect() {} }], { doc, anchor });
+    const overlay = (new MP()).open([{ label: 'Board', onSelect() {} }], { doc, anchor });
     // Immediately (within the opening window): a backdrop click must NOT close.
     if (overlay.onclick) overlay.onclick({ target: overlay });
     const survivedGhost = doc.body.children.length === 1 && overlay._removed !== true;
@@ -285,6 +285,32 @@ const MP = loadClass(MECH, 'MenuPopover');
     pass = survivedGhost && closedLater;
   }
   ok('MP-8 backdrop dismiss ignored during opening gesture, honored after', pass);
+}
+
+// --------------------------------------------------------------------------- MP-9
+// customjs static-vs-instance regression. The customJS plugin stores the class as
+// an INSTANCE (`customJS.MenuPopover = new MenuPopover()`), and callers reach it
+// via `customJS.MenuPopover.open(...)`. If `open` were STATIC it would be undefined
+// on the instance → every launcher (Go / hub ⋯ / per-row ⋯) silently no-ops at
+// runtime (the exact bug this locks out). Assert the public method + the internals
+// it needs are reachable on a fresh INSTANCE, not just the class, and that an
+// instance actually opens.
+{
+  let pass = false;
+  if (MP) {
+    const inst = new MP();
+    pass = typeof inst.open === 'function'
+      && typeof inst._isMobile === 'function'
+      && typeof inst._partitionSections === 'function'
+      && typeof inst._buildRow === 'function'
+      && typeof inst._sectionHeader === 'function';
+    if (pass) {
+      const doc = makeDoc();
+      const ov = inst.open([{ label: 'Board', onSelect() {} }], { doc, anchor: makeEl('button') });
+      pass = !!ov && doc.body.children.length === 1;
+    }
+  }
+  ok('MP-9 methods reachable on a customJS INSTANCE (not static) + opens', pass);
 }
 
 const allPass = results.every(([, p]) => p);

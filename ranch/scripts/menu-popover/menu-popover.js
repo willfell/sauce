@@ -25,9 +25,19 @@
  *     Returns the overlay element (with __navClose attached), or null on no-op.
  */
 class MenuPopover {
+  // NOTE (customjs static-vs-instance trap): the customJS plugin stores classes as
+  // INSTANCES (`customJS.MenuPopover = new MenuPopover()`), so every method a caller
+  // reaches via `customJS.MenuPopover.open(...)` MUST be an INSTANCE method (on the
+  // prototype). These were originally `static`, which made `customJS.MenuPopover.open`
+  // undefined at runtime → Go / ⋯ / per-row menus silently no-op'd on all platforms
+  // (the guard `typeof customJS.MenuPopover.open === "function"` was false). They are
+  // now instance methods; internal calls use `this._x(...)`. See code-conventions.md
+  // "Dispatcher contracts". (Unit tests must therefore drive `new MenuPopover()`, not
+  // the class — MP.open is undefined on the class now.)
+
   // Group entries by preceding { section } marker → [{ section, rows }].
   // Rows that appear before any marker land in a leading section with section:null.
-  static _partitionSections(entries) {
+  _partitionSections(entries) {
     const list = Array.isArray(entries) ? entries : [];
     const out = [];
     let current = null;
@@ -47,7 +57,7 @@ class MenuPopover {
   // This is only the FALLBACK: open() prefers explicit opts.isMobile, then
   // Obsidian's app.isMobile platform flag, and reaches for this heuristic only
   // when `app` is absent (Node tests / cold load).
-  static _isMobile(doc) {
+  _isMobile(doc) {
     try {
       const cw = doc && doc.body && doc.body.clientWidth;
       return typeof cw === "number" && cw > 0 && cw <= 600;
@@ -55,7 +65,7 @@ class MenuPopover {
   }
 
   // Build one muted, non-clickable uppercase section-header row.
-  static _sectionHeader(doc, label, isMobile) {
+  _sectionHeader(doc, label, isMobile) {
     const hdr = doc.createElement("div");
     hdr.className = "menu-popover-section";
     hdr.textContent = String(label == null ? "" : label);
@@ -68,7 +78,7 @@ class MenuPopover {
   // Build one actionable row button: icon + label (+ optional sublabel). Clicking
   // it closes the overlay first, then runs the entry's onSelect. danger:true
   // colors the label var(--text-error).
-  static _buildRow(doc, entry, close, isMobile) {
+  _buildRow(doc, entry, close, isMobile) {
     const row = doc.createElement("button");
     const icon = (entry && entry.icon) || "";
     const label = (entry && entry.label) || "";
@@ -105,7 +115,7 @@ class MenuPopover {
   // document.body) so it is never clipped by the note container: a full-width
   // bottom sheet on mobile, an anchored dropdown on desktop. Backdrop-tap /
   // Escape / re-open (same anchor) closes it.
-  static open(entries, opts = {}) {
+  open(entries, opts = {}) {
     const doc = opts.doc
       || (typeof activeDocument !== "undefined" && activeDocument)
       || (typeof document !== "undefined" ? document : null);
@@ -136,7 +146,7 @@ class MenuPopover {
       ? opts.isMobile
       : ((typeof app !== "undefined" && app && typeof app.isMobile === "boolean")
           ? app.isMobile
-          : MenuPopover._isMobile(doc));
+          : this._isMobile(doc));
 
     const overlay = doc.createElement("div");
     overlay.className = "menu-popover-overlay";
@@ -209,13 +219,13 @@ class MenuPopover {
     }
 
     // Render each section (a leading header when named) followed by its rows.
-    const sections = MenuPopover._partitionSections(list);
+    const sections = this._partitionSections(list);
     for (const sec of sections) {
       if (sec.section != null && sec.section !== "") {
-        panel.appendChild(MenuPopover._sectionHeader(doc, sec.section, isMobile));
+        panel.appendChild(this._sectionHeader(doc, sec.section, isMobile));
       }
       for (const entry of sec.rows) {
-        panel.appendChild(MenuPopover._buildRow(doc, entry, close, isMobile));
+        panel.appendChild(this._buildRow(doc, entry, close, isMobile));
       }
     }
 
