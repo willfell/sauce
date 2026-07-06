@@ -43,6 +43,52 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
 
 // ── (Task 3 appends CB-BTN-*, Task 4 CB-VAULT-*, Task 5 CB-RENDER-* here) ──
 // PLACEHOLDER-ANCHOR: additional cases inserted above the summary block below.
+// ── CB-RENDER-1..6 — render(dv, adapter): guards, adapter.resolve gate, root/btn
+// classes from the adapter, Go/primary/⋯ wiring to adapter.navEntries/dispatch.
+async function cbRenderCases() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  const menuOpens = [];
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([{ label: 'Projects', link: 'p.md' }, { label: 'Docs', link: null }]) },
+    MenuPopover: { open: (entries, opts) => { menuOpens.push({ entries, opts }); return makeEl('div'); } },
+  };
+  const dispatched = [];
+  const navEntries = [{ section: 'This project' }, { label: 'Board', onSelect() {} }, { section: 'Vault', layout: 'grid' }, { label: 'Home', onSelect() {} }];
+  const adapter = {
+    resolve: (dv, page) => ({ ctx: { context: 'docs-hub' }, spec: { primary: { id: 'new-doc', label: 'New Doc', icon: '<svg/>' }, overflow: [{ id: 'move-docs', label: 'Move', icon: '<svg/>' }], leaf: false } }),
+    navEntries: async () => navEntries,
+    dispatch: (dv, ctx, id) => dispatched.push(id),
+    openNavTarget: () => {},
+    rootClass: 'pcb-root',
+    btnClass: (v) => `pcb-btn pcb-btn-${v}`,
+  };
+  const container = makeEl('div');
+  const dv = { container, current: () => ({ file: { path: 'spice/projects/x/docs/Docs.md', name: 'Docs' } }) };
+  await inst.render(dv, adapter);
+
+  const desc = allDescendants(container);
+  const root = desc.find((e) => e.className && String(e.className).includes('pcb-root'));
+  ok('CB-RENDER-1 dedupe root uses adapter.rootClass (pcb-root)', !!root);
+  const goBtn = desc.find((e) => e.className && String(e.className).includes('pcb-btn-go'));
+  const primaryBtn = desc.find((e) => e.className && String(e.className).includes('pcb-btn-primary'));
+  const dotsBtn = desc.find((e) => e.className && String(e.className).includes('pcb-btn-dots'));
+  ok('CB-RENDER-2 renders Go (pcb-btn-go), primary (pcb-btn-primary), ⋯ (pcb-btn-dots) via adapter.btnClass', !!goBtn && !!primaryBtn && !!dotsBtn);
+  ok('CB-RENDER-3 renders a breadcrumb sub-div', desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
+  if (goBtn && typeof goBtn.onclick === 'function') await goBtn.onclick();
+  ok('CB-RENDER-4 clicking Go calls MenuPopover.open with the adapter.navEntries', menuOpens.length === 1 && menuOpens[0].entries === navEntries);
+  if (primaryBtn && typeof primaryBtn.onclick === 'function') primaryBtn.onclick();
+  ok('CB-RENDER-5 clicking primary routes to adapter.dispatch with the primary id', dispatched.includes('new-doc'));
+
+  const c2 = makeEl('div');
+  const nullAdapter = Object.assign({}, adapter, { resolve: () => null });
+  await inst.render({ container: c2, current: () => ({ file: { path: 'x.md', name: 'x' } }) }, nullAdapter);
+  ok('CB-RENDER-6 adapter.resolve → null renders nothing', allDescendants(c2).length === 0);
+
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
 // ── CB-VAULT-1..5 — vaultEntries reads the registry, delegates ordering to
 // SpaceNavButtons.firstEntryPerSource, emits a { section:"Vault", layout:"grid" }
 // marker + one entry per source, openLink→open / else→_dispatchAction, []-when-empty.
@@ -125,5 +171,6 @@ function summarize() {
 (async () => {
   await cbVaultCases();
   await cbVaultEmpty();
+  await cbRenderCases();
   summarize();
 })();
