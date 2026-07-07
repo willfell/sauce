@@ -37,6 +37,10 @@
     {
       "name": "render-safe",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "breadcrumb": {
@@ -79,6 +83,7 @@
     "ScratchDayActions",
     "ScratchLeafActions",
     "ScratchHubActions",
+    "ScratchChromeBar",
     "ScratchDayMigrate",
     "ScratchDayMigrateInit"
   ],
@@ -117,6 +122,10 @@
     {
       "source": "helpers/scratch-hub-actions.js",
       "dest": "{{scripts_path}}/scratch/scratch-hub-actions.js"
+    },
+    {
+      "source": "helpers/scratch-chrome-bar.js",
+      "dest": "{{scripts_path}}/scratch/scratch-chrome-bar.js"
     },
     {
       "source": "helpers/scratch-day-migrate.js",
@@ -190,7 +199,7 @@
         "day": "{{current_file.frontmatter.day|today}}",
         "title": "{{prompts.title}}"
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n"
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchChromeBar\" });\n```\n"
     }
   ],
   "templater_folder_templates": [

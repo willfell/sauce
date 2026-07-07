@@ -66,6 +66,7 @@ class ScratchDayActions {
 
     async render(dv) {
         if (dv.container.closest(".markdown-embed")) return;
+        try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".scratch-chrome-root")) return; } catch (_e) {}
 
         // v0.5.1: strip legacy entity-create:scratch dataviewjs block from
         // existing day-hub notes. Self-heal on first render; re-runs no-op.

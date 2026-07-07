@@ -772,21 +772,20 @@ withTempVault((vault) => {
     // rewrites the four ## headings to SectionLabel. Asserts run AFTER the
     // idempotency phase (two installs) so CHROME-6 proves exactly-once injection.
     const mtg = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Standup-2026-06-17.md");
-    ok("HC-V01240-SEED-CHROME-1 meeting breadcrumb injected", /class:\s*"Breadcrumb"/.test(mtg));
+    ok("HC-V01240-SEED-CHROME-1 meeting MeetingChromeBar injected (replaces Breadcrumb)", /class:\s*"MeetingChromeBar"/.test(mtg));
     ok("HC-V01240-SEED-CHROME-2 meeting ## Attendees rewritten to SectionLabel",
        !/^##\s+Attendees\s*$/m.test(mtg) && /SectionLabel[\s\S]*Attendees/.test(mtg));
     const scr = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-2026-06-17-14-30.md");
-    ok("HC-V01240-SEED-CHROME-3 scratch breadcrumb injected", /class:\s*"Breadcrumb"/.test(scr));
+    ok("HC-V01240-SEED-CHROME-3 scratch ScratchChromeBar injected (replaces Breadcrumb)", /class:\s*"ScratchChromeBar"/.test(scr));
     const td = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
-    ok("HC-V01240-SEED-CHROME-4 to-do breadcrumb injected", /class:\s*"Breadcrumb"/.test(td));
+    ok("HC-V01240-SEED-CHROME-4 to-do ToDoChromeBar injected (replaces Breadcrumb)", /class:\s*"ToDoChromeBar"/.test(td));
     ok("HC-V01240-SEED-CHROME-5 .sauce-backup snapshot exists", fs.existsSync(path.join(vault, ".sauce-backup")));
-    ok("HC-V01240-SEED-CHROME-6 meeting breadcrumb injected exactly once",
-       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1);
+    ok("HC-V01240-SEED-CHROME-6 meeting ChromeBar injected exactly once",
+       (mtg.match(/class:\s*"MeetingChromeBar"/g) || []).length === 1);
     const sd = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-Day-2026-06-17.md");
-    ok("HC-V01240-SEED-CHROME-7 scratch-day breadcrumb injected after H1, before SpaceNavButtons",
-       /class:\s*"Breadcrumb"/.test(sd) &&
-       sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
-       sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
+    ok("HC-V01240-SEED-CHROME-7 scratch-day ScratchChromeBar injected after H1",
+       /class:\s*"ScratchChromeBar"/.test(sd) &&
+       sd.indexOf("# ") < sd.indexOf('class: "ScratchChromeBar"'));
 
     // ===== HC-ADIV-SEED-* — action-bar divider strip (ScratchDayActions owns <hr>) =====
     // The seed scratch-day fixture brackets its ScratchDayActions block with a
@@ -798,8 +797,8 @@ withTempVault((vault) => {
        !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ScratchDayActions/.test(sd));
     ok("HC-ADIV-SEED-2 scratch-day `---` after ScratchDayActions stripped by heal",
        !/ScratchDayActions[\s\S]*?\n```\n+-{3,}/.test(sd));
-    ok("HC-ADIV-SEED-3 ScratchDayActions block preserved after strip",
-       /class:\s*"ScratchDayActions"/.test(sd));
+    ok("HC-ADIV-SEED-3 ScratchChromeBar block present (replaces ScratchDayActions after ChromeBar migration)",
+       /class:\s*"ScratchChromeBar"/.test(sd));
     // Direct unit — _stripDividersAroundActionBlock: strips both sides, idempotent,
     // and a no-op when the block is not bracketed by `---`.
     {
@@ -854,8 +853,8 @@ withTempVault((vault) => {
        /SectionLabel[\s\S]*?Agenda/.test(mtg) &&
        /SectionLabel[\s\S]*?Notes/.test(mtg) &&
        /SectionLabel[\s\S]*?Action Items/.test(mtg));
-    ok("HC-V01241-SEED-DBLDIV-3 idempotent: one breadcrumb + no leftover divider after two installs",
-       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1 &&
+    ok("HC-V01241-SEED-DBLDIV-3 idempotent: one ChromeBar + no leftover divider after two installs",
+       (mtg.match(/class:\s*"MeetingChromeBar"/g) || []).length === 1 &&
        !dividerBeforeSectionLabel(mtg));
 
     // DBLDIV-4/5 — frontmatter-delimiter safety (content-safety guard, v0.124.1).
@@ -885,9 +884,9 @@ withTempVault((vault) => {
     // anchor, so the inject no-ops there (MLA-4). No meetings-hub-tagged seed note
     // exists under spice/meetings/hubs/, so the hub skip-assert (MLA-5) is omitted.
     const mlaMtg = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Standup-2026-06-17.md");
-    ok("HC-V01250-SEED-MLA-1 meeting has MeetingLeafActions block", /class:\s*"MeetingLeafActions"/.test(mlaMtg));
-    ok("HC-V01250-SEED-MLA-2 MeetingLeafActions sits after SpaceNavButtons", mlaMtg.indexOf('class: "SpaceNavButtons"') !== -1 && mlaMtg.indexOf('class: "SpaceNavButtons"') < mlaMtg.indexOf('class: "MeetingLeafActions"'));
-    ok("HC-V01250-SEED-MLA-3 injected exactly once", (mlaMtg.match(/class:\s*"MeetingLeafActions"/g) || []).length === 1);
+    ok("HC-V01250-SEED-MLA-1 meeting has MeetingChromeBar block (replaces MeetingLeafActions)", /class:\s*"MeetingChromeBar"/.test(mlaMtg));
+    ok("HC-V01250-SEED-MLA-2 MeetingChromeBar present after frontmatter", mlaMtg.indexOf('class: "MeetingChromeBar"') > mlaMtg.indexOf('---'));
+    ok("HC-V01250-SEED-MLA-3 injected exactly once", (mlaMtg.match(/class:\s*"MeetingChromeBar"/g) || []).length === 1);
     const mlaNav = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Navless-2026-06-17.md");
     ok("HC-V01250-SEED-MLA-4 nav-less note NOT injected (no anchor)", !/class:\s*"MeetingLeafActions"/.test(mlaNav));
 

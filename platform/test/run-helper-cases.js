@@ -4356,13 +4356,13 @@ async function caseSHCS2ScratchTemplate() {
 }
 
 async function caseSHCS3ScratchDayHubTemplate() {
-  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchDayActions + ScratchDayList calls ---");
+  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchChromeBar + ScratchDayList calls ---");
   const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
   assertTrue("SHC-S3: Scratch Day Hub.md exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
   assertTrue("SHC-S3: Scratch Day Hub.md contains type: scratch-day", body.includes("type: scratch-day"));
-  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayActions via dv.view",
-    /class:\s*"ScratchDayActions"/.test(body));
+  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchChromeBar via dv.view",
+    /class:\s*"ScratchChromeBar"/.test(body));
   assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayList via dv.view",
     /class:\s*"ScratchDayList"/.test(body));
 }
@@ -4467,8 +4467,8 @@ async function caseSHCS13ScratchDayHubNoEntityCreateBlock() {
     !/\/\/\s*entity-create:scratch\b/.test(body));
   assertTrue("SHC-S13: Scratch Day Hub.md must NOT call customJS.EntityCreate.render (button is rendered by ScratchDayActions)",
     !/customJS\.EntityCreate\.render/.test(body));
-  assertTrue("SHC-S13: ScratchDayActions block still present (Task 2 regression)",
-    /class:\s*"ScratchDayActions"/.test(body));
+  assertTrue("SHC-S13: ScratchChromeBar block present (replaces ScratchDayActions)",
+    /class:\s*"ScratchChromeBar"/.test(body));
 }
 
 async function caseSHCS14ScratchDayActionsSelfHeal() {
@@ -7681,8 +7681,9 @@ async function caseHCV01174TodoManifest() {
     "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
     "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
     "ToDoCreateTaskInit", "TodayCaptureEditableList", "TaskDoneArchive",
+    "ToDoChromeBar",
   ];
-  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 13-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive)",
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 14-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive, +ToDoChromeBar)",
     JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
     `got: ${JSON.stringify(m.customjs_classes)}`);
 

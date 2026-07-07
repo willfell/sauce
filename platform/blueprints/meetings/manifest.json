@@ -41,11 +41,16 @@
     {
       "name": "task-interactions",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
     "MeetingsHubCards",
-    "MeetingLeafActions"
+    "MeetingLeafActions",
+    "MeetingChromeBar"
   ],
   "breadcrumb": {
     "types": {
@@ -80,6 +85,10 @@
     {
       "source": "helpers/meeting-leaf-actions.js",
       "dest": "{{scripts_path}}/meetings/meeting-leaf-actions.js"
+    },
+    {
+      "source": "helpers/meeting-chrome-bar.js",
+      "dest": "{{scripts_path}}/meetings/meeting-chrome-bar.js"
     }
   ],
   "claude_surface": [
@@ -144,7 +153,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingLeafActions\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Tasks\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TaskMeetingList\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Tasks\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TaskMeetingList\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{templates_path}}/Meeting Hub.md"
