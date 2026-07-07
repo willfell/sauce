@@ -4,7 +4,7 @@
   "kind": "blueprint",
   "module_directory": "wiki",
   "skills_dir": ".claude/skills/wiki",
-  "description": "Standalone, project-independent, arbitrary-depth knowledge base. spice/wiki/ root hub (wiki-hub) → section hubs (wiki-section) nested to any depth → wiki-page leaves. Folder-is-truth: the folder path IS the hierarchy; frontmatter carries identity only. Reuses nav-buttons, entity-create, section-label, breadcrumb (path_walk mode), cards, accent-button, render-safe, open-helpers, doc-search. WikiTree renders hub + section views recursively; WikiMove relocates pages/sections between folders; WikiLeafActions renders the Move action. Routing: child entities route by the {{current_file.folder}} token (the active note real folder) so nesting is robust to a missing frontmatter field. Icon: journal (book-open absent from the icons registry).",
+  "description": "Standalone, project-independent, arbitrary-depth knowledge base. spice/wiki/ root hub (wiki-hub) \u2192 section hubs (wiki-section) nested to any depth \u2192 wiki-page leaves. Folder-is-truth: the folder path IS the hierarchy; frontmatter carries identity only. Reuses nav-buttons, entity-create, section-label, breadcrumb (path_walk mode), cards, accent-button, render-safe, open-helpers, doc-search. WikiTree renders hub + section views recursively; WikiMove relocates pages/sections between folders; WikiLeafActions renders the Move action. Routing: child entities route by the {{current_file.folder}} token (the active note real folder) so nesting is robust to a missing frontmatter field. Icon: journal (book-open absent from the icons registry).",
   "depends_on": [
     {
       "name": "nav-buttons",
@@ -49,6 +49,10 @@
     {
       "name": "platform-claude",
       "range": ">=0.1.3"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.2.0"
     }
   ],
   "breadcrumb": {
@@ -89,7 +93,8 @@
     "WikiTree",
     "WikiMove",
     "WikiLeafActions",
-    "WikiHubActions"
+    "WikiHubActions",
+    "WikiChromeBar"
   ],
   "files": [
     {
@@ -123,6 +128,10 @@
     {
       "source": "helpers/wiki-leaf-actions.js",
       "dest": "{{scripts_path}}/wiki/wiki-leaf-actions.js"
+    },
+    {
+      "source": "helpers/wiki-chrome-bar.js",
+      "dest": "{{scripts_path}}/wiki/wiki-chrome-bar.js"
     }
   ],
   "claude_surface": [
