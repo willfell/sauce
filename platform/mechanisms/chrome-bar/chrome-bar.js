@@ -122,6 +122,50 @@ class ChromeBar {
     return out;
   }
 
+  // ── openNavTarget — cold-cache-safe absolute-path open (generalized from
+  // ProjectChromeBar._openNavTarget so every adapter gets it): resolve the TFile
+  // and getLeaf().openFile (bypasses the link resolver, which can double an
+  // absolute path against the current note's folder on a cold cache), else fall
+  // back to openLinkText. Never throws.
+  openNavTarget(path, dv) {
+    try {
+      const f = app.vault.getAbstractFileByPath(path);
+      if (f && app.workspace && typeof app.workspace.getLeaf === "function") {
+        app.workspace.getLeaf(false).openFile(f);
+        return;
+      }
+    } catch (_e) { /* fall through to openLinkText */ }
+    try { app.workspace.openLinkText(path, ""); } catch (_err) { /* never throw */ }
+  }
+
+  // ── makeAdapter — build a render(dv, adapter)-ready adapter from a per-blueprint
+  // config. Centralizes everything identical across blueprints (resolve wrapping,
+  // navEntries = the blueprint's This-<space> destinations + the shared Vault grid,
+  // the cold-cache-safe open). A blueprint supplies only what differs.
+  //   config = { detect(dv,page)->ctx|null, surfaceSpec(ctx)->{primary,overflow,leaf},
+  //              dispatch(dv,ctx,id), destinations(dv,ctx)->entry[], rootClass, btnClass }
+  makeAdapter(config) {
+    const self = this;
+    return {
+      resolve(dv, page) {
+        const ctx = config.detect(dv, page);
+        if (!ctx) return null;
+        return { ctx, spec: config.surfaceSpec(ctx) };
+      },
+      async navEntries(dv, ctx) {
+        const entries = [];
+        try { for (const e of (config.destinations(dv, ctx) || [])) entries.push(e); } catch (_e) { /* best-effort */ }
+        const open = (p) => self.openNavTarget(p, dv);
+        try { for (const e of await self.vaultEntries(dv, open)) entries.push(e); } catch (_e) { /* best-effort */ }
+        return entries;
+      },
+      dispatch: (dv, ctx, id) => { try { config.dispatch(dv, ctx, id); } catch (_e) { /* never throw */ } },
+      openNavTarget: (p, dv) => self.openNavTarget(p, dv),
+      rootClass: config.rootClass,
+      btnClass: config.btnClass,
+    };
+  }
+
   // ── render — the shared chrome bar ─────────────────────────────────────────
   // adapter: { resolve(dv, page) -> { ctx, spec } | null, navEntries(dv, ctx),
   //   dispatch(dv, ctx, id), openNavTarget(path, dv), rootClass, btnClass(variant) }.

@@ -442,10 +442,9 @@ const pages = [
      (leafSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
   ok('W14d page template no longer carries a trailing "---"',
      !/\n-{3,}\s*$/.test(pageTpl.trimEnd() + "\n") && !/WikiLeafActions[\s\S]*\n---/.test(pageTpl));
-  ok('W14e heal strips the legacy template "---" after WikiLeafActions on existing pages',
-     /class:\\s\*"WikiLeafActions"\[\\s\\S\]\*\?\\n```\\n\)\\s\*\\n\?-\{3,\}/.test(installSrc) ||
-     /WikiLeafActions"\[\\s\\S\]/.test(installSrc) ||
-     /type === "wiki-page"[\s\S]{0,200}-\{3,\}/.test(installSrc));
+  ok('W14e page heal migrates existing pages to the WikiChromeBar bar (strips the legacy WikiLeafActions block)',
+     /_healWikiChromeBody/.test(installSrc) && /class:\s*"WikiChromeBar"/.test(installSrc)
+     && /"WikiLeafActions"/.test(installSrc));
 }
 
 // ---------------------------------------------------------------------------
@@ -462,7 +461,9 @@ const pages = [
   const hubTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'templates', 'Section Hub.md'), 'utf8');
   const wikiTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'content', 'Wiki Hub.md'), 'utf8');
 
-  // W15a — WikiTree calls WikiHubActions.render so the buttons render in-block.
+  // W15a — WikiTree NO LONGER calls WikiHubActions (chrome-bar adoption): the
+  // create/nav buttons moved into the WikiChromeBar bar, so WikiTree renders only
+  // the search strip + tree (content). It must not invoke WikiHubActions.
   {
     function el() {
       const e = { children: [], style: { cssText: '' } };
@@ -480,7 +481,7 @@ const pages = [
     const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
     const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
     new Tree().render(dv);
-    ok('W15a WikiTree renders the create/nav buttons in-block (calls WikiHubActions)', hubRendered);
+    ok('W15a WikiTree does NOT call WikiHubActions (buttons moved to the ChromeBar)', !hubRendered);
   }
 
   // W15b — WikiHubActions owns BOTH a top and a bottom divider (2 hrs) so its
@@ -488,14 +489,19 @@ const pages = [
   ok('W15b WikiHubActions renders top + bottom dividers (2 hrs)',
      (hubSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
 
-  // W15c — hub/section templates carry NO separate WikiHubActions block; chrome
-  // ends in WikiTree.
-  ok('W15c hub/section templates drop the WikiHubActions block (WikiTree only)',
-     !/WikiHubActions/.test(hubTpl) && /WikiTree/.test(hubTpl) &&
-     !/WikiHubActions/.test(wikiTpl) && /WikiTree/.test(wikiTpl));
+  // W15c — hub/section chrome is now the single WikiChromeBar bar (chrome-bar
+  // adoption): no Breadcrumb / SpaceNavButtons / WikiHubActions blocks; WikiTree
+  // stays below as content.
+  ok('W15c hub/section templates render WikiChromeBar + WikiTree (no legacy chrome blocks)',
+     /WikiChromeBar/.test(hubTpl) && /WikiTree/.test(hubTpl)
+     && !/WikiHubActions/.test(hubTpl) && !/SpaceNavButtons/.test(hubTpl) && !/Breadcrumb/.test(hubTpl)
+     && /WikiChromeBar/.test(wikiTpl) && /WikiTree/.test(wikiTpl)
+     && !/WikiHubActions/.test(wikiTpl) && !/SpaceNavButtons/.test(wikiTpl) && !/Breadcrumb/.test(wikiTpl));
 
-  // W15d — heal behavior: existing hub note (WikiHubActions block + "---")
-  // collapses to [bc][nav][WikiTree], no divider between nav and tree, idempotent.
+  // W15d — heal behavior (chrome-bar adoption): a legacy hub/section note
+  // ([bc][nav][WikiHubActions][---][WikiTree]) migrates to [WikiChromeBar][WikiTree]
+  // — one bar, no legacy chrome blocks, WikiTree preserved as content, idempotent;
+  // and a legacy page ([bc][nav][WikiLeafActions]) migrates to [WikiChromeBar].
   {
     const m = installSrc.match(/function _healWikiChromeBody\(body, type\) \{[\s\S]*?\n\}\n/);
     const heal = new Function(m[0] + '\nreturn _healWikiChromeBody;')();
@@ -505,10 +511,18 @@ const pages = [
       blk('Breadcrumb'), '', blk('SpaceNavButtons'), '', blk('WikiHubActions'), '', '---', '', blk('WikiTree'), ''].join('\n');
     const h1 = heal(hub, 'wiki-section');
     const h2 = heal(h1, 'wiki-section');
-    const between = h1.slice(h1.indexOf('SpaceNavButtons'), h1.indexOf('WikiTree'));
-    ok('W15d heal removes legacy WikiHubActions block, keeps WikiTree, drops the "---", idempotent',
-       !/class:\s*"WikiHubActions"/.test(h1) && /class:\s*"WikiTree"/.test(h1) &&
-       !/^-{3,}$/m.test(between) && h1 === h2);
+    ok('W15d heal → single WikiChromeBar bar + WikiTree content, no legacy chrome, bar before tree, idempotent',
+       /class:\s*"WikiChromeBar"/.test(h1) && /class:\s*"WikiTree"/.test(h1)
+       && !/class:\s*"WikiHubActions"/.test(h1) && !/class:\s*"SpaceNavButtons"/.test(h1) && !/class:\s*"Breadcrumb"/.test(h1)
+       && h1.indexOf('WikiChromeBar') < h1.indexOf('WikiTree') && h1 === h2);
+
+    const page = ['---', 'type: wiki-page', 'title: p', '---', '',
+      blk('Breadcrumb'), '', blk('SpaceNavButtons'), '', blk('WikiLeafActions'), '', 'Body.', ''].join('\n');
+    const p1 = heal(page, 'wiki-page');
+    const p2 = heal(p1, 'wiki-page');
+    ok('W15d2 page heal → WikiChromeBar, WikiLeafActions/nav stripped, body kept, idempotent',
+       /class:\s*"WikiChromeBar"/.test(p1) && !/class:\s*"WikiLeafActions"/.test(p1)
+       && !/class:\s*"SpaceNavButtons"/.test(p1) && /Body\./.test(p1) && p1 === p2);
   }
 }
 

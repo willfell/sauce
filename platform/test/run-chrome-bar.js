@@ -168,9 +168,46 @@ function summarize() {
   if (failed.length) { console.error(`FAILED: ${failed.map(([n]) => n).join(', ')}`); process.exit(1); }
   process.exit(0);
 }
+// ── CB-FACTORY-1..6 — makeAdapter(config) assembles a render-ready adapter;
+// openNavTarget opens cold-cache-safe.
+async function cbFactoryCases() {
+  const openFiles = [], openLinks = [];
+  const prevApp = global.app;
+  const f = { path: 'spice/wiki/Wiki.md' };
+  global.app = { vault: { getAbstractFileByPath: (p) => (p === f.path ? f : null) },
+    workspace: { getLeaf: () => ({ openFile: (x) => openFiles.push(x) }), openLinkText: (p) => openLinks.push(p) } };
+  inst.openNavTarget('spice/wiki/Wiki.md', {});
+  inst.openNavTarget('spice/wiki/Missing.md', {});
+  global.app = prevApp;
+  ok('CB-FACTORY-1 openNavTarget opens a resolvable path via getLeaf().openFile (TFile)', openFiles.length === 1 && openFiles[0] === f);
+  ok('CB-FACTORY-2 openNavTarget falls back to openLinkText for an unresolved path', openLinks.length === 1 && openLinks[0] === 'spice/wiki/Missing.md');
+
+  const cfg = {
+    detect: (dv, page) => (page && page.file && page.file.path.indexOf('/wiki/') >= 0 ? { context: 'wiki-hub' } : null),
+    surfaceSpec: (ctx) => ({ primary: { id: 'new-page', label: 'New Page', icon: '<svg/>' }, overflow: [], leaf: false }),
+    dispatch: (dv, ctx, id) => { dv.__dispatched = id; },
+    destinations: (dv, ctx) => ([{ section: 'This wiki' }, { label: 'Wiki', icon: '<svg/>', onSelect() {} }]),
+    rootClass: 'wiki-chrome-root',
+    btnClass: (v) => `wiki-chrome-btn wiki-chrome-btn-${v}`,
+  };
+  const adapter = inst.makeAdapter(cfg);
+  ok('CB-FACTORY-3 resolve → null when detect returns null', adapter.resolve({}, { file: { path: 'x.md' } }) === null);
+  const r = adapter.resolve({}, { file: { path: 'spice/wiki/Wiki.md' } });
+  ok('CB-FACTORY-4 resolve → { ctx, spec } when detect matches', r && r.ctx.context === 'wiki-hub' && r.spec.primary.id === 'new-page');
+  ok('CB-FACTORY-5 rootClass/btnClass thread through', adapter.rootClass === 'wiki-chrome-root' && adapter.btnClass('go') === 'wiki-chrome-btn wiki-chrome-btn-go');
+  const prevApp2 = global.app, prevCJS = global.customJS;
+  global.app = { vault: { adapter: { read: async () => { throw new Error('ENOENT'); } } } };
+  global.customJS = { SpaceNavButtons: { firstEntryPerSource: () => [] }, Icons: { resolve: () => '' } };
+  const entries = await adapter.navEntries({}, { context: 'wiki-hub' });
+  global.app = prevApp2; global.customJS = prevCJS;
+  ok('CB-FACTORY-6 navEntries begins with the config.destinations (This wiki + Wiki)',
+    entries[0] && entries[0].section === 'This wiki' && entries.some((e) => e && e.label === 'Wiki'));
+}
+
 (async () => {
   await cbVaultCases();
   await cbVaultEmpty();
   await cbRenderCases();
+  await cbFactoryCases();
   summarize();
 })();

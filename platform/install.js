@@ -6173,75 +6173,50 @@ function _dropDividersBeforeSectionLabels(body) {
 // Posture mirrors the established heals: per-note try/catch, fails-loud (history
 // warning) but never throws, full git fields on every push, .sauce-backup
 // snapshot before any write. Reuses _listAllMarkdownRecursive.
-// _healWikiChromeBody — pure, idempotent body transform for wiki notes. Three
-// content-idempotent operations (each guarded so a second pass is a no-op):
-//   1. hub/section: swap the two stacked entity-create:wiki-section/-page
-//      dataviewjs blocks → a single WikiHubActions block (one evenly-spaced row).
-//   2. any wiki note with NO SpaceNavButtons block (bare/hand-made): inject the
-//      full chrome header (Breadcrumb + SpaceNavButtons + WikiHubActions|WikiLeafActions)
-//      right after the frontmatter so it renders nav like every other note.
-//   3. nav present but Breadcrumb absent: inject the Breadcrumb block before nav.
-// A correctly-chromed note (breadcrumb + nav + the right actions, no legacy
-// entity-create blocks) is returned unchanged.
+// _healWikiChromeBody — pure, idempotent body transform for wiki notes
+// (chrome-bar adoption). Migrates a note's chrome to the single WikiChromeBar
+// bar: strips every LEGACY chrome block (Breadcrumb / SpaceNavButtons / the
+// standalone WikiHubActions & WikiLeafActions action blocks / the two legacy
+// stacked entity-create blocks / the chrome "---" divider) and inserts one
+// WikiChromeBar block right after the frontmatter. WikiTree is CONTENT (the
+// create buttons moved into the bar) and is preserved; hub/section notes are
+// guaranteed a WikiTree block below the bar. A note already carrying a
+// WikiChromeBar block is returned unchanged (idempotent).
 function _healWikiChromeBody(body, type) {
   if (typeof body !== "string") return body;
   if (!["wiki-hub", "wiki-section", "wiki-page"].includes(type)) return body;
   const VP = "ranch/views/customjs-guard";
-  const bcBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "Breadcrumb" });\n```';
-  const navBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "SpaceNavButtons" });\n```';
-  // hub/section chrome now ENDS in the WikiTree block: WikiTree renders the
-  // create/nav buttons (+ its own divider), the search bar, and the cards in ONE
-  // dataviewjs block, so the buttons↔search boundary is gap-free. wiki-page still
-  // ends in WikiLeafActions.
-  const actionClass = type === "wiki-page" ? "WikiLeafActions" : "WikiTree";
-  const actionBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "' + actionClass + '" });\n```';
+  const barBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "WikiChromeBar" });\n```';
+  const treeBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "WikiTree" });\n```';
+
+  // Idempotent: already migrated → no-op.
+  if (/class:\s*"WikiChromeBar"/.test(body)) return body;
+
   let out = body;
 
-  // 1. hub/section: WikiTree renders the buttons itself now. Collapse everything
-  //    between the SpaceNavButtons block and the WikiTree block — a legacy standalone
-  //    WikiHubActions block, the two legacy stacked entity-create blocks, and the
-  //    "---" divider — down to a single blank line. This removes the cross-block
-  //    line gap AND prevents a duplicate button row. Idempotent: once collapsed the
-  //    span is just one blank line, which re-matches to itself.
-  if (type !== "wiki-page") {
-    // stragglers first, for the rare note that has NO WikiTree block to anchor on:
-    out = out.replace(/```dataviewjs\n\/\/ entity-create:wiki-section[\s\S]*?instance: "wiki-page" \}\] \}\);\n```\n?/, "");
-    out = out.replace(/```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"WikiHubActions"\s*\}\);\n```\n?/, "");
-    // common case: normalize the nav→tree gap in one shot.
-    out = out.replace(
-      /(class:\s*"SpaceNavButtons"\s*\}\);\n```\n)[\s\S]*?(```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"WikiTree"\s*\})/,
-      "$1\n$2"
-    );
+  // Strip the two legacy stacked entity-create blocks (older hub grammar).
+  out = out.replace(/```dataviewjs\n\/\/ entity-create:wiki-section[\s\S]*?instance: "wiki-page" \}\] \}\);\n```\n?/g, "");
+  // Strip each legacy chrome block (Breadcrumb / SpaceNavButtons / WikiHubActions
+  // / WikiLeafActions). WikiTree is intentionally NOT in this list — it's content.
+  for (const cls of ["Breadcrumb", "SpaceNavButtons", "WikiHubActions", "WikiLeafActions"]) {
+    const re = new RegExp('```dataviewjs\\n(?:\\/\\/[^\\n]*\\n)?await dv\\.view\\("[^"]*",\\s*\\{\\s*class:\\s*"' + cls + '"\\s*\\}\\);\\n```\\n?', "g");
+    out = out.replace(re, "");
   }
 
-  // 2. bare note (no nav at all): inject full chrome after the frontmatter. No
-  //    trailing "---" — the action helpers render their own dividers now.
-  if (!/class:\s*"SpaceNavButtons"/.test(out)) {
-    const header = [bcBlock, "", navBlock, "", actionBlock, ""].join("\n");
-    const fm = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
-    out = fm ? out.slice(0, fm[0].length) + "\n" + header + "\n" + out.slice(fm[0].length) : header + "\n" + out;
-    return out;
+  // Split off the frontmatter so the bar lands right after it.
+  const fm = out.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  const head = fm ? out.slice(0, fm[0].length) : "";
+  let rest = fm ? out.slice(fm[0].length) : out;
+  // Drop leading blank lines + any stray leading chrome "---" the strips left behind.
+  rest = rest.replace(/^\s*/, "");
+  rest = rest.replace(/^-{3,}[ \t]*\r?\n\s*/, "");
+  // hub/section keep their WikiTree content block; guarantee one exists.
+  if (type !== "wiki-page" && !/class:\s*"WikiTree"/.test(rest)) {
+    rest = treeBlock + "\n\n" + rest;
   }
 
-  // 3. nav present but breadcrumb missing: inject breadcrumb before the nav block.
-  if (!/class:\s*"Breadcrumb"/.test(out)) {
-    const navIdx = out.indexOf('class: "SpaceNavButtons"');
-    const fence = out.lastIndexOf("```dataviewjs", navIdx);
-    if (fence !== -1) out = out.slice(0, fence) + bcBlock + "\n\n" + out.slice(fence);
-  }
-
-  // 4. wiki-page: WikiLeafActions now renders its own trailing divider, so strip the
-  //    template's redundant "---" immediately after that block (idempotent).
-  if (type === "wiki-page") {
-    out = out.replace(/(class:\s*"WikiLeafActions"[\s\S]*?\n```\n)\s*\n?-{3,}[ \t]*(\r?\n|$)/, "$1");
-  }
-
-  // 5. hub/section safety net: guarantee a WikiTree block (it renders buttons +
-  //    search + cards). Only fires if the above somehow left none.
-  if (type !== "wiki-page" && !/class:\s*"WikiTree"/.test(out)) {
-    out = out.replace(/\s*$/, "") + "\n\n" + actionBlock + "\n";
-  }
-  return out;
+  const sep = rest.length ? "\n\n" : "\n";
+  return head + (head ? "\n" : "") + barBlock + sep + rest;
 }
 
 // _HOME_CHROME — canonical body chrome for spice/home/Home.md. Two customjs-guard

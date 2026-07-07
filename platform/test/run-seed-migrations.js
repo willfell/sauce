@@ -613,16 +613,18 @@ withTempVault((vault) => {
             `hasTree=${/WikiTree/.test(hubBody)} hasWHA=${/WikiHubActions/.test(hubBody)} hasLegacy=${/entity-create:wiki-/.test(hubBody)}`
         );
 
-        // WIKI-10: breadcrumbs guaranteed on EVERY wiki section + page (path_walk chrome
-        // via template + heal) — hub, both nested section hubs, and a deep page.
+        // WIKI-10: the WikiChromeBar bar (which renders the path_walk breadcrumb + the
+        // Go ▾/primary/⋯ controls) is guaranteed on EVERY wiki note post chrome-bar
+        // adoption — hub, both nested section hubs, and a deep page. (The breadcrumb is
+        // no longer a standalone block; it lives inside the bar.)
         let awsBody = "", vpcBody = "";
         try { awsBody = helpers.readNote(vault, "spice/wiki/infra/aws/AWS.md"); } catch (e) {}
         try { vpcBody = helpers.readNote(vault, "spice/wiki/infra/aws/VPC Peering.md"); } catch (e) {}
-        const _hasBc = (b) => /class:\s*"Breadcrumb"/.test(b);
+        const _hasBar = (b) => /class:\s*"WikiChromeBar"/.test(b);
         ok(
-            "HC-WIKI-SEED-MIGRATE-WIKI-10 breadcrumb present on every wiki section + page (hub/infra/aws + deep page)",
-            _hasBc(hubBody) && _hasBc(infraBody) && _hasBc(awsBody) && _hasBc(vpcBody),
-            `hub=${_hasBc(hubBody)} infra=${_hasBc(infraBody)} aws=${_hasBc(awsBody)} vpc=${_hasBc(vpcBody)}`
+            "HC-WIKI-SEED-MIGRATE-WIKI-10 WikiChromeBar bar (renders breadcrumb + nav) present on every wiki section + page (hub/infra/aws + deep page)",
+            _hasBar(hubBody) && _hasBar(infraBody) && _hasBar(awsBody) && _hasBar(vpcBody),
+            `hub=${_hasBar(hubBody)} infra=${_hasBar(infraBody)} aws=${_hasBar(awsBody)} vpc=${_hasBar(vpcBody)}`
         );
     }
 
