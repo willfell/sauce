@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.199.0",
+  "workshop_version": "0.200.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -104,7 +104,7 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ],
   "blueprints": [
@@ -138,7 +138,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "home",
