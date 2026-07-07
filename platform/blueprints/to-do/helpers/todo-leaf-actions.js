@@ -54,6 +54,7 @@ class ToDoLeafActions {
     }
     async render(dv) {
         if (dv.container.closest('.markdown-embed')) return;
+        try { if (dv.container.closest('.markdown-preview-view')?.querySelector('.todo-chrome-root')) return; } catch (_e) {}
 
         const myGen = (dv.container.__toDoLeafRenderGen || 0) + 1;
         dv.container.__toDoLeafRenderGen = myGen;

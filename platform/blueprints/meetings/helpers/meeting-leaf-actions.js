@@ -86,6 +86,7 @@ class MeetingLeafActions {
   // ── render ─────────────────────────────────────────────────────────────────
   async render(dv) {
     if (dv.container.closest(".markdown-embed")) return;
+    try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".meeting-chrome-root")) return; } catch (_e) {}
     const myGen = (dv.container.__meetingLeafRenderGen || 0) + 1;
     dv.container.__meetingLeafRenderGen = myGen;
     while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);

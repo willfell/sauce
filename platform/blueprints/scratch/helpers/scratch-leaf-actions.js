@@ -37,6 +37,7 @@ class ScratchLeafActions {
 
     async render(dv) {
         if (dv.container.closest(".markdown-embed")) return;
+        try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".scratch-chrome-root")) return; } catch (_e) {}
 
         const myGen = (dv.container.__scratchRenderGen || 0) + 1;
         dv.container.__scratchRenderGen = myGen;

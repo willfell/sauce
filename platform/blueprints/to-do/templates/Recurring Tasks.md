@@ -7,11 +7,7 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "ToDoLeafActions" });
+await dv.view("{{views_path}}/customjs-guard", { class: "ToDoChromeBar" });
 ```
 
 ```dataviewjs

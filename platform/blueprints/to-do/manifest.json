@@ -40,6 +40,10 @@
     {
       "name": "task-entity",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "breadcrumb": {
@@ -72,7 +76,8 @@
     "ToDoCreateTask",
     "ToDoCreateTaskInit",
     "TodayCaptureEditableList",
-    "TaskDoneArchive"
+    "TaskDoneArchive",
+    "ToDoChromeBar"
   ],
   "customjs_startup_scripts": [
     "ToDoCreateTaskInit"
@@ -155,6 +160,10 @@
     {
       "source": "helpers/task-done-archive.js",
       "dest": "{{scripts_path}}/to-do/task-done-archive.js"
+    },
+    {
+      "source": "helpers/todo-chrome-bar.js",
+      "dest": "{{scripts_path}}/to-do/todo-chrome-bar.js"
     }
   ],
   "nav_buttons": [
