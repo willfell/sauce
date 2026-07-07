@@ -254,8 +254,8 @@ class ChromeBar {
       },
     });
 
-    // 2. Primary button — non-leaf surfaces only.
-    if (!spec.leaf && spec.primary) {
+    // 2. Primary button — rendered whenever the surface declares one.
+    if (spec.primary) {
       const p = spec.primary;
       this.renderChromeButton(right, {
         cls: adapter.btnClass("primary"),
