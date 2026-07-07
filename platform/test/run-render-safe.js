@@ -71,6 +71,43 @@ ok('RS-5 filePath + fileName derive from page', () => {
   });
 });
 
+// 6. Mobile cold-load: dv.current() has .file but has NOT yet populated its
+// frontmatter fields (the note renders before the DV index is ready). When it IS
+// the active file, page() overlays the metadataCache frontmatter so `type` etc.
+// resolve — the previous guard returned the partial page verbatim, leaving
+// consumers (breadcrumb / chrome) with an undefined type → empty render on phones.
+ok('RS-6 page overlays cached frontmatter onto a partial dv.current() (mobile cold-load)', () => {
+  withApp({ path: 'spice/wiki/infra/AWS.md', basename: 'AWS' }, { type: 'wiki-page', title: 'AWS' }, () => {
+    const partial = { file: { path: 'spice/wiki/infra/AWS.md', name: 'AWS' } }; // no type yet
+    const out = RenderSafe.page({ current: () => partial });
+    assert(out && out.file && out.file.path === 'spice/wiki/infra/AWS.md', 'keeps DV .file');
+    assert(out.type === 'wiki-page', 'overlays frontmatter.type from metadataCache');
+    assert(out.title === 'AWS', 'overlays frontmatter.title');
+    assert(partial.type === undefined, 'does NOT mutate the live DV page');
+  });
+});
+
+// 7. The overlay only FILLS missing fields — DV's own resolved values win.
+ok('RS-7 overlay does not clobber DV-resolved fields (DV wins over cache)', () => {
+  withApp({ path: 'a/B.md', basename: 'B' }, { type: 'cached', extra: 'x' }, () => {
+    const cur = { file: { path: 'a/B.md', name: 'B' }, type: 'live' }; // DV already resolved type
+    const out = RenderSafe.page({ current: () => cur });
+    assert(out.type === 'live', 'DV type wins over cached');
+    assert(out.extra === 'x', 'still fills a field DV was missing');
+  });
+});
+
+// 8. Only overlay when the DV page IS the active file — never borrow another
+// file's frontmatter (embeds / split views render non-active notes).
+ok('RS-8 no overlay when dv.current() is not the active file', () => {
+  withApp({ path: 'other/Active.md', basename: 'Active' }, { type: 'wiki-page' }, () => {
+    const cur = { file: { path: 'embedded/Note.md', name: 'Note' } }; // a different (embedded) file
+    const out = RenderSafe.page({ current: () => cur });
+    assert(out === cur, 'returns the DV page unchanged (no cross-file overlay)');
+    assert(out.type === undefined, 'does not borrow the active file frontmatter');
+  });
+});
+
 // ---------- L3 scroll capture/restore ----------
 let observers = [], rafs = [], timeouts = [];
 function makeScroller(overflow, sh, ch) {

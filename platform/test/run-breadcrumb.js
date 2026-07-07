@@ -703,6 +703,40 @@ async function runAsync(fn) { return await fn(); }
     if (!segEq(segs, expected)) console.log('    BC-COLD got: ' + JSON.stringify(segs));
   }
 
+  // BC-COLD-PARTIAL — the harder mobile cold-load, driving the REAL RenderSafe.
+  // Here dv.current() is NOT null: it's a partial page that has .file but hasn't
+  // populated its frontmatter fields yet (no `type`). The old RenderSafe guard
+  // returned that verbatim → undefined type → empty breadcrumb on phones (the whole
+  // chrome bar failed to render). RenderSafe now overlays the metadataCache
+  // frontmatter for the active file, so buildSegments recovers the SAME trail.
+  {
+    const fsP = require('fs'), pathP = require('path');
+    const RS_SRC = fsP.readFileSync(pathP.join(__dirname, '..', 'mechanisms', 'render-safe', 'render-safe.js'), 'utf8');
+    const RealRenderSafe = new Function(`${RS_SRC}\nreturn RenderSafe;`)();
+    const notePath = 'spice/projects/test-project/docs/knowledge/Architecture.md';
+    const fm = { project_name: 'test-project', project: 'test-project', project_slug: 'test-project', type: 'doc-note', section: 'Knowledge' };
+    const partial = { file: { path: notePath, name: 'Architecture' } }; // .file present, frontmatter NOT yet indexed
+    const dvPartial = makeDv(partial);
+    const savedCJS = global.customJS, savedApp = global.app;
+    global.customJS = { RenderSafe: new RealRenderSafe() };
+    global.app = {
+      workspace: { getActiveFile: () => ({ path: notePath, basename: 'Architecture' }) },
+      metadataCache: { getFileCache: () => ({ frontmatter: fm }) },
+      vault: { adapter: { read: async (p) => { if (p === 'ranch/breadcrumb-registry.json') return JSON.stringify(REGISTRY); throw new Error('ENOENT ' + p); } } },
+    };
+    let segs = [];
+    try { segs = await new NewBreadcrumb().buildSegments(dvPartial); }
+    finally { global.customJS = savedCJS; global.app = savedApp; }
+    const expected = [
+      { label: 'test-project', link: 'spice/projects/test-project/test-project.md' },
+      { label: 'Docs',         link: 'spice/projects/test-project/docs/Docs.md' },
+      { label: 'Knowledge',    link: 'spice/projects/test-project/docs/knowledge/Knowledge.md' },
+      { label: 'Architecture', link: null },
+    ];
+    ok('BC-COLD-PARTIAL partial dv.current() (file, no type) → real RenderSafe overlay recovers the trail', segEq(segs, expected));
+    if (!segEq(segs, expected)) console.log('    BC-COLD-PARTIAL got: ' + JSON.stringify(segs));
+  }
+
   finish();
 })().catch(err => {
   console.error('harness error:', err);
