@@ -510,6 +510,25 @@ module.exports = async function (tp) {
       });
     }
 
+    // 6a2b. Prune the orphaned project/breadcrumb.js — a stale pre-mechanism
+    // `class Breadcrumb` that collides with the breadcrumb mechanism's class of the
+    // same name. The customJS scan order is platform-dependent, so on mobile the
+    // legacy could win and the ChromeBar breadcrumb silently rendered nothing.
+    try {
+      await pruneOrphanedProjectBreadcrumb(tp, installedNow.history, git);
+    } catch (e) {
+      new Notice(`pruneOrphanedProjectBreadcrumb crashed: ${e.message}`, 8000);
+      installedNow.history.push({
+        event: "error",
+        step: "orphaned_project_breadcrumb_prune",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
     // 6a3. v0.124.0 (note-chrome wave 1) — inject the Breadcrumb dataviewjs
     // block into EXISTING meetings/scratch/to-do notes (and rewrite meeting
     // ## H2 content headers to SectionLabel), so notes created before Task 1's
@@ -16896,6 +16915,51 @@ async function pruneTemplaterStartupOrphans(tp, history, git) {
       });
     }
   }
+}
+
+// pruneOrphanedProjectBreadcrumb — one-shot removal of a stale customJS script that
+// the project blueprint USED to ship: helpers/breadcrumb.js, a pre-mechanism
+// `class Breadcrumb`. It was dropped from the project manifest when the breadcrumb
+// MECHANISM (mechanisms/breadcrumb, also `class Breadcrumb`) took over (~v0.123.0),
+// but the installer has no general orphaned-script prune, so the old copy lingered
+// at ranch/scripts/project/breadcrumb.js in every already-installed vault. Two
+// `class Breadcrumb` files means a customJS NAME COLLISION: customJS registers by
+// class name and the winner depends on the filesystem scan order, which differs by
+// platform — on mobile the legacy (which has no buildSegments/path_walk) could win,
+// so the ChromeBar breadcrumb silently rendered nothing (desktop happened to load
+// the mechanism's). Delete the orphan so the mechanism's Breadcrumb is the only one.
+//
+// Path-scoped (only ranch/scripts/project/breadcrumb.js) AND content-guarded (must
+// be the legacy shape: has `class Breadcrumb`, lacks buildSegments) so it can never
+// touch the mechanism's file or an unrelated file. Backup-on-delete; never throws.
+// SUNSET: remove after all consumer vaults have installed ≥ this release once.
+async function pruneOrphanedProjectBreadcrumb(tp, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const target = "ranch/scripts/project/breadcrumb.js";
+  const step = "orphaned_project_breadcrumb_prune";
+  const warn = (message, event) => {
+    if (history) history.push({ event: event || "warning", step, message,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  };
+  try {
+    if (!(await adapter.exists(target))) return; // already pruned / never had it
+    let body;
+    try { body = await adapter.read(target); }
+    catch (e) { warn(`read failed for ${target}: ${e.message}`); return; }
+    // Safety: only remove the LEGACY standalone class. Never delete a file that
+    // exposes the mechanism's API (buildSegments), and never a non-Breadcrumb file.
+    if (!/class\s+Breadcrumb\b/.test(body) || /buildSegments/.test(body)) {
+      warn(`${target} is not the legacy Breadcrumb class — left untouched`);
+      return;
+    }
+    try { await adapter.write(`${target}.sauce-backup`, body); }
+    catch (e) { new Notice(`pruneOrphanedProjectBreadcrumb: backup write failed (${e.message}); aborting`, 8000); warn(`backup write failed: ${e.message}`, "error"); return; }
+    try {
+      await adapter.remove(target);
+      if (history) history.push({ event: "info", step, action: "applied", removed: target,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) { new Notice(`pruneOrphanedProjectBreadcrumb: remove failed (${e.message})`, 8000); warn(`remove failed: ${e.message}`, "error"); }
+  } catch (e) { warn(`crashed: ${e.message}`, "error"); }
 }
 
 // applyCustomJsStartupScripts — for each item that declares
