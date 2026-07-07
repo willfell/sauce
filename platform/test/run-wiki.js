@@ -490,11 +490,14 @@ const pages = [
   ok('W15b WikiHubActions renders top + bottom dividers (2 hrs)',
      (hubSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
 
-  // W15c — hub/section templates carry NO separate WikiHubActions block; chrome
-  // ends in WikiTree.
-  ok('W15c hub/section templates drop the WikiHubActions block (WikiTree only)',
-     !/WikiHubActions/.test(hubTpl) && /WikiTree/.test(hubTpl) &&
-     !/WikiHubActions/.test(wikiTpl) && /WikiTree/.test(wikiTpl));
+  // W15c — hub/section chrome is now the single WikiChromeBar bar (chrome-bar
+  // adoption): no Breadcrumb / SpaceNavButtons / WikiHubActions blocks; WikiTree
+  // stays below as content.
+  ok('W15c hub/section templates render WikiChromeBar + WikiTree (no legacy chrome blocks)',
+     /WikiChromeBar/.test(hubTpl) && /WikiTree/.test(hubTpl)
+     && !/WikiHubActions/.test(hubTpl) && !/SpaceNavButtons/.test(hubTpl) && !/Breadcrumb/.test(hubTpl)
+     && /WikiChromeBar/.test(wikiTpl) && /WikiTree/.test(wikiTpl)
+     && !/WikiHubActions/.test(wikiTpl) && !/SpaceNavButtons/.test(wikiTpl) && !/Breadcrumb/.test(wikiTpl));
 
   // W15d — heal behavior: existing hub note (WikiHubActions block + "---")
   // collapses to [bc][nav][WikiTree], no divider between nav and tree, idempotent.
