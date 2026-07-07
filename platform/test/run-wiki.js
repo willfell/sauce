@@ -462,7 +462,9 @@ const pages = [
   const hubTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'templates', 'Section Hub.md'), 'utf8');
   const wikiTpl = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'content', 'Wiki Hub.md'), 'utf8');
 
-  // W15a — WikiTree calls WikiHubActions.render so the buttons render in-block.
+  // W15a — WikiTree NO LONGER calls WikiHubActions (chrome-bar adoption): the
+  // create/nav buttons moved into the WikiChromeBar bar, so WikiTree renders only
+  // the search strip + tree (content). It must not invoke WikiHubActions.
   {
     function el() {
       const e = { children: [], style: { cssText: '' } };
@@ -480,7 +482,7 @@ const pages = [
     const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
     const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
     new Tree().render(dv);
-    ok('W15a WikiTree renders the create/nav buttons in-block (calls WikiHubActions)', hubRendered);
+    ok('W15a WikiTree does NOT call WikiHubActions (buttons moved to the ChromeBar)', !hubRendered);
   }
 
   // W15b — WikiHubActions owns BOTH a top and a bottom divider (2 hrs) so its
