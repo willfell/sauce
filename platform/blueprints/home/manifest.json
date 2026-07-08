@@ -1,6 +1,6 @@
 {
   "name": "home",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "kind": "blueprint",
   "module_directory": "home",
   "skills_dir": ".claude/skills/home",
@@ -47,12 +47,29 @@
     ]
   },
   "customjs_classes": [
-    "SpaceHome"
+    "SpaceHome",
+    "HomeCommandsInit"
+  ],
+  "customjs_startup_scripts": [
+    "HomeCommandsInit"
+  ],
+  "hotkeys": [
+    {
+      "command_id": "sauce-home:open",
+      "modifiers": [
+        "Mod"
+      ],
+      "key": "["
+    }
   ],
   "files": [
     {
       "source": "helpers/space-home.js",
       "dest": "{{scripts_path}}/home/space-home.js"
+    },
+    {
+      "source": "helpers/home-commands-init.js",
+      "dest": "{{scripts_path}}/home/home-commands-init.js"
     }
   ],
   "claude_surface": [

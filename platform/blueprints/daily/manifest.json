@@ -1,6 +1,6 @@
 {
   "name": "daily",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "kind": "blueprint",
   "module_directory": "daily",
   "skills_dir": ".claude/skills/daily",
@@ -38,15 +38,7 @@
       }
     }
   ],
-  "hotkeys": [
-    {
-      "command_id": "daily-notes",
-      "modifiers": [
-        "Mod"
-      ],
-      "key": "["
-    }
-  ],
+  "hotkeys": [],
   "snippets": [
     {
       "source": "helpers/sauce-daily-dashboard.css",
