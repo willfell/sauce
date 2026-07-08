@@ -2,6 +2,7 @@
 type: home
 cssclasses:
   - wide
+editor-width: 100
 ---
 
 ```dataviewjs
