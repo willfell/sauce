@@ -56,7 +56,8 @@ const cfg = inst._config();
   cfg.dispatch({}, { context: 'to-do' }, 'completed-tasks');
   cfg.dispatch({}, { context: 'to-do-hub' }, 'back-today');
 
-  ok('TDCB-DISPATCH-1 new-task → TaskDialog.open', calls.some(c => c.taskDialog && c.taskDialog.surface === 'today'));
+  ok('TDCB-DISPATCH-1 new-task → TaskDialog.open with surface "daily" + a today date (matches TaskEntity.defaultsForSurface\'s contract, NOT "today"/"scheduled" which silently fall through to source:manual with no scheduled date)',
+    calls.some(c => c.taskDialog && c.taskDialog.surface === 'daily' && c.taskDialog.today === '2026-07-06'));
   ok('TDCB-DISPATCH-2 recurring → openLinkText(Recurring Tasks)', calls.some(c => c.openLink === 'spice/to-do/Recurring Tasks.md'));
   ok('TDCB-DISPATCH-3 all-todos → openLinkText(All-ToDos)', calls.some(c => c.openLink === 'spice/to-do/All-ToDos.md'));
   ok('TDCB-DISPATCH-4 completed-tasks → openLinkText(Completed Tasks)', calls.some(c => c.openLink === 'spice/to-do/Completed Tasks.md'));
@@ -86,6 +87,26 @@ const cfg = inst._config();
 {
   ok('TDCB-CLASS-1 rootClass + btnClass',
     cfg.rootClass === 'todo-chrome-root' && cfg.btnClass('go') === 'todo-chrome-btn todo-chrome-btn-go');
+}
+
+// TDCB-CONTRACT — end-to-end proof that ToDoChromeBar's new-task dispatch
+// opts actually produce a scheduled task via the REAL TaskEntity.defaultsForSurface
+// (not a mock). This is the regression the bug fix targets: the dispatch used to
+// send { surface: "today", scheduled: <date> } — a surface value / key name
+// defaultsForSurface does not recognize — which silently fell through to its
+// default case (source: manual, no scheduled date), so the created task never
+// appeared in TaskTodayList (which requires a scheduled date). Loading the real
+// TaskDialog class here (not stubbed) closes the gap that let a wrong-but-plausible
+// opts shape ship without any test catching it.
+{
+  const TaskDialogClass = loadClass('platform/mechanisms/task-entity/task-dialog.js', 'TaskDialog');
+  const correctDefaults = TaskDialogClass.defaultsForSurface({ surface: 'daily', today: '2026-07-06' });
+  ok('TDCB-CONTRACT-1 the dispatch opts shape (surface:"daily", today:<date>) yields a real scheduled date + source:daily',
+    correctDefaults.scheduled === '2026-07-06' && correctDefaults.source === 'daily');
+
+  const buggyDefaults = TaskDialogClass.defaultsForSurface({ surface: 'today', scheduled: '2026-07-06' });
+  ok('TDCB-CONTRACT-2 sanity: the OLD buggy opts shape (surface:"today", scheduled:<date>) is confirmed unrecognized (source:manual, no scheduled) — proves this was a real, silent defect',
+    buggyDefaults.source === 'manual' && !buggyDefaults.scheduled);
 }
 
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
