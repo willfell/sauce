@@ -1190,6 +1190,56 @@ withTempVault((vault) => {
             );
         }
     }
+
+    // ===== HC-V0202-SEED-MIGRATE-RECURRING-* — applyRecurringTasksMigrationHeal =====
+    // The seed's spice/to-do/Recurring Tasks.md registry carries two entries in its
+    // Recurring Tasks section: an UNCHECKED line ("Water the plants", the live shape)
+    // and a CHECKED line ("Take out trash", the checkbox-kills-recurrence bug shape).
+    // The ungated, idempotent heal reads BOTH and materializes a real spice/tasks/*.md
+    // note per entry, leaving the original registry untouched.
+    {
+        let waterTask = null;
+        try { waterTask = helpers.readNote(vault, "spice/tasks/Water the plants.md"); } catch (e) {}
+        ok(
+            "HC-V0202-SEED-MIGRATE-RECURRING-1 unchecked registry entry migrated to a task note",
+            waterTask != null
+        );
+        if (waterTask != null) {
+            const { frontmatter: waterFm } = helpers.parseFrontmatter(waterTask);
+            ok(
+                "HC-V0202-SEED-MIGRATE-RECURRING-2 migrated task carries the recurrence grammar",
+                waterFm.recurrence === "every day",
+                `actual recurrence=${waterFm.recurrence}`
+            );
+            ok(
+                "HC-V0202-SEED-MIGRATE-RECURRING-3 migrated task is open with a scheduled date (not overdue-blank)",
+                waterFm.status === "open" && typeof waterFm.scheduled === "string" && /^\d{4}-\d{2}-\d{2}$/.test(waterFm.scheduled),
+                `actual status=${waterFm.status} scheduled=${waterFm.scheduled}`
+            );
+        }
+
+        let trashTask = null;
+        try { trashTask = helpers.readNote(vault, "spice/tasks/Take out trash.md"); } catch (e) {}
+        ok(
+            "HC-V0202-SEED-MIGRATE-RECURRING-4 CHECKED registry entry ALSO migrated (the checkbox-kills-recurrence bug fix)",
+            trashTask != null
+        );
+        if (trashTask != null) {
+            const { frontmatter: trashFm } = helpers.parseFrontmatter(trashTask);
+            ok(
+                "HC-V0202-SEED-MIGRATE-RECURRING-5 checked-entry migration carries the recurrence grammar too",
+                trashFm.recurrence === "every Monday",
+                `actual recurrence=${trashFm.recurrence}`
+            );
+        }
+
+        let registryStillThere = null;
+        try { registryStillThere = helpers.readNote(vault, "spice/to-do/Recurring Tasks.md"); } catch (e) {}
+        ok(
+            "HC-V0202-SEED-MIGRATE-RECURRING-6 original registry file left untouched (still exists)",
+            registryStillThere != null && registryStillThere.includes("Water the plants")
+        );
+    }
 });
 
 // =============================================================================
