@@ -53,6 +53,21 @@ async function main() {
   ok('TCB-DISPATCH-1 new-trip → TripNavButtons._createTrip', calls.some(c => c.createTrip === 'test-trip'));
   ok('TCB-DISPATCH-2 new-section → TripNavButtons._createTripSection', calls.some(c => c.createSection && c.createSection.includes('Extra')));
 }
+{
+  // TCB-DISPATCH-3 — new-section with no tripSlug must decline gracefully, not call _createTripSection.
+  const calls2 = [];
+  const prevCJS2 = global.customJS;
+  global.customJS = {
+    TripNavButtons: {
+      _promptForSectionTitle: async () => { calls2.push('prompted'); return 'Extra'; },
+      _createTripSection: async () => { calls2.push('created'); return 'x'; },
+    },
+  };
+  global.Notice = function () {};
+  await cfg.dispatch({}, { context: 'trip', tripSlug: null, tripName: 'Test Trip' }, 'new-section');
+  global.customJS = prevCJS2;
+  ok('TCB-DISPATCH-3 new-section with no tripSlug declines gracefully', calls2.length === 0);
+}
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);
 }

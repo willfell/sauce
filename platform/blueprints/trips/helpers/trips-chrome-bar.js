@@ -76,6 +76,10 @@ class TripsChromeBar {
             if (typeof Notice === "function") new Notice("TripsChromeBar: TripNavButtons unavailable — reinstall trips blueprint.", 6000);
             return;
           }
+          if (!ctx.tripSlug) {
+            if (typeof Notice === "function") new Notice("TripsChromeBar: this trip note is missing trip_slug — cannot create a section.", 6000);
+            return;
+          }
           const tripDir = ROOT + "/" + ctx.tripSlug;
           return TNB._promptForSectionTitle(tripDir).then((title) => {
             if (!title) return;
