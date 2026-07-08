@@ -6397,19 +6397,15 @@ function _healHomeChromeBody(body) {
   return chrome + userTail;
 }
 
-// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Three
-// customjs-guard blocks (Breadcrumb → SpaceNavButtons → ReaderQueue). Kept in
-// lockstep with blueprints/reader/content/Reader Hub.md ({{views_path}} resolves
-// to ranch/views, so the paths are byte-identical after render). The hub template
+// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Two
+// customjs-guard blocks (ReaderChromeBar → ReaderQueue). Kept in lockstep with
+// blueprints/reader/content/Reader Hub.md ({{views_path}} resolves to
+// ranch/views, so the paths are byte-identical after render). The hub template
 // has no content marker by default; any user free-write below a READER_CONTENT
 // marker is preserved by _healReaderChromeBody.
 const _READER_CHROME = [
   '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-  '```',
-  '',
-  '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+  'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
   '```',
   '',
   '```dataviewjs',
@@ -6430,11 +6426,7 @@ function _healReaderChromeBody(raw) {
   const marker = "[//]: # (READER_CONTENT)";
   const chrome = [
     '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-    '```',
-    '',
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
     '```',
     '',
     '```dataviewjs',
