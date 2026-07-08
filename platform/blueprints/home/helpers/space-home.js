@@ -355,6 +355,40 @@ class SpaceHome {
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
     sub.textContent = SpaceHome._humanDate(today, today);
 
+    // 1a) "‹ Yesterday" — opens the actual previous day's daily note (Home
+    // itself always stays pinned to today; this navigates AWAY, it does not
+    // re-render Home for another day). Never creates a file: if yesterday's
+    // note doesn't exist yet, show a Notice instead.
+    const prevBtn = greeting.createEl("button", { cls: "sauce-home-prev-day" });
+    prevBtn.setAttribute("type", "button");
+    prevBtn.setAttribute("aria-label", "Previous day");
+    prevBtn.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+    prevBtn.onclick = async () => {
+      try {
+        const appRef = (typeof app !== "undefined" && app) || (typeof window !== "undefined" && window.app) || null;
+        if (!appRef || !appRef.vault || !appRef.vault.adapter) return;
+        let cfg = null;
+        try {
+          const raw = await appRef.vault.adapter.read(".obsidian/daily-notes.json");
+          cfg = JSON.parse(raw);
+        } catch (_e) { cfg = null; }
+        const p = SpaceHome._previousDailyPath(today, cfg);
+        if (!p) {
+          try { new Notice("Could not determine yesterday's daily note path."); } catch (_e) {}
+          return;
+        }
+        const file = appRef.vault.getAbstractFileByPath ? appRef.vault.getAbstractFileByPath(p) : null;
+        if (!file) {
+          try { new Notice("No daily note for yesterday yet."); } catch (_e) {}
+          return;
+        }
+        if (appRef.workspace && typeof appRef.workspace.openLinkText === "function") {
+          appRef.workspace.openLinkText(p, "", false);
+        }
+      } catch (_e) { /* never throw out of a click handler */ }
+    };
+
     // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
     // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
     // It holds a one-gesture "Jot a task…" input + New Meeting / New Scratch /

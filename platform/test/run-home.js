@@ -384,6 +384,94 @@ function descendants(el) {
     global.window.customJS = undefined;
   }
 
+  // ── HOME-PREV-BTN: a "‹" button renders in the header, opens yesterday's
+  // daily note when it exists, and shows a Notice (never creates a file) when
+  // it doesn't.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    const opened = [];
+    const notices = [];
+    global.Notice = function (msg) { notices.push(msg); };
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => cb(),
+        openLinkText: (p, s, nl) => opened.push({ p, s, nl }),
+      },
+      vault: {
+        adapter: { read: async (p) => {
+          if (p === ".obsidian/daily-notes.json") {
+            return JSON.stringify({ folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" });
+          }
+          throw new Error("not found");
+        } },
+        getAbstractFileByPath: (p) => (p === "spice/daily/2026/07-July/Wednesday-2026-07-01.md" ? { path: p } : null),
+      },
+    };
+    global.window.app = global.app;
+    global.customJS = {};
+    global.window.customJS = global.customJS;
+
+    await home_.render(dv, {});
+    await home_.render(dv, {}); // second render (async config load may resolve after first paint) — assert on the settled DOM
+
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const prevBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-prev-day"));
+    assertTrue("HOME-PREV-BTN-1 a previous-day button renders in the header", !!prevBtn);
+
+    if (prevBtn && typeof prevBtn.onclick === "function") await prevBtn.onclick({});
+    assertEq("HOME-PREV-BTN-2 clicking it opens yesterday's existing daily note (via the correct verified weekday)",
+      opened[0] && opened[0].p, "spice/daily/2026/07-July/Wednesday-2026-07-01.md");
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.customJS;
+    delete global.Notice;
+  }
+
+  // Missing-file case: same setup but getAbstractFileByPath always returns null.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    const notices = [];
+    global.Notice = function (msg) { notices.push(msg); };
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => cb(),
+        openLinkText: () => { throw new Error("should not be called"); },
+      },
+      vault: {
+        adapter: { read: async (p) => JSON.stringify({ folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" }) },
+        getAbstractFileByPath: () => null,
+      },
+    };
+    global.window.app = global.app;
+    global.customJS = {};
+    global.window.customJS = global.customJS;
+
+    await home_.render(dv, {});
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const prevBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-prev-day"));
+
+    let threw = false;
+    try { if (prevBtn && typeof prevBtn.onclick === "function") await prevBtn.onclick({}); } catch (_e) { threw = true; }
+    assertTrue("HOME-PREV-BTN-3 missing yesterday note never throws", !threw);
+    assertTrue("HOME-PREV-BTN-4 missing yesterday note shows a Notice, no file created",
+      notices.length === 1, `expected exactly one Notice; got ${JSON.stringify(notices)}`);
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.customJS;
+    delete global.Notice;
+  }
+
   // ── HOME-CAP: "+" toggle + per-item dispatch + inline capture ───────────────
   installMoment("2026-07-02", 6);
   {
