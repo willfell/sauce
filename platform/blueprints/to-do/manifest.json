@@ -67,6 +67,7 @@
     "ToDoHubActions",
     "ToDoLeafActions",
     "ToDoAllList",
+    "TaskRecurringList",
     "TaskParser",
     "RecurrenceParser",
     "ToDoDailyCarryover",
@@ -90,6 +91,10 @@
     {
       "source": "templates/All To-Dos.md",
       "dest": "{{module_directory}}/All-ToDos.md"
+    },
+    {
+      "source": "templates/Recurring.md",
+      "dest": "{{module_directory}}/Recurring.md"
     },
     {
       "source": "templates/Project To-Do.md",
@@ -120,6 +125,10 @@
     {
       "source": "helpers/todo-all-list.js",
       "dest": "{{scripts_path}}/to-do/todo-all-list.js"
+    },
+    {
+      "source": "helpers/task-recurring-list.js",
+      "dest": "{{scripts_path}}/to-do/task-recurring-list.js"
     },
     {
       "source": "helpers/task-parser.js",

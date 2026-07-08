@@ -72,12 +72,14 @@ class TaskNoteView {
         };
         const sched = val(t.scheduled);
         const due = val(t.due);
+        const recur = val(t.recurrence);
         const prio = val(t.priority);
         let proj = val(t.project);
         const pm = /^\[\[([^\]]+)\]\]$/.exec(proj);
         if (pm) proj = pm[1];
         if (sched) rows.push({ label: 'Scheduled', value: sched });
         if (due) rows.push({ label: 'Due', value: due });
+        if (recur) rows.push({ label: 'Repeats', value: recur });
         if (prio) rows.push({ label: 'Priority', value: prio });
         if (proj) rows.push({ label: 'Project', value: proj });
         return rows;

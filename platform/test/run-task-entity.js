@@ -146,6 +146,55 @@ ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
   assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
+ok('TE-recur-1 composeNote emits recurrence (set + empty)', () => {
+  const withRecur = TaskEntity.composeNote({ title: 'Feed the dogs', recurrence: 'every day', moment: fixedMoment });
+  assert(withRecur.frontmatter.recurrence === 'every day', 'recurrence set: ' + withRecur.frontmatter.recurrence);
+  const bare = TaskEntity.composeNote({ title: 'One-shot', moment: fixedMoment });
+  assert(bare.frontmatter.recurrence === '', 'recurrence empty-string-not-omitted: ' + JSON.stringify(bare.frontmatter.recurrence));
+  // Schema position: recurrence sits right after due, before priority.
+  const keys = Object.keys(withRecur.frontmatter);
+  assert(keys.indexOf('due') === keys.indexOf('recurrence') - 1, 'recurrence follows due: ' + keys.join(','));
+  assert(keys.indexOf('recurrence') === keys.indexOf('priority') - 1, 'recurrence precedes priority: ' + keys.join(','));
+});
+
+ok('TE-recur-2 parseNote normalizes recurrence like priority (empty string, not null)', () => {
+  const withRecur = TaskEntity.parseNote({ title: 'Feed the dogs', recurrence: 'every day', file: { path: 'spice/tasks/Feed the dogs.md' } });
+  assert(withRecur.recurrence === 'every day', 'recurrence read back: ' + withRecur.recurrence);
+  const bare = TaskEntity.parseNote({ title: 'One-shot', file: { path: 'spice/tasks/One-shot.md' } });
+  assert(bare.recurrence === '', 'absent recurrence -> empty string: ' + JSON.stringify(bare.recurrence));
+});
+
+ok('TE-recur-3 nextOccurrence finds the next matching date after fromDateStr', () => {
+  // Simple predicate: matches every date whose day-of-month is even.
+  const evenDayMatches = (dateStr) => {
+    const day = parseInt(dateStr.slice(8, 10), 10);
+    return day % 2 === 0;
+  };
+  const next = TaskEntity.nextOccurrence('every 2 days (test grammar)', '2026-07-08', null, evenDayMatches);
+  assert(next === '2026-07-10', 'next even day after the 8th (itself even) is the 10th: ' + next);
+});
+
+ok('TE-recur-4 nextOccurrence never returns fromDateStr itself, even if it matches', () => {
+  const alwaysMatches = () => true;
+  const next = TaskEntity.nextOccurrence('every day', '2026-07-08', null, alwaysMatches);
+  assert(next === '2026-07-09', 'strictly AFTER fromDateStr: ' + next);
+});
+
+ok('TE-recur-5 nextOccurrence returns null when the predicate never matches within the horizon', () => {
+  const neverMatches = () => false;
+  const next = TaskEntity.nextOccurrence('every leap-day-2400', '2026-07-08', null, neverMatches);
+  assert(next === null, 'unsupported/never-matching grammar -> null: ' + next);
+});
+
+ok('TE-recur-6 nextOccurrence tolerates a missing/throwing matchesFn (never throws)', () => {
+  let threw = false;
+  try {
+    const next = TaskEntity.nextOccurrence('every day', '2026-07-08', null, null);
+    assert(next === null, 'no matchesFn -> null, not a throw: ' + next);
+  } catch (_e) { threw = true; }
+  assert(!threw, 'nextOccurrence must never throw');
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
   const parsed = TaskEntity.parseNote({ status: undefined, scheduled: '', title: 't', file: { path: 'spice/tasks/a.md' } });
@@ -367,6 +416,65 @@ ok('TD-15 _payloadFromState includes state.links', () => {
   assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
 });
 
+ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
+  const state = { title: 'Feed the dogs', scheduled: '2026-07-08', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
+  const payload = TaskDialog._payloadFromState(state);
+  assert(payload.recurrence === 'every day', 'recurrence in payload: ' + payload.recurrence);
+});
+
+ok('TD-recur-2 _payloadFromState defaults recurrence to empty string', () => {
+  const state = { title: 'One-shot', scheduled: '', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
+  const payload = TaskDialog._payloadFromState(state);
+  assert(payload.recurrence === '', 'no recurrence -> empty string: ' + JSON.stringify(payload.recurrence));
+});
+
+ok('TD-recur-3 _recurrenceValidity: empty is always valid', () => {
+  const v = TaskDialog._recurrenceValidity('', () => false);
+  assert(v.valid === true, 'empty recurrence is valid: ' + JSON.stringify(v));
+});
+
+ok('TD-recur-4 _recurrenceValidity: non-empty defers to isSupportedFn', () => {
+  const supported = TaskDialog._recurrenceValidity('every Monday', () => true);
+  assert(supported.valid === true, 'supported grammar is valid');
+  const unsupported = TaskDialog._recurrenceValidity('every leap year', () => false);
+  assert(unsupported.valid === false, 'unsupported grammar is invalid');
+});
+
+ok('TD-recur-5 _recurrenceValidity: a missing/throwing isSupportedFn defaults to valid (defensive)', () => {
+  const missingFn = TaskDialog._recurrenceValidity('every day', null);
+  assert(missingFn.valid === true, 'no isSupportedFn -> valid (never block submit on a cold-load parser): ' + JSON.stringify(missingFn));
+  const throwingFn = TaskDialog._recurrenceValidity('every day', () => { throw new Error('boom'); });
+  assert(throwingFn.valid === true, 'throwing isSupportedFn -> valid: ' + JSON.stringify(throwingFn));
+});
+
+// TD-recur-6/7 exercise _rollForwardDate, which delegates through
+// TaskDialog._taskEntity() (reads window.customJS.TaskEntity). Stub/restore
+// global.window scoped to just these two tests (narrower than a module-wide
+// stub) so no other test in this file gains an unexpected window.customJS.
+ok('TD-recur-6 _rollForwardDate: recurring task rolls from TODAY, not from stale scheduled', () => {
+  const prevWindow = global.window;
+  global.window = { customJS: { TaskEntity: TaskEntity } };
+  try {
+    // "every day" done late (scheduled 5th, actually completed on the 8th) rolls to the 9th.
+    const matchesFn = (dateStr) => true; // "every day" always matches.
+    const next = TaskDialog._rollForwardDate('every day', '2026-07-08', '2026-07-01', matchesFn);
+    assert(next === '2026-07-09', 'rolls from today (8th) not from scheduled (5th): ' + next);
+  } finally {
+    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  }
+});
+
+ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching grammar', () => {
+  const prevWindow = global.window;
+  global.window = { customJS: { TaskEntity: TaskEntity } };
+  try {
+    const next = TaskDialog._rollForwardDate('every leap year', '2026-07-08', '2026-07-01', () => false);
+    assert(next === null, 'unsupported grammar -> null (caller falls back to archiving): ' + next);
+  } finally {
+    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  }
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
@@ -405,6 +513,17 @@ ok('TNV-1 _fieldRows returns only set fields (project unwrapped)', () => {
 ok('TNV-2 _fieldRows tolerates null / empty task', () => {
   assert(TaskNoteView._fieldRows(null).length === 0, 'null → []');
   assert(TaskNoteView._fieldRows({}).length === 0, 'empty → []');
+});
+
+// TNV-recur-1. _fieldRows includes a Repeats row iff recurrence is set.
+ok('TNV-recur-1 _fieldRows includes a Repeats row iff recurrence is set', () => {
+  const TaskNoteViewClass = loadClass('mechanisms/task-entity/task-note-view.js', 'TaskNoteView');
+  const rows = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08', recurrence: 'every day' });
+  const hit = rows.find(r => r.label === 'Repeats');
+  assert(hit && hit.value === 'every day', 'Repeats row present with grammar text: ' + JSON.stringify(rows));
+
+  const rowsNone = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08' });
+  assert(!rowsNone.find(r => r.label === 'Repeats'), 'no recurrence -> no Repeats row: ' + JSON.stringify(rowsNone));
 });
 
 // TNV-3. _humanDate formats a YYYY-MM-DD into "Ddd, Mon D, YYYY" (pure, no wall clock).
@@ -946,6 +1065,37 @@ ok('RTR-3 renderTaskRow: title click opens the task NOTE, not the edit dialog', 
   assert(openDialogCalls.length === 0,
     'title click must NOT open the edit dialog: ' + JSON.stringify(openDialogCalls));
   global.window = prevWindow;
+});
+
+// TTL-recur-1. renderTaskRow draws a repeat-icon badge iff task.recurrence is
+// set — a small icon (not a text chip), visually distinct at a glance without
+// opening the note. Uses a minimal Obsidian-like createEl-shaped DOM stub.
+ok('TTL-recur-1 renderTaskRow shows a repeat badge iff task.recurrence is set', () => {
+  function stubEl(tag) {
+    const el = {
+      tag, children: [], _text: '',
+      style: {}, attrs: {},
+      createEl(t, opts) { const c = stubEl(t); if (opts && opts.text != null) c._text = opts.text; if (opts && opts.cls) c.className = opts.cls; this.children.push(c); return c; },
+      addEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { this.children.push(c); },
+    };
+    return el;
+  }
+  const container = stubEl('div');
+  const recurring = { title: 'Feed the dogs', path: 'spice/tasks/Feed the dogs.md', recurrence: 'every day' };
+  TaskTodayList.renderTaskRow(container, recurring, null);
+  const rowRecur = container.children[0];
+  const findByClassDeep = (node, cls) => {
+    if (node.className === cls) return node;
+    for (const c of (node.children || [])) { const hit = findByClassDeep(c, cls); if (hit) return hit; }
+    return null;
+  };
+  assert(!!findByClassDeep(rowRecur, 'sauce-task-today-recur-badge'), 'recurring row has the badge');
+
+  const container2 = stubEl('div');
+  const oneShot = { title: 'One-shot', path: 'spice/tasks/One-shot.md', recurrence: '' };
+  TaskTodayList.renderTaskRow(container2, oneShot, null);
+  const rowOneShot = container2.children[0];
+  assert(!findByClassDeep(rowOneShot, 'sauce-task-today-recur-badge'), 'one-shot row has NO badge');
 });
 
 // ---------- _parseInlineLinks (FIX 1 — deterministic inline-link parser) ----------
@@ -2043,6 +2193,34 @@ function runTaskDoneArchiveTests() {
     assert(result.length === 0, 'no matches');
   });
 }
+
+// ---------- TaskRecurringList static helper (pure) ----------
+//
+// TaskRecurringList is the "Recurring" index view (to-do blueprint) — lists
+// every OPEN task note with a non-empty `recurrence` grammar, sorted by
+// `scheduled` ascending (undated recurring tasks sort last). Only the
+// filterRecurring static is pure/Node-testable; render() is browser-only.
+
+ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by scheduled ascending', () => {
+  const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
+  const tasks = [
+    { title: 'B', status: 'open', scheduled: '2026-07-20', recurrence: 'every day' },
+    { title: 'A', status: 'open', scheduled: '2026-07-09', recurrence: 'every Monday' },
+    { title: 'No recurrence', status: 'open', scheduled: '2026-07-08', recurrence: '' },
+    { title: 'Done recurring', status: 'done', scheduled: '2026-07-08', recurrence: 'every day' },
+    { title: 'No date', status: 'open', scheduled: null, recurrence: 'every day' },
+  ];
+  const out = TaskRecurringListClass.filterRecurring(tasks);
+  assert(out.length === 3, 'keeps the 3 open+recurring tasks (including the undated one): ' + out.length);
+  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by scheduled ascending, dated first: ' + out.map(t => t.title).join(','));
+  assert(out[2].title === 'No date', 'undated recurring task sorts last: ' + out.map(t => t.title).join(','));
+});
+
+ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
+  const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
+  assert(Array.isArray(TaskRecurringListClass.filterRecurring(null)), 'null -> []');
+  assert(TaskRecurringListClass.filterRecurring(null).length === 0, 'null -> empty array');
+});
 
 (async () => {
   await runCreateQuickTests();
