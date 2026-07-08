@@ -35,6 +35,7 @@ class ToDoChromeBar {
             overflow: [
               { id: "recurring", label: "Recurring", icon: ICON.repeat },
               { id: "all-todos", label: "All To-Dos", icon: ICON.list },
+              { id: "completed-tasks", label: "Completed", icon: ICON.list },
             ],
             leaf: true,
           };
@@ -56,7 +57,10 @@ class ToDoChromeBar {
         if (ctx.context === "to-do-recurring") {
           return {
             primary: null,
-            overflow: [{ id: "all-todos", label: "All To-Dos", icon: ICON.list }],
+            overflow: [
+              { id: "all-todos", label: "All To-Dos", icon: ICON.list },
+              { id: "completed-tasks", label: "Completed", icon: ICON.list },
+            ],
             leaf: true,
           };
         }
@@ -104,6 +108,11 @@ class ToDoChromeBar {
           catch (e) { if (typeof Notice === "function") new Notice("Could not open All To-Dos: " + (e.message || e), 6000); }
           return;
         }
+        if (id === "completed-tasks") {
+          try { app.workspace.openLinkText("spice/to-do/Completed Tasks.md", ""); }
+          catch (e) { if (typeof Notice === "function") new Notice("Could not open Completed Tasks: " + (e.message || e), 6000); }
+          return;
+        }
         if (id === "back-today") {
           try {
             const cmds = app.commands.commands || {};
@@ -134,6 +143,10 @@ class ToDoChromeBar {
         const allPath = "spice/to-do/All-ToDos.md";
         if (curPath !== allPath) {
           out.push({ label: "All To-Dos", icon: ICON.list, _navTarget: allPath, onSelect: () => open(allPath) });
+        }
+        const completedPath = "spice/to-do/Completed Tasks.md";
+        if (curPath !== completedPath) {
+          out.push({ label: "Completed Tasks", icon: ICON.list, _navTarget: completedPath, onSelect: () => open(completedPath) });
         }
         return out;
       },

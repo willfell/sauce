@@ -594,6 +594,197 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   assert(res.overdue.length === 1, 'overdue = the 06-28 Luxon task: got ' + res.overdue.length);
 });
 
+// ---------- buildBands sort order (Today/Overdue chronological ordering) ----------
+
+ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-overdue first)', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-05', title: 'C' },
+    { status: 'open', scheduled: '2026-07-01', title: 'A' },
+    { status: 'open', scheduled: '2026-07-03', title: 'B' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.overdue.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['A', 'B', 'C']),
+    'expected A,B,C (oldest first), got ' + JSON.stringify(order));
+});
+
+ok('TBB-SORT-2 buildBands sorts today ascending by due (earliest deadline first; undated last)', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-10', title: 'Later' },
+    { status: 'open', scheduled: '2026-07-08', due: '', title: 'NoDue' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Soonest' },
+    { status: 'open', scheduled: '2026-07-08', due: null, title: 'AlsoNoDue' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.today.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['Soonest', 'Later', 'AlsoNoDue', 'NoDue']),
+    'expected Soonest,Later,AlsoNoDue,NoDue (earliest due first, undated last, tie-broken by title), got ' + JSON.stringify(order));
+});
+
+ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'beta' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.today.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['Alpha', 'beta', 'zeta']),
+    'expected case-insensitive alpha order, got ' + JSON.stringify(order));
+});
+
+// ---------- renderTaskRow CSS structure (checkbox/title never split across lines) ----------
+//
+// row is `flex-wrap: wrap` with (pre-fix) THREE direct children: cbWrap, title,
+// rightCluster. CSS line-wrapping decides breaks using each flex item's
+// UNSHRUNK hypothetical width, so a long title can push the whole `title` item
+// to its own line, stranding the checkbox alone on line 1 — even though title
+// itself wraps internally (overflow-wrap/word-break). The fix nests cbWrap +
+// title inside a new `titleGroup` sub-container (flex-wrap: nowrap, flex: 1 1
+// auto, min-width: 0) so the two can never split from each other; rightCluster
+// remains the only sibling allowed to wrap to its own line.
+function makeRowStubEl(tag) {
+  const el = {
+    tag, style: {}, children: [], _attrs: {}, _listeners: {},
+    classList: { add() {} },
+    createEl(t, o) {
+      const c = makeRowStubEl(t);
+      if (o && o.cls) c._attrs.cls = o.cls;
+      if (o && o.text != null) c.textContent = o.text;
+      el.children.push(c);
+      return c;
+    },
+    createSpan(o) { return el.createEl('span', o); },
+    addEventListener(name, fn) { el._listeners[name] = fn; },
+    setAttribute(k, v) { el._attrs[k] = v; },
+    empty() { el.children = []; },
+    querySelector() { return null; },
+  };
+  return el;
+}
+
+// Recursive finder — searches the whole subtree (not just direct children)
+// for the first element whose _attrs.cls matches. Needed because the fix
+// nests cbWrap/title one level deeper (inside titleGroup) than before.
+function findByClsAttr(root, cls) {
+  if (!root) return null;
+  if (root._attrs && root._attrs.cls === cls) return root;
+  for (const c of (root.children || [])) {
+    const found = findByClsAttr(c, cls);
+    if (found) return found;
+  }
+  return null;
+}
+
+ok('RTR-WRAP-1 checkbox + title are non-wrapping siblings (never split by a long title flex-wrapping the row)', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'A very long task title that could overflow the row width by itself', path: 'spice/tasks/Long.md' };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  assert(row, 'row created');
+  const cbWrap = findByClsAttr(row, 'sauce-task-today-cbwrap');
+  const title = findByClsAttr(row, 'sauce-task-today-title');
+  assert(cbWrap && title, 'both cbWrap and title exist somewhere under row');
+  // Neither may be a DIRECT child of `row` (the outer flex-wrap:wrap row) —
+  // the fix nests both one level deeper, inside a non-wrapping titleGroup, so
+  // they never split across flex lines from each other.
+  assert(!row.children.includes(cbWrap), 'cbWrap must NOT be a direct child of row (must be nested in a nowrap titleGroup)');
+  assert(!row.children.includes(title), 'title must NOT be a direct child of row (must be nested in a nowrap titleGroup)');
+});
+
+ok('RTR-WRAP-2 nested title group never wraps (flex-wrap: nowrap) and contains both cbWrap + title', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'Task', path: 'spice/tasks/Task.md' };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  const titleGroup = findByClsAttr(row, 'sauce-task-today-titlegroup');
+  assert(titleGroup, 'a sauce-task-today-titlegroup wrapper exists');
+  assert(row.children.includes(titleGroup), 'titleGroup IS a direct child of row (the only nesting level added)');
+  assert(/flex-wrap:\s*nowrap/.test(titleGroup.style.cssText || ''),
+    'titleGroup must be flex-wrap: nowrap, got: ' + titleGroup.style.cssText);
+  const cbWrap = titleGroup.children.find((c) => c._attrs.cls === 'sauce-task-today-cbwrap');
+  const title = titleGroup.children.find((c) => c._attrs.cls === 'sauce-task-today-title');
+  assert(cbWrap && title, 'titleGroup directly contains both cbWrap and title');
+});
+
+// DT-4. THE UTC-SAFETY FIX — a Luxon-like DateTime that exposes BOTH
+// toISODate() (naive, LOCAL-zone) and toUTC() (returns a UTC-anchored
+// DateTime) must prefer the UTC path. A bare YAML date parses UTC
+// midnight; naive .toISODate() in a negative-offset zone (e.g.
+// America/Chicago, -06:00) rolls the calendar date back one day —
+// WRONG, so it must be discarded in favor of .toUTC().toISODate(),
+// which returns the correct one.
+function luxonUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate) {
+  return {
+    toISODate: () => wrongLocalIsoDate,
+    toUTC: () => ({
+      toISODate: () => correctUtcIsoDate,
+      toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? correctUtcIsoDate : correctUtcIsoDate),
+    }),
+  };
+}
+
+ok('DT-4 _toDateStr prefers toUTC().toISODate() over local-zone toISODate() (negative-offset bug)', () => {
+  const stub = luxonUtcMidnight('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
+// DT-5. Same UTC-safety fix, but the value only exposes toFormat (no
+// toISODate) — mirrors real Luxon DateTime objects, which always expose
+// BOTH, but a value that only implements toFormat must still route
+// through .toUTC() first.
+function luxonUtcMidnightFormatOnly(correctUtcIsoDate, wrongLocalIsoDate) {
+  return {
+    toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? wrongLocalIsoDate : wrongLocalIsoDate),
+    toUTC: () => ({
+      toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? correctUtcIsoDate : correctUtcIsoDate),
+    }),
+  };
+}
+
+ok('DT-5 _toDateStr prefers toUTC().toFormat() over local-zone toFormat() (negative-offset bug)', () => {
+  const stub = luxonUtcMidnightFormatOnly('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
+// DT-6. Plain JS Date branch must read the calendar date via UTC
+// getters (getUTCFullYear/getUTCMonth/getUTCDate), not local getters
+// (getFullYear/getMonth/getDate). A bare YAML date parses UTC midnight;
+// on a machine running in a negative-offset TZ, local getters would
+// roll the date back one day. This sanity-checks against the same
+// Date.UTC()-constructed value regardless of the test-runner's TZ.
+ok('DT-6 _toDateStr reads plain JS Date via UTC getters, not local getters', () => {
+  const d = new Date(Date.UTC(2026, 6, 8, 0, 0, 0)); // 2026-07-08T00:00:00Z
+  const expected = d.getUTCFullYear() + '-' +
+    String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getUTCDate()).padStart(2, '0');
+  assert(expected === '2026-07-08', 'sanity: UTC getters give 2026-07-08, got ' + expected);
+  assert(TaskEntity._toDateStr(d) === '2026-07-08',
+    'expected 2026-07-08 via UTC getters, got ' + TaskEntity._toDateStr(d));
+});
+
+// DT-7. Regression guard — a moment-like value is mutable, so .utc()
+// must be called on a CLONE before conversion (moment mutates in
+// place), and the fix must read via the UTC clone, not the naive one.
+function momentUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate) {
+  const self = {
+    _isUtc: false,
+    format: (fmt) => {
+      const iso = self._isUtc ? correctUtcIsoDate : wrongLocalIsoDate;
+      return fmt === 'YYYY-MM-DD' ? iso : iso;
+    },
+    clone: () => momentUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate),
+    utc: () => { self._isUtc = true; return self; },
+  };
+  return self;
+}
+
+ok('DT-7 _toDateStr prefers cloned .utc().format() over local .format() for moment-like values', () => {
+  const stub = momentUtcMidnight('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
 // ---------- Dataview Link coercion (source_note / project filter fix) ----------
 //
 // Dataview surfaces a `[[Meeting]]` frontmatter value as a Link OBJECT (with
@@ -985,6 +1176,107 @@ ok('TLA-CPN-1 ToDoLeafActions._cleanProjectName mirrors the meeting extractor', 
   assert(ToDoLeafActionsClass._cleanProjectName(null) === '', 'null → ""');
   assert(ToDoLeafActionsClass._slugify('Global K8s') === 'global-k8s', 'slugify Global K8s');
 });
+
+// ---------- TaskDialog._buildNoteLinkCandidates (note-link picker) ----------
+
+ok('NLC-1 sorts candidates by mtime descending, ties broken alphabetically', () => {
+  const files = [
+    { path: 'spice/wiki/Alpha.md', basename: 'Alpha', stat: { mtime: 100 } },
+    { path: 'spice/wiki/Beta.md', basename: 'Beta', stat: { mtime: 300 } },
+    { path: 'spice/wiki/Gamma.md', basename: 'Gamma', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(JSON.stringify(names) === JSON.stringify(['Beta', 'Gamma', 'Alpha']),
+    'expected Beta,Gamma,Alpha (mtime desc, tie alpha), got ' + JSON.stringify(names));
+});
+
+ok('NLC-2 excludes notes under spice/tasks/ and the file currently being edited', () => {
+  const files = [
+    { path: 'spice/tasks/Buy milk.md', basename: 'Buy milk', stat: { mtime: 500 } },
+    { path: 'spice/projects/connectors/Connectors.md', basename: 'Connectors', stat: { mtime: 400 } },
+    { path: 'spice/wiki/Notes.md', basename: 'Notes', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, 'spice/wiki/Notes.md');
+  assert(JSON.stringify(names) === JSON.stringify(['Connectors']),
+    'expected only Connectors (task excluded, editPath excluded), got ' + JSON.stringify(names));
+});
+
+ok('NLC-3 dedupes by basename', () => {
+  const files = [
+    { path: 'spice/wiki/A/Dup.md', basename: 'Dup', stat: { mtime: 200 } },
+    { path: 'spice/wiki/B/Dup.md', basename: 'Dup', stat: { mtime: 100 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.length === 1, 'expected exactly 1 deduped entry, got ' + names.length);
+});
+
+ok('NLC-4 note basename matching an inherited Object.prototype key is NOT silently dropped', () => {
+  const files = [
+    { path: 'spice/wiki/constructor.md', basename: 'constructor', stat: { mtime: 500 } },
+    { path: 'spice/wiki/hasOwnProperty.md', basename: 'hasOwnProperty', stat: { mtime: 400 } },
+    { path: 'spice/wiki/Normal.md', basename: 'Normal', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.includes('constructor'), 'a note literally named "constructor" must still surface: ' + JSON.stringify(names));
+  assert(names.includes('hasOwnProperty'), 'a note literally named "hasOwnProperty" must still surface: ' + JSON.stringify(names));
+  assert(names.length === 3, 'expected all 3 candidates, got ' + names.length + ': ' + JSON.stringify(names));
+});
+
+ok('NLC-5 realistic vault snapshot (many files, missing stat) never returns empty', () => {
+  const files = [];
+  for (let i = 0; i < 50; i++) {
+    files.push({ path: `spice/wiki/Note ${i}.md`, basename: `Note ${i}`, stat: { mtime: i * 10 } });
+  }
+  files.push({ path: 'spice/wiki/NoStat.md', basename: 'NoStat' }); // missing .stat entirely
+  files.push({ path: 'spice/tasks/_done/Old task.md', basename: 'Old task', stat: { mtime: 999999 } });
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.length === 51, 'expected 51 (50 notes + NoStat, task excluded), got ' + names.length);
+  assert(names[0] === 'Note 49', 'highest mtime first: ' + names[0]);
+  assert(names.includes('NoStat'), 'a file with no .stat still surfaces (mtime defaults to 0): ' + JSON.stringify(names));
+  assert(!names.includes('Old task'), 'spice/tasks/ files are excluded even under _done/: ' + JSON.stringify(names));
+});
+
+// ---------- ToDoLeafActions "Completed" button (Task 6) ----------
+async function runToDoLeafActionsCompletedTests() {
+  await okAsync('TLA-COMPLETED-1 ToDoLeafActions exposes an openCompletedTasks handler that creates the archive note', async () => {
+    const created = [];
+    let opened = null;
+    global.window = { moment: () => ({ format: () => '2026-07-08T09:00:00-0600' }) };
+    global.app = {
+      vault: {
+        getAbstractFileByPath: () => null,
+        create: async (p, body) => { created.push({ path: p, body }); return { path: p }; },
+      },
+      workspace: { openLinkText: (p) => { opened = p; } },
+    };
+    const inst = new ToDoLeafActionsClass();
+    await inst.openCompletedTasks();
+    assert(created.length === 1, 'exactly one vault.create: got ' + created.length);
+    assert(created[0].path === 'spice/to-do/Completed Tasks.md',
+      'path is spice/to-do/Completed Tasks.md: ' + created[0].path);
+    assert(/TaskDoneArchive/.test(created[0].body), 'body embeds TaskDoneArchive: ' + created[0].body);
+    assert(opened === 'spice/to-do/Completed Tasks.md', 'opens the note after create');
+  });
+
+  await okAsync('TLA-COMPLETED-2 an existing well-formed note is left alone (not overwritten)', async () => {
+    const modified = [];
+    let opened = null;
+    const existingBody = '---\ntype: to-do-hub\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "TaskDoneArchive" });\n```\n';
+    global.window = { moment: () => ({ format: () => '2026-07-08T09:00:00-0600' }) };
+    global.app = {
+      vault: {
+        getAbstractFileByPath: () => ({ path: 'spice/to-do/Completed Tasks.md' }),
+        read: async () => existingBody,
+        modify: async (f, body) => { modified.push(body); },
+      },
+      workspace: { openLinkText: (p) => { opened = p; } },
+    };
+    const inst = new ToDoLeafActionsClass();
+    await inst.openCompletedTasks();
+    assert(modified.length === 0, 'existing well-formed note left alone: got ' + modified.length + ' modify calls');
+    assert(opened === 'spice/to-do/Completed Tasks.md', 'still opens note');
+  });
+}
 
 // ---------- HC-TQC: TaskDialog.createQuick — modal-less one-file create ----------
 //
@@ -1762,6 +2054,7 @@ function runTaskDoneArchiveTests() {
   runReconcileTests();
   runTaskDoneTodayListTests();
   runTaskDoneArchiveTests();
+  await runToDoLeafActionsCompletedTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {

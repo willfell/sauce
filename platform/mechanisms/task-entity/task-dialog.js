@@ -475,6 +475,38 @@ class TaskDialog {
         return { app: app, file: file };
     }
 
+    /**
+     * Pure candidate-builder for the note-link picker (Links → "+ Note").
+     * Given `files` (an array of Obsidian TFile-shaped objects: { path,
+     * basename, stat: { mtime } }) and the path of the task currently being
+     * edited (`editPath`, or null for a new task), returns basenames sorted by
+     * mtime DESCENDING (most-recently-edited first, ties broken
+     * alphabetically), excluding notes under `spice/tasks/` (don't link a
+     * task to another task) and the file currently being edited.
+     *
+     * Uses a null-prototype map for dedup so a note whose basename happens to
+     * collide with an inherited Object.prototype key (e.g. a note literally
+     * titled "constructor" or "hasOwnProperty") is never silently treated as
+     * already-seen. Pure, Node-testable, never throws on malformed input.
+     */
+    static _buildNoteLinkCandidates(files, editPath) {
+        const cand = [];
+        const seen = Object.create(null);
+        const list = Array.isArray(files) ? files : [];
+        for (const f of list) {
+            const p = (f && f.path) || '';
+            if (p.indexOf('spice/tasks/') === 0) continue;   // don't link tasks to tasks
+            if (editPath && p === editPath) continue;        // not the current file
+            const bn = (f && f.basename) || '';
+            if (!bn || seen[bn]) continue;
+            seen[bn] = 1;
+            const mtime = (f && f.stat && typeof f.stat.mtime === 'number') ? f.stat.mtime : 0;
+            cand.push({ name: bn, mtime: mtime });
+        }
+        cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
+        return cand.map((c) => c.name);
+    }
+
     _render(opts) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app);
         if (!app) { try { new Notice('TaskDialog: app unavailable'); } catch (_e) {} return; }
@@ -725,21 +757,7 @@ class TaskDialog {
                 try {
                     const files = (app.vault && typeof app.vault.getMarkdownFiles === 'function')
                         ? app.vault.getMarkdownFiles() : [];
-                    const cand = [];
-                    const seen = {};
-                    for (const f of files) {
-                        const p = (f && f.path) || '';
-                        if (p.indexOf('spice/tasks/') === 0) continue;   // don't link tasks to tasks
-                        if (editPath && p === editPath) continue;        // not the current file
-                        const bn = (f && f.basename) || '';
-                        if (!bn || seen[bn]) continue;
-                        seen[bn] = 1;
-                        const mtime = (f && f.stat && typeof f.stat.mtime === 'number') ? f.stat.mtime : 0;
-                        cand.push({ name: bn, mtime: mtime });
-                    }
-                    // Most-recently-edited first; tie-break by name for stability.
-                    cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
-                    names = cand.map((c) => c.name);
+                    names = TaskDialog._buildNoteLinkCandidates(files, editPath);
                 } catch (_e) { names = []; }
 
                 const filterInput = inserterBox.createEl('input', { type: 'text' });
