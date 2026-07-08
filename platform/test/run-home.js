@@ -434,9 +434,14 @@ function descendants(el) {
       const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
       const input2 = menu2 ? descendants(menu2).filter((n) => n.tag === "input")[0] : null;
       input2.value = "call mom";
-      if (input2 && typeof input2.dispatch === "function") await input2.dispatch("keydown", { key: "Enter" });
+      let stopped = false;
+      if (input2 && typeof input2.dispatch === "function") {
+        await input2.dispatch("keydown", { key: "Enter", stopPropagation: () => { stopped = true; } });
+      }
       assertEq("HOME-CAP-20 Enter → createQuick called once", calls.createQuick.length, 1);
       assertEq("HOME-CAP-21 Enter → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
+      assertTrue("HOME-CAP-21b Enter → keydown handler calls stopPropagation", stopped,
+        "the Enter handler must stopPropagation so a higher-level (Obsidian/document) keydown listener can't swallow or redirect the same event");
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──

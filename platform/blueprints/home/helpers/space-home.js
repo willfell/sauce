@@ -347,6 +347,7 @@ class SpaceHome {
     input.addEventListener("keydown", (ev) => {
       if (ev && ev.key === "Enter" && !ev.isComposing) {
         if (typeof ev.preventDefault === "function") ev.preventDefault();
+        if (typeof ev.stopPropagation === "function") ev.stopPropagation();
         submitCapture();
       }
     });
