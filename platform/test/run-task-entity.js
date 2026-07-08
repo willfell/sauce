@@ -576,6 +576,86 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   assert(res.overdue.length === 1, 'overdue = the 06-28 Luxon task: got ' + res.overdue.length);
 });
 
+// DT-4. THE UTC-SAFETY FIX — a Luxon-like DateTime that exposes BOTH
+// toISODate() (naive, LOCAL-zone) and toUTC() (returns a UTC-anchored
+// DateTime) must prefer the UTC path. A bare YAML date parses UTC
+// midnight; naive .toISODate() in a negative-offset zone (e.g.
+// America/Chicago, -06:00) rolls the calendar date back one day —
+// WRONG, so it must be discarded in favor of .toUTC().toISODate(),
+// which returns the correct one.
+function luxonUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate) {
+  return {
+    toISODate: () => wrongLocalIsoDate,
+    toUTC: () => ({
+      toISODate: () => correctUtcIsoDate,
+      toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? correctUtcIsoDate : correctUtcIsoDate),
+    }),
+  };
+}
+
+ok('DT-4 _toDateStr prefers toUTC().toISODate() over local-zone toISODate() (negative-offset bug)', () => {
+  const stub = luxonUtcMidnight('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
+// DT-5. Same UTC-safety fix, but the value only exposes toFormat (no
+// toISODate) — mirrors real Luxon DateTime objects, which always expose
+// BOTH, but a value that only implements toFormat must still route
+// through .toUTC() first.
+function luxonUtcMidnightFormatOnly(correctUtcIsoDate, wrongLocalIsoDate) {
+  return {
+    toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? wrongLocalIsoDate : wrongLocalIsoDate),
+    toUTC: () => ({
+      toFormat: (fmt) => (fmt === 'yyyy-MM-dd' ? correctUtcIsoDate : correctUtcIsoDate),
+    }),
+  };
+}
+
+ok('DT-5 _toDateStr prefers toUTC().toFormat() over local-zone toFormat() (negative-offset bug)', () => {
+  const stub = luxonUtcMidnightFormatOnly('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
+// DT-6. Plain JS Date branch must read the calendar date via UTC
+// getters (getUTCFullYear/getUTCMonth/getUTCDate), not local getters
+// (getFullYear/getMonth/getDate). A bare YAML date parses UTC midnight;
+// on a machine running in a negative-offset TZ, local getters would
+// roll the date back one day. This sanity-checks against the same
+// Date.UTC()-constructed value regardless of the test-runner's TZ.
+ok('DT-6 _toDateStr reads plain JS Date via UTC getters, not local getters', () => {
+  const d = new Date(Date.UTC(2026, 6, 8, 0, 0, 0)); // 2026-07-08T00:00:00Z
+  const expected = d.getUTCFullYear() + '-' +
+    String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getUTCDate()).padStart(2, '0');
+  assert(expected === '2026-07-08', 'sanity: UTC getters give 2026-07-08, got ' + expected);
+  assert(TaskEntity._toDateStr(d) === '2026-07-08',
+    'expected 2026-07-08 via UTC getters, got ' + TaskEntity._toDateStr(d));
+});
+
+// DT-7. Regression guard — a moment-like value is mutable, so .utc()
+// must be called on a CLONE before conversion (moment mutates in
+// place), and the fix must read via the UTC clone, not the naive one.
+function momentUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate) {
+  const self = {
+    _isUtc: false,
+    format: (fmt) => {
+      const iso = self._isUtc ? correctUtcIsoDate : wrongLocalIsoDate;
+      return fmt === 'YYYY-MM-DD' ? iso : iso;
+    },
+    clone: () => momentUtcMidnight(correctUtcIsoDate, wrongLocalIsoDate),
+    utc: () => { self._isUtc = true; return self; },
+  };
+  return self;
+}
+
+ok('DT-7 _toDateStr prefers cloned .utc().format() over local .format() for moment-like values', () => {
+  const stub = momentUtcMidnight('2026-07-08', '2026-07-07');
+  assert(TaskEntity._toDateStr(stub) === '2026-07-08',
+    'expected UTC-safe date 2026-07-08, got ' + TaskEntity._toDateStr(stub));
+});
+
 // ---------- Dataview Link coercion (source_note / project filter fix) ----------
 //
 // Dataview surfaces a `[[Meeting]]` frontmatter value as a Link OBJECT (with
