@@ -12,6 +12,10 @@ phone:
 tags:
 ---
 ```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "PeopleChromeBar" });
+```
+
+```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "PersonNavButtons" });
 ```
 
