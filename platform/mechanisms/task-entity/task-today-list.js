@@ -273,6 +273,16 @@ class TaskTodayList {
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
+        // Checkbox + title grouped in a NON-wrapping sub-container so they are
+        // never split across lines from each other (FIX: a long title used to
+        // push the whole `title` flex item to its own line, stranding the
+        // checkbox alone on line 1 — CSS flex-wrap decides breaks using an
+        // item's UNSHRUNK width, not its post-wrap rendered width). `flex: 1 1
+        // auto; min-width: 0` lets the group take the remaining row width while
+        // still allowing the title's own text to wrap internally.
+        const titleGroup = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+        titleGroup.style.cssText = 'display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0;';
+
         // Functional done-checkbox — starts UNCHECKED (open tasks only). On
         // change → delegate the write to TaskDialog.markDone(path); revert +
         // notice on failure. Stop propagation so the checkbox doesn't also
@@ -284,7 +294,7 @@ class TaskTodayList {
         // in a fixed 1.5em-tall flex box that centers it against that first line —
         // the wrapper height MUST equal the title's first-line line-height so the
         // math holds for BOTH a short title and a wrapping one.
-        const cbWrap = row.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+        const cbWrap = titleGroup.createEl('div', { cls: 'sauce-task-today-cbwrap' });
         cbWrap.style.cssText = 'display: flex; align-items: center; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
         const cb = cbWrap.createEl('input');
         cb.type = 'checkbox';
@@ -327,7 +337,7 @@ class TaskTodayList {
         // MarkdownRenderer — which is NOT a global in the customJS eval context, so
         // the old MarkdownRenderer path always fell back to raw text).
         const titleText = (task && task.title) || '(untitled)';
-        const title = row.createEl('span', { cls: 'sauce-task-today-title' });
+        const title = titleGroup.createEl('span', { cls: 'sauce-task-today-title' });
         // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
         // column (break-word wraps long words). The min-width:8em FLOOR keeps a long
         // title readable and forces the right cluster (chips + icons) to wrap to its

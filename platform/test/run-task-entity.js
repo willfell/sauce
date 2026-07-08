@@ -615,6 +615,78 @@ ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
     'expected case-insensitive alpha order, got ' + JSON.stringify(order));
 });
 
+// ---------- renderTaskRow CSS structure (checkbox/title never split across lines) ----------
+//
+// row is `flex-wrap: wrap` with (pre-fix) THREE direct children: cbWrap, title,
+// rightCluster. CSS line-wrapping decides breaks using each flex item's
+// UNSHRUNK hypothetical width, so a long title can push the whole `title` item
+// to its own line, stranding the checkbox alone on line 1 — even though title
+// itself wraps internally (overflow-wrap/word-break). The fix nests cbWrap +
+// title inside a new `titleGroup` sub-container (flex-wrap: nowrap, flex: 1 1
+// auto, min-width: 0) so the two can never split from each other; rightCluster
+// remains the only sibling allowed to wrap to its own line.
+function makeRowStubEl(tag) {
+  const el = {
+    tag, style: {}, children: [], _attrs: {}, _listeners: {},
+    classList: { add() {} },
+    createEl(t, o) {
+      const c = makeRowStubEl(t);
+      if (o && o.cls) c._attrs.cls = o.cls;
+      if (o && o.text != null) c.textContent = o.text;
+      el.children.push(c);
+      return c;
+    },
+    createSpan(o) { return el.createEl('span', o); },
+    addEventListener(name, fn) { el._listeners[name] = fn; },
+    setAttribute(k, v) { el._attrs[k] = v; },
+    empty() { el.children = []; },
+    querySelector() { return null; },
+  };
+  return el;
+}
+
+// Recursive finder — searches the whole subtree (not just direct children)
+// for the first element whose _attrs.cls matches. Needed because the fix
+// nests cbWrap/title one level deeper (inside titleGroup) than before.
+function findByClsAttr(root, cls) {
+  if (!root) return null;
+  if (root._attrs && root._attrs.cls === cls) return root;
+  for (const c of (root.children || [])) {
+    const found = findByClsAttr(c, cls);
+    if (found) return found;
+  }
+  return null;
+}
+
+ok('RTR-WRAP-1 checkbox + title are non-wrapping siblings (never split by a long title flex-wrapping the row)', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'A very long task title that could overflow the row width by itself', path: 'spice/tasks/Long.md' };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  assert(row, 'row created');
+  const cbWrap = findByClsAttr(row, 'sauce-task-today-cbwrap');
+  const title = findByClsAttr(row, 'sauce-task-today-title');
+  assert(cbWrap && title, 'both cbWrap and title exist somewhere under row');
+  // Neither may be a DIRECT child of `row` (the outer flex-wrap:wrap row) —
+  // the fix nests both one level deeper, inside a non-wrapping titleGroup, so
+  // they never split across flex lines from each other.
+  assert(!row.children.includes(cbWrap), 'cbWrap must NOT be a direct child of row (must be nested in a nowrap titleGroup)');
+  assert(!row.children.includes(title), 'title must NOT be a direct child of row (must be nested in a nowrap titleGroup)');
+});
+
+ok('RTR-WRAP-2 nested title group never wraps (flex-wrap: nowrap) and contains both cbWrap + title', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'Task', path: 'spice/tasks/Task.md' };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  const titleGroup = findByClsAttr(row, 'sauce-task-today-titlegroup');
+  assert(titleGroup, 'a sauce-task-today-titlegroup wrapper exists');
+  assert(row.children.includes(titleGroup), 'titleGroup IS a direct child of row (the only nesting level added)');
+  assert(/flex-wrap:\s*nowrap/.test(titleGroup.style.cssText || ''),
+    'titleGroup must be flex-wrap: nowrap, got: ' + titleGroup.style.cssText);
+  const cbWrap = titleGroup.children.find((c) => c._attrs.cls === 'sauce-task-today-cbwrap');
+  const title = titleGroup.children.find((c) => c._attrs.cls === 'sauce-task-today-title');
+  assert(cbWrap && title, 'titleGroup directly contains both cbWrap and title');
+});
+
 // DT-4. THE UTC-SAFETY FIX — a Luxon-like DateTime that exposes BOTH
 // toISODate() (naive, LOCAL-zone) and toUTC() (returns a UTC-anchored
 // DateTime) must prefer the UTC path. A bare YAML date parses UTC
