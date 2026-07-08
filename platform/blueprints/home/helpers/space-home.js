@@ -95,6 +95,63 @@ class SpaceHome {
   }
 
   /**
+   * Compute yesterday's daily-note VAULT PATH from `today` (YYYY-MM-DD) and
+   * the parsed `.obsidian/daily-notes.json` config ({ folder, format }).
+   * PURE — never touches the wall clock or the vault; the caller resolves
+   * `today` and reads daily-notes.json. `format` is a moment.js-style token
+   * string (folder/file segments); this only needs the tokens the daily
+   * blueprint's own config actually uses: YYYY, MM, MMMM, dddd, YYYY-MM-DD.
+   * Returns null when `today` or `config.folder`/`config.format` are missing
+   * or unparseable — the caller shows a Notice rather than guessing a path.
+   */
+  static _previousDailyPath(today, config) {
+    if (!config || typeof config.folder !== "string" || !config.folder
+      || typeof config.format !== "string" || !config.format) return null;
+    const ymd = SpaceHome._ymd(today);
+    if (!ymd) return null;
+    const dn = SpaceHome._dayNumber(ymd);
+    if (dn == null) return null;
+
+    // Convert the PREVIOUS absolute day number back to { y, mo, d } via the
+    // inverse of _dayNumber's Howard Hinnant civil_from_days algorithm.
+    const civilFromDays = (z) => {
+      z += 719468;
+      const era = Math.floor((z >= 0 ? z : z - 146096) / 146097);
+      const doe = z - era * 146097;                                  // [0, 146096]
+      const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365); // [0, 399]
+      const y = yoe + era * 400;
+      const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100)); // [0, 365]
+      const mp = Math.floor((5 * doy + 2) / 153);                     // [0, 11]
+      const d = doy - Math.floor((153 * mp + 2) / 5) + 1;             // [1, 31]
+      const m = mp + (mp < 10 ? 3 : -9);                              // [1, 12]
+      return { y: y + (m <= 2 ? 1 : 0), mo: m, d };
+    };
+    const prev = civilFromDays(dn - 1);
+
+    const WD = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
+    const MO = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const wd = WD[(((dn - 1) % 7) + 7) % 7];
+    const tokens = {
+      YYYY: String(prev.y),
+      MM: pad2(prev.mo),
+      MMMM: MO[prev.mo - 1],
+      dddd: wd,
+      DD: pad2(prev.d),
+    };
+    // Build the literal "YYYY-MM-DD" composite token first (longest match),
+    // then the remaining single tokens — longest-token-first avoids MM being
+    // consumed inside a not-yet-replaced YYYY-MM-DD literal.
+    const isoDate = tokens.YYYY + "-" + tokens.MM + "-" + pad2(prev.d);
+    let out = config.format.split("YYYY-MM-DD").join(isoDate);
+    out = out.split("YYYY").join(tokens.YYYY);
+    out = out.split("MMMM").join(tokens.MMMM);
+    out = out.split("MM").join(tokens.MM);
+    out = out.split("dddd").join(tokens.dddd);
+    return config.folder.replace(/\/+$/, "") + "/" + out + ".md";
+  }
+
+  /**
    * Format a date-ish value into a HUMAN string, PURELY (no wall clock).
    *   "Thursday, Jul 2, 2026"                (base)
    *   "Thursday, Jul 2, 2026 · Today"        (iso === todayIso)

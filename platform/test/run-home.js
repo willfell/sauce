@@ -271,6 +271,30 @@ function descendants(el) {
     Array.isArray(spec) && spec.every((s) => s && typeof s.key === "string" && typeof s.label === "string" && typeof s.icon === "string"),
     `each capture spec entry must carry key/label/icon; got ${JSON.stringify(spec)}`);
 
+  // ── HOME-PREV: SpaceHome._previousDailyPath — pure date math computing
+  // yesterday's daily-note path from daily-notes.json's folder/format config
+  // (mirrors the moment-format folder convention todo-chrome-bar.js already
+  // uses for its own today/back-to-today path).
+  {
+    const path1 = SpaceHome._previousDailyPath("2026-07-08", {
+      folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
+    });
+    assertEq("HOME-PREV-1 computes yesterday's path from today + daily-notes config",
+      path1, "spice/daily/2026/07-July/Tuesday-2026-07-07.md");
+
+    // Month/year boundary.
+    const path2 = SpaceHome._previousDailyPath("2026-01-01", {
+      folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
+    });
+    assertEq("HOME-PREV-2 crosses a year boundary correctly",
+      path2, "spice/daily/2025/12-December/Wednesday-2025-12-31.md");
+
+    // Missing/malformed config → null (caller shows a Notice, never throws).
+    assertTrue("HOME-PREV-3 null config → null path", SpaceHome._previousDailyPath("2026-07-08", null) === null);
+    assertTrue("HOME-PREV-4 missing folder → null path",
+      SpaceHome._previousDailyPath("2026-07-08", { format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" }) === null);
+  }
+
   // ── HOME-RENDER: render() DOM order + guard mount ──────────────────────────
   installMoment("2026-07-02", 6);
   {
