@@ -1,10 +1,10 @@
 {
   "name": "home",
-  "version": "0.5.0",
+  "version": "0.4.1",
   "kind": "blueprint",
   "module_directory": "home",
   "skills_dir": ".claude/skills/home",
-  "description": "Home command center at spice/home/Home.md — greeting, quick-capture, and today's dashboard. Rendered by the SpaceHome customJS class; set as the vault homepage. Hard-depends on nav-buttons, customjs-guard, convenience, activity-feed, task-entity, entity-create, and daily (the dashboard core). Meetings + scratch are OPTIONAL capture targets — the New Meeting / New Scratch buttons degrade gracefully (no-op) when those blueprints aren't subscribed, so home installs on any vault with the dashboard core (e.g. work vaults without scratch).",
+  "description": "Home command center at spice/home/Home.md \u2014 greeting, quick-capture, and today's dashboard. Rendered by the SpaceHome customJS class; set as the vault homepage. Hard-depends on nav-buttons, customjs-guard, convenience, activity-feed, task-entity, entity-create, and daily (the dashboard core). Meetings + scratch are OPTIONAL capture targets \u2014 the New Meeting / New Scratch buttons degrade gracefully (no-op) when those blueprints aren't subscribed, so home installs on any vault with the dashboard core (e.g. work vaults without scratch).",
   "depends_on": [
     {
       "name": "nav-buttons",
