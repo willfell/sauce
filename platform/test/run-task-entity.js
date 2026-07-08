@@ -1218,6 +1218,48 @@ ok('NLC-5 realistic vault snapshot (many files, missing stat) never returns empt
   assert(!names.includes('Old task'), 'spice/tasks/ files are excluded even under _done/: ' + JSON.stringify(names));
 });
 
+// ---------- ToDoLeafActions "Completed" button (Task 6) ----------
+async function runToDoLeafActionsCompletedTests() {
+  await okAsync('TLA-COMPLETED-1 ToDoLeafActions exposes an openCompletedTasks handler that creates the archive note', async () => {
+    const created = [];
+    let opened = null;
+    global.window = { moment: () => ({ format: () => '2026-07-08T09:00:00-0600' }) };
+    global.app = {
+      vault: {
+        getAbstractFileByPath: () => null,
+        create: async (p, body) => { created.push({ path: p, body }); return { path: p }; },
+      },
+      workspace: { openLinkText: (p) => { opened = p; } },
+    };
+    const inst = new ToDoLeafActionsClass();
+    await inst.openCompletedTasks();
+    assert(created.length === 1, 'exactly one vault.create: got ' + created.length);
+    assert(created[0].path === 'spice/to-do/Completed Tasks.md',
+      'path is spice/to-do/Completed Tasks.md: ' + created[0].path);
+    assert(/TaskDoneArchive/.test(created[0].body), 'body embeds TaskDoneArchive: ' + created[0].body);
+    assert(opened === 'spice/to-do/Completed Tasks.md', 'opens the note after create');
+  });
+
+  await okAsync('TLA-COMPLETED-2 an existing well-formed note is left alone (not overwritten)', async () => {
+    const modified = [];
+    let opened = null;
+    const existingBody = '---\ntype: to-do-hub\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "TaskDoneArchive" });\n```\n';
+    global.window = { moment: () => ({ format: () => '2026-07-08T09:00:00-0600' }) };
+    global.app = {
+      vault: {
+        getAbstractFileByPath: () => ({ path: 'spice/to-do/Completed Tasks.md' }),
+        read: async () => existingBody,
+        modify: async (f, body) => { modified.push(body); },
+      },
+      workspace: { openLinkText: (p) => { opened = p; } },
+    };
+    const inst = new ToDoLeafActionsClass();
+    await inst.openCompletedTasks();
+    assert(modified.length === 0, 'existing well-formed note left alone: got ' + modified.length + ' modify calls');
+    assert(opened === 'spice/to-do/Completed Tasks.md', 'still opens note');
+  });
+}
+
 // ---------- HC-TQC: TaskDialog.createQuick — modal-less one-file create ----------
 //
 // createQuick is the Home command center's inline "Jot a task…" capture path: a
@@ -1994,6 +2036,7 @@ function runTaskDoneArchiveTests() {
   runReconcileTests();
   runTaskDoneTodayListTests();
   runTaskDoneArchiveTests();
+  await runToDoLeafActionsCompletedTests();
   console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
   process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {

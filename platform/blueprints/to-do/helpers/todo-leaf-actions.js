@@ -229,8 +229,63 @@ class ToDoLeafActions {
         customJS.AccentButton.render(row, { label: 'Recurring', icon: repeatIcon, onClick: openNewRecurring, flex: true });
         if (noteType !== 'project-todo') {
             customJS.AccentButton.render(row, { label: 'All', icon: listIcon, onClick: openAllToDos, flex: true });
+            customJS.AccentButton.render(row, { label: 'Completed', icon: listIcon, onClick: () => this.openCompletedTasks(), flex: true });
         }
 
         if (wantDividers) host.createEl('hr').style.cssText = DIVIDER;
+    }
+
+    /**
+     * Open (creating if missing) the Completed Tasks archive note — mirrors
+     * openAllToDos's lightweight create-if-missing pattern exactly. Uses a
+     * module-level `app` (browser-side; both this method and openAllToDos
+     * normally run inside render()'s closures where `app` is the Obsidian
+     * global), but this method is also invoked directly in tests via
+     * `new ToDoLeafActionsClass()`, so resolve `app` defensively via
+     * window/global the same way other task-entity Node tests do.
+     */
+    async openCompletedTasks() {
+        const appRef = (typeof app !== 'undefined' && app)
+            || (typeof window !== 'undefined' && window.app)
+            || (typeof globalThis !== 'undefined' && globalThis.app)
+            || null;
+        if (!appRef) return;
+        const path = 'spice/to-do/Completed Tasks.md';
+        const file = appRef.vault.getAbstractFileByPath(path);
+        const body = [
+            '---',
+            'type: to-do-hub',
+            `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZZ')}"`,
+            'cssclasses:',
+            '  - wide',
+            '---',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+            '```',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "ToDoHubActions" });',
+            '```',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskDoneArchive" });',
+            '```',
+            '',
+        ].join('\n');
+        try {
+            if (!file) {
+                await appRef.vault.create(path, body);
+            } else {
+                const content = await appRef.vault.read(file);
+                if (!content.trim() || !/^---\s*$/m.test(content) || !/TaskDoneArchive/.test(content)) {
+                    await appRef.vault.modify(file, body);
+                    new Notice('Completed Tasks.md was empty or missing the aggregator block — restored from template.', 6000);
+                }
+            }
+        } catch (e) {
+            console.warn('[ToDoLeafActions] could not (re)write Completed Tasks.md', e);
+        }
+        appRef.workspace.openLinkText(path, '');
     }
 }
