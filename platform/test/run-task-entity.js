@@ -200,20 +200,38 @@ ok('TD-3 defaultsForSurface meeting seeds source_note + project + source', () =>
   assert(deepEq(d.project, { name: 'P', slug: 'p' }), 'project: ' + JSON.stringify(d.project));
 });
 
-// TD-4. trashPath rewrites spice/tasks/ prefix → spice/tasks/_trash/.
-ok('TD-4 trashPath rewrites prefix into _trash', () => {
+// TD-4. The to-do page's "New Task" button must dispatch surface:'daily' (NOT
+// 'today') so defaultsForSurface actually seeds scheduled+source. Regression
+// net for the "New Task on daily to-do never shows in Today" bug.
+ok('TD-4 to-do chrome bar New Task dispatch uses surface "daily"', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'blueprints', 'to-do', 'helpers', 'todo-chrome-bar.js'),
+    'utf8'
+  );
+  assert(
+    /TaskDialog\.open\(\{\s*surface:\s*"daily"/.test(src),
+    'todo-chrome-bar.js must call TaskDialog.open({ surface: "daily", ... }) for the daily to-do New Task button'
+  );
+  assert(
+    !/TaskDialog\.open\(\{\s*surface:\s*"today"/.test(src),
+    'todo-chrome-bar.js must not use the unrecognized surface "today" anymore'
+  );
+});
+
+// TD-5. trashPath rewrites spice/tasks/ prefix → spice/tasks/_trash/.
+ok('TD-5 trashPath rewrites prefix into _trash', () => {
   assert(TaskDialog.trashPath('spice/tasks/task-a.md') === 'spice/tasks/_trash/task-a.md',
     'got ' + TaskDialog.trashPath('spice/tasks/task-a.md'));
 });
 
-// TD-5. donePath rewrites spice/tasks/ prefix → spice/tasks/_done/.
-ok('TD-5 donePath rewrites prefix into _done', () => {
+// TD-6. donePath rewrites spice/tasks/ prefix → spice/tasks/_done/.
+ok('TD-6 donePath rewrites prefix into _done', () => {
   assert(TaskDialog.donePath('spice/tasks/task-a.md') === 'spice/tasks/_done/task-a.md',
     'got ' + TaskDialog.donePath('spice/tasks/task-a.md'));
 });
 
-// TD-6. _bodyNotesBelowMarker returns only the user-notes portion (below marker).
-ok('TD-6 _bodyNotesBelowMarker extracts notes below the marker', () => {
+// TD-7. _bodyNotesBelowMarker returns only the user-notes portion (below marker).
+ok('TD-7 _bodyNotesBelowMarker extracts notes below the marker', () => {
   const fileText = [
     '---', 'type: task', 'title: X', '---', '',
     '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', '```',
@@ -227,8 +245,8 @@ ok('TD-6 _bodyNotesBelowMarker extracts notes below the marker', () => {
     'legacy fallback: ' + JSON.stringify(TaskDialog._bodyNotesBelowMarker(legacy)));
 });
 
-// TD-7. _replaceBody preserves chrome + marker, swaps only the notes below it.
-ok('TD-7 _replaceBody preserves marker + chrome, swaps notes', () => {
+// TD-8. _replaceBody preserves chrome + marker, swaps only the notes below it.
+ok('TD-8 _replaceBody preserves marker + chrome, swaps notes', () => {
   const fileText = [
     '---', 'type: task', 'title: X', '---', '',
     '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });', '```',
@@ -246,8 +264,8 @@ ok('TD-7 _replaceBody preserves marker + chrome, swaps notes', () => {
   assert(cleared.includes('<!-- TASK_NOTES -->') && !cleared.includes('OLD NOTE'), 'cleared notes');
 });
 
-// TD-8. _replaceBody on a legacy (no-marker) note re-injects chrome + marker.
-ok('TD-8 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
+// TD-9. _replaceBody on a legacy (no-marker) note re-injects chrome + marker.
+ok('TD-9 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
   const legacy = '---\ntype: task\ntitle: X\n---\nsome old body\n';
   const out = TaskDialog._replaceBody(legacy, 'kept note');
   assert(out.includes('<!-- TASK_NOTES -->'), 'marker injected');
@@ -265,8 +283,8 @@ ok('TD-8 _replaceBody un-bares a legacy note (injects chrome + marker)', () => {
 // a thin shell over Node-testable helpers. Called through an INSTANCE (customJS
 // stores instances) so a regression to instance-less statics fails loudly.
 
-// TD-9. _wikilink wraps a note basename; empty/nullish → "".
-ok('TD-9 _wikilink wraps a basename (trims; empty → "")', () => {
+// TD-10. _wikilink wraps a note basename; empty/nullish → "".
+ok('TD-10 _wikilink wraps a basename (trims; empty → "")', () => {
   assert(TaskDialog._wikilink('Note A') === '[[Note A]]', 'got ' + TaskDialog._wikilink('Note A'));
   assert(TaskDialog._wikilink('  Trimmed  ') === '[[Trimmed]]', 'trims: ' + TaskDialog._wikilink('  Trimmed  '));
   assert(TaskDialog._wikilink('') === '', 'empty → ""');
@@ -275,8 +293,8 @@ ok('TD-9 _wikilink wraps a basename (trims; empty → "")', () => {
   assert(TaskDialog._wikilink('   ') === '', 'all-whitespace → ""');
 });
 
-// TD-10. _mdLink builds a markdown link; label optional; no url → "".
-ok('TD-10 _mdLink builds [label](url) / <url> / "" per inputs', () => {
+// TD-11. _mdLink builds a markdown link; label optional; no url → "".
+ok('TD-11 _mdLink builds [label](url) / <url> / "" per inputs', () => {
   assert(TaskDialog._mdLink('site', 'https://x.com') === '[site](https://x.com)', 'labelled: ' + TaskDialog._mdLink('site', 'https://x.com'));
   assert(TaskDialog._mdLink('', 'https://x.com') === '<https://x.com>', 'no label → autolink: ' + TaskDialog._mdLink('', 'https://x.com'));
   assert(TaskDialog._mdLink('   ', 'https://x.com') === '<https://x.com>', 'blank label → autolink');
@@ -286,8 +304,8 @@ ok('TD-10 _mdLink builds [label](url) / <url> / "" per inputs', () => {
   assert(TaskDialog._mdLink('  Docs  ', '  https://x.com  ') === '[Docs](https://x.com)', 'trims both');
 });
 
-// TD-11. _insertAt splices insertion into text at [start,end); invalid → append.
-ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
+// TD-12. _insertAt splices insertion into text at [start,end); invalid → append.
+ok('TD-12 _insertAt splices at selection; invalid range → append', () => {
   assert(TaskDialog._insertAt('ab', 'X', 1, 1) === 'aXb', 'insert at caret: ' + TaskDialog._insertAt('ab', 'X', 1, 1));
   assert(TaskDialog._insertAt('abcd', 'X', 1, 3) === 'aXd', 'replaces selection: ' + TaskDialog._insertAt('abcd', 'X', 1, 3));
   assert(TaskDialog._insertAt('', 'X', 0, 0) === 'X', 'empty text → just insertion');
@@ -308,8 +326,8 @@ ok('TD-11 _insertAt splices at selection; invalid range → append', () => {
 // browser chip UI is a thin shell. Called through an INSTANCE so a regression to
 // instance-less statics fails loudly.
 
-// TD-12. _addLink appends a trimmed, non-empty, DEDUPED entry (returns a new array).
-ok('TD-12 _addLink appends a trimmed non-empty deduped entry', () => {
+// TD-13. _addLink appends a trimmed, non-empty, DEDUPED entry (returns a new array).
+ok('TD-13 _addLink appends a trimmed non-empty deduped entry', () => {
   assert(deepEq(TaskDialog._addLink([], '[[A]]'), ['[[A]]']), 'first add: ' + JSON.stringify(TaskDialog._addLink([], '[[A]]')));
   assert(deepEq(TaskDialog._addLink(['[[A]]'], '  [b](u)  '), ['[[A]]', '[b](u)']), 'trims + appends');
   // Duplicate entry is a no-op (kept unique).
@@ -326,8 +344,8 @@ ok('TD-12 _addLink appends a trimmed non-empty deduped entry', () => {
   assert(base.length === 1, 'input array not mutated');
 });
 
-// TD-13. _removeLink drops the entry at index i (returns a new array; oob → clone).
-ok('TD-13 _removeLink drops index i (out-of-range → unchanged clone)', () => {
+// TD-14. _removeLink drops the entry at index i (returns a new array; oob → clone).
+ok('TD-14 _removeLink drops index i (out-of-range → unchanged clone)', () => {
   assert(deepEq(TaskDialog._removeLink(['a', 'b', 'c'], 1), ['a', 'c']), 'drops middle');
   assert(deepEq(TaskDialog._removeLink(['a', 'b'], 0), ['b']), 'drops first');
   assert(deepEq(TaskDialog._removeLink(['a', 'b'], 5), ['a', 'b']), 'oob → unchanged');
@@ -339,8 +357,8 @@ ok('TD-13 _removeLink drops index i (out-of-range → unchanged clone)', () => {
   assert(base.length === 2, 'input array not mutated');
 });
 
-// TD-14. _payloadFromState carries state.links onto the payload (FIX 5).
-ok('TD-14 _payloadFromState includes state.links', () => {
+// TD-15. _payloadFromState carries state.links onto the payload (FIX 5).
+ok('TD-15 _payloadFromState includes state.links', () => {
   const p = TaskDialog._payloadFromState({ title: 't', links: ['[[A]]', '[b](u)'] });
   assert(Array.isArray(p.links) && p.links.length === 2, 'links on payload: ' + JSON.stringify(p.links));
   assert(p.links[0] === '[[A]]' && p.links[1] === '[b](u)', 'link entries preserved');
