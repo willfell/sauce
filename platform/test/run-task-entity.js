@@ -398,6 +398,37 @@ ok('TD-14 _payloadFromState includes state.links', () => {
   assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
 });
 
+ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
+  const state = { title: 'Feed the dogs', scheduled: '2026-07-08', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
+  const payload = TaskDialog._payloadFromState(state);
+  assert(payload.recurrence === 'every day', 'recurrence in payload: ' + payload.recurrence);
+});
+
+ok('TD-recur-2 _payloadFromState defaults recurrence to empty string', () => {
+  const state = { title: 'One-shot', scheduled: '', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
+  const payload = TaskDialog._payloadFromState(state);
+  assert(payload.recurrence === '', 'no recurrence -> empty string: ' + JSON.stringify(payload.recurrence));
+});
+
+ok('TD-recur-3 _recurrenceValidity: empty is always valid', () => {
+  const v = TaskDialog._recurrenceValidity('', () => false);
+  assert(v.valid === true, 'empty recurrence is valid: ' + JSON.stringify(v));
+});
+
+ok('TD-recur-4 _recurrenceValidity: non-empty defers to isSupportedFn', () => {
+  const supported = TaskDialog._recurrenceValidity('every Monday', () => true);
+  assert(supported.valid === true, 'supported grammar is valid');
+  const unsupported = TaskDialog._recurrenceValidity('every leap year', () => false);
+  assert(unsupported.valid === false, 'unsupported grammar is invalid');
+});
+
+ok('TD-recur-5 _recurrenceValidity: a missing/throwing isSupportedFn defaults to valid (defensive)', () => {
+  const missingFn = TaskDialog._recurrenceValidity('every day', null);
+  assert(missingFn.valid === true, 'no isSupportedFn -> valid (never block submit on a cold-load parser): ' + JSON.stringify(missingFn));
+  const throwingFn = TaskDialog._recurrenceValidity('every day', () => { throw new Error('boom'); });
+  assert(throwingFn.valid === true, 'throwing isSupportedFn -> valid: ' + JSON.stringify(throwingFn));
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only

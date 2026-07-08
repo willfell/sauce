@@ -53,6 +53,8 @@ class TaskDialog {
     _insertAt(text, insertion, start, end) { return TaskDialog._insertAt(text, insertion, start, end); }
     renderNote(frontmatter, body) { return TaskDialog.renderNote(frontmatter, body); }
     _chromeBody() { return TaskDialog._chromeBody(); }
+    _payloadFromState(state) { return TaskDialog._payloadFromState(state); }
+    _recurrenceValidity(recurrence, isSupportedFn) { return TaskDialog._recurrenceValidity(recurrence, isSupportedFn); }
 
     // ---------- Static pure helpers ----------
 
@@ -120,6 +122,25 @@ class TaskDialog {
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '');
+    }
+
+    /**
+     * Validate a recurrence grammar string for the dialog's live-typing
+     * feedback. Empty is ALWAYS valid (no recurrence). A non-empty value defers
+     * to `isSupportedFn(value)` (normally `window.customJS.RecurrenceParser
+     * .isSupported`, injected so this stays pure/testable). A missing or
+     * throwing `isSupportedFn` — e.g. a cold-load before RecurrenceParser
+     * registers — defaults to VALID rather than blocking submit; the dialog
+     * should never brick task creation because a defensive dependency isn't
+     * ready yet. Pure, never throws.
+     */
+    static _recurrenceValidity(recurrence, isSupportedFn) {
+        const s = String(recurrence == null ? '' : recurrence).trim();
+        if (!s) return { valid: true };
+        if (typeof isSupportedFn !== 'function') return { valid: true };
+        let supported;
+        try { supported = !!isSupportedFn(s); } catch (_e) { return { valid: true }; }
+        return supported ? { valid: true } : { valid: false, reason: 'unsupported recurrence grammar' };
     }
 
     /**
@@ -539,6 +560,7 @@ class TaskDialog {
             // carry create-only seeds forward into the payload
             source: fm ? (fm.source || '') : (defaults.source || 'manual'),
             source_note: fm ? (fm.source_note || '') : (defaults.source_note || ''),
+            recurrence: fm ? (fm.recurrence || '') : '',
         };
 
         // ----- Overlay scaffolding (reuses ToDoCreateTask's mobile-capable DOM) -----
@@ -609,6 +631,34 @@ class TaskDialog {
         dueInput.style.cssText = dateCss;
         dueInput.value = state.due;
         dueInput.onchange = () => { state.due = dueInput.value; updateSubmit(); };
+
+        // Recurrence — free-text grammar (RecurrenceParser), validated live.
+        // Empty = one-shot task (default). A supported grammar makes "Done"
+        // roll the task's scheduled date forward instead of archiving it.
+        label('Repeats (optional — e.g. "every day", "every Monday", "every 2 weeks on Friday")');
+        const recurInput = host.createEl('input', { type: 'text' });
+        recurInput.style.cssText = fieldCss;
+        recurInput.value = state.recurrence;
+        recurInput.placeholder = 'every day';
+        const recurError = host.createEl('div');
+        recurError.style.cssText = 'font-size:11px; color:var(--text-error,#e05561); margin-top:4px; display:none;';
+        const isSupportedFn = () => {
+            try {
+                const RP = window.customJS && window.customJS.RecurrenceParser;
+                return RP && typeof RP.isSupported === 'function' ? (v) => RP.isSupported(v) : null;
+            } catch (_e) { return null; }
+        };
+        recurInput.oninput = () => {
+            state.recurrence = recurInput.value;
+            const v = TaskDialog._recurrenceValidity(state.recurrence, isSupportedFn());
+            if (v.valid) {
+                recurError.style.display = 'none';
+            } else {
+                recurError.textContent = 'Unrecognized repeat pattern — try "every day", "every Monday", "every 15th of month", or "every 2 weeks on Friday".';
+                recurError.style.display = 'block';
+            }
+            updateSubmit();
+        };
 
         // Priority chip row
         label('Priority');
@@ -908,10 +958,12 @@ class TaskDialog {
         const updateSubmit = () => {
             const TE = TaskDialog._taskEntity();
             const v = TE ? TE.validatePayload(buildPayload()) : { valid: !!(state.title && state.title.trim()) };
-            saveBtn.disabled = !v.valid;
+            const rv = TaskDialog._recurrenceValidity(state.recurrence, isSupportedFn());
+            const valid = v.valid && rv.valid;
+            saveBtn.disabled = !valid;
             // Mute the accent when Save is unavailable so the disabled state reads.
-            saveBtn.style.opacity = v.valid ? '1' : '0.45';
-            saveBtn.style.cursor = v.valid ? 'pointer' : 'not-allowed';
+            saveBtn.style.opacity = valid ? '1' : '0.45';
+            saveBtn.style.cursor = valid ? 'pointer' : 'not-allowed';
         };
         saveBtn.onclick = async () => {
             try {
@@ -934,12 +986,13 @@ class TaskDialog {
     }
 
     // Build a TaskEntity-shaped payload from the current form state.
-    _payloadFromState(state) {
+    static _payloadFromState(state) {
         const s = state || {};
         const payload = {
             title: s.title,
             scheduled: s.scheduled || '',
             due: s.due || '',
+            recurrence: s.recurrence || '',
             priority: s.priority || '',
             source: s.source || 'manual',
             source_note: s.source_note || '',
@@ -1066,6 +1119,7 @@ class TaskDialog {
             fm.scheduled = payload.scheduled || '';
             fm.due = payload.due || '';
             fm.priority = payload.priority || '';
+            fm.recurrence = payload.recurrence || '';
             if (payload.project && payload.project.name) {
                 fm.project = '[[' + payload.project.name + ']]';
                 fm.project_slug = payload.project.slug || TaskDialog._slugify(payload.project.name);
