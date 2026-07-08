@@ -89,7 +89,7 @@ class ToDoChromeBar {
             } catch (e) { if (typeof Notice === "function") new Notice("Could not open task dialog: " + (e.message || e), 6000); }
           } else {
             try {
-              window.customJS.TaskDialog.open({ surface: "today", scheduled: window.moment().format("YYYY-MM-DD") });
+              window.customJS.TaskDialog.open({ surface: "daily", today: window.moment().format("YYYY-MM-DD") });
             } catch (e) { if (typeof Notice === "function") new Notice("Could not open task dialog: " + (e.message || e), 6000); }
           }
           return;
