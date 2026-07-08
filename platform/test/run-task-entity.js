@@ -231,7 +231,7 @@ ok('TD-6 donePath rewrites prefix into _done', () => {
 });
 
 // TD-7. _bodyNotesBelowMarker returns only the user-notes portion (below marker).
-ok('TD-6 _bodyNotesBelowMarker extracts notes below the marker', () => {
+ok('TD-7 _bodyNotesBelowMarker extracts notes below the marker', () => {
   const fileText = [
     '---', 'type: task', 'title: X', '---', '',
     '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', '```',
