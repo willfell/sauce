@@ -28,7 +28,7 @@
   gap: 12px;
   margin: 0 0 14px 0;
 }
-.sauce-home .sauce-home-greeting { min-width: 0; }
+.sauce-home .sauce-home-greeting { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* The date — the sole header line: uppercase, tracked, in full-strength text,
  * with a short accent tick before it as the surface's signature. */
@@ -61,7 +61,7 @@
   width: 26px;
   height: 26px;
   padding: 0;
-  margin-left: 8px;
+  flex: 0 0 auto;
   border: none;
   border-radius: var(--sh-radius);
   background: transparent;
