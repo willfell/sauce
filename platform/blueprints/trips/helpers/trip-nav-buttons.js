@@ -47,6 +47,9 @@ class TripNavButtons {
     async render(dv) {
         const page = customJS.RenderSafe.page(dv);
         if (!page || !page.file) return;
+        try {
+            if (dv.container.closest && dv.container.closest(".markdown-preview-view")?.querySelector(".trips-chrome-root")) return;
+        } catch (_e) { /* best-effort guard */ }
         const filePath = page.file.path;
         const ctx = this.detectContext(filePath, dv);
 

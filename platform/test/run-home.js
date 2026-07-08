@@ -160,6 +160,7 @@ function assertEq(name, actual, expected) {
   results.push([name, ok]);
   if (!ok) console.log(`      ↳ expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
+function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // Recursively collect descendants (depth-first, pre-order) of an el.
 function descendants(el) {
@@ -270,6 +271,30 @@ function descendants(el) {
     Array.isArray(spec) && spec.every((s) => s && typeof s.key === "string" && typeof s.label === "string" && typeof s.icon === "string"),
     `each capture spec entry must carry key/label/icon; got ${JSON.stringify(spec)}`);
 
+  // ── HOME-PREV: SpaceHome._previousDailyPath — pure date math computing
+  // yesterday's daily-note path from daily-notes.json's folder/format config
+  // (mirrors the moment-format folder convention todo-chrome-bar.js already
+  // uses for its own today/back-to-today path).
+  {
+    const path1 = SpaceHome._previousDailyPath("2026-07-08", {
+      folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
+    });
+    assertEq("HOME-PREV-1 computes yesterday's path from today + daily-notes config",
+      path1, "spice/daily/2026/07-July/Tuesday-2026-07-07.md");
+
+    // Month/year boundary.
+    const path2 = SpaceHome._previousDailyPath("2026-01-01", {
+      folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
+    });
+    assertEq("HOME-PREV-2 crosses a year boundary correctly",
+      path2, "spice/daily/2025/12-December/Wednesday-2025-12-31.md");
+
+    // Missing/malformed config → null (caller shows a Notice, never throws).
+    assertTrue("HOME-PREV-3 null config → null path", SpaceHome._previousDailyPath("2026-07-08", null) === null);
+    assertTrue("HOME-PREV-4 missing folder → null path",
+      SpaceHome._previousDailyPath("2026-07-08", { format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" }) === null);
+  }
+
   // ── HOME-RENDER: render() DOM order + guard mount ──────────────────────────
   installMoment("2026-07-02", 6);
   {
@@ -359,6 +384,94 @@ function descendants(el) {
     global.window.customJS = undefined;
   }
 
+  // ── HOME-PREV-BTN: a "‹" button renders in the header, opens yesterday's
+  // daily note when it exists, and shows a Notice (never creates a file) when
+  // it doesn't.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    const opened = [];
+    const notices = [];
+    global.Notice = function (msg) { notices.push(msg); };
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => cb(),
+        openLinkText: (p, s, nl) => opened.push({ p, s, nl }),
+      },
+      vault: {
+        adapter: { read: async (p) => {
+          if (p === ".obsidian/daily-notes.json") {
+            return JSON.stringify({ folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" });
+          }
+          throw new Error("not found");
+        } },
+        getAbstractFileByPath: (p) => (p === "spice/daily/2026/07-July/Wednesday-2026-07-01.md" ? { path: p } : null),
+      },
+    };
+    global.window.app = global.app;
+    global.customJS = {};
+    global.window.customJS = global.customJS;
+
+    await home_.render(dv, {});
+    await home_.render(dv, {}); // second render (async config load may resolve after first paint) — assert on the settled DOM
+
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const prevBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-prev-day"));
+    assertTrue("HOME-PREV-BTN-1 a previous-day button renders in the header", !!prevBtn);
+
+    if (prevBtn && typeof prevBtn.onclick === "function") await prevBtn.onclick({});
+    assertEq("HOME-PREV-BTN-2 clicking it opens yesterday's existing daily note (via the correct verified weekday)",
+      opened[0] && opened[0].p, "spice/daily/2026/07-July/Wednesday-2026-07-01.md");
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.customJS;
+    delete global.Notice;
+  }
+
+  // Missing-file case: same setup but getAbstractFileByPath always returns null.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    const notices = [];
+    global.Notice = function (msg) { notices.push(msg); };
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => cb(),
+        openLinkText: () => { throw new Error("should not be called"); },
+      },
+      vault: {
+        adapter: { read: async (p) => JSON.stringify({ folder: "spice/daily", format: "YYYY/MM-MMMM/dddd-YYYY-MM-DD" }) },
+        getAbstractFileByPath: () => null,
+      },
+    };
+    global.window.app = global.app;
+    global.customJS = {};
+    global.window.customJS = global.customJS;
+
+    await home_.render(dv, {});
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const prevBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-prev-day"));
+
+    let threw = false;
+    try { if (prevBtn && typeof prevBtn.onclick === "function") await prevBtn.onclick({}); } catch (_e) { threw = true; }
+    assertTrue("HOME-PREV-BTN-3 missing yesterday note never throws", !threw);
+    assertTrue("HOME-PREV-BTN-4 missing yesterday note shows a Notice, no file created",
+      notices.length === 1, `expected exactly one Notice; got ${JSON.stringify(notices)}`);
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.customJS;
+    delete global.Notice;
+  }
+
   // ── HOME-CAP: "+" toggle + per-item dispatch + inline capture ───────────────
   installMoment("2026-07-02", 6);
   {
@@ -434,9 +547,14 @@ function descendants(el) {
       const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
       const input2 = menu2 ? descendants(menu2).filter((n) => n.tag === "input")[0] : null;
       input2.value = "call mom";
-      if (input2 && typeof input2.dispatch === "function") await input2.dispatch("keydown", { key: "Enter" });
+      let stopped = false;
+      if (input2 && typeof input2.dispatch === "function") {
+        await input2.dispatch("keydown", { key: "Enter", stopPropagation: () => { stopped = true; } });
+      }
       assertEq("HOME-CAP-20 Enter → createQuick called once", calls.createQuick.length, 1);
       assertEq("HOME-CAP-21 Enter → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
+      assertTrue("HOME-CAP-21b Enter → keydown handler calls stopPropagation", stopped,
+        "the Enter handler must stopPropagation so a higher-level (Obsidian/document) keydown listener can't swallow or redirect the same event");
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──
@@ -567,6 +685,55 @@ function descendants(el) {
     global.window.customJS = undefined;
   }
 
+  // ── HOME-READY: first render defers to workspace.onLayoutReady (cold-start
+  // flash/reflow mitigation); later renders in the same session run immediately.
+  {
+    installMoment("2026-07-05", 9);
+    const dv = makeDv();
+    let readyCb = null;
+    let layoutReady = false;
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => { readyCb = cb; if (layoutReady) cb(); },
+        on: () => ({}),
+        getActiveFile: () => null,
+      },
+      commands: { executeCommandById: () => {} },
+    };
+    global.window.app = global.app;
+    delete global.window.__sauceHomeLayoutReady;
+
+    let resolved = false;
+    const p = home_.render(dv, {});
+    p.then(() => { resolved = true; });
+    await Promise.resolve();
+    assertTrue("HOME-READY-1 render awaits onLayoutReady before painting on a cold session",
+      !resolved && dv.container.querySelector(".sauce-home") === null,
+      "before layout is ready, render() must not have appended .sauce-home yet");
+
+    layoutReady = true;
+    if (typeof readyCb === "function") readyCb();
+    await p;
+    assertTrue("HOME-READY-2 render paints once layout is ready",
+      dv.container.querySelector(".sauce-home") !== null, "expected .sauce-home after onLayoutReady fires");
+
+    // A SECOND render call in the same app session (layout already marked ready)
+    // must NOT wait again — it should paint synchronously.
+    const dv2 = makeDv();
+    let resolved2 = false;
+    const p2 = home_.render(dv2, {});
+    p2.then(() => { resolved2 = true; });
+    await Promise.resolve();
+    assertTrue("HOME-READY-3 subsequent renders in the same session do not re-wait",
+      resolved2 || dv2.container.querySelector(".sauce-home") !== null,
+      "a second render() in the same session must not block on onLayoutReady again");
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.__sauceHomeLayoutReady;
+  }
+
   // ── HOME-HEAL: pure _healHomeChromeBody(body) string transform ─────────────
   // Load the pure helper the same way run-wiki.js loads _healWikiChromeBody:
   // slice its source out of install.js and eval it as a standalone function
@@ -632,6 +799,198 @@ function descendants(el) {
     assertTrue("HOME-HEAL-13 bare body's free text lands BELOW the marker",
       bareMarkerIdx >= 0 && bare.indexOf("just some notes I wrote") > bareMarkerIdx,
       `free text should be appended after HOME_CHROME_END; got ${JSON.stringify(bare)}`);
+  }
+
+  // ── HOME-NOOP: a re-render with an IDENTICAL glance-count signature skips
+  // the teardown/rebuild entirely (no-op) — preserving any in-progress state
+  // (an open menu, a partially-typed draft) a rebuild would otherwise wipe.
+  // A re-render with a DIFFERENT signature still rebuilds normally.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    let countsReturn = { today: 1, overdue: 0, done: 0, meetings: 0 };
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => countsReturn } };
+    delete global.app;
+    delete global.window.app;
+
+    await home_.render(dv, {});
+    const first = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-1 first render paints .sauce-home", !!first);
+
+    // Simulate an in-progress draft: open the menu + type, WITHOUT submitting.
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const descendantsOf = (n) => descendants(n);
+    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    const menu = descendantsOf(first).find((n) => hasCls(n, "sauce-home-add-menu"));
+    const input = menu ? descendantsOf(menu).filter((n) => n.tag === "input")[0] : null;
+    if (input) input.value = "unsent draft";
+
+    // Same counts → render() again should be a complete no-op.
+    await home_.render(dv, {});
+    const second = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-2 identical-signature re-render reuses the SAME node (no rebuild)",
+      second === first, "expected the exact same .sauce-home DOM node after a no-op render");
+    assertTrue("HOME-NOOP-3 in-progress draft survives the no-op re-render",
+      input && input.value === "unsent draft", `expected draft preserved; got ${input && input.value}`);
+    const isOpenNoop = (n) => (n && (n.cls || "").split(/\s+/).indexOf("is-open") >= 0);
+    assertTrue("HOME-NOOP-4 the menu stays open across the no-op re-render",
+      isOpenNoop(menu), "the open menu state must survive a skipped render");
+
+    // Different counts → render() must rebuild for real.
+    countsReturn = { today: 2, overdue: 1, done: 0, meetings: 0 };
+    await home_.render(dv, {});
+    const third = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-5 a changed signature still triggers a real rebuild",
+      third !== first, "expected a NEW .sauce-home node once the glance counts actually changed");
+
+    delete global.customJS;
+    delete global.window.customJS;
+    if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
+  // ── HOME-FOCUS: clicking "+" focuses the "Jot a task…" input so the user
+  // can start typing immediately (an explicit click gesture, not page-load
+  // autofocus).
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) } };
+    delete global.app;
+    delete global.window.app;
+
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = descendants(home);
+    const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
+    const input = menu ? descendants(menu).filter((n) => n.tag === "input")[0] : null;
+    let focused = false;
+    if (input) input.focus = () => { focused = true; };
+
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    assertTrue("HOME-FOCUS-1 opening the menu focuses the jot-a-task input", focused);
+
+    // Closing the menu again must NOT re-focus (only the OPEN transition does).
+    focused = false;
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    assertTrue("HOME-FOCUS-2 closing the menu does not (re-)focus the input", !focused);
+
+    delete global.customJS;
+    delete global.window.customJS;
+    if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
+  // ── HOME-CMD: HomeCommandsInit registers sauce-home:open, mirroring
+  // ProjectCommandsInit's pattern (idempotent, cold-load-safe, delegates to the
+  // same navigation the "Open today's daily" / Go-to launcher path uses).
+  {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'blueprints', 'home', 'helpers', 'home-commands-init.js'), 'utf8'
+    );
+    const HomeCommandsInit = new Function(src + "; return HomeCommandsInit;")();
+
+    // Cold-load guard: no app.commands → never throws, never registers.
+    {
+      let threw = false;
+      try { new HomeCommandsInit().invoke(); } catch (_e) { threw = true; }
+      assertTrue("HOME-CMD-1 invoke() never throws when app/commands is absent", !threw);
+    }
+
+    // Registers exactly one command, id sauce-home:open, and its callback opens Home.
+    {
+      const registered = [];
+      global.app = { commands: { addCommand: (c) => registered.push(c) } };
+      global.window.app = global.app;
+      const inst = new HomeCommandsInit();
+      inst.invoke();
+      assertEq("HOME-CMD-2 registers exactly one command", registered.length, 1);
+      assertEq("HOME-CMD-3 command id is sauce-home:open", registered[0].id, "sauce-home:open");
+      assertTrue("HOME-CMD-4 command has a name", typeof registered[0].name === "string" && registered[0].name.length > 0);
+
+      const opened = [];
+      global.app.workspace = { openLinkText: (p, s, nl) => opened.push({ p, s, nl }) };
+      registered[0].callback();
+      assertEq("HOME-CMD-5 callback opens spice/home/Home.md", opened[0] && opened[0].p, "spice/home/Home.md");
+
+      // Second invoke() is a no-op (idempotent).
+      inst.invoke();
+      assertEq("HOME-CMD-6 a second invoke() does not re-register", registered.length, 1);
+
+      delete global.app;
+      delete global.window.app;
+    }
+  }
+
+  // ── HOME-HOTKEY: _planHomeHotkeyRemap — pure decision logic backing
+  // applyHomeHotkeyRemapHeal. Given the parsed hotkeys.json object, decide
+  // whether/how to move the Mod+[ binding from daily-notes to sauce-home:open.
+  {
+    const installSrc = fs.readFileSync(path.join(__dirname, '..', 'install.js'), 'utf8');
+    const fnMatch = installSrc.match(/function _planHomeHotkeyRemap\([\s\S]*?\n}\n/);
+    assertTrue("HOME-HOTKEY-0 _planHomeHotkeyRemap is defined in install.js", !!fnMatch,
+      "expected a pure _planHomeHotkeyRemap(existing) function in platform/install.js");
+    const _planHomeHotkeyRemap = new Function(fnMatch[0] + "; return _planHomeHotkeyRemap;")();
+
+    // Case A: daily-notes bound to exactly Mod+[, sauce-home:open unbound → act.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod"], key: "[" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-1 acts when daily-notes owns Mod+[ and sauce-home:open is unbound", plan.act === true);
+      assertTrue("HOME-HOTKEY-2 result clears daily-notes' Mod+[ entry",
+        !plan.next["daily-notes"] || plan.next["daily-notes"].length === 0,
+        `got ${JSON.stringify(plan.next["daily-notes"])}`);
+      assertTrue("HOME-HOTKEY-3 result binds sauce-home:open to Mod+[",
+        Array.isArray(plan.next["sauce-home:open"]) && plan.next["sauce-home:open"].length === 1
+          && plan.next["sauce-home:open"][0].key === "[" && deepEq(plan.next["sauce-home:open"][0].modifiers, ["Mod"]),
+        `got ${JSON.stringify(plan.next["sauce-home:open"])}`);
+    }
+
+    // Case B: daily-notes has OTHER bindings too (user customized) — only the
+    // Mod+[ entry is removed, any other binding for daily-notes survives.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod"], key: "[" }, { modifiers: ["Mod", "Shift"], key: "d" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-4 preserves a daily-notes binding that isn't Mod+[",
+        Array.isArray(plan.next["daily-notes"]) && plan.next["daily-notes"].length === 1
+          && plan.next["daily-notes"][0].key === "d");
+    }
+
+    // Case C: already remapped (sauce-home:open already bound) → no-op.
+    {
+      const existing = { "sauce-home:open": [{ modifiers: ["Mod"], key: "[" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-5 no-ops when sauce-home:open is already bound", plan.act === false);
+    }
+
+    // Case D: daily-notes never had Mod+[ (e.g. user rebound it elsewhere) → no-op.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod", "Shift"], key: "d" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-6 no-ops when daily-notes doesn't own Mod+[", plan.act === false);
+    }
+
+    // Case E: fresh/empty hotkeys.json → no-op (nothing to remap; the manifest
+    // hotkeys[] seed path handles brand-new installs instead).
+    {
+      const plan = _planHomeHotkeyRemap({});
+      assertTrue("HOME-HOTKEY-7 no-ops on an empty hotkeys object", plan.act === false);
+    }
+  }
+
+  // ── HOME-CSS: .sauce-home-greeting is a flex row with centered alignment,
+  // so the "‹ Yesterday" button lines up with the date text instead of
+  // sitting on the text baseline (the reported "vertically higher" bug).
+  {
+    const cssSrc = fs.readFileSync(
+      path.join(__dirname, "..", "blueprints", "home", "helpers", "sauce-home.css"), "utf8"
+    );
+    const ruleMatch = cssSrc.match(/\.sauce-home\s+\.sauce-home-greeting\s*\{([^}]*)\}/);
+    assertTrue("HOME-CSS-1 .sauce-home-greeting rule exists", !!ruleMatch);
+    const rule = ruleMatch ? ruleMatch[1] : "";
+    assertTrue("HOME-CSS-2 .sauce-home-greeting is a flex container", /display:\s*flex/.test(rule));
+    assertTrue("HOME-CSS-3 .sauce-home-greeting centers its children", /align-items:\s*center/.test(rule));
   }
 
   // ── Summary ────────────────────────────────────────────────────────────────

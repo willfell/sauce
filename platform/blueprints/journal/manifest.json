@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "journal",
   "description": "Date-routed daily journal entries under spice/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under spice/journal/ auto-applies template via templater_folder_templates.",
@@ -16,12 +16,23 @@
     {
       "name": "convenience",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
+  ],
+  "customjs_classes": [
+    "JournalChromeBar"
   ],
   "files": [
     {
       "source": "templates/Today Journal.md",
       "dest": "{{templates_path}}/Today Journal.md"
+    },
+    {
+      "source": "helpers/journal-chrome-bar.js",
+      "dest": "{{scripts_path}}/journal/journal-chrome-bar.js"
     }
   ],
   "nav_buttons": [

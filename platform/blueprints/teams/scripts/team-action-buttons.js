@@ -13,6 +13,9 @@
 class TeamActionButtons {
   async render(dv, opts) {
     if (dv.container.closest(".markdown-embed")) return;
+    try {
+      if (dv.container.closest(".markdown-preview-view")?.querySelector(".teams-chrome-root")) return;
+    } catch (_e) { /* best-effort guard */ }
     if (!customJS.AccentButton) {
       const warn = dv.container.createEl("div", { text: "accent-button mechanism not loaded" });
       warn.style.color = "var(--text-error)";

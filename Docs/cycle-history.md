@@ -2846,3 +2846,29 @@ See `Docs/plans/2026-07-03-perf-seamlessness-arc-result.md` (+ the six `2026-07-
 
 See `Docs/plans/2026-07-03-reader-blueprint-result.md` (+ `-design.md` / `-plan.md`).
 
+
+## home fixes + nav CLOSED 2026-07-08 (v0.201.4 — pipeline-assigned)
+
+**Blueprints touched:** `home 0.4.1→0.4.2`, `daily 0.18.2→0.18.3` · **Mechanisms:** none new · **Harnesses:** `run-home.js` +22 cases, `run-task-entity.js` +1 (`TD-4`, merged with a concurrent overlapping fix).
+
+**Headline:** Five small user-reported defects/gaps in the daily-use `home`/`to-do` surfaces, fixed in one cycle. (1) The daily to-do page's "New Task" button dispatched an unrecognized `TaskDialog` surface (`"today"` instead of `"daily"`), silently dropping the scheduled date so the task never showed in Today — fixed at the one call site. (2) Home's inline Enter-key quick-capture hardened with `stopPropagation()` against a possible higher-level keydown listener race (root cause not confirmed live — DOM-stub tests already passed in isolation). (3) Home's reported ~3s load flash + pane widening got a best-effort mitigation: `SpaceHome.render()` now defers its first paint per app session to `workspace.onLayoutReady`, since no live Obsidian session was available to pin the exact cause. (4) `Cmd+[` now opens Home (new `sauce-home:open` command via `HomeCommandsInit`, mirroring `ProjectCommandsInit`) instead of the core daily-notes command — `daily`'s manifest no longer seeds that hotkey for new installs, `home`'s manifest seeds the new one, and a new idempotent heal (`applyHomeHotkeyRemapHeal` / pure `_planHomeHotkeyRemap`) migrated the binding on all 4 already-installed vaults (workshop + 3 consumers), preserving any other `daily-notes` binding. (5) Home gained a "‹ Yesterday" nav button (new pure `SpaceHome._previousDailyPath`) opening the actual previous day's daily note — never creates one, shows a `Notice` if it's missing.
+
+**Process:** design + plan docs written up front; executed via subagent-driven development (one implementer + one combined spec/quality reviewer subagent per task, all APPROVED). **Caught and corrected mid-cycle:** the plan's Task 4b instructed hand-bumping the `home`/`daily` manifest versions + the `component-versions.snapshot.json` fixture — a direct violation of this workshop's automated-release-bumper-only rule. Reverted in its own commit before the PR opened.
+
+**Tests:** `run-home.js` 127/127, `run-task-entity.js` 127/127 (after merging a concurrent, independently-discovered fix for the same to-do surface bug — merged cleanly, no duplication), `npm run release:preflight` exit 0 (twice), `lint-schemas` 0 issues, workshop dogfood exit 0.
+
+**Deploy:** brew-only on all 3 consumers (`brew update && brew upgrade sauce` → 0.201.4, `sauce update --bump-pins` per vault, drift:none on all 3). Verified the hotkey remap + all 4 code changes landed correctly in each vault's materialized files. User must Cmd+R (or restart) per vault.
+
+**Carry-forward:** item (3) is a best-effort mitigation pending user confirmation it actually resolves the flash/widen; `daily-notes:goto-today` (`Mod+T`) intentionally untouched.
+
+See `Docs/plans/2026-07-08-home-fixes-result.md` (+ `-design.md` / `-plan.md`). PR #355 → release PR #356 → tag `v0.201.4` → tap PR #349 (homebrew-sauce) — all auto-merged by the pipeline, no manual merges.
+
+## home fixes follow-up CLOSED 2026-07-08 (v0.202.0 — pipeline-assigned)
+
+Three quick user-reported follow-ups on the v0.201.4 home cycle: (1) the "‹ Yesterday" button was vertically misaligned with the date (baseline-flow issue) — `.sauce-home-greeting` is now a flex row with `align-items:center`. (2) The reported "still reloading every time" — `render()` now computes its glance-count signature BEFORE any DOM work and skips the entire teardown/rebuild when unchanged since the last render in that container, avoiding self-inflicted churn and preserving in-progress state (open menu, partially-typed draft). Explicitly documented as a **partial** fix: it cannot suppress Dataview's own periodic re-execution of the whole dataviewjs block (2.5s interval, vault-wide reactivity), only redundant work on top of it. (3) Clicking "+" now focuses the "Jot a task…" input immediately.
+
+**Also fixed (unrelated, but blocking):** the automated release pipeline's `prepare-release` job started failing on 4 stale hardcoded-regex version-range test assertions (`FA2-PEOPLE-1`, `FA2-PRODUCTS-1`, `FA2-TEAMS-1`, `HC-V0880-PEOPLE-D`) that hadn't been migrated to the canonical `component-versions.snapshot.json`-based pattern (unlike their `FA2-MEETINGS-1` neighbor) — an unrelated concurrent cycle's legitimate people/products/teams version bumps exceeded the old hand-typed ranges, wedging release for everyone. Migrated to the snapshot pattern; verified with `npm run release:preflight-bumped` locally before pushing. No version field was hand-edited.
+
+**Tests:** `run-home.js` 137/137 (`HOME-NOOP-1..5`, `HOME-FOCUS-1..2`, `HOME-CSS-1..3` new). `release:preflight` + `release:preflight-bumped` both green.
+
+**Deploy:** brew (0.201.4 → 0.202.0), `sauce update --bump-pins` on all 3 consumer vaults, drift:none, all 3 fixes verified present in materialized files. PR #359 (fixes) → PR #360 (pipeline unblock) → release PR #361 (v0.202.0) → tag → tap PR #350 — all auto-merged.

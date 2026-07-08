@@ -117,7 +117,7 @@
     },
     {
       "name": "daily",
-      "version": "0.18.2"
+      "version": "0.18.3"
     },
     {
       "name": "meetings",
@@ -125,11 +125,11 @@
     },
     {
       "name": "people",
-      "version": "0.6.2"
+      "version": "0.7.0"
     },
     {
       "name": "products",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "project",
@@ -141,11 +141,11 @@
     },
     {
       "name": "journal",
-      "version": "0.2.1"
+      "version": "0.3.0"
     },
     {
       "name": "trips",
-      "version": "0.5.0"
+      "version": "0.6.0"
     },
     {
       "name": "finance",
@@ -157,7 +157,7 @@
     },
     {
       "name": "teams",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "wiki",
@@ -165,7 +165,7 @@
     },
     {
       "name": "reader",
-      "version": "0.3.0"
+      "version": "0.4.0"
     }
   ]
 }

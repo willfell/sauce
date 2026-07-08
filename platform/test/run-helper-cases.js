@@ -7181,7 +7181,8 @@ async function caseFA2PeopleCanonical() {
   console.log("\n--- Case FA2-PEOPLE: people@0.3.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4|5|6)\.\d+$/.test(manifest.version),
+  assertTrue("FA2-PEOPLE-1: people manifest.version matches the snapshot SSOT",
+    manifest.version === VERSION_SNAPSHOT.components.people,
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-PEOPLE-2: entity-create frontmatter_template has type:person",
@@ -7197,7 +7198,8 @@ async function caseFA2ProductsCanonical() {
   console.log("\n--- Case FA2-PRODUCTS: products@0.2.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/products/manifest.json"), "utf8"));
-  assertTrue("FA2-PRODUCTS-1: products version >= 0.2.0", /^0\.(2|3)\.\d+$/.test(manifest.version),
+  assertTrue("FA2-PRODUCTS-1: products manifest.version matches the snapshot SSOT",
+    manifest.version === VERSION_SNAPSHOT.components.products,
     `got: ${manifest.version}`);
   const tmpl = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/products/templates/Template, Product.md"), "utf8");
@@ -7211,7 +7213,8 @@ async function caseFA2TeamsCanonical() {
   console.log("\n--- Case FA2-TEAMS: teams@0.2.0 canonical vocab adoption + product→products ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/teams/manifest.json"), "utf8"));
-  assertTrue("FA2-TEAMS-1: teams version >= 0.2.0", /^0\.(2|3)\.\d+$/.test(manifest.version),
+  assertTrue("FA2-TEAMS-1: teams manifest.version matches the snapshot SSOT",
+    manifest.version === VERSION_SNAPSHOT.components.teams,
     `got: ${manifest.version}`);
   const tmpl = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/teams/templates/Template, Team.md"), "utf8");
@@ -7789,8 +7792,8 @@ async function caseHCV0880PeopleD() {
   console.log("\n--- Case HC-V0880-PEOPLE-D: people version >= 0.5.0 (v0.88.x line) ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("HC-V0880-PEOPLE-D: people manifest.version on the 0.5.x or 0.6.x line",
-    /^0\.(5|6)\.\d+$/.test(m.version),
+  assertTrue("HC-V0880-PEOPLE-D: people manifest.version matches the snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components.people,
     `got: ${m.version}`);
 }
 

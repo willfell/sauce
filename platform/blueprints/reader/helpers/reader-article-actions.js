@@ -154,6 +154,9 @@ class ReaderArticleActions {
     render(dv) {
         if (!dv || !dv.container) return;
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
+        try {
+            if (dv.container.closest('.markdown-preview-view')?.querySelector('.reader-chrome-root')) return;
+        } catch (_e) { /* best-effort guard */ }
         const cur = dv.current && dv.current();
         if (!cur || !cur.file || cur.type !== 'reader-article') return;
 

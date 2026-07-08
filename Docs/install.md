@@ -1488,3 +1488,21 @@ sauce update --force
 - **`spice/reader/reader-clip.json`** — a Web Clipper template artifact. **Import it once** into the browser's Obsidian Web Clipper (extension → templates → import); clips thereafter route straight to `spice/reader/` with the house frontmatter and (recommended, on a local Ollama) an Interpreter-generated **AI TL;DR** `summary`. The installer materializes the JSON into the vault but **cannot push it into the browser extension** — the one-time import is a manual step.
 
 **Effect of running this upgrade:** `applyReaderScaffoldHeal` scaffolds/heals the hub (additive, backcompat — no new required fields on any existing note); **Cmd+R** to load the 3 new CustomJS classes (`ReaderQueue` / `ReaderArticleActions` / `ReaderArticleView`). The queue is empty until you import the clip template and clip a page (or use the hub's `＋ New article` button).
+
+## Upgrading from v0.201.x — home fixes (Cmd+[ now opens Home)
+
+No new subscriptions needed — this cycle only touches already-subscribed components (`home`, `daily`, `to-do`).
+
+```bash
+brew update && brew upgrade sauce
+cd /abs/path/to/vault
+sauce update --bump-pins
+```
+
+**What changes:**
+
+- **`Cmd+[` now opens Home instead of the daily note.** An idempotent install heal moves the existing binding from `daily-notes` to the new `sauce-home:open` command; any OTHER binding you'd added to `daily-notes` is preserved untouched. The core `daily-notes` command is still reachable via the command palette (Cmd+P) — it just no longer has a hotkey by default.
+- **Home gains a "‹ Yesterday" button** next to the date, opening the actual previous day's daily note (never creates one).
+- A few quiet bug fixes: the daily to-do page's "New Task" button now correctly shows the created task in Today; Home's Enter-key quick-capture is hardened against a possible event-swallowing race; Home's first paint per app session now waits for Obsidian's workspace layout to settle (a best-effort mitigation for a reported load-time flash/widen — not a confirmed fix).
+
+**User action required:** Cmd+R (or a full restart if that doesn't pick up the new `HomeCommandsInit` class) to load the updated classes and start using `Cmd+[` for Home.

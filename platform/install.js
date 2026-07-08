@@ -1270,6 +1270,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
+  await applyHomeHotkeyRemapHeal(tp, history, git); // NEW — retargets Cmd+[ from daily-notes to sauce-home:open on already-installed vaults
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -6032,6 +6033,12 @@ function _healNoteChromeBody(body, type) {
     "to-do": "ToDoChromeBar", "to-do-hub": "ToDoChromeBar", "project-todo": "ToDoChromeBar", "to-do-recurring": "ToDoChromeBar",
     "meeting": "MeetingChromeBar",
     "scratch-hub": "ScratchChromeBar", "scratch-day": "ScratchChromeBar", "scratch": "ScratchChromeBar",
+    "trips-hub": "TripsChromeBar", "trip": "TripsChromeBar", "trip-section": "TripsChromeBar", "trip-board-card": "TripsChromeBar",
+    "reader-hub": "ReaderChromeBar", "reader-article": "ReaderChromeBar",
+    "people-hub": "PeopleChromeBar", "person": "PeopleChromeBar",
+    "products-hub": "ProductsChromeBar", "product": "ProductsChromeBar",
+    "teams-hub": "TeamsChromeBar", "team": "TeamsChromeBar",
+    "journal": "JournalChromeBar",
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
@@ -6219,8 +6226,15 @@ function _healChromeBarMigration(body, type, barClass) {
   if (body.includes(barClass)) return body;
   // No legacy chrome to strip — nothing to do (e.g. notes that never had nav).
   const hasLegacyNav = /SpaceNavButtons|Breadcrumb/.test(body);
-  const hasLegacyAction = /ToDoHubActions|ToDoLeafActions|MeetingLeafActions|ScratchHubActions|ScratchDayActions|ScratchLeafActions/.test(body);
-  if (!hasLegacyNav && !hasLegacyAction) return body;
+  const hasLegacyAction = /ToDoHubActions|ToDoLeafActions|MeetingLeafActions|ScratchHubActions|ScratchDayActions|ScratchLeafActions|TripNavButtons|ReaderArticleActions|ProductActionButtons|TeamActionButtons/.test(body);
+  // person notes carry ONLY PersonNavButtons (kept, not stripped — see LEGACY_CLASSES
+  // below) with no Breadcrumb/SpaceNavButtons/action block at all, so the generic
+  // hasLegacyNav/hasLegacyAction checks never fire for them. Without this allowance
+  // the function would bail here and existing person notes would never gain
+  // PeopleChromeBar. This is the ONLY type where ChromeBar is inserted alongside
+  // (not in place of) existing chrome.
+  const hasPersonNav = type === 'person' && /PersonNavButtons/.test(body);
+  if (!hasLegacyNav && !hasLegacyAction && !hasPersonNav) return body;
 
   let out = body;
 
@@ -6230,6 +6244,7 @@ function _healChromeBarMigration(body, type, barClass) {
     'ToDoHubActions', 'ToDoLeafActions',
     'MeetingLeafActions',
     'ScratchHubActions', 'ScratchDayActions', 'ScratchLeafActions',
+    'TripNavButtons', 'ReaderArticleActions', 'ProductActionButtons', 'TeamActionButtons',
   ];
   for (const cls of LEGACY_CLASSES) {
     // Match the full ```dataviewjs ... ``` fence containing the class name.
@@ -6384,19 +6399,15 @@ function _healHomeChromeBody(body) {
   return chrome + userTail;
 }
 
-// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Three
-// customjs-guard blocks (Breadcrumb → SpaceNavButtons → ReaderQueue). Kept in
-// lockstep with blueprints/reader/content/Reader Hub.md ({{views_path}} resolves
-// to ranch/views, so the paths are byte-identical after render). The hub template
+// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Two
+// customjs-guard blocks (ReaderChromeBar → ReaderQueue). Kept in lockstep with
+// blueprints/reader/content/Reader Hub.md ({{views_path}} resolves to
+// ranch/views, so the paths are byte-identical after render). The hub template
 // has no content marker by default; any user free-write below a READER_CONTENT
 // marker is preserved by _healReaderChromeBody.
 const _READER_CHROME = [
   '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-  '```',
-  '',
-  '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+  'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
   '```',
   '',
   '```dataviewjs',
@@ -6417,11 +6428,7 @@ function _healReaderChromeBody(raw) {
   const marker = "[//]: # (READER_CONTENT)";
   const chrome = [
     '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-    '```',
-    '',
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
     '```',
     '',
     '```dataviewjs',
@@ -6447,7 +6454,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6467,7 +6474,8 @@ async function applyNoteChromeHeal(tp, history, git) {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES].includes(type)) continue;
+        const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES].includes(type)) continue;
         const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
@@ -12023,6 +12031,96 @@ async function applyHomeScaffoldHeal(tp, history, git) {
     history?.push({ event: "warning", step: "home_scaffold_heal", name: "Home.md",
       reason: `home scaffold/heal failed: ${e && e.message ? e.message : String(e)}`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+// _planHomeHotkeyRemap — PURE decision logic for applyHomeHotkeyRemapHeal.
+// Given the parsed .obsidian/hotkeys.json object, decide whether the
+// daily-notes -> Mod+[ binding (seeded by an OLDER daily blueprint manifest)
+// should move to sauce-home:open. Only acts when daily-notes owns EXACTLY a
+// Mod+[ entry and sauce-home:open has no binding yet; any OTHER daily-notes
+// binding is preserved untouched. Never mutates its input.
+function _planHomeHotkeyRemap(existing) {
+  const src = (existing && typeof existing === "object" && !Array.isArray(existing)) ? existing : {};
+  const isModBracket = (b) => b && Array.isArray(b.modifiers) && b.modifiers.length === 1
+    && b.modifiers[0] === "Mod" && b.key === "[";
+
+  const homeAlreadyBound = Array.isArray(src["sauce-home:open"]) && src["sauce-home:open"].length > 0;
+  const dailyBindings = Array.isArray(src["daily-notes"]) ? src["daily-notes"] : [];
+  const dailyOwnsModBracket = dailyBindings.some(isModBracket);
+
+  if (homeAlreadyBound || !dailyOwnsModBracket) {
+    return { act: false, next: src };
+  }
+
+  const next = Object.assign({}, src);
+  next["daily-notes"] = dailyBindings.filter((b) => !isModBracket(b));
+  next["sauce-home:open"] = [{ modifiers: ["Mod"], key: "[" }];
+  return { act: true, next };
+}
+
+// applyHomeHotkeyRemapHeal — IO wrapper around _planHomeHotkeyRemap. Mirrors
+// applyHotkeys's read/parse-guard/backup-then-write posture for
+// .obsidian/hotkeys.json. Never throws; no-ops on any read/parse failure or
+// when the plan says nothing to do. NEW (home fixes cycle).
+async function applyHomeHotkeyRemapHeal(tp, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/hotkeys.json";
+  if (!(await adapter.exists(target))) return;
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: cannot read ${target} (${e.message}); skipping`, 8000);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: ${target} malformed JSON (${e.message}); skipping`, 8000);
+    return;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return;
+
+  const plan = _planHomeHotkeyRemap(parsed);
+  if (!plan.act) return;
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: backup write failed (${e.message}); aborting`, 8000);
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(plan.next, null, 2));
+    if (history) {
+      history.push({
+        event: "info",
+        step: "home_hotkey_remap",
+        message: "moved Mod+[ from daily-notes to sauce-home:open",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: write failed (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "home_hotkey_remap",
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
   }
 }
 
@@ -20281,6 +20379,12 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // is also extracted by regex in the harness; expose it explicitly too.
     module.exports.applyHomeScaffoldHeal = applyHomeScaffoldHeal;
     module.exports._healHomeChromeBody = _healHomeChromeBody;
+    // home-hotkey-remap heal — retargets Cmd+[ from daily-notes to
+    // sauce-home:open on already-installed vaults (for run-home.js HOME-HOTKEY-*).
+    // The pure decision function is also extracted by regex in the harness;
+    // expose it explicitly too.
+    module.exports.applyHomeHotkeyRemapHeal = applyHomeHotkeyRemapHeal;
+    module.exports._planHomeHotkeyRemap = _planHomeHotkeyRemap;
     // reader-scaffold heal — materialize + chrome-heal the singleton
     // spice/reader/Reader.md reading-queue hub. The pure body transform is also
     // extractable by regex in a harness; expose it explicitly too.

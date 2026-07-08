@@ -1,6 +1,6 @@
 {
   "name": "reader",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "reader",
   "skills_dir": ".claude/skills/reader",
@@ -49,6 +49,10 @@
     {
       "name": "platform-claude",
       "range": ">=0.1.3"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "breadcrumb": {
@@ -75,7 +79,8 @@
   "customjs_classes": [
     "ReaderQueue",
     "ReaderArticleActions",
-    "ReaderArticleView"
+    "ReaderArticleView",
+    "ReaderChromeBar"
   ],
   "files": [
     {
@@ -101,6 +106,10 @@
     {
       "source": "helpers/reader-article-view.js",
       "dest": "{{scripts_path}}/reader/reader-article-view.js"
+    },
+    {
+      "source": "helpers/reader-chrome-bar.js",
+      "dest": "{{scripts_path}}/reader/reader-chrome-bar.js"
     },
     {
       "source": "assets/reader-clip.json",

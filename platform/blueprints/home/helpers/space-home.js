@@ -95,6 +95,63 @@ class SpaceHome {
   }
 
   /**
+   * Compute yesterday's daily-note VAULT PATH from `today` (YYYY-MM-DD) and
+   * the parsed `.obsidian/daily-notes.json` config ({ folder, format }).
+   * PURE — never touches the wall clock or the vault; the caller resolves
+   * `today` and reads daily-notes.json. `format` is a moment.js-style token
+   * string (folder/file segments); this only needs the tokens the daily
+   * blueprint's own config actually uses: YYYY, MM, MMMM, dddd, YYYY-MM-DD.
+   * Returns null when `today` or `config.folder`/`config.format` are missing
+   * or unparseable — the caller shows a Notice rather than guessing a path.
+   */
+  static _previousDailyPath(today, config) {
+    if (!config || typeof config.folder !== "string" || !config.folder
+      || typeof config.format !== "string" || !config.format) return null;
+    const ymd = SpaceHome._ymd(today);
+    if (!ymd) return null;
+    const dn = SpaceHome._dayNumber(ymd);
+    if (dn == null) return null;
+
+    // Convert the PREVIOUS absolute day number back to { y, mo, d } via the
+    // inverse of _dayNumber's Howard Hinnant civil_from_days algorithm.
+    const civilFromDays = (z) => {
+      z += 719468;
+      const era = Math.floor((z >= 0 ? z : z - 146096) / 146097);
+      const doe = z - era * 146097;                                  // [0, 146096]
+      const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365); // [0, 399]
+      const y = yoe + era * 400;
+      const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100)); // [0, 365]
+      const mp = Math.floor((5 * doy + 2) / 153);                     // [0, 11]
+      const d = doy - Math.floor((153 * mp + 2) / 5) + 1;             // [1, 31]
+      const m = mp + (mp < 10 ? 3 : -9);                              // [1, 12]
+      return { y: y + (m <= 2 ? 1 : 0), mo: m, d };
+    };
+    const prev = civilFromDays(dn - 1);
+
+    const WD = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
+    const MO = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const wd = WD[(((dn - 1) % 7) + 7) % 7];
+    const tokens = {
+      YYYY: String(prev.y),
+      MM: pad2(prev.mo),
+      MMMM: MO[prev.mo - 1],
+      dddd: wd,
+      DD: pad2(prev.d),
+    };
+    // Build the literal "YYYY-MM-DD" composite token first (longest match),
+    // then the remaining single tokens — longest-token-first avoids MM being
+    // consumed inside a not-yet-replaced YYYY-MM-DD literal.
+    const isoDate = tokens.YYYY + "-" + tokens.MM + "-" + pad2(prev.d);
+    let out = config.format.split("YYYY-MM-DD").join(isoDate);
+    out = out.split("YYYY").join(tokens.YYYY);
+    out = out.split("MMMM").join(tokens.MMMM);
+    out = out.split("MM").join(tokens.MM);
+    out = out.split("dddd").join(tokens.dddd);
+    return config.folder.replace(/\/+$/, "") + "/" + out + ".md";
+  }
+
+  /**
    * Format a date-ish value into a HUMAN string, PURELY (no wall clock).
    *   "Thursday, Jul 2, 2026"                (base)
    *   "Thursday, Jul 2, 2026 · Today"        (iso === todayIso)
@@ -229,6 +286,26 @@ class SpaceHome {
     // input/Add handlers await createQuick then call self.render to refresh).
     const self = this;
 
+    // Cold-start reflow guard: on the FIRST render of any app session, wait for
+    // Obsidian's workspace layout (panes/sidebars) to finish restoring before
+    // painting. Firing during layout restore is what produces the visible
+    // "flash then widen" on a cold app open — deferring the first paint avoids
+    // racing that restore. Deduped via a window flag so this never delays a
+    // SECOND render in the same session (e.g. day-rollover force-refresh).
+    try {
+      const w = (typeof window !== "undefined" && window) || null;
+      const A = (typeof app !== "undefined" && app) || (w && w.app) || null;
+      if (w && !w.__sauceHomeLayoutReady) {
+        if (A && A.workspace && typeof A.workspace.onLayoutReady === "function") {
+          await new Promise((resolve) => {
+            A.workspace.onLayoutReady(() => { w.__sauceHomeLayoutReady = true; resolve(); });
+          });
+        } else {
+          w.__sauceHomeLayoutReady = true;
+        }
+      }
+    } catch (_e) { /* never throw — fall through to an immediate render */ }
+
     // The ONLY live-clock reads. moment is a runtime global (window.moment).
     const M = (typeof moment !== "undefined" && moment)
       || (typeof window !== "undefined" && window.moment)
@@ -263,6 +340,43 @@ class SpaceHome {
       }
     } catch (_e) { /* never throw */ }
 
+    // Glance counts — computed EARLY (before any DOM work) so the no-op-if-
+    // unchanged check below can short-circuit the whole rebuild. Counts route
+    // through SpaceDailyDashboard.computeCounts (the DRY seam), guarded so a
+    // not-yet-registered dashboard/task-entity (cold load) yields zeros
+    // instead of throwing.
+    const cjs = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const SDD = cjs && cjs.SpaceDailyDashboard;
+    const TE = cjs && cjs.TaskEntity;
+    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
+    try {
+      if (SDD && typeof SDD.computeCounts === "function") {
+        counts = SDD.computeCounts(dv, today, TE) || counts;
+      }
+    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+
+    // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
+    // (the reported "reloading every time" feel) and is wasted work whenever
+    // NOTHING actually changed since the last render in THIS render() call —
+    // e.g. our own post-capture self.render() re-invocation firing while the
+    // glance counts happen to be identical. Skipping also PRESERVES any
+    // in-progress state a rebuild would otherwise wipe (an open "+" menu, a
+    // partially-typed "Jot a task…" draft). This does NOT (and cannot) cover
+    // Dataview's OWN periodic re-execution of the whole block, which clears
+    // dv.container itself before calling render() again — this guard only
+    // short-circuits redundant work WE would otherwise do within one still-
+    // live container.
+    const sig = today + "|" + JSON.stringify(counts);
+    try {
+      const w = (typeof window !== "undefined" && window) || null;
+      if (w && w.__sauceHomeLastSig === sig && dv.container.querySelector(".sauce-home")) {
+        return;
+      }
+      if (w) w.__sauceHomeLastSig = sig;
+    } catch (_e) { /* never throw — fall through to a normal rebuild */ }
+
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
     const prior = dv.container.querySelector(".sauce-home");
@@ -277,6 +391,40 @@ class SpaceHome {
     const greeting = head.createEl("div", { cls: "sauce-home-greeting" });
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
     sub.textContent = SpaceHome._humanDate(today, today);
+
+    // 1a) "‹ Yesterday" — opens the actual previous day's daily note (Home
+    // itself always stays pinned to today; this navigates AWAY, it does not
+    // re-render Home for another day). Never creates a file: if yesterday's
+    // note doesn't exist yet, show a Notice instead.
+    const prevBtn = greeting.createEl("button", { cls: "sauce-home-prev-day" });
+    prevBtn.setAttribute("type", "button");
+    prevBtn.setAttribute("aria-label", "Previous day");
+    prevBtn.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+    prevBtn.onclick = async () => {
+      try {
+        const appRef = (typeof app !== "undefined" && app) || (typeof window !== "undefined" && window.app) || null;
+        if (!appRef || !appRef.vault || !appRef.vault.adapter) return;
+        let cfg = null;
+        try {
+          const raw = await appRef.vault.adapter.read(".obsidian/daily-notes.json");
+          cfg = JSON.parse(raw);
+        } catch (_e) { cfg = null; }
+        const p = SpaceHome._previousDailyPath(today, cfg);
+        if (!p) {
+          try { new Notice("Could not determine yesterday's daily note path."); } catch (_e) {}
+          return;
+        }
+        const file = appRef.vault.getAbstractFileByPath ? appRef.vault.getAbstractFileByPath(p) : null;
+        if (!file) {
+          try { new Notice("No daily note for yesterday yet."); } catch (_e) {}
+          return;
+        }
+        if (appRef.workspace && typeof appRef.workspace.openLinkText === "function") {
+          appRef.workspace.openLinkText(p, "", false);
+        }
+      } catch (_e) { /* never throw out of a click handler */ }
+    };
 
     // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
     // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
@@ -315,7 +463,17 @@ class SpaceHome {
       if (!inMenu && !inBtn) setMenu(false);
     };
     const onDocKey = (ev) => { if (menuOpen && ev && ev.key === "Escape") setMenu(false); };
-    addBtn.onclick = () => { setMenu(!menuOpen); };
+    addBtn.onclick = () => {
+      const opening = !menuOpen;
+      setMenu(opening);
+      // Focus the "Jot a task…" input the moment the menu springs open, so the
+      // user can start typing immediately — this is an explicit click gesture,
+      // not an autofocus-on-page-load (which would pop the mobile keyboard on
+      // every Home open; see the render()-time comment on `input` below).
+      if (opening && input && typeof input.focus === "function") {
+        try { input.focus(); } catch (_e) { /* never throw out of a click handler */ }
+      }
+    };
 
     // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
     // guarded; then close the menu + re-render so the Tasks panel + glance chip
@@ -347,6 +505,7 @@ class SpaceHome {
     input.addEventListener("keydown", (ev) => {
       if (ev && ev.key === "Enter" && !ev.isComposing) {
         if (typeof ev.preventDefault === "function") ev.preventDefault();
+        if (typeof ev.stopPropagation === "function") ev.stopPropagation();
         submitCapture();
       }
     });
@@ -365,22 +524,8 @@ class SpaceHome {
 
     // 2) Glance counts ───────────────────────────────────────────────────────
     // A rolled-up count line ("N today · M overdue · K meetings · J done").
-    // Counts route through SpaceDailyDashboard.computeCounts (the DRY seam),
-    // guarded exactly like _dispatch so a not-yet-registered dashboard/task-entity
-    // (cold load) yields zeros instead of throwing out of render. _glanceChips is
-    // the PURE descriptor; this block just paints it.
-    const cjs = (typeof customJS !== "undefined" && customJS)
-      || (typeof window !== "undefined" && window.customJS)
-      || null;
-    const SDD = cjs && cjs.SpaceDailyDashboard;
-    const TE = cjs && cjs.TaskEntity;
-    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
-    try {
-      if (SDD && typeof SDD.computeCounts === "function") {
-        counts = SDD.computeCounts(dv, today, TE) || counts;
-      }
-    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
-
+    // `counts` was already computed above (before the no-op-if-unchanged
+    // check); _glanceChips is the PURE descriptor, this block just paints it.
     // Glance count line — rendered ONLY when there's something to show. An empty
     // day shows NOTHING (no "Clear day" message, no empty element).
     const g = SpaceHome._glanceChips(counts);
