@@ -2862,3 +2862,13 @@ See `Docs/plans/2026-07-03-reader-blueprint-result.md` (+ `-design.md` / `-plan.
 **Carry-forward:** item (3) is a best-effort mitigation pending user confirmation it actually resolves the flash/widen; `daily-notes:goto-today` (`Mod+T`) intentionally untouched.
 
 See `Docs/plans/2026-07-08-home-fixes-result.md` (+ `-design.md` / `-plan.md`). PR #355 → release PR #356 → tag `v0.201.4` → tap PR #349 (homebrew-sauce) — all auto-merged by the pipeline, no manual merges.
+
+## home fixes follow-up CLOSED 2026-07-08 (v0.202.0 — pipeline-assigned)
+
+Three quick user-reported follow-ups on the v0.201.4 home cycle: (1) the "‹ Yesterday" button was vertically misaligned with the date (baseline-flow issue) — `.sauce-home-greeting` is now a flex row with `align-items:center`. (2) The reported "still reloading every time" — `render()` now computes its glance-count signature BEFORE any DOM work and skips the entire teardown/rebuild when unchanged since the last render in that container, avoiding self-inflicted churn and preserving in-progress state (open menu, partially-typed draft). Explicitly documented as a **partial** fix: it cannot suppress Dataview's own periodic re-execution of the whole dataviewjs block (2.5s interval, vault-wide reactivity), only redundant work on top of it. (3) Clicking "+" now focuses the "Jot a task…" input immediately.
+
+**Also fixed (unrelated, but blocking):** the automated release pipeline's `prepare-release` job started failing on 4 stale hardcoded-regex version-range test assertions (`FA2-PEOPLE-1`, `FA2-PRODUCTS-1`, `FA2-TEAMS-1`, `HC-V0880-PEOPLE-D`) that hadn't been migrated to the canonical `component-versions.snapshot.json`-based pattern (unlike their `FA2-MEETINGS-1` neighbor) — an unrelated concurrent cycle's legitimate people/products/teams version bumps exceeded the old hand-typed ranges, wedging release for everyone. Migrated to the snapshot pattern; verified with `npm run release:preflight-bumped` locally before pushing. No version field was hand-edited.
+
+**Tests:** `run-home.js` 137/137 (`HOME-NOOP-1..5`, `HOME-FOCUS-1..2`, `HOME-CSS-1..3` new). `release:preflight` + `release:preflight-bumped` both green.
+
+**Deploy:** brew (0.201.4 → 0.202.0), `sauce update --bump-pins` on all 3 consumer vaults, drift:none, all 3 fixes verified present in materialized files. PR #359 (fixes) → PR #360 (pipeline unblock) → release PR #361 (v0.202.0) → tag → tap PR #350 — all auto-merged.
