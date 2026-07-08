@@ -2176,6 +2176,34 @@ function runTaskDoneArchiveTests() {
   });
 }
 
+// ---------- TaskRecurringList static helper (pure) ----------
+//
+// TaskRecurringList is the "Recurring" index view (to-do blueprint) — lists
+// every OPEN task note with a non-empty `recurrence` grammar, sorted by
+// `scheduled` ascending (undated recurring tasks sort last). Only the
+// filterRecurring static is pure/Node-testable; render() is browser-only.
+
+ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by scheduled ascending', () => {
+  const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
+  const tasks = [
+    { title: 'B', status: 'open', scheduled: '2026-07-20', recurrence: 'every day' },
+    { title: 'A', status: 'open', scheduled: '2026-07-09', recurrence: 'every Monday' },
+    { title: 'No recurrence', status: 'open', scheduled: '2026-07-08', recurrence: '' },
+    { title: 'Done recurring', status: 'done', scheduled: '2026-07-08', recurrence: 'every day' },
+    { title: 'No date', status: 'open', scheduled: null, recurrence: 'every day' },
+  ];
+  const out = TaskRecurringListClass.filterRecurring(tasks);
+  assert(out.length === 3, 'keeps the 3 open+recurring tasks (including the undated one): ' + out.length);
+  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by scheduled ascending, dated first: ' + out.map(t => t.title).join(','));
+  assert(out[2].title === 'No date', 'undated recurring task sorts last: ' + out.map(t => t.title).join(','));
+});
+
+ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
+  const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
+  assert(Array.isArray(TaskRecurringListClass.filterRecurring(null)), 'null -> []');
+  assert(TaskRecurringListClass.filterRecurring(null).length === 0, 'null -> empty array');
+});
+
 (async () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
