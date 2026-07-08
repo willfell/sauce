@@ -20,14 +20,52 @@ const cfg = inst._config();
 }
 // RCB-SPEC
 {
+  const prevCJS = global.customJS;
+  global.customJS = {
+    ReaderArticleActions: {
+      statusTransitions: (status) => {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        if (s === 'reading') {
+          return [
+            { label: 'Mark read', next: 'archived' },
+            { label: 'Back to unread', next: 'unread' },
+          ];
+        }
+        if (s === 'archived') {
+          return [
+            { label: 'Back to reading', next: 'reading' },
+            { label: 'Mark unread', next: 'unread' },
+          ];
+        }
+        return [
+          { label: 'Mark reading', next: 'reading' },
+          { label: 'Mark read', next: 'archived' },
+        ];
+      },
+    },
+  };
   const h = cfg.surfaceSpec({ context: 'reader-hub' });
   const unread = cfg.surfaceSpec({ context: 'reader-article', status: 'unread', url: '' });
   const reading = cfg.surfaceSpec({ context: 'reader-article', status: 'reading', url: 'https://x.com/a' });
+  global.customJS = prevCJS;
   ok('RCB-SPEC-1 hub: primary new-article + not leaf', h.primary.id === 'new-article' && h.leaf === false);
   ok('RCB-SPEC-2 unread article, no url: leaf + no open-article + 2 status actions',
     unread.leaf === true && !unread.overflow.some(o => o.id === 'open-article') && unread.overflow.some(o => o.id === 'status-reading') && unread.overflow.some(o => o.id === 'status-archived'));
   ok('RCB-SPEC-3 reading article with url: open-article + 2 status actions (archived, unread)',
     reading.overflow.some(o => o.id === 'open-article') && reading.overflow.some(o => o.id === 'status-archived') && reading.overflow.some(o => o.id === 'status-unread'));
+}
+// RCB-SPEC-4 — customJS unavailable entirely: surfaceSpec must not throw, overflow has no status-* entries.
+{
+  const prevCJS2 = global.customJS;
+  delete global.customJS;
+  let threw = false;
+  let noStatusActions = false;
+  try {
+    const degraded = cfg.surfaceSpec({ context: 'reader-article', status: 'unread', url: '' });
+    noStatusActions = !degraded.overflow.some(o => o.id && o.id.indexOf('status-') === 0);
+  } catch (_e) { threw = true; }
+  global.customJS = prevCJS2;
+  ok('RCB-SPEC-4 surfaceSpec never throws when customJS is entirely undefined, and has no status actions', threw === false && noStatusActions);
 }
 // RCB-DISPATCH
 {

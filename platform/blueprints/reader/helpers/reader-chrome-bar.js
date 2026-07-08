@@ -3,9 +3,10 @@
  *
  * Renders the shared Go ▾ / primary / ⋯ bar on reader surfaces via
  * customJS.ChromeBar.makeAdapter(this._config()). Absorbs ReaderArticleActions'
- * status-transition row (Open article ↗ / Mark reading / Mark read / etc.) into
- * the ⋯ overflow menu — reuses ReaderArticleActions.statusTransitions(status)
- * and ._setStatus(path, next) directly, no new transition logic. The hub's
+ * status-transition row (Open article ↗ + the current status's transition
+ * buttons) into the ⋯ overflow menu — reuses
+ * ReaderArticleActions.statusTransitions(status) and ._setStatus(path, next)
+ * directly, no new transition logic. The hub's
  * "+ New article" button dispatches to the same EntityCreate call
  * ReaderArticleActions.renderCreateRow already uses (which stays active,
  * unchanged, for ReaderQueue). Instance methods; never-throw; cold-load-safe.
@@ -30,36 +31,19 @@ class ReaderChromeBar {
   }
 
   // Status-transition pairs for the CURRENT status. Delegates to
-  // ReaderArticleActions.statusTransitions when the live customJS instance is
-  // reachable (the real runtime path — single source of truth for the labels/
-  // literals). Falls back to a local mirror of that same pure table so
-  // surfaceSpec (a pure function with no dv/customJS argument) stays
-  // computable in contexts where customJS isn't wired yet (e.g. cold-load
-  // ordering, tests). Keep in sync with ReaderArticleActions.statusTransitions.
+  // ReaderArticleActions.statusTransitions — the single source of truth for
+  // the labels/literals. No local mirror: when customJS isn't reachable
+  // (cold-load ordering before other classes register, or a test context that
+  // never stubs customJS), this degrades to an empty list rather than
+  // duplicating the table. Never throws.
   _statusTransitions(status) {
     try {
       if (typeof customJS !== "undefined" && customJS && customJS.ReaderArticleActions
         && typeof customJS.ReaderArticleActions.statusTransitions === "function") {
         return customJS.ReaderArticleActions.statusTransitions(status) || [];
       }
-    } catch (_e) { /* fall through to local mirror */ }
-    const s = String(status == null ? "" : status).trim().toLowerCase();
-    if (s === "reading") {
-      return [
-        { label: "Mark read", next: "archived" },
-        { label: "Back to unread", next: "unread" },
-      ];
-    }
-    if (s === "archived") {
-      return [
-        { label: "Back to reading", next: "reading" },
-        { label: "Mark unread", next: "unread" },
-      ];
-    }
-    return [
-      { label: "Mark reading", next: "reading" },
-      { label: "Mark read", next: "archived" },
-    ];
+    } catch (_e) { /* fall through to empty */ }
+    return [];
   }
 
   _config() {
