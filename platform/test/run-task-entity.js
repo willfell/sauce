@@ -164,6 +164,37 @@ ok('TE-recur-2 parseNote normalizes recurrence like priority (empty string, not 
   assert(bare.recurrence === '', 'absent recurrence -> empty string: ' + JSON.stringify(bare.recurrence));
 });
 
+ok('TE-recur-3 nextOccurrence finds the next matching date after fromDateStr', () => {
+  // Simple predicate: matches every date whose day-of-month is even.
+  const evenDayMatches = (dateStr) => {
+    const day = parseInt(dateStr.slice(8, 10), 10);
+    return day % 2 === 0;
+  };
+  const next = TaskEntity.nextOccurrence('every 2 days (test grammar)', '2026-07-08', null, evenDayMatches);
+  assert(next === '2026-07-10', 'next even day after the 8th (itself even) is the 10th: ' + next);
+});
+
+ok('TE-recur-4 nextOccurrence never returns fromDateStr itself, even if it matches', () => {
+  const alwaysMatches = () => true;
+  const next = TaskEntity.nextOccurrence('every day', '2026-07-08', null, alwaysMatches);
+  assert(next === '2026-07-09', 'strictly AFTER fromDateStr: ' + next);
+});
+
+ok('TE-recur-5 nextOccurrence returns null when the predicate never matches within the horizon', () => {
+  const neverMatches = () => false;
+  const next = TaskEntity.nextOccurrence('every leap-day-2400', '2026-07-08', null, neverMatches);
+  assert(next === null, 'unsupported/never-matching grammar -> null: ' + next);
+});
+
+ok('TE-recur-6 nextOccurrence tolerates a missing/throwing matchesFn (never throws)', () => {
+  let threw = false;
+  try {
+    const next = TaskEntity.nextOccurrence('every day', '2026-07-08', null, null);
+    assert(next === null, 'no matchesFn -> null, not a throw: ' + next);
+  } catch (_e) { threw = true; }
+  assert(!threw, 'nextOccurrence must never throw');
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
   const parsed = TaskEntity.parseNote({ status: undefined, scheduled: '', title: 't', file: { path: 'spice/tasks/a.md' } });
