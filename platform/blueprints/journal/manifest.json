@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "journal",
   "description": "Date-routed daily journal entries under spice/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under spice/journal/ auto-applies template via templater_folder_templates.",

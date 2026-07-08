@@ -1,6 +1,6 @@
 {
   "name": "teams",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "teams",
   "skills_dir": ".claude/skills/teams",
