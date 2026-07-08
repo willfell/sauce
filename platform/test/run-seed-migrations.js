@@ -1153,13 +1153,19 @@ withTempVault((vault) => {
             );
         }
 
-        // HC-TRIPS-SEED-3: Breadcrumb injected into the Flights section body.
+        // HC-TRIPS-SEED-3: chrome injected into the Flights section body. The
+        // seed runs TWO installs; applyTripsConformanceHeal injects legacy
+        // Breadcrumb chrome into the newly-renamed section on pass 1, then
+        // applyNoteChromeHeal (which now covers spice/trips per the cycle-3
+        // note-chrome heal wiring) runs ahead of applyTripsConformanceHeal on
+        // pass 2 and migrates that Breadcrumb forward to TripsChromeBar — so
+        // the post-idempotency-phase body carries TripsChromeBar, not Breadcrumb.
         {
             let flightsBody = "";
             try { flightsBody = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip — Flights.md"); } catch (e) {}
             ok(
-                "HC-TRIPS-SEED-3 Flights section body contains class: \"Breadcrumb\" (breadcrumb injected)",
-                /class:\s*"Breadcrumb"/.test(flightsBody)
+                "HC-TRIPS-SEED-3 Flights section body contains class: \"TripsChromeBar\" (chrome injected + migrated)",
+                /class:\s*"TripsChromeBar"/.test(flightsBody)
             );
         }
 
