@@ -113,6 +113,14 @@ class TaskEntity {
      * through this on READ so downstream comparisons see plain strings. Handles:
      * string (ISO or date), Luxon DateTime (toISODate / toFormat), moment
      * (format), and JS Date. Empty / null / unparseable → null.
+     *
+     * UTC-safe: a bare YAML date (`scheduled: 2026-07-08`) parses to UTC
+     * midnight; Dataview wraps it in a Luxon DateTime in the LOCAL system
+     * zone, so naive .toISODate()/.toFormat() in a negative-UTC-offset zone
+     * (e.g. America/Chicago, -06:00) rolls the calendar date back one day —
+     * misclassifying today-scheduled tasks as overdue. Always read the
+     * calendar date via UTC accessors first, regardless of the device's
+     * local zone.
      */
     static _toDateStr(v) {
         if (v == null || v === '') return null;
@@ -122,15 +130,31 @@ class TaskEntity {
             const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
             return m ? m[1] : s;
         }
-        // Luxon DateTime (Dataview) — toISODate() → "yyyy-MM-dd" or null
-        if (typeof v.toISODate === 'function') { const s = v.toISODate(); return s || null; }
-        if (typeof v.toFormat === 'function') { return v.toFormat('yyyy-MM-dd'); }
-        // moment
-        if (typeof v.format === 'function') { const s = v.format('YYYY-MM-DD'); return s || null; }
-        // JS Date
+        // Luxon DateTime (Dataview) — convert to UTC first (see note above).
+        if (typeof v.toISODate === 'function') {
+            const dt = (typeof v.toUTC === 'function') ? v.toUTC() : v;
+            const s = dt.toISODate();
+            return s || null;
+        }
+        if (typeof v.toFormat === 'function') {
+            const dt = (typeof v.toUTC === 'function') ? v.toUTC() : v;
+            return dt.toFormat('yyyy-MM-dd');
+        }
+        // moment — mutable, so clone before switching to UTC (never mutate
+        // the caller's instance).
+        if (typeof v.format === 'function') {
+            const dt = (typeof v.clone === 'function' && typeof v.utc === 'function')
+                ? v.clone().utc()
+                : v;
+            const s = dt.format('YYYY-MM-DD');
+            return s || null;
+        }
+        // JS Date — read the calendar date via UTC getters (a bare YAML date
+        // parses to UTC midnight; local getters roll it back a day in a
+        // negative-offset zone).
         if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
             const p = (n) => String(n).padStart(2, '0');
-            return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
+            return v.getUTCFullYear() + '-' + p(v.getUTCMonth() + 1) + '-' + p(v.getUTCDate());
         }
         const m2 = /(\d{4}-\d{2}-\d{2})/.exec(String(v));
         return m2 ? m2[1] : null;

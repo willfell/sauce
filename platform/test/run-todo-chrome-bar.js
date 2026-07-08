@@ -29,14 +29,16 @@ const cfg = inst._config();
   const hub = cfg.surfaceSpec({ context: 'to-do-hub' });
   const ptodo = cfg.surfaceSpec({ context: 'project-todo' });
   const rec = cfg.surfaceSpec({ context: 'to-do-recurring' });
-  ok('TDCB-SPEC-1 daily: primary new-task + 2 overflow + leaf',
-    daily.primary && daily.primary.id === 'new-task' && daily.overflow.length === 2 && daily.leaf === true);
+  ok('TDCB-SPEC-1 daily: primary new-task + 3 overflow (recurring/all-todos/completed-tasks) + leaf',
+    daily.primary && daily.primary.id === 'new-task' && daily.overflow.length === 3 && daily.leaf === true
+    && daily.overflow.some(e => e.id === 'completed-tasks'));
   ok('TDCB-SPEC-2 hub: no primary + back-today overflow + not leaf',
     hub.primary === null && hub.overflow.length === 1 && hub.overflow[0].id === 'back-today' && hub.leaf === false);
   ok('TDCB-SPEC-3 project-todo: primary new-task + recurring overflow + leaf',
     ptodo.primary && ptodo.primary.id === 'new-task' && ptodo.overflow.length === 1 && ptodo.overflow[0].id === 'recurring' && ptodo.leaf === true);
-  ok('TDCB-SPEC-4 recurring: no primary + all-todos overflow + leaf',
-    rec.primary === null && rec.overflow.length === 1 && rec.overflow[0].id === 'all-todos' && rec.leaf === true);
+  ok('TDCB-SPEC-4 recurring: no primary + 2 overflow (all-todos/completed-tasks) + leaf',
+    rec.primary === null && rec.overflow.length === 2 && rec.overflow.some(e => e.id === 'all-todos')
+    && rec.overflow.some(e => e.id === 'completed-tasks') && rec.leaf === true);
 }
 
 // TDCB-DISPATCH — routes to correct handlers.
@@ -51,11 +53,13 @@ const cfg = inst._config();
   cfg.dispatch({}, { context: 'to-do' }, 'new-task');
   cfg.dispatch({}, { context: 'to-do' }, 'recurring');
   cfg.dispatch({}, { context: 'to-do' }, 'all-todos');
+  cfg.dispatch({}, { context: 'to-do' }, 'completed-tasks');
   cfg.dispatch({}, { context: 'to-do-hub' }, 'back-today');
 
   ok('TDCB-DISPATCH-1 new-task → TaskDialog.open', calls.some(c => c.taskDialog && c.taskDialog.surface === 'today'));
   ok('TDCB-DISPATCH-2 recurring → openLinkText(Recurring Tasks)', calls.some(c => c.openLink === 'spice/to-do/Recurring Tasks.md'));
   ok('TDCB-DISPATCH-3 all-todos → openLinkText(All-ToDos)', calls.some(c => c.openLink === 'spice/to-do/All-ToDos.md'));
+  ok('TDCB-DISPATCH-4 completed-tasks → openLinkText(Completed Tasks)', calls.some(c => c.openLink === 'spice/to-do/Completed Tasks.md'));
 
   global.customJS = prevCJS;
   delete global.window;
@@ -69,10 +73,11 @@ const cfg = inst._config();
   global.customJS = { ChromeBar: { openNavTarget: () => {} } };
   global.window = { moment: () => ({ format: (f) => f === 'YYYY-MM-DD' ? '2026-07-06' : '2026/07-July' }) };
   const dests = cfg.destinations({}, { context: 'to-do-recurring', path: 'spice/to-do/Recurring Tasks.md' });
-  ok('TDCB-DEST-1 includes This to-do section + Today + All To-Dos',
+  ok('TDCB-DEST-1 includes This to-do section + Today + All To-Dos + Completed Tasks',
     dests[0] && dests[0].section === 'This to-do'
     && dests.some(e => e && e.label === "Today's To-Do")
-    && dests.some(e => e && e.label === 'All To-Dos'));
+    && dests.some(e => e && e.label === 'All To-Dos')
+    && dests.some(e => e && e.label === 'Completed Tasks'));
   global.customJS = prevCJS;
   delete global.window;
 }
