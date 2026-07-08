@@ -688,6 +688,47 @@ function descendants(el) {
       `free text should be appended after HOME_CHROME_END; got ${JSON.stringify(bare)}`);
   }
 
+  // ── HOME-CMD: HomeCommandsInit registers sauce-home:open, mirroring
+  // ProjectCommandsInit's pattern (idempotent, cold-load-safe, delegates to the
+  // same navigation the "Open today's daily" / Go-to launcher path uses).
+  {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'blueprints', 'home', 'helpers', 'home-commands-init.js'), 'utf8'
+    );
+    const HomeCommandsInit = new Function(src + "; return HomeCommandsInit;")();
+
+    // Cold-load guard: no app.commands → never throws, never registers.
+    {
+      let threw = false;
+      try { new HomeCommandsInit().invoke(); } catch (_e) { threw = true; }
+      assertTrue("HOME-CMD-1 invoke() never throws when app/commands is absent", !threw);
+    }
+
+    // Registers exactly one command, id sauce-home:open, and its callback opens Home.
+    {
+      const registered = [];
+      global.app = { commands: { addCommand: (c) => registered.push(c) } };
+      global.window.app = global.app;
+      const inst = new HomeCommandsInit();
+      inst.invoke();
+      assertEq("HOME-CMD-2 registers exactly one command", registered.length, 1);
+      assertEq("HOME-CMD-3 command id is sauce-home:open", registered[0].id, "sauce-home:open");
+      assertTrue("HOME-CMD-4 command has a name", typeof registered[0].name === "string" && registered[0].name.length > 0);
+
+      const opened = [];
+      global.app.workspace = { openLinkText: (p, s, nl) => opened.push({ p, s, nl }) };
+      registered[0].callback();
+      assertEq("HOME-CMD-5 callback opens spice/home/Home.md", opened[0] && opened[0].p, "spice/home/Home.md");
+
+      // Second invoke() is a no-op (idempotent).
+      inst.invoke();
+      assertEq("HOME-CMD-6 a second invoke() does not re-register", registered.length, 1);
+
+      delete global.app;
+      delete global.window.app;
+    }
+  }
+
   // ── Summary ────────────────────────────────────────────────────────────────
   console.log("\n=== Summary ===");
   for (const [name, ok] of results) console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
