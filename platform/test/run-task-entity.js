@@ -1038,6 +1038,37 @@ ok('RTR-3 renderTaskRow: title click opens the task NOTE, not the edit dialog', 
   global.window = prevWindow;
 });
 
+// TTL-recur-1. renderTaskRow draws a repeat-icon badge iff task.recurrence is
+// set — a small icon (not a text chip), visually distinct at a glance without
+// opening the note. Uses a minimal Obsidian-like createEl-shaped DOM stub.
+ok('TTL-recur-1 renderTaskRow shows a repeat badge iff task.recurrence is set', () => {
+  function stubEl(tag) {
+    const el = {
+      tag, children: [], _text: '',
+      style: {}, attrs: {},
+      createEl(t, opts) { const c = stubEl(t); if (opts && opts.text != null) c._text = opts.text; if (opts && opts.cls) c.className = opts.cls; this.children.push(c); return c; },
+      addEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { this.children.push(c); },
+    };
+    return el;
+  }
+  const container = stubEl('div');
+  const recurring = { title: 'Feed the dogs', path: 'spice/tasks/Feed the dogs.md', recurrence: 'every day' };
+  TaskTodayList.renderTaskRow(container, recurring, null);
+  const rowRecur = container.children[0];
+  const findByClassDeep = (node, cls) => {
+    if (node.className === cls) return node;
+    for (const c of (node.children || [])) { const hit = findByClassDeep(c, cls); if (hit) return hit; }
+    return null;
+  };
+  assert(!!findByClassDeep(rowRecur, 'sauce-task-today-recur-badge'), 'recurring row has the badge');
+
+  const container2 = stubEl('div');
+  const oneShot = { title: 'One-shot', path: 'spice/tasks/One-shot.md', recurrence: '' };
+  TaskTodayList.renderTaskRow(container2, oneShot, null);
+  const rowOneShot = container2.children[0];
+  assert(!findByClassDeep(rowOneShot, 'sauce-task-today-recur-badge'), 'one-shot row has NO badge');
+});
+
 // ---------- _parseInlineLinks (FIX 1 — deterministic inline-link parser) ----------
 //
 // The title / LINKS renderer no longer depends on Obsidian's MarkdownRenderer
