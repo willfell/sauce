@@ -497,6 +497,17 @@ ok('TNV-2 _fieldRows tolerates null / empty task', () => {
   assert(TaskNoteView._fieldRows({}).length === 0, 'empty → []');
 });
 
+// TNV-recur-1. _fieldRows includes a Repeats row iff recurrence is set.
+ok('TNV-recur-1 _fieldRows includes a Repeats row iff recurrence is set', () => {
+  const TaskNoteViewClass = loadClass('mechanisms/task-entity/task-note-view.js', 'TaskNoteView');
+  const rows = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08', recurrence: 'every day' });
+  const hit = rows.find(r => r.label === 'Repeats');
+  assert(hit && hit.value === 'every day', 'Repeats row present with grammar text: ' + JSON.stringify(rows));
+
+  const rowsNone = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08' });
+  assert(!rowsNone.find(r => r.label === 'Repeats'), 'no recurrence -> no Repeats row: ' + JSON.stringify(rowsNone));
+});
+
 // TNV-3. _humanDate formats a YYYY-MM-DD into "Ddd, Mon D, YYYY" (pure, no wall clock).
 // Weekdays VERIFIED via `node -e "new Date('<d>T00:00:00Z').toUTCString()"`:
 //   2026-07-02 = Thu, 2026-07-03 = Fri, 2026-06-29 = Mon, 2026-07-10 = Fri,
