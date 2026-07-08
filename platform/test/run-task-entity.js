@@ -576,6 +576,45 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   assert(res.overdue.length === 1, 'overdue = the 06-28 Luxon task: got ' + res.overdue.length);
 });
 
+// ---------- buildBands sort order (Today/Overdue chronological ordering) ----------
+
+ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-overdue first)', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-05', title: 'C' },
+    { status: 'open', scheduled: '2026-07-01', title: 'A' },
+    { status: 'open', scheduled: '2026-07-03', title: 'B' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.overdue.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['A', 'B', 'C']),
+    'expected A,B,C (oldest first), got ' + JSON.stringify(order));
+});
+
+ok('TBB-SORT-2 buildBands sorts today ascending by due (earliest deadline first; undated last)', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-10', title: 'Later' },
+    { status: 'open', scheduled: '2026-07-08', due: '', title: 'NoDue' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Soonest' },
+    { status: 'open', scheduled: '2026-07-08', due: null, title: 'AlsoNoDue' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.today.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['Soonest', 'Later', 'AlsoNoDue', 'NoDue']),
+    'expected Soonest,Later,AlsoNoDue,NoDue (earliest due first, undated last, tie-broken by title), got ' + JSON.stringify(order));
+});
+
+ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
+  const tasks = [
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'beta' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.today.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['Alpha', 'beta', 'zeta']),
+    'expected case-insensitive alpha order, got ' + JSON.stringify(order));
+});
+
 // DT-4. THE UTC-SAFETY FIX — a Luxon-like DateTime that exposes BOTH
 // toISODate() (naive, LOCAL-zone) and toUTC() (returns a UTC-anchored
 // DateTime) must prefer the UTC path. A bare YAML date parses UTC

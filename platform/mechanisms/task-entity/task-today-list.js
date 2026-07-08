@@ -92,6 +92,26 @@ class TaskTodayList {
             else if (sched < todayStr) overdue.push(t);
             // sched > todayStr (future) → excluded from both bands.
         }
+        // Overdue: oldest/most-overdue scheduled date first — the task that's been
+        // sitting longest surfaces at the top. Tie-broken by title (case-insensitive).
+        overdue.sort((a, b) => {
+            const as = a.scheduled || '';
+            const bs = b.scheduled || '';
+            if (as !== bs) return as < bs ? -1 : 1;
+            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
+        });
+        // Today: earliest due deadline first; tasks with no due date sort LAST
+        // (empty string treated as "after" any real date). Tie-broken by title.
+        today.sort((a, b) => {
+            const ad = a.due || '';
+            const bd = b.due || '';
+            if (ad !== bd) {
+                if (ad === '') return 1;
+                if (bd === '') return -1;
+                return ad < bd ? -1 : 1;
+            }
+            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
+        });
         return { today: today, overdue: overdue };
     }
 
