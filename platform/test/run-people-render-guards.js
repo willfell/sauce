@@ -145,6 +145,84 @@ const variants = [
     { label: '.markdown-embed context', embed: true, current: undefined },
 ];
 
+// ---------------------------------------------------------------------------
+// PEOPLEGUARD-CHROME — PersonNavButtons presence-guards its back-link button
+// (only) against PeopleChromeBar: when the preview view already hosts a
+// `.people-chrome-root` (the ChromeBar-owned nav), render() still builds the
+// unconditional identity row (icon+name+chip) but SKIPS the now-redundant
+// "Back to People" AccentButton row. Absent ChromeBar (unhealed/cold-load
+// note), the back-button still renders as before. Mirrors the reader
+// blueprint's HC-READER-13a/13b idiom (run-reader.js).
+// ---------------------------------------------------------------------------
+function makeStubEl(overrides) {
+    const el = Object.assign({
+        style: {},
+        children: [],
+        closest() { return null; },
+        querySelector() { return null; },
+        querySelectorAll() { return []; },
+        createEl(_tag, _opts) { const child = makeStubEl(); this.children.push(child); return child; },
+        addEventListener() {},
+        remove() {},
+    }, overrides || {});
+    return el;
+}
+
+async function runPersonNavButtonsChromeGuardCases() {
+    const PersonNavButtonsClass = loadWidget(
+        'platform/blueprints/people/scripts/person-nav-buttons.js', 'PersonNavButtons');
+
+    // Case A: `.people-chrome-root` IS present under the preview view →
+    // identity row still renders, but the back-link AccentButton is skipped.
+    await guard('PEOPLEGUARD-CHROME PersonNavButtons — .people-chrome-root present skips back-button (identity row still renders)', async () => {
+        let accentButtonCalls = 0;
+        global.customJS.AccentButton = { render: () => { accentButtonCalls++; return makeStubEl(); } };
+        const previewView = makeStubEl({ querySelector: (sel) => (sel === '.people-chrome-root' ? makeStubEl() : null) });
+        const container = makeStubEl({
+            closest: (sel) => (sel === '.markdown-preview-view' ? previewView : null),
+            querySelector: () => null,
+        });
+        const dv = {
+            container,
+            current: () => ({ file: { name: 'Jane Doe' }, tags: [] }),
+            app: { workspace: { openLinkText() {} } },
+        };
+        const inst = new PersonNavButtonsClass();
+        await Promise.resolve(inst.render(dv, {}));
+        const rootChild = container.children.find((c) => true); // the pnb-root div
+        if (!rootChild) throw new Error('expected pnb-root to be created');
+        if (accentButtonCalls !== 0) throw new Error(`expected AccentButton.render NOT called, got ${accentButtonCalls} call(s)`);
+        // Identity row (first child of pnb-root) must still be created.
+        if (!rootChild.children || rootChild.children.length < 1) throw new Error('expected identity row to still render unconditionally');
+    });
+
+    // Case B: NO `.people-chrome-root` present (legacy/cold-load path) →
+    // both the identity row AND the back-link button render (regression guard).
+    await guard('PEOPLEGUARD-CHROME PersonNavButtons — .people-chrome-root absent renders back-button (no regression)', async () => {
+        let accentButtonCalls = 0;
+        global.customJS.AccentButton = { render: () => { accentButtonCalls++; return makeStubEl(); } };
+        const previewView = makeStubEl({ querySelector: () => null });
+        const container = makeStubEl({
+            closest: (sel) => (sel === '.markdown-preview-view' ? previewView : null),
+            querySelector: () => null,
+        });
+        const dv = {
+            container,
+            current: () => ({ file: { name: 'Jane Doe' }, tags: [] }),
+            app: { workspace: { openLinkText() {} } },
+        };
+        const inst = new PersonNavButtonsClass();
+        await Promise.resolve(inst.render(dv, {}));
+        const rootChild = container.children.find((c) => true);
+        if (!rootChild) throw new Error('expected pnb-root to be created');
+        if (accentButtonCalls !== 1) throw new Error(`expected AccentButton.render called once, got ${accentButtonCalls} call(s)`);
+        if (!rootChild.children || rootChild.children.length < 2) throw new Error('expected both identity row and back-button row to render');
+    });
+
+    // Restore the shared no-op stub used by the cold-load guard variants above.
+    global.customJS.AccentButton = { render: () => makeEl() };
+}
+
 (async () => {
     for (const w of widgets) {
         let WidgetClass;
@@ -157,6 +235,7 @@ const variants = [
             });
         }
     }
+    await runPersonNavButtonsChromeGuardCases();
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();

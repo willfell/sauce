@@ -207,9 +207,12 @@ function art(title, status, capturedAt, extra) {
 }
 
 // ---------------------------------------------------------------------------
-// HC-READER-10 — Structural: hub template + hub content each carry the 3 guarded
-// blocks and NO literal `---` outside frontmatter; article template carries the 4
-// guarded blocks + both markers and NO frontmatter; reader-clip.json parses with
+// HC-READER-10 — Structural: hub template + hub content each carry the
+// ReaderChromeBar + ReaderQueue guarded blocks (legacy Breadcrumb/SpaceNavButtons
+// blocks retired onto the shared ChromeBar) and NO literal `---` outside
+// frontmatter; article template carries the ReaderChromeBar + ReaderArticleView
+// guarded blocks (legacy Breadcrumb/SpaceNavButtons/ReaderArticleActions blocks
+// retired) + both markers and NO frontmatter; reader-clip.json parses with
 // path "spice/reader".
 // ---------------------------------------------------------------------------
 {
@@ -219,23 +222,25 @@ function art(title, status, capturedAt, extra) {
 
   const hubTpl  = fs.readFileSync(path.join(RDIR, 'templates', 'Reader.md'), 'utf8');
   const hubBody = stripFm(hubTpl);
-  ok('HC-READER-10a templates/Reader.md: 3 guarded blocks + no literal --- outside frontmatter',
-     hasBlock(hubTpl, 'Breadcrumb') && hasBlock(hubTpl, 'SpaceNavButtons') && hasBlock(hubTpl, 'ReaderQueue') &&
+  ok('HC-READER-10a templates/Reader.md: ReaderChromeBar + ReaderQueue guarded blocks, no legacy nav blocks, no literal --- outside frontmatter',
+     hasBlock(hubTpl, 'ReaderChromeBar') && hasBlock(hubTpl, 'ReaderQueue') &&
+     !hasBlock(hubTpl, 'Breadcrumb') && !hasBlock(hubTpl, 'SpaceNavButtons') &&
      !/^-{3,}\s*$/m.test(hubBody),
      'body---=' + /^-{3,}\s*$/m.test(hubBody));
 
   const hubContent = fs.readFileSync(path.join(RDIR, 'content', 'Reader Hub.md'), 'utf8');
   const hubContentBody = stripFm(hubContent);
-  ok('HC-READER-10b content/Reader Hub.md: 3 guarded blocks + no literal --- outside frontmatter',
-     hasBlock(hubContent, 'Breadcrumb') && hasBlock(hubContent, 'SpaceNavButtons') && hasBlock(hubContent, 'ReaderQueue') &&
+  ok('HC-READER-10b content/Reader Hub.md: ReaderChromeBar + ReaderQueue guarded blocks, no legacy nav blocks, no literal --- outside frontmatter',
+     hasBlock(hubContent, 'ReaderChromeBar') && hasBlock(hubContent, 'ReaderQueue') &&
+     !hasBlock(hubContent, 'Breadcrumb') && !hasBlock(hubContent, 'SpaceNavButtons') &&
      !/^-{3,}\s*$/m.test(hubContentBody),
      'body---=' + /^-{3,}\s*$/m.test(hubContentBody));
 
   const artTpl = fs.readFileSync(path.join(RDIR, 'templates', 'Reader Article.md'), 'utf8');
   const hasFm  = /^---\r?\n/.test(artTpl);
-  ok('HC-READER-10c templates/Reader Article.md: 4 guarded blocks + both markers + NO frontmatter',
-     hasBlock(artTpl, 'Breadcrumb') && hasBlock(artTpl, 'SpaceNavButtons') &&
-     hasBlock(artTpl, 'ReaderArticleActions') && hasBlock(artTpl, 'ReaderArticleView') &&
+  ok('HC-READER-10c templates/Reader Article.md: ReaderChromeBar + ReaderArticleView guarded blocks, no legacy nav/actions blocks, both markers, NO frontmatter',
+     hasBlock(artTpl, 'ReaderChromeBar') && hasBlock(artTpl, 'ReaderArticleView') &&
+     !hasBlock(artTpl, 'Breadcrumb') && !hasBlock(artTpl, 'SpaceNavButtons') && !hasBlock(artTpl, 'ReaderArticleActions') &&
      /READER_HIGHLIGHTS/.test(artTpl) && /READER_CONTENT/.test(artTpl) && !hasFm,
      'hasFm=' + hasFm);
 
@@ -301,6 +306,78 @@ function art(title, status, capturedAt, extra) {
   ok('HC-READER-12c article renders the "Open article ↗" access link (a target=_blank)',
      actSrc.includes('Open article ↗') && !actSrc.includes('Open source ↗') &&
      /createEl\('a'|createEl\("a"/.test(actSrc) && /target:\s*'_blank'|target="_blank"/.test(actSrc));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-13 — ReaderArticleActions.render() presence-guards against
+// ReaderChromeBar: when the preview view already hosts a `.reader-chrome-root`
+// (the new ChromeBar-owned status row), render() returns early and does NOT
+// build its own legacy `.reader-article-actions` row (would double the chrome).
+// Minimal DOM stub: a container whose `.closest('.markdown-preview-view')`
+// resolves to a stub exposing `.querySelector('.reader-chrome-root')` → truthy.
+// ---------------------------------------------------------------------------
+{
+  function makeStubEl(overrides) {
+    const el = Object.assign({
+      style: {},
+      children: [],
+      closest() { return null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      createEl(_tag, _opts) { const child = makeStubEl(); this.children.push(child); return child; },
+      addEventListener() {},
+      remove() {},
+    }, overrides || {});
+    return el;
+  }
+
+  // Case A: a `.reader-chrome-root` IS present under the preview view → guarded,
+  // no `.reader-article-actions` row created.
+  {
+    const previewView = makeStubEl({ querySelector: (sel) => (sel === '.reader-chrome-root' ? makeStubEl() : null) });
+    const container = makeStubEl({
+      closest: (sel) => (sel === '.markdown-preview-view' ? previewView : null),
+      querySelector: () => null, // no pre-existing .reader-article-actions to dedupe
+    });
+    const dv = {
+      container,
+      current: () => ({ file: { path: 'spice/reader/Foo.md' }, type: 'reader-article', status: 'unread', url: '' }),
+    };
+    let threw = false;
+    try { new ReaderArticleActions().render(dv); } catch (_e) { threw = true; }
+    const builtRow = container.children.some((c) => c._clsIsActionsRow);
+    ok('HC-READER-13a render() returns early when .reader-chrome-root is present (no legacy row, no throw)',
+       !threw && container.children.length === 0,
+       'threw=' + threw + ' childCount=' + container.children.length);
+  }
+
+  // Case B: NO `.reader-chrome-root` present (legacy/cold-load path) → render()
+  // proceeds and builds its row as before (regression guard for the guard itself).
+  // render() reaches `window.customJS.AccentButton` for its buttons — stub a
+  // minimal global.window for this case only, restoring it after.
+  {
+    const hadWindow = Object.prototype.hasOwnProperty.call(global, 'window');
+    const prevWindow = global.window;
+    global.window = { customJS: { AccentButton: { render: () => makeStubEl() } } };
+    try {
+      const previewView = makeStubEl({ querySelector: () => null });
+      const container = makeStubEl({
+        closest: (sel) => (sel === '.markdown-preview-view' ? previewView : null),
+        querySelector: () => null,
+      });
+      const dv = {
+        container,
+        current: () => ({ file: { path: 'spice/reader/Foo.md' }, type: 'reader-article', status: 'unread', url: '' }),
+      };
+      let threw = false;
+      try { new ReaderArticleActions().render(dv); } catch (_e) { threw = true; }
+      ok('HC-READER-13b render() still builds its row when .reader-chrome-root is absent (no regression)',
+         !threw && container.children.length > 0,
+         'threw=' + threw + ' childCount=' + container.children.length);
+    } finally {
+      if (hadWindow) global.window = prevWindow; else delete global.window;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
