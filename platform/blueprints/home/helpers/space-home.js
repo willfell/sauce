@@ -340,6 +340,43 @@ class SpaceHome {
       }
     } catch (_e) { /* never throw */ }
 
+    // Glance counts — computed EARLY (before any DOM work) so the no-op-if-
+    // unchanged check below can short-circuit the whole rebuild. Counts route
+    // through SpaceDailyDashboard.computeCounts (the DRY seam), guarded so a
+    // not-yet-registered dashboard/task-entity (cold load) yields zeros
+    // instead of throwing.
+    const cjs = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const SDD = cjs && cjs.SpaceDailyDashboard;
+    const TE = cjs && cjs.TaskEntity;
+    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
+    try {
+      if (SDD && typeof SDD.computeCounts === "function") {
+        counts = SDD.computeCounts(dv, today, TE) || counts;
+      }
+    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+
+    // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
+    // (the reported "reloading every time" feel) and is wasted work whenever
+    // NOTHING actually changed since the last render in THIS render() call —
+    // e.g. our own post-capture self.render() re-invocation firing while the
+    // glance counts happen to be identical. Skipping also PRESERVES any
+    // in-progress state a rebuild would otherwise wipe (an open "+" menu, a
+    // partially-typed "Jot a task…" draft). This does NOT (and cannot) cover
+    // Dataview's OWN periodic re-execution of the whole block, which clears
+    // dv.container itself before calling render() again — this guard only
+    // short-circuits redundant work WE would otherwise do within one still-
+    // live container.
+    const sig = today + "|" + JSON.stringify(counts);
+    try {
+      const w = (typeof window !== "undefined" && window) || null;
+      if (w && w.__sauceHomeLastSig === sig && dv.container.querySelector(".sauce-home")) {
+        return;
+      }
+      if (w) w.__sauceHomeLastSig = sig;
+    } catch (_e) { /* never throw — fall through to a normal rebuild */ }
+
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
     const prior = dv.container.querySelector(".sauce-home");
@@ -426,7 +463,17 @@ class SpaceHome {
       if (!inMenu && !inBtn) setMenu(false);
     };
     const onDocKey = (ev) => { if (menuOpen && ev && ev.key === "Escape") setMenu(false); };
-    addBtn.onclick = () => { setMenu(!menuOpen); };
+    addBtn.onclick = () => {
+      const opening = !menuOpen;
+      setMenu(opening);
+      // Focus the "Jot a task…" input the moment the menu springs open, so the
+      // user can start typing immediately — this is an explicit click gesture,
+      // not an autofocus-on-page-load (which would pop the mobile keyboard on
+      // every Home open; see the render()-time comment on `input` below).
+      if (opening && input && typeof input.focus === "function") {
+        try { input.focus(); } catch (_e) { /* never throw out of a click handler */ }
+      }
+    };
 
     // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
     // guarded; then close the menu + re-render so the Tasks panel + glance chip
@@ -477,22 +524,8 @@ class SpaceHome {
 
     // 2) Glance counts ───────────────────────────────────────────────────────
     // A rolled-up count line ("N today · M overdue · K meetings · J done").
-    // Counts route through SpaceDailyDashboard.computeCounts (the DRY seam),
-    // guarded exactly like _dispatch so a not-yet-registered dashboard/task-entity
-    // (cold load) yields zeros instead of throwing out of render. _glanceChips is
-    // the PURE descriptor; this block just paints it.
-    const cjs = (typeof customJS !== "undefined" && customJS)
-      || (typeof window !== "undefined" && window.customJS)
-      || null;
-    const SDD = cjs && cjs.SpaceDailyDashboard;
-    const TE = cjs && cjs.TaskEntity;
-    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
-    try {
-      if (SDD && typeof SDD.computeCounts === "function") {
-        counts = SDD.computeCounts(dv, today, TE) || counts;
-      }
-    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
-
+    // `counts` was already computed above (before the no-op-if-unchanged
+    // check); _glanceChips is the PURE descriptor, this block just paints it.
     // Glance count line — rendered ONLY when there's something to show. An empty
     // day shows NOTHING (no "Clear day" message, no empty element).
     const g = SpaceHome._glanceChips(counts);

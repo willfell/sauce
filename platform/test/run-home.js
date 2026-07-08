@@ -801,6 +801,87 @@ function descendants(el) {
       `free text should be appended after HOME_CHROME_END; got ${JSON.stringify(bare)}`);
   }
 
+  // ── HOME-NOOP: a re-render with an IDENTICAL glance-count signature skips
+  // the teardown/rebuild entirely (no-op) — preserving any in-progress state
+  // (an open menu, a partially-typed draft) a rebuild would otherwise wipe.
+  // A re-render with a DIFFERENT signature still rebuilds normally.
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    let countsReturn = { today: 1, overdue: 0, done: 0, meetings: 0 };
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => countsReturn } };
+    delete global.app;
+    delete global.window.app;
+
+    await home_.render(dv, {});
+    const first = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-1 first render paints .sauce-home", !!first);
+
+    // Simulate an in-progress draft: open the menu + type, WITHOUT submitting.
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const descendantsOf = (n) => descendants(n);
+    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    const menu = descendantsOf(first).find((n) => hasCls(n, "sauce-home-add-menu"));
+    const input = menu ? descendantsOf(menu).filter((n) => n.tag === "input")[0] : null;
+    if (input) input.value = "unsent draft";
+
+    // Same counts → render() again should be a complete no-op.
+    await home_.render(dv, {});
+    const second = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-2 identical-signature re-render reuses the SAME node (no rebuild)",
+      second === first, "expected the exact same .sauce-home DOM node after a no-op render");
+    assertTrue("HOME-NOOP-3 in-progress draft survives the no-op re-render",
+      input && input.value === "unsent draft", `expected draft preserved; got ${input && input.value}`);
+    const isOpenNoop = (n) => (n && (n.cls || "").split(/\s+/).indexOf("is-open") >= 0);
+    assertTrue("HOME-NOOP-4 the menu stays open across the no-op re-render",
+      isOpenNoop(menu), "the open menu state must survive a skipped render");
+
+    // Different counts → render() must rebuild for real.
+    countsReturn = { today: 2, overdue: 1, done: 0, meetings: 0 };
+    await home_.render(dv, {});
+    const third = dv.container.querySelector(".sauce-home");
+    assertTrue("HOME-NOOP-5 a changed signature still triggers a real rebuild",
+      third !== first, "expected a NEW .sauce-home node once the glance counts actually changed");
+
+    delete global.customJS;
+    delete global.window.customJS;
+    if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
+  // ── HOME-FOCUS: clicking "+" focuses the "Jot a task…" input so the user
+  // can start typing immediately (an explicit click gesture, not page-load
+  // autofocus).
+  {
+    installMoment("2026-07-02", 9);
+    const dv = makeDv();
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) } };
+    delete global.app;
+    delete global.window.app;
+
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = descendants(home);
+    const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
+    const input = menu ? descendants(menu).filter((n) => n.tag === "input")[0] : null;
+    let focused = false;
+    if (input) input.focus = () => { focused = true; };
+
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    assertTrue("HOME-FOCUS-1 opening the menu focuses the jot-a-task input", focused);
+
+    // Closing the menu again must NOT re-focus (only the OPEN transition does).
+    focused = false;
+    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+    assertTrue("HOME-FOCUS-2 closing the menu does not (re-)focus the input", !focused);
+
+    delete global.customJS;
+    delete global.window.customJS;
+    if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
   // ── HOME-CMD: HomeCommandsInit registers sauce-home:open, mirroring
   // ProjectCommandsInit's pattern (idempotent, cold-load-safe, delegates to the
   // same navigation the "Open today's daily" / Go-to launcher path uses).
@@ -896,6 +977,20 @@ function descendants(el) {
       const plan = _planHomeHotkeyRemap({});
       assertTrue("HOME-HOTKEY-7 no-ops on an empty hotkeys object", plan.act === false);
     }
+  }
+
+  // ── HOME-CSS: .sauce-home-greeting is a flex row with centered alignment,
+  // so the "‹ Yesterday" button lines up with the date text instead of
+  // sitting on the text baseline (the reported "vertically higher" bug).
+  {
+    const cssSrc = fs.readFileSync(
+      path.join(__dirname, "..", "blueprints", "home", "helpers", "sauce-home.css"), "utf8"
+    );
+    const ruleMatch = cssSrc.match(/\.sauce-home\s+\.sauce-home-greeting\s*\{([^}]*)\}/);
+    assertTrue("HOME-CSS-1 .sauce-home-greeting rule exists", !!ruleMatch);
+    const rule = ruleMatch ? ruleMatch[1] : "";
+    assertTrue("HOME-CSS-2 .sauce-home-greeting is a flex container", /display:\s*flex/.test(rule));
+    assertTrue("HOME-CSS-3 .sauce-home-greeting centers its children", /align-items:\s*center/.test(rule));
   }
 
   // ── Summary ────────────────────────────────────────────────────────────────
