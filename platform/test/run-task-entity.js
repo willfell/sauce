@@ -1048,6 +1048,65 @@ ok('TLA-CPN-1 ToDoLeafActions._cleanProjectName mirrors the meeting extractor', 
   assert(ToDoLeafActionsClass._slugify('Global K8s') === 'global-k8s', 'slugify Global K8s');
 });
 
+// ---------- TaskDialog._buildNoteLinkCandidates (note-link picker) ----------
+
+ok('NLC-1 sorts candidates by mtime descending, ties broken alphabetically', () => {
+  const files = [
+    { path: 'spice/wiki/Alpha.md', basename: 'Alpha', stat: { mtime: 100 } },
+    { path: 'spice/wiki/Beta.md', basename: 'Beta', stat: { mtime: 300 } },
+    { path: 'spice/wiki/Gamma.md', basename: 'Gamma', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(JSON.stringify(names) === JSON.stringify(['Beta', 'Gamma', 'Alpha']),
+    'expected Beta,Gamma,Alpha (mtime desc, tie alpha), got ' + JSON.stringify(names));
+});
+
+ok('NLC-2 excludes notes under spice/tasks/ and the file currently being edited', () => {
+  const files = [
+    { path: 'spice/tasks/Buy milk.md', basename: 'Buy milk', stat: { mtime: 500 } },
+    { path: 'spice/projects/connectors/Connectors.md', basename: 'Connectors', stat: { mtime: 400 } },
+    { path: 'spice/wiki/Notes.md', basename: 'Notes', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, 'spice/wiki/Notes.md');
+  assert(JSON.stringify(names) === JSON.stringify(['Connectors']),
+    'expected only Connectors (task excluded, editPath excluded), got ' + JSON.stringify(names));
+});
+
+ok('NLC-3 dedupes by basename', () => {
+  const files = [
+    { path: 'spice/wiki/A/Dup.md', basename: 'Dup', stat: { mtime: 200 } },
+    { path: 'spice/wiki/B/Dup.md', basename: 'Dup', stat: { mtime: 100 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.length === 1, 'expected exactly 1 deduped entry, got ' + names.length);
+});
+
+ok('NLC-4 note basename matching an inherited Object.prototype key is NOT silently dropped', () => {
+  const files = [
+    { path: 'spice/wiki/constructor.md', basename: 'constructor', stat: { mtime: 500 } },
+    { path: 'spice/wiki/hasOwnProperty.md', basename: 'hasOwnProperty', stat: { mtime: 400 } },
+    { path: 'spice/wiki/Normal.md', basename: 'Normal', stat: { mtime: 300 } },
+  ];
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.includes('constructor'), 'a note literally named "constructor" must still surface: ' + JSON.stringify(names));
+  assert(names.includes('hasOwnProperty'), 'a note literally named "hasOwnProperty" must still surface: ' + JSON.stringify(names));
+  assert(names.length === 3, 'expected all 3 candidates, got ' + names.length + ': ' + JSON.stringify(names));
+});
+
+ok('NLC-5 realistic vault snapshot (many files, missing stat) never returns empty', () => {
+  const files = [];
+  for (let i = 0; i < 50; i++) {
+    files.push({ path: `spice/wiki/Note ${i}.md`, basename: `Note ${i}`, stat: { mtime: i * 10 } });
+  }
+  files.push({ path: 'spice/wiki/NoStat.md', basename: 'NoStat' }); // missing .stat entirely
+  files.push({ path: 'spice/tasks/_done/Old task.md', basename: 'Old task', stat: { mtime: 999999 } });
+  const names = TaskDialogClass._buildNoteLinkCandidates(files, null);
+  assert(names.length === 51, 'expected 51 (50 notes + NoStat, task excluded), got ' + names.length);
+  assert(names[0] === 'Note 49', 'highest mtime first: ' + names[0]);
+  assert(names.includes('NoStat'), 'a file with no .stat still surfaces (mtime defaults to 0): ' + JSON.stringify(names));
+  assert(!names.includes('Old task'), 'spice/tasks/ files are excluded even under _done/: ' + JSON.stringify(names));
+});
+
 // ---------- HC-TQC: TaskDialog.createQuick — modal-less one-file create ----------
 //
 // createQuick is the Home command center's inline "Jot a task…" capture path: a
