@@ -429,6 +429,34 @@ ok('TD-recur-5 _recurrenceValidity: a missing/throwing isSupportedFn defaults to
   assert(throwingFn.valid === true, 'throwing isSupportedFn -> valid: ' + JSON.stringify(throwingFn));
 });
 
+// TD-recur-6/7 exercise _rollForwardDate, which delegates through
+// TaskDialog._taskEntity() (reads window.customJS.TaskEntity). Stub/restore
+// global.window scoped to just these two tests (narrower than a module-wide
+// stub) so no other test in this file gains an unexpected window.customJS.
+ok('TD-recur-6 _rollForwardDate: recurring task rolls from TODAY, not from stale scheduled', () => {
+  const prevWindow = global.window;
+  global.window = { customJS: { TaskEntity: TaskEntity } };
+  try {
+    // "every day" done late (scheduled 5th, actually completed on the 8th) rolls to the 9th.
+    const matchesFn = (dateStr) => true; // "every day" always matches.
+    const next = TaskDialog._rollForwardDate('every day', '2026-07-08', '2026-07-01', matchesFn);
+    assert(next === '2026-07-09', 'rolls from today (8th) not from scheduled (5th): ' + next);
+  } finally {
+    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  }
+});
+
+ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching grammar', () => {
+  const prevWindow = global.window;
+  global.window = { customJS: { TaskEntity: TaskEntity } };
+  try {
+    const next = TaskDialog._rollForwardDate('every leap year', '2026-07-08', '2026-07-01', () => false);
+    assert(next === null, 'unsupported grammar -> null (caller falls back to archiving): ' + next);
+  } finally {
+    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  }
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only

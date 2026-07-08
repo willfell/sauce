@@ -55,6 +55,7 @@ class TaskDialog {
     _chromeBody() { return TaskDialog._chromeBody(); }
     _payloadFromState(state) { return TaskDialog._payloadFromState(state); }
     _recurrenceValidity(recurrence, isSupportedFn) { return TaskDialog._recurrenceValidity(recurrence, isSupportedFn); }
+    _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
 
     // ---------- Static pure helpers ----------
 
@@ -141,6 +142,21 @@ class TaskDialog {
         let supported;
         try { supported = !!isSupportedFn(s); } catch (_e) { return { valid: true }; }
         return supported ? { valid: true } : { valid: false, reason: 'unsupported recurrence grammar' };
+    }
+
+    /**
+     * Thin wrapper over TaskEntity.nextOccurrence for the "done" branch:
+     * rolls forward from TODAY (not from the task's stale `scheduled`), so a
+     * late completion doesn't create a backlog of overdue occurrences. Returns
+     * the next `YYYY-MM-DD`, or `null` when the grammar is unsupported/never
+     * fires (caller falls back to normal archiving). Pure, never throws.
+     */
+    static _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) {
+        const TE = TaskDialog._taskEntity();
+        if (TE && typeof TE.nextOccurrence === 'function') {
+            return TE.nextOccurrence(recurrence, todayStr, anchorDateStr, matchesFn);
+        }
+        return null;
     }
 
     /**
@@ -1154,12 +1170,53 @@ class TaskDialog {
      */
     async _markDone(app, file) {
         if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return; }
+        // Read the CURRENT frontmatter (not the state object — markDone(path)
+        // is also called directly from a row checkbox, with no open dialog) to
+        // decide recurring vs. one-shot completion.
+        let fm = null;
+        try {
+            const cache = app.metadataCache && typeof app.metadataCache.getFileCache === 'function'
+                ? app.metadataCache.getFileCache(file) : null;
+            fm = (cache && cache.frontmatter) || null;
+        } catch (_e) { fm = null; }
+        const recurrence = fm ? String(fm.recurrence || '').trim() : '';
+
+        if (recurrence) {
+            const todayStr = (typeof window !== 'undefined' && window.moment)
+                ? window.moment().format('YYYY-MM-DD')
+                : null;
+            const anchorStr = fm && fm.created_at ? String(fm.created_at).slice(0, 10) : null;
+            const RP = (typeof window !== 'undefined' && window.customJS && window.customJS.RecurrenceParser) || null;
+            const matchesFn = (RP && typeof RP.matches === 'function' && typeof window !== 'undefined' && window.moment)
+                ? (dateStr, anchorDateStr) => {
+                    const dateMoment = window.moment(dateStr, 'YYYY-MM-DD');
+                    const anchorMoment = anchorDateStr ? window.moment(anchorDateStr, 'YYYY-MM-DD') : null;
+                    try { return RP.matches(recurrence, dateMoment, { registryCreatedAt: anchorMoment }); }
+                    catch (_e) { return false; }
+                }
+                : null;
+            const nextDate = todayStr ? TaskDialog._rollForwardDate(recurrence, todayStr, anchorStr, matchesFn) : null;
+            if (nextDate) {
+                // ROLL FORWARD — same file, never archived. Leaves status/priority/
+                // project/links untouched; only scheduled advances and completed_at
+                // clears (so the note never carries a stale "last time" stamp).
+                await app.fileManager.processFrontMatter(file, (fmw) => {
+                    fmw.scheduled = nextDate;
+                    fmw.completed_at = '';
+                });
+                try { new Notice('Task rolled to ' + nextDate); } catch (_e) {}
+                return;
+            }
+            // Grammar unsupported / never fires within the horizon — fall through
+            // to normal one-shot archiving rather than silently doing nothing.
+        }
+
         const iso = (typeof window !== 'undefined' && window.moment)
             ? window.moment().format('YYYY-MM-DDTHH:mm:ssZ')
             : new Date().toISOString();
-        await app.fileManager.processFrontMatter(file, (fm) => {
-            fm.status = 'done';
-            fm.completed_at = iso;
+        await app.fileManager.processFrontMatter(file, (fm2) => {
+            fm2.status = 'done';
+            fm2.completed_at = iso;
         });
         await this._ensureFolder(app, 'spice/tasks/_done');
         await app.fileManager.renameFile(file, TaskDialog.donePath(file.path));
