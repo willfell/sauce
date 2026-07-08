@@ -1263,6 +1263,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // v0.119.1 — merges duplicate "Recurring Today" blocks. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
   await stripPersistedRecurringSection(tp, mech, variables, history, git); // NEW v0.120.0 — retires materialized "Recurring Today" / "Recurring" SectionLabel blocks + recurring_from task lines + sentinels from dailies, since ToDoDailyRecurring.render() now live-queries the registry instead of writing to today's file. Idempotent. .sauce-backup snapshot before write.
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
+  await applyRecurringTasksMigrationHeal(tp, mech, variables, history, git);   // NEW recurring-tasks cycle — migrates legacy Recurring Tasks.md registry entries (checked + unchecked) into real rolling spice/tasks/*.md notes; ungated (idempotent via per-title exists-check), never touches/deletes the original registry
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
@@ -9472,6 +9473,240 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
     summary: { created, skipped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
+}
+
+// applyRecurringTasksMigrationHeal — recurring-tasks note-per-task migration.
+//
+// Migrates every parseable entry in the legacy spice/to-do/Recurring
+// Tasks.md registry into a real spice/tasks/*.md rolling recurring task
+// note. Reads BOTH `- [ ] ...` (unchecked) AND `- [x] ...` (checked) lines —
+// checking a registry line off was the OLD (broken) way a user tried to mark
+// a day done under the pre-migration UI, not an intentional deactivation, so
+// both forms migrate. UNGATED (runs every install) but fully idempotent: an
+// entry with a task note ALREADY present at the same title is skipped, so
+// repeat runs are a no-op. NEVER writes to or deletes the original registry
+// file — it stays in place, untouched, as a passive backup. Never throws;
+// every outcome is a failure-loud history entry.
+async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "to-do") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const registryPath = "spice/to-do/Recurring Tasks.md";
+  const registryExists = await adapter.exists(registryPath).catch(() => false);
+  if (!registryExists) {
+    history?.push({ event: "info", step: "recurring_tasks_migration_heal", name: "to-do",
+      migrated: 0, skipped: 0, errors: [],
+      reason: "no Recurring Tasks.md registry present",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  let registryContent;
+  try { registryContent = await adapter.read(registryPath); }
+  catch (e) {
+    history?.push({ event: "error", step: "recurring_tasks_migration_heal", name: "to-do",
+      reason: "could not read registry: " + (e && e.message),
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const entries = _parseRecurringRegistry(registryContent);
+  if (!entries.length) {
+    history?.push({ event: "info", step: "recurring_tasks_migration_heal", name: "to-do",
+      migrated: 0, skipped: 0, errors: [],
+      reason: "registry has no parseable recurring entries",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const tasksRoot = "spice/tasks";
+  try { if (!(await adapter.exists(tasksRoot))) await adapter.mkdir(tasksRoot); } catch (_e) { /* tolerate */ }
+
+  const nowIso = new Date().toISOString();
+  const errors = [];
+  let migrated = 0;
+  let skipped = 0;
+
+  for (const entry of entries) {
+    if (entry.invalid) { skipped++; continue; }
+    const filename = _sanitizeRecurringTitle(entry.title) + ".md";
+    const path = tasksRoot + "/" + filename;
+    let alreadyExists = false;
+    try { alreadyExists = await adapter.exists(path); } catch (_e) { alreadyExists = false; }
+    if (alreadyExists) { skipped++; continue; }
+
+    const scheduled = _nextOccurrenceForHeal(entry.recurrence);
+    const project = entry.project ? "[[" + entry.project + "]]" : "";
+    const lines = [
+      "---",
+      "type: task",
+      "title: " + entry.title,
+      "status: open",
+      "scheduled: " + (scheduled || ""),
+      "due:",
+      "recurrence: " + entry.recurrence,
+      "priority: " + (entry.priority || ""),
+      "project: " + project,
+      "project_slug: " + (entry.projectSlug || ""),
+      "source: migrated-from-registry",
+      "source_note:",
+      "links: []",
+      "created_at: " + nowIso,
+      "completed_at:",
+      "---",
+      "",
+      "```dataviewjs",
+      'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+      "```",
+      "",
+      "---",
+      "",
+      "```dataviewjs",
+      'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });',
+      "```",
+      "",
+      "---",
+      "",
+      "<!-- TASK_NOTES -->",
+      "",
+    ];
+    try {
+      await adapter.write(path, lines.join("\n"));
+      migrated++;
+    } catch (e) {
+      errors.push({ title: entry.title, error: e && e.message });
+    }
+  }
+
+  history?.push({ event: "info", step: "recurring_tasks_migration_heal", name: "to-do",
+    migrated, skipped, errors,
+    reason: migrated + " recurring task note(s) created from the legacy registry; " + skipped + " skipped (already migrated or unsupported grammar); registry left untouched at " + registryPath,
+    git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+    completed_at: new Date().toISOString() });
+}
+
+// _parseRecurringRegistry — adapted from ToDoDailyRecurring.parseRegistryLine's
+// grammar, EXTENDED to also match checked (`- [x] ...`) lines. Section-scoped
+// the same way (`## Recurring Tasks` H2 OR the SectionLabel block form).
+// Returns [{ title, recurrence, project, projectSlug, priority, invalid }].
+// Pure; never throws.
+function _parseRecurringRegistry(content) {
+  const lines = String(content == null ? "" : content).split("\n");
+  let inSection = false;
+  const entries = [];
+  for (const line of lines) {
+    if (/^## Recurring Tasks/.test(line) ||
+      (/SectionLabel/.test(line) && /text:\s*["']Recurring Tasks["']/.test(line))) {
+      inSection = true; continue;
+    }
+    if (inSection && (/^## /.test(line) ||
+      (/SectionLabel/.test(line) && /text:\s*["']Last 7 days/.test(line)))) {
+      inSection = false; continue;
+    }
+    if (!inSection) continue;
+    // Match BOTH "- [ ] " and "- [x] " (case-insensitive on the x).
+    const m = /^- \[([ xX])\] (.+)$/.exec(line);
+    if (!m) continue;
+    const rest = m[2];
+    const fields = {};
+    const fieldRe = /\[(\w+)::\s*([^\]]+(?:\]\][^\]]*)*)\]/g;
+    let mm;
+    while ((mm = fieldRe.exec(rest)) !== null) {
+      let val = mm[2].trim();
+      const wl = /^\[\[([^\]]+)\]\]$/.exec(val);
+      if (wl) val = wl[1];
+      fields[mm[1]] = val;
+    }
+    const title = rest.replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, "").trim();
+    if (!title) continue;
+    const recurrence = fields.recurrence || null;
+    if (!recurrence) { entries.push({ title, invalid: true }); continue; }
+    entries.push({
+      title,
+      recurrence,
+      project: fields.project || null,
+      projectSlug: fields.project ? _slugifyForHeal(fields.project) : null,
+      priority: fields.priority || null,
+      invalid: false,
+    });
+  }
+  return entries;
+}
+
+function _slugifyForHeal(name) {
+  return String(name == null ? "" : name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// Human-readable filename base for a migrated task, same illegal-char strip as
+// TaskEntity._sanitizeTitle (kept as a self-contained copy here since
+// install.js runs in the Templater/Node context, not the browser customJS
+// scope — no cross-import). Collisions are handled by the caller's
+// `adapter.exists` pre-check (an existing note at that path is treated as
+// "already migrated" and skipped, matching the idempotency contract).
+function _sanitizeRecurringTitle(title) {
+  const s = String(title == null ? "" : title)
+    .replace(/[/\\:*?"<>|#^[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .trim();
+  return s === "" ? "Task" : s;
+}
+
+// _nextOccurrenceForHeal — a SELF-CONTAINED (no window/customJS dependency)
+// reimplementation of the 4 supported RecurrenceParser grammar families,
+// walking forward from TODAY (never returning today itself) so a freshly
+// migrated task never lands already-overdue. Unsupported grammar -> null
+// (the task note still gets created with `recurrence` set and an EMPTY
+// `scheduled`, so it's visible on the new Recurring.md index for the user to
+// fix by hand, rather than silently dropped). Mirrors
+// ToDoDailyRecurring._fallbackRecurrenceMatch's grammar exactly.
+function _nextOccurrenceForHeal(recurrence) {
+  const g = String(recurrence == null ? "" : recurrence).trim().toLowerCase();
+  if (!g.startsWith("every ")) return null;
+  const tail = g.slice(6).trim();
+  const dayMap = {
+    sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2,
+    wednesday: 3, wed: 3, thursday: 4, thu: 4, thur: 4, thurs: 4,
+    friday: 5, fri: 5, saturday: 6, sat: 6,
+  };
+  const toDaySet = (text) => {
+    const tokens = text.split(/[\s,]+/).filter(Boolean);
+    if (!tokens.length) return null;
+    const out = new Set();
+    for (const t of tokens) {
+      if (!Object.prototype.hasOwnProperty.call(dayMap, t)) return null;
+      out.add(dayMap[t]);
+    }
+    return out;
+  };
+  const matches = (dow, dom) => {
+    if (tail === "day") return true;
+    if (tail === "weekday" || tail === "weekdays") return dow >= 1 && dow <= 5;
+    if (tail === "weekend" || tail === "weekends") return dow === 0 || dow === 6;
+    const m1 = tail.match(/^(\d{1,2})(?:st|nd|rd|th)? of (?:the )?month$/);
+    if (m1) return dom === +m1[1];
+    // "every N weeks on X" needs an anchor we don't have at migration time —
+    // unsupported for the heal (falls through to the plain weekday-set check
+    // below, which is WRONG for this family, so explicitly bail instead).
+    if (/^\d+\s+weeks?\s+on\s+/.test(tail)) return false;
+    const days = toDaySet(tail);
+    return days ? days.has(dow) : false;
+  };
+  const startMs = Date.now();
+  const DAY_MS = 86400000;
+  for (let i = 1; i <= 400; i++) {
+    const d = new Date(startMs + i * DAY_MS);
+    if (matches(d.getUTCDay(), d.getUTCDate())) {
+      const p = (n) => String(n).padStart(2, "0");
+      return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
+    }
+  }
+  return null;
 }
 
 // _linksHubBody — pure. Returns the Links Hub note BODY (below the frontmatter),

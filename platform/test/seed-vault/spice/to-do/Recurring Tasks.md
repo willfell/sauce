@@ -21,6 +21,9 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 
 <!-- Each line is a template. Sauce parses these on daily-note creation; matching ones get freshly copied into today's daily. Do not check these off — check the copy in your daily note. -->
 
+- [ ] Water the plants [recurrence:: every day]
+- [x] Take out trash [recurrence:: every Monday]
+
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });
 ```
