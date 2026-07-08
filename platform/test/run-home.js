@@ -160,6 +160,7 @@ function assertEq(name, actual, expected) {
   results.push([name, ok]);
   if (!ok) console.log(`      ↳ expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
+function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // Recursively collect descendants (depth-first, pre-order) of an el.
 function descendants(el) {
@@ -726,6 +727,62 @@ function descendants(el) {
 
       delete global.app;
       delete global.window.app;
+    }
+  }
+
+  // ── HOME-HOTKEY: _planHomeHotkeyRemap — pure decision logic backing
+  // applyHomeHotkeyRemapHeal. Given the parsed hotkeys.json object, decide
+  // whether/how to move the Mod+[ binding from daily-notes to sauce-home:open.
+  {
+    const installSrc = fs.readFileSync(path.join(__dirname, '..', 'install.js'), 'utf8');
+    const fnMatch = installSrc.match(/function _planHomeHotkeyRemap\([\s\S]*?\n}\n/);
+    assertTrue("HOME-HOTKEY-0 _planHomeHotkeyRemap is defined in install.js", !!fnMatch,
+      "expected a pure _planHomeHotkeyRemap(existing) function in platform/install.js");
+    const _planHomeHotkeyRemap = new Function(fnMatch[0] + "; return _planHomeHotkeyRemap;")();
+
+    // Case A: daily-notes bound to exactly Mod+[, sauce-home:open unbound → act.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod"], key: "[" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-1 acts when daily-notes owns Mod+[ and sauce-home:open is unbound", plan.act === true);
+      assertTrue("HOME-HOTKEY-2 result clears daily-notes' Mod+[ entry",
+        !plan.next["daily-notes"] || plan.next["daily-notes"].length === 0,
+        `got ${JSON.stringify(plan.next["daily-notes"])}`);
+      assertTrue("HOME-HOTKEY-3 result binds sauce-home:open to Mod+[",
+        Array.isArray(plan.next["sauce-home:open"]) && plan.next["sauce-home:open"].length === 1
+          && plan.next["sauce-home:open"][0].key === "[" && deepEq(plan.next["sauce-home:open"][0].modifiers, ["Mod"]),
+        `got ${JSON.stringify(plan.next["sauce-home:open"])}`);
+    }
+
+    // Case B: daily-notes has OTHER bindings too (user customized) — only the
+    // Mod+[ entry is removed, any other binding for daily-notes survives.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod"], key: "[" }, { modifiers: ["Mod", "Shift"], key: "d" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-4 preserves a daily-notes binding that isn't Mod+[",
+        Array.isArray(plan.next["daily-notes"]) && plan.next["daily-notes"].length === 1
+          && plan.next["daily-notes"][0].key === "d");
+    }
+
+    // Case C: already remapped (sauce-home:open already bound) → no-op.
+    {
+      const existing = { "sauce-home:open": [{ modifiers: ["Mod"], key: "[" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-5 no-ops when sauce-home:open is already bound", plan.act === false);
+    }
+
+    // Case D: daily-notes never had Mod+[ (e.g. user rebound it elsewhere) → no-op.
+    {
+      const existing = { "daily-notes": [{ modifiers: ["Mod", "Shift"], key: "d" }] };
+      const plan = _planHomeHotkeyRemap(existing);
+      assertTrue("HOME-HOTKEY-6 no-ops when daily-notes doesn't own Mod+[", plan.act === false);
+    }
+
+    // Case E: fresh/empty hotkeys.json → no-op (nothing to remap; the manifest
+    // hotkeys[] seed path handles brand-new installs instead).
+    {
+      const plan = _planHomeHotkeyRemap({});
+      assertTrue("HOME-HOTKEY-7 no-ops on an empty hotkeys object", plan.act === false);
     }
   }
 

@@ -1269,6 +1269,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
+  await applyHomeHotkeyRemapHeal(tp, history, git); // NEW — retargets Cmd+[ from daily-notes to sauce-home:open on already-installed vaults
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -11791,6 +11792,96 @@ async function applyHomeScaffoldHeal(tp, history, git) {
   }
 }
 
+// _planHomeHotkeyRemap — PURE decision logic for applyHomeHotkeyRemapHeal.
+// Given the parsed .obsidian/hotkeys.json object, decide whether the
+// daily-notes -> Mod+[ binding (seeded by an OLDER daily blueprint manifest)
+// should move to sauce-home:open. Only acts when daily-notes owns EXACTLY a
+// Mod+[ entry and sauce-home:open has no binding yet; any OTHER daily-notes
+// binding is preserved untouched. Never mutates its input.
+function _planHomeHotkeyRemap(existing) {
+  const src = (existing && typeof existing === "object" && !Array.isArray(existing)) ? existing : {};
+  const isModBracket = (b) => b && Array.isArray(b.modifiers) && b.modifiers.length === 1
+    && b.modifiers[0] === "Mod" && b.key === "[";
+
+  const homeAlreadyBound = Array.isArray(src["sauce-home:open"]) && src["sauce-home:open"].length > 0;
+  const dailyBindings = Array.isArray(src["daily-notes"]) ? src["daily-notes"] : [];
+  const dailyOwnsModBracket = dailyBindings.some(isModBracket);
+
+  if (homeAlreadyBound || !dailyOwnsModBracket) {
+    return { act: false, next: src };
+  }
+
+  const next = Object.assign({}, src);
+  next["daily-notes"] = dailyBindings.filter((b) => !isModBracket(b));
+  next["sauce-home:open"] = [{ modifiers: ["Mod"], key: "[" }];
+  return { act: true, next };
+}
+
+// applyHomeHotkeyRemapHeal — IO wrapper around _planHomeHotkeyRemap. Mirrors
+// applyHotkeys's read/parse-guard/backup-then-write posture for
+// .obsidian/hotkeys.json. Never throws; no-ops on any read/parse failure or
+// when the plan says nothing to do. NEW (home fixes cycle).
+async function applyHomeHotkeyRemapHeal(tp, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/hotkeys.json";
+  if (!(await adapter.exists(target))) return;
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: cannot read ${target} (${e.message}); skipping`, 8000);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: ${target} malformed JSON (${e.message}); skipping`, 8000);
+    return;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return;
+
+  const plan = _planHomeHotkeyRemap(parsed);
+  if (!plan.act) return;
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: backup write failed (${e.message}); aborting`, 8000);
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(plan.next, null, 2));
+    if (history) {
+      history.push({
+        event: "info",
+        step: "home_hotkey_remap",
+        message: "moved Mod+[ from daily-notes to sauce-home:open",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    new Notice(`applyHomeHotkeyRemapHeal: write failed (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "home_hotkey_remap",
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
 // applyReaderScaffoldHeal — ungated scaffold + chrome heal for the singleton
 // spice/reader/Reader.md reading-queue hub note. Runs every install (NOT
 // version-gated, per the migration-lifecycle rule, because it materializes +
@@ -20046,6 +20137,12 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // is also extracted by regex in the harness; expose it explicitly too.
     module.exports.applyHomeScaffoldHeal = applyHomeScaffoldHeal;
     module.exports._healHomeChromeBody = _healHomeChromeBody;
+    // home-hotkey-remap heal — retargets Cmd+[ from daily-notes to
+    // sauce-home:open on already-installed vaults (for run-home.js HOME-HOTKEY-*).
+    // The pure decision function is also extracted by regex in the harness;
+    // expose it explicitly too.
+    module.exports.applyHomeHotkeyRemapHeal = applyHomeHotkeyRemapHeal;
+    module.exports._planHomeHotkeyRemap = _planHomeHotkeyRemap;
     // reader-scaffold heal — materialize + chrome-heal the singleton
     // spice/reader/Reader.md reading-queue hub. The pure body transform is also
     // extractable by regex in a harness; expose it explicitly too.
