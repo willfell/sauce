@@ -146,6 +146,24 @@ ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
   assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
+ok('TE-recur-1 composeNote emits recurrence (set + empty)', () => {
+  const withRecur = TaskEntity.composeNote({ title: 'Feed the dogs', recurrence: 'every day', moment: fixedMoment });
+  assert(withRecur.frontmatter.recurrence === 'every day', 'recurrence set: ' + withRecur.frontmatter.recurrence);
+  const bare = TaskEntity.composeNote({ title: 'One-shot', moment: fixedMoment });
+  assert(bare.frontmatter.recurrence === '', 'recurrence empty-string-not-omitted: ' + JSON.stringify(bare.frontmatter.recurrence));
+  // Schema position: recurrence sits right after due, before priority.
+  const keys = Object.keys(withRecur.frontmatter);
+  assert(keys.indexOf('due') === keys.indexOf('recurrence') - 1, 'recurrence follows due: ' + keys.join(','));
+  assert(keys.indexOf('recurrence') === keys.indexOf('priority') - 1, 'recurrence precedes priority: ' + keys.join(','));
+});
+
+ok('TE-recur-2 parseNote normalizes recurrence like priority (empty string, not null)', () => {
+  const withRecur = TaskEntity.parseNote({ title: 'Feed the dogs', recurrence: 'every day', file: { path: 'spice/tasks/Feed the dogs.md' } });
+  assert(withRecur.recurrence === 'every day', 'recurrence read back: ' + withRecur.recurrence);
+  const bare = TaskEntity.parseNote({ title: 'One-shot', file: { path: 'spice/tasks/One-shot.md' } });
+  assert(bare.recurrence === '', 'absent recurrence -> empty string: ' + JSON.stringify(bare.recurrence));
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
   const parsed = TaskEntity.parseNote({ status: undefined, scheduled: '', title: 't', file: { path: 'spice/tasks/a.md' } });

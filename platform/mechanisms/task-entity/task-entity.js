@@ -292,7 +292,7 @@ class TaskEntity {
      * bare; the caller appends any typed user notes BELOW the marker.
      *
      * payload = {
-     *   title, status?, scheduled?, due?, priority?,
+     *   title, status?, scheduled?, due?, recurrence?, priority?,
      *   project?: { name, slug }, source?, source_note?,
      *   now?, moment?,   // now: ISO string; moment: moment-like for filename+created_at
      * }
@@ -319,6 +319,7 @@ class TaskEntity {
             status: p.status || 'open',
             scheduled: p.scheduled || '',
             due: p.due || '',
+            recurrence: p.recurrence || '',
             priority: p.priority || '',
             project: project,
             project_slug: projectSlug,
@@ -349,6 +350,7 @@ class TaskEntity {
             status: p.status || 'open',
             scheduled: TaskEntity._toDateStr(p.scheduled),
             due: TaskEntity._toDateStr(p.due),
+            recurrence: p.recurrence || '',
             priority: p.priority || '',
             project: p.project != null ? p.project : null,
             project_slug: p.project_slug != null ? p.project_slug : null,
