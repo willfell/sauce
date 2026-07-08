@@ -572,6 +572,55 @@ function descendants(el) {
     global.window.customJS = undefined;
   }
 
+  // ── HOME-READY: first render defers to workspace.onLayoutReady (cold-start
+  // flash/reflow mitigation); later renders in the same session run immediately.
+  {
+    installMoment("2026-07-05", 9);
+    const dv = makeDv();
+    let readyCb = null;
+    let layoutReady = false;
+    global.app = {
+      workspace: {
+        onLayoutReady: (cb) => { readyCb = cb; if (layoutReady) cb(); },
+        on: () => ({}),
+        getActiveFile: () => null,
+      },
+      commands: { executeCommandById: () => {} },
+    };
+    global.window.app = global.app;
+    delete global.window.__sauceHomeLayoutReady;
+
+    let resolved = false;
+    const p = home_.render(dv, {});
+    p.then(() => { resolved = true; });
+    await Promise.resolve();
+    assertTrue("HOME-READY-1 render awaits onLayoutReady before painting on a cold session",
+      !resolved && dv.container.querySelector(".sauce-home") === null,
+      "before layout is ready, render() must not have appended .sauce-home yet");
+
+    layoutReady = true;
+    if (typeof readyCb === "function") readyCb();
+    await p;
+    assertTrue("HOME-READY-2 render paints once layout is ready",
+      dv.container.querySelector(".sauce-home") !== null, "expected .sauce-home after onLayoutReady fires");
+
+    // A SECOND render call in the same app session (layout already marked ready)
+    // must NOT wait again — it should paint synchronously.
+    const dv2 = makeDv();
+    let resolved2 = false;
+    const p2 = home_.render(dv2, {});
+    p2.then(() => { resolved2 = true; });
+    await Promise.resolve();
+    assertTrue("HOME-READY-3 subsequent renders in the same session do not re-wait",
+      resolved2 || dv2.container.querySelector(".sauce-home") !== null,
+      "a second render() in the same session must not block on onLayoutReady again");
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.__sauceHomeLayoutReady;
+  }
+
   // ── HOME-HEAL: pure _healHomeChromeBody(body) string transform ─────────────
   // Load the pure helper the same way run-wiki.js loads _healWikiChromeBody:
   // slice its source out of install.js and eval it as a standalone function

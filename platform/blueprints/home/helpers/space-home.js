@@ -229,6 +229,26 @@ class SpaceHome {
     // input/Add handlers await createQuick then call self.render to refresh).
     const self = this;
 
+    // Cold-start reflow guard: on the FIRST render of any app session, wait for
+    // Obsidian's workspace layout (panes/sidebars) to finish restoring before
+    // painting. Firing during layout restore is what produces the visible
+    // "flash then widen" on a cold app open — deferring the first paint avoids
+    // racing that restore. Deduped via a window flag so this never delays a
+    // SECOND render in the same session (e.g. day-rollover force-refresh).
+    try {
+      const w = (typeof window !== "undefined" && window) || null;
+      const A = (typeof app !== "undefined" && app) || (w && w.app) || null;
+      if (w && !w.__sauceHomeLayoutReady) {
+        if (A && A.workspace && typeof A.workspace.onLayoutReady === "function") {
+          await new Promise((resolve) => {
+            A.workspace.onLayoutReady(() => { w.__sauceHomeLayoutReady = true; resolve(); });
+          });
+        } else {
+          w.__sauceHomeLayoutReady = true;
+        }
+      }
+    } catch (_e) { /* never throw — fall through to an immediate render */ }
+
     // The ONLY live-clock reads. moment is a runtime global (window.moment).
     const M = (typeof moment !== "undefined" && moment)
       || (typeof window !== "undefined" && window.moment)
