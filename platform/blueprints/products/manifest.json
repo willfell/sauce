@@ -25,12 +25,17 @@
     {
       "name": "backlink-panel",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
     "ProductsHubCards",
     "ProductPageCards",
-    "ProductActionButtons"
+    "ProductActionButtons",
+    "ProductsChromeBar"
   ],
   "files": [
     {
@@ -40,6 +45,10 @@
     {
       "source": "scripts/product-page-cards.js",
       "dest": "{{scripts_path}}/products/product-page-cards.js"
+    },
+    {
+      "source": "scripts/products-chrome-bar.js",
+      "dest": "{{scripts_path}}/products/products-chrome-bar.js"
     },
     {
       "source": "scripts/product-action-buttons.js",

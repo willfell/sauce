@@ -6032,6 +6032,12 @@ function _healNoteChromeBody(body, type) {
     "to-do": "ToDoChromeBar", "to-do-hub": "ToDoChromeBar", "project-todo": "ToDoChromeBar", "to-do-recurring": "ToDoChromeBar",
     "meeting": "MeetingChromeBar",
     "scratch-hub": "ScratchChromeBar", "scratch-day": "ScratchChromeBar", "scratch": "ScratchChromeBar",
+    "trips-hub": "TripsChromeBar", "trip": "TripsChromeBar", "trip-section": "TripsChromeBar", "trip-board-card": "TripsChromeBar",
+    "reader-hub": "ReaderChromeBar", "reader-article": "ReaderChromeBar",
+    "people-hub": "PeopleChromeBar", "person": "PeopleChromeBar",
+    "products-hub": "ProductsChromeBar", "product": "ProductsChromeBar",
+    "teams-hub": "TeamsChromeBar", "team": "TeamsChromeBar",
+    "journal": "JournalChromeBar",
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
@@ -6219,8 +6225,15 @@ function _healChromeBarMigration(body, type, barClass) {
   if (body.includes(barClass)) return body;
   // No legacy chrome to strip — nothing to do (e.g. notes that never had nav).
   const hasLegacyNav = /SpaceNavButtons|Breadcrumb/.test(body);
-  const hasLegacyAction = /ToDoHubActions|ToDoLeafActions|MeetingLeafActions|ScratchHubActions|ScratchDayActions|ScratchLeafActions/.test(body);
-  if (!hasLegacyNav && !hasLegacyAction) return body;
+  const hasLegacyAction = /ToDoHubActions|ToDoLeafActions|MeetingLeafActions|ScratchHubActions|ScratchDayActions|ScratchLeafActions|TripNavButtons|ReaderArticleActions|ProductActionButtons|TeamActionButtons/.test(body);
+  // person notes carry ONLY PersonNavButtons (kept, not stripped — see LEGACY_CLASSES
+  // below) with no Breadcrumb/SpaceNavButtons/action block at all, so the generic
+  // hasLegacyNav/hasLegacyAction checks never fire for them. Without this allowance
+  // the function would bail here and existing person notes would never gain
+  // PeopleChromeBar. This is the ONLY type where ChromeBar is inserted alongside
+  // (not in place of) existing chrome.
+  const hasPersonNav = type === 'person' && /PersonNavButtons/.test(body);
+  if (!hasLegacyNav && !hasLegacyAction && !hasPersonNav) return body;
 
   let out = body;
 
@@ -6230,6 +6243,7 @@ function _healChromeBarMigration(body, type, barClass) {
     'ToDoHubActions', 'ToDoLeafActions',
     'MeetingLeafActions',
     'ScratchHubActions', 'ScratchDayActions', 'ScratchLeafActions',
+    'TripNavButtons', 'ReaderArticleActions', 'ProductActionButtons', 'TeamActionButtons',
   ];
   for (const cls of LEGACY_CLASSES) {
     // Match the full ```dataviewjs ... ``` fence containing the class name.
@@ -6384,19 +6398,15 @@ function _healHomeChromeBody(body) {
   return chrome + userTail;
 }
 
-// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Three
-// customjs-guard blocks (Breadcrumb → SpaceNavButtons → ReaderQueue). Kept in
-// lockstep with blueprints/reader/content/Reader Hub.md ({{views_path}} resolves
-// to ranch/views, so the paths are byte-identical after render). The hub template
+// _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Two
+// customjs-guard blocks (ReaderChromeBar → ReaderQueue). Kept in lockstep with
+// blueprints/reader/content/Reader Hub.md ({{views_path}} resolves to
+// ranch/views, so the paths are byte-identical after render). The hub template
 // has no content marker by default; any user free-write below a READER_CONTENT
 // marker is preserved by _healReaderChromeBody.
 const _READER_CHROME = [
   '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-  '```',
-  '',
-  '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+  'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
   '```',
   '',
   '```dataviewjs',
@@ -6417,11 +6427,7 @@ function _healReaderChromeBody(raw) {
   const marker = "[//]: # (READER_CONTENT)";
   const chrome = [
     '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });',
-    '```',
-    '',
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+    'await dv.view("ranch/views/customjs-guard", { class: "ReaderChromeBar" });',
     '```',
     '',
     '```dataviewjs',
@@ -6447,7 +6453,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6467,7 +6473,8 @@ async function applyNoteChromeHeal(tp, history, git) {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES].includes(type)) continue;
+        const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES].includes(type)) continue;
         const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).

@@ -22,9 +22,5 @@ if (newFilePath.includes("/board/")) {
 -%>
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "TripsChromeBar" });
 ```
