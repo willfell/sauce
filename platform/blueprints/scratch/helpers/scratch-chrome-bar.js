@@ -1,0 +1,161 @@
+class ScratchChromeBar {
+  get ICON() {
+    return {
+      pencilPlus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/><line x1="20" y1="2" x2="20" y2="8"/><line x1="23" y1="5" x2="17" y2="5"/></svg>`,
+      today: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/></svg>`,
+      home: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+      back: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
+    };
+  }
+
+  render(dv) {
+    try {
+      if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
+        || typeof customJS.ChromeBar.render !== "function") return;
+      return customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+    } catch (_e) { /* never throw */ }
+  }
+
+  _config() {
+    const ICON = this.ICON;
+    const ROOT = "spice/scratch";
+    return {
+      detect: (dv, page) => {
+        const t = page && page.type;
+        if (t === "scratch-hub") return { context: "scratch-hub", path: (page.file && page.file.path) || "" };
+        if (t === "scratch-day") return { context: "scratch-day", path: (page.file && page.file.path) || "", day: page.day };
+        if (t === "scratch") return { context: "scratch", path: (page.file && page.file.path) || "", day: page.day };
+        return null;
+      },
+      surfaceSpec: (ctx) => {
+        if (ctx.context === "scratch-hub") {
+          return { primary: { id: "today", label: "Today", icon: ICON.today }, overflow: [], leaf: false };
+        }
+        if (ctx.context === "scratch-day") {
+          return {
+            primary: { id: "new-scratch", label: "+ New Scratch", icon: ICON.pencilPlus },
+            overflow: [{ id: "hub", label: "Hub", icon: ICON.home }],
+            leaf: false,
+          };
+        }
+        if (ctx.context === "scratch") {
+          return {
+            primary: null,
+            overflow: [
+              { id: "back-day", label: "Back to Day", icon: ICON.back },
+              { id: "hub", label: "Hub", icon: ICON.home },
+            ],
+            leaf: true,
+          };
+        }
+        return { primary: null, overflow: [], leaf: false };
+      },
+      dispatch: (dv, ctx, id) => {
+        if (id === "today") {
+          this._openToday(dv);
+          return;
+        }
+        if (id === "new-scratch") {
+          if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
+            customJS.EntityCreate.create({ instance: "scratch", dv });
+          } else if (typeof Notice === "function") { new Notice("ScratchChromeBar: EntityCreate unavailable.", 8000); }
+          return;
+        }
+        if (id === "hub") {
+          try { app.workspace.openLinkText("spice/scratch/Scratch.md", ""); } catch (_e) {}
+          return;
+        }
+        if (id === "back-day") {
+          const day = this._resolveDay(dv, ctx);
+          if (!day) return;
+          const mo = window.moment(day, "YYYY-MM-DD", true);
+          if (!mo.isValid()) return;
+          const folder = mo.format("YYYY/MM-MMMM");
+          const dayHubPath = `spice/scratch/${folder}/${day}/Scratch-Day-${day}.md`;
+          try { app.workspace.openLinkText(dayHubPath, ""); } catch (_e) {}
+          return;
+        }
+      },
+      destinations: (dv, ctx) => {
+        const out = [{ section: "This scratch" }];
+        const open = (p) => { try { customJS.ChromeBar.openNavTarget(p, dv); } catch (_e) {} };
+        let curPath = ctx && ctx.path;
+        if (!curPath) { try { const c = dv && dv.current ? dv.current() : null; curPath = (c && c.file && c.file.path) || ""; } catch (_e) { curPath = ""; } }
+        const hubPath = "spice/scratch/Scratch.md";
+        if (curPath !== hubPath) {
+          out.push({ label: "Scratch Hub", icon: ICON.home, _navTarget: hubPath, onSelect: () => open(hubPath) });
+        }
+        if (ctx.context !== "scratch-hub") {
+          const day = this._resolveDay(dv, ctx);
+          if (day) {
+            const mo = window.moment(day, "YYYY-MM-DD", true);
+            if (mo.isValid()) {
+              const folder = mo.format("YYYY/MM-MMMM");
+              const dayHubPath = `spice/scratch/${folder}/${day}/Scratch-Day-${day}.md`;
+              if (curPath !== dayHubPath) {
+                out.push({ label: "Day Hub", icon: ICON.today, _navTarget: dayHubPath, onSelect: () => open(dayHubPath) });
+              }
+            }
+          }
+        }
+        return out;
+      },
+      rootClass: "scratch-chrome-root",
+      btnClass: (v) => `scratch-chrome-btn scratch-chrome-btn-${v}`,
+    };
+  }
+
+  _resolveDay(dv, ctx) {
+    if (ctx && ctx.day) {
+      const d = this._coerceDay(ctx.day);
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    }
+    try {
+      const page = customJS.RenderSafe.page(dv);
+      const d = this._coerceDay(page && page.day);
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    } catch (_e) {}
+    return null;
+  }
+
+  _coerceDay(raw) {
+    if (typeof raw === "string") return raw.slice(0, 10);
+    if (raw && typeof raw.toISODate === "function") return raw.toISODate();
+    if (raw instanceof Date && !isNaN(raw)) {
+      const y = raw.getFullYear();
+      const m = String(raw.getMonth() + 1).padStart(2, "0");
+      const d = String(raw.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    return null;
+  }
+
+  async _openToday(dv) {
+    const day = window.moment().format("YYYY-MM-DD");
+    const mo = window.moment(day, "YYYY-MM-DD", true);
+    const monthFolder = mo.format("YYYY/MM-MMMM");
+    const folder = `spice/scratch/${monthFolder}/${day}`;
+    const dayHubPath = `${folder}/Scratch-Day-${day}.md`;
+    const existing = app.vault.getAbstractFileByPath(dayHubPath);
+    if (existing) { app.workspace.openLinkText(dayHubPath, ""); return; }
+    const tpPlugin = app.plugins.plugins["templater-obsidian"];
+    if (!tpPlugin || !tpPlugin.templater) {
+      if (typeof Notice === "function") new Notice("ScratchChromeBar: Templater plugin not enabled.", 8000);
+      return;
+    }
+    const templateFile = app.vault.getAbstractFileByPath("ranch/templates/Scratch Day Hub.md");
+    if (!templateFile) {
+      if (typeof Notice === "function") new Notice("ScratchChromeBar: template not found.", 8000);
+      return;
+    }
+    if (!app.vault.getAbstractFileByPath(folder)) {
+      try { await app.vault.createFolder(folder); }
+      catch (e) { if (!/already exists|exists/i.test((e && e.message) || "")) { if (typeof Notice === "function") new Notice("ScratchChromeBar: cannot create folder — " + (e.message || e), 8000); return; } }
+    }
+    try { await tpPlugin.templater.create_new_note_from_template(templateFile, folder, `Scratch-Day-${day}`, true); }
+    catch (e) {
+      if (/already exists|exists/i.test((e && e.message) || "")) { app.workspace.openLinkText(dayHubPath, ""); return; }
+      if (typeof Notice === "function") new Notice("ScratchChromeBar: Templater create failed — " + (e.message || e), 8000);
+    }
+  }
+}

@@ -6022,6 +6022,18 @@ function _healNoteChromeBody(body, type) {
   if (type === 'to-do')       out = _stripDividersAroundActionBlock(out, 'ToDoLeafActions');
   if (type === 'meeting')     out = _stripDividersAroundActionBlock(out, 'MeetingLeafActions');
   if (type === 'scratch-day') out = _stripDividersAroundActionBlock(out, 'ScratchDayActions');
+  // Step 8 (chrome-bar cycle 2) — migrate to-do / meeting / scratch notes from
+  // legacy stacked chrome (Breadcrumb + SpaceNavButtons + action-helper blocks)
+  // to the single <Bp>ChromeBar block. Mirrors _healWikiChromeBody's approach:
+  // strip known legacy blocks, insert the ChromeBar block after frontmatter.
+  // Idempotent: notes already carrying the ChromeBar block are returned unchanged.
+  const CHROME_BAR_MAP = {
+    "to-do": "ToDoChromeBar", "to-do-hub": "ToDoChromeBar", "project-todo": "ToDoChromeBar", "to-do-recurring": "ToDoChromeBar",
+    "meeting": "MeetingChromeBar",
+    "scratch-hub": "ScratchChromeBar", "scratch-day": "ScratchChromeBar", "scratch": "ScratchChromeBar",
+  };
+  const barClass = CHROME_BAR_MAP[type];
+  if (barClass) out = _healChromeBarMigration(out, type, barClass);
   return out;
 }
 
@@ -6192,6 +6204,73 @@ function _dropDividersBeforeSectionLabels(body) {
 // Posture mirrors the established heals: per-note try/catch, fails-loud (history
 // warning) but never throws, full git fields on every push, .sauce-backup
 // snapshot before any write. Reuses _listAllMarkdownRecursive.
+// _healChromeBarMigration — pure, idempotent body transform for cycle-2
+// chrome-bar adoption (to-do / meetings / scratch). Strips every LEGACY
+// chrome block (Breadcrumb / SpaceNavButtons / ProjectNavButtons / the
+// standalone action-helper blocks: ToDoHubActions, ToDoLeafActions,
+// MeetingLeafActions, ScratchHubActions, ScratchDayActions, ScratchLeafActions /
+// chrome "---" dividers around those blocks) and inserts one <Bp>ChromeBar
+// block right after the frontmatter. A note already carrying the target
+// ChromeBar class is returned unchanged (idempotent).
+function _healChromeBarMigration(body, type, barClass) {
+  if (!body || typeof body !== 'string') return body;
+  // Already migrated — idempotent guard.
+  if (body.includes(barClass)) return body;
+  // No legacy chrome to strip — nothing to do (e.g. notes that never had nav).
+  const hasLegacyNav = /SpaceNavButtons|Breadcrumb/.test(body);
+  const hasLegacyAction = /ToDoHubActions|ToDoLeafActions|MeetingLeafActions|ScratchHubActions|ScratchDayActions|ScratchLeafActions/.test(body);
+  if (!hasLegacyNav && !hasLegacyAction) return body;
+
+  let out = body;
+
+  // Strip known legacy dataviewjs blocks (class name inside the block).
+  const LEGACY_CLASSES = [
+    'Breadcrumb', 'SpaceNavButtons', 'ProjectNavButtons',
+    'ToDoHubActions', 'ToDoLeafActions',
+    'MeetingLeafActions',
+    'ScratchHubActions', 'ScratchDayActions', 'ScratchLeafActions',
+  ];
+  for (const cls of LEGACY_CLASSES) {
+    // Match the full ```dataviewjs ... ``` fence containing the class name.
+    const re = new RegExp('```dataviewjs\\s*\\n[^`]*?["\']' + cls + '["\'][^`]*?\\n```\\s*\\n?', 'g');
+    out = out.replace(re, '');
+  }
+
+  // Strip orphaned chrome "---" dividers: a line that is just `---` (not
+  // frontmatter) surrounded by blank lines (left by removing the nav/action blocks).
+  // Preserve the frontmatter fence (first and second `---` in the file).
+  // Strategy: split on frontmatter, then strip standalone `---` lines from the body.
+  const fmEnd = out.indexOf('---', out.indexOf('---') + 3);
+  if (fmEnd >= 0) {
+    const fm = out.slice(0, fmEnd + 3);
+    let rest = out.slice(fmEnd + 3);
+    // Collapse runs of \n---\n (standalone divider, not preceded by non-blank).
+    rest = rest.replace(/\n---\s*\n(\s*\n)*/g, '\n');
+    out = fm + rest;
+  }
+
+  // Collapse triple+ blank lines → double.
+  out = out.replace(/\n{3,}/g, '\n\n');
+
+  // Insert the ChromeBar block right after the frontmatter close.
+  const insertIdx = out.indexOf('---', out.indexOf('---') + 3);
+  if (insertIdx >= 0) {
+    const before = out.slice(0, insertIdx + 3);
+    const after = out.slice(insertIdx + 3);
+    // Skip any heading line (e.g. "# Scratch") right after frontmatter.
+    const headingMatch = after.match(/^\s*\n(# [^\n]+\n)/);
+    if (headingMatch) {
+      const heading = headingMatch[0];
+      const rest = after.slice(heading.length);
+      out = before + heading + '\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + barClass + '" });\n```\n' + rest;
+    } else {
+      out = before + '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + barClass + '" });\n```\n' + after;
+    }
+  }
+
+  return out;
+}
+
 // _healWikiChromeBody — pure, idempotent body transform for wiki notes
 // (chrome-bar adoption). Migrates a note's chrome to the single WikiChromeBar
 // bar: strips every LEGACY chrome block (Breadcrumb / SpaceNavButtons / the
@@ -6367,7 +6446,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6387,7 +6466,7 @@ async function applyNoteChromeHeal(tp, history, git) {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
-        if (!["meeting", "scratch", "scratch-day", "to-do", "person", ...WIKI_TYPES].includes(type)) continue;
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES].includes(type)) continue;
         const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
@@ -19907,6 +19986,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // (run-project-chrome-heal-guard.js).
     module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
+    module.exports._healChromeBarMigration = _healChromeBarMigration;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;

@@ -12,6 +12,7 @@
 class ScratchHubActions {
     async render(dv) {
         if (dv.container.closest(".markdown-embed")) return;
+        try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".scratch-chrome-root")) return; } catch (_e) {}
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
