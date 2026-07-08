@@ -11,15 +11,7 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "TripsChromeBar" });
 ```
 
 ```dataviewjs
