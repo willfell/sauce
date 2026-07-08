@@ -6398,6 +6398,37 @@ function _healHomeChromeBody(body) {
   return chrome + userTail;
 }
 
+// _healHomeFrontmatterEditorWidth — pure, idempotent frontmatter transform for
+// spice/home/Home.md. Stamps `editor-width: 100` when absent.
+//
+// WHY: the third-party community plugin "editor-width-slider" listens to
+// Obsidian's "file-open" event and unconditionally overwrites the
+// --file-line-width CSS custom property with `!important` — which beats our
+// own cssclasses:[wide] rule (not !important) regardless of source order. If
+// a note has NO `editor-width` frontmatter field, the plugin falls back to
+// its own slider-percentage default, which differs from whatever width was
+// showing a moment ago (the previously active note's own width, or nothing
+// yet) — producing a visible width jump on every single Home open. The
+// plugin explicitly supports a per-note override via `editor-width` in
+// frontmatter (0-100); stamping Home's own note with a fixed value makes its
+// rendered width deterministic on every open, independent of plugin state
+// left over from whatever note was active before. `100` maps to the
+// plugin's own formula (`calc(100px + 100vw)`) which is effectively
+// unconstrained, matching the intent of cssclasses:[wide].
+//
+// Never touches a note that already declares editor-width (respects an
+// explicit user override); never touches anything if there's no frontmatter
+// block at all; never throws.
+function _healHomeFrontmatterEditorWidth(body) {
+  const raw = typeof body === "string" ? body : "";
+  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!fmMatch) return raw;
+  const fmBlock = fmMatch[1];
+  if (/^editor-width\s*:/m.test(fmBlock)) return raw;
+  const healedFm = "---\n" + fmBlock + "\neditor-width: 100\n---\n";
+  return raw.slice(0, fmMatch.index) + healedFm + raw.slice(fmMatch.index + fmMatch[0].length);
+}
+
 // _READER_CHROME — canonical body chrome for spice/reader/Reader.md. Two
 // customjs-guard blocks (ReaderChromeBar → ReaderQueue). Kept in lockstep with
 // blueprints/reader/content/Reader Hub.md ({{views_path}} resolves to
@@ -11774,7 +11805,11 @@ async function applyHomeScaffoldHeal(tp, history, git) {
 
     if (!(await adapter.exists(HOME_PATH))) {
       // Brand-new file — no backup needed. Frontmatter mirrors the template.
-      const fm = "---\ntype: home\ncssclasses:\n  - wide\n---\n\n";
+      // editor-width: 100 works around the third-party "editor-width-slider"
+      // community plugin overriding --file-line-width on every file-open
+      // when a note has no explicit width — see
+      // _healHomeFrontmatterEditorWidth's docstring for the full story.
+      const fm = "---\ntype: home\ncssclasses:\n  - wide\neditor-width: 100\n---\n\n";
       await adapter.write(HOME_PATH, fm + _HOME_CHROME + "\n");
       history?.push({ event: "info", step: "home_scaffold_heal", name: "Home.md", action: "created",
         reason: `scaffolded ${HOME_PATH}`,
@@ -11783,7 +11818,7 @@ async function applyHomeScaffoldHeal(tp, history, git) {
     }
 
     const before = await adapter.read(HOME_PATH);
-    const after = _healHomeChromeBody(before);
+    const after = _healHomeFrontmatterEditorWidth(_healHomeChromeBody(before));
     if (after === before) return; // healthy note — no-op
     const backupPath = `.sauce-backup/home/Home.md.${ts}`;
     try { await adapter.mkdir(".sauce-backup/home"); } catch (_e) { /* already exists */ }

@@ -801,6 +801,67 @@ function descendants(el) {
       `free text should be appended after HOME_CHROME_END; got ${JSON.stringify(bare)}`);
   }
 
+  // ── HOME-FMW: pure _healHomeFrontmatterEditorWidth(body) — stamps
+  // editor-width: 100 into Home.md's frontmatter so the third-party
+  // "editor-width-slider" community plugin (which force-overrides Obsidian's
+  // --file-line-width CSS var with !important on every file-open, beating our
+  // own cssclasses:[wide]) has a STABLE, deterministic value for Home instead
+  // of falling back to its own slider default — eliminating the width jump on
+  // every Home open. Never touches a note that already sets its own
+  // editor-width (respects a user's explicit per-note override).
+  {
+    const INSTALL_FILE = path.join(WORKSHOP, "platform", "install.js");
+    const installSrc = fs.readFileSync(INSTALL_FILE, "utf8");
+    const m = installSrc.match(/function _healHomeFrontmatterEditorWidth\(body\) \{[\s\S]*?\n\}\n/);
+    assertTrue("HOME-FMW-0 _healHomeFrontmatterEditorWidth is defined as a pure function in install.js", !!m,
+      "expected `function _healHomeFrontmatterEditorWidth(body) { … }` in install.js");
+    const healFM = m ? new Function(m[0] + "\nreturn _healHomeFrontmatterEditorWidth;")() : (b) => b;
+
+    // (a) frontmatter without editor-width → stamps editor-width: 100.
+    const noWidth = "---\ntype: home\ncssclasses:\n  - wide\n---\n\nbody content\n";
+    const stamped = healFM(noWidth);
+    assertTrue("HOME-FMW-1 stamps editor-width: 100 into frontmatter lacking it",
+      /^editor-width:\s*100\s*$/m.test(stamped), `got: ${JSON.stringify(stamped)}`);
+    assertTrue("HOME-FMW-2 preserves the rest of the frontmatter + body",
+      stamped.includes("type: home") && stamped.includes("- wide") && stamped.includes("body content"),
+      `got: ${JSON.stringify(stamped)}`);
+
+    // (b) idempotent — healing an already-stamped note is a fixed point.
+    const stampedTwice = healFM(stamped);
+    assertTrue("HOME-FMW-3 idempotent (heal(heal(x)) === heal(x))", stampedTwice === stamped,
+      `not idempotent:\n--- once ---\n${stamped}\n--- twice ---\n${stampedTwice}`);
+
+    // (c) a note with its OWN editor-width is left completely untouched.
+    const userSet = "---\ntype: home\ncssclasses:\n  - wide\neditor-width: 60\n---\n\nbody\n";
+    assertTrue("HOME-FMW-4 never overwrites a user-set editor-width", healFM(userSet) === userSet,
+      `got: ${JSON.stringify(healFM(userSet))}`);
+
+    // (d) no frontmatter block at all → returns unchanged, never throws.
+    const noFm = "just a bare note, no frontmatter\n";
+    let threw = false;
+    let noFmResult = noFm;
+    try { noFmResult = healFM(noFm); } catch (_e) { threw = true; }
+    assertTrue("HOME-FMW-5 no frontmatter block → never throws, returns unchanged", !threw && noFmResult === noFm,
+      `got: ${JSON.stringify(noFmResult)}`);
+
+    // (e) empty/undefined input → never throws.
+    for (const input of ["", undefined, null]) {
+      let threw2 = false;
+      try { healFM(input); } catch (_e) { threw2 = true; }
+      assertTrue(`HOME-FMW-6 (${JSON.stringify(input)}) never throws`, !threw2);
+    }
+
+    // (f) wiring: applyHomeScaffoldHeal actually composes the frontmatter
+    // heal with the chrome heal for EXISTING notes, and the fresh-scaffold
+    // string for brand-NEW notes already carries editor-width: 100.
+    assertTrue("HOME-FMW-7 applyHomeScaffoldHeal composes _healHomeFrontmatterEditorWidth with the chrome heal",
+      /_healHomeFrontmatterEditorWidth\(_healHomeChromeBody\(before\)\)/.test(installSrc),
+      "expected applyHomeScaffoldHeal to run the frontmatter heal on top of the chrome heal for existing notes");
+    assertTrue("HOME-FMW-8 the fresh-scaffold frontmatter string includes editor-width: 100",
+      /type: home\\ncssclasses:\\n {2}- wide\\neditor-width: 100\\n---/.test(installSrc),
+      "expected the brand-new-Home.md scaffold string to seed editor-width: 100 alongside cssclasses:[wide]");
+  }
+
   // ── HOME-NOOP: a re-render with an IDENTICAL glance-count signature skips
   // the teardown/rebuild entirely (no-op) — preserving any in-progress state
   // (an open menu, a partially-typed draft) a rebuild would otherwise wipe.
