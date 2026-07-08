@@ -2872,3 +2872,13 @@ Three quick user-reported follow-ups on the v0.201.4 home cycle: (1) the "‹ Ye
 **Tests:** `run-home.js` 137/137 (`HOME-NOOP-1..5`, `HOME-FOCUS-1..2`, `HOME-CSS-1..3` new). `release:preflight` + `release:preflight-bumped` both green.
 
 **Deploy:** brew (0.201.4 → 0.202.0), `sauce update --bump-pins` on all 3 consumer vaults, drift:none, all 3 fixes verified present in materialized files. PR #359 (fixes) → PR #360 (pipeline unblock) → release PR #361 (v0.202.0) → tag → tap PR #350 — all auto-merged.
+
+## home width-flicker root-cause fix CLOSED 2026-07-08 (v0.202.1 — pipeline-assigned)
+
+Root-caused the flash/widening on Home load that v0.201.4/v0.202.0's onLayoutReady deferral and no-op-re-render skip had only mitigated. The user pasted the actual browser stack trace pointing at a third-party community plugin, `editor-width-slider`: it listens to Obsidian's `file-open` event and unconditionally overwrites `--file-line-width` with `!important` on every open (beating our own `cssclasses:[wide]` rule regardless of source order), falling back to its own slider-percentage default when a note has no `editor-width` frontmatter field — Home's case. Stamped `editor-width: 100` into Home.md's frontmatter (the plugin's own documented per-note override), making Home's rendered width deterministic on every open. New `spice/home/Home.md` scaffold seeds it directly; a new pure `_healHomeFrontmatterEditorWidth`, composed into the existing `applyHomeScaffoldHeal`, migrated already-installed vaults (backup-first, idempotent, never overwrites a user's own `editor-width`).
+
+**Lesson:** this took 3 attempts (v0.201.4's onLayoutReady guess, v0.202.0's no-op-skip guess, this fix) because there was no live Obsidian session to interactively reproduce the bug against — the first two were defensible static-analysis mitigations, not confirmed fixes. Once the user shared the actual stack trace, reading the offending plugin's bundled source (9KB, fully readable) took minutes to find the real cause. When a "flash"/"reload" bug resists a first fix, ask for the browser console/stack trace before guessing again.
+
+**Tests:** `run-home.js` 148/148 (`HOME-FMW-0..8` new). `release:preflight` green.
+
+**Deploy:** brew (already at 0.203.0, cumulative), `sauce update --bump-pins` on all 3 consumer vaults, drift:none, `editor-width: 100` verified present in all 3 vaults' `spice/home/Home.md`. PR #365 → release PR #366 (v0.202.1) → tag → tap PR #351 — all auto-merged.
