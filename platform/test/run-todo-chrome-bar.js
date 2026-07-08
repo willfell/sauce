@@ -16,10 +16,12 @@ const cfg = inst._config();
   const hub = cfg.detect({}, { file: { path: 'spice/to-do/All-ToDos.md' }, type: 'to-do-hub' });
   const ptodo = cfg.detect({}, { file: { path: 'spice/projects/conn/Connectors To-Do.md' }, type: 'project-todo' });
   const rec = cfg.detect({}, { file: { path: 'spice/to-do/Recurring Tasks.md' }, type: 'to-do-recurring' });
+  const recList = cfg.detect({}, { file: { path: 'spice/to-do/Recurring.md' }, type: 'to-do-recurring-list' });
   const off = cfg.detect({}, { file: { path: 'spice/wiki/Wiki.md' }, type: 'wiki-hub' });
   ok('TDCB-DETECT-1 to-do/hub/project-todo/recurring classify; non-todo → null',
     todo && todo.context === 'to-do' && hub && hub.context === 'to-do-hub'
     && ptodo && ptodo.context === 'project-todo' && rec && rec.context === 'to-do-recurring'
+    && recList && recList.context === 'to-do-recurring-list'
     && off === null);
 }
 
@@ -29,6 +31,7 @@ const cfg = inst._config();
   const hub = cfg.surfaceSpec({ context: 'to-do-hub' });
   const ptodo = cfg.surfaceSpec({ context: 'project-todo' });
   const rec = cfg.surfaceSpec({ context: 'to-do-recurring' });
+  const recListSpec = cfg.surfaceSpec({ context: 'to-do-recurring-list' });
   ok('TDCB-SPEC-1 daily: primary new-task + 3 overflow (recurring/all-todos/completed-tasks) + leaf',
     daily.primary && daily.primary.id === 'new-task' && daily.overflow.length === 3 && daily.leaf === true
     && daily.overflow.some(e => e.id === 'completed-tasks'));
@@ -39,6 +42,9 @@ const cfg = inst._config();
   ok('TDCB-SPEC-4 recurring: no primary + 2 overflow (all-todos/completed-tasks) + leaf',
     rec.primary === null && rec.overflow.length === 2 && rec.overflow.some(e => e.id === 'all-todos')
     && rec.overflow.some(e => e.id === 'completed-tasks') && rec.leaf === true);
+  ok('TDCB-SPEC-5 recurring-list: no primary + 2 overflow (all-todos/completed-tasks) + leaf',
+    recListSpec.primary === null && recListSpec.overflow.length === 2 && recListSpec.overflow.some(e => e.id === 'all-todos')
+    && recListSpec.overflow.some(e => e.id === 'completed-tasks') && recListSpec.leaf === true);
 }
 
 // TDCB-DISPATCH — routes to correct handlers.
@@ -58,7 +64,7 @@ const cfg = inst._config();
 
   ok('TDCB-DISPATCH-1 new-task → TaskDialog.open with surface "daily" + a today date (matches TaskEntity.defaultsForSurface\'s contract, NOT "today"/"scheduled" which silently fall through to source:manual with no scheduled date)',
     calls.some(c => c.taskDialog && c.taskDialog.surface === 'daily' && c.taskDialog.today === '2026-07-06'));
-  ok('TDCB-DISPATCH-2 recurring → openLinkText(Recurring Tasks)', calls.some(c => c.openLink === 'spice/to-do/Recurring Tasks.md'));
+  ok('TDCB-DISPATCH-2 recurring → openLinkText(Recurring.md, the new index)', calls.some(c => c.openLink === 'spice/to-do/Recurring.md'));
   ok('TDCB-DISPATCH-3 all-todos → openLinkText(All-ToDos)', calls.some(c => c.openLink === 'spice/to-do/All-ToDos.md'));
   ok('TDCB-DISPATCH-4 completed-tasks → openLinkText(Completed Tasks)', calls.some(c => c.openLink === 'spice/to-do/Completed Tasks.md'));
 

@@ -26,6 +26,7 @@ class ToDoChromeBar {
         if (t === "to-do-hub") return { context: "to-do-hub", path: (page.file && page.file.path) || "" };
         if (t === "project-todo") return { context: "project-todo", path: (page.file && page.file.path) || "" };
         if (t === "to-do-recurring") return { context: "to-do-recurring", path: (page.file && page.file.path) || "" };
+        if (t === "to-do-recurring-list") return { context: "to-do-recurring-list", path: (page.file && page.file.path) || "" };
         return null;
       },
       surfaceSpec: (ctx) => {
@@ -55,6 +56,16 @@ class ToDoChromeBar {
           };
         }
         if (ctx.context === "to-do-recurring") {
+          return {
+            primary: null,
+            overflow: [
+              { id: "all-todos", label: "All To-Dos", icon: ICON.list },
+              { id: "completed-tasks", label: "Completed", icon: ICON.list },
+            ],
+            leaf: true,
+          };
+        }
+        if (ctx.context === "to-do-recurring-list") {
           return {
             primary: null,
             overflow: [
@@ -99,8 +110,8 @@ class ToDoChromeBar {
           return;
         }
         if (id === "recurring") {
-          try { app.workspace.openLinkText("spice/to-do/Recurring Tasks.md", ""); }
-          catch (e) { if (typeof Notice === "function") new Notice("Could not open Recurring Tasks: " + (e.message || e), 6000); }
+          try { app.workspace.openLinkText("spice/to-do/Recurring.md", ""); }
+          catch (e) { if (typeof Notice === "function") new Notice("Could not open Recurring: " + (e.message || e), 6000); }
           return;
         }
         if (id === "all-todos") {
