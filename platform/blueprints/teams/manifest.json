@@ -29,12 +29,17 @@
     {
       "name": "backlink-panel",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
     "TeamsHubCards",
     "TeamPageCards",
-    "TeamActionButtons"
+    "TeamActionButtons",
+    "TeamsChromeBar"
   ],
   "files": [
     {
@@ -44,6 +49,10 @@
     {
       "source": "scripts/team-page-cards.js",
       "dest": "{{scripts_path}}/teams/team-page-cards.js"
+    },
+    {
+      "source": "scripts/teams-chrome-bar.js",
+      "dest": "{{scripts_path}}/teams/teams-chrome-bar.js"
     },
     {
       "source": "scripts/team-action-buttons.js",
