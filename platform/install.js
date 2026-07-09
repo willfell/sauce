@@ -6588,23 +6588,30 @@ async function applyNoteChromeHeal(tp, history, git) {
 // Per-vault, .sauce-backup snapshot before write, idempotent (transform itself
 // short-circuits when the target class is already present), never throws.
 // _stripEntityCreateMarkerBlock — pure, idempotent transform (v0.205.0):
-// strips a single standalone `// entity-create:<instanceId>` EntityCreate
-// dataviewjs fence, collapsing any orphaned standalone "---" divider /
-// blank-line runs left behind. Used wherever a hub's "+ New <X>" moves from
-// this standalone block into its own ChromeBar adapter's primary button
-// (right of the compass) — first meetings, now people, generic so future
-// blueprints doing the same fold don't need a bespoke copy. No-op when the
-// block isn't present (nothing to strip → body returned unchanged).
+// strips a single standalone EntityCreate dataviewjs fence for instanceId,
+// collapsing any orphaned standalone "---" divider / blank-line runs left
+// behind. Used wherever a hub's "+ New <X>" moves from this standalone block
+// into its own ChromeBar adapter's primary button (right of the compass) —
+// first meetings, now people, generic so future blueprints doing the same
+// fold don't need a bespoke copy. Handles both marker shapes: the current
+// inside-fence `// entity-create:<id>` JS comment, and the pre-v0.49.0
+// outside-fence `<!-- entity-create:<id> -->` HTML comment (a handful of
+// very old notes predate the v0.49.0 marker-format migration and never got
+// touched by it, since that migration only rewrote the comment syntax —
+// it never removed blocks). No-op when neither shape is present.
 function _stripEntityCreateMarkerBlock(body, instanceId) {
   if (typeof body !== "string" || typeof instanceId !== "string" || instanceId.length === 0) return body;
   const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(
-    "```dataviewjs\\n// entity-create:" + escId + "[^\\n]*\\n" +
-    'await dv\\.view\\("[^"]*",\\s*\\{\\s*class:\\s*"EntityCreate",\\s*args:\\s*\\[\\{\\s*instance:\\s*"' + escId + '"\\s*\\}\\]\\s*\\}\\);\\n' +
-    "```\\n?",
+  const viewCall = 'await dv\\.view\\("[^"]*",\\s*\\{\\s*class:\\s*"EntityCreate",\\s*args:\\s*\\[\\{\\s*instance:\\s*"' + escId + '"\\s*\\}\\]\\s*\\}\\);\\n';
+  const reNewFormat = new RegExp(
+    "```dataviewjs\\n// entity-create:" + escId + "[^\\n]*\\n" + viewCall + "```\\n?",
     "g"
   );
-  let out = body.replace(re, "");
+  const reOldFormat = new RegExp(
+    "<!--\\s*entity-create:" + escId + "\\s*-->\\n```dataviewjs\\n" + viewCall + "```\\n?",
+    "g"
+  );
+  let out = body.replace(reNewFormat, "").replace(reOldFormat, "");
   if (out === body) return body;
   const fmEnd = out.indexOf('---', out.indexOf('---') + 3);
   if (fmEnd >= 0) {
