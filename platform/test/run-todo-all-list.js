@@ -96,8 +96,8 @@ function makeEl(tag) {
 const allEls = (root, out = []) => { for (const c of root.children) { out.push(c); allEls(c, out); } return out; };
 const whereArr = (arr) => Object.assign(arr.slice(), { where(fn) { return whereArr(arr.filter(fn)); }, array() { return arr.slice(); } });
 
-function mkTaskPage(title, scheduled, status) {
-  return { type: 'task', status: status || 'open', title, scheduled, due: null, priority: '', project: null, project_slug: null, source: null, source_note: null, links: [], created_at: null, completed_at: null, file: { path: `spice/tasks/${title}.md` } };
+function mkTaskPage(title, due, status) {
+  return { type: 'task', status: status || 'open', title, due, priority: '', project: null, project_slug: null, source: null, source_note: null, links: [], created_at: null, completed_at: null, file: { path: `spice/tasks/${title}.md` } };
 }
 
 async function runRender(pages) {
@@ -115,7 +115,7 @@ async function runRender(pages) {
     customJS: {
       RenderSafe: { page: (_dv) => ({ type: 'to-do-hub' }) },
       TaskEntity: {
-        parseNote: (p) => ({ title: p.title, scheduled: p.scheduled, due: p.due, status: p.status, path: p.file.path, project_slug: null, source: null }),
+        parseNote: (p) => ({ title: p.title, due: p.due, status: p.status, path: p.file.path, project_slug: null, source: null }),
       },
       TaskTodayList: {
         renderTaskRow: (c, task) => { renderTaskRowCalls.push(task.title); return c.createEl('div', { cls: 'row', text: task.title }); },
