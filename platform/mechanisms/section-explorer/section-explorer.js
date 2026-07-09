@@ -62,6 +62,16 @@ class SectionExplorer {
   }
 
   _renderPagePane(dv, adapter, ctx, section, pages, pane) {
+    const links = adapter.getLinks(section || ctx);
+    if (Array.isArray(links) && links.length > 0) {
+      const linksRow = pane.createEl("div", { cls: "se-links-row" });
+      for (const link of links) {
+        const a = linksRow.createEl("a", { cls: "se-link-chip" });
+        a.textContent = link.text || link.url;
+        a.onclick = () => { try { window.open(link.url, "_blank"); } catch (_e) {} };
+      }
+    }
+
     if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
     const proxyDv = this._makeProxyDv(dv, pane);
     const fileIcon = adapter.icons.file || "";

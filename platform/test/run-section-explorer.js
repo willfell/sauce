@@ -146,4 +146,46 @@ failures += !run("page pane renders BeaconCards.render with the section's pages"
   delete global.customJS;
 });
 
+failures += !run("pinned links render above the page grid, and render nothing when empty", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  // Non-empty links → a links row appears.
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [],
+      getLinks: () => [{ url: "https://example.com", text: "Style guide" }],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const linksRow = els.find((e) => e.className === "se-links-row");
+    assert.ok(linksRow, "expected a se-links-row when links[] is non-empty");
+  }
+
+  // Empty links → no links row at all (renders nothing, per the vault's rule).
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [],
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const linksRow = els.find((e) => e.className === "se-links-row");
+    assert.strictEqual(linksRow, undefined, "expected NO se-links-row when links[] is empty");
+  }
+
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
