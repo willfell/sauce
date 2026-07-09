@@ -1156,6 +1156,7 @@ class TaskDialog {
             title,
             due: (opts && opts.today) || '',
             source: (opts && opts.source) || 'daily',
+            parent_task: (opts && opts.parent_task) || '',
             links: [],
         };
         await this._create(app, payload, '');

@@ -211,6 +211,11 @@ ok('TE-sub-2 parseNote normalizes parent_task via _linkText (Link object -> base
   assert(bare.parent_task === '', 'absent parent_task -> empty string: ' + JSON.stringify(bare.parent_task));
 });
 
+ok('TD-sub-1 createQuick-shaped payload carries parent_task through composeNote', () => {
+  const composed = TaskEntity.composeNote({ title: 'Write intro', parent_task: '[[Ship the report]]', due: '', source: 'daily', links: [], moment: fixedMoment });
+  assert(composed.frontmatter.parent_task === '[[Ship the report]]', 'parent_task in composed frontmatter: ' + composed.frontmatter.parent_task);
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
   const parsed = TaskEntity.parseNote({ status: undefined, due: '', title: 't', file: { path: 'spice/tasks/a.md' } });
@@ -647,6 +652,20 @@ ok('TNV-7 _linkEntries coerces links[] to renderable markdown strings', () => {
   assert(TaskNoteView._linkEntries({ links: 'nope' }).length === 0, 'non-array links → []');
   // A single object that already looks like a bare wikilink target string stays a wikilink.
   assert(deepEq(TaskNoteView._linkEntries({ links: ['[[a/b/Baz.md|Baz]]'] }), ['[[a/b/Baz.md|Baz]]']), 'wikilink string kept verbatim');
+});
+
+ok('TNV-sub-1 _subtaskProgressText: "N/M subtasks done" from a parsed-task array', () => {
+  const subtasks = [
+    { title: 'A', status: 'done' },
+    { title: 'B', status: 'open' },
+    { title: 'C', status: 'done' },
+  ];
+  assert(TaskNoteViewClass._subtaskProgressText(subtasks) === '2/3 subtasks done', 'progress text: ' + TaskNoteViewClass._subtaskProgressText(subtasks));
+});
+
+ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
+  assert(TaskNoteViewClass._subtaskProgressText([]) === '', 'empty array -> empty string');
+  assert(TaskNoteViewClass._subtaskProgressText(null) === '', 'null -> empty string, never throws');
 });
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
