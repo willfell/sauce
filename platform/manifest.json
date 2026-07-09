@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.207.0",
+  "workshop_version": "0.207.1",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
