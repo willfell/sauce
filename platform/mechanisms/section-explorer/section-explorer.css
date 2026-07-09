@@ -32,10 +32,31 @@
   gap: 4px;
 }
 
+/* Header row: "Sections" group label left, sort toggle right. */
+.se-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+/* Shared group-label treatment (rail "Sections", pane "Docs"/"Pages") —
+ * mirrors SectionLabel's small-caps muted look without depending on it. */
+.se-group-label {
+  font-size: 0.78em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .se-rail-toggle {
   display: flex;
   gap: 6px;
-  margin-bottom: 6px;
+  flex: 0 0 auto;
 }
 .se-rail-toggle-pill {
   display: inline-flex;
@@ -63,7 +84,7 @@
 
 .se-rail-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
   padding: 8px 10px;
@@ -78,12 +99,19 @@
   border-color: var(--interactive-accent);
   transform: translateY(-1px);
 }
+/* Stacked main block: title line over meta line. */
+.se-rail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .se-rail-title {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
   font-weight: 600;
   color: var(--text-normal);
 }
@@ -94,10 +122,13 @@
   white-space: nowrap;
 }
 .se-rail-meta {
-  flex: 0 0 auto;
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Indent under the title text, past the 16px icon + 8px gap. */
+  padding-left: 24px;
 }
 .se-rail-dots {
   display: inline-flex;
@@ -144,6 +175,10 @@
 .se-link-chip:not([href]) {
   color: var(--text-faint);
   cursor: default;
+}
+
+.se-pane-label {
+  margin-bottom: 2px;
 }
 
 @keyframes sectionExplorerRailIn {
