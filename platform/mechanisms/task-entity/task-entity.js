@@ -325,6 +325,7 @@ class TaskEntity {
             project_slug: projectSlug,
             source: p.source || '',
             source_note: p.source_note || '',
+            parent_task: p.parent_task || '',
             links: links,
             created_at: createdAt,
             completed_at: p.completed_at || '',
@@ -360,6 +361,10 @@ class TaskEntity {
             // left as-is (TaskNoteView strips its brackets); the reliable project
             // filter uses project_slug (a plain string) above.
             source_note: p.source_note != null ? TaskEntity._linkText(p.source_note) : null,
+            // Unlike source_note, parent_task normalizes to '' (not null) when
+            // absent — it is read as a plain string for subtask truthiness checks
+            // (`if (task.parent_task)`), so empty-string is more convenient here.
+            parent_task: p.parent_task != null ? TaskEntity._linkText(p.parent_task) : '',
             // Structured card links (FIX 5) — normalized to a clean string array so
             // TaskNoteView can render them inside the card. Dataview may hand back an
             // array of strings and/or Link objects; _normLinks coerces both.

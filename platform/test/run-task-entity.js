@@ -194,6 +194,23 @@ ok('TE-recur-6 nextOccurrence tolerates a missing/throwing matchesFn (never thro
   assert(!threw, 'nextOccurrence must never throw');
 });
 
+ok('TE-sub-1 composeNote emits parent_task (set + empty)', () => {
+  const child = TaskEntity.composeNote({ title: 'Write intro', parent_task: '[[Ship the report]]', moment: fixedMoment });
+  assert(child.frontmatter.parent_task === '[[Ship the report]]', 'parent_task set: ' + child.frontmatter.parent_task);
+  const bare = TaskEntity.composeNote({ title: 'Top-level', moment: fixedMoment });
+  assert(bare.frontmatter.parent_task === '', 'parent_task empty-string-not-omitted: ' + JSON.stringify(bare.frontmatter.parent_task));
+  const keys = Object.keys(child.frontmatter);
+  assert(keys.indexOf('source_note') === keys.indexOf('parent_task') - 1, 'parent_task follows source_note: ' + keys.join(','));
+});
+
+ok('TE-sub-2 parseNote normalizes parent_task via _linkText (Link object -> basename)', () => {
+  const linkObj = { path: 'spice/tasks/Ship the report.md', display: null };
+  const parsed = TaskEntity.parseNote({ title: 'Write intro', parent_task: linkObj, file: { path: 'spice/tasks/Write intro.md' } });
+  assert(parsed.parent_task === 'Ship the report', 'coerced to basename: ' + parsed.parent_task);
+  const bare = TaskEntity.parseNote({ title: 'Top-level', file: { path: 'spice/tasks/Top-level.md' } });
+  assert(bare.parent_task === '', 'absent parent_task -> empty string: ' + JSON.stringify(bare.parent_task));
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
   const parsed = TaskEntity.parseNote({ status: undefined, due: '', title: 't', file: { path: 'spice/tasks/a.md' } });
