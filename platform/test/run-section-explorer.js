@@ -136,16 +136,14 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   assert.ok(meta, "expected a meta line mentioning doc count");
 });
 
-failures += !run("page pane renders BeaconCards.render with the section's pages", () => {
+failures += !run("page pane renders mechanism-owned doc cards (no BeaconCards)", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  const { container } = makeDomStub();
-  const calls = [];
-  global.customJS = {
-    BeaconCards: { render: (proxyDv, opts) => { calls.push(opts); } },
-  };
+  const beaconCalls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => beaconCalls.push(o) } };
+  const { container, els } = makeDomStub();
   const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
-  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+  const pages = [{ title: null, file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1000 } } }];
   const adapter = se.makeAdapter({
     resolveContext: () => ({ scopePath: "spice/wiki" }),
     listSections: () => [],
@@ -155,8 +153,15 @@ failures += !run("page pane renders BeaconCards.render with the section's pages"
     rootClass: "se-root",
   });
   se.render(dv, adapter);
-  assert.strictEqual(calls.length, 1, "expected BeaconCards.render to be called once");
-  assert.strictEqual(calls[0].pages.length, 1);
+  assert.strictEqual(beaconCalls.length, 0, "BeaconCards must NOT be called by the pane anymore");
+  const grid = els.find((e) => e.className === "se-doc-grid");
+  assert.ok(grid, "expected a se-doc-grid");
+  const cards = els.filter((e) => e.className === "se-doc-card");
+  assert.strictEqual(cards.length, 1);
+  const title = els.find((e) => e.className === "se-doc-title");
+  assert.strictEqual(title.textContent, "Runbook");
+  const icon = els.find((e) => e.className === "se-doc-icon");
+  assert.ok(icon, "expected the doc icon badge");
   delete global.customJS;
 });
 
@@ -929,11 +934,10 @@ failures += !run("empty page pane is SUPPRESSED entirely when sections exist (no
   delete global.customJS;
 });
 
-failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the pane empty-state message", () => {
+failures += !run("genuinely empty leaf (0 sections AND 0 pages) shows the mechanism-owned empty-state box", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  const calls = [];
-  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) } };
+  global.customJS = {};
   const { container, els } = makeDomStub();
   const dv = { container, current: () => ({ file: { path: "spice/wiki/empty/Empty.md" } }) };
   const adapter = se.makeAdapter({
@@ -946,8 +950,9 @@ failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the 
   });
   se.render(dv, adapter);
   assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 1, "pane still renders on a truly-empty leaf");
-  assert.strictEqual(calls.length, 1, "BeaconCards still called — its built-in empty message communicates the real 'nothing here'");
-  assert.deepStrictEqual(calls[0].pages, [], "called with zero pages");
+  const empty = els.find((e) => e.className === "se-doc-empty");
+  assert.ok(empty, "expected the mechanism-owned empty-state box");
+  assert.strictEqual(empty.textContent, "Nothing here yet.");
   delete global.customJS;
 });
 

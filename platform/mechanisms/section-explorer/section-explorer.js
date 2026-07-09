@@ -100,18 +100,55 @@ class SectionExplorer {
       }
     }
 
-    if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
-    const proxyDv = this._makeProxyDv(dv, pane);
-    const fileIcon = adapter.icons.file || "";
-    customJS.BeaconCards.render(proxyDv, {
-      pages,
-      layout: "stacked",
-      columns: 2,
-      title: (p) => p.title || (p.file && p.file.name),
-      icon: () => fileIcon,
-      target: (p) => p.file && p.file.path,
-    });
+    const cards = (Array.isArray(pages) ? pages : Array.from(pages || [])).map((p) => this._docCardModel(p));
+    this._renderDocCards(pane, adapter, cards);
+  }
+
+  // Normalize a Dataview page into the doc-card model {title, path, mtime, where}.
+  _docCardModel(p) {
+    return {
+      title: (p && p.title) || (p && p.file && p.file.name) || "",
+      path: (p && p.file && p.file.path) || "",
+      mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || 0,
+      where: null,
+    };
+  }
+
+  // Mechanism-owned doc cards — the pane's visual language lives here (not in
+  // BeaconCards) so docs read distinctly from rail section rows: each card
+  // carries a bordered accent icon BADGE (the "this is a document" mark),
+  // where rail rows use a flat inline folder icon.
+  _renderDocCards(pane, adapter, cards) {
+    if (!Array.isArray(cards) || cards.length === 0) {
+      const empty = pane.createEl("div", { cls: "se-doc-empty" });
+      empty.textContent = "Nothing here yet.";
+      return;
+    }
+    const grid = pane.createEl("div", { cls: "se-doc-grid" });
+    for (const c of cards) {
+      const card = grid.createEl("div", { cls: "se-doc-card" });
+      const icon = card.createEl("span", { cls: "se-doc-icon" });
+      icon.innerHTML = adapter.icons.file || "";
+      const body = card.createEl("div", { cls: "se-doc-body" });
+      const title = body.createEl("div", { cls: "se-doc-title" });
+      title.textContent = c.title;
+      const sub = body.createEl("div", { cls: "se-doc-sub" });
+      sub.textContent = this._docCardSub(c);
+      card.onclick = () => {
+        if (c.path) { try { app.workspace.openLinkText(c.path, "", false); } catch (_e) { /* never-throw */ } }
+      };
+    }
+  }
+
+  // "in <section> · 2 hours ago" (recent mode) / "edited 2 hours ago" (docs mode).
+  _docCardSub(c) {
+    let ago = "";
+    try {
+      if (c.mtime && typeof window !== "undefined" && window.moment) ago = window.moment(c.mtime).fromNow();
+    } catch (_e) { /* cosmetic */ }
+    if (c.where) return ago ? ("in " + c.where + " · " + ago) : ("in " + c.where);
+    return ago ? ("edited " + ago) : "";
   }
 
   _isSafeUrl(url) {
@@ -128,14 +165,6 @@ class SectionExplorer {
       const lower = trimmed.toLowerCase();
       return SectionExplorer.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
     } catch (_e) { return false; }
-  }
-
-  _makeProxyDv(dv, container) {
-    return {
-      container,
-      current: dv.current ? dv.current.bind(dv) : (() => null),
-      pages: dv.pages ? dv.pages.bind(dv) : (() => []),
-    };
   }
 
   _renderRail(dv, adapter, ctx, sections, root) {
