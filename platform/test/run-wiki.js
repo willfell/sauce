@@ -652,6 +652,32 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W19 — cold-load guard: WikiTree.render must never throw when
+// customJS.SectionExplorer is missing/undefined (matching the sibling
+// customJS-guard idiom used by WikiChromeBar/WikiHubActions/WikiLeafActions).
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const cjs = {
+    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: () => {} },
+    // SectionExplorer deliberately absent — simulates cold-load TDZ ordering.
+  };
+  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
+  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+  let threw = false;
+  try { new Tree().render(dv); } catch (_e) { threw = true; }
+  ok('W19a WikiTree.render does not throw when customJS.SectionExplorer is missing (cold-load guard)', !threw);
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

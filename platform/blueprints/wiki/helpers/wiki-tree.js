@@ -54,6 +54,8 @@ class WikiTree {
 
         // Browse view — delegate the rail (sections) + page pane (this folder's docs +
         // pinned links) to the shared SectionExplorer mechanism.
+        if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.makeAdapter !== "function"
+            || typeof customJS.SectionExplorer.render !== "function") return;
         const adapter = customJS.SectionExplorer.makeAdapter(this._config);
         customJS.SectionExplorer.render({ ...dv, container }, adapter);
 
