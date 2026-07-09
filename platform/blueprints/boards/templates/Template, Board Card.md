@@ -9,7 +9,5 @@ tags:
 <%* await tp.file.move("{{module_directory}}/cards/" + tp.date.now("YYYY") + "/" + tp.date.now("MM-MMMM") + "/" + tp.file.title) %>
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "BoardsChromeBar" });
 ```
-
----
