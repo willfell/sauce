@@ -2,7 +2,7 @@
  * TaskRecurringList (CustomJS) — the "Recurring" index view (to-do blueprint).
  * Replaces the old spice/to-do/Recurring Tasks.md raw-markdown registry: lists
  * every OPEN task note under spice/tasks/ that has a `recurrence` grammar set,
- * sorted by `scheduled` ascending (undated recurring tasks sort last). Each
+ * sorted by `due` ascending (undated recurring tasks sort last). Each
  * row opens its real task note via the shared TaskTodayList.renderTaskRow —
  * this is a READ-ONLY index; there is no manual-editing surface here (edit
  * happens on the task note itself, same as everywhere else).
@@ -28,9 +28,9 @@ class TaskRecurringList {
 
     /**
      * Filter parsed tasks (TaskEntity.parseNote output, or any object shaped
-     * `{ status, recurrence, scheduled, title }`) to open tasks with a
-     * non-empty `recurrence`. Sorted by `scheduled` ascending; tasks with no
-     * `scheduled` value sort LAST (treated as "after" any real date), tie-
+     * `{ status, recurrence, due, title }`) to open tasks with a
+     * non-empty `recurrence`. Sorted by `due` ascending; tasks with no
+     * `due` value sort LAST (treated as "after" any real date), tie-
      * broken by title (case-insensitive). Tolerates null/non-array input
      * (-> []). Never throws.
      */
@@ -38,8 +38,8 @@ class TaskRecurringList {
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         const out = list.filter(t => t && t.status === 'open' && t.recurrence && String(t.recurrence).trim() !== '');
         out.sort((a, b) => {
-            const as = a.scheduled || '';
-            const bs = b.scheduled || '';
+            const as = a.due || '';
+            const bs = b.due || '';
             if (as !== bs) {
                 if (as === '') return 1;
                 if (bs === '') return -1;

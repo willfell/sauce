@@ -2197,25 +2197,59 @@ function runTaskDoneArchiveTests() {
   });
 }
 
+// ---------- ToDoAllList static helper (pure) ----------
+//
+// ToDoAllList is the "All To-Dos" flat query view (to-do blueprint) —
+// groupByDate buckets parsed OPEN tasks by their `due` date relative to
+// today: overdue (due < today, oldest first), today, future (due > today,
+// soonest first, split per-date into futureByDate), noDate (no due value).
+
+ok('TAL-1 groupByDate buckets overdue/today/future/noDate by due date', () => {
+  const ToDoAllListClass = loadClass('blueprints/to-do/helpers/todo-all-list.js', 'ToDoAllList');
+  const tasks = [
+    { title: 'Yesterday', due: '2026-07-07' },
+    { title: 'TwoDaysAgo', due: '2026-07-06' },
+    { title: 'Today', due: '2026-07-08' },
+    { title: 'Tomorrow', due: '2026-07-09' },
+    { title: 'NextWeek', due: '2026-07-15' },
+    { title: 'Undated', due: null },
+  ];
+  const groups = ToDoAllListClass.groupByDate(tasks, '2026-07-08');
+  assert(groups.overdue.length === 2, 'overdue has 2: ' + groups.overdue.length);
+  assert(groups.overdue[0].title === 'TwoDaysAgo' && groups.overdue[1].title === 'Yesterday', 'overdue sorted oldest-first: ' + groups.overdue.map(t => t.title).join(','));
+  assert(groups.today.length === 1 && groups.today[0].title === 'Today', 'today has the today task');
+  assert(groups.future.length === 2, 'future has 2: ' + groups.future.length);
+  assert(groups.future[0].title === 'Tomorrow' && groups.future[1].title === 'NextWeek', 'future sorted soonest-first: ' + groups.future.map(t => t.title).join(','));
+  assert(groups.futureByDate.get('2026-07-09')[0].title === 'Tomorrow', 'futureByDate keyed by due date');
+  assert(groups.noDate.length === 1 && groups.noDate[0].title === 'Undated', 'noDate has the undated task');
+});
+
+ok('TAL-2 groupByDate tolerates null/non-array input', () => {
+  const ToDoAllListClass = loadClass('blueprints/to-do/helpers/todo-all-list.js', 'ToDoAllList');
+  const groups = ToDoAllListClass.groupByDate(null, '2026-07-08');
+  assert(groups.overdue.length === 0 && groups.today.length === 0 && groups.future.length === 0 && groups.noDate.length === 0, 'all-empty groups on null input');
+  assert(groups.futureByDate.size === 0, 'empty futureByDate map on null input');
+});
+
 // ---------- TaskRecurringList static helper (pure) ----------
 //
 // TaskRecurringList is the "Recurring" index view (to-do blueprint) — lists
 // every OPEN task note with a non-empty `recurrence` grammar, sorted by
-// `scheduled` ascending (undated recurring tasks sort last). Only the
+// `due` ascending (undated recurring tasks sort last). Only the
 // filterRecurring static is pure/Node-testable; render() is browser-only.
 
-ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by scheduled ascending', () => {
+ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by due ascending', () => {
   const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
   const tasks = [
-    { title: 'B', status: 'open', scheduled: '2026-07-20', recurrence: 'every day' },
-    { title: 'A', status: 'open', scheduled: '2026-07-09', recurrence: 'every Monday' },
-    { title: 'No recurrence', status: 'open', scheduled: '2026-07-08', recurrence: '' },
-    { title: 'Done recurring', status: 'done', scheduled: '2026-07-08', recurrence: 'every day' },
-    { title: 'No date', status: 'open', scheduled: null, recurrence: 'every day' },
+    { title: 'B', status: 'open', due: '2026-07-20', recurrence: 'every day' },
+    { title: 'A', status: 'open', due: '2026-07-09', recurrence: 'every Monday' },
+    { title: 'No recurrence', status: 'open', due: '2026-07-08', recurrence: '' },
+    { title: 'Done recurring', status: 'done', due: '2026-07-08', recurrence: 'every day' },
+    { title: 'No date', status: 'open', due: null, recurrence: 'every day' },
   ];
   const out = TaskRecurringListClass.filterRecurring(tasks);
   assert(out.length === 3, 'keeps the 3 open+recurring tasks (including the undated one): ' + out.length);
-  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by scheduled ascending, dated first: ' + out.map(t => t.title).join(','));
+  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by due ascending, dated first: ' + out.map(t => t.title).join(','));
   assert(out[2].title === 'No date', 'undated recurring task sorts last: ' + out.map(t => t.title).join(','));
 });
 
