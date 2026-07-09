@@ -197,6 +197,21 @@ async function runAdapterCases() {
   const out4 = adapter4.written['spice/meetings/hubs/2026/07-July/Meetings-2026-07-08.md'];
   ok('MHCBH-14 an already-chrome-swapped hub note still gets its EntityCreate block stripped',
     out4 && !out4.includes('entity-create:meeting') && out4.includes('class: "MeetingsHubCards"'));
+
+  // Real-world stray: a note that predates the v0.49.0 marker-format
+  // migration (that migration only rewrote the comment SYNTAX, it never
+  // removed blocks) — outside-fence `<!-- entity-create:meeting -->` HTML
+  // comment, no inside-fence JS comment at all. Found live in a real vault.
+  const OLD_MARKER_FORMAT_BODY = `---\ntags:\n  - meetings-hub\ntype: meeting\n---\n\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "MeetingChromeBar" });\n\`\`\`\n\n<!-- entity-create:meeting -->\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "meeting" }] });\n\`\`\`\n\n## Today's Meetings\n\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "MeetingsHubCards" });\n\`\`\`\n`;
+  const history5 = [];
+  const adapter5 = makeAdapter({
+    'spice/meetings/hubs/2026/05-May/Meetings-2026-05-15.md': OLD_MARKER_FORMAT_BODY,
+  });
+  const tp5 = { app: { vault: { adapter: adapter5 } } };
+  await applyMeetingsHubChromeBarHeal(tp5, history5, git);
+  const out5 = adapter5.written['spice/meetings/hubs/2026/05-May/Meetings-2026-05-15.md'];
+  ok('MHCBH-15 a pre-v0.49.0 note (outside-fence <!-- entity-create:meeting --> comment) still gets stripped',
+    out5 && !out5.includes('entity-create:meeting') && !out5.includes('class: "EntityCreate"') && out5.includes('class: "MeetingsHubCards"'));
 }
 
 runAdapterCases().then(() => {
