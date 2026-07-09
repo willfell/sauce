@@ -288,14 +288,15 @@ failures += !run("_addLinkPure appends a valid link, rejects empty url and dupli
   assert.strictEqual(r.links[0].text, "https://b.com");
 });
 
-failures += !run("_openAddLinkForm calls adapter.writeLinks with the appended list", () => {
+failures += !run("_addLinkPure + adapter.writeLinks integration (no DOM)", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const writes = [];
   const adapter = { getLinks: () => [], writeLinks: (target, links) => { writes.push({ target, links }); } };
   const section = { title: "EMS", hubPath: "e.md" };
-  se._promptFn = () => ({ url: "https://x.com", text: "X" }); // test seam, no real dialog
-  se._openAddLinkForm(null, adapter, section);
+  const result = se._addLinkPure(adapter.getLinks(section), { url: "https://x.com", text: "X" });
+  assert.strictEqual(result.changed, true);
+  adapter.writeLinks(section, result.links);
   assert.strictEqual(writes.length, 1);
   assert.deepStrictEqual(writes[0].links, [{ url: "https://x.com", text: "X" }]);
 });

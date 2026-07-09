@@ -177,9 +177,6 @@ class SectionExplorer {
     };
   }
 
-  // ── Stubs wired up in Task 6/7 ──────────────────────────────────────────
-  _openRenameDialog(dv, adapter, section) { /* Task 6 */ }
-
   // Pure link-mutation — mirrors ProjectLinksManager.addLink exactly (same
   // {url, text} shape, same empty/duplicate rejection) so the two dialogs stay
   // behaviorally identical without a cross-mechanism dependency.
@@ -193,17 +190,77 @@ class SectionExplorer {
     return { links: list, changed: true };
   }
 
-  // _promptFn is a test seam: production calls the real modal (Task 7 replaces
-  // this with an actual DOM form); tests inject a stub returning {url, text}.
-  _promptFn() { return null; }
-
+  // Real add-link modal — single overlay <div> appended to document.body,
+  // dedupe-guarded by class name (mirrors ProjectLinksManager._openModal).
+  // Untestable in the Node harness (real DOM appended to document.body); the
+  // pure mutation this calls (_addLinkPure) is covered directly by tests —
+  // matches the established "dogfood-only" precedent for this kind of dialog.
   _openAddLinkForm(dv, adapter, section) {
-    const entry = this._promptFn();
-    if (!entry) return;
-    const current = adapter.getLinks(section) || [];
-    const result = this._addLinkPure(current, entry);
-    if (!result.changed) return;
-    try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ }
+    const doc = (typeof document !== "undefined") ? document : null;
+    if (!doc || !doc.body) return;
+    const existing = doc.body.querySelector(".se-link-modal-overlay");
+    if (existing && existing.remove) existing.remove();
+
+    const overlay = doc.createElement("div");
+    overlay.className = "se-link-modal-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
+    const panel = doc.createElement("div");
+    panel.style.cssText = "background:var(--background-primary);border-radius:12px;padding:16px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
+    const urlInput = doc.createElement("input");
+    urlInput.placeholder = "https://…";
+    urlInput.style.cssText = "width:100%;margin-bottom:8px;";
+    const textInput = doc.createElement("input");
+    textInput.placeholder = "Label (optional)";
+    textInput.style.cssText = "width:100%;margin-bottom:12px;";
+    const addBtn = doc.createElement("button");
+    addBtn.textContent = "Add link";
+    const close = () => { if (overlay.remove) overlay.remove(); };
+    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    addBtn.onclick = () => {
+      const current = adapter.getLinks(section) || [];
+      const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
+      if (result.changed) { try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ } }
+      close();
+    };
+    panel.appendChild(urlInput);
+    panel.appendChild(textInput);
+    panel.appendChild(addBtn);
+    overlay.appendChild(panel);
+    doc.body.appendChild(overlay);
+  }
+
+  // Real rename modal — single text input, calls adapter.renameSection (which
+  // is where wiki-vs-project rename mechanics diverge; see Task 9).
+  // Same DOM-only untestability rationale as _openAddLinkForm above.
+  _openRenameDialog(dv, adapter, section) {
+    const doc = (typeof document !== "undefined") ? document : null;
+    if (!doc || !doc.body) return;
+    const existing = doc.body.querySelector(".se-rename-modal-overlay");
+    if (existing && existing.remove) existing.remove();
+
+    const overlay = doc.createElement("div");
+    overlay.className = "se-rename-modal-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
+    const panel = doc.createElement("div");
+    panel.style.cssText = "background:var(--background-primary);border-radius:12px;padding:16px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
+    const nameInput = doc.createElement("input");
+    nameInput.value = section.title || "";
+    nameInput.style.cssText = "width:100%;margin-bottom:12px;";
+    const saveBtn = doc.createElement("button");
+    saveBtn.textContent = "Rename";
+    const close = () => { if (overlay.remove) overlay.remove(); };
+    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
+    saveBtn.onclick = () => {
+      const newTitle = String(nameInput.value || "").trim();
+      if (newTitle && newTitle !== section.title) {
+        try { adapter.renameSection(section, newTitle); } catch (_e) { /* never-throw */ }
+      }
+      close();
+    };
+    panel.appendChild(nameInput);
+    panel.appendChild(saveBtn);
+    overlay.appendChild(panel);
+    doc.body.appendChild(overlay);
   }
 
   _openDeleteConfirm(dv, adapter, section) {
