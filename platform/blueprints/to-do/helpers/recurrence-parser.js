@@ -35,6 +35,8 @@ class RecurrenceParser {
 
     isSupported(grammar) { return RecurrenceParser.isSupported(grammar); }
 
+    describe(grammar) { return RecurrenceParser.describe(grammar); }
+
     matches(grammar, dateMoment, opts) { return RecurrenceParser.matches(grammar, dateMoment, opts); }
 
     /**
@@ -86,6 +88,30 @@ class RecurrenceParser {
      */
     static isSupported(grammar) {
         return RecurrenceParser._parse(grammar) !== null;
+    }
+
+    /**
+     * Reverse-map a grammar string into a plain, JSON-serializable shape for
+     * UI consumers (the dialog's structured recurrence picker):
+     *   { kind: 'daily' }
+     *   { kind: 'weekday-block' }               (every weekday)
+     *   { kind: 'weekend-block' }                (every weekend)
+     *   { kind: 'day-of-month', day: 1..31 }
+     *   { kind: 'weekday-set', days: [0..6] }    (days sorted Sun..Sat)
+     *   { kind: 'every-n-weeks-on-day', weeks: N, days: [0..6] }
+     *   null                                     (empty / unsupported grammar)
+     * A thin, public wrapper over the internal _parse() — days come back as a
+     * sorted array (not a Set) so this round-trips through JSON. Pure, never
+     * throws (delegates entirely to _parse's own guards).
+     */
+    static describe(grammar) {
+        const parsed = RecurrenceParser._parse(grammar);
+        if (!parsed) return null;
+        const out = { kind: parsed.kind };
+        if (typeof parsed.weeks === 'number') out.weeks = parsed.weeks;
+        if (parsed.days instanceof Set) out.days = Array.from(parsed.days).sort((a, b) => a - b);
+        if (typeof parsed.day === 'number') out.day = parsed.day;
+        return out;
     }
 
     // ---------- Internal: pure parse to a structured form ----------
