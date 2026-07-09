@@ -133,7 +133,7 @@
     },
     {
       "name": "project",
-      "version": "1.45.0"
+      "version": "1.45.1"
     },
     {
       "name": "to-do",
@@ -161,7 +161,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.5.0"
+      "version": "0.5.1"
     },
     {
       "name": "reader",
