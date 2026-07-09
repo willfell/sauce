@@ -45,6 +45,7 @@ class SectionExplorer {
       renameSection: (section, newTitle) => config.renameSection(section, newTitle),
       icons: config.icons || { folder: "", file: "" },
       rootClass: config.rootClass || "se-root",
+      pageLabel: config.pageLabel || "Docs",
     };
   }
 
@@ -93,6 +94,7 @@ class SectionExplorer {
     }
 
     if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
+    pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
     const proxyDv = this._makeProxyDv(dv, pane);
     const fileIcon = adapter.icons.file || "";
     customJS.BeaconCards.render(proxyDv, {

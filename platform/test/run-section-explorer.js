@@ -850,4 +850,60 @@ failures += !run("rail row stacks: a se-rail-main block holds title THEN meta on
   assert.ok(dots, "dots stay a direct child of the row (right edge), outside the stacking block");
 });
 
+failures += !run("page pane renders a group label above the grid — default 'Docs', adapter-overridable to 'Pages'", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+
+  // Default: "Docs".
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/projects/foo/docs/Docs.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/projects/foo/docs" }),
+      listSections: () => [],
+      listPages: () => pages,
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const label = els.find((e) => e.className === "se-group-label se-pane-label");
+    assert.ok(label, "expected a pane group label");
+    assert.strictEqual(label.textContent, "Docs");
+  }
+
+  // Override: pageLabel "Pages" (wiki).
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => pages,
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+      pageLabel: "Pages",
+    });
+    se.render(dv, adapter);
+    const label = els.find((e) => e.className === "se-group-label se-pane-label");
+    assert.ok(label, "expected a pane group label");
+    assert.strictEqual(label.textContent, "Pages");
+  }
+  delete global.customJS;
+});
+
+failures += !run("wiki adapter config sets pageLabel 'Pages'", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const config = wt._buildConfig({ container: {} }, { file: { path: "spice/wiki/Wiki.md" } });
+  assert.strictEqual(config.pageLabel, "Pages");
+});
+
 process.exit(failures > 0 ? 1 : 0);
