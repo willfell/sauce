@@ -186,5 +186,86 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
   ok('CBC3-JOURNAL-2: journal heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
 }
 
+// ---- boards: board-card body carries SpaceNavButtons + trailing bare "---" divider ----
+{
+  const before = `---
+type: board-card
+created_at: "2026-07-08T09:00:00-06:00"
+source_board: boards/To-Do-Board.md
+tags:
+  - kanban-card
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+---
+`;
+  const after = _healNoteChromeBody(before, 'board-card');
+  ok('CBC4-BOARDS-1: board-card heal inserts BoardsChromeBar', after.includes('class: "BoardsChromeBar"'));
+  ok('CBC4-BOARDS-2: board-card heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
+  ok('CBC4-BOARDS-3: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'board-card') === after);
+}
+
+// ---- finance: finance-hub body carries SpaceNavButtons + FinanceNav — FinanceNav MUST survive ----
+{
+  const before = `---
+type: finance-hub
+created_at: "2026-05-17T16:45:00-06:00"
+tags:
+  - finance-hub
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceHubSummary" });
+\`\`\`
+`;
+  const after = _healNoteChromeBody(before, 'finance-hub');
+  ok('CBC4-FINANCE-1: finance-hub heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
+  ok('CBC4-FINANCE-2: finance-hub heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
+  ok('CBC4-FINANCE-3: finance-hub heal KEEPS FinanceNav untouched', after.includes('class: "FinanceNav"'));
+  ok('CBC4-FINANCE-4: finance-hub heal KEEPS FinanceHubSummary untouched', after.includes('class: "FinanceHubSummary"'));
+  ok('CBC4-FINANCE-5: FinanceChromeBar is inserted BEFORE FinanceNav', after.indexOf('FinanceChromeBar') < after.indexOf('FinanceNav'));
+  ok('CBC4-FINANCE-6: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'finance-hub') === after);
+}
+
+// ---- finance: entity-level type (budget) — same guarantee ----
+{
+  const before = `---
+type: budget
+month: "2026-07"
+categories: []
+groups: []
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });
+\`\`\`
+`;
+  const after = _healNoteChromeBody(before, 'budget');
+  ok('CBC4-BUDGET-1: budget heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
+  ok('CBC4-BUDGET-2: budget heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
+  ok('CBC4-BUDGET-3: budget heal KEEPS FinanceNavRow untouched (not in scope to fix)', after.includes('class: "FinanceNavRow"'));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

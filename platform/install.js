@@ -6039,6 +6039,12 @@ function _healNoteChromeBody(body, type) {
     "products-hub": "ProductsChromeBar", "product": "ProductsChromeBar",
     "teams-hub": "TeamsChromeBar", "team": "TeamsChromeBar",
     "journal": "JournalChromeBar",
+    "board-card": "BoardsChromeBar",
+    "finance-hub": "FinanceChromeBar", "budgets-hub": "FinanceChromeBar", "paychecks-hub": "FinanceChromeBar",
+    "invoices-hub": "FinanceChromeBar", "debts-hub": "FinanceChromeBar", "months-hub": "FinanceChromeBar", "savings-hub": "FinanceChromeBar",
+    "budget": "FinanceChromeBar", "paycheck": "FinanceChromeBar", "invoice": "FinanceChromeBar", "debt": "FinanceChromeBar",
+    "month": "FinanceChromeBar", "savings-account": "FinanceChromeBar",
+    "budget-defaults": "FinanceChromeBar", "paycheck-defaults": "FinanceChromeBar", "debt-defaults": "FinanceChromeBar", "finance-plan": "FinanceChromeBar",
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
@@ -6485,7 +6491,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6506,7 +6512,8 @@ async function applyNoteChromeHeal(tp, history, git) {
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES].includes(type)) continue;
+        const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan"];
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
         const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
@@ -7611,7 +7618,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7638,7 +7645,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7669,7 +7676,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7697,7 +7704,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7738,7 +7745,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7760,7 +7767,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7787,7 +7794,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7803,7 +7810,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SavingsSummary" });
 // v0.112.0 S2a — months hub body (byte-identical to content/Months.md body and
 // FINANCE_HUB_BODY_TEMPLATES entry — all three must stay in sync).
 const FINANCE_MONTHS_HUB_BODY = `\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs

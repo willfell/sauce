@@ -28,6 +28,10 @@
     {
       "name": "entity-create",
       "range": ">=0.7.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
@@ -67,7 +71,8 @@
     "PlanBand",
     "SavingsSummary",
     "SavingsConfigEditor",
-    "SavingsCards"
+    "SavingsCards",
+    "FinanceChromeBar"
   ],
   "files": [
     {
@@ -173,6 +178,10 @@
     {
       "source": "helpers/finance-nav.js",
       "dest": "{{scripts_path}}/finance/finance-nav.js"
+    },
+    {
+      "source": "helpers/finance-chrome-bar.js",
+      "dest": "{{scripts_path}}/finance/finance-chrome-bar.js"
     },
     {
       "source": "helpers/finance-hub-summary.js",
@@ -435,7 +444,7 @@
           "actual": 0
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"budget\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetAllocationsEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/budgets/Budgets.md"
@@ -482,7 +491,7 @@
           }
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"paycheck\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- finance-edit-scope -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceEditScopeBanner\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"paycheck\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/paychecks/Paychecks.md"
@@ -518,7 +527,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceWorkspaceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"invoice\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceWorkspaceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceStatus\", method: \"renderBadge\", args: [\"invoice\"] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
       "extra_files": [
         {
           "filename_pattern": "Time-Log-{{prompts.month}}.md",
@@ -598,7 +607,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/debts/Debts.md"
@@ -629,7 +638,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- month-setup-checklist -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthSetupChecklist\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- month-setup-checklist -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthSetupChecklist\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/months/Months.md"
@@ -664,13 +673,223 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- savings-summary-v0.10.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SavingsSummary\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- savings-summary-v0.10.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SavingsSummary\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "{{module_directory}}/savings/Savings.md"
       }
     }
   ],
+  "breadcrumb": {
+    "types": {
+      "finance-hub": {
+        "ancestors": [],
+        "current": {
+          "label": "lit:Finance"
+        }
+      },
+      "budgets-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Budgets"
+        }
+      },
+      "paychecks-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Paychecks"
+        }
+      },
+      "invoices-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Invoices"
+        }
+      },
+      "debts-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Debts"
+        }
+      },
+      "months-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Months"
+        }
+      },
+      "savings-hub": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Savings"
+        }
+      },
+      "budget": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Budgets",
+            "link": "spice/finance/budgets/Budgets.md"
+          }
+        ],
+        "current": {
+          "label": "fm:month|file:basename"
+        }
+      },
+      "paycheck": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Paychecks",
+            "link": "spice/finance/paychecks/Paychecks.md"
+          }
+        ],
+        "current": {
+          "label": "fm:month|file:basename"
+        }
+      },
+      "invoice": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Invoices",
+            "link": "spice/finance/invoices/Invoices.md"
+          }
+        ],
+        "current": {
+          "label": "fm:month|file:basename"
+        }
+      },
+      "debt": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Debts",
+            "link": "spice/finance/debts/Debts.md"
+          }
+        ],
+        "current": {
+          "label": "fm:name|file:basename"
+        }
+      },
+      "month": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Months",
+            "link": "spice/finance/months/Months.md"
+          }
+        ],
+        "current": {
+          "label": "fm:month|file:basename"
+        }
+      },
+      "savings-account": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Savings",
+            "link": "spice/finance/savings/Savings.md"
+          }
+        ],
+        "current": {
+          "label": "fm:name|file:basename"
+        }
+      },
+      "budget-defaults": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Budget Defaults"
+        }
+      },
+      "paycheck-defaults": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Paycheck Defaults"
+        }
+      },
+      "debt-defaults": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Debt Defaults"
+        }
+      },
+      "finance-plan": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          }
+        ],
+        "current": {
+          "label": "lit:Plan"
+        }
+      }
+    }
+  },
   "rule_fragments": [
     {
       "target": "finance",
