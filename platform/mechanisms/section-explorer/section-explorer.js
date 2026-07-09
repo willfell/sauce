@@ -14,6 +14,11 @@
  * Every method is never-throw + cold-load-safe.
  */
 class SectionExplorer {
+  // Reuse established platform/blueprints/to-do/helpers/todo-daily-project-groups.js
+  // precedent: only these schemes get a live href; anything else (incl.
+  // javascript:) renders as plain non-clickable text, never silently dropped.
+  static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
+
   // ── makeAdapter — build a render(dv, adapter)-ready adapter from a per-
   // blueprint config. config = {
   //   resolveContext(dv) -> ctx|null,
@@ -68,7 +73,13 @@ class SectionExplorer {
       for (const link of links) {
         const a = linksRow.createEl("a", { cls: "se-link-chip" });
         a.textContent = link.text || link.url;
-        a.onclick = () => { try { window.open(link.url, "_blank"); } catch (_e) {} };
+        if (this._isSafeUrl(link.url)) {
+          a.href = link.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+        }
+        // Unsafe/malformed URLs: no href set — chip stays visible as plain
+        // text instead of a live link, and is never silently dropped.
       }
     }
 
@@ -83,6 +94,22 @@ class SectionExplorer {
       icon: () => fileIcon,
       target: (p) => p.file && p.file.path,
     });
+  }
+
+  _isSafeUrl(url) {
+    try {
+      // v0.119.0 PATCH (C1 from code review, ported from
+      // todo-daily-project-groups.js): trim before scheme detection.
+      // Browsers strip leading whitespace from href attrs at resolution
+      // time, so " javascript:alert(1)" executes as javascript: — but the
+      // scheme regex doesn't match leading whitespace, falling through the
+      // "relative URL" allow-path. Trim first.
+      const trimmed = String(url == null ? '' : url).trim();
+      // Allow relative URLs (no scheme) too — they're treated as same-origin.
+      if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return true;
+      const lower = trimmed.toLowerCase();
+      return SectionExplorer.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
+    } catch (_e) { return false; }
   }
 
   _makeProxyDv(dv, container) {

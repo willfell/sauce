@@ -188,4 +188,53 @@ failures += !run("pinned links render above the page grid, and render nothing wh
   delete global.customJS;
 });
 
+failures += !run("javascript: link renders as a chip with NO href/onclick (unsafe scheme blocked)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [{ url: "javascript:alert(1)", text: "evil" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const chip = els.find((e) => e.className === "se-link-chip");
+  assert.ok(chip, "expected a se-link-chip to still be rendered (never silently dropped)");
+  assert.ok(!chip.href, "expected no href set on an unsafe-scheme link");
+  assert.ok(!chip.onclick, "expected no onclick/window.open fallback on the chip");
+
+  delete global.customJS;
+});
+
+failures += !run("https: link gets a real safe anchor (href + target=_blank + rel=noopener)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [{ url: "https://example.com", text: "Style guide" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const chip = els.find((e) => e.className === "se-link-chip");
+  assert.ok(chip, "expected a se-link-chip");
+  assert.strictEqual(chip.href, "https://example.com");
+  assert.strictEqual(chip.target, "_blank");
+  assert.ok(String(chip.rel).includes("noopener"), "expected rel to include noopener");
+
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
