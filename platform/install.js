@@ -541,6 +541,11 @@ module.exports = async function (tp) {
     // into the FINAL note shape, so a second install is a true no-op (idempotent).
     await applyNoteChromeHeal(tp, installedNow.history, git);
 
+    // 6a3b. Meeting Hub notes are a tag-based hub (`tags: meetings-hub`, no
+    // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
+    // reaches them (see note-chrome.md §6). Separate heal for that surface.
+    await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+
     // 6a4. task-entity — convert the MOST-RECENT daily's open `- [ ]` lines into
     // note-per-task files under spice/tasks/ and swap the legacy capture/carryover
     // dataviewjs blocks for a single TaskTodayList render. MUST run HERE (post-loop,
@@ -6535,6 +6540,57 @@ async function applyNoteChromeHeal(tp, history, git) {
     }
   }
   history?.push({ event: "info", step: "note_chrome_heal", name: "vault",
+    reason: `healed ${healed}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// applyMeetingsHubChromeBarHeal — Meeting Hub notes carry `tags: [..., meetings-hub,
+// ...]` but NO frontmatter `type:` field (tag-based hub, not type-based — see
+// note-chrome.md §6), so applyNoteChromeHeal's type-keyed dispatch (line 6517)
+// never reaches them. Separate, small heal: scan spice/meetings/hubs for tag
+// "meetings-hub", reuse the existing pure _healChromeBarMigration(body, type,
+// barClass) transform (same strip-legacy-chrome + insert-ChromeBar-block logic
+// cycle-2 already uses for meeting/scratch/to-do) with barClass "MeetingChromeBar".
+// Per-vault, .sauce-backup snapshot before write, idempotent (transform itself
+// short-circuits when the target class is already present), never throws.
+async function applyMeetingsHubChromeBarHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/meetings/hubs";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+  let files;
+  try {
+    files = await _listAllMarkdownRecursive(adapter, root);
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_chrome_bar_heal",
+      reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (!/^\s*-\s*["']?meetings-hub["']?\s*$/m.test(before)) continue;
+      const after = _healChromeBarMigration(before, "meeting", "MeetingChromeBar");
+      if (after === before) continue;
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "meetings_hub_chrome_bar_heal", target: fpath, action: "healed",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "meetings_hub_chrome_bar_heal",
+        reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "meetings_hub_chrome_bar_heal", name: "vault",
     reason: `healed ${healed}; ${warned} warning(s)`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
@@ -20363,6 +20419,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
+    module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;

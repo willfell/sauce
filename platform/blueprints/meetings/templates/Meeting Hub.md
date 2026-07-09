@@ -11,10 +11,8 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "MeetingChromeBar" });
 ```
-
----
 
 ```dataviewjs
 // entity-create:meeting — installer-managed; do not delete this comment

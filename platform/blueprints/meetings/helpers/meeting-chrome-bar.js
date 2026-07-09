@@ -15,15 +15,31 @@ class MeetingChromeBar {
     } catch (_e) { /* never throw */ }
   }
 
+  // meetings-hub notes have no `type:` frontmatter field (tag-based hub, not
+  // type-based — see note-chrome.md §6), so hub detection reads tags instead.
+  // Same page.tags / page.file.tags fallback shape doc-search.js already uses.
+  _hasHubTag(page) {
+    const tags = Array.isArray(page && page.tags) ? page.tags : ((page && page.file && page.file.tags) || []);
+    return tags.map((t) => String(t).replace(/^#/, "")).includes("meetings-hub");
+  }
+
   _config() {
     const ICON = this.ICON;
+    const self = this;
     return {
       detect: (dv, page) => {
         const t = page && page.type;
-        if (t !== "meeting") return null;
-        return { context: "meeting", path: (page.file && page.file.path) || "" };
+        if (t === "meeting") return { context: "meeting", path: (page.file && page.file.path) || "" };
+        // No `type:` on the hub — only reachable via the tag check above.
+        if (!t && self._hasHubTag(page)) return { context: "meetings-hub", path: (page.file && page.file.path) || "" };
+        return null;
       },
       surfaceSpec: (ctx) => {
+        // The hub's own EntityCreate block + MeetingsHubCards already cover
+        // creation/listing — the bar here is breadcrumb (empty, no `type:` to
+        // key a trail off) + Vault Go▾ launcher only, same partial-integration
+        // shape as FinanceChromeBar on its hub-adjacent surfaces.
+        if (ctx.context === "meetings-hub") return { primary: null, overflow: [], leaf: false };
         return {
           primary: { id: "new-task", label: "New Task", icon: ICON.plus },
           overflow: [
@@ -54,8 +70,8 @@ class MeetingChromeBar {
         }
       },
       destinations: (dv, ctx) => {
-        const out = [{ section: "This meeting" }];
-        return out;
+        if (ctx.context === "meetings-hub") return [];
+        return [{ section: "This meeting" }];
       },
       rootClass: "meeting-chrome-root",
       btnClass: (v) => `meeting-chrome-btn meeting-chrome-btn-${v}`,

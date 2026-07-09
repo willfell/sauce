@@ -141,7 +141,7 @@ Brand-new notes open in **read / preview**, never edit-with-title-selected. The 
 
 - **Managed adopted-blueprint TEMPLATES conform** — new notes are born correct.
 - **EXISTING notes are healed at install** by `applyNoteChromeHeal` (per-vault, idempotent, `.sauce-backup` snapshot before any write, fence-aware H2 rewrite, fails loud but never throws). It keys on the dataviewjs invocation substring + frontmatter `type`, never on display markers. **Never hand-edit a note body to conform** — the heal owns it.
-- **Heal scope** is notes with frontmatter `type` ∈ {`meeting`, `scratch`, `scratch-day`, `to-do`}. **Tag-based hubs without a `type` field** (e.g. Meeting Hub, `tags: meetings-hub`) are therefore NOT healed — their template is fixed for new notes, but existing hubs keep their incidental `## H2` (e.g. `## Today's Meetings`). This is an **accepted cosmetic regression**, not a bug: the cards list below the heading is unaffected, and per the registry-grammar feedback we accept a cosmetic regression over a same-cycle heal.
+- **Heal scope** is notes with frontmatter `type` ∈ {`meeting`, `scratch`, `scratch-day`, `to-do`}. **Tag-based hubs without a `type` field** (e.g. Meeting Hub, `tags: meetings-hub`) are outside that dispatch's reach by construction (it keys on `type:`, which these notes never carry). Meeting Hub is healed by a dedicated, separately-wired `applyMeetingsHubChromeBarHeal` (scans `spice/meetings/hubs/` for the `meetings-hub` tag, reuses the same `_healChromeBarMigration` transform) — see `platform/install.js`. Any future tag-based hub without a `type:` field needs the same treatment: a small dedicated heal, not an extension of `applyNoteChromeHeal`'s type-keyed dispatch.
 
 ## 7. Cross-references
 
