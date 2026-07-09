@@ -41,6 +41,17 @@ function makeDomStub() {
       querySelectorAll() { return []; },
       empty() { this.children = []; },
     };
+    el.classList = {
+      _set: new Set(),
+      add(c) { this._set.add(c); },
+      remove(c) { this._set.delete(c); },
+      contains(c) { return this._set.has(c); },
+      toggle(c, force) {
+        const shouldHave = force === undefined ? !this._set.has(c) : !!force;
+        if (shouldHave) this._set.add(c); else this._set.delete(c);
+        return shouldHave;
+      },
+    };
     return el;
   }
   const container = makeEl("div");
@@ -117,7 +128,8 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   const rows = els.filter((e) => e.className === "se-rail-row");
   assert.strictEqual(rows.length, 2);
   // Default sort = recent (maxMtime desc) → Alpha (200) before Bravo (100).
-  assert.ok(rows[0].textContent.includes("Alpha") || rows[0].innerHTML.includes("Alpha"));
+  const firstTitle = els.find((e) => e.className === "se-rail-title" && rows[0].children.includes(e));
+  assert.ok(firstTitle && firstTitle.innerHTML.includes("Alpha"), "expected the first (most-recent) rail row's title to be Alpha");
   const meta = els.find((e) => e.className === "se-rail-meta" && (e.textContent.includes("3 doc") || e.innerHTML.includes("3 doc")));
   assert.ok(meta, "expected a meta line mentioning doc count");
 });
