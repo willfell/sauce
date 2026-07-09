@@ -47,6 +47,7 @@ class TaskNoteView {
     // ---------- Instance delegators (customJS stores INSTANCES) ----------
 
     _fieldRows(task) { return TaskNoteView._fieldRows(task); }
+    _subtaskProgressText(subtasks) { return TaskNoteView._subtaskProgressText(subtasks); }
     _humanDate(value, todayStr) { return TaskNoteView._humanDate(value, todayStr); }
     _priorityMeta(priority) { return TaskNoteView._priorityMeta(priority); }
     _linkEntries(task) { return TaskNoteView._linkEntries(task); }
@@ -70,19 +71,29 @@ class TaskNoteView {
             const s = String(v).trim();
             return s;
         };
-        const sched = val(t.scheduled);
         const due = val(t.due);
         const recur = val(t.recurrence);
         const prio = val(t.priority);
         let proj = val(t.project);
         const pm = /^\[\[([^\]]+)\]\]$/.exec(proj);
         if (pm) proj = pm[1];
-        if (sched) rows.push({ label: 'Scheduled', value: sched });
         if (due) rows.push({ label: 'Due', value: due });
         if (recur) rows.push({ label: 'Repeats', value: recur });
         if (prio) rows.push({ label: 'Priority', value: prio });
         if (proj) rows.push({ label: 'Project', value: proj });
         return rows;
+    }
+
+    /**
+     * Build the "N/M subtasks done" progress string from a parsed-task array
+     * (TaskEntity.parseNote output for each child). Empty/null input -> ''
+     * (caller skips rendering the line entirely). Pure, never throws.
+     */
+    static _subtaskProgressText(subtasks) {
+        const list = Array.isArray(subtasks) ? subtasks : [];
+        if (!list.length) return '';
+        const done = list.filter(t => t && t.status === 'done').length;
+        return done + '/' + list.length + ' subtasks done';
     }
 
     /**
@@ -363,11 +374,11 @@ class TaskNoteView {
             const task = {
                 title: str(parsed ? parsed.title : page.title),
                 status: str((parsed && parsed.status) || page.status || 'open'),
-                scheduled: str(parsed ? parsed.scheduled : page.scheduled),
                 due: str(parsed ? parsed.due : page.due),
                 priority: str(parsed ? parsed.priority : page.priority),
                 project: str(parsed ? parsed.project : page.project),
                 source_note: str(parsed ? parsed.source_note : page.source_note),
+                parent_task: str(parsed ? parsed.parent_task : page.parent_task),
                 created_at: str(parsed ? parsed.created_at : page.created_at),
                 // Structured card links (FIX 5) — read from the parsed view (already
                 // normalized to a string array) or the raw page frontmatter (which
@@ -430,7 +441,6 @@ class TaskNoteView {
                 } catch (_e) { return false; }
             };
 
-            const hasScheduled = !!task.scheduled;
             const hasDue = !!task.due;
             const prioMeta = TaskNoteView._priorityMeta(task.priority);
             // Clean, comparable link target for the Project row. Prefer
@@ -484,18 +494,6 @@ class TaskNoteView {
                         buildValue(valWrap);
                     } catch (_e) { /* one bad row must not break the card */ }
                 };
-
-                // Scheduled — human date + muted relative hint.
-                if (hasScheduled) {
-                    addRow('Scheduled', (wrap) => {
-                        const h = TaskNoteView._humanDate(task.scheduled, todayStr);
-                        wrap.createEl('span', { text: h.text || task.scheduled });
-                        if (h.relative) {
-                            const rel = wrap.createEl('span', { text: ' (' + h.relative + ')' });
-                            rel.style.cssText = 'color:var(--text-muted); font-size:0.9em;';
-                        }
-                    });
-                }
 
                 // Due — human date; overdue+open → text-error; muted relative hint.
                 if (hasDue) {
@@ -578,6 +576,28 @@ class TaskNoteView {
                 } catch (_e) { /* source link best-effort */ }
             }
 
+            // ----- "Part of" — a subtask's own note links back to its parent -----
+            const isSubtask = !!task.parent_task;
+            if (isSubtask) {
+                try {
+                    drawDivider();
+                    const partOfRow = card.createEl('div');
+                    partOfRow.style.cssText = 'font-size:0.88em; color:var(--text-muted); display:flex; align-items:center; gap:5px; flex-wrap:wrap;';
+                    partOfRow.createEl('span', { text: 'Part of' });
+                    const parentLink = partOfRow.createEl('a', { text: task.parent_task });
+                    parentLink.classList.add('internal-link');
+                    parentLink.style.cssText = 'color:var(--link-color, var(--text-accent)); cursor:pointer; text-decoration:none;';
+                    parentLink.addEventListener('click', (ev) => {
+                        ev.preventDefault();
+                        try {
+                            if (window.app && window.app.workspace && typeof window.app.workspace.openLinkText === 'function') {
+                                window.app.workspace.openLinkText(task.parent_task, filePath || '', false);
+                            }
+                        } catch (_e) { /* open best-effort */ }
+                    });
+                } catch (_e) { /* part-of link best-effort */ }
+            }
+
             // ----- LINKS section (FIX 5) — structured links rendered INSIDE the card -----
             // Each entry is a markdown link string ([[Note]] / [label](url) / <url>)
             // rendered as CLICKABLE markdown so the user's added links live neatly in
@@ -600,6 +620,73 @@ class TaskNoteView {
                     }
                 }
             } catch (_e) { /* LINKS section best-effort */ }
+
+            // ----- SUBTASKS — only meaningful when NOT itself a subtask (one level
+            // of nesting only, per design). Live-queries spice/tasks/ for every open
+            // child whose parent_task points at THIS note, reuses the shared
+            // TaskTodayList.renderTaskRow for each row (same checkbox/edit/delete/
+            // badge behavior as every other task surface), and offers an inline
+            // one-gesture "+ Add subtask" quick-create.
+            if (!isSubtask && filePath) {
+                try {
+                    const thisBasename = filePath.split('/').pop().replace(/\.md$/i, '');
+                    let subtasks = [];
+                    try {
+                        const raw = dv.pages('"spice/tasks"').where(p => {
+                            if (!p || p.type !== 'task' || !p.file || !p.file.path) return false;
+                            if (p.file.path.includes('/_trash/')) return false;
+                            let pt = '';
+                            try {
+                                const TE2 = window.customJS && window.customJS.TaskEntity;
+                                pt = (TE2 && typeof TE2._linkText === 'function') ? TE2._linkText(p.parent_task) : String(p.parent_task || '');
+                            } catch (_e) { pt = ''; }
+                            return pt === thisBasename;
+                        });
+                        const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
+                        const TEsub = window.customJS && window.customJS.TaskEntity;
+                        subtasks = (TEsub && typeof TEsub.parseNote === 'function') ? arr.map(p => TEsub.parseNote(p)) : [];
+                    } catch (_e) { subtasks = []; }
+
+                    drawDivider();
+                    const subHeadRow = card.createEl('div');
+                    subHeadRow.style.cssText = 'display:flex; align-items:baseline; justify-content:space-between; gap:8px;';
+                    const subLabel = subHeadRow.createEl('div', { text: 'SUBTASKS' });
+                    subLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
+                    const progressText = TaskNoteView._subtaskProgressText(subtasks);
+                    if (progressText) {
+                        const prog = subHeadRow.createEl('span', { text: progressText });
+                        prog.style.cssText = 'font-size:0.78em; color:var(--text-muted);';
+                    }
+
+                    const subList = card.createEl('div');
+                    subList.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
+                    const TTL = window.customJS && window.customJS.TaskTodayList;
+                    if (TTL && typeof TTL.renderTaskRow === 'function') {
+                        for (const st of subtasks) {
+                            try { TTL.renderTaskRow(subList, st, null); } catch (_e) {}
+                        }
+                    }
+
+                    const addRow = card.createEl('div');
+                    addRow.style.cssText = 'display:flex; gap:8px; margin-top:2px;';
+                    const addInput = addRow.createEl('input', { type: 'text' });
+                    addInput.placeholder = '+ Add subtask…';
+                    addInput.style.cssText = 'flex:1 1 auto; min-width:0; box-sizing:border-box; padding:6px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px;';
+                    const doAdd = async () => {
+                        const title = String(addInput.value || '').trim();
+                        if (!title) return;
+                        const TD = window.customJS && window.customJS.TaskDialog;
+                        if (!TD || typeof TD.createQuick !== 'function') return;
+                        try {
+                            await TD.createQuick({ title, parent_task: '[[' + thisBasename + ']]' });
+                            addInput.value = '';
+                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                            try { window.app && window.app.commands && window.app.commands.executeCommandById && window.app.commands.executeCommandById('dataview:dataview-force-refresh-views'); } catch (_e) {}
+                        } catch (_e) { /* best-effort */ }
+                    };
+                    addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
+                } catch (_e) { /* SUBTASKS section best-effort — never break the card */ }
+            }
 
             // ----- Full-width primary "Edit task" button -----
             drawDivider();

@@ -1269,6 +1269,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await stripPersistedRecurringSection(tp, mech, variables, history, git); // NEW v0.120.0 — retires materialized "Recurring Today" / "Recurring" SectionLabel blocks + recurring_from task lines + sentinels from dailies, since ToDoDailyRecurring.render() now live-queries the registry instead of writing to today's file. Idempotent. .sauce-backup snapshot before write.
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyRecurringTasksMigrationHeal(tp, mech, variables, history, git);   // NEW recurring-tasks cycle — migrates legacy Recurring Tasks.md registry entries (checked + unchecked) into real rolling spice/tasks/*.md notes; ungated (idempotent via per-title exists-check), never touches/deletes the original registry
+  await applyTaskDueScheduledRenameMigration(tp, mech, variables, history, git);   // NEW subtasks-and-dialog-polish cycle — renames scheduled -> due on every existing task note (open + _done/ + _trash/); ungated, idempotent, .sauce-backup before write. MUST run before any consumer relies on TaskEntity.queryToday's due-only bucketing.
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
@@ -9682,8 +9683,7 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
       "type: task",
       "title: " + entry.title,
       "status: open",
-      "scheduled: " + (scheduled || ""),
-      "due:",
+      "due: " + (scheduled || ""),
       "recurrence: " + entry.recurrence,
       "priority: " + (entry.priority || ""),
       "project: " + project,
@@ -9843,6 +9843,105 @@ function _nextOccurrenceForHeal(recurrence) {
     }
   }
   return null;
+}
+
+// applyTaskDueScheduledRenameMigration — schema consolidation.
+//
+// TaskEntity's schema retired the separate `scheduled` field (queryToday /
+// buildBands / groupByDate now all bucket Today/Overdue by `due` alone).
+// This heal walks every note under spice/tasks/ (open root + _done/ +
+// _trash/ — a task can live in any of the three) and, where a `scheduled:`
+// key is present, copies its value into `due:` ONLY IF `due` is currently
+// blank (never clobber a value someone already had in `due` under the old
+// dual-field system), then removes the `scheduled` key entirely. Ungated
+// (runs every install), idempotent (a note with no `scheduled` key is a
+// no-op), one `.sauce-backup` snapshot per touched file, failure-loud
+// history. Critical correctness note: without this heal, every existing
+// task with a `scheduled` date silently vanishes from Today/Overdue the
+// moment queryToday starts reading `due` instead.
+async function applyTaskDueScheduledRenameMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "task-entity") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const roots = ["spice/tasks", "spice/tasks/_done", "spice/tasks/_trash"];
+  const files = [];
+  for (const root of roots) {
+    const exists = await adapter.exists(root).catch(() => false);
+    if (!exists) continue;
+    let listing;
+    try { listing = await adapter.list(root); } catch (_e) { continue; }
+    for (const f of (listing.files || [])) {
+      if (/\.md$/i.test(f)) files.push(f);
+    }
+  }
+
+  if (!files.length) {
+    history?.push({ event: "info", step: "task_due_scheduled_rename_migration", name: "task-entity",
+      renamed: 0, skipped: 0, errors: [],
+      reason: "no task notes found under spice/tasks/",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let renamed = 0;
+  let skipped = 0;
+  const errors = [];
+
+  for (const path of files) {
+    let content;
+    try { content = await adapter.read(path); }
+    catch (e) { errors.push({ path, error: e && e.message }); continue; }
+
+    // NOTE: [ \t]* (not \s*) right after the colon — \s* would cross the
+    // newline into the FOLLOWING frontmatter line whenever this key's value
+    // is blank (e.g. "due:\npriority:" — \s* greedily eats the blank line's
+    // newline, then (.*) captures "priority:" as if it were due's value).
+    // That silently made a blank `due:` look non-blank, skipping the copy.
+    const schedMatch = /^scheduled:[ \t]*(.*)$/m.exec(content);
+    if (!schedMatch) { skipped++; continue; }
+    const schedValue = schedMatch[1].trim();
+
+    const dueMatch = /^due:[ \t]*(.*)$/m.exec(content);
+    const dueIsBlank = !dueMatch || dueMatch[1].trim() === "";
+
+    let updated = content;
+    if (dueIsBlank && schedValue) {
+      // Move the scheduled value into due (only when due is currently blank).
+      if (dueMatch) {
+        updated = updated.replace(/^due:[ \t]*.*$/m, "due: " + schedValue);
+      } else {
+        // No due key at all (very old note) — insert one right after the
+        // scheduled line so we don't have to guess at overall key order.
+        updated = updated.replace(/^scheduled:[ \t]*.*$/m, (m) => m + "\ndue: " + schedValue);
+      }
+    }
+    // Always strip the scheduled line itself, whether or not we moved its value.
+    updated = updated.replace(/^scheduled:[ \t]*.*\n?/m, "");
+
+    if (updated === content) { skipped++; continue; }
+
+    try {
+      const backupDir = ".sauce-backup/" + ts + "/" + path.split("/").slice(0, -1).join("/");
+      const backupPath = ".sauce-backup/" + ts + "/" + path;
+      if (typeof adapter.mkdir === "function") {
+        try { await adapter.mkdir(backupDir); } catch (_e) { /* tolerate */ }
+      }
+      try { await adapter.write(backupPath, content); } catch (_e) { /* tolerate */ }
+      await adapter.write(path, updated);
+      renamed++;
+    } catch (e) {
+      errors.push({ path, error: e && e.message });
+    }
+  }
+
+  history?.push({ event: "info", step: "task_due_scheduled_rename_migration", name: "task-entity",
+    renamed, skipped, errors,
+    reason: renamed + " task note(s) migrated from scheduled to due; " + skipped + " already-clean or no-op",
+    git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+    completed_at: new Date().toISOString() });
 }
 
 // _linksHubBody — pure. Returns the Links Hub note BODY (below the frontmatter),

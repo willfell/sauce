@@ -56,13 +56,14 @@ class TaskDialog {
     _payloadFromState(state) { return TaskDialog._payloadFromState(state); }
     _recurrenceValidity(recurrence, isSupportedFn) { return TaskDialog._recurrenceValidity(recurrence, isSupportedFn); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
+    _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
 
     // ---------- Static pure helpers ----------
 
     /**
      * Seed a create form from the surface that opened the dialog.
-     *   daily   → { scheduled: today, source: "daily" }
-     *   project → { project, source: "project" }        (NO scheduled)
+     *   daily   → { due: today, source: "daily" }
+     *   project → { project, source: "project" }        (NO due)
      *   meeting → { source_note, project, source: "meeting" }
      *   manual / absent → { source: "manual" }
      * Only keys with a meaningful value are emitted (no empty scaffolding), so a
@@ -72,7 +73,7 @@ class TaskDialog {
         const o = opts || {};
         switch (o.surface) {
             case 'daily':
-                return { scheduled: o.today || '', source: 'daily' };
+                return { due: o.today || '', source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
             case 'meeting': {
@@ -145,8 +146,24 @@ class TaskDialog {
     }
 
     /**
+     * Decide whether the dialog's "More options" section should start
+     * EXPANDED: true iff any of Priority/Project/Repeats/Notes/Links already
+     * has a value. Create mode always passes an all-blank state (nothing to
+     * show yet) so this naturally returns false there. Pure, never throws.
+     */
+    static _moreOptionsShouldStartExpanded(state) {
+        const s = state || {};
+        if (s.priority && String(s.priority).trim()) return true;
+        if (s.projectName && String(s.projectName).trim()) return true;
+        if (s.recurrence && String(s.recurrence).trim()) return true;
+        if (s.notes && String(s.notes).trim()) return true;
+        if (Array.isArray(s.links) && s.links.length > 0) return true;
+        return false;
+    }
+
+    /**
      * Thin wrapper over TaskEntity.nextOccurrence for the "done" branch:
-     * rolls forward from TODAY (not from the task's stale `scheduled`), so a
+     * rolls forward from TODAY (not from the task's stale `due`), so a
      * late completion doesn't create a backlog of overdue occurrences. Returns
      * the next `YYYY-MM-DD`, or `null` when the grammar is unsupported/never
      * fires (caller falls back to normal archiving). Pure, never throws.
@@ -563,8 +580,7 @@ class TaskDialog {
         const defaults = editPath ? {} : TaskDialog.defaultsForSurface(opts);
         const state = {
             title: fm ? (fm.title || '') : '',
-            scheduled: fm ? (fm.scheduled || '') : (defaults.scheduled || ''),
-            due: fm ? (fm.due || '') : '',
+            due: fm ? (fm.due || '') : (defaults.due || ''),
             priority: fm ? (fm.priority || '') : (defaults.priority || ''),
             // project as a display name (strip [[ ]] if present)
             projectName: fm ? TaskDialog._stripWikilink(fm.project) : (defaults.project && defaults.project.name) || '',
@@ -618,8 +634,8 @@ class TaskDialog {
         // control chrome/sizing (the native date picker still opens on tap), so
         // the input finally respects the container width like the text fields.
         const dateCss = fieldCss + ' -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;';
-        const label = (text) => {
-            const el = host.createEl('div', { text });
+        const label = (text, container) => {
+            const el = (container || host).createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; color:var(--text-muted, #999); margin-top:16px; margin-bottom:6px;';
             return el;
         };
@@ -634,13 +650,6 @@ class TaskDialog {
         // existing task shouldn't grab focus (the title is already filled in).
         if (!editPath) setTimeout(() => titleInput.focus(), 50);
 
-        // Scheduled
-        label('Scheduled (optional)');
-        const schedInput = host.createEl('input', { type: 'date' });
-        schedInput.style.cssText = dateCss;
-        schedInput.value = state.scheduled;
-        schedInput.onchange = () => { state.scheduled = schedInput.value; updateSubmit(); };
-
         // Due
         label('Due (optional)');
         const dueInput = host.createEl('input', { type: 'date' });
@@ -648,15 +657,48 @@ class TaskDialog {
         dueInput.value = state.due;
         dueInput.onchange = () => { state.due = dueInput.value; updateSubmit(); };
 
+        // ----- More options toggle (progressive disclosure) -----
+        // Everything below (Repeats, Priority, Project, Notes, Links) lives
+        // inside moreBox, which starts collapsed in create mode and starts
+        // EXPANDED in edit mode when the task already has any of those fields
+        // set (so existing data is never hidden by default).
+        const moreToggleRow = host.createDiv();
+        moreToggleRow.style.cssText = 'margin-top:14px;';
+        const moreToggle = moreToggleRow.createEl('button', { text: 'More options ▾' });
+        moreToggle.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:2px 0; border:none; background:transparent; color:var(--text-muted,#999); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; cursor:pointer;';
+        try { moreToggle.setAttribute('type', 'button'); } catch (_e) {}
+
+        const moreBox = host.createDiv();
+        moreBox.style.cssText = 'overflow:hidden; max-height:0; opacity:0; transition:max-height 180ms ease, opacity 140ms ease; border-top:1px solid var(--background-modifier-border,#333); margin-top:0;';
+
+        let moreExpanded = false;
+        const setMoreExpanded = (expanded) => {
+            moreExpanded = expanded;
+            if (expanded) {
+                moreBox.style.maxHeight = '2000px';
+                moreBox.style.opacity = '1';
+                moreBox.style.borderTopWidth = '1px';
+                moreBox.style.marginTop = '10px';
+                moreToggle.textContent = 'Less options ▴';
+            } else {
+                moreBox.style.maxHeight = '0';
+                moreBox.style.opacity = '0';
+                moreBox.style.borderTopWidth = '0';
+                moreBox.style.marginTop = '0';
+                moreToggle.textContent = 'More options ▾';
+            }
+        };
+        moreToggle.onclick = () => setMoreExpanded(!moreExpanded);
+
         // Recurrence — free-text grammar (RecurrenceParser), validated live.
         // Empty = one-shot task (default). A supported grammar makes "Done"
-        // roll the task's scheduled date forward instead of archiving it.
-        label('Repeats (optional — e.g. "every day", "every Monday", "every 2 weeks on Friday")');
-        const recurInput = host.createEl('input', { type: 'text' });
+        // roll the task's due date forward instead of archiving it.
+        label('Repeats (optional — e.g. "every day", "every Monday", "every 2 weeks on Friday")', moreBox);
+        const recurInput = moreBox.createEl('input', { type: 'text' });
         recurInput.style.cssText = fieldCss;
         recurInput.value = state.recurrence;
         recurInput.placeholder = 'every day';
-        const recurError = host.createEl('div');
+        const recurError = moreBox.createEl('div');
         recurError.style.cssText = 'font-size:11px; color:var(--text-error,#e05561); margin-top:4px; display:none;';
         const isSupportedFn = () => {
             try {
@@ -677,8 +719,8 @@ class TaskDialog {
         };
 
         // Priority chip row
-        label('Priority');
-        const chipRow = host.createDiv();
+        label('Priority', moreBox);
+        const chipRow = moreBox.createDiv();
         chipRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
         const chipOff = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:transparent; color:var(--text-muted,#999); transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
         const chipOn = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--interactive-accent,#6a6abf); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:var(--interactive-accent,#6a6abf); color:var(--text-on-accent,#fff); font-weight:600; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
@@ -698,8 +740,8 @@ class TaskDialog {
         // (no `dv` in a button-invoked dialog). First option is "— none —"; a
         // seeded/edited project not in the list is preserved via a temp option so
         // it's never silently lost.
-        label('Project (optional)');
-        const projSelect = host.createEl('select');
+        label('Project (optional)', moreBox);
+        const projSelect = moreBox.createEl('select');
         projSelect.style.cssText = fieldCss;
         const projects = TaskDialog._loadProjectList(app);
         const noneOpt = projSelect.createEl('option', { text: '— none —' });
@@ -726,8 +768,8 @@ class TaskDialog {
         // existing body (minus its frontmatter) just-in-time so notes/hyperlinks
         // can be added or edited on an existing task; the save path writes them
         // back into the task's OWN file only (single-file invariant intact).
-        label('Notes (optional)');
-        const notesInput = host.createEl('textarea');
+        label('Notes (optional)', moreBox);
+        const notesInput = moreBox.createEl('textarea');
         notesInput.style.cssText = fieldCss + ' min-height:60px; resize:vertical;';
         notesInput.value = state.notes;
         notesInput.oninput = () => { state.notes = notesInput.value; };
@@ -751,11 +793,11 @@ class TaskDialog {
         // so the browser shell stays thin. Everything is guarded — a bad DOM/vault
         // call never throws out of _render. Only ONE inserter is open at a time.
         try {
-            label('Links (optional)');
+            label('Links (optional)', moreBox);
 
             // Chip list — one removable chip per entry in state.links, re-rendered
             // in place whenever the list changes.
-            const chipsBox = host.createDiv();
+            const chipsBox = moreBox.createDiv();
             chipsBox.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:2px;';
             const renderChips = () => {
                 chipsBox.empty();
@@ -779,7 +821,7 @@ class TaskDialog {
             };
             renderChips();
 
-            const linkRow = host.createDiv();
+            const linkRow = moreBox.createDiv();
             linkRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;';
             // Small ghost buttons that match the footer button grammar (quiet,
             // native tokens, comfortable tap height).
@@ -797,7 +839,7 @@ class TaskDialog {
             const webBtn = mkGhost(linkRow, '＋ Web link');
 
             // A single host div below the row that holds whichever inserter is open.
-            const inserterBox = host.createDiv();
+            const inserterBox = moreBox.createDiv();
             inserterBox.style.cssText = 'margin-top:8px;';
             let openKind = null;   // null | 'note' | 'web'
             const closeInserter = () => { inserterBox.empty(); openKind = null; };
@@ -883,6 +925,8 @@ class TaskDialog {
             noteBtn.onclick = openNotePicker;
             webBtn.onclick = openWebForm;
         } catch (_e) { /* link chips are best-effort; never abort the render */ }
+
+        setMoreExpanded(TaskDialog._moreOptionsShouldStartExpanded(state));
 
         // ----- Footer -----
         // A two-group flex row: item actions (Open / Done / Delete) grouped on the
@@ -1006,7 +1050,6 @@ class TaskDialog {
         const s = state || {};
         const payload = {
             title: s.title,
-            scheduled: s.scheduled || '',
             due: s.due || '',
             recurrence: s.recurrence || '',
             priority: s.priority || '',
@@ -1097,7 +1140,7 @@ class TaskDialog {
     /**
      * QUICK-CREATE — a modal-less one-gesture task create for the Home command
      * center's inline "Jot a task…" capture. Builds the minimal payload from the
-     * typed title (scheduled = today, no priority/due/project) and reuses the SAME
+     * typed title (due = today, no priority/project) and reuses the SAME
      * single-file `_create` path (composeNote → dedupe → one vault.create), so the
      * one-file-write invariant holds and the note appears in the Tasks panel on
      * the caller's re-render. `app` is grabbed from the runtime global (as
@@ -1111,8 +1154,9 @@ class TaskDialog {
         if (!app || !title) return;
         const payload = {
             title,
-            scheduled: (opts && opts.today) || '',
+            due: (opts && opts.today) || '',
             source: (opts && opts.source) || 'daily',
+            parent_task: (opts && opts.parent_task) || '',
             links: [],
         };
         await this._create(app, payload, '');
@@ -1132,7 +1176,6 @@ class TaskDialog {
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
-            fm.scheduled = payload.scheduled || '';
             fm.due = payload.due || '';
             fm.priority = payload.priority || '';
             fm.recurrence = payload.recurrence || '';
@@ -1198,10 +1241,10 @@ class TaskDialog {
             const nextDate = todayStr ? TaskDialog._rollForwardDate(recurrence, todayStr, anchorStr, matchesFn) : null;
             if (nextDate) {
                 // ROLL FORWARD — same file, never archived. Leaves status/priority/
-                // project/links untouched; only scheduled advances and completed_at
+                // project/links untouched; only due advances and completed_at
                 // clears (so the note never carries a stale "last time" stamp).
                 await app.fileManager.processFrontMatter(file, (fmw) => {
-                    fmw.scheduled = nextDate;
+                    fmw.due = nextDate;
                     fmw.completed_at = '';
                 });
                 try { new Notice('Task rolled to ' + nextDate); } catch (_e) {}

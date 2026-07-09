@@ -82,7 +82,7 @@ ok('TE-1b _uniqueName dedupes against the vault', () => {
 ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   const out = TaskEntity.composeNote({
     title: 'Call X',
-    scheduled: '2026-07-01',
+    due: '2026-07-01',
     project: { name: 'Sauce', slug: 'sauce' },
     source: 'daily',
     now: '2026-07-01T10:00:00-06:00',
@@ -90,13 +90,12 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   const fm = out.frontmatter;
   assert(fm.type === 'task', 'type');
   assert(fm.status === 'open', 'status defaults open');
-  assert(fm.scheduled === '2026-07-01', 'scheduled');
+  assert(fm.due === '2026-07-01', 'due');
   assert(fm.project === '[[Sauce]]', 'project wikilink');
   assert(fm.project_slug === 'sauce', 'project_slug');
   assert(fm.source === 'daily', 'source');
   assert(!!fm.created_at, 'created_at truthy');
   assert(fm.created_at === '2026-07-01T10:00:00-06:00', 'created_at from payload.now');
-  assert(fm.due === '', 'absent due → empty string');
   assert(fm.completed_at === '', 'absent completed_at → empty string');
   // FIX 5 — links is always present as an array (empty when none provided).
   assert(Array.isArray(fm.links), 'links is an array');
@@ -108,10 +107,10 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
-// 3. composeNote — minimal payload → blank scheduled, still valid.
-ok('TE-3 composeNote minimal payload → blank scheduled + valid', () => {
+// 3. composeNote — minimal payload → blank due, still valid.
+ok('TE-3 composeNote minimal payload → blank due + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
-  assert(out.frontmatter.scheduled === '', 'absent scheduled → empty string');
+  assert(out.frontmatter.due === '', 'absent due → empty string');
   assert(TaskEntity.validatePayload({ title: 'x' }).valid === true, 'minimal payload valid');
 });
 
@@ -195,11 +194,33 @@ ok('TE-recur-6 nextOccurrence tolerates a missing/throwing matchesFn (never thro
   assert(!threw, 'nextOccurrence must never throw');
 });
 
+ok('TE-sub-1 composeNote emits parent_task (set + empty)', () => {
+  const child = TaskEntity.composeNote({ title: 'Write intro', parent_task: '[[Ship the report]]', moment: fixedMoment });
+  assert(child.frontmatter.parent_task === '[[Ship the report]]', 'parent_task set: ' + child.frontmatter.parent_task);
+  const bare = TaskEntity.composeNote({ title: 'Top-level', moment: fixedMoment });
+  assert(bare.frontmatter.parent_task === '', 'parent_task empty-string-not-omitted: ' + JSON.stringify(bare.frontmatter.parent_task));
+  const keys = Object.keys(child.frontmatter);
+  assert(keys.indexOf('source_note') === keys.indexOf('parent_task') - 1, 'parent_task follows source_note: ' + keys.join(','));
+});
+
+ok('TE-sub-2 parseNote normalizes parent_task via _linkText (Link object -> basename)', () => {
+  const linkObj = { path: 'spice/tasks/Ship the report.md', display: null };
+  const parsed = TaskEntity.parseNote({ title: 'Write intro', parent_task: linkObj, file: { path: 'spice/tasks/Write intro.md' } });
+  assert(parsed.parent_task === 'Ship the report', 'coerced to basename: ' + parsed.parent_task);
+  const bare = TaskEntity.parseNote({ title: 'Top-level', file: { path: 'spice/tasks/Top-level.md' } });
+  assert(bare.parent_task === '', 'absent parent_task -> empty string: ' + JSON.stringify(bare.parent_task));
+});
+
+ok('TD-sub-1 createQuick-shaped payload carries parent_task through composeNote', () => {
+  const composed = TaskEntity.composeNote({ title: 'Write intro', parent_task: '[[Ship the report]]', due: '', source: 'daily', links: [], moment: fixedMoment });
+  assert(composed.frontmatter.parent_task === '[[Ship the report]]', 'parent_task in composed frontmatter: ' + composed.frontmatter.parent_task);
+});
+
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
-  const parsed = TaskEntity.parseNote({ status: undefined, scheduled: '', title: 't', file: { path: 'spice/tasks/a.md' } });
+  const parsed = TaskEntity.parseNote({ status: undefined, due: '', title: 't', file: { path: 'spice/tasks/a.md' } });
   assert(parsed.status === 'open', 'missing status → open');
-  assert(parsed.scheduled === null, 'blank scheduled → null');
+  assert(parsed.due === null, 'blank due → null');
   assert(parsed.title === 't', 'title preserved');
   assert(parsed.path === 'spice/tasks/a.md', 'path from file.path');
 });
@@ -207,10 +228,10 @@ ok('TE-4 parseNote normalizes status + blank dates', () => {
 // 5. queryToday — partition open tasks into today / overdue; excludes done/future.
 ok('TE-5 queryToday partitions today + overdue (open only)', () => {
   const res = TaskEntity.queryToday([
-    { scheduled: '2026-07-01', status: 'open' },
-    { scheduled: '2026-06-30', status: 'open' },
-    { scheduled: '2026-07-02', status: 'open' },
-    { scheduled: '2026-07-01', status: 'done' },
+    { due: '2026-07-01', status: 'open' },
+    { due: '2026-06-30', status: 'open' },
+    { due: '2026-07-02', status: 'open' },
+    { due: '2026-07-01', status: 'done' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single open 07-01: got ' + res.today.length);
   assert(res.overdue.length === 1, 'overdue = the open 06-30: got ' + res.overdue.length);
@@ -220,23 +241,22 @@ ok('TE-5 queryToday partitions today + overdue (open only)', () => {
 ok('TE-6 validatePayload requires title + validates date shape', () => {
   assert(TaskEntity.validatePayload({ title: '' }).valid === false, 'empty title invalid');
   assert(TaskEntity.validatePayload({ title: 'ok' }).valid === true, 'non-empty title valid');
-  assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-7-1' }).valid === false, 'bad scheduled shape invalid');
   assert(TaskEntity.validatePayload({ title: 'ok', due: 'nope' }).valid === false, 'bad due shape invalid');
-  assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-07-01', due: '2026-06-30' }).valid === true, 'good dates valid');
+  assert(TaskEntity.validatePayload({ title: 'ok', due: '2026-06-30' }).valid === true, 'good due valid');
 });
 
 function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // ---------- TaskDialog static helpers (pure) ----------
 
-// TD-1. defaultsForSurface daily → { scheduled: today, source: "daily" }.
-ok('TD-1 defaultsForSurface daily seeds scheduled + source', () => {
+// TD-1. defaultsForSurface daily → { due: today, source: "daily" }.
+ok('TD-1 defaultsForSurface daily seeds due + source', () => {
   const d = TaskDialog.defaultsForSurface({ surface: 'daily', today: '2026-07-01' });
-  assert(deepEq(d, { scheduled: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
+  assert(deepEq(d, { due: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
 });
 
-// TD-2. defaultsForSurface project → { project, source: "project" }, no scheduled.
-ok('TD-2 defaultsForSurface project seeds project + source (no scheduled)', () => {
+// TD-2. defaultsForSurface project → { project, source: "project" }, no due.
+ok('TD-2 defaultsForSurface project seeds project + source (no due)', () => {
   const d = TaskDialog.defaultsForSurface({ surface: 'project', project: { name: 'Sauce', slug: 'sauce' } });
   assert(deepEq(d, { project: { name: 'Sauce', slug: 'sauce' }, source: 'project' }), 'got ' + JSON.stringify(d));
 });
@@ -250,7 +270,7 @@ ok('TD-3 defaultsForSurface meeting seeds source_note + project + source', () =>
 });
 
 // TD-4. The to-do page's "New Task" button must dispatch surface:'daily' (NOT
-// 'today') so defaultsForSurface actually seeds scheduled+source. Regression
+// 'today') so defaultsForSurface actually seeds due+source. Regression
 // net for the "New Task on daily to-do never shows in Today" bug.
 ok('TD-4 to-do chrome bar New Task dispatch uses surface "daily"', () => {
   const src = fs.readFileSync(
@@ -417,13 +437,13 @@ ok('TD-15 _payloadFromState includes state.links', () => {
 });
 
 ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
-  const state = { title: 'Feed the dogs', scheduled: '2026-07-08', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
+  const state = { title: 'Feed the dogs', due: '2026-07-08', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
   const payload = TaskDialog._payloadFromState(state);
   assert(payload.recurrence === 'every day', 'recurrence in payload: ' + payload.recurrence);
 });
 
 ok('TD-recur-2 _payloadFromState defaults recurrence to empty string', () => {
-  const state = { title: 'One-shot', scheduled: '', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
+  const state = { title: 'One-shot', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
   const payload = TaskDialog._payloadFromState(state);
   assert(payload.recurrence === '', 'no recurrence -> empty string: ' + JSON.stringify(payload.recurrence));
 });
@@ -475,12 +495,36 @@ ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching g
   }
 });
 
+// ---------- TaskDialog _moreOptionsShouldStartExpanded (pure) ----------
+//
+// Decides whether the dialog's "More options" section (Repeats/Priority/
+// Project/Notes/Links) should start expanded: true iff ANY of those fields
+// already has a value (so existing edit-mode data is never hidden by
+// default); create mode's all-blank state naturally collapses.
+
+ok('TD-polish-1 _moreOptionsShouldStartExpanded: false when no optional field is set', () => {
+  const state = { priority: '', projectName: '', recurrence: '', notes: '', links: [] };
+  assert(TaskDialog._moreOptionsShouldStartExpanded(state) === false, 'bare state -> collapsed');
+});
+
+ok('TD-polish-2 _moreOptionsShouldStartExpanded: true when ANY optional field is set', () => {
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: 'high', projectName: '', recurrence: '', notes: '', links: [] }) === true, 'priority set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: 'Connectors', recurrence: '', notes: '', links: [] }) === true, 'project set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: 'every day', notes: '', links: [] }) === true, 'recurrence set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: '', notes: 'some notes', links: [] }) === true, 'notes set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: '', notes: '', links: ['[[A]]'] }) === true, 'links set -> expanded');
+});
+
+ok('TD-polish-3 _moreOptionsShouldStartExpanded tolerates a missing/null state', () => {
+  assert(TaskDialog._moreOptionsShouldStartExpanded(null) === false, 'null state -> collapsed, never throws');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
 // (exercised in-vault), but buildBands is a PURE partition helper mirroring
-// TaskEntity.queryToday: open-only, today = scheduled === todayStr, overdue =
-// scheduled < todayStr. We load it the same bare-class way and call the static
+// TaskEntity.queryToday: open-only, today = due === todayStr, overdue =
+// due < todayStr. We load it the same bare-class way and call the static
 // through an INSTANCE so a regression to instance-less statics fails loudly.
 const TaskTodayListClass = loadClass('mechanisms/task-entity/task-today-list.js', 'TaskTodayList');
 const TaskTodayList = new TaskTodayListClass();
@@ -498,15 +542,15 @@ const TaskNoteView = new TaskNoteViewClass();
 // TNV-1. _fieldRows includes only set fields; strips project wikilink brackets.
 ok('TNV-1 _fieldRows returns only set fields (project unwrapped)', () => {
   const rows = TaskNoteView._fieldRows({
-    scheduled: '2026-07-01', due: '', priority: 'high', project: '[[Sauce]]',
+    due: '2026-07-01', priority: 'high', project: '[[Sauce]]',
   });
   const byLabel = {};
   for (const r of rows) byLabel[r.label] = r.value;
-  assert(rows.length === 3, 'only 3 set fields (no due): got ' + rows.length);
-  assert(byLabel.Scheduled === '2026-07-01', 'scheduled row');
+  assert(rows.length === 3, 'only 3 set fields: got ' + rows.length);
+  assert(byLabel.Due === '2026-07-01', 'due row');
   assert(byLabel.Priority === 'high', 'priority row');
   assert(byLabel.Project === 'Sauce', 'project unwrapped: ' + byLabel.Project);
-  assert(!('Due' in byLabel), 'empty due omitted');
+  assert(!('Scheduled' in byLabel), 'no Scheduled row ever produced');
 });
 
 // TNV-2. _fieldRows tolerates a null / empty task (never throws → []).
@@ -518,11 +562,11 @@ ok('TNV-2 _fieldRows tolerates null / empty task', () => {
 // TNV-recur-1. _fieldRows includes a Repeats row iff recurrence is set.
 ok('TNV-recur-1 _fieldRows includes a Repeats row iff recurrence is set', () => {
   const TaskNoteViewClass = loadClass('mechanisms/task-entity/task-note-view.js', 'TaskNoteView');
-  const rows = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08', recurrence: 'every day' });
+  const rows = TaskNoteViewClass._fieldRows({ due: '2026-07-08', recurrence: 'every day' });
   const hit = rows.find(r => r.label === 'Repeats');
   assert(hit && hit.value === 'every day', 'Repeats row present with grammar text: ' + JSON.stringify(rows));
 
-  const rowsNone = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08' });
+  const rowsNone = TaskNoteViewClass._fieldRows({ due: '2026-07-08' });
   assert(!rowsNone.find(r => r.label === 'Repeats'), 'no recurrence -> no Repeats row: ' + JSON.stringify(rowsNone));
 });
 
@@ -610,23 +654,37 @@ ok('TNV-7 _linkEntries coerces links[] to renderable markdown strings', () => {
   assert(deepEq(TaskNoteView._linkEntries({ links: ['[[a/b/Baz.md|Baz]]'] }), ['[[a/b/Baz.md|Baz]]']), 'wikilink string kept verbatim');
 });
 
+ok('TNV-sub-1 _subtaskProgressText: "N/M subtasks done" from a parsed-task array', () => {
+  const subtasks = [
+    { title: 'A', status: 'done' },
+    { title: 'B', status: 'open' },
+    { title: 'C', status: 'done' },
+  ];
+  assert(TaskNoteViewClass._subtaskProgressText(subtasks) === '2/3 subtasks done', 'progress text: ' + TaskNoteViewClass._subtaskProgressText(subtasks));
+});
+
+ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
+  assert(TaskNoteViewClass._subtaskProgressText([]) === '', 'empty array -> empty string');
+  assert(TaskNoteViewClass._subtaskProgressText(null) === '', 'null -> empty string, never throws');
+});
+
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   const res = TaskTodayList.buildBands([
-    { scheduled: '2026-07-01', status: 'open' },
-    { scheduled: '2026-06-29', status: 'open' },
-    { scheduled: '2026-07-01', status: 'done' },
+    { due: '2026-07-01', status: 'open' },
+    { due: '2026-06-29', status: 'open' },
+    { due: '2026-07-01', status: 'done' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single open 07-01: got ' + res.today.length);
   assert(res.overdue.length === 1, 'overdue = the open 06-29: got ' + res.overdue.length);
 });
 
-// TTL-2. buildBands excludes future-scheduled + unscheduled open tasks.
+// TTL-2. buildBands excludes future-due + unscheduled open tasks.
 ok('TTL-2 buildBands excludes future + unscheduled open tasks', () => {
   const res = TaskTodayList.buildBands([
-    { scheduled: '2026-07-02', status: 'open' },  // future → neither
-    { scheduled: '', status: 'open' },            // unscheduled → neither
-    { scheduled: null, status: 'open' },          // unscheduled → neither
+    { due: '2026-07-02', status: 'open' },  // future → neither
+    { due: '', status: 'open' },            // unscheduled → neither
+    { due: null, status: 'open' },          // unscheduled → neither
   ], '2026-07-01');
   assert(res.today.length === 0, 'no today: got ' + res.today.length);
   assert(res.overdue.length === 0, 'no overdue: got ' + res.overdue.length);
@@ -642,34 +700,43 @@ ok('TTL-3 buildBands tolerates non-array input', () => {
 // TTL-4. buildBands EXCLUDES tasks that belong elsewhere (FIX 1 — dedup): a task
 // with a project_slug renders in its Project section, and a meeting-sourced task
 // renders in Meeting Tasks — so neither may ALSO show in the Today/Overdue bands
-// (that duplicate was the bug). Today/Overdue = open, scheduled, NO project, NOT
+// (that duplicate was the bug). Today/Overdue = open, due, NO project, NOT
 // meeting-sourced (personal daily tasks only).
 ok('TTL-4 buildBands excludes project-connected + meeting-sourced tasks (dedup)', () => {
   const res = TaskTodayList.buildBands([
-    // Scheduled today, but has a project → shown in its Project section, NOT today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
-    // Scheduled today, meeting-sourced → shown in Meeting Tasks, NOT today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
-    // Plain scheduled-today personal task (no project, source daily) → IN today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
+    // Due today, but has a project → shown in its Project section, NOT today.
+    { due: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Due today, meeting-sourced → shown in Meeting Tasks, NOT today.
+    { due: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain due-today personal task (no project, source daily) → IN today.
+    { due: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
     // Overdue but has a project → excluded from overdue too.
-    { scheduled: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
+    { due: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
     // Overdue meeting-sourced → excluded from overdue too.
-    { scheduled: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
+    { due: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
     // Plain overdue personal task → IN overdue.
-    { scheduled: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
+    { due: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single plain personal 07-01: got ' + res.today.length);
-  assert(res.today[0].scheduled === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
+  assert(res.today[0].due === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
     'today band holds only the personal daily task');
   assert(res.overdue.length === 1, 'overdue = the single plain personal 06-29: got ' + res.overdue.length);
-  assert(res.overdue[0].scheduled === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
+  assert(res.overdue[0].due === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
     'overdue band holds only the personal daily task');
   // A whitespace-only project_slug is treated as "no project" (still shown in today).
   const ws = TaskTodayList.buildBands([
-    { scheduled: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
+    { due: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
   ], '2026-07-01');
   assert(ws.today.length === 1, 'whitespace-only project_slug → still a personal task: got ' + ws.today.length);
+});
+
+ok('TTL-sub-1 buildBands excludes a task with parent_task set (shown in its parent Subtasks section instead)', () => {
+  const tasks = [
+    { title: 'Top-level today', status: 'open', due: '2026-07-08', parent_task: '' },
+    { title: 'Subtask today', status: 'open', due: '2026-07-08', parent_task: 'Ship the report' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  assert(bands.today.length === 1 && bands.today[0].title === 'Top-level today', 'subtask excluded from Today: ' + JSON.stringify(bands.today));
 });
 
 // ---------- Dataview DateTime coercion (FIX 1 — tasks-don't-render bug) ----------
@@ -691,22 +758,21 @@ ok('DT-1 _toDateStr coerces date-ish values to YYYY-MM-DD strings', () => {
   assert(TaskEntity._toDateStr({ toFormat: () => '2026-07-01' }) === '2026-07-01', 'toFormat → string');
 });
 
-// DT-2. parseNote coerces a Luxon `scheduled` into a plain string (was a DateTime).
-ok('DT-2 parseNote coerces Luxon scheduled → string', () => {
+// DT-2. parseNote coerces a Luxon `due` into a plain string (was a DateTime).
+ok('DT-2 parseNote coerces Luxon due → string', () => {
   const parsed = TaskEntity.parseNote({
     type: 'task', status: 'open',
-    scheduled: luxon('2026-07-01'), due: '',
+    due: luxon('2026-07-01'),
     file: { path: 'spice/tasks/a.md' },
   });
-  assert(parsed.scheduled === '2026-07-01', 'scheduled is the string, not a DateTime: got ' + JSON.stringify(parsed.scheduled));
-  assert(parsed.due === null, 'blank due → null');
+  assert(parsed.due === '2026-07-01', 'due is the string, not a DateTime: got ' + JSON.stringify(parsed.due));
 });
 
-// DT-3. THE REPRO — Luxon-scheduled open tasks must land in a band, not vanish.
+// DT-3. THE REPRO — Luxon-due open tasks must land in a band, not vanish.
 ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   const tasks = [
-    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-07-01') }),
-    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-06-28') }),
+    TaskEntity.parseNote({ status: 'open', due: luxon('2026-07-01') }),
+    TaskEntity.parseNote({ status: 'open', due: luxon('2026-06-28') }),
   ];
   const res = TaskTodayList.buildBands(tasks, '2026-07-01');
   assert(res.today.length === 1, 'today = the 07-01 Luxon task: got ' + res.today.length);
@@ -715,11 +781,11 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
 
 // ---------- buildBands sort order (Today/Overdue chronological ordering) ----------
 
-ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-overdue first)', () => {
+ok('TBB-SORT-1 buildBands sorts overdue ascending by due (oldest/most-overdue first)', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-05', title: 'C' },
-    { status: 'open', scheduled: '2026-07-01', title: 'A' },
-    { status: 'open', scheduled: '2026-07-03', title: 'B' },
+    { status: 'open', due: '2026-07-05', title: 'C' },
+    { status: 'open', due: '2026-07-01', title: 'A' },
+    { status: 'open', due: '2026-07-03', title: 'B' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.overdue.map((t) => t.title);
@@ -727,24 +793,30 @@ ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-over
     'expected A,B,C (oldest first), got ' + JSON.stringify(order));
 });
 
-ok('TBB-SORT-2 buildBands sorts today ascending by due (earliest deadline first; undated last)', () => {
+// NOTE: `due` now drives BOTH band membership (buildBands's today/overdue split)
+// and the secondary within-Today sort key (today.sort by a.due/b.due — see the
+// plan's Task 3: that sort block is left unchanged, a leftover secondary sort
+// that's now a no-op tie for same-due tasks since membership already pins every
+// Today-band task's `due` to todayStr). So every fixture row here necessarily
+// shares the SAME due (todayStr) to land in Today at all, and the sort collapses
+// to the title tie-break in all cases — this test now documents that behavior.
+ok('TBB-SORT-2 buildBands sorts today by title when due ties (secondary sort is a no-op post-merge)', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-10', title: 'Later' },
-    { status: 'open', scheduled: '2026-07-08', due: '', title: 'NoDue' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Soonest' },
-    { status: 'open', scheduled: '2026-07-08', due: null, title: 'AlsoNoDue' },
+    { status: 'open', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', due: '2026-07-08', title: 'beta' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.today.map((t) => t.title);
-  assert(JSON.stringify(order) === JSON.stringify(['Soonest', 'Later', 'AlsoNoDue', 'NoDue']),
-    'expected Soonest,Later,AlsoNoDue,NoDue (earliest due first, undated last, tie-broken by title), got ' + JSON.stringify(order));
+  assert(JSON.stringify(order) === JSON.stringify(['Alpha', 'beta', 'zeta']),
+    'expected case-insensitive alpha order (title tie-break), got ' + JSON.stringify(order));
 });
 
 ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'zeta' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Alpha' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'beta' },
+    { status: 'open', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', due: '2026-07-08', title: 'beta' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.today.map((t) => t.title);
@@ -1479,7 +1551,7 @@ async function runCreateQuickTests() {
     const c = app._creates[0].content;
     assert(/\ntype: task\n/.test(c), 'content carries type: task');
     assert(/\nstatus: open\n/.test(c), 'content carries status: open');
-    assert(/\nscheduled: 2026-07-02\n/.test(c), 'content carries scheduled: 2026-07-02');
+    assert(/\ndue: 2026-07-02\n/.test(c), 'content carries due: 2026-07-02');
     assert(/\nsource: daily\n/.test(c), 'content carries source: daily');
   });
 
@@ -2194,25 +2266,59 @@ function runTaskDoneArchiveTests() {
   });
 }
 
+// ---------- ToDoAllList static helper (pure) ----------
+//
+// ToDoAllList is the "All To-Dos" flat query view (to-do blueprint) —
+// groupByDate buckets parsed OPEN tasks by their `due` date relative to
+// today: overdue (due < today, oldest first), today, future (due > today,
+// soonest first, split per-date into futureByDate), noDate (no due value).
+
+ok('TAL-1 groupByDate buckets overdue/today/future/noDate by due date', () => {
+  const ToDoAllListClass = loadClass('blueprints/to-do/helpers/todo-all-list.js', 'ToDoAllList');
+  const tasks = [
+    { title: 'Yesterday', due: '2026-07-07' },
+    { title: 'TwoDaysAgo', due: '2026-07-06' },
+    { title: 'Today', due: '2026-07-08' },
+    { title: 'Tomorrow', due: '2026-07-09' },
+    { title: 'NextWeek', due: '2026-07-15' },
+    { title: 'Undated', due: null },
+  ];
+  const groups = ToDoAllListClass.groupByDate(tasks, '2026-07-08');
+  assert(groups.overdue.length === 2, 'overdue has 2: ' + groups.overdue.length);
+  assert(groups.overdue[0].title === 'TwoDaysAgo' && groups.overdue[1].title === 'Yesterday', 'overdue sorted oldest-first: ' + groups.overdue.map(t => t.title).join(','));
+  assert(groups.today.length === 1 && groups.today[0].title === 'Today', 'today has the today task');
+  assert(groups.future.length === 2, 'future has 2: ' + groups.future.length);
+  assert(groups.future[0].title === 'Tomorrow' && groups.future[1].title === 'NextWeek', 'future sorted soonest-first: ' + groups.future.map(t => t.title).join(','));
+  assert(groups.futureByDate.get('2026-07-09')[0].title === 'Tomorrow', 'futureByDate keyed by due date');
+  assert(groups.noDate.length === 1 && groups.noDate[0].title === 'Undated', 'noDate has the undated task');
+});
+
+ok('TAL-2 groupByDate tolerates null/non-array input', () => {
+  const ToDoAllListClass = loadClass('blueprints/to-do/helpers/todo-all-list.js', 'ToDoAllList');
+  const groups = ToDoAllListClass.groupByDate(null, '2026-07-08');
+  assert(groups.overdue.length === 0 && groups.today.length === 0 && groups.future.length === 0 && groups.noDate.length === 0, 'all-empty groups on null input');
+  assert(groups.futureByDate.size === 0, 'empty futureByDate map on null input');
+});
+
 // ---------- TaskRecurringList static helper (pure) ----------
 //
 // TaskRecurringList is the "Recurring" index view (to-do blueprint) — lists
 // every OPEN task note with a non-empty `recurrence` grammar, sorted by
-// `scheduled` ascending (undated recurring tasks sort last). Only the
+// `due` ascending (undated recurring tasks sort last). Only the
 // filterRecurring static is pure/Node-testable; render() is browser-only.
 
-ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by scheduled ascending', () => {
+ok('TRL-1 filterRecurring keeps only open tasks with a non-empty recurrence, sorted by due ascending', () => {
   const TaskRecurringListClass = loadClass('blueprints/to-do/helpers/task-recurring-list.js', 'TaskRecurringList');
   const tasks = [
-    { title: 'B', status: 'open', scheduled: '2026-07-20', recurrence: 'every day' },
-    { title: 'A', status: 'open', scheduled: '2026-07-09', recurrence: 'every Monday' },
-    { title: 'No recurrence', status: 'open', scheduled: '2026-07-08', recurrence: '' },
-    { title: 'Done recurring', status: 'done', scheduled: '2026-07-08', recurrence: 'every day' },
-    { title: 'No date', status: 'open', scheduled: null, recurrence: 'every day' },
+    { title: 'B', status: 'open', due: '2026-07-20', recurrence: 'every day' },
+    { title: 'A', status: 'open', due: '2026-07-09', recurrence: 'every Monday' },
+    { title: 'No recurrence', status: 'open', due: '2026-07-08', recurrence: '' },
+    { title: 'Done recurring', status: 'done', due: '2026-07-08', recurrence: 'every day' },
+    { title: 'No date', status: 'open', due: null, recurrence: 'every day' },
   ];
   const out = TaskRecurringListClass.filterRecurring(tasks);
   assert(out.length === 3, 'keeps the 3 open+recurring tasks (including the undated one): ' + out.length);
-  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by scheduled ascending, dated first: ' + out.map(t => t.title).join(','));
+  assert(out[0].title === 'A' && out[1].title === 'B', 'sorted by due ascending, dated first: ' + out.map(t => t.title).join(','));
   assert(out[2].title === 'No date', 'undated recurring task sorts last: ' + out.map(t => t.title).join(','));
 });
 
