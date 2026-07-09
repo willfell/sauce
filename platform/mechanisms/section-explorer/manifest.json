@@ -28,13 +28,19 @@
     {
       "source": "section-explorer.js",
       "dest": "{{scripts_path}}/section-explorer/section-explorer.js"
-    },
-    {
-      "source": "section-explorer.css",
-      "dest": ".obsidian/snippets/section-explorer.css",
-      "approval": "required"
     }
   ],
+  "snippets": [
+    {
+      "source": "section-explorer.css",
+      "name": "sauce-section-explorer"
+    }
+  ],
+  "appearance": {
+    "enabledCssSnippets": [
+      "sauce-section-explorer"
+    ]
+  },
   "post_install": [],
   "rule_fragments": []
 }

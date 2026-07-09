@@ -591,4 +591,42 @@ failures += !run("REGRESSION: ProjectDocsIndex.render with a class-shaped dv sti
   delete global.customJS;
 });
 
+// ── Regression: section-explorer.css was written to disk correctly on every
+// consumer vault but NEVER actually applied, because Obsidian CSS snippets
+// are OFF by default until registered in .obsidian/appearance.json's
+// enabledCssSnippets[] — and this mechanism's manifest shipped the CSS via
+// the generic `files[]` array (a raw copy, gated only by an install-time
+// approval prompt) instead of the dedicated `snippets[]` array that BOTH
+// copies the file AND registers/enables it (see `applySnippets` in
+// platform/install.js, which requires the registered name to match
+// /^sauce-[A-Za-z0-9._-]+$/ — the same mechanism `home`'s manifest.json
+// already uses successfully for sauce-home.css). Assert the manifest uses
+// the correct mechanism so this can't silently regress again.
+failures += !run("REGRESSION: section-explorer manifest ships its CSS via snippets[] (enabled), not files[] (write-only, never enabled)", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../mechanisms/section-explorer/manifest.json"), "utf8"));
+
+  const cssInFiles = (manifest.files || []).some((f) => String(f.dest || "").endsWith(".css"));
+  assert.strictEqual(cssInFiles, false, "the CSS file must NOT ship via files[] — that array only copies the file, it never registers/enables it as an Obsidian CSS snippet");
+
+  const snippets = manifest.snippets || [];
+  assert.strictEqual(snippets.length, 1, "expected exactly one snippets[] entry for section-explorer.css");
+  assert.strictEqual(snippets[0].source, "section-explorer.css");
+  assert.ok(
+    /^sauce-[A-Za-z0-9._-]+$/.test(snippets[0].name),
+    "snippets[].name must match /^sauce-[A-Za-z0-9._-]+$/ (applySnippets' validation regex in platform/install.js) or the entry is silently skipped as invalid — got: " + snippets[0].name
+  );
+
+  // The `snippets[]` entry above only COPIES the CSS file — actually
+  // enabling it in Obsidian requires a SEPARATE `appearance.enabledCssSnippets`
+  // declaration (processed by applyAppearance, not applySnippets). Missing
+  // this second declaration was the root cause: the file was written to
+  // disk correctly on every consumer vault, but Obsidian never applied it
+  // because CSS snippets are OFF by default until explicitly enabled.
+  const enabled = (manifest.appearance && manifest.appearance.enabledCssSnippets) || [];
+  assert.ok(
+    enabled.includes(snippets[0].name),
+    "manifest.appearance.enabledCssSnippets must include '" + snippets[0].name + "' — otherwise the snippet is copied to disk but never actually applied by Obsidian"
+  );
+});
+
 process.exit(failures > 0 ? 1 : 0);
