@@ -421,4 +421,52 @@ failures += !run("wiki adapter config: renameSection renames folder + updates ti
   delete global.app;
 });
 
+failures += !run("project adapter: virtual (unmaterialized) sections expose no rename/delete/add-link", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const virtualSection = { title: "Notes", hubPath: null, folder: "spice/projects/foo/docs/notes", pageCount: 0, subSectionCount: 0, materialized: false };
+  const config = pdi._buildConfig({ file: { path: "spice/projects/foo/Docs.md" } }, {
+    projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder: "spice/projects/foo/docs", scopePath: "spice/projects/foo/docs",
+  });
+  assert.strictEqual(config.canDelete(virtualSection), false, "a virtual section must never be deletable");
+});
+
+failures += !run("project adapter: renameSection on a depth-1 hub updates section/section_slug + child parent_section", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  const fmWrites = [];
+  const renameCalls = [];
+  global.app = {
+    fileManager: {
+      renameFile: (f, p) => { renameCalls.push({ f, p }); return Promise.resolve(); },
+      processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ file: f, fm }); return Promise.resolve(); },
+    },
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+  };
+  global.customJS = { DocSearch: { matches: () => true }, SectionLabel: { render: () => {}, divider: () => {} } };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
+  const config = sh._buildConfig(cur, 1, "foo", "ems", "EMS");
+  const childHub = { path: "spice/projects/foo/docs/ems/sub/Sub.md" };
+  sh._childHubsForRename = () => [childHub]; // test seam listing depth-2 children
+  const section = { title: "EMS", hubPath: cur.file.path, folder: cur.file.folder, materialized: true };
+  config.renameSection(section, "Networking");
+  const hubFmWrite = fmWrites.find((w) => w.file.path === cur.file.path);
+  assert.ok(hubFmWrite, "expected a frontmatter write on the section-hub itself");
+  assert.strictEqual(hubFmWrite.fm.section, "Networking");
+  assert.strictEqual(hubFmWrite.fm.section_slug, "networking");
+  const childFmWrite = fmWrites.find((w) => w.file.path === childHub.path);
+  assert.ok(childFmWrite, "expected the depth-2 child's parent_section to also be updated");
+  assert.strictEqual(childFmWrite.fm.parent_section, "Networking");
+  delete global.app;
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
