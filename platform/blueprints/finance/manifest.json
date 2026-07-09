@@ -28,6 +28,10 @@
     {
       "name": "entity-create",
       "range": ">=0.7.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
@@ -67,7 +71,8 @@
     "PlanBand",
     "SavingsSummary",
     "SavingsConfigEditor",
-    "SavingsCards"
+    "SavingsCards",
+    "FinanceChromeBar"
   ],
   "files": [
     {
@@ -173,6 +178,10 @@
     {
       "source": "helpers/finance-nav.js",
       "dest": "{{scripts_path}}/finance/finance-nav.js"
+    },
+    {
+      "source": "helpers/finance-chrome-bar.js",
+      "dest": "{{scripts_path}}/finance/finance-chrome-bar.js"
     },
     {
       "source": "helpers/finance-hub-summary.js",
@@ -671,6 +680,63 @@
       }
     }
   ],
+  "breadcrumb": {
+    "types": {
+      "finance-hub": { "ancestors": [], "current": { "label": "lit:Finance" } },
+      "budgets-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Budgets" } },
+      "paychecks-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Paychecks" } },
+      "invoices-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Invoices" } },
+      "debts-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Debts" } },
+      "months-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Months" } },
+      "savings-hub": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Savings" } },
+      "budget": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Budgets", "link": "spice/finance/budgets/Budgets.md" }
+        ],
+        "current": { "label": "fm:month|file:basename" }
+      },
+      "paycheck": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Paychecks", "link": "spice/finance/paychecks/Paychecks.md" }
+        ],
+        "current": { "label": "fm:month|file:basename" }
+      },
+      "invoice": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Invoices", "link": "spice/finance/invoices/Invoices.md" }
+        ],
+        "current": { "label": "fm:month|file:basename" }
+      },
+      "debt": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Debts", "link": "spice/finance/debts/Debts.md" }
+        ],
+        "current": { "label": "fm:name|file:basename" }
+      },
+      "month": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Months", "link": "spice/finance/months/Months.md" }
+        ],
+        "current": { "label": "fm:month|file:basename" }
+      },
+      "savings-account": {
+        "ancestors": [
+          { "label": "lit:Finance", "link": "spice/finance/Finance.md" },
+          { "label": "lit:Savings", "link": "spice/finance/savings/Savings.md" }
+        ],
+        "current": { "label": "fm:name|file:basename" }
+      },
+      "budget-defaults": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Budget Defaults" } },
+      "paycheck-defaults": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Paycheck Defaults" } },
+      "debt-defaults": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Debt Defaults" } },
+      "finance-plan": { "ancestors": [{ "label": "lit:Finance", "link": "spice/finance/Finance.md" }], "current": { "label": "lit:Plan" } }
+    }
+  },
   "rule_fragments": [
     {
       "target": "finance",
