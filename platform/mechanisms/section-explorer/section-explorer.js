@@ -179,7 +179,33 @@ class SectionExplorer {
 
   // ── Stubs wired up in Task 6/7 ──────────────────────────────────────────
   _openRenameDialog(dv, adapter, section) { /* Task 6 */ }
-  _openAddLinkForm(dv, adapter, section) { /* Task 7 */ }
+
+  // Pure link-mutation — mirrors ProjectLinksManager.addLink exactly (same
+  // {url, text} shape, same empty/duplicate rejection) so the two dialogs stay
+  // behaviorally identical without a cross-mechanism dependency.
+  _addLinkPure(links, entry) {
+    const list = Array.isArray(links) ? links.slice() : [];
+    const url = String((entry && entry.url) || "").trim();
+    const text = String((entry && entry.text) || "").trim();
+    if (!url) return { links: list, changed: false, reason: "empty-url" };
+    if (list.some((l) => l.url === url)) return { links: list, changed: false, reason: "duplicate" };
+    list.push({ url, text: text || url });
+    return { links: list, changed: true };
+  }
+
+  // _promptFn is a test seam: production calls the real modal (Task 7 replaces
+  // this with an actual DOM form); tests inject a stub returning {url, text}.
+  _promptFn() { return null; }
+
+  _openAddLinkForm(dv, adapter, section) {
+    const entry = this._promptFn();
+    if (!entry) return;
+    const current = adapter.getLinks(section) || [];
+    const result = this._addLinkPure(current, entry);
+    if (!result.changed) return;
+    try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ }
+  }
+
   _openDeleteConfirm(dv, adapter, section) {
     if (!adapter.canDelete(section)) return;
     try { adapter.deleteSection(section); } catch (_e) { /* never-throw */ }

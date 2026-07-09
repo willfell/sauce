@@ -268,4 +268,36 @@ failures += !run("rail row's inline dots opens MenuPopover with Rename/Add link/
   delete global.customJS;
 });
 
+failures += !run("_addLinkPure appends a valid link, rejects empty url and duplicate url", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let r = se._addLinkPure([], { url: "https://a.com", text: "A" });
+  assert.strictEqual(r.changed, true);
+  assert.deepStrictEqual(r.links, [{ url: "https://a.com", text: "A" }]);
+
+  r = se._addLinkPure(r.links, { url: "", text: "empty" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "empty-url");
+
+  r = se._addLinkPure([{ url: "https://a.com", text: "A" }], { url: "https://a.com", text: "dup" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "duplicate");
+
+  // text defaults to url when omitted.
+  r = se._addLinkPure([], { url: "https://b.com" });
+  assert.strictEqual(r.links[0].text, "https://b.com");
+});
+
+failures += !run("_openAddLinkForm calls adapter.writeLinks with the appended list", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const writes = [];
+  const adapter = { getLinks: () => [], writeLinks: (target, links) => { writes.push({ target, links }); } };
+  const section = { title: "EMS", hubPath: "e.md" };
+  se._promptFn = () => ({ url: "https://x.com", text: "X" }); // test seam, no real dialog
+  se._openAddLinkForm(null, adapter, section);
+  assert.strictEqual(writes.length, 1);
+  assert.deepStrictEqual(writes[0].links, [{ url: "https://x.com", text: "X" }]);
+});
+
 process.exit(failures > 0 ? 1 : 0);
