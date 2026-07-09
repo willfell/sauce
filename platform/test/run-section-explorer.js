@@ -956,4 +956,81 @@ failures += !run("genuinely empty leaf (0 sections AND 0 pages) shows the mechan
   delete global.customJS;
 });
 
+failures += !run("hub with sections but 0 root pages renders 'Recently updated' cards from listRecent", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { MenuPopover: { open: () => {} } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    listRecent: () => [
+      { title: "Kargo Step by Step", path: "spice/wiki/ems/Kargo.md", mtime: 2000, where: "EMS" },
+      { title: "POC Links", path: "spice/wiki/links/POC.md", mtime: 1000, where: "Links" },
+    ],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const label = els.find((e) => e.className === "se-group-label se-pane-label");
+  assert.ok(label, "expected a pane label in recent mode");
+  assert.strictEqual(label.textContent, "Recently updated");
+  const cards = els.filter((e) => e.className === "se-doc-card");
+  assert.strictEqual(cards.length, 2, "expected one card per recent doc");
+  const subs = els.filter((e) => e.className === "se-doc-sub").map((e) => e.textContent);
+  assert.ok(subs.some((s) => s.startsWith("in EMS")), "recent card subtitle carries its section (got: " + JSON.stringify(subs) + ")");
+  delete global.customJS;
+});
+
+failures += !run("hub with sections, 0 root pages and NO listRecent (or empty) still suppresses the pane", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { MenuPopover: { open: () => {} } };
+  const mk = (listRecent) => {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const cfg = {
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+      listPages: () => [],
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+      rootClass: "se-root",
+    };
+    if (listRecent) cfg.listRecent = listRecent;
+    se.render(dv, se.makeAdapter(cfg));
+    return els;
+  };
+  for (const els of [mk(null), mk(() => [])]) {
+    assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 0, "pane must stay suppressed without recent content");
+  }
+  delete global.customJS;
+});
+
+failures += !run("pane with real root pages ignores listRecent (normal docs mode)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = {};
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/ems/EMS.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki/ems" }),
+    listSections: () => [],
+    listPages: () => [{ title: null, file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }],
+    listRecent: () => [{ title: "ShouldNotShow", path: "x.md", mtime: 9, where: "X" }],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const label = els.find((e) => e.className === "se-group-label se-pane-label");
+  assert.strictEqual(label.textContent, "Docs");
+  const titles = els.filter((e) => e.className === "se-doc-title").map((e) => e.textContent);
+  assert.deepStrictEqual(titles, ["Runbook"]);
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);

@@ -46,6 +46,7 @@ class SectionExplorer {
       icons: config.icons || { folder: "", file: "" },
       rootClass: config.rootClass || "se-root",
       pageLabel: config.pageLabel || "Docs",
+      listRecent: config.listRecent ? ((dv, ctx) => config.listRecent(dv, ctx) || []) : null,
     };
   }
 
@@ -71,35 +72,55 @@ class SectionExplorer {
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
 
-    // Empty-state suppression: when the hub has sections but no direct pages,
-    // an empty pane ("Nothing here yet.") IS redundant chrome — the rail
-    // already communicates the structure. Only a truly-empty leaf (0 sections
-    // AND 0 pages) keeps the pane so its empty message means something.
+    // No docs at this level but real sections in the rail — fill the pane
+    // with the subtree's recently-updated docs when the adapter provides
+    // them; otherwise (no listRecent / nothing recent) suppress the pane —
+    // an empty "Nothing here yet." box next to a populated rail is noise.
+    // A truly-empty leaf (0 sections AND 0 pages) keeps the pane so its
+    // empty message means something.
     const pages = adapter.listPages(dv, ctx, null);
     const pageCount = Array.isArray(pages) ? pages.length : (pages && pages.length) || 0;
-    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) return;
+    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) {
+      const recent = adapter.listRecent ? adapter.listRecent(dv, ctx) : [];
+      if (!Array.isArray(recent) || recent.length === 0) return;
+      const recentPane = root.createEl("div", { cls: "se-page-pane" });
+      this._renderRecentPane(dv, adapter, ctx, recent, recentPane);
+      return;
+    }
 
     const pane = root.createEl("div", { cls: "se-page-pane" });
     this._renderPagePane(dv, adapter, ctx, null, pages, pane);
   }
 
-  _renderPagePane(dv, adapter, ctx, section, pages, pane) {
-    const links = adapter.getLinks(section || ctx);
-    if (Array.isArray(links) && links.length > 0) {
-      const linksRow = pane.createEl("div", { cls: "se-links-row" });
-      for (const link of links) {
-        const a = linksRow.createEl("a", { cls: "se-link-chip" });
-        a.textContent = link.text || link.url;
-        if (this._isSafeUrl(link.url)) {
-          a.href = link.url;
-          a.target = "_blank";
-          a.rel = "noopener";
-        }
-        // Unsafe/malformed URLs: no href set — chip stays visible as plain
-        // text instead of a live link, and is never silently dropped.
-      }
-    }
+  // Recent mode — a hub/section with zero direct docs shows the subtree's
+  // recently-updated docs instead of an empty pane. Links row still renders
+  // (the hub's own pinned links stay reachable), then the recent card grid.
+  _renderRecentPane(dv, adapter, ctx, recent, pane) {
+    this._renderLinksRow(adapter, ctx, pane);
+    pane.createEl("div", { cls: "se-group-label se-pane-label", text: "Recently updated" });
+    this._renderDocCards(pane, adapter, recent);
+  }
 
+  // Pinned-links chips row — shared by the normal page pane and recent mode.
+  _renderLinksRow(adapter, target, pane) {
+    const links = adapter.getLinks(target);
+    if (!Array.isArray(links) || links.length === 0) return;
+    const linksRow = pane.createEl("div", { cls: "se-links-row" });
+    for (const link of links) {
+      const a = linksRow.createEl("a", { cls: "se-link-chip" });
+      a.textContent = link.text || link.url;
+      if (this._isSafeUrl(link.url)) {
+        a.href = link.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+      }
+      // Unsafe/malformed URLs: no href set — chip stays visible as plain
+      // text instead of a live link, and is never silently dropped.
+    }
+  }
+
+  _renderPagePane(dv, adapter, ctx, section, pages, pane) {
+    this._renderLinksRow(adapter, section || ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
     const cards = (Array.isArray(pages) ? pages : Array.from(pages || [])).map((p) => this._docCardModel(p));
     this._renderDocCards(pane, adapter, cards);
