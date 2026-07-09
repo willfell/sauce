@@ -60,11 +60,45 @@ class SectionExplorer {
   _renderRail(dv, adapter, ctx, sections, root) {
     if (!Array.isArray(sections) || sections.length === 0) return;
     const rail = root.createEl("div", { cls: "se-rail" });
-    for (const section of sections) {
-      const row = rail.createEl("div", { cls: "se-rail-row" });
-      const iconHtml = adapter.icons.folder || "";
-      row.innerHTML = iconHtml + `<span>${this._escape(section.title)}</span>`;
+    const sortRecent = (list) => [...list].sort((a, b) => (b.maxMtime || 0) - (a.maxMtime || 0));
+    const sortAlpha = (list) => [...list].sort((a, b) => String(a.title).localeCompare(String(b.title)));
+    const cardsWrap = rail.createEl("div", { cls: "se-rail-cards" });
+
+    const paint = (mode) => {
+      cardsWrap.empty();
+      const ordered = mode === "alpha" ? sortAlpha(sections) : sortRecent(sections);
+      for (const section of ordered) this._renderRailRow(dv, adapter, ctx, section, cardsWrap);
+    };
+
+    if (sections.length >= 2) {
+      const toggle = rail.createEl("div", { cls: "se-rail-toggle" });
+      const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
+      let current = "recent";
+      for (const m of modes) {
+        const pill = toggle.createEl("span", { cls: "se-rail-toggle-pill" });
+        pill.textContent = m.label;
+        pill.onclick = () => { current = m.key; paint(current); };
+      }
     }
+    paint("recent");
+  }
+
+  _railMeta(section) {
+    const parts = [];
+    if (section.subSectionCount) parts.push(section.subSectionCount + " section" + (section.subSectionCount === 1 ? "" : "s"));
+    parts.push((section.pageCount || 0) + " doc" + (section.pageCount === 1 ? "" : "s"));
+    return parts.join(" · ");
+  }
+
+  _renderRailRow(dv, adapter, ctx, section, host) {
+    const row = host.createEl("div", { cls: "se-rail-row" });
+    const iconHtml = adapter.icons.folder || "";
+    row.innerHTML = iconHtml + `<span>${this._escape(section.title)}</span>`;
+    const meta = row.createEl("span", { cls: "se-rail-meta" });
+    meta.textContent = this._railMeta(section);
+    row.onclick = () => {
+      if (section.hubPath) app.workspace.openLinkText(section.hubPath, "");
+    };
   }
 
   _escape(s) {

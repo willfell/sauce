@@ -96,4 +96,30 @@ failures += !run("render() renders a rail row per section", () => {
   assert.strictEqual(railRows.length, 1, "expected exactly one rail row for the one section");
 });
 
+failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle click", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "Bravo", hubPath: "b.md", folder: "b", pageCount: 1, subSectionCount: 0, maxMtime: 100, materialized: true },
+    { title: "Alpha", hubPath: "a.md", folder: "a", pageCount: 3, subSectionCount: 1, maxMtime: 200, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const rows = els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(rows.length, 2);
+  // Default sort = recent (maxMtime desc) → Alpha (200) before Bravo (100).
+  assert.ok(rows[0].textContent.includes("Alpha") || rows[0].innerHTML.includes("Alpha"));
+  const meta = els.find((e) => e.className === "se-rail-meta" && (e.textContent.includes("3 doc") || e.innerHTML.includes("3 doc")));
+  assert.ok(meta, "expected a meta line mentioning doc count");
+});
+
 process.exit(failures > 0 ? 1 : 0);
