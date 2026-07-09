@@ -54,7 +54,10 @@ class TaskDialog {
     renderNote(frontmatter, body) { return TaskDialog.renderNote(frontmatter, body); }
     _chromeBody() { return TaskDialog._chromeBody(); }
     _payloadFromState(state) { return TaskDialog._payloadFromState(state); }
-    _recurrenceValidity(recurrence, isSupportedFn) { return TaskDialog._recurrenceValidity(recurrence, isSupportedFn); }
+    _composeRecurrenceGrammar(freq, opts) { return TaskDialog._composeRecurrenceGrammar(freq, opts); }
+    _ordinalSuffix(n) { return TaskDialog._ordinalSuffix(n); }
+    _recurrenceStateFromDescribe(described) { return TaskDialog._recurrenceStateFromDescribe(described); }
+    _recurrencePickerValid(state) { return TaskDialog._recurrencePickerValid(state); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
 
@@ -127,22 +130,98 @@ class TaskDialog {
     }
 
     /**
-     * Validate a recurrence grammar string for the dialog's live-typing
-     * feedback. Empty is ALWAYS valid (no recurrence). A non-empty value defers
-     * to `isSupportedFn(value)` (normally `window.customJS.RecurrenceParser
-     * .isSupported`, injected so this stays pure/testable). A missing or
-     * throwing `isSupportedFn` — e.g. a cold-load before RecurrenceParser
-     * registers — defaults to VALID rather than blocking submit; the dialog
-     * should never brick task creation because a defensive dependency isn't
-     * ready yet. Pure, never throws.
+     * Compose a RecurrenceParser grammar string from the dialog's structured
+     * picker state. `freq` is one of 'none' | 'daily' | 'weekday' | 'weekly' |
+     * 'monthly'; `opts.days` is an array of 0(Sun)..6(Sat), `opts.weeks` is the
+     * "every N weeks" interval (weekly only, N<=1 omits the wrapper),
+     * `opts.dayOfMonth` is 1..31 (monthly only). Days are de-duped, filtered to
+     * 0..6, and sorted Sun..Sat so click order never affects the output — the
+     * composed string is deterministic. Weekly with zero valid days, or
+     * monthly with an out-of-range/missing day, both return "" (never a
+     * malformed "every " with nothing after it). Pure, never throws.
      */
-    static _recurrenceValidity(recurrence, isSupportedFn) {
-        const s = String(recurrence == null ? '' : recurrence).trim();
-        if (!s) return { valid: true };
-        if (typeof isSupportedFn !== 'function') return { valid: true };
-        let supported;
-        try { supported = !!isSupportedFn(s); } catch (_e) { return { valid: true }; }
-        return supported ? { valid: true } : { valid: false, reason: 'unsupported recurrence grammar' };
+    static _composeRecurrenceGrammar(freq, opts) {
+        const o = opts || {};
+        switch (freq) {
+            case 'daily':
+                return 'every day';
+            case 'weekday':
+                return 'every weekday';
+            case 'monthly': {
+                const day = parseInt(o.dayOfMonth, 10);
+                if (!Number.isInteger(day) || day < 1 || day > 31) return '';
+                return 'every ' + day + TaskDialog._ordinalSuffix(day) + ' of month';
+            }
+            case 'weekly': {
+                const raw = Array.isArray(o.days) ? o.days : [];
+                const uniq = Array.from(new Set(raw.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort((a, b) => a - b);
+                if (uniq.length === 0) return '';
+                const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const dayNames = uniq.map((d) => DOW_NAMES[d]).join(' ');
+                const weeks = parseInt(o.weeks, 10);
+                if (Number.isInteger(weeks) && weeks > 1) return 'every ' + weeks + ' weeks on ' + dayNames;
+                return 'every ' + dayNames;
+            }
+            case 'none':
+            default:
+                return '';
+        }
+    }
+
+    /** English ordinal suffix for a day-of-month number (1st, 2nd, 3rd, 4th..11th..21st..). */
+    static _ordinalSuffix(n) {
+        const v = n % 100;
+        if (v >= 11 && v <= 13) return 'th';
+        switch (n % 10) {
+            case 1: return 'st';
+            case 2: return 'nd';
+            case 3: return 'rd';
+            default: return 'th';
+        }
+    }
+
+    /**
+     * Reverse-map RecurrenceParser.describe()'s output into the picker's
+     * initial UI state — { freq, days, weeks, dayOfMonth } — for hydrating
+     * the dialog when editing a task that already has a recurrence. A `null`
+     * input (no recurrence, or an unsupported/legacy grammar) maps to
+     * freq: 'none' with everything blank, never throws.
+     */
+    static _recurrenceStateFromDescribe(described) {
+        const BLANK = { freq: 'none', days: [], weeks: 1, dayOfMonth: null };
+        if (!described) return BLANK;
+        switch (described.kind) {
+            case 'daily':
+                return Object.assign({}, BLANK, { freq: 'daily' });
+            case 'weekday-block':
+                return Object.assign({}, BLANK, { freq: 'weekday' });
+            case 'weekend-block':
+                return Object.assign({}, BLANK, { freq: 'weekly', days: [0, 6] });
+            case 'day-of-month':
+                return Object.assign({}, BLANK, { freq: 'monthly', dayOfMonth: described.day || null });
+            case 'weekday-set':
+                return Object.assign({}, BLANK, { freq: 'weekly', days: Array.isArray(described.days) ? described.days.slice() : [] });
+            case 'every-n-weeks-on-day':
+                return Object.assign({}, BLANK, {
+                    freq: 'weekly',
+                    days: Array.isArray(described.days) ? described.days.slice() : [],
+                    weeks: described.weeks || 1,
+                });
+            default:
+                return BLANK;
+        }
+    }
+
+    /**
+     * Gate for Save: the only structurally-invalid picker state is Weekly
+     * with zero days toggled (which would silently compose to "" — i.e.
+     * "doesn't repeat" — contradicting the user's choice of Weekly). Every
+     * other frequency is always valid. Pure, never throws.
+     */
+    static _recurrencePickerValid(state) {
+        const s = state || {};
+        if (s.recurrenceFreq !== 'weekly') return true;
+        return Array.isArray(s.recurrenceDays) && s.recurrenceDays.length > 0;
     }
 
     /**
@@ -690,32 +769,128 @@ class TaskDialog {
         };
         moreToggle.onclick = () => setMoreExpanded(!moreExpanded);
 
-        // Recurrence — free-text grammar (RecurrenceParser), validated live.
-        // Empty = one-shot task (default). A supported grammar makes "Done"
-        // roll the task's due date forward instead of archiving it.
-        label('Repeats (optional — e.g. "every day", "every Monday", "every 2 weeks on Friday")', moreBox);
-        const recurInput = moreBox.createEl('input', { type: 'text' });
-        recurInput.style.cssText = fieldCss;
-        recurInput.value = state.recurrence;
-        recurInput.placeholder = 'every day';
+        // Repeats — structured picker (dropdown + contextual day-of-week /
+        // day-of-month controls). Composes the SAME RecurrenceParser grammar
+        // string the backend already understands (TaskEntity.nextOccurrence,
+        // _markDone's roll-forward) — no schema change, this is purely a
+        // front-end grammar builder. state.recurrence stays the source of
+        // truth written to frontmatter; state.recurrenceFreq/Days/Weeks/
+        // DayOfMonth are picker-only UI state, recomposed on every change.
+        label('Repeats (optional)', moreBox);
+        {
+            const described = (() => {
+                try {
+                    const RP = window.customJS && window.customJS.RecurrenceParser;
+                    return RP && typeof RP.describe === 'function' ? RP.describe(state.recurrence) : null;
+                } catch (_e) { return null; }
+            })();
+            const initial = TaskDialog._recurrenceStateFromDescribe(described);
+            state.recurrenceFreq = initial.freq;
+            state.recurrenceDays = initial.days;
+            state.recurrenceWeeks = initial.weeks;
+            state.recurrenceDayOfMonth = initial.dayOfMonth;
+        }
+
+        const recurSelect = moreBox.createEl('select');
+        recurSelect.style.cssText = fieldCss;
+        const RECUR_OPTIONS = [
+            { value: 'none', text: "Doesn't repeat" },
+            { value: 'daily', text: 'Every day' },
+            { value: 'weekly', text: 'Weekly' },
+            { value: 'weekday', text: 'Every weekday' },
+            { value: 'monthly', text: 'Monthly' },
+        ];
+        for (const ro of RECUR_OPTIONS) {
+            const opt = recurSelect.createEl('option', { text: ro.text });
+            opt.value = ro.value;
+            if (ro.value === state.recurrenceFreq) opt.selected = true;
+        }
+
+        const recurSubBox = moreBox.createDiv();
+        recurSubBox.style.cssText = 'margin-top:8px;';
         const recurError = moreBox.createEl('div');
         recurError.style.cssText = 'font-size:11px; color:var(--text-error,#e05561); margin-top:4px; display:none;';
-        const isSupportedFn = () => {
-            try {
-                const RP = window.customJS && window.customJS.RecurrenceParser;
-                return RP && typeof RP.isSupported === 'function' ? (v) => RP.isSupported(v) : null;
-            } catch (_e) { return null; }
-        };
-        recurInput.oninput = () => {
-            state.recurrence = recurInput.value;
-            const v = TaskDialog._recurrenceValidity(state.recurrence, isSupportedFn());
-            if (v.valid) {
-                recurError.style.display = 'none';
-            } else {
-                recurError.textContent = 'Unrecognized repeat pattern — try "every day", "every Monday", "every 15th of month", or "every 2 weeks on Friday".';
-                recurError.style.display = 'block';
-            }
+
+        const recomposeRecurrence = () => {
+            state.recurrence = TaskDialog._composeRecurrenceGrammar(state.recurrenceFreq, {
+                days: state.recurrenceDays,
+                weeks: state.recurrenceWeeks,
+                dayOfMonth: state.recurrenceDayOfMonth,
+            });
+            const valid = TaskDialog._recurrencePickerValid(state);
+            recurError.style.display = valid ? 'none' : 'block';
+            recurError.textContent = valid ? '' : 'Pick at least one day for a weekly repeat.';
             updateSubmit();
+        };
+
+        const dayChipCss = 'flex:0 0 34px; box-sizing:border-box; text-align:center; padding:6px 0; border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
+        const dayChipOff = dayChipCss + ' border:1px solid var(--background-modifier-border,#444); background:transparent; color:var(--text-muted,#999);';
+        const dayChipOn = dayChipCss + ' border:1px solid var(--interactive-accent,#6a6abf); background:var(--interactive-accent,#6a6abf); color:var(--text-on-accent,#fff); font-weight:600;';
+        const DOW_LABELS = [
+            { n: 0, l: 'S' }, { n: 1, l: 'M' }, { n: 2, l: 'T' }, { n: 3, l: 'W' },
+            { n: 4, l: 'T' }, { n: 5, l: 'F' }, { n: 6, l: 'S' },
+        ];
+
+        const renderRecurSubBox = () => {
+            recurSubBox.empty();
+            if (state.recurrenceFreq === 'weekly') {
+                const dayRow = recurSubBox.createDiv();
+                dayRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+                for (const d of DOW_LABELS) {
+                    const on = state.recurrenceDays.indexOf(d.n) >= 0;
+                    const btn = dayRow.createEl('div', { text: d.l });
+                    btn.style.cssText = on ? dayChipOn : dayChipOff;
+                    btn.onclick = () => {
+                        const idx = state.recurrenceDays.indexOf(d.n);
+                        if (idx >= 0) state.recurrenceDays.splice(idx, 1);
+                        else state.recurrenceDays.push(d.n);
+                        renderRecurSubBox();
+                        recomposeRecurrence();
+                    };
+                }
+                const weeksRow = recurSubBox.createDiv();
+                weeksRow.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:8px;';
+                const weeksLabel = weeksRow.createEl('span', { text: 'Every' });
+                weeksLabel.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                const weeksInput = weeksRow.createEl('input', { type: 'number' });
+                weeksInput.style.cssText = 'width:52px; box-sizing:border-box; padding:5px 6px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:12px;';
+                weeksInput.min = '1';
+                weeksInput.max = '12';
+                weeksInput.value = String(state.recurrenceWeeks || 1);
+                weeksInput.onchange = () => {
+                    const n = parseInt(weeksInput.value, 10);
+                    state.recurrenceWeeks = Number.isInteger(n) && n >= 1 && n <= 12 ? n : 1;
+                    weeksInput.value = String(state.recurrenceWeeks);
+                    recomposeRecurrence();
+                };
+                const weeksLabel2 = weeksRow.createEl('span', { text: 'week(s)' });
+                weeksLabel2.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+            } else if (state.recurrenceFreq === 'monthly') {
+                const domRow = recurSubBox.createDiv();
+                domRow.style.cssText = 'display:flex; align-items:center; gap:8px;';
+                const domLabel = domRow.createEl('span', { text: 'On day' });
+                domLabel.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                const domInput = domRow.createEl('input', { type: 'number' });
+                domInput.style.cssText = 'width:60px; box-sizing:border-box; padding:5px 6px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:12px;';
+                domInput.min = '1';
+                domInput.max = '31';
+                if (state.recurrenceDayOfMonth) domInput.value = String(state.recurrenceDayOfMonth);
+                domInput.onchange = () => {
+                    const n = parseInt(domInput.value, 10);
+                    state.recurrenceDayOfMonth = (Number.isInteger(n) && n >= 1 && n <= 31) ? n : null;
+                    recomposeRecurrence();
+                };
+                const domLabel2 = domRow.createEl('span', { text: 'of the month' });
+                domLabel2.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+            }
+        };
+        renderRecurSubBox();
+
+        recurSelect.onchange = () => {
+            const opt = recurSelect.options[recurSelect.selectedIndex];
+            state.recurrenceFreq = (opt && opt.value) || 'none';
+            renderRecurSubBox();
+            recomposeRecurrence();
         };
 
         // Priority chip row
@@ -1018,8 +1193,7 @@ class TaskDialog {
         const updateSubmit = () => {
             const TE = TaskDialog._taskEntity();
             const v = TE ? TE.validatePayload(buildPayload()) : { valid: !!(state.title && state.title.trim()) };
-            const rv = TaskDialog._recurrenceValidity(state.recurrence, isSupportedFn());
-            const valid = v.valid && rv.valid;
+            const valid = v.valid && TaskDialog._recurrencePickerValid(state);
             saveBtn.disabled = !valid;
             // Mute the accent when Save is unavailable so the disabled state reads.
             saveBtn.style.opacity = valid ? '1' : '0.45';

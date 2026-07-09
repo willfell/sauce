@@ -140,6 +140,25 @@ ok('RP-31 empty string → false',
 ok('RP-32 gibberish → false + isSupported false',
     !RecurrenceParser.matches('asldkjf', mon) && !RecurrenceParser.isSupported('asldkjf'));
 
+// ===== describe() — public reverse-mapping for the dialog's picker UI — RP-37..RP-46 =====
+ok('RP-37 describe("every day") -> {kind: daily}',
+    JSON.stringify(RecurrenceParser.describe('every day')) === JSON.stringify({ kind: 'daily' }));
+ok('RP-38 describe("every weekday") -> {kind: weekday-block}',
+    JSON.stringify(RecurrenceParser.describe('every weekday')) === JSON.stringify({ kind: 'weekday-block' }));
+ok('RP-39 describe("every weekend") -> {kind: weekend-block}',
+    JSON.stringify(RecurrenceParser.describe('every weekend')) === JSON.stringify({ kind: 'weekend-block' }));
+ok('RP-40 describe("every 15th of month") -> {kind: day-of-month, day: 15}',
+    JSON.stringify(RecurrenceParser.describe('every 15th of month')) === JSON.stringify({ kind: 'day-of-month', day: 15 }));
+ok('RP-41 describe("every Fri Mon Wed") -> {kind: weekday-set, days: [1,3,5]} (sorted)',
+    JSON.stringify(RecurrenceParser.describe('every Fri Mon Wed')) === JSON.stringify({ kind: 'weekday-set', days: [1, 3, 5] }));
+ok('RP-42 describe("every 2 weeks on Friday") -> {kind: every-n-weeks-on-day, weeks: 2, days: [5]}',
+    JSON.stringify(RecurrenceParser.describe('every 2 weeks on Friday')) === JSON.stringify({ kind: 'every-n-weeks-on-day', weeks: 2, days: [5] }));
+ok('RP-43 describe("") -> null', RecurrenceParser.describe('') === null);
+ok('RP-44 describe(null) -> null', RecurrenceParser.describe(null) === null);
+ok('RP-45 describe("garbage") -> null', RecurrenceParser.describe('garbage') === null);
+ok('RP-46 instance describe() agrees with static',
+    JSON.stringify(new RecurrenceParser().describe('every day')) === JSON.stringify(RecurrenceParser.describe('every day')));
+
 // ===== INSTANCE path — RP-33..RP-36 =====
 // customJS stores INSTANCES under window.customJS.RecurrenceParser, then the
 // guard dispatches customJS.RecurrenceParser.isSupported(...) / .matches(...) on

@@ -448,25 +448,6 @@ ok('TD-recur-2 _payloadFromState defaults recurrence to empty string', () => {
   assert(payload.recurrence === '', 'no recurrence -> empty string: ' + JSON.stringify(payload.recurrence));
 });
 
-ok('TD-recur-3 _recurrenceValidity: empty is always valid', () => {
-  const v = TaskDialog._recurrenceValidity('', () => false);
-  assert(v.valid === true, 'empty recurrence is valid: ' + JSON.stringify(v));
-});
-
-ok('TD-recur-4 _recurrenceValidity: non-empty defers to isSupportedFn', () => {
-  const supported = TaskDialog._recurrenceValidity('every Monday', () => true);
-  assert(supported.valid === true, 'supported grammar is valid');
-  const unsupported = TaskDialog._recurrenceValidity('every leap year', () => false);
-  assert(unsupported.valid === false, 'unsupported grammar is invalid');
-});
-
-ok('TD-recur-5 _recurrenceValidity: a missing/throwing isSupportedFn defaults to valid (defensive)', () => {
-  const missingFn = TaskDialog._recurrenceValidity('every day', null);
-  assert(missingFn.valid === true, 'no isSupportedFn -> valid (never block submit on a cold-load parser): ' + JSON.stringify(missingFn));
-  const throwingFn = TaskDialog._recurrenceValidity('every day', () => { throw new Error('boom'); });
-  assert(throwingFn.valid === true, 'throwing isSupportedFn -> valid: ' + JSON.stringify(throwingFn));
-});
-
 // TD-recur-6/7 exercise _rollForwardDate, which delegates through
 // TaskDialog._taskEntity() (reads window.customJS.TaskEntity). Stub/restore
 // global.window scoped to just these two tests (narrower than a module-wide
@@ -517,6 +498,184 @@ ok('TD-polish-2 _moreOptionsShouldStartExpanded: true when ANY optional field is
 
 ok('TD-polish-3 _moreOptionsShouldStartExpanded tolerates a missing/null state', () => {
   assert(TaskDialog._moreOptionsShouldStartExpanded(null) === false, 'null state -> collapsed, never throws');
+});
+
+// ---------- TaskDialog._composeRecurrenceGrammar (pure) ----------
+//
+// Builds the RecurrenceParser grammar string from the picker's structured
+// state: { days: [0..6], weeks: N, dayOfMonth: 1..31 }. Days are deduped +
+// sorted Sun..Sat so click order never affects the composed string.
+
+ok('CRG-1 none -> empty string', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('none', {}) === '', 'none -> ""');
+});
+
+ok('CRG-2 daily -> "every day"', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('daily', {}) === 'every day');
+});
+
+ok('CRG-3 weekday -> "every weekday"', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekday', {}) === 'every weekday');
+});
+
+ok('CRG-4 monthly with dayOfMonth=15 -> "every 15th of month"', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 15 }) === 'every 15th of month');
+});
+
+ok('CRG-5 monthly ordinal suffixes: 1st/2nd/3rd/4th/11th/21st', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 1 }) === 'every 1st of month');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 2 }) === 'every 2nd of month');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 3 }) === 'every 3rd of month');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 4 }) === 'every 4th of month');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 11 }) === 'every 11th of month');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 21 }) === 'every 21st of month');
+});
+
+ok('CRG-6 monthly with missing/invalid dayOfMonth -> empty string', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', {}) === '', 'no dayOfMonth -> ""');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 0 }) === '', '0 out of range -> ""');
+  assert(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 32 }) === '', '32 out of range -> ""');
+});
+
+ok('CRG-7 weekly single day, weeks=1 -> "every Mon"', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [1], weeks: 1 }) === 'every Mon');
+});
+
+ok('CRG-8 weekly multi-day sorted regardless of input order -> "every Mon Wed Fri"', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [5, 1, 3], weeks: 1 }) === 'every Mon Wed Fri');
+});
+
+ok('CRG-9 weekly with weeks>1 -> "every N weeks on ..."', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [5], weeks: 2 }) === 'every 2 weeks on Fri');
+});
+
+ok('CRG-10 weekly with weeks=1 (explicit) omits the "N weeks on" wrapper', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [0, 6], weeks: 1 }) === 'every Sun Sat');
+});
+
+ok('CRG-11 weekly with zero days -> empty string (guards against "every ")', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [], weeks: 1 }) === '');
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', {}) === '', 'missing days array -> ""');
+});
+
+ok('CRG-12 weekly de-dupes repeated day values', () => {
+  assert(TaskDialog._composeRecurrenceGrammar('weekly', { days: [1, 1, 1], weeks: 1 }) === 'every Mon');
+});
+
+ok('CRG-13 round-trips through RecurrenceParser.matches for every composed kind', () => {
+  const RecurrenceParserClass = loadClass('blueprints/to-do/helpers/recurrence-parser.js', 'RecurrenceParser');
+  const RP = new RecurrenceParserClass();
+  const mon = { day: () => 1, date: () => 15 };
+  assert(RP.matches(TaskDialog._composeRecurrenceGrammar('daily', {}), mon) === true, 'daily fires');
+  assert(RP.matches(TaskDialog._composeRecurrenceGrammar('weekday', {}), mon) === true, 'weekday fires on Mon');
+  assert(RP.matches(TaskDialog._composeRecurrenceGrammar('weekly', { days: [1], weeks: 1 }), mon) === true, 'weekly Mon fires on Mon');
+  assert(RP.matches(TaskDialog._composeRecurrenceGrammar('monthly', { dayOfMonth: 15 }), mon) === true, 'monthly 15th fires on the 15th');
+});
+
+// ---------- TaskDialog._recurrenceStateFromDescribe (pure) ----------
+//
+// Reverse-maps RecurrenceParser.describe()'s output into the picker's initial
+// UI state, for edit-mode hydration.
+
+ok('RSD-1 null (no recurrence) -> freq none, all blank', () => {
+  const s = TaskDialog._recurrenceStateFromDescribe(null);
+  assert(s.freq === 'none' && s.days.length === 0 && s.weeks === 1 && s.dayOfMonth === null, JSON.stringify(s));
+});
+
+ok('RSD-2 {kind: daily} -> freq daily', () => {
+  assert(TaskDialog._recurrenceStateFromDescribe({ kind: 'daily' }).freq === 'daily');
+});
+
+ok('RSD-3 {kind: weekday-block} -> freq weekday', () => {
+  assert(TaskDialog._recurrenceStateFromDescribe({ kind: 'weekday-block' }).freq === 'weekday');
+});
+
+ok('RSD-4 {kind: weekend-block} -> freq weekly, days [0,6]', () => {
+  const s = TaskDialog._recurrenceStateFromDescribe({ kind: 'weekend-block' });
+  assert(s.freq === 'weekly' && JSON.stringify(s.days) === JSON.stringify([0, 6]), JSON.stringify(s));
+});
+
+ok('RSD-5 {kind: day-of-month, day: 15} -> freq monthly, dayOfMonth 15', () => {
+  const s = TaskDialog._recurrenceStateFromDescribe({ kind: 'day-of-month', day: 15 });
+  assert(s.freq === 'monthly' && s.dayOfMonth === 15, JSON.stringify(s));
+});
+
+ok('RSD-6 {kind: weekday-set, days: [1,3,5]} -> freq weekly, weeks 1', () => {
+  const s = TaskDialog._recurrenceStateFromDescribe({ kind: 'weekday-set', days: [1, 3, 5] });
+  assert(s.freq === 'weekly' && JSON.stringify(s.days) === JSON.stringify([1, 3, 5]) && s.weeks === 1, JSON.stringify(s));
+});
+
+ok('RSD-7 {kind: every-n-weeks-on-day, weeks: 2, days: [5]} -> freq weekly, weeks 2', () => {
+  const s = TaskDialog._recurrenceStateFromDescribe({ kind: 'every-n-weeks-on-day', weeks: 2, days: [5] });
+  assert(s.freq === 'weekly' && s.weeks === 2 && JSON.stringify(s.days) === JSON.stringify([5]), JSON.stringify(s));
+});
+
+// ---------- TaskDialog._recurrencePickerValid (pure) ----------
+//
+// Gates Save: the only structurally-invalid picker state is Weekly with zero
+// days selected (would silently compose to "" — i.e. "doesn't repeat", not
+// what picking Weekly implied).
+
+ok('RPV-1 non-weekly freq is always valid', () => {
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'none' }) === true);
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'daily' }) === true);
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'weekday' }) === true);
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'monthly', recurrenceDayOfMonth: null }) === true);
+});
+
+ok('RPV-2 weekly with at least one day is valid', () => {
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'weekly', recurrenceDays: [1] }) === true);
+});
+
+ok('RPV-3 weekly with zero days is invalid', () => {
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'weekly', recurrenceDays: [] }) === false);
+  assert(TaskDialog._recurrencePickerValid({ recurrenceFreq: 'weekly' }) === false, 'missing recurrenceDays -> invalid');
+});
+
+ok('RPV-4 tolerates a missing/null state', () => {
+  assert(TaskDialog._recurrencePickerValid(null) === true, 'null state -> valid (freq defaults away from weekly)');
+});
+
+// ---------- Recurrence picker round-trip (describe -> hydrate -> recompose) ----------
+//
+// Simulates opening the edit dialog on a task with an existing recurrence:
+// RecurrenceParser.describe() parses it, _recurrenceStateFromDescribe()
+// hydrates the picker state, and _composeRecurrenceGrammar() rebuilds an
+// equivalent grammar string with no user interaction — confirms the picker
+// never silently mutates an existing recurring task's schedule just by
+// opening and re-saving it unchanged.
+
+ok('RRT-1 round-trips "every 2 weeks on Friday" unchanged (short day name)', () => {
+  const RecurrenceParserClass = loadClass('blueprints/to-do/helpers/recurrence-parser.js', 'RecurrenceParser');
+  const grammar = 'every 2 weeks on Friday';
+  const described = RecurrenceParserClass.describe(grammar);
+  const hydrated = TaskDialog._recurrenceStateFromDescribe(described);
+  const recomposed = TaskDialog._composeRecurrenceGrammar(hydrated.freq, { days: hydrated.days, weeks: hydrated.weeks, dayOfMonth: hydrated.dayOfMonth });
+  assert(recomposed === 'every 2 weeks on Fri', 'recomposed: ' + recomposed);
+});
+
+ok('RRT-2 round-trips "every 15th of month" unchanged', () => {
+  const RecurrenceParserClass = loadClass('blueprints/to-do/helpers/recurrence-parser.js', 'RecurrenceParser');
+  const grammar = 'every 15th of month';
+  const described = RecurrenceParserClass.describe(grammar);
+  const hydrated = TaskDialog._recurrenceStateFromDescribe(described);
+  const recomposed = TaskDialog._composeRecurrenceGrammar(hydrated.freq, { days: hydrated.days, weeks: hydrated.weeks, dayOfMonth: hydrated.dayOfMonth });
+  assert(recomposed === grammar, 'recomposed: ' + recomposed);
+});
+
+ok('RRT-3 round-trips "every weekday" unchanged', () => {
+  const RecurrenceParserClass = loadClass('blueprints/to-do/helpers/recurrence-parser.js', 'RecurrenceParser');
+  const grammar = 'every weekday';
+  const described = RecurrenceParserClass.describe(grammar);
+  const hydrated = TaskDialog._recurrenceStateFromDescribe(described);
+  const recomposed = TaskDialog._composeRecurrenceGrammar(hydrated.freq, { days: hydrated.days, weeks: hydrated.weeks, dayOfMonth: hydrated.dayOfMonth });
+  assert(recomposed === grammar, 'recomposed: ' + recomposed);
+});
+
+ok('RRT-4 round-trips an empty/no-recurrence task unchanged', () => {
+  const hydrated = TaskDialog._recurrenceStateFromDescribe(null);
+  const recomposed = TaskDialog._composeRecurrenceGrammar(hydrated.freq, { days: hydrated.days, weeks: hydrated.weeks, dayOfMonth: hydrated.dayOfMonth });
+  assert(recomposed === '', 'recomposed: ' + recomposed);
 });
 
 // ---------- TaskTodayList static helpers (pure) ----------
