@@ -286,14 +286,14 @@ class TaskEntity {
      *   { path: "spice/tasks/<filename>", frontmatter: {...}, body: <chrome> }
      *
      * Frontmatter keys are emitted in the canonical schema order. Absent
-     * scheduled / due / completed_at are emitted as EMPTY STRINGS (not omitted)
+     * due / completed_at are emitted as EMPTY STRINGS (not omitted)
      * so downstream edits (setting a date) are a simple in-place field write.
      * The body is the CHROME body (SpaceNavButtons + TaskNoteView + the
      * `<!-- TASK_NOTES -->` marker) so a freshly-created task note is never
      * bare; the caller appends any typed user notes BELOW the marker.
      *
      * payload = {
-     *   title, status?, scheduled?, due?, recurrence?, priority?,
+     *   title, status?, due?, recurrence?, priority?,
      *   project?: { name, slug }, source?, source_note?,
      *   now?, moment?,   // now: ISO string; moment: moment-like for filename+created_at
      * }
@@ -318,7 +318,6 @@ class TaskEntity {
             type: 'task',
             title: p.title || '',
             status: p.status || 'open',
-            scheduled: p.scheduled || '',
             due: p.due || '',
             recurrence: p.recurrence || '',
             priority: p.priority || '',
@@ -349,7 +348,6 @@ class TaskEntity {
         return {
             title: p.title != null ? String(p.title) : '',
             status: p.status || 'open',
-            scheduled: TaskEntity._toDateStr(p.scheduled),
             due: TaskEntity._toDateStr(p.due),
             recurrence: p.recurrence || '',
             priority: p.priority || '',
@@ -376,10 +374,10 @@ class TaskEntity {
      * Partition a list of task-like objects (raw frontmatter or parseNote output)
      * relative to `todayStr` (YYYY-MM-DD). Only status==="open" tasks are
      * considered. Returns { today, overdue }:
-     *   today   — scheduled === todayStr
-     *   overdue — scheduled truthy AND scheduled < todayStr (string compare of
+     *   today   — due === todayStr
+     *   overdue — due truthy AND due < todayStr (string compare of
      *             zero-padded ISO dates is chronologically correct)
-     * Future-scheduled and unscheduled open tasks appear in NEITHER bucket.
+     * Future-due and undated open tasks appear in NEITHER bucket.
      */
     static queryToday(tasks, todayStr) {
         const today = [];
@@ -387,11 +385,11 @@ class TaskEntity {
         const list = Array.isArray(tasks) ? tasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
-            const sched = t.scheduled;
-            if (!sched) continue;
-            if (sched === todayStr) today.push(t);
-            else if (sched < todayStr) overdue.push(t);
-            // sched > todayStr (future) → excluded from both buckets.
+            const due = t.due;
+            if (!due) continue;
+            if (due === todayStr) today.push(t);
+            else if (due < todayStr) overdue.push(t);
+            // due > todayStr (future) → excluded from both buckets.
         }
         return { today: today, overdue: overdue };
     }
@@ -433,7 +431,7 @@ class TaskEntity {
 
     /**
      * Validate a create/edit payload. `title` (non-empty after trim) is
-     * required. `scheduled` / `due`, when present, must be strict YYYY-MM-DD.
+     * required. `due`, when present, must be strict YYYY-MM-DD.
      */
     static validatePayload(payload) {
         if (!payload) return { valid: false, reason: 'empty payload' };
@@ -441,9 +439,6 @@ class TaskEntity {
             return { valid: false, reason: 'title required' };
         }
         const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-        if (payload.scheduled && !DATE_RE.test(payload.scheduled)) {
-            return { valid: false, reason: 'invalid scheduled date' };
-        }
         if (payload.due && !DATE_RE.test(payload.due)) {
             return { valid: false, reason: 'invalid due date' };
         }

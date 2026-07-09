@@ -82,7 +82,7 @@ ok('TE-1b _uniqueName dedupes against the vault', () => {
 ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   const out = TaskEntity.composeNote({
     title: 'Call X',
-    scheduled: '2026-07-01',
+    due: '2026-07-01',
     project: { name: 'Sauce', slug: 'sauce' },
     source: 'daily',
     now: '2026-07-01T10:00:00-06:00',
@@ -90,13 +90,12 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   const fm = out.frontmatter;
   assert(fm.type === 'task', 'type');
   assert(fm.status === 'open', 'status defaults open');
-  assert(fm.scheduled === '2026-07-01', 'scheduled');
+  assert(fm.due === '2026-07-01', 'due');
   assert(fm.project === '[[Sauce]]', 'project wikilink');
   assert(fm.project_slug === 'sauce', 'project_slug');
   assert(fm.source === 'daily', 'source');
   assert(!!fm.created_at, 'created_at truthy');
   assert(fm.created_at === '2026-07-01T10:00:00-06:00', 'created_at from payload.now');
-  assert(fm.due === '', 'absent due → empty string');
   assert(fm.completed_at === '', 'absent completed_at → empty string');
   // FIX 5 — links is always present as an array (empty when none provided).
   assert(Array.isArray(fm.links), 'links is an array');
@@ -108,10 +107,10 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
-// 3. composeNote — minimal payload → blank scheduled, still valid.
-ok('TE-3 composeNote minimal payload → blank scheduled + valid', () => {
+// 3. composeNote — minimal payload → blank due, still valid.
+ok('TE-3 composeNote minimal payload → blank due + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
-  assert(out.frontmatter.scheduled === '', 'absent scheduled → empty string');
+  assert(out.frontmatter.due === '', 'absent due → empty string');
   assert(TaskEntity.validatePayload({ title: 'x' }).valid === true, 'minimal payload valid');
 });
 
@@ -197,9 +196,9 @@ ok('TE-recur-6 nextOccurrence tolerates a missing/throwing matchesFn (never thro
 
 // 4. parseNote — normalize a dataview page: missing status → open, blank date → null.
 ok('TE-4 parseNote normalizes status + blank dates', () => {
-  const parsed = TaskEntity.parseNote({ status: undefined, scheduled: '', title: 't', file: { path: 'spice/tasks/a.md' } });
+  const parsed = TaskEntity.parseNote({ status: undefined, due: '', title: 't', file: { path: 'spice/tasks/a.md' } });
   assert(parsed.status === 'open', 'missing status → open');
-  assert(parsed.scheduled === null, 'blank scheduled → null');
+  assert(parsed.due === null, 'blank due → null');
   assert(parsed.title === 't', 'title preserved');
   assert(parsed.path === 'spice/tasks/a.md', 'path from file.path');
 });
@@ -207,10 +206,10 @@ ok('TE-4 parseNote normalizes status + blank dates', () => {
 // 5. queryToday — partition open tasks into today / overdue; excludes done/future.
 ok('TE-5 queryToday partitions today + overdue (open only)', () => {
   const res = TaskEntity.queryToday([
-    { scheduled: '2026-07-01', status: 'open' },
-    { scheduled: '2026-06-30', status: 'open' },
-    { scheduled: '2026-07-02', status: 'open' },
-    { scheduled: '2026-07-01', status: 'done' },
+    { due: '2026-07-01', status: 'open' },
+    { due: '2026-06-30', status: 'open' },
+    { due: '2026-07-02', status: 'open' },
+    { due: '2026-07-01', status: 'done' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single open 07-01: got ' + res.today.length);
   assert(res.overdue.length === 1, 'overdue = the open 06-30: got ' + res.overdue.length);
@@ -220,9 +219,8 @@ ok('TE-5 queryToday partitions today + overdue (open only)', () => {
 ok('TE-6 validatePayload requires title + validates date shape', () => {
   assert(TaskEntity.validatePayload({ title: '' }).valid === false, 'empty title invalid');
   assert(TaskEntity.validatePayload({ title: 'ok' }).valid === true, 'non-empty title valid');
-  assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-7-1' }).valid === false, 'bad scheduled shape invalid');
   assert(TaskEntity.validatePayload({ title: 'ok', due: 'nope' }).valid === false, 'bad due shape invalid');
-  assert(TaskEntity.validatePayload({ title: 'ok', scheduled: '2026-07-01', due: '2026-06-30' }).valid === true, 'good dates valid');
+  assert(TaskEntity.validatePayload({ title: 'ok', due: '2026-06-30' }).valid === true, 'good due valid');
 });
 
 function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
@@ -691,15 +689,14 @@ ok('DT-1 _toDateStr coerces date-ish values to YYYY-MM-DD strings', () => {
   assert(TaskEntity._toDateStr({ toFormat: () => '2026-07-01' }) === '2026-07-01', 'toFormat → string');
 });
 
-// DT-2. parseNote coerces a Luxon `scheduled` into a plain string (was a DateTime).
-ok('DT-2 parseNote coerces Luxon scheduled → string', () => {
+// DT-2. parseNote coerces a Luxon `due` into a plain string (was a DateTime).
+ok('DT-2 parseNote coerces Luxon due → string', () => {
   const parsed = TaskEntity.parseNote({
     type: 'task', status: 'open',
-    scheduled: luxon('2026-07-01'), due: '',
+    due: luxon('2026-07-01'),
     file: { path: 'spice/tasks/a.md' },
   });
-  assert(parsed.scheduled === '2026-07-01', 'scheduled is the string, not a DateTime: got ' + JSON.stringify(parsed.scheduled));
-  assert(parsed.due === null, 'blank due → null');
+  assert(parsed.due === '2026-07-01', 'due is the string, not a DateTime: got ' + JSON.stringify(parsed.due));
 });
 
 // DT-3. THE REPRO — Luxon-scheduled open tasks must land in a band, not vanish.
