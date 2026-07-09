@@ -121,11 +121,11 @@
     },
     {
       "name": "meetings",
-      "version": "0.17.1"
+      "version": "0.18.0"
     },
     {
       "name": "people",
-      "version": "0.7.0"
+      "version": "0.8.0"
     },
     {
       "name": "products",
@@ -149,7 +149,7 @@
     },
     {
       "name": "finance",
-      "version": "0.18.1"
+      "version": "0.19.0"
     },
     {
       "name": "scratch",
