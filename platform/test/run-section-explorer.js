@@ -1033,4 +1033,70 @@ failures += !run("pane with real root pages ignores listRecent (normal docs mode
   delete global.customJS;
 });
 
+failures += !run("wiki adapter listRecent returns subtree-recent pages with section subtitles, capped at 8", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const pages = [
+    { type: "wiki-section", title: "EMS", file: { name: "EMS", path: "spice/wiki/ems/EMS.md", mtime: { ts: 1 } } },
+  ];
+  for (let i = 0; i < 10; i++) {
+    pages.push({ type: "wiki-page", title: "Page " + i, file: { name: "Page " + i, path: "spice/wiki/ems/Page " + i + ".md", mtime: { ts: 100 + i } } });
+  }
+  const dvStub = {
+    page: () => null,
+    pages: () => { const arr = pages.slice(); arr.array = () => arr; return arr; },
+  };
+  const config = wt._buildConfig(dvStub, { file: { path: "spice/wiki/Wiki.md" } });
+  assert.strictEqual(typeof config.listRecent, "function", "wiki config must expose listRecent");
+  const recent = config.listRecent(dvStub, { scopePath: "spice/wiki" });
+  assert.strictEqual(recent.length, 8, "capped at 8");
+  assert.strictEqual(recent[0].title, "Page 9", "most recent first");
+  assert.strictEqual(recent[0].where, "EMS", "where = the page's section display title");
+  assert.strictEqual(recent[0].mtime, 109);
+});
+
+failures += !run("WikiTree hub render no longer draws its own Recently-Updated grid (moved into the pane)", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  assert.ok(!/Recently updated/.test(treeSrc), "wiki-tree.js must not render its own 'Recently updated' section anymore");
+});
+
+failures += !run("project docs-index adapter listRecent returns subtree-recent doc-notes with section subtitles", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const docsFolder = "spice/projects/foo/docs";
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { name: "Knowledge", path: docsFolder + "/knowledge/Knowledge.md", folder: docsFolder + "/knowledge", mtime: { ts: 1 } } },
+    { type: "doc-note", file: { name: "Dashboards", path: docsFolder + "/knowledge/Dashboards.md", folder: docsFolder + "/knowledge", mtime: { ts: 500 } } },
+    { type: "doc-note", file: { name: "Older", path: docsFolder + "/knowledge/Older.md", folder: docsFolder + "/knowledge", mtime: { ts: 100 } } },
+  ];
+  const dvStub = { page: () => null, pages: () => { const a = pages.slice(); a.array = () => a; a.where = (fn) => { const r = a.filter(fn); r.array = () => r; return r; }; return a; } };
+  const config = pdi._buildConfig(dvStub, { file: { path: docsFolder + "/Docs.md" } }, { projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder, scopePath: docsFolder });
+  assert.strictEqual(typeof config.listRecent, "function");
+  const recent = config.listRecent(dvStub, { scopePath: docsFolder });
+  assert.strictEqual(recent.length, 2);
+  assert.strictEqual(recent[0].title, "Dashboards");
+  assert.strictEqual(recent[0].where, "Knowledge");
+});
+
+failures += !run("section-hub adapter exposes listRecent (subtree-recent doc-notes)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const dvStub = { page: () => null, pages: () => { const a = []; a.array = () => a; a.where = (fn) => { const r = a.filter(fn); r.array = () => r; return r; }; return a; } };
+  const config = sh._buildConfig(dvStub, { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 }, 1, "foo", "ems", "EMS");
+  assert.strictEqual(typeof config.listRecent, "function");
+  assert.deepStrictEqual(config.listRecent(dvStub, {}), []);
+});
+
 process.exit(failures > 0 ? 1 : 0);
