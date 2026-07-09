@@ -469,4 +469,114 @@ failures += !run("project adapter: renameSection on a depth-1 hub updates sectio
   delete global.customJS;
 });
 
+// ── Regression: real Obsidian `dv` is a CLASS INSTANCE (pages/current live on
+// its prototype, not as own enumerable properties). `{ ...dv, container }` —
+// used at every SectionExplorer.render() call site in WikiTree/ProjectDocsIndex/
+// SectionHub — only copies OWN enumerable properties, silently dropping every
+// prototype method. The existing tests above never caught this because their
+// `dv` stubs are plain object literals (methods ARE own properties there), which
+// doesn't match production. This test uses a real `class FakeDv` (methods on
+// the prototype, exactly like the actual Dataview API) to reproduce the bug
+// end-to-end through the REAL WikiTree source, proving sections silently
+// vanish even though matching pages genuinely exist.
+function makeClassShapedDv(container, pages, currentPage) {
+  class FakeDv {
+    constructor() { this.container = container; }
+    pages(q) {
+      const arr = pages.filter((p) => !q || (p.file && p.file.path && p.file.path.startsWith(q.replace(/^"|"$/g, ""))));
+      arr.array = () => arr;
+      arr.where = (fn) => { const r = arr.filter(fn); r.array = () => r; r.where = arr.where; r.length = r.length; return r; };
+      return arr;
+    }
+    current() { return currentPage; }
+  }
+  return new FakeDv();
+}
+
+failures += !run("REGRESSION: WikiTree.render with a class-shaped dv still finds real sections (dv-spread must not drop dv.pages)", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+
+  const SectionExplorer = loadClass();
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: {
+      render: (dv, opts) => {
+        // No active filter — mirror the real DocSearch contract closely enough
+        // to drive WikiTree straight into the SectionExplorer.render() branch.
+        return { hasActiveFilter: false, resultsContainer: dv.container, matches: () => true };
+      },
+      matches: () => true,
+    },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+  };
+
+  const { container, els } = makeDomStub();
+  const cur = { file: { path: "spice/wiki/Wiki.md" }, type: "wiki-hub" };
+  const pages = [
+    { type: "wiki-section", title: "EMS", file: { path: "spice/wiki/ems/EMS.md", name: "EMS", mtime: { ts: 1 } } },
+  ];
+  const dv = makeClassShapedDv(container, pages, cur);
+  const wt = new WikiTree();
+  wt.render(dv);
+
+  const railRows = els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(
+    railRows.length,
+    1,
+    "expected WikiTree to surface the real wiki-section via SectionExplorer's rail — got " + railRows.length +
+      " rail rows. This reproduces the dv-spread bug: '{ ...dv, container }' at the WikiTree.render() call site " +
+      "drops dv.pages (a prototype method on the real Dataview API), so the adapter's listSections() throws/no-ops."
+  );
+  delete global.customJS;
+});
+
+failures += !run("REGRESSION: ProjectDocsIndex.render with a class-shaped dv still finds real docs (dv-spread must not drop dv.pages)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+
+  const SectionExplorer = loadClass();
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: { render: (dv) => ({ hasActiveFilter: false, resultsContainer: dv.container }) },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+    AccentButton: { render: () => {} },
+  };
+
+  const { container, els } = makeDomStub();
+  const cur = { file: { path: "spice/projects/sauce/docs/Docs.md", folder: "spice/projects/sauce/docs" }, type: "docs-hub" };
+  // A real materialized section-hub note (NOT relying on the "Knowledge"/"Notes"
+  // virtual-fallback path _buildConfig takes when zero sections are discovered —
+  // that fallback would mask the dv-spread bug, since it also fires when
+  // dv.pages() throws/no-ops and discoveredSet ends up empty either way).
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { path: "spice/projects/sauce/docs/knowledge/Knowledge.md", name: "Knowledge", folder: "spice/projects/sauce/docs/knowledge", mtime: { ts: 1 } } },
+    { type: "doc-note", file: { path: "spice/projects/sauce/docs/knowledge/Notes.md", name: "Notes", folder: "spice/projects/sauce/docs/knowledge", mtime: { ts: 1 } } },
+  ];
+  const dv = makeClassShapedDv(container, pages, cur);
+  const pdi = new ProjectDocsIndex();
+  pdi.render(dv);
+
+  const railRows = els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(
+    railRows.length,
+    1,
+    "expected ProjectDocsIndex to surface the real 'Knowledge' section-hub via SectionExplorer's rail — got " + railRows.length +
+      " rail rows. This reproduces the dv-spread bug at the ProjectDocsIndex.render() call site (a broken dv makes " +
+      "the section-hub discovery silently find nothing, either 0 rows or falling back to the default 'Knowledge'/'Notes' " +
+      "virtual placeholders instead of the REAL discovered section)."
+  );
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
