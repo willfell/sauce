@@ -77,7 +77,7 @@ class SectionHub {
     });
     // Wiki parity: normalize the shared search strip's top gap to 12px.
     try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
-    this._config = this._buildConfig(cur, depth, projectSlug, sectionSlug, sectionName);
+    this._config = this._buildConfig(dv, cur, depth, projectSlug, sectionSlug, sectionName);
 
     // ── Tier 3: list (leading hairline + sub-sections + docs) ─────────────────
     this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx);
@@ -203,7 +203,7 @@ class SectionHub {
     // not a throw.
     if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.makeAdapter !== "function"
       || typeof customJS.SectionExplorer.render !== "function") return;
-    if (!this._config) this._config = this._buildConfig(cur, depth, projectSlug, sectionSlug, sectionName);
+    if (!this._config) this._config = this._buildConfig(dv, cur, depth, projectSlug, sectionSlug, sectionName);
     const adapter = customJS.SectionExplorer.makeAdapter(this._config);
     // NOTE: do NOT use `{ ...dv, container }` here — Obsidian's real `dv` is
     // a class instance; `pages`/`current` live on its prototype, not as own
@@ -224,7 +224,7 @@ class SectionHub {
   // nesting, listSections returns []. Rename on a depth-1 hub must ALSO patch
   // every depth-2 child's parent_section (a display-name string, not derived
   // from the folder path) via _childHubsForRename.
-  _buildConfig(cur, depth, projectSlug, sectionSlug, sectionName) {
+  _buildConfig(dv, cur, depth, projectSlug, sectionSlug, sectionName) {
     const parentSlugForScope = depth === 2 ? this._slugify(this._stripLink(cur.parent_section)) : null;
     const sectionPath = depth === 1
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
@@ -283,7 +283,7 @@ class SectionHub {
         const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve();
         // Depth-1 rename must also patch every depth-2 child's parent_section
         // (a display-name string, not derived from the folder path).
-        const childHubs = this._childHubsForRename ? (this._childHubsForRename(section) || []) : [];
+        const childHubs = this._childHubsForRename ? (this._childHubsForRename(dv, section) || []) : [];
         const childPromises = childHubs.map((childHub) => {
           const cf = app.vault.getAbstractFileByPath(childHub.path);
           return cf ? app.fileManager.processFrontMatter(cf, (fm) => { fm.parent_section = newTitle; }) : Promise.resolve();
@@ -297,7 +297,7 @@ class SectionHub {
 
   // Depth-2 children of a depth-1 section, for renameSection's parent_section
   // cascade. Never-throw (defensive against a cold-load / query error).
-  _childHubsForRename(section) {
+  _childHubsForRename(dv, section) {
     try {
       const rows = dv.pages(`"${section.folder}"`).where((p) => p.type === "section-hub" && p.depth === 2);
       const arr = rows.array ? rows.array() : Array.from(rows);

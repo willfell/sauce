@@ -441,7 +441,7 @@ failures += !run("project adapter: virtual (unmaterialized) sections expose no r
   const ProjectDocsIndex = mod.exports;
   const pdi = new ProjectDocsIndex();
   const virtualSection = { title: "Notes", hubPath: null, folder: "spice/projects/foo/docs/notes", pageCount: 0, subSectionCount: 0, materialized: false };
-  const config = pdi._buildConfig({ file: { path: "spice/projects/foo/Docs.md" } }, {
+  const config = pdi._buildConfig({ page: () => null, pages: () => [] }, { file: { path: "spice/projects/foo/Docs.md" } }, {
     projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder: "spice/projects/foo/docs", scopePath: "spice/projects/foo/docs",
   });
   assert.strictEqual(config.canDelete(virtualSection), false, "a virtual section must never be deletable");
@@ -465,7 +465,7 @@ failures += !run("project adapter: renameSection on a depth-1 hub updates sectio
   const SectionHub = mod.exports;
   const sh = new SectionHub();
   const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
-  const config = sh._buildConfig(cur, 1, "foo", "ems", "EMS");
+  const config = sh._buildConfig({ page: () => null, pages: () => [] }, cur, 1, "foo", "ems", "EMS");
   const childHub = { path: "spice/projects/foo/docs/ems/sub/Sub.md" };
   sh._childHubsForRename = () => [childHub]; // test seam listing depth-2 children
   const section = { title: "EMS", hubPath: cur.file.path, folder: cur.file.folder, materialized: true };
@@ -659,11 +659,6 @@ failures += !run("REGRESSION: a prior render's search onChange must not hijack a
     BeaconCards: { render: () => {} },
     AccentButton: { render: () => {} },
   };
-  // Unrelated latent quirk: _buildConfig's getLinks references a bare `dv`
-  // identifier (not in scope) — stub a global so this regression test can
-  // reach its own assertions instead of dying on that ReferenceError.
-  global.dv = { page: () => null };
-
   const pagesFor = (slug) => [
     { type: "section-hub", depth: 1, section: "Knowledge", file: { path: `spice/projects/${slug}/docs/knowledge/Knowledge.md`, name: "Knowledge", folder: `spice/projects/${slug}/docs/knowledge`, mtime: { ts: 1 } } },
   ];
@@ -693,7 +688,67 @@ failures += !run("REGRESSION: a prior render's search onChange must not hijack a
   assert.strictEqual(rowsInStale.length, staleRowsAfterOnChange, "no NEW rail rows may render into the PRIOR render's stale resultsContainer");
   assert.strictEqual(rowsInB.length, 1, "render #2's rail rows must land in ITS OWN resultsContainer — got " + rowsInB.length + " (stale-_currentCtx hijack)");
   delete global.customJS;
-  delete global.dv;
+});
+
+// ── Regression: _buildConfig's getLinks closure referenced a BARE `dv`
+// identifier that is NOT in scope inside the method (wiki-tree's
+// _buildConfig(dv, cur) correctly takes dv as a parameter; the project
+// helpers forgot it). At runtime adapter.getLinks() threw ReferenceError
+// inside SectionExplorer._renderPagePane, killing the whole page pane
+// (rail rendered, docs never did). These tests run WITHOUT any global.dv.
+failures += !run("REGRESSION: ProjectDocsIndex adapter getLinks must not throw (dv captured in _buildConfig scope)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+
+  const SectionExplorer = loadClass();
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: { render: (dv) => ({ hasActiveFilter: false, resultsContainer: dv.container }) },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+    AccentButton: { render: () => {} },
+  };
+  assert.strictEqual(typeof global.dv, "undefined", "precondition: no global dv may mask the scope bug");
+
+  const { container, els } = makeDomStub();
+  const cur = { file: { path: "spice/projects/sauce/docs/Docs.md", folder: "spice/projects/sauce/docs" }, type: "docs-hub" };
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { path: "spice/projects/sauce/docs/knowledge/Knowledge.md", name: "Knowledge", folder: "spice/projects/sauce/docs/knowledge", mtime: { ts: 1 } } },
+    { type: "doc-note", file: { path: "spice/projects/sauce/docs/Readme.md", name: "Readme", folder: "spice/projects/sauce/docs", mtime: { ts: 2 } } },
+  ];
+  const dv = makeClassShapedDv(container, pages, cur);
+  // dv.page exists (own property is fine for this direction of the spread bug).
+  dv.page = () => ({ links: [{ url: "https://example.com", text: "Guide" }] });
+
+  const pdi = new ProjectDocsIndex();
+  pdi.render(dv);
+
+  const linksRow = els.find((e) => e.className === "se-links-row");
+  assert.ok(
+    linksRow,
+    "expected a se-links-row — getLinks must resolve links via the dv passed to _buildConfig, not a bare out-of-scope `dv` (ReferenceError kills the page pane)"
+  );
+  delete global.customJS;
+});
+
+failures += !run("REGRESSION: SectionHub adapter getLinks must not throw (dv captured in _buildConfig scope)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+
+  assert.strictEqual(typeof global.dv, "undefined", "precondition: no global dv may mask the scope bug");
+  const sh = new SectionHub();
+  const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
+  const dvStub = { page: () => ({ links: [{ url: "https://x.com", text: "X" }] }), pages: () => [] };
+  const config = sh._buildConfig(dvStub, cur, 1, "foo", "ems", "EMS");
+  const links = config.getLinks({ hubPath: "spice/projects/foo/docs/ems/EMS.md" });
+  assert.deepStrictEqual(links, [{ url: "https://x.com", text: "X" }], "getLinks must return the stub dv's links without throwing");
 });
 
 process.exit(failures > 0 ? 1 : 0);
