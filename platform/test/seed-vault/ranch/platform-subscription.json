@@ -149,7 +149,7 @@
     },
     {
       "name": "finance",
-      "version": "0.18.0"
+      "version": "0.18.1"
     },
     {
       "name": "scratch",
@@ -165,7 +165,7 @@
     },
     {
       "name": "reader",
-      "version": "0.4.0"
+      "version": "0.4.1"
     }
   ]
 }
