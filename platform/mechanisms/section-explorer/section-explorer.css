@@ -1,0 +1,38 @@
+/* platform/mechanisms/section-explorer/section-explorer.css */
+:root {
+  --se-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --se-spring: cubic-bezier(0.34, 1.56, 0.5, 1);
+}
+
+@keyframes sectionExplorerRailIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.se-rail-row {
+  animation: sectionExplorerRailIn 0.22s var(--se-spring) both;
+}
+.se-rail-row:nth-child(1) { animation-delay: 0.02s; }
+.se-rail-row:nth-child(2) { animation-delay: 0.05s; }
+.se-rail-row:nth-child(3) { animation-delay: 0.08s; }
+.se-rail-row:nth-child(4) { animation-delay: 0.11s; }
+.se-rail-row:nth-child(n+5) { animation-delay: 0.14s; }
+
+@keyframes sectionExplorerPaneIn {
+  from { opacity: 0; transform: scale(0.985); filter: blur(2px); }
+  to { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+.se-page-pane {
+  animation: sectionExplorerPaneIn 0.28s var(--se-ease) both;
+}
+
+@media (max-width: 720px) {
+  .se-root { flex-direction: column; }
+  .se-rail { flex: 0 0 auto; }
+  .se-page-pane { flex: 1 1 auto; }
+}
+
+@media (min-width: 721px) {
+  .se-root { display: flex; flex-direction: row; align-items: flex-start; }
+  .se-rail { flex: 0 0 auto; }
+  .se-page-pane { flex: 1 1 auto; min-width: 0; }
+}

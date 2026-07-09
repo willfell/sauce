@@ -176,6 +176,11 @@
       "name": "chrome-bar",
       "version": "0.3.1",
       "path": "mechanisms/chrome-bar"
+    },
+    {
+      "name": "section-explorer",
+      "version": "0.1.0",
+      "path": "mechanisms/section-explorer"
     }
   ],
   "blueprints": [
