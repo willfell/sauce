@@ -1,0 +1,16 @@
+---
+type: to-do-recurring-list
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
+tags:
+  - "{{vault_identity_tag}}"
+cssclasses:
+  - wide
+---
+
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "ToDoChromeBar" });
+```
+
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "TaskRecurringList" });
+```

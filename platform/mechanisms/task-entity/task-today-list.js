@@ -376,6 +376,16 @@ class TaskTodayList {
 
         // Metadata chips (only when set): project / priority / due. flex-shrink:0
         // so the chips never shrink or clip — DUE stays intact.
+        // Repeat badge — a small icon (not a text chip) shown when the task has
+        // a recurrence grammar set, so a recurring task is visually distinct at
+        // a glance without opening the note.
+        if (task && task.recurrence) {
+            const badge = rightCluster.createEl('span', { cls: 'sauce-task-today-recur-badge' });
+            badge.style.cssText = 'display:inline-flex; align-items:center; flex-shrink:0; color:var(--text-muted);';
+            try { badge.setAttribute('title', 'Repeats: ' + task.recurrence); } catch (_e) {}
+            badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+        }
+
         const chips = rightCluster.createEl('div', { cls: 'sauce-task-today-chips' });
         chips.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0;';
         const addChip = (label) => {

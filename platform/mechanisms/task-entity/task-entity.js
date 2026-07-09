@@ -49,6 +49,7 @@ class TaskEntity {
     composeNote(payload) { return TaskEntity.composeNote(payload); }
     parseNote(page) { return TaskEntity.parseNote(page); }
     queryToday(tasks, todayStr) { return TaskEntity.queryToday(tasks, todayStr); }
+    nextOccurrence(recurrence, fromDateStr, anchorDateStr, matchesFn) { return TaskEntity.nextOccurrence(recurrence, fromDateStr, anchorDateStr, matchesFn); }
     validatePayload(payload) { return TaskEntity.validatePayload(payload); }
     _toDateStr(v) { return TaskEntity._toDateStr(v); }
     _linkText(v) { return TaskEntity._linkText(v); }
@@ -292,7 +293,7 @@ class TaskEntity {
      * bare; the caller appends any typed user notes BELOW the marker.
      *
      * payload = {
-     *   title, status?, scheduled?, due?, priority?,
+     *   title, status?, scheduled?, due?, recurrence?, priority?,
      *   project?: { name, slug }, source?, source_note?,
      *   now?, moment?,   // now: ISO string; moment: moment-like for filename+created_at
      * }
@@ -319,6 +320,7 @@ class TaskEntity {
             status: p.status || 'open',
             scheduled: p.scheduled || '',
             due: p.due || '',
+            recurrence: p.recurrence || '',
             priority: p.priority || '',
             project: project,
             project_slug: projectSlug,
@@ -349,6 +351,7 @@ class TaskEntity {
             status: p.status || 'open',
             scheduled: TaskEntity._toDateStr(p.scheduled),
             due: TaskEntity._toDateStr(p.due),
+            recurrence: p.recurrence || '',
             priority: p.priority || '',
             project: p.project != null ? p.project : null,
             project_slug: p.project_slug != null ? p.project_slug : null,
@@ -391,6 +394,41 @@ class TaskEntity {
             // sched > todayStr (future) → excluded from both buckets.
         }
         return { today: today, overdue: overdue };
+    }
+
+    /**
+     * Walk forward day-by-day from the day AFTER `fromDateStr` (never returning
+     * `fromDateStr` itself, even if it would match) looking for the first date
+     * where `matchesFn(candidateDateStr, anchorDateStr)` returns true. Capped at
+     * a 400-day horizon (mirrors `_uniqueName`'s collision-loop cap) so an
+     * unsupported or never-firing grammar can't spin forever — returns `null` in
+     * that case. `matchesFn` is INJECTED (not a hard dependency on
+     * RecurrenceParser) so this pure core stays testable without a customJS
+     * global; the browser-side caller (TaskDialog) closes over
+     * `window.customJS.RecurrenceParser.matches`. A missing/throwing/non-function
+     * `matchesFn` yields `null` — never throws.
+     *
+     * `fromDateStr` / `anchorDateStr` are plain `YYYY-MM-DD` strings. Date
+     * arithmetic is done via `Date.UTC` (never local-zone getters) so this is
+     * correct regardless of the host device's timezone (mirrors `_toDateStr`'s
+     * UTC-safety rationale).
+     */
+    static nextOccurrence(recurrence, fromDateStr, anchorDateStr, matchesFn) {
+        if (typeof matchesFn !== 'function') return null;
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fromDateStr == null ? '' : fromDateStr));
+        if (!m) return null;
+        const startMs = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+        const DAY_MS = 86400000;
+        const HORIZON_DAYS = 400;
+        for (let i = 1; i <= HORIZON_DAYS; i++) {
+            const d = new Date(startMs + i * DAY_MS);
+            const p = (n) => String(n).padStart(2, '0');
+            const candidate = d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+            let fires = false;
+            try { fires = !!matchesFn(candidate, anchorDateStr, recurrence); } catch (_e) { fires = false; }
+            if (fires) return candidate;
+        }
+        return null;
     }
 
     /**
