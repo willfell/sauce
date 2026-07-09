@@ -267,5 +267,56 @@ await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });
   ok('CBC4-BUDGET-3: budget heal KEEPS FinanceNavRow untouched (not in scope to fix)', after.includes('class: "FinanceNavRow"'));
 }
 
+// ---- finance: invoice-board-card (kanban card) — a previously-missed type ----
+{
+  const before = `---
+type: invoice-board-card
+created_at: "2026-07-09T09:00:00-06:00"
+tags:
+  - kanban-card
+  - invoice-card
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+`;
+  const after = _healNoteChromeBody(before, 'invoice-board-card');
+  ok('CBC4-INVBOARD-1: invoice-board-card heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
+  ok('CBC4-INVBOARD-2: invoice-board-card heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
+  ok('CBC4-INVBOARD-3: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'invoice-board-card') === after);
+}
+
+// ---- finance: time-log — same previously-missed-type guarantee ----
+{
+  const before = `---
+type: time-log
+month: "2026-07"
+total_hours: 0
+entries: []
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "InvoiceTimeLogEditor" });
+\`\`\`
+`;
+  const after = _healNoteChromeBody(before, 'time-log');
+  ok('CBC4-TIMELOG-1: time-log heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
+  ok('CBC4-TIMELOG-2: time-log heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
+  ok('CBC4-TIMELOG-3: time-log heal KEEPS InvoiceTimeLogEditor untouched', after.includes('class: "InvoiceTimeLogEditor"'));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

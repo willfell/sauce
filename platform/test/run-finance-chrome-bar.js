@@ -13,29 +13,34 @@ const cfg = inst._config();
 const HUB_TYPES = ['finance-hub', 'budgets-hub', 'paychecks-hub', 'invoices-hub', 'debts-hub', 'months-hub', 'savings-hub'];
 const ENTITY_TYPES = ['budget', 'paycheck', 'invoice', 'debt', 'month', 'savings-account'];
 const DEFAULTS_TYPES = ['budget-defaults', 'paycheck-defaults', 'debt-defaults', 'finance-plan'];
+const AUX_TYPES = ['invoice-board-card', 'time-log'];
 
-// FCB-DETECT — every one of the 17 types classifies; unrelated types → null.
+// FCB-DETECT — every one of the 19 types classifies; unrelated types → null.
 {
-  let allHubs = true, allEntities = true, allDefaults = true;
+  let allHubs = true, allEntities = true, allDefaults = true, allAux = true;
   for (const t of HUB_TYPES) { const r = cfg.detect({}, { file: { path: 'x' }, type: t }); if (!r || r.context !== t) allHubs = false; }
   for (const t of ENTITY_TYPES) { const r = cfg.detect({}, { file: { path: 'x' }, type: t }); if (!r || r.context !== t) allEntities = false; }
   for (const t of DEFAULTS_TYPES) { const r = cfg.detect({}, { file: { path: 'x' }, type: t }); if (!r || r.context !== t) allDefaults = false; }
+  for (const t of AUX_TYPES) { const r = cfg.detect({}, { file: { path: 'x' }, type: t }); if (!r || r.context !== t) allAux = false; }
   const off = cfg.detect({}, { file: { path: 'spice/other/x.md' }, type: 'meeting' });
   ok('FCB-DETECT-1 all 7 hub types classify', allHubs);
   ok('FCB-DETECT-2 all 6 entity types classify', allEntities);
   ok('FCB-DETECT-3 all 4 defaults/plan types classify', allDefaults);
   ok('FCB-DETECT-4 non-finance type → null', off === null);
+  ok('FCB-DETECT-5 both aux types classify (invoice-board-card, time-log)', allAux);
 }
 // FCB-SPEC — no primary/overflow anywhere (FinanceNav already owns "+ New X" + defaults links);
-// hubs are not leaf, entities/defaults/plan are leaf.
+// hubs are not leaf, entities/defaults/plan/aux are leaf.
 {
-  let hubsOk = true, entitiesOk = true, defaultsOk = true;
+  let hubsOk = true, entitiesOk = true, defaultsOk = true, auxOk = true;
   for (const t of HUB_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== false) hubsOk = false; }
   for (const t of ENTITY_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) entitiesOk = false; }
   for (const t of DEFAULTS_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) defaultsOk = false; }
+  for (const t of AUX_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) auxOk = false; }
   ok('FCB-SPEC-1 hubs: primary null + overflow empty + not leaf', hubsOk);
   ok('FCB-SPEC-2 entities: primary null + overflow empty + leaf', entitiesOk);
   ok('FCB-SPEC-3 defaults/plan: primary null + overflow empty + leaf', defaultsOk);
+  ok('FCB-SPEC-4 aux (invoice-board-card, time-log): primary null + overflow empty + leaf', auxOk);
 }
 // FCB-DISPATCH — never throws (no chrome-owned actions on any surface).
 {
