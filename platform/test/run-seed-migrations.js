@@ -1218,9 +1218,9 @@ withTempVault((vault) => {
                 `actual recurrence=${waterFm.recurrence}`
             );
             ok(
-                "HC-V0202-SEED-MIGRATE-RECURRING-3 migrated task is open with a scheduled date (not overdue-blank)",
-                waterFm.status === "open" && typeof waterFm.scheduled === "string" && /^\d{4}-\d{2}-\d{2}$/.test(waterFm.scheduled),
-                `actual status=${waterFm.status} scheduled=${waterFm.scheduled}`
+                "HC-V0202-SEED-MIGRATE-RECURRING-3 migrated task is open with a due date (not overdue-blank)",
+                waterFm.status === "open" && typeof waterFm.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(waterFm.due),
+                `actual status=${waterFm.status} due=${waterFm.due}`
             );
         }
 
