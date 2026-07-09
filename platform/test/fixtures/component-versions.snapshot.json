@@ -1,10 +1,10 @@
 {
-  "workshop_version": "0.204.1",
+  "workshop_version": "0.204.2",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.40.3",
     "daily": "0.18.3",
-    "meetings": "0.17.0",
+    "meetings": "0.17.1",
     "people": "0.7.0",
     "products": "0.4.0",
     "project": "1.44.0",
@@ -25,7 +25,7 @@
     "backlink-panel": "0.1.1",
     "breadcrumb": "0.3.1",
     "doc-search": "0.3.0",
-    "nav-buttons": "2.15.0",
+    "nav-buttons": "2.15.1",
     "cards": "0.2.6",
     "accent-button": "0.1.3",
     "section-label": "0.2.2",
