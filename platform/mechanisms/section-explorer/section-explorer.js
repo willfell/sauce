@@ -190,77 +190,105 @@ class SectionExplorer {
     return { links: list, changed: true };
   }
 
-  // Real add-link modal — single overlay <div> appended to document.body,
-  // dedupe-guarded by class name (mirrors ProjectLinksManager._openModal).
-  // Untestable in the Node harness (real DOM appended to document.body); the
-  // pure mutation this calls (_addLinkPure) is covered directly by tests —
-  // matches the established "dogfood-only" precedent for this kind of dialog.
-  _openAddLinkForm(dv, adapter, section) {
+  // Shared modal chassis for _openAddLinkForm/_openRenameDialog — mirrors
+  // MenuPopover.open's overlay/panel/close pattern: dedupe by className,
+  // single teardown fn for ALL dismiss paths (backdrop, Escape), and the
+  // same ~400ms openedAt/withinOpeningGesture() ghost-click guard on the
+  // backdrop handler (these modals are opened from INSIDE a MenuPopover
+  // row's onSelect — the exact trigger shape that caused v0.194.1's
+  // mobile self-dismiss incident; see lesson_mobile_chrome_ghostclick_and_coldload_page).
+  // buildFn(panel, close) populates panel with whatever inputs/buttons the
+  // caller needs and may call close() itself (e.g. on Save).
+  _openModal(className, buildFn) {
     const doc = (typeof document !== "undefined") ? document : null;
-    if (!doc || !doc.body) return;
-    const existing = doc.body.querySelector(".se-link-modal-overlay");
+    if (!doc || !doc.body) return null;
+    const existing = doc.body.querySelector ? doc.body.querySelector("." + className) : null;
     if (existing && existing.remove) existing.remove();
 
     const overlay = doc.createElement("div");
-    overlay.className = "se-link-modal-overlay";
+    overlay.className = className;
     overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
     const panel = doc.createElement("div");
     panel.style.cssText = "background:var(--background-primary);border-radius:12px;padding:16px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
-    const urlInput = doc.createElement("input");
-    urlInput.placeholder = "https://…";
-    urlInput.style.cssText = "width:100%;margin-bottom:8px;";
-    const textInput = doc.createElement("input");
-    textInput.placeholder = "Label (optional)";
-    textInput.style.cssText = "width:100%;margin-bottom:12px;";
-    const addBtn = doc.createElement("button");
-    addBtn.textContent = "Add link";
-    const close = () => { if (overlay.remove) overlay.remove(); };
-    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
-    addBtn.onclick = () => {
-      const current = adapter.getLinks(section) || [];
-      const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
-      if (result.changed) { try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ } }
-      close();
+
+    // Single teardown for ALL dismiss paths (backdrop, Escape) — removes
+    // overlay AND the keydown listener so a stale Escape handler can never
+    // swallow keys elsewhere (mirrors MenuPopover.open's close()).
+    const escListener = (e) => { if (e && e.key === "Escape") close(); };
+    const close = () => {
+      if (overlay.remove) overlay.remove();
+      else if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (doc.removeEventListener) doc.removeEventListener("keydown", escListener);
     };
-    panel.appendChild(urlInput);
-    panel.appendChild(textInput);
-    panel.appendChild(addBtn);
+
+    // Opening-gesture ghost-click guard — mirrors MenuPopover.open exactly.
+    // A menu-row tap can bleed through to this just-mounted full-screen
+    // backdrop and self-dismiss it on mobile before the user ever sees it.
+    // Reads overlay.__seOpenedAt (not a closed-over var) so tests can
+    // fast-forward past the guard window by mutating the returned overlay.
+    overlay.__seOpenedAt = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+    const withinOpeningGesture = () => {
+      if (!overlay.__seOpenedAt) return false;
+      const now = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+      return now - overlay.__seOpenedAt < 400;
+    };
+
+    overlay.onclick = (e) => {
+      if (e && e.target === overlay && !withinOpeningGesture()) close();
+    };
+    if (doc.addEventListener) doc.addEventListener("keydown", escListener);
+
+    if (typeof buildFn === "function") buildFn(panel, close, doc);
     overlay.appendChild(panel);
     doc.body.appendChild(overlay);
+    return overlay;
   }
 
-  // Real rename modal — single text input, calls adapter.renameSection (which
-  // is where wiki-vs-project rename mechanics diverge; see Task 9).
-  // Same DOM-only untestability rationale as _openAddLinkForm above.
-  _openRenameDialog(dv, adapter, section) {
-    const doc = (typeof document !== "undefined") ? document : null;
-    if (!doc || !doc.body) return;
-    const existing = doc.body.querySelector(".se-rename-modal-overlay");
-    if (existing && existing.remove) existing.remove();
+  // Real add-link modal — pure mutation this calls (_addLinkPure) is
+  // covered directly by tests; the DOM shell is exercised via _openModal's
+  // Escape/ghost-click guard tests (dogfood-only for the rest, matching the
+  // established precedent for this kind of dialog).
+  _openAddLinkForm(dv, adapter, section) {
+    this._openModal("se-link-modal-overlay", (panel, close, doc) => {
+      const urlInput = doc.createElement("input");
+      urlInput.placeholder = "https://…";
+      urlInput.style.cssText = "width:100%;margin-bottom:8px;";
+      const textInput = doc.createElement("input");
+      textInput.placeholder = "Label (optional)";
+      textInput.style.cssText = "width:100%;margin-bottom:12px;";
+      const addBtn = doc.createElement("button");
+      addBtn.textContent = "Add link";
+      addBtn.onclick = () => {
+        const current = adapter.getLinks(section) || [];
+        const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
+        if (result.changed) { try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ } }
+        close();
+      };
+      panel.appendChild(urlInput);
+      panel.appendChild(textInput);
+      panel.appendChild(addBtn);
+    });
+  }
 
-    const overlay = doc.createElement("div");
-    overlay.className = "se-rename-modal-overlay";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
-    const panel = doc.createElement("div");
-    panel.style.cssText = "background:var(--background-primary);border-radius:12px;padding:16px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
-    const nameInput = doc.createElement("input");
-    nameInput.value = section.title || "";
-    nameInput.style.cssText = "width:100%;margin-bottom:12px;";
-    const saveBtn = doc.createElement("button");
-    saveBtn.textContent = "Rename";
-    const close = () => { if (overlay.remove) overlay.remove(); };
-    overlay.onclick = (e) => { if (e && e.target === overlay) close(); };
-    saveBtn.onclick = () => {
-      const newTitle = String(nameInput.value || "").trim();
-      if (newTitle && newTitle !== section.title) {
-        try { adapter.renameSection(section, newTitle); } catch (_e) { /* never-throw */ }
-      }
-      close();
-    };
-    panel.appendChild(nameInput);
-    panel.appendChild(saveBtn);
-    overlay.appendChild(panel);
-    doc.body.appendChild(overlay);
+  // Real rename modal — calls adapter.renameSection (where wiki-vs-project
+  // rename mechanics diverge; see Task 9). Same testability rationale above.
+  _openRenameDialog(dv, adapter, section) {
+    this._openModal("se-rename-modal-overlay", (panel, close, doc) => {
+      const nameInput = doc.createElement("input");
+      nameInput.value = section.title || "";
+      nameInput.style.cssText = "width:100%;margin-bottom:12px;";
+      const saveBtn = doc.createElement("button");
+      saveBtn.textContent = "Rename";
+      saveBtn.onclick = () => {
+        const newTitle = String(nameInput.value || "").trim();
+        if (newTitle && newTitle !== section.title) {
+          try { adapter.renameSection(section, newTitle); } catch (_e) { /* never-throw */ }
+        }
+        close();
+      };
+      panel.appendChild(nameInput);
+      panel.appendChild(saveBtn);
+    });
   }
 
   _openDeleteConfirm(dv, adapter, section) {

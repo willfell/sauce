@@ -288,6 +288,99 @@ failures += !run("_addLinkPure appends a valid link, rejects empty url and dupli
   assert.strictEqual(r.links[0].text, "https://b.com");
 });
 
+// Minimal fake `document` for _openModal tests: tracks the single keydown
+// listener registered (Escape) and supports the overlay/panel DOM shape
+// _openModal needs (createElement, body.appendChild, body.querySelector,
+// removeChild via parentNode).
+function makeDocStub() {
+  const listeners = {};
+  const body = {
+    children: [],
+    appendChild(el) { el.parentNode = body; this.children.push(el); },
+    removeChild(el) { this.children = this.children.filter((c) => c !== el); },
+    querySelector(sel) {
+      const cls = sel.replace(/^\./, "");
+      return this.children.find((c) => c.className === cls) || null;
+    },
+  };
+  const doc = {
+    body,
+    createElement(tag) {
+      return {
+        tag,
+        style: {},
+        children: [],
+        appendChild(child) { this.children.push(child); },
+        remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+      };
+    },
+    addEventListener(type, fn) { listeners[type] = fn; },
+    removeEventListener(type, fn) { if (listeners[type] === fn) delete listeners[type]; },
+    __listeners: listeners,
+  };
+  global.document = doc;
+  return doc;
+}
+
+failures += !run("_openModal: Escape key closes the modal and removes the keydown listener", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  assert.ok(overlay, "expected _openModal to return the overlay");
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay appended to body");
+  assert.ok(doc.__listeners.keydown, "expected a keydown listener registered");
+  doc.__listeners.keydown({ key: "Escape" });
+  assert.strictEqual(doc.body.children.length, 0, "expected overlay removed after Escape");
+  assert.ok(!doc.__listeners.keydown, "expected keydown listener removed on close");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click WITHIN the ~400ms opening-gesture guard does NOT close it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  // Real elapsed time since _openModal's Date.now() call is near-zero here —
+  // well under the 400ms guard window.
+  overlay.onclick({ target: overlay });
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay to survive a backdrop click within the opening-gesture guard");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click AFTER the opening-gesture guard window DOES close it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  // Mutate the recorded open time backward past the 400ms guard window.
+  overlay.__seOpenedAt = Date.now() - 1000;
+  overlay.onclick({ target: overlay });
+  assert.strictEqual(doc.body.children.length, 0, "expected overlay removed after guard window elapses");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click that does NOT hit the overlay itself is ignored", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  overlay.__seOpenedAt = Date.now() - 1000;
+  overlay.onclick({ target: {} }); // click landed on inner panel content, not overlay
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay to survive a click on non-overlay target");
+  delete global.document;
+});
+
+failures += !run("_openModal dedupes by className — opening twice leaves exactly one overlay", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  se._openModal("se-test-overlay", () => {});
+  se._openModal("se-test-overlay", () => {});
+  assert.strictEqual(doc.body.children.length, 1, "expected exactly one overlay after opening twice");
+  delete global.document;
+});
+
 failures += !run("_addLinkPure + adapter.writeLinks integration (no DOM)", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
