@@ -3144,16 +3144,16 @@ async function testSelectTasksNotePerTask() {
   const today = "2026-07-02";
   const pagesByQuery = {
     '"spice/tasks"': [
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "daily today", source: "daily",   file: { path: "spice/tasks/daily-today.md" } },
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "proj today",  source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-today.md" } },
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "mtg today",   source: "meeting",  file: { path: "spice/tasks/mtg-today.md" } },
-      { type: "task", status: "open", scheduled: "2026-06-30", title: "mtg overdue", source: "meeting",  file: { path: "spice/tasks/mtg-overdue.md" } },
-      { type: "task", status: "open", scheduled: "2026-06-29", title: "proj overdue", source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-overdue.md" } },
-      { type: "task", status: "open", scheduled: "2026-07-05", title: "future",       file: { path: "spice/tasks/future.md" } },
-      { type: "task", status: "open", scheduled: "",           title: "someday",      file: { path: "spice/tasks/someday.md" } },
-      { type: "task", status: "done", scheduled: "2026-07-02", title: "leaked done",  file: { path: "spice/tasks/_done/leaked.md" } },
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "trashed",      file: { path: "spice/tasks/_trash/trashed.md" } },
-      { type: "note", status: "open", scheduled: "2026-07-02", title: "not a task",   file: { path: "spice/tasks/note.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "daily today", source: "daily",   file: { path: "spice/tasks/daily-today.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "proj today",  source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-today.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "mtg today",   source: "meeting",  file: { path: "spice/tasks/mtg-today.md" } },
+      { type: "task", status: "open", due: "2026-06-30", title: "mtg overdue", source: "meeting",  file: { path: "spice/tasks/mtg-overdue.md" } },
+      { type: "task", status: "open", due: "2026-06-29", title: "proj overdue", source: "project", project_slug: "connectors", file: { path: "spice/tasks/proj-overdue.md" } },
+      { type: "task", status: "open", due: "2026-07-05", title: "future",       file: { path: "spice/tasks/future.md" } },
+      { type: "task", status: "open", due: "",           title: "someday",      file: { path: "spice/tasks/someday.md" } },
+      { type: "task", status: "done", due: "2026-07-02", title: "leaked done",  file: { path: "spice/tasks/_done/leaked.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "trashed",      file: { path: "spice/tasks/_trash/trashed.md" } },
+      { type: "note", status: "open", due: "2026-07-02", title: "not a task",   file: { path: "spice/tasks/note.md" } },
     ],
     '"spice/tasks/_done"': [
       { type: "task", status: "done", completed_at: "2026-07-02T09:15:00-06:00", title: "done today dt",   file: { path: "spice/tasks/_done/a.md" } },
@@ -3171,9 +3171,9 @@ async function testSelectTasksNotePerTask() {
   const res = SDD.selectTasks(fakeDv, today, TE);
   const titles = res.open.map((t) => t.title);
 
-  // open == TODAY ONLY (scheduled == today); overdue is a COUNT, not in the list.
-  check("open list is today-only (3 tasks scheduled today)", res.open.length === 3);
-  check("every open row is scheduled today", res.open.every((t) => t.scheduled === "2026-07-02"));
+  // open == TODAY ONLY (due == today); overdue is a COUNT, not in the list.
+  check("open list is today-only (3 tasks due today)", res.open.length === 3);
+  check("every open row is due today", res.open.every((t) => t.due === "2026-07-02"));
   check("all sources present in the today list (daily + project + meeting)",
     titles.indexOf("daily today") >= 0 && titles.indexOf("proj today") >= 0 && titles.indexOf("mtg today") >= 0);
   check("overdue tasks are NOT in the open list", titles.indexOf("mtg overdue") < 0 && titles.indexOf("proj overdue") < 0);
@@ -3253,9 +3253,9 @@ async function testComputeCounts() {
   const today = "2026-07-02";
   const pagesByQuery = {
     '"spice/tasks"': [
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "a", source: "daily",   file: { path: "spice/tasks/a.md" } },
-      { type: "task", status: "open", scheduled: "2026-07-02", title: "b", source: "project",  file: { path: "spice/tasks/b.md" } },
-      { type: "task", status: "open", scheduled: "2026-06-30", title: "od", source: "meeting",  file: { path: "spice/tasks/od.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "a", source: "daily",   file: { path: "spice/tasks/a.md" } },
+      { type: "task", status: "open", due: "2026-07-02", title: "b", source: "project",  file: { path: "spice/tasks/b.md" } },
+      { type: "task", status: "open", due: "2026-06-30", title: "od", source: "meeting",  file: { path: "spice/tasks/od.md" } },
     ],
     '"spice/tasks/_done"': [
       { type: "task", status: "done", completed_at: "2026-07-02", title: "done1", file: { path: "spice/tasks/_done/d1.md" } },
@@ -3272,7 +3272,7 @@ async function testComputeCounts() {
   const check = (label, cond) => { if (!cond) { ok = false; console.log(`  FAIL: HC-COUNTS ${label}`); } };
 
   const c = SDD.computeCounts(fakeDv, today, TE);
-  check("today === 2 (two tasks scheduled today)", c.today === 2);
+  check("today === 2 (two tasks due today)", c.today === 2);
   check("overdue === 1 (one open task before today)", c.overdue === 1);
   check("done === 1 (one done-today)", c.done === 1);
   check("meetings === 2 (two today meetings)", c.meetings === 2);

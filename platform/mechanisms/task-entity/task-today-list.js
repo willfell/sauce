@@ -58,16 +58,18 @@ class TaskTodayList {
 
     /**
      * Partition a list of ALREADY-PARSED task objects (parseNote output, or any
-     * object with `{ scheduled, status, project_slug, source }`) relative to
+     * object with `{ due, status, project_slug, source }`) relative to
      * `todayStr` (YYYY-MM-DD). Open-only, and PERSONAL-daily-only — a task that
      * belongs to another daily section is EXCLUDED so it doesn't render twice:
-     *   today   — status "open", scheduled === todayStr, NO project, NOT meeting
-     *   overdue — status "open", scheduled < todayStr, NO project, NOT meeting
+     *   today   — status "open", due === todayStr, NO project, NOT meeting
+     *   overdue — status "open", due < todayStr, NO project, NOT meeting
      * (string compare of zero-padded ISO dates is chronologically correct.)
      * A task WITH a project_slug renders in its "Project Tasks" section
      * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
      * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
-     * task-notes, so excluding them here loses nothing. Future-scheduled +
+     * task-notes, so excluding them here loses nothing. A task WITH a
+     * parent_task is a subtask and renders in its parent's "Subtasks" section
+     * instead, so it is excluded here too. Future-scheduled +
      * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
      * input (→ empty bands); never throws.
      */
@@ -86,17 +88,18 @@ class TaskTodayList {
             // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
             if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
             if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
-            const sched = t.scheduled;
-            if (!sched) continue;
-            if (sched === todayStr) today.push(t);
-            else if (sched < todayStr) overdue.push(t);
-            // sched > todayStr (future) → excluded from both bands.
+            if (t.parent_task && String(t.parent_task).trim() !== '') continue;   // shown in its parent's Subtasks section
+            const due = t.due;
+            if (!due) continue;
+            if (due === todayStr) today.push(t);
+            else if (due < todayStr) overdue.push(t);
+            // due > todayStr (future) → excluded from both bands.
         }
-        // Overdue: oldest/most-overdue scheduled date first — the task that's been
+        // Overdue: oldest/most-overdue due date first — the task that's been
         // sitting longest surfaces at the top. Tie-broken by title (case-insensitive).
         overdue.sort((a, b) => {
-            const as = a.scheduled || '';
-            const bs = b.scheduled || '';
+            const as = a.due || '';
+            const bs = b.due || '';
             if (as !== bs) return as < bs ? -1 : 1;
             return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
         });

@@ -109,10 +109,10 @@ class ToDoAllList {
     }
 
     /**
-     * Buckets parsed OPEN tasks by their `scheduled` date relative to
-     * `todayStr` (YYYY-MM-DD): overdue (scheduled < today), today
-     * (scheduled === today), future (scheduled > today, further split
-     * per-date into `futureByDate`), and noDate (no scheduled value).
+     * Buckets parsed OPEN tasks by their `due` date relative to
+     * `todayStr` (YYYY-MM-DD): overdue (due < today), today
+     * (due === today), future (due > today, further split
+     * per-date into `futureByDate`), and noDate (no due value).
      * Overdue sorts oldest-first, future sorts soonest-first. Pure,
      * Node-testable; tolerates null/non-array input (returns all-empty
      * groups).
@@ -125,18 +125,18 @@ class ToDoAllList {
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t) continue;
-            const sched = t.scheduled;
-            if (!sched) { noDate.push(t); continue; }
-            if (sched === todayStr) today.push(t);
-            else if (sched < todayStr) overdue.push(t);
+            const due = t.due;
+            if (!due) { noDate.push(t); continue; }
+            if (due === todayStr) today.push(t);
+            else if (due < todayStr) overdue.push(t);
             else future.push(t);
         }
-        overdue.sort((a, b) => (a.scheduled < b.scheduled ? -1 : a.scheduled > b.scheduled ? 1 : 0));
-        future.sort((a, b) => (a.scheduled < b.scheduled ? -1 : a.scheduled > b.scheduled ? 1 : 0));
+        overdue.sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+        future.sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
         const futureByDate = new Map();
         for (const t of future) {
-            if (!futureByDate.has(t.scheduled)) futureByDate.set(t.scheduled, []);
-            futureByDate.get(t.scheduled).push(t);
+            if (!futureByDate.has(t.due)) futureByDate.set(t.due, []);
+            futureByDate.get(t.due).push(t);
         }
         return { overdue, today, future, futureByDate, noDate };
     }
