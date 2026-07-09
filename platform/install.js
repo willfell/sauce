@@ -541,6 +541,11 @@ module.exports = async function (tp) {
     // into the FINAL note shape, so a second install is a true no-op (idempotent).
     await applyNoteChromeHeal(tp, installedNow.history, git);
 
+    // 6a3b. Meeting Hub notes are a tag-based hub (`tags: meetings-hub`, no
+    // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
+    // reaches them (see note-chrome.md §6). Separate heal for that surface.
+    await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+
     // 6a4. task-entity — convert the MOST-RECENT daily's open `- [ ]` lines into
     // note-per-task files under spice/tasks/ and swap the legacy capture/carryover
     // dataviewjs blocks for a single TaskTodayList render. MUST run HERE (post-loop,
@@ -3446,8 +3451,15 @@ const PROJECT_CHROME_TYPES = [
 // still run on them until the forward migration (Pass 9b) reshapes them.
 // Substring match (install.js has no parseYaml at runtime); mirrors the many
 // `body.includes('class: "X"')` idempotency guards already used across the heals.
+// Generalized (v0.205.0) from a literal ProjectChromeBar-only check: any
+// "<Name>ChromeBar" adapter class owning a surface's chrome means legacy
+// standalone widgets/markers for that surface are redundant — same guard
+// semantics regardless of WHICH blueprint's adapter is present. All 5
+// call sites either only ever see ProjectChromeBar bodies (project-typed
+// notes) — unchanged behavior — or now correctly recognize MeetingChromeBar
+// et al. too (the injectAccentButtonBlock verify pass at line ~7265).
 function _hasChromeBar(body) {
-  return typeof body === "string" && body.includes('class: "ProjectChromeBar"');
+  return typeof body === "string" && /class:\s*"[A-Za-z]+ChromeBar"/.test(body);
 }
 
 // _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
@@ -6040,9 +6052,21 @@ function _healNoteChromeBody(body, type) {
     "products-hub": "ProductsChromeBar", "product": "ProductsChromeBar",
     "teams-hub": "TeamsChromeBar", "team": "TeamsChromeBar",
     "journal": "JournalChromeBar",
+    "board-card": "BoardsChromeBar",
+    "finance-hub": "FinanceChromeBar", "budgets-hub": "FinanceChromeBar", "paychecks-hub": "FinanceChromeBar",
+    "invoices-hub": "FinanceChromeBar", "debts-hub": "FinanceChromeBar", "months-hub": "FinanceChromeBar", "savings-hub": "FinanceChromeBar",
+    "budget": "FinanceChromeBar", "paycheck": "FinanceChromeBar", "invoice": "FinanceChromeBar", "debt": "FinanceChromeBar",
+    "month": "FinanceChromeBar", "savings-account": "FinanceChromeBar",
+    "budget-defaults": "FinanceChromeBar", "paycheck-defaults": "FinanceChromeBar", "debt-defaults": "FinanceChromeBar", "finance-plan": "FinanceChromeBar",
+    "invoice-board-card": "FinanceChromeBar", "time-log": "FinanceChromeBar",
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
+  // Step 9 (v0.205.0) — people-hub: "+ New Person" moved from a standalone
+  // EntityCreate dataviewjs fence into PeopleChromeBar's own primary button
+  // (right of the compass). Strip the now-redundant block; a no-op when
+  // already stripped (fresh template) or absent.
+  if (type === "people-hub") out = _stripEntityCreateMarkerBlock(out, "person");
   return out;
 }
 
@@ -6506,7 +6530,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6527,7 +6551,8 @@ async function applyNoteChromeHeal(tp, history, git) {
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES].includes(type)) continue;
+        const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan", "invoice-board-card", "time-log"];
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
         let after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         after = _healSectionLinksFrontmatter(after, type);
         if (after === before) continue;
@@ -6549,6 +6574,95 @@ async function applyNoteChromeHeal(tp, history, git) {
     }
   }
   history?.push({ event: "info", step: "note_chrome_heal", name: "vault",
+    reason: `healed ${healed}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// applyMeetingsHubChromeBarHeal — Meeting Hub notes carry `tags: [..., meetings-hub,
+// ...]` but NO frontmatter `type:` field (tag-based hub, not type-based — see
+// note-chrome.md §6), so applyNoteChromeHeal's type-keyed dispatch (line 6517)
+// never reaches them. Separate, small heal: scan spice/meetings/hubs for tag
+// "meetings-hub", reuse the existing pure _healChromeBarMigration(body, type,
+// barClass) transform (same strip-legacy-chrome + insert-ChromeBar-block logic
+// cycle-2 already uses for meeting/scratch/to-do) with barClass "MeetingChromeBar".
+// Per-vault, .sauce-backup snapshot before write, idempotent (transform itself
+// short-circuits when the target class is already present), never throws.
+// _stripEntityCreateMarkerBlock — pure, idempotent transform (v0.205.0):
+// strips a single standalone `// entity-create:<instanceId>` EntityCreate
+// dataviewjs fence, collapsing any orphaned standalone "---" divider /
+// blank-line runs left behind. Used wherever a hub's "+ New <X>" moves from
+// this standalone block into its own ChromeBar adapter's primary button
+// (right of the compass) — first meetings, now people, generic so future
+// blueprints doing the same fold don't need a bespoke copy. No-op when the
+// block isn't present (nothing to strip → body returned unchanged).
+function _stripEntityCreateMarkerBlock(body, instanceId) {
+  if (typeof body !== "string" || typeof instanceId !== "string" || instanceId.length === 0) return body;
+  const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    "```dataviewjs\\n// entity-create:" + escId + "[^\\n]*\\n" +
+    'await dv\\.view\\("[^"]*",\\s*\\{\\s*class:\\s*"EntityCreate",\\s*args:\\s*\\[\\{\\s*instance:\\s*"' + escId + '"\\s*\\}\\]\\s*\\}\\);\\n' +
+    "```\\n?",
+    "g"
+  );
+  let out = body.replace(re, "");
+  if (out === body) return body;
+  const fmEnd = out.indexOf('---', out.indexOf('---') + 3);
+  if (fmEnd >= 0) {
+    const fm = out.slice(0, fmEnd + 3);
+    let rest = out.slice(fmEnd + 3);
+    rest = rest.replace(/\n---\s*\n(\s*\n)*/g, '\n');
+    out = fm + rest;
+  }
+  out = out.replace(/\n{3,}/g, '\n\n');
+  return out;
+}
+
+// _stripMeetingsHubEntityCreateBlock — thin wrapper (kept for call-site/test
+// clarity) around the generic _stripEntityCreateMarkerBlock for the "meeting"
+// instance specifically.
+function _stripMeetingsHubEntityCreateBlock(body) {
+  return _stripEntityCreateMarkerBlock(body, "meeting");
+}
+
+async function applyMeetingsHubChromeBarHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/meetings/hubs";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+  let files;
+  try {
+    files = await _listAllMarkdownRecursive(adapter, root);
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_chrome_bar_heal",
+      reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  for (const fpath of files) {
+    try {
+      const before = await adapter.read(fpath);
+      if (!/^\s*-\s*["']?meetings-hub["']?\s*$/m.test(before)) continue;
+      let after = _healChromeBarMigration(before, "meeting", "MeetingChromeBar");
+      after = _stripMeetingsHubEntityCreateBlock(after);
+      if (after === before) continue;
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "meetings_hub_chrome_bar_heal", target: fpath, action: "healed",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "meetings_hub_chrome_bar_heal",
+        reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "meetings_hub_chrome_bar_heal", name: "vault",
     reason: `healed ${healed}; ${warned} warning(s)`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
@@ -7633,7 +7747,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7660,7 +7774,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7691,7 +7805,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7719,7 +7833,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7760,7 +7874,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7782,7 +7896,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7809,7 +7923,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7825,7 +7939,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SavingsSummary" });
 // v0.112.0 S2a — months hub body (byte-identical to content/Months.md body and
 // FINANCE_HUB_BODY_TEMPLATES entry — all three must stay in sync).
 const FINANCE_MONTHS_HUB_BODY = `\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -20377,6 +20491,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
+    module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
+    module.exports._stripMeetingsHubEntityCreateBlock = _stripMeetingsHubEntityCreateBlock;
+    module.exports._stripEntityCreateMarkerBlock = _stripEntityCreateMarkerBlock;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;

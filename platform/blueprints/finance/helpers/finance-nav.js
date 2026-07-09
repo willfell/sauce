@@ -74,27 +74,43 @@ class FinanceNav {
         const type = page?.type;
         const mode = this._detectMode(filePath, type);
 
+        // FinanceChromeBar (v0.204.0+) already renders a Go▾ launcher listing
+        // all 7 hubs — the cross-hub button row (Section 1) and the single
+        // "<X> Hub" back-buttons in entity/defaults context (Section 2) are
+        // now redundant on chrome-bar-migrated notes. Skip them there;
+        // fall back to full legacy rendering when the chrome bar is absent
+        // (unmigrated note) so nav isn't lost. Mirrors the PersonNavButtons /
+        // ReaderArticleActions guard precedent.
+        const chromePresent = !!(dv.container.closest && dv.container.closest(".markdown-preview-view")?.querySelector(".finance-chrome-root"));
+
         const root = dv.container.createEl("div", { cls: "fnav-root", attr: { "data-mode": mode } });
 
         // Section 1: top divider + cross-hub nav + divider
-        this._hr(root);
-        this._renderCrossHub(root, mode);
-        this._hr(root);
+        if (!chromePresent) {
+            this._hr(root);
+            this._renderCrossHub(root, mode);
+            this._hr(root);
+        }
 
         // Section 2 (when applicable): context row + divider
         if (mode.startsWith("hub-") && mode !== "hub-finance") {
-            await this._renderHubContext(dv, root, mode);
-            this._hr(root);
+            const rendered = await this._renderHubContext(dv, root, mode, chromePresent);
+            if (rendered) this._hr(root);
         } else if (mode.startsWith("entity-")) {
-            this._renderEntityContext(root, mode, page);
+            this._renderEntityContext(root, mode, page, chromePresent);
             this._hr(root);
         } else if (mode.startsWith("defaults-") || mode === "config-plan") {
-            this._renderDefaultsContext(root, mode);
-            this._hr(root);
+            const rendered = this._renderDefaultsContext(root, mode, chromePresent);
+            if (rendered) this._hr(root);
         }
     }
 
-    _renderDefaultsContext(root, mode) {
+    _renderDefaultsContext(root, mode, chromePresent) {
+        // Entirely redundant with the chrome bar's Go▾ launcher once
+        // migrated — this row is JUST a "back to hub" button, nothing else
+        // (defaults pages have no "+ New X").
+        if (chromePresent) return false;
+
         const row = root.createEl("div", { cls: "fnav-row fnav-context" });
         row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
 
@@ -105,13 +121,14 @@ class FinanceNav {
             "config-plan":       { hubLabel: "Finance Hub",   hubIcon: this._icon("wallet"),      hubPath: "spice/finance/Finance.md" },
         };
         const cfg = config[mode];
-        if (!cfg) return;
+        if (!cfg) return false;
 
         customJS.AccentButton.render(row, {
             label: cfg.hubLabel,
             icon: cfg.hubIcon,
             onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
         });
+        return true;
     }
 
     _hr(root) {
@@ -181,10 +198,7 @@ class FinanceNav {
         }
     }
 
-    async _renderHubContext(dv, root, mode) {
-        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
-
+    async _renderHubContext(dv, root, mode, chromePresent) {
         const config = {
             "hub-budgets":   { instance: "budget",   defaultsLabel: "Budget Defaults",   defaultsPath: "spice/finance/Budget Defaults.md",   defaultsIcon: this._icon("settings") },
             "hub-paychecks": { instance: "paycheck", defaultsLabel: "Paycheck Defaults", defaultsPath: "spice/finance/Paycheck Defaults.md", defaultsIcon: this._icon("settings") },
@@ -194,34 +208,47 @@ class FinanceNav {
             "hub-savings":   { instance: "savings",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
         };
         const cfg = config[mode];
-        if (!cfg) return;
+        if (!cfg) return false;
 
-        // + New <X> via EntityCreate (poll for cold-load race; carried from v0.110.1/0.110.3)
-        const subContainer = row.createEl("div");
-        subContainer.style.cssText = "display: inline-flex;";
-        const shim = Object.create(dv);
-        shim.container = subContainer;
-        for (let i = 0; i < 100 && !window.customJS?.EntityCreate; i++) {
-            await new Promise((r) => setTimeout(r, 50));
-        }
-        if (window.customJS?.EntityCreate) {
-            await customJS.EntityCreate.render(shim, { instance: cfg.instance });
-        } else {
-            const ph = subContainer.createEl("em", { text: "EntityCreate unavailable" });
-            ph.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+        // + New <X> — owned by FinanceChromeBar's primary button (right of the
+        // compass) once migrated; only fall back to this inline render on an
+        // unmigrated note (no .finance-chrome-root present).
+        const showNewButton = !chromePresent;
+        const showDefaults = !!(cfg.defaultsPath && cfg.defaultsLabel);
+        if (!showNewButton && !showDefaults) return false;
+
+        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+
+        if (showNewButton) {
+            // via EntityCreate (poll for cold-load race; carried from v0.110.1/0.110.3)
+            const subContainer = row.createEl("div");
+            subContainer.style.cssText = "display: inline-flex;";
+            const shim = Object.create(dv);
+            shim.container = subContainer;
+            for (let i = 0; i < 100 && !window.customJS?.EntityCreate; i++) {
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            if (window.customJS?.EntityCreate) {
+                await customJS.EntityCreate.render(shim, { instance: cfg.instance });
+            } else {
+                const ph = subContainer.createEl("em", { text: "EntityCreate unavailable" });
+                ph.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+            }
         }
 
         // <X> Defaults link
-        if (cfg.defaultsPath && cfg.defaultsLabel) {
+        if (showDefaults) {
             customJS.AccentButton.render(row, {
                 label: cfg.defaultsLabel,
                 icon: cfg.defaultsIcon,
                 onClick: () => app.workspace.openLinkText(cfg.defaultsPath, "")
             });
         }
+        return true;
     }
 
-    _renderEntityContext(root, mode, page) {
+    _renderEntityContext(root, mode, page, chromePresent) {
         const row = root.createEl("div", { cls: "fnav-row fnav-context" });
         row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
 
@@ -236,14 +263,17 @@ class FinanceNav {
         const cfg = subAreaConfig[mode];
         if (!cfg) return;
 
-        // Sub-area hub button
-        customJS.AccentButton.render(row, {
-            label: cfg.hubLabel,
-            icon: cfg.hubIcon,
-            onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
-        });
+        // Sub-area hub button — redundant with the chrome bar's Go▾ launcher
+        // (already lists this hub) once the note is chrome-bar-migrated.
+        if (!chromePresent) {
+            customJS.AccentButton.render(row, {
+                label: cfg.hubLabel,
+                icon: cfg.hubIcon,
+                onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
+            });
+        }
 
-        // Prev / Next sibling nav
+        // Prev / Next sibling nav — not covered by the chrome bar, always render.
         this._renderSiblingNav(row, page, cfg.sub, cfg.sortKey, cfg.dir);
     }
 

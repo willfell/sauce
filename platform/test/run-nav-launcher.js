@@ -44,12 +44,13 @@ const all = [
   { id: 'w',  label: 'Wiki',     _source: 'wiki',     action: { type: 'openLink', target: 'W.md' } },
   { id: 'pr', label: 'Projects', _source: 'project',  action: { type: 'openLink', target: 'P.md' } },
   { id: 'h',  label: 'Home',     _source: 'home',     action: { type: 'invoke_command', command_id: 'homepage:open-homepage' } },
+  { id: 'j',  label: 'Journal',  _source: 'journal',  action: { type: 'openLink', target: 'J.md' } },
 ];
 const part = inst2._partitionEntries(all);
-// pinned in the FIXED source order: home, to-do, scratch, project, meetings.
-ok('NL-6 pins exactly the 5 fixed sources', part.pinned.length === 5);
-ok('NL-7 pinned are in fixed source order (home,to-do,scratch,project,meetings)',
-  part.pinned.map(e => e._source).join(',') === 'home,to-do,scratch,project,meetings');
+// pinned in the FIXED source order: home, to-do, scratch, project, meetings, journal.
+ok('NL-6 pins exactly the 6 fixed sources', part.pinned.length === 6);
+ok('NL-7 pinned are in fixed source order (home,to-do,scratch,project,meetings,journal)',
+  part.pinned.map(e => e._source).join(',') === 'home,to-do,scratch,project,meetings,journal');
 ok('NL-8 rest = everything else (incl. Daily now), original order preserved',
   part.rest.map(e => e.id).join(',') === 'd,co,pe,w');
 // Absent pinned source simply drops its cell; extra entries per source → rest.

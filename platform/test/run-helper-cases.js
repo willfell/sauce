@@ -13469,11 +13469,14 @@ async function caseV01101SourceTemplatesUseGuard() {
   // action row (New Doc + New Section via EntityCreate, + Move docs) with
   // helper-owned dividers — same guard-routed, no-raw-customJS-call intent as
   // WS1's Projects.md → ProjectsHubCards move; only the dispatch target changed.
+  // v0.205.0: People.md and Meeting Hub.md no longer host a standalone
+  // EntityCreate block at all — "+ New Person" / "+ New Meeting" moved to
+  // PeopleChromeBar's / MeetingChromeBar's own primary button (right of the
+  // compass), same "no EntityCreate dispatch left to assert on" reasoning
+  // as Section Hub.md above. Dropped from this guard-form list.
   const TEMPLATES = [
     { rel: "platform/blueprints/project/content/Projects.md", dispatch: "ProjectsHubCards" },
     { rel: "platform/blueprints/project/templates/Docs Hub.md", dispatch: "ProjectDocsIndex" },
-    { rel: "platform/blueprints/people/content/People.md", dispatch: "EntityCreate" },
-    { rel: "platform/blueprints/meetings/templates/Meeting Hub.md", dispatch: "EntityCreate" },
   ];
   for (const { rel, dispatch } of TEMPLATES) {
     const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");

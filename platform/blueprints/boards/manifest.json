@@ -1,12 +1,25 @@
 {
   "name": "boards",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "boards",
   "description": "Kanban-plugin task board with Templater date-routed card notes under spice/boards/. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment. Template, Board Card.md emits canonical created_at: (ISO+TZ; replaces legacy created:) + type: board-card; discriminator tag board stripped; temporal YYYY/MM/DD tag stripped; preserve kanban-card functional marker (per _canonical-vocab.preserve_tags). To-Do-Board.md hub kanban-plugin block gains static created_at: (rule_fragment scope only covers cards path; hub kanban frontmatter is plugin-managed and outside the canonical-vocab contract). NEW canonical-vocab rule_fragment scoping spice/boards/cards/**/*.md (where Templater-routed card notes land).",
   "depends_on": [
-    { "name": "nav-buttons",    "range": ">=2.0.0" },
-    { "name": "customjs-guard", "range": ">=1.0.0" }
+    {
+      "name": "nav-buttons",
+      "range": ">=2.0.0"
+    },
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
+    }
+  ],
+  "customjs_classes": [
+    "BoardsChromeBar"
   ],
   "external_plugins": [
     {
@@ -31,6 +44,10 @@
     {
       "source": "templates/Template, Board Card.md",
       "dest": "{{templates_path}}/Template, Board Card.md"
+    },
+    {
+      "source": "helpers/boards-chrome-bar.js",
+      "dest": "{{scripts_path}}/boards/boards-chrome-bar.js"
     }
   ],
   "nav_buttons": [
@@ -56,10 +73,16 @@
     {
       "target": "boards",
       "fragment": {
-        "scope": { "path_glob": "spice/boards/cards/**/*.md" },
+        "scope": {
+          "path_glob": "spice/boards/cards/**/*.md"
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type": { "required": true, "type": "string", "equals": "board-card" }
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "board-card"
+          }
         }
       }
     }
