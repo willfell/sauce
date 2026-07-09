@@ -44,16 +44,19 @@ const cfg = inst._config();
     && s.leaf === true);
 }
 
-// MCB-SPEC-HUB — no primary/overflow on the hub; EntityCreate owns creation.
+// MCB-SPEC-HUB — "+ New Meeting" primary (right of the compass) on the hub;
+// no overflow; MeetingsHubCards still owns the listing below.
 {
   const s = cfg.surfaceSpec({ context: 'meetings-hub' });
-  ok('MCB-SPEC-HUB-1 no primary, no overflow, leaf:false on the hub',
-    s.primary === null && Array.isArray(s.overflow) && s.overflow.length === 0 && s.leaf === false);
+  ok('MCB-SPEC-HUB-1 primary "+ New Meeting" (id new-meeting), no overflow, leaf:false',
+    s.primary && s.primary.id === 'new-meeting' && s.primary.label === '+ New Meeting'
+    && Array.isArray(s.overflow) && s.overflow.length === 0 && s.leaf === false);
 }
 
-// MCB-DISPATCH — routes MeetingLeafActions methods.
+// MCB-DISPATCH — routes MeetingLeafActions methods + the hub's new-meeting → EntityCreate.
 {
   const calls = [];
+  const entityCreateCalls = [];
   const prevCJS = global.customJS;
   global.customJS = {
     MeetingLeafActions: {
@@ -61,24 +64,29 @@ const cfg = inst._config();
       _onAddToProject: () => calls.push('add-project'),
       _onEditAttendees: () => calls.push('edit-attendees'),
     },
+    EntityCreate: { create: (opts) => entityCreateCalls.push(opts) },
   };
   cfg.dispatch({}, { context: 'meeting' }, 'new-task');
   cfg.dispatch({}, { context: 'meeting' }, 'add-project');
   cfg.dispatch({}, { context: 'meeting' }, 'edit-attendees');
+  cfg.dispatch({}, { context: 'meetings-hub' }, 'new-meeting');
   global.customJS = prevCJS;
 
   ok('MCB-DISPATCH-1 new-task → MeetingLeafActions._onNewTask', calls[0] === 'new-task');
   ok('MCB-DISPATCH-2 add-project → MeetingLeafActions._onAddToProject', calls[1] === 'add-project');
   ok('MCB-DISPATCH-3 edit-attendees → MeetingLeafActions._onEditAttendees', calls[2] === 'edit-attendees');
+  ok('MCB-DISPATCH-4 new-meeting → EntityCreate.create({instance:"meeting"})',
+    entityCreateCalls.length === 1 && entityCreateCalls[0].instance === 'meeting');
 }
 
-// MCB-DEST — "This meeting" section on the leaf; nothing on the hub.
+// MCB-DEST — "This meeting" section on the leaf; nothing extra on the hub
+// (its create action now lives on the primary, not in the Go▾ menu).
 {
   const dests = cfg.destinations({}, { context: 'meeting', path: 'spice/meetings/notes/x.md' });
   ok('MCB-DEST-1 leaf destinations = [{section:"This meeting"}]',
     dests.length === 1 && dests[0].section === 'This meeting');
   const hubDests = cfg.destinations({}, { context: 'meetings-hub', path: 'spice/meetings/hubs/x.md' });
-  ok('MCB-DEST-HUB-1 hub destinations = [] (EntityCreate/MeetingsHubCards own the body)',
+  ok('MCB-DEST-HUB-1 hub destinations = [] (primary + MeetingsHubCards own the body)',
     Array.isArray(hubDests) && hubDests.length === 0);
 }
 

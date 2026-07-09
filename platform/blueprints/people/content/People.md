@@ -8,13 +8,6 @@ tags:
 await dv.view("{{views_path}}/customjs-guard", { class: "PeopleChromeBar" });
 ```
 
-```dataviewjs
-// entity-create:person — installer-managed; do not delete this comment
-await dv.view("{{views_path}}/customjs-guard", { class: "EntityCreate", args: [{ instance: "person" }] });
-```
-
----
-
 ## All People
 
 ```dataviewjs

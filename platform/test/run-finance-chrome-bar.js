@@ -29,24 +29,43 @@ const AUX_TYPES = ['invoice-board-card', 'time-log'];
   ok('FCB-DETECT-4 non-finance type → null', off === null);
   ok('FCB-DETECT-5 both aux types classify (invoice-board-card, time-log)', allAux);
 }
-// FCB-SPEC — no primary/overflow anywhere (FinanceNav already owns "+ New X" + defaults links);
-// hubs are not leaf, entities/defaults/plan/aux are leaf.
+// FCB-SPEC — 6 of the 7 hubs (all but finance-hub, which scaffolds no entity
+// of its own) get a "+ New <X>" primary to the right of the compass; entities/
+// defaults/plan/aux stay primary-less. Hubs are not leaf, everything else is.
 {
+  const CREATE_FOR_HUB = {
+    'budgets-hub': 'New Budget', 'paychecks-hub': 'New Paycheck', 'invoices-hub': 'New Invoice',
+    'debts-hub': 'New Debt', 'months-hub': 'New Month', 'savings-hub': 'New Savings',
+  };
   let hubsOk = true, entitiesOk = true, defaultsOk = true, auxOk = true;
-  for (const t of HUB_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== false) hubsOk = false; }
+  for (const t of HUB_TYPES) {
+    const s = cfg.surfaceSpec({ context: t });
+    const wantLabel = CREATE_FOR_HUB[t];
+    const primaryOk = wantLabel
+      ? (s.primary && s.primary.label === `+ ${wantLabel}` && typeof s.primary.id === 'string' && s.primary.id.startsWith('new-'))
+      : s.primary === null;
+    if (!primaryOk || s.overflow.length !== 0 || s.leaf !== false) hubsOk = false;
+  }
   for (const t of ENTITY_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) entitiesOk = false; }
   for (const t of DEFAULTS_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) defaultsOk = false; }
   for (const t of AUX_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) auxOk = false; }
-  ok('FCB-SPEC-1 hubs: primary null + overflow empty + not leaf', hubsOk);
+  ok('FCB-SPEC-1 6 entity-scaffolding hubs get "+ New <X>" primary; finance-hub does not; not leaf', hubsOk);
   ok('FCB-SPEC-2 entities: primary null + overflow empty + leaf', entitiesOk);
   ok('FCB-SPEC-3 defaults/plan: primary null + overflow empty + leaf', defaultsOk);
   ok('FCB-SPEC-4 aux (invoice-board-card, time-log): primary null + overflow empty + leaf', auxOk);
 }
-// FCB-DISPATCH — never throws (no chrome-owned actions on any surface).
+// FCB-DISPATCH — "new-<instance>" primary ids route to EntityCreate.create;
+// unknown ids are a no-op; both paths never throw.
 {
+  const calls = [];
+  const prevCJS = global.customJS;
+  global.customJS = { EntityCreate: { create: (opts) => calls.push(opts) } };
+  cfg.dispatch({}, { context: 'budgets-hub' }, 'new-budget');
   let threw = false;
   try { cfg.dispatch({}, { context: 'budget' }, 'unknown-id'); } catch (_e) { threw = true; }
-  ok('FCB-DISPATCH-1 dispatch never throws (no-op surface)', !threw);
+  global.customJS = prevCJS;
+  ok('FCB-DISPATCH-1 "new-budget" → EntityCreate.create({instance:"budget"})', calls.length === 1 && calls[0].instance === 'budget');
+  ok('FCB-DISPATCH-2 dispatch never throws (unknown id is a no-op)', !threw);
 }
 // FCB-DEST — This finance marker + 7 hub entries; current hub omits its own self-link.
 {

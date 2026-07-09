@@ -250,17 +250,20 @@ withTempHomeAndVault(({ home, vault }) => {
         paycheck: "spice/finance/paychecks/Paychecks.md",
         invoice:  "spice/finance/invoices/Invoices.md",
     };
-    // button/nav refactor Pass 9a — hubs that render the single ProjectChromeBar
-    // block OWN entity creation (the bar's primary + `⋯` route through
+    // button/nav refactor Pass 9a (project) + v0.205.0 (people, meetings) — hubs
+    // that render a single "<Name>ChromeBar" block OWN entity creation (the
+    // bar's own primary button, right of the compass, routes through
     // EntityCreate.create). Those hubs intentionally carry NO
-    // `// entity-create:<id>` marker (retired in the refactor). For a
-    // ProjectChromeBar hub we assert the bar is present exactly once instead of the
-    // marker; every OTHER (marker-based) hub still asserts its marker. This keeps
-    // the check meaningful for people/finance/meetings/scratch, which still ship
-    // markers.
-    const ecChromeBarHubs = new Set(["project"]);
-    const hasChromeBarBlock = (body) =>
-        (body.match(/```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?\n```/g) || []).length;
+    // `// entity-create:<id>` marker. For a ChromeBar-owned hub we assert its
+    // bar is present exactly once instead of the marker; every OTHER
+    // (marker-based) hub still asserts its marker. This keeps the check
+    // meaningful for finance/scratch, which still ship markers (finance's
+    // marker sits on FinanceNav's own call, not a standalone EntityCreate
+    // block — see finance-nav.js's chromePresent guard).
+    const ecChromeBarClassFor = { project: "ProjectChromeBar", person: "PeopleChromeBar", meeting: "MeetingChromeBar" };
+    const ecChromeBarHubs = new Set(Object.keys(ecChromeBarClassFor));
+    const hasChromeBarBlock = (body, barClass) =>
+        (body.match(new RegExp('```dataviewjs[\\s\\S]*?class:\\s*"' + barClass + '"[\\s\\S]*?\\n```', 'g')) || []).length;
     let allMarkersPresent = true;
     let missingMarker = null;
     for (const e of ecEntries) {
@@ -271,11 +274,12 @@ withTempHomeAndVault(({ home, vault }) => {
         if (!fs.existsSync(tp)) { allMarkersPresent = false; missingMarker = `${e.id}: hub file missing at ${rel}`; break; }
         const body = fs.readFileSync(tp, "utf8");
         if (ecChromeBarHubs.has(e.id)) {
-            // ProjectChromeBar-owned hub: no marker; assert the bar renders once.
-            const barCount = hasChromeBarBlock(body);
+            // ChromeBar-owned hub: no marker; assert its bar renders exactly once.
+            const barClass = ecChromeBarClassFor[e.id];
+            const barCount = hasChromeBarBlock(body, barClass);
             if (barCount !== 1) {
                 allMarkersPresent = false;
-                missingMarker = `${e.id}: ProjectChromeBar block count=${barCount} in ${rel} (ProjectChromeBar-owned hub; expected 1)`;
+                missingMarker = `${e.id}: ${barClass} block count=${barCount} in ${rel} (${barClass}-owned hub; expected 1)`;
                 break;
             }
             continue;
@@ -306,10 +310,11 @@ withTempHomeAndVault(({ home, vault }) => {
             if (!fs.existsSync(tp)) continue;
             const body = fs.readFileSync(tp, "utf8");
             if (ecChromeBarHubs.has(e.id)) {
-                // ProjectChromeBar-owned hub: the bar must stay at exactly one across
+                // ChromeBar-owned hub: its bar must stay at exactly one across
                 // installs (no heal re-injects a second bar / breadcrumb / action row).
-                const barCount = hasChromeBarBlock(body);
-                if (barCount !== 1) { idempotent = false; dupTarget = `${e.id}: ProjectChromeBar block count=${barCount} in ${rel} after 2nd install`; break; }
+                const barClass = ecChromeBarClassFor[e.id];
+                const barCount = hasChromeBarBlock(body, barClass);
+                if (barCount !== 1) { idempotent = false; dupTarget = `${e.id}: ${barClass} block count=${barCount} in ${rel} after 2nd install`; break; }
                 continue;
             }
             const escId = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -3451,8 +3451,15 @@ const PROJECT_CHROME_TYPES = [
 // still run on them until the forward migration (Pass 9b) reshapes them.
 // Substring match (install.js has no parseYaml at runtime); mirrors the many
 // `body.includes('class: "X"')` idempotency guards already used across the heals.
+// Generalized (v0.205.0) from a literal ProjectChromeBar-only check: any
+// "<Name>ChromeBar" adapter class owning a surface's chrome means legacy
+// standalone widgets/markers for that surface are redundant — same guard
+// semantics regardless of WHICH blueprint's adapter is present. All 5
+// call sites either only ever see ProjectChromeBar bodies (project-typed
+// notes) — unchanged behavior — or now correctly recognize MeetingChromeBar
+// et al. too (the injectAccentButtonBlock verify pass at line ~7265).
 function _hasChromeBar(body) {
-  return typeof body === "string" && body.includes('class: "ProjectChromeBar"');
+  return typeof body === "string" && /class:\s*"[A-Za-z]+ChromeBar"/.test(body);
 }
 
 // _stripProjectChromeDividers — pure transform (WS9 P0a chrome overhaul). The
@@ -6054,6 +6061,11 @@ function _healNoteChromeBody(body, type) {
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
+  // Step 9 (v0.205.0) — people-hub: "+ New Person" moved from a standalone
+  // EntityCreate dataviewjs fence into PeopleChromeBar's own primary button
+  // (right of the compass). Strip the now-redundant block; a no-op when
+  // already stripped (fresh template) or absent.
+  if (type === "people-hub") out = _stripEntityCreateMarkerBlock(out, "person");
   return out;
 }
 
@@ -6553,6 +6565,43 @@ async function applyNoteChromeHeal(tp, history, git) {
 // cycle-2 already uses for meeting/scratch/to-do) with barClass "MeetingChromeBar".
 // Per-vault, .sauce-backup snapshot before write, idempotent (transform itself
 // short-circuits when the target class is already present), never throws.
+// _stripEntityCreateMarkerBlock — pure, idempotent transform (v0.205.0):
+// strips a single standalone `// entity-create:<instanceId>` EntityCreate
+// dataviewjs fence, collapsing any orphaned standalone "---" divider /
+// blank-line runs left behind. Used wherever a hub's "+ New <X>" moves from
+// this standalone block into its own ChromeBar adapter's primary button
+// (right of the compass) — first meetings, now people, generic so future
+// blueprints doing the same fold don't need a bespoke copy. No-op when the
+// block isn't present (nothing to strip → body returned unchanged).
+function _stripEntityCreateMarkerBlock(body, instanceId) {
+  if (typeof body !== "string" || typeof instanceId !== "string" || instanceId.length === 0) return body;
+  const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    "```dataviewjs\\n// entity-create:" + escId + "[^\\n]*\\n" +
+    'await dv\\.view\\("[^"]*",\\s*\\{\\s*class:\\s*"EntityCreate",\\s*args:\\s*\\[\\{\\s*instance:\\s*"' + escId + '"\\s*\\}\\]\\s*\\}\\);\\n' +
+    "```\\n?",
+    "g"
+  );
+  let out = body.replace(re, "");
+  if (out === body) return body;
+  const fmEnd = out.indexOf('---', out.indexOf('---') + 3);
+  if (fmEnd >= 0) {
+    const fm = out.slice(0, fmEnd + 3);
+    let rest = out.slice(fmEnd + 3);
+    rest = rest.replace(/\n---\s*\n(\s*\n)*/g, '\n');
+    out = fm + rest;
+  }
+  out = out.replace(/\n{3,}/g, '\n\n');
+  return out;
+}
+
+// _stripMeetingsHubEntityCreateBlock — thin wrapper (kept for call-site/test
+// clarity) around the generic _stripEntityCreateMarkerBlock for the "meeting"
+// instance specifically.
+function _stripMeetingsHubEntityCreateBlock(body) {
+  return _stripEntityCreateMarkerBlock(body, "meeting");
+}
+
 async function applyMeetingsHubChromeBarHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -6573,7 +6622,8 @@ async function applyMeetingsHubChromeBarHeal(tp, history, git) {
     try {
       const before = await adapter.read(fpath);
       if (!/^\s*-\s*["']?meetings-hub["']?\s*$/m.test(before)) continue;
-      const after = _healChromeBarMigration(before, "meeting", "MeetingChromeBar");
+      let after = _healChromeBarMigration(before, "meeting", "MeetingChromeBar");
+      after = _stripMeetingsHubEntityCreateBlock(after);
       if (after === before) continue;
       const backupPath = `.sauce-backup/${ts}/${fpath}`;
       const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
@@ -20420,6 +20470,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
     module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
+    module.exports._stripMeetingsHubEntityCreateBlock = _stripMeetingsHubEntityCreateBlock;
+    module.exports._stripEntityCreateMarkerBlock = _stripEntityCreateMarkerBlock;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
