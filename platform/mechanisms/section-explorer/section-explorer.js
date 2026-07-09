@@ -176,9 +176,12 @@ class SectionExplorer {
   _renderRailRow(dv, adapter, ctx, section, host) {
     const row = host.createEl("div", { cls: "se-rail-row" });
     const iconHtml = adapter.icons.folder || "";
-    const title = row.createEl("span", { cls: "se-rail-title" });
+    // Stacked layout: title on its own line, meta below it — long section
+    // names truncate instead of colliding with the counts.
+    const main = row.createEl("div", { cls: "se-rail-main" });
+    const title = main.createEl("span", { cls: "se-rail-title" });
     title.innerHTML = iconHtml + `<span class="se-rail-title-text">${this._escape(section.title)}</span>`;
-    const meta = row.createEl("span", { cls: "se-rail-meta" });
+    const meta = main.createEl("span", { cls: "se-rail-meta" });
     meta.textContent = this._railMeta(section);
     row.onclick = () => {
       if (section.hubPath) app.workspace.openLinkText(section.hubPath, "");

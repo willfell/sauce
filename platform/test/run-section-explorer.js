@@ -128,7 +128,9 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   const rows = els.filter((e) => e.className === "se-rail-row");
   assert.strictEqual(rows.length, 2);
   // Default sort = recent (maxMtime desc) → Alpha (200) before Bravo (100).
-  const firstTitle = els.find((e) => e.className === "se-rail-title" && rows[0].children.includes(e));
+  // NEW (title now nests inside the se-rail-main stacking block):
+  const firstMain = rows[0].children.find((c) => c.className === "se-rail-main");
+  const firstTitle = firstMain && firstMain.children.find((c) => c.className === "se-rail-title");
   assert.ok(firstTitle && firstTitle.innerHTML.includes("Alpha"), "expected the first (most-recent) rail row's title to be Alpha");
   const meta = els.find((e) => e.className === "se-rail-meta" && (e.textContent.includes("3 doc") || e.innerHTML.includes("3 doc")));
   assert.ok(meta, "expected a meta line mentioning doc count");
@@ -818,6 +820,34 @@ failures += !run("single-section rail still shows the 'Sections' header but hide
   se.render(dv, adapter);
   assert.ok(els.find((e) => e.className === "se-group-label"), "expected the Sections label even with one section");
   assert.strictEqual(els.filter((e) => e.className === "se-rail-toggle").length, 0, "toggle stays hidden below 2 sections");
+});
+
+failures += !run("rail row stacks: a se-rail-main block holds title THEN meta on separate lines, dots outside it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 3, subSectionCount: 1, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const row = els.find((e) => e.className === "se-rail-row");
+  assert.ok(row, "expected a rail row");
+  const main = row.children.find((c) => c.className === "se-rail-main");
+  assert.ok(main, "expected a se-rail-main stacking block inside the row");
+  const title = main.children.find((c) => c.className === "se-rail-title");
+  const meta = main.children.find((c) => c.className === "se-rail-meta");
+  assert.ok(title, "title lives inside se-rail-main");
+  assert.ok(meta, "meta lives inside se-rail-main, below the title");
+  assert.strictEqual(main.children.indexOf(title) < main.children.indexOf(meta), true, "title renders before (above) meta");
+  assert.strictEqual(meta.textContent, "1 section · 3 docs");
+  const dots = row.children.find((c) => c.className === "se-rail-dots");
+  assert.ok(dots, "dots stay a direct child of the row (right edge), outside the stacking block");
 });
 
 process.exit(failures > 0 ? 1 : 0);
