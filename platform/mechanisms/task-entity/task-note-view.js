@@ -70,14 +70,12 @@ class TaskNoteView {
             const s = String(v).trim();
             return s;
         };
-        const sched = val(t.scheduled);
         const due = val(t.due);
         const recur = val(t.recurrence);
         const prio = val(t.priority);
         let proj = val(t.project);
         const pm = /^\[\[([^\]]+)\]\]$/.exec(proj);
         if (pm) proj = pm[1];
-        if (sched) rows.push({ label: 'Scheduled', value: sched });
         if (due) rows.push({ label: 'Due', value: due });
         if (recur) rows.push({ label: 'Repeats', value: recur });
         if (prio) rows.push({ label: 'Priority', value: prio });
@@ -363,7 +361,6 @@ class TaskNoteView {
             const task = {
                 title: str(parsed ? parsed.title : page.title),
                 status: str((parsed && parsed.status) || page.status || 'open'),
-                scheduled: str(parsed ? parsed.scheduled : page.scheduled),
                 due: str(parsed ? parsed.due : page.due),
                 priority: str(parsed ? parsed.priority : page.priority),
                 project: str(parsed ? parsed.project : page.project),
@@ -430,7 +427,6 @@ class TaskNoteView {
                 } catch (_e) { return false; }
             };
 
-            const hasScheduled = !!task.scheduled;
             const hasDue = !!task.due;
             const prioMeta = TaskNoteView._priorityMeta(task.priority);
             // Clean, comparable link target for the Project row. Prefer
@@ -484,18 +480,6 @@ class TaskNoteView {
                         buildValue(valWrap);
                     } catch (_e) { /* one bad row must not break the card */ }
                 };
-
-                // Scheduled — human date + muted relative hint.
-                if (hasScheduled) {
-                    addRow('Scheduled', (wrap) => {
-                        const h = TaskNoteView._humanDate(task.scheduled, todayStr);
-                        wrap.createEl('span', { text: h.text || task.scheduled });
-                        if (h.relative) {
-                            const rel = wrap.createEl('span', { text: ' (' + h.relative + ')' });
-                            rel.style.cssText = 'color:var(--text-muted); font-size:0.9em;';
-                        }
-                    });
-                }
 
                 // Due — human date; overdue+open → text-error; muted relative hint.
                 if (hasDue) {

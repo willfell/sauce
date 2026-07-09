@@ -496,15 +496,15 @@ const TaskNoteView = new TaskNoteViewClass();
 // TNV-1. _fieldRows includes only set fields; strips project wikilink brackets.
 ok('TNV-1 _fieldRows returns only set fields (project unwrapped)', () => {
   const rows = TaskNoteView._fieldRows({
-    scheduled: '2026-07-01', due: '', priority: 'high', project: '[[Sauce]]',
+    due: '2026-07-01', priority: 'high', project: '[[Sauce]]',
   });
   const byLabel = {};
   for (const r of rows) byLabel[r.label] = r.value;
-  assert(rows.length === 3, 'only 3 set fields (no due): got ' + rows.length);
-  assert(byLabel.Scheduled === '2026-07-01', 'scheduled row');
+  assert(rows.length === 3, 'only 3 set fields: got ' + rows.length);
+  assert(byLabel.Due === '2026-07-01', 'due row');
   assert(byLabel.Priority === 'high', 'priority row');
   assert(byLabel.Project === 'Sauce', 'project unwrapped: ' + byLabel.Project);
-  assert(!('Due' in byLabel), 'empty due omitted');
+  assert(!('Scheduled' in byLabel), 'no Scheduled row ever produced');
 });
 
 // TNV-2. _fieldRows tolerates a null / empty task (never throws → []).
@@ -516,11 +516,11 @@ ok('TNV-2 _fieldRows tolerates null / empty task', () => {
 // TNV-recur-1. _fieldRows includes a Repeats row iff recurrence is set.
 ok('TNV-recur-1 _fieldRows includes a Repeats row iff recurrence is set', () => {
   const TaskNoteViewClass = loadClass('mechanisms/task-entity/task-note-view.js', 'TaskNoteView');
-  const rows = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08', recurrence: 'every day' });
+  const rows = TaskNoteViewClass._fieldRows({ due: '2026-07-08', recurrence: 'every day' });
   const hit = rows.find(r => r.label === 'Repeats');
   assert(hit && hit.value === 'every day', 'Repeats row present with grammar text: ' + JSON.stringify(rows));
 
-  const rowsNone = TaskNoteViewClass._fieldRows({ scheduled: '2026-07-08' });
+  const rowsNone = TaskNoteViewClass._fieldRows({ due: '2026-07-08' });
   assert(!rowsNone.find(r => r.label === 'Repeats'), 'no recurrence -> no Repeats row: ' + JSON.stringify(rowsNone));
 });
 
