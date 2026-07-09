@@ -7586,7 +7586,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7613,7 +7613,7 @@ cssclasses: [wide]
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7644,7 +7644,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7672,7 +7672,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7713,7 +7713,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7735,7 +7735,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7762,7 +7762,7 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -7778,7 +7778,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SavingsSummary" });
 // v0.112.0 S2a — months hub body (byte-identical to content/Months.md body and
 // FINANCE_HUB_BODY_TEMPLATES entry — all three must stay in sync).
 const FINANCE_MONTHS_HUB_BODY = `\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 \`\`\`
 
 \`\`\`dataviewjs
