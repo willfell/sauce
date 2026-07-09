@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.206.0",
+  "workshop_version": "0.207.0",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.40.3",
@@ -8,7 +8,7 @@
     "people": "0.8.0",
     "products": "0.4.0",
     "project": "1.45.0",
-    "to-do": "0.20.0",
+    "to-do": "0.21.0",
     "journal": "0.3.0",
     "trips": "0.6.0",
     "finance": "0.19.0",
@@ -42,7 +42,7 @@
     "smart-connections-bridge": "0.2.0",
     "render-safe": "0.2.2",
     "sauce-plugin": "0.3.0",
-    "task-entity": "0.9.0",
+    "task-entity": "0.10.0",
     "menu-popover": "0.3.0",
     "chrome-bar": "0.3.1",
     "section-explorer": "0.2.0"
