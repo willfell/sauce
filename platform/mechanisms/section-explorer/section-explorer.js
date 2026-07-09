@@ -132,6 +132,11 @@ class SectionExplorer {
   _renderRail(dv, adapter, ctx, sections, root) {
     if (!Array.isArray(sections) || sections.length === 0) return;
     const rail = root.createEl("div", { cls: "se-rail" });
+
+    // Header row: "Sections" group label (left) + Recent/A–Z toggle (right).
+    const header = rail.createEl("div", { cls: "se-rail-header" });
+    header.createEl("span", { cls: "se-group-label", text: "Sections" });
+
     const sortRecent = (list) => [...list].sort((a, b) => (b.maxMtime || 0) - (a.maxMtime || 0));
     const sortAlpha = (list) => [...list].sort((a, b) => String(a.title).localeCompare(String(b.title)));
     const cardsWrap = rail.createEl("div", { cls: "se-rail-cards" });
@@ -143,7 +148,7 @@ class SectionExplorer {
     };
 
     if (sections.length >= 2) {
-      const toggle = rail.createEl("div", { cls: "se-rail-toggle" });
+      const toggle = header.createEl("div", { cls: "se-rail-toggle" });
       const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
       let current = "recent";
       const pills = [];

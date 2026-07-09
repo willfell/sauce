@@ -751,4 +751,73 @@ failures += !run("REGRESSION: SectionHub adapter getLinks must not throw (dv cap
   assert.deepStrictEqual(links, [{ url: "https://x.com", text: "X" }], "getLinks must return the stub dv's links without throwing");
 });
 
+failures += !run("rail renders a header row: 'Sections' group label left, sort toggle right, ABOVE the row list", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "Bravo", hubPath: "b.md", folder: "b", pageCount: 1, subSectionCount: 0, maxMtime: 100, materialized: true },
+    { title: "Alpha", hubPath: "a.md", folder: "a", pageCount: 3, subSectionCount: 1, maxMtime: 200, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+
+  const rail = els.find((e) => e.className === "se-rail");
+  assert.ok(rail, "expected a se-rail");
+  const header = els.find((e) => e.className === "se-rail-header");
+  assert.ok(header, "expected a se-rail-header row");
+  // Header is the FIRST child of the rail — above the cards list.
+  assert.strictEqual(rail.children[0], header, "header must be the rail's first child (above the row list)");
+  // Label inside the header.
+  const label = header.children.find((c) => c.className === "se-group-label");
+  assert.ok(label, "expected a se-group-label inside the header");
+  assert.strictEqual(label.textContent, "Sections");
+  // Toggle lives INSIDE the header (not trailing after the list anymore).
+  const toggleInHeader = header.children.find((c) => c.className === "se-rail-toggle");
+  assert.ok(toggleInHeader, "expected the sort toggle inside the header row");
+  // Toggle still works: clicking A–Z re-sorts.
+  const pills = els.filter((e) => e.className === "se-rail-toggle-pill");
+  assert.strictEqual(pills.length, 2);
+  const az = pills.find((p) => p.textContent === "A–Z");
+  az.onclick();
+  const rowsAfter = els.filter((e) => e.className === "se-rail-row");
+  // paint() re-renders rows into cardsWrap; the LAST two rows are the re-painted order.
+  const lastTwo = rowsAfter.slice(-2);
+  // Depth-agnostic title lookup: Task 3 later nests the title inside a
+  // se-rail-main stacking block — this assertion must survive both shapes.
+  const findDeep = (el, cls) => {
+    if (el.className === cls) return el;
+    for (const c of el.children || []) { const r = findDeep(c, cls); if (r) return r; }
+    return null;
+  };
+  const firstTitle = findDeep(lastTwo[0], "se-rail-title");
+  assert.ok(firstTitle && firstTitle.innerHTML.includes("Alpha"), "after A–Z click, Alpha sorts first");
+});
+
+failures += !run("single-section rail still shows the 'Sections' header but hides the toggle", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "Solo", hubPath: "s.md", folder: "s", pageCount: 1, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.ok(els.find((e) => e.className === "se-group-label"), "expected the Sections label even with one section");
+  assert.strictEqual(els.filter((e) => e.className === "se-rail-toggle").length, 0, "toggle stays hidden below 2 sections");
+});
+
 process.exit(failures > 0 ? 1 : 0);
