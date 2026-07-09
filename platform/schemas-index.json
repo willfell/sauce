@@ -354,6 +354,19 @@
         "platform/blueprints/wiki/helpers/wiki-tree.js"
       ],
       "notes": "DocSearch.render(dv, opts) → filterContext { text, tags:Set, hasActiveFilter, resultsContainer }; DocSearch.matches(page, ctx) pure predicate. opts: scopePath, recursive, entityType (default doc-note), onChange, hideTags, persist, placeholder, tagExclude. Graduated verbatim from the project blueprint helper at this release."
+    },
+    {
+      "id": "section-explorer-links-frontmatter",
+      "kind": "contract",
+      "owner": { "type": "mechanism", "name": "section-explorer" },
+      "source": "platform/mechanisms/section-explorer/manifest.json",
+      "consumers": [
+        "platform/blueprints/wiki/helpers/wiki-tree.js",
+        "platform/blueprints/project/helpers/project-docs-index.js",
+        "platform/blueprints/project/helpers/section-hub.js",
+        "platform/install.js"
+      ],
+      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware)."
     }
   ]
 }
