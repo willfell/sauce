@@ -148,7 +148,7 @@ class ProjectDocsIndex {
     // every visit). Leading hairline owns the tier boundary.
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
-    this._config = this._buildConfig(dv.current(), ctx);
+    this._config = this._buildConfig(dv, dv.current(), ctx);
 
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
@@ -158,7 +158,6 @@ class ProjectDocsIndex {
       persist: false,
       entityType: "doc-note",
       onChange: (c) => {
-        this._currentCtx = c;
         c.resultsContainer.empty();
         this._renderTerminal(dv, docsFolder, c);
       },
@@ -166,10 +165,6 @@ class ProjectDocsIndex {
     // Wiki parity: normalize the shared search strip's top gap to 12px (it ships
     // a 2px top margin) so the space above the search matches the divider grammar.
     try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
-    if (this._currentCtx) {
-      Object.assign(filterCtx, this._currentCtx);
-    }
-
     // Tier 3 — either the search-mode results list, or (no active filter) the
     // browse view rendered by the shared SectionExplorer mechanism.
     this._renderTerminal(dv, docsFolder, filterCtx);
@@ -214,7 +209,7 @@ class ProjectDocsIndex {
   // Rename/Delete/Add-link must only ever be offered for a MATERIALIZED
   // section (a real section-hub note exists) — gated via `section.materialized`
   // in addition to the existing zero-children guard on delete.
-  _buildConfig(cur, ctx) {
+  _buildConfig(dv, cur, ctx) {
     const { projectSlug, projectPath, docsFolder } = ctx;
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;

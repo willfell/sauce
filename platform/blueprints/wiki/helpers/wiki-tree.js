@@ -256,6 +256,7 @@ class WikiTree {
             },
             icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
             rootClass: "se-root",
+            pageLabel: "Pages",
         };
     }
 

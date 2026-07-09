@@ -45,6 +45,7 @@ class SectionExplorer {
       renameSection: (section, newTitle) => config.renameSection(section, newTitle),
       icons: config.icons || { folder: "", file: "" },
       rootClass: config.rootClass || "se-root",
+      pageLabel: config.pageLabel || "Docs",
     };
   }
 
@@ -70,8 +71,15 @@ class SectionExplorer {
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
 
-    const pane = root.createEl("div", { cls: "se-page-pane" });
+    // Empty-state suppression: when the hub has sections but no direct pages,
+    // an empty pane ("Nothing here yet.") IS redundant chrome — the rail
+    // already communicates the structure. Only a truly-empty leaf (0 sections
+    // AND 0 pages) keeps the pane so its empty message means something.
     const pages = adapter.listPages(dv, ctx, null);
+    const pageCount = Array.isArray(pages) ? pages.length : (pages && pages.length) || 0;
+    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) return;
+
+    const pane = root.createEl("div", { cls: "se-page-pane" });
     this._renderPagePane(dv, adapter, ctx, null, pages, pane);
   }
 
@@ -93,6 +101,7 @@ class SectionExplorer {
     }
 
     if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
+    pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
     const proxyDv = this._makeProxyDv(dv, pane);
     const fileIcon = adapter.icons.file || "";
     customJS.BeaconCards.render(proxyDv, {
@@ -132,6 +141,11 @@ class SectionExplorer {
   _renderRail(dv, adapter, ctx, sections, root) {
     if (!Array.isArray(sections) || sections.length === 0) return;
     const rail = root.createEl("div", { cls: "se-rail" });
+
+    // Header row: "Sections" group label (left) + Recent/A–Z toggle (right).
+    const header = rail.createEl("div", { cls: "se-rail-header" });
+    header.createEl("span", { cls: "se-group-label", text: "Sections" });
+
     const sortRecent = (list) => [...list].sort((a, b) => (b.maxMtime || 0) - (a.maxMtime || 0));
     const sortAlpha = (list) => [...list].sort((a, b) => String(a.title).localeCompare(String(b.title)));
     const cardsWrap = rail.createEl("div", { cls: "se-rail-cards" });
@@ -143,7 +157,7 @@ class SectionExplorer {
     };
 
     if (sections.length >= 2) {
-      const toggle = rail.createEl("div", { cls: "se-rail-toggle" });
+      const toggle = header.createEl("div", { cls: "se-rail-toggle" });
       const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
       let current = "recent";
       const pills = [];
@@ -171,9 +185,12 @@ class SectionExplorer {
   _renderRailRow(dv, adapter, ctx, section, host) {
     const row = host.createEl("div", { cls: "se-rail-row" });
     const iconHtml = adapter.icons.folder || "";
-    const title = row.createEl("span", { cls: "se-rail-title" });
+    // Stacked layout: title on its own line, meta below it — long section
+    // names truncate instead of colliding with the counts.
+    const main = row.createEl("div", { cls: "se-rail-main" });
+    const title = main.createEl("span", { cls: "se-rail-title" });
     title.innerHTML = iconHtml + `<span class="se-rail-title-text">${this._escape(section.title)}</span>`;
-    const meta = row.createEl("span", { cls: "se-rail-meta" });
+    const meta = main.createEl("span", { cls: "se-rail-meta" });
     meta.textContent = this._railMeta(section);
     row.onclick = () => {
       if (section.hubPath) app.workspace.openLinkText(section.hubPath, "");

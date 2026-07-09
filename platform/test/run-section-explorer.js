@@ -128,7 +128,9 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   const rows = els.filter((e) => e.className === "se-rail-row");
   assert.strictEqual(rows.length, 2);
   // Default sort = recent (maxMtime desc) → Alpha (200) before Bravo (100).
-  const firstTitle = els.find((e) => e.className === "se-rail-title" && rows[0].children.includes(e));
+  // NEW (title now nests inside the se-rail-main stacking block):
+  const firstMain = rows[0].children.find((c) => c.className === "se-rail-main");
+  const firstTitle = firstMain && firstMain.children.find((c) => c.className === "se-rail-title");
   assert.ok(firstTitle && firstTitle.innerHTML.includes("Alpha"), "expected the first (most-recent) rail row's title to be Alpha");
   const meta = els.find((e) => e.className === "se-rail-meta" && (e.textContent.includes("3 doc") || e.innerHTML.includes("3 doc")));
   assert.ok(meta, "expected a meta line mentioning doc count");
@@ -441,7 +443,7 @@ failures += !run("project adapter: virtual (unmaterialized) sections expose no r
   const ProjectDocsIndex = mod.exports;
   const pdi = new ProjectDocsIndex();
   const virtualSection = { title: "Notes", hubPath: null, folder: "spice/projects/foo/docs/notes", pageCount: 0, subSectionCount: 0, materialized: false };
-  const config = pdi._buildConfig({ file: { path: "spice/projects/foo/Docs.md" } }, {
+  const config = pdi._buildConfig({ page: () => null, pages: () => [] }, { file: { path: "spice/projects/foo/Docs.md" } }, {
     projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder: "spice/projects/foo/docs", scopePath: "spice/projects/foo/docs",
   });
   assert.strictEqual(config.canDelete(virtualSection), false, "a virtual section must never be deletable");
@@ -465,7 +467,7 @@ failures += !run("project adapter: renameSection on a depth-1 hub updates sectio
   const SectionHub = mod.exports;
   const sh = new SectionHub();
   const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
-  const config = sh._buildConfig(cur, 1, "foo", "ems", "EMS");
+  const config = sh._buildConfig({ page: () => null, pages: () => [] }, cur, 1, "foo", "ems", "EMS");
   const childHub = { path: "spice/projects/foo/docs/ems/sub/Sub.md" };
   sh._childHubsForRename = () => [childHub]; // test seam listing depth-2 children
   const section = { title: "EMS", hubPath: cur.file.path, folder: cur.file.folder, materialized: true };
@@ -627,6 +629,326 @@ failures += !run("REGRESSION: section-explorer manifest ships its CSS via snippe
     enabled.includes(snippets[0].name),
     "manifest.appearance.enabledCssSnippets must include '" + snippets[0].name + "' — otherwise the snippet is copied to disk but never actually applied by Obsidian"
   );
+});
+
+// ── Regression: SectionHub/ProjectDocsIndex are customJS SINGLETONS — one
+// instance reused for every note. DocSearch.render() creates a brand-new
+// resultsContainer per call, but the (now-deleted) `Object.assign(filterCtx,
+// this._currentCtx)` restore overwrote the fresh ctx (incl. resultsContainer)
+// with the one captured by the LAST onChange anywhere in the vault, so all
+// content rendered into a detached, invisible container ("no docs" despite
+// real matches). WikiTree never had the mechanism and works.
+failures += !run("REGRESSION: a prior render's search onChange must not hijack a later render's resultsContainer (ProjectDocsIndex singleton)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+
+  const SectionExplorer = loadClass();
+  let capturedOnChange = null;
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: {
+      render: (dv, opts) => {
+        capturedOnChange = opts.onChange;
+        return { hasActiveFilter: false, resultsContainer: dv.container.createEl("div", { cls: "results" }) };
+      },
+      matches: () => true,
+    },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+    AccentButton: { render: () => {} },
+  };
+  const pagesFor = (slug) => [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { path: `spice/projects/${slug}/docs/knowledge/Knowledge.md`, name: "Knowledge", folder: `spice/projects/${slug}/docs/knowledge`, mtime: { ts: 1 } } },
+  ];
+
+  const pdi = new ProjectDocsIndex();
+
+  // Render #1 on note A, then simulate a search keystroke: onChange fires with
+  // a ctx bound to note A's (soon-stale) resultsContainer.
+  const { container: containerA } = makeDomStub();
+  const curA = { file: { path: "spice/projects/aaa/docs/Docs.md", folder: "spice/projects/aaa/docs" }, type: "docs-hub" };
+  pdi.render(makeClassShapedDv(containerA, pagesFor("aaa"), curA));
+  assert.ok(capturedOnChange, "expected DocSearch.render to receive an onChange");
+  const staleStub = makeDomStub();
+  capturedOnChange({ hasActiveFilter: false, resultsContainer: staleStub.container, text: "", tags: new Set() });
+  // The onChange itself legitimately re-renders note A's browse view into its
+  // own container — baseline that count; render #2 must not ADD to it.
+  const staleRowsAfterOnChange = staleStub.els.filter((e) => e.className === "se-rail-row").length;
+
+  // Render #2 on note B (fresh containers). All browse content must land under
+  // note B's own DOM — nothing may leak into the stale ctx's container.
+  const { container: containerB, els: elsB } = makeDomStub();
+  const curB = { file: { path: "spice/projects/bbb/docs/Docs.md", folder: "spice/projects/bbb/docs" }, type: "docs-hub" };
+  pdi.render(makeClassShapedDv(containerB, pagesFor("bbb"), curB));
+
+  const rowsInB = elsB.filter((e) => e.className === "se-rail-row");
+  const rowsInStale = staleStub.els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(rowsInStale.length, staleRowsAfterOnChange, "no NEW rail rows may render into the PRIOR render's stale resultsContainer");
+  assert.strictEqual(rowsInB.length, 1, "render #2's rail rows must land in ITS OWN resultsContainer — got " + rowsInB.length + " (stale-_currentCtx hijack)");
+  delete global.customJS;
+});
+
+// ── Regression: _buildConfig's getLinks closure referenced a BARE `dv`
+// identifier that is NOT in scope inside the method (wiki-tree's
+// _buildConfig(dv, cur) correctly takes dv as a parameter; the project
+// helpers forgot it). At runtime adapter.getLinks() threw ReferenceError
+// inside SectionExplorer._renderPagePane, killing the whole page pane
+// (rail rendered, docs never did). These tests run WITHOUT any global.dv.
+failures += !run("REGRESSION: ProjectDocsIndex adapter getLinks must not throw (dv captured in _buildConfig scope)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+
+  const SectionExplorer = loadClass();
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: { render: (dv) => ({ hasActiveFilter: false, resultsContainer: dv.container }) },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+    AccentButton: { render: () => {} },
+  };
+  assert.strictEqual(typeof global.dv, "undefined", "precondition: no global dv may mask the scope bug");
+
+  const { container, els } = makeDomStub();
+  const cur = { file: { path: "spice/projects/sauce/docs/Docs.md", folder: "spice/projects/sauce/docs" }, type: "docs-hub" };
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { path: "spice/projects/sauce/docs/knowledge/Knowledge.md", name: "Knowledge", folder: "spice/projects/sauce/docs/knowledge", mtime: { ts: 1 } } },
+    { type: "doc-note", file: { path: "spice/projects/sauce/docs/Readme.md", name: "Readme", folder: "spice/projects/sauce/docs", mtime: { ts: 2 } } },
+  ];
+  const dv = makeClassShapedDv(container, pages, cur);
+  // dv.page exists (own property is fine for this direction of the spread bug).
+  dv.page = () => ({ links: [{ url: "https://example.com", text: "Guide" }] });
+
+  const pdi = new ProjectDocsIndex();
+  pdi.render(dv);
+
+  const linksRow = els.find((e) => e.className === "se-links-row");
+  assert.ok(
+    linksRow,
+    "expected a se-links-row — getLinks must resolve links via the dv passed to _buildConfig, not a bare out-of-scope `dv` (ReferenceError kills the page pane)"
+  );
+  delete global.customJS;
+});
+
+failures += !run("REGRESSION: SectionHub adapter getLinks must not throw (dv captured in _buildConfig scope)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+
+  assert.strictEqual(typeof global.dv, "undefined", "precondition: no global dv may mask the scope bug");
+  const sh = new SectionHub();
+  const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
+  const dvStub = { page: () => ({ links: [{ url: "https://x.com", text: "X" }] }), pages: () => [] };
+  const config = sh._buildConfig(dvStub, cur, 1, "foo", "ems", "EMS");
+  const links = config.getLinks({ hubPath: "spice/projects/foo/docs/ems/EMS.md" });
+  assert.deepStrictEqual(links, [{ url: "https://x.com", text: "X" }], "getLinks must return the stub dv's links without throwing");
+});
+
+failures += !run("rail renders a header row: 'Sections' group label left, sort toggle right, ABOVE the row list", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "Bravo", hubPath: "b.md", folder: "b", pageCount: 1, subSectionCount: 0, maxMtime: 100, materialized: true },
+    { title: "Alpha", hubPath: "a.md", folder: "a", pageCount: 3, subSectionCount: 1, maxMtime: 200, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+
+  const rail = els.find((e) => e.className === "se-rail");
+  assert.ok(rail, "expected a se-rail");
+  const header = els.find((e) => e.className === "se-rail-header");
+  assert.ok(header, "expected a se-rail-header row");
+  // Header is the FIRST child of the rail — above the cards list.
+  assert.strictEqual(rail.children[0], header, "header must be the rail's first child (above the row list)");
+  // Label inside the header.
+  const label = header.children.find((c) => c.className === "se-group-label");
+  assert.ok(label, "expected a se-group-label inside the header");
+  assert.strictEqual(label.textContent, "Sections");
+  // Toggle lives INSIDE the header (not trailing after the list anymore).
+  const toggleInHeader = header.children.find((c) => c.className === "se-rail-toggle");
+  assert.ok(toggleInHeader, "expected the sort toggle inside the header row");
+  // Toggle still works: clicking A–Z re-sorts.
+  const pills = els.filter((e) => e.className === "se-rail-toggle-pill");
+  assert.strictEqual(pills.length, 2);
+  const az = pills.find((p) => p.textContent === "A–Z");
+  az.onclick();
+  const rowsAfter = els.filter((e) => e.className === "se-rail-row");
+  // paint() re-renders rows into cardsWrap; the LAST two rows are the re-painted order.
+  const lastTwo = rowsAfter.slice(-2);
+  // Depth-agnostic title lookup: Task 3 later nests the title inside a
+  // se-rail-main stacking block — this assertion must survive both shapes.
+  const findDeep = (el, cls) => {
+    if (el.className === cls) return el;
+    for (const c of el.children || []) { const r = findDeep(c, cls); if (r) return r; }
+    return null;
+  };
+  const firstTitle = findDeep(lastTwo[0], "se-rail-title");
+  assert.ok(firstTitle && firstTitle.innerHTML.includes("Alpha"), "after A–Z click, Alpha sorts first");
+});
+
+failures += !run("single-section rail still shows the 'Sections' header but hides the toggle", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "Solo", hubPath: "s.md", folder: "s", pageCount: 1, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.ok(els.find((e) => e.className === "se-group-label"), "expected the Sections label even with one section");
+  assert.strictEqual(els.filter((e) => e.className === "se-rail-toggle").length, 0, "toggle stays hidden below 2 sections");
+});
+
+failures += !run("rail row stacks: a se-rail-main block holds title THEN meta on separate lines, dots outside it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 3, subSectionCount: 1, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const row = els.find((e) => e.className === "se-rail-row");
+  assert.ok(row, "expected a rail row");
+  const main = row.children.find((c) => c.className === "se-rail-main");
+  assert.ok(main, "expected a se-rail-main stacking block inside the row");
+  const title = main.children.find((c) => c.className === "se-rail-title");
+  const meta = main.children.find((c) => c.className === "se-rail-meta");
+  assert.ok(title, "title lives inside se-rail-main");
+  assert.ok(meta, "meta lives inside se-rail-main, below the title");
+  assert.strictEqual(main.children.indexOf(title) < main.children.indexOf(meta), true, "title renders before (above) meta");
+  assert.strictEqual(meta.textContent, "1 section · 3 docs");
+  const dots = row.children.find((c) => c.className === "se-rail-dots");
+  assert.ok(dots, "dots stay a direct child of the row (right edge), outside the stacking block");
+});
+
+failures += !run("page pane renders a group label above the grid — default 'Docs', adapter-overridable to 'Pages'", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+
+  // Default: "Docs".
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/projects/foo/docs/Docs.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/projects/foo/docs" }),
+      listSections: () => [],
+      listPages: () => pages,
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const label = els.find((e) => e.className === "se-group-label se-pane-label");
+    assert.ok(label, "expected a pane group label");
+    assert.strictEqual(label.textContent, "Docs");
+  }
+
+  // Override: pageLabel "Pages" (wiki).
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => pages,
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+      pageLabel: "Pages",
+    });
+    se.render(dv, adapter);
+    const label = els.find((e) => e.className === "se-group-label se-pane-label");
+    assert.ok(label, "expected a pane group label");
+    assert.strictEqual(label.textContent, "Pages");
+  }
+  delete global.customJS;
+});
+
+failures += !run("wiki adapter config sets pageLabel 'Pages'", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const config = wt._buildConfig({ container: {} }, { file: { path: "spice/wiki/Wiki.md" } });
+  assert.strictEqual(config.pageLabel, "Pages");
+});
+
+failures += !run("empty page pane is SUPPRESSED entirely when sections exist (no label, no links row, no BeaconCards empty box)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const calls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) }, MenuPopover: { open: () => {} } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [{ url: "https://example.com", text: "Example" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(calls.length, 0, "BeaconCards must NOT be called");
+  assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 0, "pane not created");
+  assert.strictEqual(els.filter((e) => e.className === "se-links-row").length, 0, "links row suppressed with the pane");
+  assert.strictEqual(els.filter((e) => e.className === "se-group-label se-pane-label").length, 0, "pane label suppressed too");
+  delete global.customJS;
+});
+
+failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the pane empty-state message", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const calls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/empty/Empty.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki/empty" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 1, "pane still renders on a truly-empty leaf");
+  assert.strictEqual(calls.length, 1, "BeaconCards still called — its built-in empty message communicates the real 'nothing here'");
+  assert.deepStrictEqual(calls[0].pages, [], "called with zero pages");
+  delete global.customJS;
 });
 
 process.exit(failures > 0 ? 1 : 0);
