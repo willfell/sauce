@@ -61,8 +61,8 @@ class TaskDialog {
 
     /**
      * Seed a create form from the surface that opened the dialog.
-     *   daily   → { scheduled: today, source: "daily" }
-     *   project → { project, source: "project" }        (NO scheduled)
+     *   daily   → { due: today, source: "daily" }
+     *   project → { project, source: "project" }        (NO due)
      *   meeting → { source_note, project, source: "meeting" }
      *   manual / absent → { source: "manual" }
      * Only keys with a meaningful value are emitted (no empty scaffolding), so a
@@ -72,7 +72,7 @@ class TaskDialog {
         const o = opts || {};
         switch (o.surface) {
             case 'daily':
-                return { scheduled: o.today || '', source: 'daily' };
+                return { due: o.today || '', source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
             case 'meeting': {
@@ -146,7 +146,7 @@ class TaskDialog {
 
     /**
      * Thin wrapper over TaskEntity.nextOccurrence for the "done" branch:
-     * rolls forward from TODAY (not from the task's stale `scheduled`), so a
+     * rolls forward from TODAY (not from the task's stale `due`), so a
      * late completion doesn't create a backlog of overdue occurrences. Returns
      * the next `YYYY-MM-DD`, or `null` when the grammar is unsupported/never
      * fires (caller falls back to normal archiving). Pure, never throws.
@@ -563,8 +563,7 @@ class TaskDialog {
         const defaults = editPath ? {} : TaskDialog.defaultsForSurface(opts);
         const state = {
             title: fm ? (fm.title || '') : '',
-            scheduled: fm ? (fm.scheduled || '') : (defaults.scheduled || ''),
-            due: fm ? (fm.due || '') : '',
+            due: fm ? (fm.due || '') : (defaults.due || ''),
             priority: fm ? (fm.priority || '') : (defaults.priority || ''),
             // project as a display name (strip [[ ]] if present)
             projectName: fm ? TaskDialog._stripWikilink(fm.project) : (defaults.project && defaults.project.name) || '',
@@ -634,13 +633,6 @@ class TaskDialog {
         // existing task shouldn't grab focus (the title is already filled in).
         if (!editPath) setTimeout(() => titleInput.focus(), 50);
 
-        // Scheduled
-        label('Scheduled (optional)');
-        const schedInput = host.createEl('input', { type: 'date' });
-        schedInput.style.cssText = dateCss;
-        schedInput.value = state.scheduled;
-        schedInput.onchange = () => { state.scheduled = schedInput.value; updateSubmit(); };
-
         // Due
         label('Due (optional)');
         const dueInput = host.createEl('input', { type: 'date' });
@@ -650,7 +642,7 @@ class TaskDialog {
 
         // Recurrence — free-text grammar (RecurrenceParser), validated live.
         // Empty = one-shot task (default). A supported grammar makes "Done"
-        // roll the task's scheduled date forward instead of archiving it.
+        // roll the task's due date forward instead of archiving it.
         label('Repeats (optional — e.g. "every day", "every Monday", "every 2 weeks on Friday")');
         const recurInput = host.createEl('input', { type: 'text' });
         recurInput.style.cssText = fieldCss;
@@ -1006,7 +998,6 @@ class TaskDialog {
         const s = state || {};
         const payload = {
             title: s.title,
-            scheduled: s.scheduled || '',
             due: s.due || '',
             recurrence: s.recurrence || '',
             priority: s.priority || '',
@@ -1097,7 +1088,7 @@ class TaskDialog {
     /**
      * QUICK-CREATE — a modal-less one-gesture task create for the Home command
      * center's inline "Jot a task…" capture. Builds the minimal payload from the
-     * typed title (scheduled = today, no priority/due/project) and reuses the SAME
+     * typed title (due = today, no priority/project) and reuses the SAME
      * single-file `_create` path (composeNote → dedupe → one vault.create), so the
      * one-file-write invariant holds and the note appears in the Tasks panel on
      * the caller's re-render. `app` is grabbed from the runtime global (as
@@ -1111,7 +1102,7 @@ class TaskDialog {
         if (!app || !title) return;
         const payload = {
             title,
-            scheduled: (opts && opts.today) || '',
+            due: (opts && opts.today) || '',
             source: (opts && opts.source) || 'daily',
             links: [],
         };
@@ -1132,7 +1123,6 @@ class TaskDialog {
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
-            fm.scheduled = payload.scheduled || '';
             fm.due = payload.due || '';
             fm.priority = payload.priority || '';
             fm.recurrence = payload.recurrence || '';
@@ -1198,10 +1188,10 @@ class TaskDialog {
             const nextDate = todayStr ? TaskDialog._rollForwardDate(recurrence, todayStr, anchorStr, matchesFn) : null;
             if (nextDate) {
                 // ROLL FORWARD — same file, never archived. Leaves status/priority/
-                // project/links untouched; only scheduled advances and completed_at
+                // project/links untouched; only due advances and completed_at
                 // clears (so the note never carries a stale "last time" stamp).
                 await app.fileManager.processFrontMatter(file, (fmw) => {
-                    fmw.scheduled = nextDate;
+                    fmw.due = nextDate;
                     fmw.completed_at = '';
                 });
                 try { new Notice('Task rolled to ' + nextDate); } catch (_e) {}

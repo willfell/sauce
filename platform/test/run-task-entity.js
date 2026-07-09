@@ -227,14 +227,14 @@ function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // ---------- TaskDialog static helpers (pure) ----------
 
-// TD-1. defaultsForSurface daily → { scheduled: today, source: "daily" }.
-ok('TD-1 defaultsForSurface daily seeds scheduled + source', () => {
+// TD-1. defaultsForSurface daily → { due: today, source: "daily" }.
+ok('TD-1 defaultsForSurface daily seeds due + source', () => {
   const d = TaskDialog.defaultsForSurface({ surface: 'daily', today: '2026-07-01' });
-  assert(deepEq(d, { scheduled: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
+  assert(deepEq(d, { due: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
 });
 
-// TD-2. defaultsForSurface project → { project, source: "project" }, no scheduled.
-ok('TD-2 defaultsForSurface project seeds project + source (no scheduled)', () => {
+// TD-2. defaultsForSurface project → { project, source: "project" }, no due.
+ok('TD-2 defaultsForSurface project seeds project + source (no due)', () => {
   const d = TaskDialog.defaultsForSurface({ surface: 'project', project: { name: 'Sauce', slug: 'sauce' } });
   assert(deepEq(d, { project: { name: 'Sauce', slug: 'sauce' }, source: 'project' }), 'got ' + JSON.stringify(d));
 });
@@ -248,7 +248,7 @@ ok('TD-3 defaultsForSurface meeting seeds source_note + project + source', () =>
 });
 
 // TD-4. The to-do page's "New Task" button must dispatch surface:'daily' (NOT
-// 'today') so defaultsForSurface actually seeds scheduled+source. Regression
+// 'today') so defaultsForSurface actually seeds due+source. Regression
 // net for the "New Task on daily to-do never shows in Today" bug.
 ok('TD-4 to-do chrome bar New Task dispatch uses surface "daily"', () => {
   const src = fs.readFileSync(
@@ -415,13 +415,13 @@ ok('TD-15 _payloadFromState includes state.links', () => {
 });
 
 ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
-  const state = { title: 'Feed the dogs', scheduled: '2026-07-08', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
+  const state = { title: 'Feed the dogs', due: '2026-07-08', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
   const payload = TaskDialog._payloadFromState(state);
   assert(payload.recurrence === 'every day', 'recurrence in payload: ' + payload.recurrence);
 });
 
 ok('TD-recur-2 _payloadFromState defaults recurrence to empty string', () => {
-  const state = { title: 'One-shot', scheduled: '', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
+  const state = { title: 'One-shot', due: '', priority: '', projectName: '', source: 'manual', source_note: '', links: [] };
   const payload = TaskDialog._payloadFromState(state);
   assert(payload.recurrence === '', 'no recurrence -> empty string: ' + JSON.stringify(payload.recurrence));
 });
@@ -1476,7 +1476,7 @@ async function runCreateQuickTests() {
     const c = app._creates[0].content;
     assert(/\ntype: task\n/.test(c), 'content carries type: task');
     assert(/\nstatus: open\n/.test(c), 'content carries status: open');
-    assert(/\nscheduled: 2026-07-02\n/.test(c), 'content carries scheduled: 2026-07-02');
+    assert(/\ndue: 2026-07-02\n/.test(c), 'content carries due: 2026-07-02');
     assert(/\nsource: daily\n/.test(c), 'content carries source: daily');
   });
 
