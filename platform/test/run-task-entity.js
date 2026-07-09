@@ -473,6 +473,30 @@ ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching g
   }
 });
 
+// ---------- TaskDialog _moreOptionsShouldStartExpanded (pure) ----------
+//
+// Decides whether the dialog's "More options" section (Repeats/Priority/
+// Project/Notes/Links) should start expanded: true iff ANY of those fields
+// already has a value (so existing edit-mode data is never hidden by
+// default); create mode's all-blank state naturally collapses.
+
+ok('TD-polish-1 _moreOptionsShouldStartExpanded: false when no optional field is set', () => {
+  const state = { priority: '', projectName: '', recurrence: '', notes: '', links: [] };
+  assert(TaskDialog._moreOptionsShouldStartExpanded(state) === false, 'bare state -> collapsed');
+});
+
+ok('TD-polish-2 _moreOptionsShouldStartExpanded: true when ANY optional field is set', () => {
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: 'high', projectName: '', recurrence: '', notes: '', links: [] }) === true, 'priority set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: 'Connectors', recurrence: '', notes: '', links: [] }) === true, 'project set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: 'every day', notes: '', links: [] }) === true, 'recurrence set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: '', notes: 'some notes', links: [] }) === true, 'notes set -> expanded');
+  assert(TaskDialog._moreOptionsShouldStartExpanded({ priority: '', projectName: '', recurrence: '', notes: '', links: ['[[A]]'] }) === true, 'links set -> expanded');
+});
+
+ok('TD-polish-3 _moreOptionsShouldStartExpanded tolerates a missing/null state', () => {
+  assert(TaskDialog._moreOptionsShouldStartExpanded(null) === false, 'null state -> collapsed, never throws');
+});
+
 // ---------- TaskTodayList static helpers (pure) ----------
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
