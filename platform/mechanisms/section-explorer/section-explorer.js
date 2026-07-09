@@ -162,6 +162,27 @@ class SectionExplorer {
     row.onclick = () => {
       if (section.hubPath) app.workspace.openLinkText(section.hubPath, "");
     };
+
+    const dots = row.createEl("span", { cls: "se-rail-dots" });
+    dots.innerHTML = adapter.icons.dots || "";
+    dots.onclick = (ev) => {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      const canDelete = adapter.canDelete(section);
+      const entries = [
+        { label: "Rename", onSelect: () => this._openRenameDialog(dv, adapter, section) },
+        { label: "Add link", onSelect: () => this._openAddLinkForm(dv, adapter, section) },
+        { label: "Delete", danger: true, disabled: !canDelete, onSelect: () => { if (canDelete) this._openDeleteConfirm(dv, adapter, section); } },
+      ];
+      customJS.MenuPopover.open(entries, { anchor: dots });
+    };
+  }
+
+  // ── Stubs wired up in Task 6/7 ──────────────────────────────────────────
+  _openRenameDialog(dv, adapter, section) { /* Task 6 */ }
+  _openAddLinkForm(dv, adapter, section) { /* Task 7 */ }
+  _openDeleteConfirm(dv, adapter, section) {
+    if (!adapter.canDelete(section)) return;
+    try { adapter.deleteSection(section); } catch (_e) { /* never-throw */ }
   }
 
   _escape(s) {

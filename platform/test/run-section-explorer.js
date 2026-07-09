@@ -237,4 +237,35 @@ failures += !run("https: link gets a real safe anchor (href + target=_blank + re
   delete global.customJS;
 });
 
+failures += !run("rail row's inline dots opens MenuPopover with Rename/Add link/Delete, Delete disabled when non-empty", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const opened = [];
+  global.customJS = { MenuPopover: { open: (entries, opts) => { opened.push({ entries, opts }); } } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 0, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    canDelete: (s) => s.pageCount === 0 && s.subSectionCount === 0,
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const dots = els.find((e) => e.className === "se-rail-dots");
+  assert.ok(dots, "expected an inline dots control on the rail row");
+  dots.onclick();
+  assert.strictEqual(opened.length, 1);
+  const labels = opened[0].entries.filter((e) => e && e.label).map((e) => e.label);
+  assert.deepStrictEqual(labels, ["Rename", "Add link", "Delete"]);
+  const deleteEntry = opened[0].entries.find((e) => e && e.label === "Delete");
+  assert.strictEqual(deleteEntry.disabled, true, "Delete must be disabled — section has 2 pages");
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
