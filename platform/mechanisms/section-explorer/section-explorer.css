@@ -10,6 +10,140 @@
 .se-root {
   --se-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
   --se-spring: cubic-bezier(0.34, 1.56, 0.5, 1);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+/* ── Rail (sections) — a compact list of rows, not a card grid; the page
+ * pane below/right is where BeaconCards' card treatment lives. ────────── */
+.se-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+@media (min-width: 721px) {
+  .se-rail { flex-basis: 260px; max-width: 320px; }
+}
+
+.se-rail-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.se-rail-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.se-rail-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s var(--se-ease), color 0.15s var(--se-ease), border-color 0.15s var(--se-ease);
+}
+.se-rail-toggle-pill:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+.se-rail-toggle-pill.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.se-rail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s var(--se-ease), border-color 0.15s var(--se-ease), transform 0.15s var(--se-ease);
+}
+.se-rail-row:hover {
+  background: var(--background-secondary-alt, var(--background-secondary));
+  border-color: var(--interactive-accent);
+  transform: translateY(-1px);
+}
+.se-rail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.se-rail-title svg { flex-shrink: 0; }
+.se-rail-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.se-rail-meta {
+  flex: 0 0 auto;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.se-rail-dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 0.15s var(--se-ease), color 0.15s var(--se-ease);
+}
+.se-rail-dots:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ── Pinned links row (above the page grid) ──────────────────────────────── */
+.se-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.se-link-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 500;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s var(--se-ease), border-color 0.15s var(--se-ease);
+}
+.se-link-chip[href]:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+.se-link-chip:not([href]) {
+  color: var(--text-faint);
+  cursor: default;
 }
 
 @keyframes sectionExplorerRailIn {
@@ -43,6 +177,23 @@
   .se-root { display: flex; flex-direction: row; align-items: flex-start; }
   .se-rail { flex: 0 0 auto; }
   .se-page-pane { flex: 1 1 auto; min-width: 0; }
+}
+
+/* Obsidian is a multi-pane desktop app — the WINDOW viewport can be wide
+ * while the actual note pane rendering this is narrow (split panes, a
+ * sidebar note, etc.), so the width-based media queries above are only a
+ * fallback. `.se-mobile` is set in JS from Obsidian's own `app.isMobile`
+ * platform flag (same source BeaconCards/MenuPopover use) and always wins,
+ * regardless of window width. */
+.se-root.se-mobile {
+  flex-direction: column !important;
+}
+.se-root.se-mobile > .se-rail {
+  flex: 0 0 auto !important;
+  max-width: none !important;
+}
+.se-root.se-mobile > .se-page-pane {
+  flex: 1 1 auto !important;
 }
 
 /* ── Reduced-motion off-switch ─────────────────────────────────────────── *

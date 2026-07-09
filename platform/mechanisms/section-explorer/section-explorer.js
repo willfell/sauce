@@ -58,6 +58,15 @@ class SectionExplorer {
     if (!ctx) return;
 
     const root = container0.createEl("div", { cls: adapter.rootClass });
+    // CSS `@media (max-width)` reads the WINDOW viewport, not the actual
+    // rendering pane — in Obsidian's multi-pane desktop layout a narrow note
+    // pane in a wide window would otherwise still get the desktop two-column
+    // layout. Drive the mobile/desktop switch from Obsidian's own platform
+    // flag (same source BeaconCards/MenuPopover already use) via a class, and
+    // keep the CSS media query only as a defensive fallback.
+    try {
+      if (typeof app !== "undefined" && app && app.isMobile) root.classList.add("se-mobile");
+    } catch (_e) { /* never-throw */ }
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
 
@@ -137,11 +146,17 @@ class SectionExplorer {
       const toggle = rail.createEl("div", { cls: "se-rail-toggle" });
       const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
       let current = "recent";
+      const pills = [];
+      const paintActive = () => {
+        for (const p of pills) p.el.classList.toggle("is-active", p.key === current);
+      };
       for (const m of modes) {
         const pill = toggle.createEl("span", { cls: "se-rail-toggle-pill" });
         pill.textContent = m.label;
-        pill.onclick = () => { current = m.key; paint(current); };
+        pill.onclick = () => { current = m.key; paintActive(); paint(current); };
+        pills.push({ key: m.key, el: pill });
       }
+      paintActive();
     }
     paint("recent");
   }
@@ -156,7 +171,8 @@ class SectionExplorer {
   _renderRailRow(dv, adapter, ctx, section, host) {
     const row = host.createEl("div", { cls: "se-rail-row" });
     const iconHtml = adapter.icons.folder || "";
-    row.innerHTML = iconHtml + `<span>${this._escape(section.title)}</span>`;
+    const title = row.createEl("span", { cls: "se-rail-title" });
+    title.innerHTML = iconHtml + `<span class="se-rail-title-text">${this._escape(section.title)}</span>`;
     const meta = row.createEl("span", { cls: "se-rail-meta" });
     meta.textContent = this._railMeta(section);
     row.onclick = () => {
