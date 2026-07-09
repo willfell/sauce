@@ -55,6 +55,32 @@ class SectionExplorer {
     const root = container0.createEl("div", { cls: adapter.rootClass });
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
+
+    const pane = root.createEl("div", { cls: "se-page-pane" });
+    const pages = adapter.listPages(dv, ctx, null);
+    this._renderPagePane(dv, adapter, ctx, null, pages, pane);
+  }
+
+  _renderPagePane(dv, adapter, ctx, section, pages, pane) {
+    if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
+    const proxyDv = this._makeProxyDv(dv, pane);
+    const fileIcon = adapter.icons.file || "";
+    customJS.BeaconCards.render(proxyDv, {
+      pages,
+      layout: "stacked",
+      columns: 2,
+      title: (p) => p.title || (p.file && p.file.name),
+      icon: () => fileIcon,
+      target: (p) => p.file && p.file.path,
+    });
+  }
+
+  _makeProxyDv(dv, container) {
+    return {
+      container,
+      current: dv.current ? dv.current.bind(dv) : (() => null),
+      pages: dv.pages ? dv.pages.bind(dv) : (() => []),
+    };
   }
 
   _renderRail(dv, adapter, ctx, sections, root) {

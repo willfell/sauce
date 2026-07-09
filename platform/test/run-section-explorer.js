@@ -122,4 +122,28 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   assert.ok(meta, "expected a meta line mentioning doc count");
 });
 
+failures += !run("page pane renders BeaconCards.render with the section's pages", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container } = makeDomStub();
+  const calls = [];
+  global.customJS = {
+    BeaconCards: { render: (proxyDv, opts) => { calls.push(opts); } },
+  };
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => pages,
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(calls.length, 1, "expected BeaconCards.render to be called once");
+  assert.strictEqual(calls[0].pages.length, 1);
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);
