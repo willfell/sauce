@@ -711,6 +711,15 @@ ok('TTL-4 buildBands excludes project-connected + meeting-sourced tasks (dedup)'
   assert(ws.today.length === 1, 'whitespace-only project_slug → still a personal task: got ' + ws.today.length);
 });
 
+ok('TTL-sub-1 buildBands excludes a task with parent_task set (shown in its parent Subtasks section instead)', () => {
+  const tasks = [
+    { title: 'Top-level today', status: 'open', due: '2026-07-08', parent_task: '' },
+    { title: 'Subtask today', status: 'open', due: '2026-07-08', parent_task: 'Ship the report' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  assert(bands.today.length === 1 && bands.today[0].title === 'Top-level today', 'subtask excluded from Today: ' + JSON.stringify(bands.today));
+});
+
 // ---------- Dataview DateTime coercion (FIX 1 — tasks-don't-render bug) ----------
 //
 // Dataview parses an UNQUOTED frontmatter date (`scheduled: 2026-07-01`) into a

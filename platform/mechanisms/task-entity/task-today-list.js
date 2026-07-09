@@ -67,7 +67,9 @@ class TaskTodayList {
      * A task WITH a project_slug renders in its "Project Tasks" section
      * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
      * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
-     * task-notes, so excluding them here loses nothing. Future-scheduled +
+     * task-notes, so excluding them here loses nothing. A task WITH a
+     * parent_task is a subtask and renders in its parent's "Subtasks" section
+     * instead, so it is excluded here too. Future-scheduled +
      * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
      * input (→ empty bands); never throws.
      */
@@ -86,6 +88,7 @@ class TaskTodayList {
             // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
             if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
             if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
+            if (t.parent_task && String(t.parent_task).trim() !== '') continue;   // shown in its parent's Subtasks section
             const due = t.due;
             if (!due) continue;
             if (due === todayStr) today.push(t);
