@@ -636,6 +636,20 @@ withTempVault((vault) => {
             /links:\s*\[\]/.test(hubBody),
             `hubBody snippet=${hubBody.slice(0, 200)}`
         );
+
+        // WIKI-12/13: the same links: [] backfill heal fires for wiki-section notes
+        // too — not just the wiki-hub type checked by WIKI-11. infraBody/awsBody are
+        // both real wiki-section fixtures already read above for WIKI-8/WIKI-10.
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-12 infra section hub links: [] backfilled into frontmatter by install",
+            /links:\s*\[\]/.test(infraBody),
+            `infraBody snippet=${infraBody.slice(0, 200)}`
+        );
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-13 aws section hub links: [] backfilled into frontmatter by install",
+            /links:\s*\[\]/.test(awsBody),
+            `awsBody snippet=${awsBody.slice(0, 200)}`
+        );
     }
 
     // ===== HC-V0RDR-SEED-READER-* — reader blueprint seed coverage =====
