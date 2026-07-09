@@ -3916,8 +3916,9 @@ async function applyProjectChromeBarHeal(tp, manifest, variables, history, git) 
       const before = await adapter.read(fpath);
       const type = _noteChromeFrontmatterType(before);
       if (!PROJECT_CHROME_TYPES.includes(type)) { skipped += 1; continue; }
-      const { changed, body: after } = _projectChromeBarBody(before, type);
-      if (!changed || after === before) { skipped += 1; continue; }
+      const { changed, body: chromeAfter } = _projectChromeBarBody(before, type);
+      const after = _healSectionLinksFrontmatter(changed ? chromeAfter : before, type);
+      if (after === before) { skipped += 1; continue; }
       const backupPath = `.sauce-backup/${ts}/${fpath}`;
       const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
       try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
@@ -6311,6 +6312,26 @@ function _healChromeBarMigration(body, type, barClass) {
   return out;
 }
 
+// _healSectionLinksFrontmatter — pure, idempotent frontmatter transform. Backfills
+// `links: []` onto wiki-hub / wiki-section / docs-hub / section-hub notes that
+// lack the key (section-explorer's per-hub/section links contract — see
+// schemas-index.json's "section-explorer-links-frontmatter" entry). It never
+// touches an EXISTING `links:` line (line-anchored /^links:/m match) regardless
+// of quoting; it only ever inserts a brand-new key when one is entirely absent.
+// No-ops on notes of any other type, on notes with no frontmatter block, and on
+// notes that already carry a `links:` key (idempotent — re-running install a
+// second time is a no-op here).
+function _healSectionLinksFrontmatter(body, type) {
+  if (typeof body !== "string") return body;
+  if (!["wiki-hub", "wiki-section", "docs-hub", "section-hub"].includes(type)) return body;
+  const fm = body.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (!fm) return body;
+  const fmBody = fm[1];
+  if (/^links:/m.test(fmBody)) return body;
+  const newFmBody = fmBody + "\nlinks: []";
+  return body.slice(0, fm.index) + "---\n" + newFmBody + "\n---\n" + body.slice(fm.index + fm[0].length);
+}
+
 // _healWikiChromeBody — pure, idempotent body transform for wiki notes
 // (chrome-bar adoption). Migrates a note's chrome to the single WikiChromeBar
 // bar: strips every LEGACY chrome block (Breadcrumb / SpaceNavButtons / the
@@ -6532,7 +6553,8 @@ async function applyNoteChromeHeal(tp, history, git) {
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
         const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan", "invoice-board-card", "time-log"];
         if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
-        const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
+        let after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
+        after = _healSectionLinksFrontmatter(after, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
         const backupPath = `.sauce-backup/${ts}/${fpath}`;

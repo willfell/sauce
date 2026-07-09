@@ -8076,7 +8076,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 28, "HC-V0890-VERSION-D: mechanism count = 28 (+chrome-bar mechanism, ProjectChromeBar extraction)");
+  assertEqual(mechCount, 29, "HC-V0890-VERSION-D: mechanism count = 29 (+section-explorer mechanism)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8629,7 +8629,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 28, "HC-V0891-VERSION-D: mechanism count = 28 (+chrome-bar mechanism, ProjectChromeBar extraction)");
+  assertEqual(mechs.length, 29, "HC-V0891-VERSION-D: mechanism count = 29 (+section-explorer mechanism)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
@@ -11322,10 +11322,21 @@ async function caseV01030Bc4HandlesAllTypes() {
 // chip strip (doc total / open meetings / project status) + + New Section
 // button. Static-string asserts against the helper source.
 const _PDI_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "project-docs-index.js");
+// Section Explorer extraction (2026-07-08): the section-card ROW rendering
+// (layout, doc-count meta) that used to live inline in ProjectDocsIndex /
+// SectionHub now lives in the shared SectionExplorer mechanism — both
+// blueprints are thin adapters. Assertions about that rendering re-target to
+// section-explorer.js (mirrors the wiki-adapter precedent in run-wiki.js).
+const _SE_PATH = path.join(WORKSHOP, "platform", "mechanisms", "section-explorer", "section-explorer.js");
 
 function _readPdiSrc() {
   if (!fs.existsSync(_PDI_PATH)) return "";
   return fs.readFileSync(_PDI_PATH, "utf8");
+}
+
+function _readSeSrc() {
+  if (!fs.existsSync(_SE_PATH)) return "";
+  return fs.readFileSync(_SE_PATH, "utf8");
 }
 
 async function caseV01030Pdi1ClassDefined() {
@@ -11375,14 +11386,20 @@ async function caseV01030Pdi3DefaultsKnowledgeNotesWikilinks() {
 }
 
 async function caseV01030Pdi4SectionCardsBeaconCardsRow() {
-  console.log("\n--- Case HC-V01030-PDI-4: renders section cards via BeaconCards with layout: \"row\" ---");
+  console.log("\n--- Case HC-V01030-PDI-4: renders section cards via SectionExplorer (rail rows + doc-count meta) ---");
   const src = _readPdiSrc();
-  assertTrue("HC-V01030-PDI-4a: BeaconCards.render called",
+  const seSrc = _readSeSrc();
+  // Since the section-explorer extraction (Task 11), ProjectDocsIndex.render
+  // delegates browse-view rendering (section rail rows) to the shared
+  // SectionExplorer mechanism rather than calling BeaconCards inline itself;
+  // BeaconCards.render is still called directly for the search-mode results
+  // list (_renderSearchResults, unchanged/out of scope).
+  assertTrue("HC-V01030-PDI-4a: BeaconCards.render still called (search-mode results)",
     /customJS\.BeaconCards\.render\s*\(/.test(src));
-  assertTrue("HC-V01030-PDI-4b: layout: \"row\" present",
-    /layout:\s*["']row["']/.test(src));
-  assertTrue("HC-V01030-PDI-4c: meta callback emits doc count",
-    /doc\s*\$\{|docs?["'`]|`\$\{count\}\s*doc/.test(src));
+  assertTrue("HC-V01030-PDI-4b: delegates browse view to customJS.SectionExplorer.render",
+    /customJS\.SectionExplorer\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-4c: SectionExplorer's rail meta emits doc count",
+    /doc["'`]|`\$\{count\}\s*doc|pageCount/.test(seSrc));
 }
 
 async function caseV01030Pdi5NewSectionButton() {
@@ -11478,15 +11495,22 @@ async function caseV01030Sh5DocsStrictFolderMatch() {
 }
 
 async function caseV01030Sh6BeaconCardsRowMeta() {
-  console.log("\n--- Case HC-V01030-SH-6: BeaconCards layout: \"row\" + meta callback shows created + edited ---");
+  console.log("\n--- Case HC-V01030-SH-6: docs list delegates to SectionExplorer's page pane (BeaconCards stacked/2-col); search-mode still shows an edited timestamp ---");
   const src = _readShSrc();
-  assertTrue("HC-V01030-SH-6a: BeaconCards.render called",
+  // Since the section-explorer extraction (Task 11), the browse-view docs
+  // list (sub-sections rail + this section's docs) is rendered by the shared
+  // SectionExplorer mechanism, not inline BeaconCards.render("row") calls in
+  // SectionHub itself. SectionHub keeps its own BeaconCards.render call only
+  // for the search-mode results list (_renderSearchResults, unchanged), which
+  // still shows an "edited …" timestamp subtitle; the browse-view's
+  // created/edited per-doc meta was intentionally dropped in the extraction
+  // (SectionExplorer's page pane has no per-page meta callback — same as the
+  // wiki adapter's Task 9 precedent).
+  assertTrue("HC-V01030-SH-6a: BeaconCards.render still called (search-mode results)",
     /customJS\.BeaconCards\.render\s*\(/.test(src));
-  assertTrue("HC-V01030-SH-6b: layout: \"row\" present",
-    /layout:\s*["']row["']/.test(src));
-  assertTrue("HC-V01030-SH-6c: meta callback emits created token",
-    /created\s*\$\{|`created\s/.test(src));
-  assertTrue("HC-V01030-SH-6d: meta callback emits edited token",
+  assertTrue("HC-V01030-SH-6b: delegates browse view to customJS.SectionExplorer.render",
+    /customJS\.SectionExplorer\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-SH-6c: search-mode subtitle still emits an edited timestamp",
     /edited\s*\$\{|`edited\s|·\s*edited/.test(src));
 }
 
@@ -12163,14 +12187,25 @@ async function caseV01050DsNoEmoji() {
 
 // Issue 10: docs queries sort by file.mtime desc — both consumers.
 async function caseV01050Sort1MtimeDesc() {
-  console.log("\n--- Case HC-V01050-SORT-1: section-hub.js + project-docs-index.js sort docs by file.mtime desc ---");
+  console.log("\n--- Case HC-V01050-SORT-1: section-hub.js + project-docs-index.js search-mode docs sort by file.mtime desc; browse-view docs default to BeaconCards' own mtime-desc sort ---");
   const shSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
   const pdiSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  // sort((p) => p.file.mtime?.ts || 0, "desc") or equivalent.
-  assertTrue("HC-V01050-SORT-1: section-hub.js sorts by file.mtime desc",
-    /\.sort\s*\(\s*\([^)]*\)\s*=>\s*[^,)]*file\.mtime[^,)]*,\s*["']desc["']\s*\)/.test(shSrc));
-  assertTrue("HC-V01050-SORT-1: project-docs-index.js sorts by file.mtime desc",
-    /\.sort\s*\(\s*\([^)]*\)\s*=>\s*[^,)]*file\.mtime[^,)]*,\s*["']desc["']\s*\)/.test(pdiSrc));
+  const bcSrc = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/cards/beacon-cards.js"), "utf8");
+  // Since the section-explorer extraction (Task 11), the browse-view docs
+  // list's Dataview-native `.sort((p) => p.file.mtime?.ts || 0, "desc")` call
+  // was removed from both files — that listing now delegates to
+  // SectionExplorer's page pane (BeaconCards.render with no explicit `sort`
+  // option), which defaults to mtime-desc itself (verified in beacon-cards.js
+  // below), so newest-first ordering is preserved without a caller-supplied
+  // sort. Each blueprint's OWN search-mode results list (_renderSearchResults,
+  // unchanged/out of scope) still sorts most-recent-first with a plain JS
+  // array .sort((a, b) => bt - at).
+  assertTrue("HC-V01050-SORT-1a: BeaconCards.render defaults to mtime-desc sort when no `sort` option given",
+    /default mtime desc|opts\.sort\s*\|\|/.test(bcSrc));
+  assertTrue("HC-V01050-SORT-1b: section-hub.js search-mode results sort most-recent-first",
+    /bt\s*-\s*at/.test(shSrc));
+  assertTrue("HC-V01050-SORT-1c: project-docs-index.js search-mode results sort most-recent-first",
+    /bt\s*-\s*at/.test(pdiSrc));
 }
 
 // =====================================================================
@@ -14861,47 +14896,67 @@ async function caseV01090Pwm1SectionLabelInvoked() {
 }
 
 async function caseV01090ShSlabel() {
-  console.log("\n--- Case HC-V01090-SH-SL: SectionHub adopts SectionLabel for Sub-sections + Docs ---");
+  console.log("\n--- Case HC-V01090-SH-SL: SectionHub browse-view (Sub-sections + Docs) now delegates to SectionExplorer; search-mode still uses SectionLabel for Results ---");
   const sh = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
-  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Sub-sections",
-    /customJS\.SectionLabel\.render[\s\S]{0,160}Sub-sections/.test(sh));
-  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Docs",
-    /customJS\.SectionLabel\.render[\s\S]{0,160}Docs/.test(sh));
+  // Since the section-explorer extraction (Task 11), the browse-view
+  // "Sub-sections"/"Docs" SectionLabel headers were replaced by
+  // SectionExplorer's own rail-row rendering (no per-tier SectionLabel
+  // headers in the rail/page-pane layout). SectionHub keeps its own
+  // SectionLabel.render call only for the search-mode "Results (N)" header
+  // (_renderSearchResults, unchanged/out of scope).
+  assertTrue("HC-V01090-SH-SL: SectionHub delegates browse view to customJS.SectionExplorer.render",
+    /customJS\.SectionExplorer\.render\s*\(/.test(sh));
+  assertTrue("HC-V01090-SH-SL: SectionHub still uses SectionLabel for search-mode Results",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Results/.test(sh));
   assertTrue("HC-V01090-SH-SL: no proxyDv.header(3) survivors",
     !/proxyDv\.header\(\s*3\b/.test(sh));
 }
 
 async function caseV01090PdiSlabel() {
-  console.log("\n--- Case HC-V01090-PDI-SL: ProjectDocsIndex adopts SectionLabel for Sections ---");
+  console.log("\n--- Case HC-V01090-PDI-SL: ProjectDocsIndex browse-view (Sections) now delegates to SectionExplorer; search-mode still uses SectionLabel for Results ---");
   const pdi = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01090-PDI-SL: ProjectDocsIndex uses SectionLabel for Sections",
-    /customJS\.SectionLabel\.render[\s\S]{0,160}Sections/.test(pdi));
+  // Since the section-explorer extraction (Task 11), the browse-view
+  // "Sections" SectionLabel header was replaced by SectionExplorer's own
+  // rail-row rendering. ProjectDocsIndex keeps its own SectionLabel.render
+  // call only for the search-mode "Results (N)" header
+  // (_renderSearchResults, unchanged/out of scope).
+  assertTrue("HC-V01090-PDI-SL: ProjectDocsIndex delegates browse view to customJS.SectionExplorer.render",
+    /customJS\.SectionExplorer\.render\s*\(/.test(pdi));
+  assertTrue("HC-V01090-PDI-SL: ProjectDocsIndex still uses SectionLabel for search-mode Results",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Results/.test(pdi));
   assertTrue("HC-V01090-PDI-SL: no proxyDv.header(3) survivors",
     !/proxyDv\.header\(\s*3\b/.test(pdi));
 }
 
-// S4 — Docs.md section card metadata.
+// S4 — Docs.md section rail metadata. Since the section-explorer extraction
+// (Task 11), the section CARD grid (maxMtime + mostRecentDoc subtitle,
+// sectionPages.sort, "updated ..." meta suffix) was replaced by
+// SectionExplorer's compact rail (a { title, maxMtime, pageCount,
+// subSectionCount } tuple per section, sorted/rendered entirely inside
+// section-explorer.js — no per-item "most recent doc" subtitle or "updated"
+// meta suffix in the new compact layout). ProjectDocsIndex's listSections
+// still COMPUTES maxMtime per section (feeds the adapter's Recent sort) —
+// verified directly; the sort + "updated" presentation now live in
+// section-explorer.js, verified there.
 async function caseV01090Pdi1MaxMtimeComputed() {
-  console.log("\n--- Case HC-V01090-PDI-1: ProjectDocsIndex section cards compute maxMtime + mostRecentDoc ---");
+  console.log("\n--- Case HC-V01090-PDI-1: ProjectDocsIndex's listSections computes maxMtime per section ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
   assertTrue("HC-V01090-PDI-1: maxMtime computed per section",
     /maxMtime/.test(src));
-  assertTrue("HC-V01090-PDI-1: most recent doc captured",
-    /mostRecentDoc/.test(src));
 }
 
 async function caseV01090Pdi2SectionsSortedDesc() {
-  console.log("\n--- Case HC-V01090-PDI-2: section cards sorted by maxMtime desc ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01090-PDI-2: sectionPages sorted",
-    /sectionPages\.sort/.test(src));
+  console.log("\n--- Case HC-V01090-PDI-2: SectionExplorer's rail sorts sections by maxMtime desc (Recent mode) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/section-explorer/section-explorer.js"), "utf8");
+  assertTrue("HC-V01090-PDI-2: rail sortRecent sorts by maxMtime desc",
+    /sortRecent[\s\S]{0,200}maxMtime/.test(src));
 }
 
 async function caseV01090Pdi3MetaIncludesUpdated() {
-  console.log("\n--- Case HC-V01090-PDI-3: section card meta carries 'updated' suffix when populated ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01090-PDI-3: meta includes 'updated' for populated sections",
-    /["'`]updated /.test(src));
+  console.log("\n--- Case HC-V01090-PDI-3: SectionExplorer's rail meta shows doc + section counts (per-section 'updated' subtitle removed with the section-explorer extraction) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/section-explorer/section-explorer.js"), "utf8");
+  assertTrue("HC-V01090-PDI-3: rail meta emits a doc-count string",
+    /_railMeta[\s\S]{0,300}doc["'`]/.test(src));
 }
 
 // S3 — ProjectsHubCards adopts DocSearch.

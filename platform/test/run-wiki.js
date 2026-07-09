@@ -16,6 +16,7 @@ const ROOT      = path.resolve(__dirname, '..', '..');
 const TREE_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-tree.js');
 const MOVE_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-move.js');
 const LEAF_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-leaf-actions.js');
+const SE_SRC    = path.join(ROOT, 'platform', 'mechanisms', 'section-explorer', 'section-explorer.js');
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -268,11 +269,17 @@ const pages = [
 // openLinkText), NOT `link`. Section entries are plain objects with no
 // .file.path, so a `link:` opt left them with an undefined default target →
 // clicking a section card did nothing. Guard the source so it can't regress.
+// Since Task 9 (section-explorer), section-card nav lives in SectionExplorer
+// (WikiTree only delegates); page-card nav (search results + recently-updated)
+// still lives in WikiTree itself.
 // ---------------------------------------------------------------------------
 {
   const src = fs.readFileSync(TREE_SRC, 'utf8');
-  ok('W8a WikiTree card nav uses BeaconCards `target:` (not `link:`)',
-     /target:\s*\(s\)\s*=>/.test(src) && /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
+  const seSrc = fs.readFileSync(SE_SRC, 'utf8');
+  ok('W8a SectionExplorer section-card nav uses BeaconCards `target:` (not `link:`)',
+     /target:\s*\(p\)\s*=>/.test(seSrc) && !/\blink:\s*\(/.test(seSrc));
+  ok('W8a2 WikiTree page-card nav uses BeaconCards `target:` (not `link:`)',
+     /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
   ok('W8b recent-updates renders via BeaconCards (no no-op raw <a href>)',
      /pages:\s*recent/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
 }
@@ -348,6 +355,7 @@ const pages = [
     DocSearch: { render: () => ({ resultsContainer: makeEl3(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
     SectionLabel: { render: () => {} },
     BeaconCards: { render: (dv, opts) => bcCalls.push(opts) },
+    SectionExplorer: { makeAdapter: (cfg) => cfg, render: () => {} },
   };
   const wikiPages = [
     makePage('wiki-section', 'spice/wiki/testing/testing.md', 1000),
@@ -436,8 +444,12 @@ const pages = [
 
   ok('W14a "Up:" prefix removed from the up/section nav button (both helpers)',
      !/"Up: "/.test(leafSrc) && !/"Up: "/.test(hubSrc));
-  ok('W14b WikiTree section cards are ROWS; recent/pages stay a 2-col grid',
-     /layout: "row"/.test(treeSrc) && /layout: "stacked"/.test(treeSrc) && /columns: 2/.test(treeSrc));
+  // Since Task 9 (section-explorer): section rows are SectionExplorer's own
+  // `se-rail-row` divs (no longer BeaconCards `layout: "row"`); WikiTree's own
+  // BeaconCards calls (recently-updated + search results) still stay a 2-col grid.
+  const seSrc2 = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'section-explorer', 'section-explorer.js'), 'utf8');
+  ok('W14b SectionExplorer rail renders section ROWS; WikiTree recent/pages stay a 2-col grid',
+     /se-rail-row/.test(seSrc2) && /layout: "stacked"/.test(treeSrc) && /columns: 2/.test(treeSrc));
   ok('W14c WikiLeafActions renders its own top AND bottom divider (2 hrs)',
      (leafSrc.match(/createEl\("hr"\)/g) || []).length >= 2);
   ok('W14d page template no longer carries a trailing "---"',
@@ -477,6 +489,7 @@ const pages = [
       DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
       SectionLabel: { render: () => {} },
       BeaconCards: { render: () => {} },
+      SectionExplorer: { makeAdapter: (cfg) => cfg, render: () => {} },
     };
     const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
     const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
@@ -527,25 +540,22 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
-// W16 — section cards as ROWS with rich metadata (sub-sections · docs · edited),
-// recent/pages stay a grid, and the leaf row is centered + width-filling.
+// W16 — section listing carries rich metadata (sub-sections · docs, recursive),
+// and the leaf row is centered + width-filling. Since Task 9 (section-explorer),
+// section-card RENDERING (rows vs grid, meta string) lives in SectionExplorer's
+// own test suite (run-section-explorer.js); this suite still verifies WikiTree's
+// own _immediateChildFolders data (feeds the adapter's listSections) is correct.
 // ---------------------------------------------------------------------------
 {
   const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
   const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
 
-  function el() {
-    const e = { children: [], style: { cssText: '' } };
-    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
-    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
-    return e;
-  }
-  const bc = [];
-  const cjs = {
-    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
-    SectionLabel: { render: () => {} },
-    BeaconCards: { render: (dv, opts) => bc.push(opts) },
-  };
+  const factory = new Function('module', 'exports', treeSrc + '\nmodule.exports = WikiTree;');
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTreeCls = mod.exports;
+  const tree = new WikiTreeCls();
+
   // ems has 1 sub-section (other-stuff) + 2 docs (recursive); zeta is empty.
   const wp = [
     makePage('wiki-section', 'spice/wiki/ems/ems.md', 1000),
@@ -554,19 +564,12 @@ const pages = [
     makePage('wiki-page',    'spice/wiki/ems/other-stuff/doc1.md', 1300),
     makePage('wiki-section', 'spice/wiki/zeta/zeta.md', 900),
   ];
-  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
-  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
-  new Tree().render(dv);
-
-  const sectionsCall = bc.find(c => c.layout === 'row' && Array.isArray(c.pages) && c.pages.some(s => s && s.folder));
-  ok('W16a section cards render as a ROW (layout: "row"), not a grid', !!sectionsCall);
-  const ems = sectionsCall && sectionsCall.pages.find(s => s.folder === 'spice/wiki/ems');
+  const subs = tree._immediateChildFolders('spice/wiki', wp);
+  const ems = subs.find(s => s.folder === 'spice/wiki/ems');
   ok('W16b _immediateChildFolders counts sub-sections + docs (recursive)',
      !!ems && ems.subSectionCount === 1 && ems.pageCount === 2);
-  ok('W16c section meta reads "N section(s) · M docs" (+ edited when moment present)',
-     !!ems && sectionsCall.meta(ems) === '1 section · 2 docs');
-  const zeta = sectionsCall && sectionsCall.pages.find(s => s.folder === 'spice/wiki/zeta');
-  ok('W16d empty section still shows a doc count', !!zeta && sectionsCall.meta(zeta) === '0 docs');
+  const zeta = subs.find(s => s.folder === 'spice/wiki/zeta');
+  ok('W16d empty section still reports a doc count', !!zeta && zeta.pageCount === 0 && zeta.subSectionCount === 0);
 
   // Leaf: centered row that stretches its buttons to fill the width (flex:1), NOT
   // Move-pushed-right.
@@ -579,45 +582,20 @@ const pages = [
 
 // ---------------------------------------------------------------------------
 // W17 — sections sort toggle (last-edited default, A–Z toggle) + search-gap match.
+// Since Task 9 (section-explorer), the sort toggle + rail rendering live in
+// SectionExplorer (see run-section-explorer.js "rail rows show meta ... and
+// re-sort on toggle click"); this suite keeps WikiTree's own search-gap check.
 // ---------------------------------------------------------------------------
 {
   const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  const seSrc3 = fs.readFileSync(path.join(ROOT, 'platform', 'mechanisms', 'section-explorer', 'section-explorer.js'), 'utf8');
   // W17a — the search strip top gap is normalized to 12px (identical to the
   // buttons↔divider gap the user wanted matched).
   ok('W17a WikiTree matches the search strip top gap to 12px',
      /\.doc-search-strip/.test(treeSrc) && /marginTop\s*=\s*"12px"/.test(treeSrc));
-  // W17d — toggle labels + persisted mode key present in source.
-  ok('W17d sections render a "Recent | A–Z" toggle backed by __wikiSectionSort',
-     /Recent/.test(treeSrc) && /A–Z/.test(treeSrc) && /__wikiSectionSort/.test(treeSrc));
-
-  function el() {
-    const e = { children: [], style: { cssText: '' } };
-    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
-    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
-    return e;
-  }
-  const bc = [];
-  const cjs = {
-    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
-    SectionLabel: { render: () => {} },
-    BeaconCards: { render: (dv, opts) => bc.push(opts) },
-  };
-  // beta (edited 9000) is alphabetically AFTER alpha (edited 1000) — last-edited
-  // default must put beta FIRST.
-  const wp = [
-    makePage('wiki-section', 'spice/wiki/alpha/alpha.md', 1000),
-    makePage('wiki-page',    'spice/wiki/alpha/p.md', 1000),
-    makePage('wiki-section', 'spice/wiki/beta/beta.md', 5000),
-    makePage('wiki-page',    'spice/wiki/beta/p.md', 9000),
-  ];
-  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
-  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
-  new Tree().render(dv);
-  const rowCall = bc.find(c => c.layout === 'row' && Array.isArray(c.pages) && c.pages.some(s => s && s.folder));
-  ok('W17b section cards default to LAST-EDITED order (most recent first)',
-     !!rowCall && rowCall.pages[0] && rowCall.pages[0].folder === 'spice/wiki/beta');
-  ok('W17c BeaconCards keeps our order (sort: () => 0)',
-     !!rowCall && typeof rowCall.sort === 'function' && rowCall.sort({}, {}) === 0);
+  // W17d — toggle labels present in SectionExplorer's source.
+  ok('W17d SectionExplorer sections render a "Recent | A–Z" toggle',
+     /Recent/.test(seSrc3) && /A–Z/.test(seSrc3));
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +627,7 @@ const pages = [
       },
       SectionLabel: { render: (dv, o) => labels.push(o && o.text) },
       BeaconCards: { render: (dv, opts) => bc.push(opts) },
+      SectionExplorer: { makeAdapter: (cfg) => cfg, render: () => { labels.push('__SectionExplorer.render__'); } },
     };
     const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wp }) };
     const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
@@ -668,8 +647,34 @@ const pages = [
      !!vpcPeer && resCall.subtitle(vpcPeer) === 'in infra / aws' &&
      !!vpcNotes && resCall.subtitle(vpcNotes) === 'in ems');
   const b = runTree(false);
-  ok('W18d empty query falls through to browse (sections row, no Results label)',
-     b.bc.some(c => c.layout === 'row') && !b.labels.some(l => /^Results/.test(l)));
+  ok('W18d empty query falls through to browse (delegates to SectionExplorer, no Results label)',
+     b.labels.includes('__SectionExplorer.render__') && !b.labels.some(l => /^Results/.test(l)));
+}
+
+// ---------------------------------------------------------------------------
+// W19 — cold-load guard: WikiTree.render must never throw when
+// customJS.SectionExplorer is missing/undefined (matching the sibling
+// customJS-guard idiom used by WikiChromeBar/WikiHubActions/WikiLeafActions).
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  function el() {
+    const e = { children: [], style: { cssText: '' } };
+    e.createEl = (t, o) => { const c = el(); c.cls = (o && o.cls) || ''; e.children.push(c); return c; };
+    e.querySelector = () => null; e.closest = () => null; e.empty = () => { e.children.length = 0; };
+    return e;
+  }
+  const cjs = {
+    DocSearch: { render: () => ({ resultsContainer: el(), text: '', tags: new Set(), hasActiveFilter: false }), matches: () => true },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: () => {} },
+    // SectionExplorer deliberately absent — simulates cold-load TDZ ordering.
+  };
+  const dv = { container: el(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => [] }) };
+  const Tree = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(cjs, { moment: null });
+  let threw = false;
+  try { new Tree().render(dv); } catch (_e) { threw = true; }
+  ok('W19a WikiTree.render does not throw when customJS.SectionExplorer is missing (cold-load guard)', !threw);
 }
 
 // ---------------------------------------------------------------------------

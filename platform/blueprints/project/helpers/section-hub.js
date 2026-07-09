@@ -82,6 +82,8 @@ class SectionHub {
       Object.assign(filterCtx, this._currentCtx);
     }
 
+    this._config = this._buildConfig(cur, depth, projectSlug, sectionSlug, sectionName);
+
     // ── Tier 3: list (leading hairline + sub-sections + docs) ─────────────────
     this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx);
   }
@@ -199,75 +201,103 @@ class SectionHub {
       return;
     }
 
-    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
+    // No-filter browse view — delegate the rail (sub-sections, depth-1 only)
+    // + page pane (this section's docs + pinned links) to the shared
+    // SectionExplorer mechanism. Cold-load-guarded exactly like WikiTree /
+    // ProjectDocsIndex — a not-yet-loaded customJS.SectionExplorer is a no-op,
+    // not a throw.
+    if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.makeAdapter !== "function"
+      || typeof customJS.SectionExplorer.render !== "function") return;
+    if (!this._config) this._config = this._buildConfig(cur, depth, projectSlug, sectionSlug, sectionName);
+    const adapter = customJS.SectionExplorer.makeAdapter(this._config);
+    customJS.SectionExplorer.render({ ...dv, container }, adapter);
+  }
 
-    // Sub-sections list — depth === 1 only.
-    if (depth === 1) {
-      const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
-      const subHubs = dv.pages(`"${sectionPath}"`)
-        .where((p) => p.type === "section-hub" && p.depth === 2);
-      if (subHubs.length > 0) {
-        customJS.SectionLabel.render(proxyDv, { text: "Sub-sections" });
-        const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-        await customJS.BeaconCards.render(proxyDv, {
-          pages: subHubs,
-          layout: "row",
-          title: (p) => p.section || p.file.name,
-          icon: () => folderIcon,
-          meta: (p) => {
-            const subSlug = p.section_slug || this._slugify(p.section || p.file.name);
-            const subFolder = `${sectionPath}/${subSlug}`;
-            const count = dv.pages(`"${subFolder}"`)
-              .where((q) => q.type === "doc-note" && q.file.folder === subFolder
-                && customJS.DocSearch.matches(q, filterCtx))
-              .length;
-            return `${count} doc${count === 1 ? "" : "s"}`;
-          },
-        });
-      }
-    }
-
-    // Docs in THIS folder — strict folder match (does NOT recurse).
-    const docsPath = depth === 1
+  // ── SectionExplorer adapter config — depth-aware. A depth-1 hub's
+  // listSections returns its depth-2 sub-hubs (materialized-only, section-hub
+  // notes always exist as real files); a depth-2 hub is a LEAF — no further
+  // nesting, listSections returns []. Rename on a depth-1 hub must ALSO patch
+  // every depth-2 child's parent_section (a display-name string, not derived
+  // from the folder path) via _childHubsForRename.
+  _buildConfig(cur, depth, projectSlug, sectionSlug, sectionName) {
+    const parentSlugForScope = depth === 2 ? this._slugify(this._stripLink(cur.parent_section)) : null;
+    const sectionPath = depth === 1
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
-      : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
-
-    const docs = dv.pages(`"${docsPath}"`)
-      .where((p) => p.type === "doc-note" && p.file.folder === docsPath
-        && customJS.DocSearch.matches(p, filterCtx))
-      .sort((p) => p.file.mtime?.ts || 0, "desc");
-
-    // No docs → render nothing more (the hairline + sections above stand alone).
-    if (docs.length === 0) {
-      return;
-    }
-
-    // When this section ALSO has sub-sections (depth-1 only), emit a "Docs"
-    // SectionLabel so the docs row is visually separated from the sub-sections
-    // row above.
-    if (depth === 1) {
-      try {
-        const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
-        const hasSubSections = dv.pages(`"${sectionPath}"`)
-          .where((p) => p.type === "section-hub" && p.depth === 2)
-          .length > 0;
-        if (hasSubSections) customJS.SectionLabel.render(proxyDv, { text: "Docs" });
-      } catch (_e) {}
-    }
-
+      : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
+    const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-
-    await customJS.BeaconCards.render(proxyDv, {
-      pages: docs,
-      layout: "row",
-      title: (p) => p.file.name,
-      icon: () => fileIcon,
-      meta: (p) => {
-        const created = this._formatCreated(p);
-        const edited = moment(p.file.mtime.ts).fromNow();
-        return created ? `created ${created} · edited ${edited}` : `edited ${edited}`;
+    const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
+    return {
+      resolveContext: () => ({ sectionPath }),
+      listSections: (dv2, c) => {
+        if (depth !== 1) return []; // depth-2 (sub-section) is a leaf — no further nesting
+        try {
+          return dv2.pages(`"${c.sectionPath}"`)
+            .where((p) => p.type === "section-hub" && p.depth === 2)
+            .map((p) => ({
+              title: p.section || p.file.name,
+              hubPath: p.file.path,
+              folder: p.file.folder,
+              materialized: true,
+              pageCount: 0,
+              subSectionCount: 0,
+              maxMtime: p.file.mtime?.ts || 0,
+            }));
+        } catch (_e) { return []; }
       },
-    });
+      listPages: (dv2, c) => {
+        try {
+          return dv2.pages(`"${c.sectionPath}"`).where((p) => p.type === "doc-note" && p.file.folder === c.sectionPath);
+        } catch (_e) { return []; }
+      },
+      getLinks: (target) => {
+        const path2 = (target && target.hubPath) || cur.file.path;
+        const page = dv.page ? dv.page(path2) : null;
+        return (page && Array.isArray(page.links)) ? page.links : [];
+      },
+      writeLinks: (target, links) => {
+        const path2 = (target && target.hubPath) || cur.file.path;
+        const f = app.vault.getAbstractFileByPath(path2);
+        if (!f) return Promise.resolve();
+        return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+      },
+      canDelete: (section) => !!(section && section.materialized) && !section.pageCount && !section.subSectionCount,
+      deleteSection: (section) => {
+        if (!section || !section.materialized) return Promise.resolve();
+        const f = app.vault.getAbstractFileByPath(section.folder);
+        return f && app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve();
+      },
+      renameSection: (section, newTitle) => {
+        if (!section || !section.materialized) return Promise.resolve();
+        const newSlug = this._slugify(newTitle);
+        const parentOfSection = section.folder.slice(0, section.folder.lastIndexOf("/"));
+        const newFolder = `${parentOfSection}/${newSlug}`;
+        const folderFile = app.vault.getAbstractFileByPath(section.folder);
+        const renamePromise = folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve();
+        const hubFile = app.vault.getAbstractFileByPath(section.hubPath);
+        const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve();
+        // Depth-1 rename must also patch every depth-2 child's parent_section
+        // (a display-name string, not derived from the folder path).
+        const childHubs = this._childHubsForRename ? (this._childHubsForRename(section) || []) : [];
+        const childPromises = childHubs.map((childHub) => {
+          const cf = app.vault.getAbstractFileByPath(childHub.path);
+          return cf ? app.fileManager.processFrontMatter(cf, (fm) => { fm.parent_section = newTitle; }) : Promise.resolve();
+        });
+        return Promise.all([renamePromise, fmPromise, ...childPromises]);
+      },
+      icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
+      rootClass: "se-root",
+    };
+  }
+
+  // Depth-2 children of a depth-1 section, for renameSection's parent_section
+  // cascade. Never-throw (defensive against a cold-load / query error).
+  _childHubsForRename(section) {
+    try {
+      const rows = dv.pages(`"${section.folder}"`).where((p) => p.type === "section-hub" && p.depth === 2);
+      const arr = rows.array ? rows.array() : Array.from(rows);
+      return arr.map((p) => ({ path: p.file.path }));
+    } catch (_e) { return []; }
   }
 
   // SEARCH MODE renderer — a flat, most-recent-first list of every matching
@@ -383,17 +413,5 @@ class SectionHub {
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
-  }
-
-  // created_at is canonical ISO frontmatter; Dataview parses it into a Luxon
-  // DateTime (has .toISO()), but unparsed strings can reach here too. Pre-canonical
-  // notes have no created_at at all → fall back to file ctime.
-  _formatCreated(p) {
-    const raw = p.created_at;
-    let m = null;
-    if (raw && typeof raw.toISO === "function") m = moment(raw.toISO());
-    else if (raw) m = moment(String(raw));
-    if (!m || !m.isValid()) m = (p.file.ctime && p.file.ctime.ts) ? moment(p.file.ctime.ts) : null;
-    return (m && m.isValid()) ? m.format("MMM D") : "";
   }
 }

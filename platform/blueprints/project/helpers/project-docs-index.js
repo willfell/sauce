@@ -140,13 +140,15 @@ class ProjectDocsIndex {
   async render(dv, opts = {}) {
     const ctx = this._resolveContext(dv);
     if (!ctx) return;
-    const { projectSlug, projectPath, docsFolder, scopePath } = ctx;
+    const { projectSlug, docsFolder, scopePath } = ctx;
 
     // Tier 2 — search strip: a text input + scoped "Search" button (wiki parity,
     // 2026-07-02: hideNativeSearch dropped so the scoped-search button shows, just
     // like the wiki). No tag chips (hideTags), never persisted (starts empty on
     // every visit). Leading hairline owns the tier boundary.
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
+
+    this._config = this._buildConfig(dv.current(), ctx);
 
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
@@ -158,7 +160,7 @@ class ProjectDocsIndex {
       onChange: (c) => {
         this._currentCtx = c;
         c.resultsContainer.empty();
-        this._renderResults(dv, projectSlug, projectPath, docsFolder, c);
+        this._renderTerminal(dv, docsFolder, c);
       },
     });
     // Wiki parity: normalize the shared search strip's top gap to 12px (it ships
@@ -168,113 +170,138 @@ class ProjectDocsIndex {
       Object.assign(filterCtx, this._currentCtx);
     }
 
-    // Tier 3 — the sections + docs list, rendered into the search strip's
-    // resultsContainer so the input survives keystrokes.
-    await this._renderResults(dv, projectSlug, projectPath, docsFolder, filterCtx);
+    // Tier 3 — either the search-mode results list, or (no active filter) the
+    // browse view rendered by the shared SectionExplorer mechanism.
+    this._renderTerminal(dv, docsFolder, filterCtx);
   }
 
-  async _renderResults(dv, projectSlug, projectPath, docsFolder, filterCtx) {
+  // Dispatch the search strip's resultsContainer: search-mode keeps the
+  // existing flat cross-section results list (UNCHANGED, out of scope for the
+  // SectionExplorer extraction); the empty-query browse view delegates the
+  // rail (sections) + page pane (this folder's docs + pinned links) to the
+  // shared SectionExplorer mechanism, cold-load-guarded exactly like WikiTree.
+  _renderTerminal(dv, docsFolder, filterCtx) {
     const container = filterCtx.resultsContainer;
     const proxyDv = this._makeProxyDv(dv, container);
 
-    // SEARCH MODE — with an active query, search the WHOLE docs subtree
-    // recursively (mirrors WikiTree._renderResults): a flat most-recent-first
-    // list of every matching doc-note, each tagged with the section it lives in.
-    // The empty-query path falls through to the normal sections/browse view.
     if (filterCtx && filterCtx.hasActiveFilter) {
       this._renderSearchResults(dv, proxyDv, docsFolder, filterCtx);
       return;
     }
 
-    // Leading hairline for the list tier.
-    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
+    if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.makeAdapter !== "function"
+      || typeof customJS.SectionExplorer.render !== "function") return;
+    const adapter = customJS.SectionExplorer.makeAdapter(this._config);
+    customJS.SectionExplorer.render({ ...dv, container }, adapter);
+  }
 
-    // Sections discovery: query filesystem for section-hub notes at depth 1
-    // inside docs/ (union with declared sections[] for resilience). Filesystem
-    // is the source of truth — sections created via "+ New Section" surface
-    // without editing the project note.
-    const project = this._projectPage(dv, projectPath);
-    const discoveredSet = new Set();
-    try {
-      const hubs = dv.pages(`"${docsFolder}"`)
-        .where((p) => p && p.type === "section-hub" && Number(p.depth) === 1);
-      for (const h of hubs) {
-        const label = this._stripLink(h.section || (h.file && h.file.name) || "");
-        if (label) discoveredSet.add(label);
-      }
-    } catch (_e) {}
-    if (project && Array.isArray(project.sections)) {
-      for (const v of project.sections) {
-        const label = this._stripLink(v);
-        if (label) discoveredSet.add(label);
-      }
-    }
-    if (discoveredSet.size === 0) {
-      discoveredSet.add("Knowledge");
-      discoveredSet.add("Notes");
-    }
-    const sections = Array.from(discoveredSet).sort();
-
-    // Filtered docs, newest-first.
-    const allDocs = dv.pages(`"${docsFolder}"`)
-      .where((p) => p.type === "doc-note" && customJS.DocSearch.matches(p, filterCtx))
-      .sort((p) => p.file.mtime?.ts || 0, "desc");
-
-    // Section cards. SectionLabel heads the strip; sections sorted by maxMtime
-    // DESC (active sections first), alphabetic tie-break, empty sections last.
-    customJS.SectionLabel.render(proxyDv, { text: "Sections" });
+  // ── SectionExplorer adapter config — builds the project-docs-hub-specific
+  // resolveContext/listSections/listPages/getLinks/writeLinks/canDelete/
+  // deleteSection/renameSection/icons that SectionExplorer.render needs.
+  //
+  // Sections can be VIRTUAL: declared in the parent project's sections[] array
+  // with no real folder/hub note yet (hubPath: null, materialized: false).
+  // Rename/Delete/Add-link must only ever be offered for a MATERIALIZED
+  // section (a real section-hub note exists) — gated via `section.materialized`
+  // in addition to the existing zero-children guard on delete.
+  _buildConfig(cur, ctx) {
+    const { projectSlug, projectPath, docsFolder } = ctx;
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-
-    const sectionPages = sections.map((label) => {
-      const slug = this._slugify(label);
-      const sectionFolder = `${docsFolder}/${slug}`;
-      const docsInSection = allDocs.where((p) => {
-        const folder = String(p.file.folder || "");
-        return folder === sectionFolder || folder.startsWith(`${sectionFolder}/`);
-      });
-      let maxMtime = 0;
-      let mostRecentDoc = null;
-      for (const d of docsInSection) {
-        const ts = d.file.mtime?.ts || 0;
-        if (ts > maxMtime) {
-          maxMtime = ts;
-          mostRecentDoc = String(d.file.name || "");
+    const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+    const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
+    return {
+      resolveContext: () => ctx,
+      listSections: (dv2) => {
+        // Union of declared project.sections[] (virtual, may lack a hub note
+        // yet) + discovered depth-1 section-hub notes (materialized). Ported
+        // from the pre-adapter _renderResults sections discovery.
+        const project = this._projectPage(dv2, projectPath);
+        const discoveredSet = new Set();
+        const hubByLabel = {};
+        try {
+          const hubs = dv2.pages(`"${docsFolder}"`)
+            .where((p) => p && p.type === "section-hub" && Number(p.depth) === 1);
+          for (const h of hubs) {
+            const label = this._stripLink(h.section || (h.file && h.file.name) || "");
+            if (label) { discoveredSet.add(label); hubByLabel[label] = h; }
+          }
+        } catch (_e) {}
+        if (project && Array.isArray(project.sections)) {
+          for (const v of project.sections) {
+            const label = this._stripLink(v);
+            if (label) discoveredSet.add(label);
+          }
         }
-      }
-      const hubPath = `${sectionFolder}/${label}.md`;
-      return {
-        file: { name: label, path: hubPath, folder: sectionFolder },
-        section_label: label,
-        section_slug: slug,
-        doc_count: docsInSection.length,
-        maxMtime,
-        mostRecentDoc,
-      };
-    });
-
-    sectionPages.sort((a, b) => {
-      if ((b.maxMtime || 0) !== (a.maxMtime || 0)) return (b.maxMtime || 0) - (a.maxMtime || 0);
-      return String(a.section_label).localeCompare(String(b.section_label));
-    });
-
-    await customJS.BeaconCards.render(proxyDv, {
-      pages: sectionPages,
-      layout: "row",
-      title: (p) => p.section_label || p.file.name,
-      icon: () => folderIcon,
-      subtitle: (p) => {
-        if (!p.mostRecentDoc) return null;
-        const s = String(p.mostRecentDoc);
-        return s.length > 60 ? s.slice(0, 57) + "…" : s;
+        if (discoveredSet.size === 0) {
+          discoveredSet.add("Knowledge");
+          discoveredSet.add("Notes");
+        }
+        return Array.from(discoveredSet).sort().map((label) => {
+          const slug = this._slugify(label);
+          const sectionFolder = `${docsFolder}/${slug}`;
+          const hub = hubByLabel[label];
+          let docsInSection;
+          try {
+            docsInSection = dv2.pages(`"${docsFolder}"`)
+              .where((p) => p.type === "doc-note" && String(p.file.folder || "").startsWith(sectionFolder));
+          } catch (_e) { docsInSection = []; }
+          let maxMtime = 0;
+          for (const d of docsInSection) {
+            const ts = d.file.mtime?.ts || 0;
+            if (ts > maxMtime) maxMtime = ts;
+          }
+          return {
+            title: label,
+            folder: sectionFolder,
+            hubPath: hub ? hub.file.path : null,
+            materialized: !!hub,
+            pageCount: docsInSection.length,
+            subSectionCount: 0,
+            maxMtime,
+          };
+        });
       },
-      meta: (p) => {
-        const count = p.doc_count || 0;
-        const parts = [`${count} doc${count === 1 ? "" : "s"}`];
-        if (p.maxMtime) parts.push(`updated ${moment(p.maxMtime).fromNow()}`);
-        return parts.join(" · ");
+      listPages: (dv2) => {
+        try {
+          return dv2.pages(`"${docsFolder}"`).where((p) => p.type === "doc-note" && p.file.folder === docsFolder);
+        } catch (_e) { return []; }
       },
-      target: (p) => p.file.path,
-    });
+      getLinks: (target) => {
+        const path2 = (target && target.hubPath) || (cur && cur.file && cur.file.path);
+        if (!path2) return [];
+        const page = dv.page ? dv.page(path2) : null;
+        return (page && Array.isArray(page.links)) ? page.links : [];
+      },
+      writeLinks: (target, links) => {
+        const path2 = (target && target.hubPath) || (cur && cur.file && cur.file.path);
+        if (!path2) return Promise.resolve();
+        const f = app.vault.getAbstractFileByPath(path2);
+        if (!f) return Promise.resolve();
+        return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+      },
+      // Delete/rename/add-link ALL require a materialized section — a virtual,
+      // declared-only section (project.sections[] entry with no folder/hub
+      // note yet) has nothing to mutate.
+      canDelete: (section) => !!(section && section.materialized) && !section.pageCount && !section.subSectionCount,
+      deleteSection: (section) => {
+        if (!section || !section.materialized) return Promise.resolve();
+        const f = app.vault.getAbstractFileByPath(section.folder);
+        if (!f) return Promise.resolve();
+        return app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve();
+      },
+      renameSection: (section, newTitle) => {
+        if (!section || !section.materialized) return Promise.resolve();
+        const newSlug = this._slugify(newTitle);
+        const newFolder = `${docsFolder}/${newSlug}`;
+        const folderFile = app.vault.getAbstractFileByPath(section.folder);
+        const renamePromise = folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve();
+        const hubFile = app.vault.getAbstractFileByPath(section.hubPath);
+        const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve();
+        return Promise.all([renamePromise, fmPromise]);
+      },
+      icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
+      rootClass: "se-root",
+    };
   }
 
   _projectPage(dv, projectPath) {

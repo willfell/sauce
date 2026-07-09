@@ -1,0 +1,472 @@
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const assert = require("assert");
+
+const SRC = fs.readFileSync(
+  path.join(__dirname, "../mechanisms/section-explorer/section-explorer.js"),
+  "utf8"
+);
+
+function loadClass() {
+  const sandbox = {};
+  // eslint-disable-next-line no-new-func
+  const factory = new Function("module", "exports", SRC + "\nmodule.exports = SectionExplorer;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  return mod.exports;
+}
+
+function makeDomStub() {
+  const els = [];
+  function makeEl(tag) {
+    const el = {
+      tag,
+      children: [],
+      style: {},
+      className: "",
+      textContent: "",
+      innerHTML: "",
+      attrs: {},
+      onclick: null,
+      createEl(t, opts) {
+        const child = makeEl(t);
+        if (opts && opts.cls) child.className = opts.cls;
+        if (opts && opts.text) child.textContent = opts.text;
+        this.children.push(child);
+        els.push(child);
+        return child;
+      },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      empty() { this.children = []; },
+    };
+    return el;
+  }
+  const container = makeEl("div");
+  return { container, els };
+}
+
+function run(name, fn) {
+  try {
+    fn();
+    console.log("PASS " + name);
+    return true;
+  } catch (e) {
+    console.log("FAIL " + name + " — " + e.message);
+    return false;
+  }
+}
+
+let failures = 0;
+
+failures += !run("makeAdapter returns an object exposing render-ready shape", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  assert.strictEqual(typeof adapter.render, "undefined"); // adapter has no render of its own
+  assert.strictEqual(typeof adapter.resolveContext, "function");
+  assert.strictEqual(typeof adapter.listSections, "function");
+});
+
+failures += !run("render() renders a rail row per section", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [
+      { title: "EMS", hubPath: "spice/wiki/ems/EMS.md", folder: "spice/wiki/ems", pageCount: 2, subSectionCount: 0, maxMtime: 0, materialized: true },
+    ],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const railRows = els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(railRows.length, 1, "expected exactly one rail row for the one section");
+});
+
+failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle click", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "Bravo", hubPath: "b.md", folder: "b", pageCount: 1, subSectionCount: 0, maxMtime: 100, materialized: true },
+    { title: "Alpha", hubPath: "a.md", folder: "a", pageCount: 3, subSectionCount: 1, maxMtime: 200, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const rows = els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(rows.length, 2);
+  // Default sort = recent (maxMtime desc) → Alpha (200) before Bravo (100).
+  assert.ok(rows[0].textContent.includes("Alpha") || rows[0].innerHTML.includes("Alpha"));
+  const meta = els.find((e) => e.className === "se-rail-meta" && (e.textContent.includes("3 doc") || e.innerHTML.includes("3 doc")));
+  assert.ok(meta, "expected a meta line mentioning doc count");
+});
+
+failures += !run("page pane renders BeaconCards.render with the section's pages", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container } = makeDomStub();
+  const calls = [];
+  global.customJS = {
+    BeaconCards: { render: (proxyDv, opts) => { calls.push(opts); } },
+  };
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => pages,
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(calls.length, 1, "expected BeaconCards.render to be called once");
+  assert.strictEqual(calls[0].pages.length, 1);
+  delete global.customJS;
+});
+
+failures += !run("pinned links render above the page grid, and render nothing when empty", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  // Non-empty links → a links row appears.
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [],
+      getLinks: () => [{ url: "https://example.com", text: "Style guide" }],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const linksRow = els.find((e) => e.className === "se-links-row");
+    assert.ok(linksRow, "expected a se-links-row when links[] is non-empty");
+  }
+
+  // Empty links → no links row at all (renders nothing, per the vault's rule).
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [],
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const linksRow = els.find((e) => e.className === "se-links-row");
+    assert.strictEqual(linksRow, undefined, "expected NO se-links-row when links[] is empty");
+  }
+
+  delete global.customJS;
+});
+
+failures += !run("javascript: link renders as a chip with NO href/onclick (unsafe scheme blocked)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [{ url: "javascript:alert(1)", text: "evil" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const chip = els.find((e) => e.className === "se-link-chip");
+  assert.ok(chip, "expected a se-link-chip to still be rendered (never silently dropped)");
+  assert.ok(!chip.href, "expected no href set on an unsafe-scheme link");
+  assert.ok(!chip.onclick, "expected no onclick/window.open fallback on the chip");
+
+  delete global.customJS;
+});
+
+failures += !run("https: link gets a real safe anchor (href + target=_blank + rel=noopener)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { BeaconCards: { render: () => {} } };
+
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [{ url: "https://example.com", text: "Style guide" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const chip = els.find((e) => e.className === "se-link-chip");
+  assert.ok(chip, "expected a se-link-chip");
+  assert.strictEqual(chip.href, "https://example.com");
+  assert.strictEqual(chip.target, "_blank");
+  assert.ok(String(chip.rel).includes("noopener"), "expected rel to include noopener");
+
+  delete global.customJS;
+});
+
+failures += !run("rail row's inline dots opens MenuPopover with Rename/Add link/Delete, Delete disabled when non-empty", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const opened = [];
+  global.customJS = { MenuPopover: { open: (entries, opts) => { opened.push({ entries, opts }); } } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const sections = [
+    { title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 0, materialized: true },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => sections,
+    listPages: () => [],
+    getLinks: () => [],
+    canDelete: (s) => s.pageCount === 0 && s.subSectionCount === 0,
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const dots = els.find((e) => e.className === "se-rail-dots");
+  assert.ok(dots, "expected an inline dots control on the rail row");
+  dots.onclick();
+  assert.strictEqual(opened.length, 1);
+  const labels = opened[0].entries.filter((e) => e && e.label).map((e) => e.label);
+  assert.deepStrictEqual(labels, ["Rename", "Add link", "Delete"]);
+  const deleteEntry = opened[0].entries.find((e) => e && e.label === "Delete");
+  assert.strictEqual(deleteEntry.disabled, true, "Delete must be disabled — section has 2 pages");
+  delete global.customJS;
+});
+
+failures += !run("_addLinkPure appends a valid link, rejects empty url and duplicate url", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let r = se._addLinkPure([], { url: "https://a.com", text: "A" });
+  assert.strictEqual(r.changed, true);
+  assert.deepStrictEqual(r.links, [{ url: "https://a.com", text: "A" }]);
+
+  r = se._addLinkPure(r.links, { url: "", text: "empty" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "empty-url");
+
+  r = se._addLinkPure([{ url: "https://a.com", text: "A" }], { url: "https://a.com", text: "dup" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "duplicate");
+
+  // text defaults to url when omitted.
+  r = se._addLinkPure([], { url: "https://b.com" });
+  assert.strictEqual(r.links[0].text, "https://b.com");
+});
+
+// Minimal fake `document` for _openModal tests: tracks the single keydown
+// listener registered (Escape) and supports the overlay/panel DOM shape
+// _openModal needs (createElement, body.appendChild, body.querySelector,
+// removeChild via parentNode).
+function makeDocStub() {
+  const listeners = {};
+  const body = {
+    children: [],
+    appendChild(el) { el.parentNode = body; this.children.push(el); },
+    removeChild(el) { this.children = this.children.filter((c) => c !== el); },
+    querySelector(sel) {
+      const cls = sel.replace(/^\./, "");
+      return this.children.find((c) => c.className === cls) || null;
+    },
+  };
+  const doc = {
+    body,
+    createElement(tag) {
+      return {
+        tag,
+        style: {},
+        children: [],
+        appendChild(child) { this.children.push(child); },
+        remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+      };
+    },
+    addEventListener(type, fn) { listeners[type] = fn; },
+    removeEventListener(type, fn) { if (listeners[type] === fn) delete listeners[type]; },
+    __listeners: listeners,
+  };
+  global.document = doc;
+  return doc;
+}
+
+failures += !run("_openModal: Escape key closes the modal and removes the keydown listener", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  assert.ok(overlay, "expected _openModal to return the overlay");
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay appended to body");
+  assert.ok(doc.__listeners.keydown, "expected a keydown listener registered");
+  doc.__listeners.keydown({ key: "Escape" });
+  assert.strictEqual(doc.body.children.length, 0, "expected overlay removed after Escape");
+  assert.ok(!doc.__listeners.keydown, "expected keydown listener removed on close");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click WITHIN the ~400ms opening-gesture guard does NOT close it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  // Real elapsed time since _openModal's Date.now() call is near-zero here —
+  // well under the 400ms guard window.
+  overlay.onclick({ target: overlay });
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay to survive a backdrop click within the opening-gesture guard");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click AFTER the opening-gesture guard window DOES close it", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  // Mutate the recorded open time backward past the 400ms guard window.
+  overlay.__seOpenedAt = Date.now() - 1000;
+  overlay.onclick({ target: overlay });
+  assert.strictEqual(doc.body.children.length, 0, "expected overlay removed after guard window elapses");
+  delete global.document;
+});
+
+failures += !run("_openModal: backdrop click that does NOT hit the overlay itself is ignored", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const overlay = se._openModal("se-test-overlay", () => {});
+  overlay.__seOpenedAt = Date.now() - 1000;
+  overlay.onclick({ target: {} }); // click landed on inner panel content, not overlay
+  assert.strictEqual(doc.body.children.length, 1, "expected overlay to survive a click on non-overlay target");
+  delete global.document;
+});
+
+failures += !run("_openModal dedupes by className — opening twice leaves exactly one overlay", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  se._openModal("se-test-overlay", () => {});
+  se._openModal("se-test-overlay", () => {});
+  assert.strictEqual(doc.body.children.length, 1, "expected exactly one overlay after opening twice");
+  delete global.document;
+});
+
+failures += !run("_addLinkPure + adapter.writeLinks integration (no DOM)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const writes = [];
+  const adapter = { getLinks: () => [], writeLinks: (target, links) => { writes.push({ target, links }); } };
+  const section = { title: "EMS", hubPath: "e.md" };
+  const result = se._addLinkPure(adapter.getLinks(section), { url: "https://x.com", text: "X" });
+  assert.strictEqual(result.changed, true);
+  adapter.writeLinks(section, result.links);
+  assert.strictEqual(writes.length, 1);
+  assert.deepStrictEqual(writes[0].links, [{ url: "https://x.com", text: "X" }]);
+});
+
+failures += !run("wiki adapter config: renameSection renames folder + updates title frontmatter", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  const renameCalls = [];
+  const fmWrites = [];
+  global.app = {
+    fileManager: {
+      renameFile: (file, newPath) => { renameCalls.push({ file, newPath }); return Promise.resolve(); },
+      processFrontMatter: (file, fn) => { const fm = {}; fn(fm); fmWrites.push({ file, fm }); return Promise.resolve(); },
+    },
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    workspace: { openLinkText: () => {} },
+  };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const section = { title: "EMS", hubPath: "spice/wiki/ems/EMS.md", folder: "spice/wiki/ems" };
+  wt._config = wt._buildConfig({ container: {} }, { file: { path: "spice/wiki/ems/EMS.md" } });
+  wt._config.renameSection(section, "Networking");
+  assert.strictEqual(renameCalls.length, 1, "expected exactly one folder rename");
+  assert.strictEqual(renameCalls[0].newPath, "spice/wiki/networking");
+  assert.strictEqual(fmWrites.length, 1, "expected exactly one frontmatter write (title)");
+  assert.strictEqual(fmWrites[0].fm.title, "Networking");
+  delete global.app;
+});
+
+failures += !run("project adapter: virtual (unmaterialized) sections expose no rename/delete/add-link", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const virtualSection = { title: "Notes", hubPath: null, folder: "spice/projects/foo/docs/notes", pageCount: 0, subSectionCount: 0, materialized: false };
+  const config = pdi._buildConfig({ file: { path: "spice/projects/foo/Docs.md" } }, {
+    projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder: "spice/projects/foo/docs", scopePath: "spice/projects/foo/docs",
+  });
+  assert.strictEqual(config.canDelete(virtualSection), false, "a virtual section must never be deletable");
+});
+
+failures += !run("project adapter: renameSection on a depth-1 hub updates section/section_slug + child parent_section", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  const fmWrites = [];
+  const renameCalls = [];
+  global.app = {
+    fileManager: {
+      renameFile: (f, p) => { renameCalls.push({ f, p }); return Promise.resolve(); },
+      processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ file: f, fm }); return Promise.resolve(); },
+    },
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+  };
+  global.customJS = { DocSearch: { matches: () => true }, SectionLabel: { render: () => {}, divider: () => {} } };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const cur = { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 };
+  const config = sh._buildConfig(cur, 1, "foo", "ems", "EMS");
+  const childHub = { path: "spice/projects/foo/docs/ems/sub/Sub.md" };
+  sh._childHubsForRename = () => [childHub]; // test seam listing depth-2 children
+  const section = { title: "EMS", hubPath: cur.file.path, folder: cur.file.folder, materialized: true };
+  config.renameSection(section, "Networking");
+  const hubFmWrite = fmWrites.find((w) => w.file.path === cur.file.path);
+  assert.ok(hubFmWrite, "expected a frontmatter write on the section-hub itself");
+  assert.strictEqual(hubFmWrite.fm.section, "Networking");
+  assert.strictEqual(hubFmWrite.fm.section_slug, "networking");
+  const childFmWrite = fmWrites.find((w) => w.file.path === childHub.path);
+  assert.ok(childFmWrite, "expected the depth-2 child's parent_section to also be updated");
+  assert.strictEqual(childFmWrite.fm.parent_section, "Networking");
+  delete global.app;
+  delete global.customJS;
+});
+
+process.exit(failures > 0 ? 1 : 0);
