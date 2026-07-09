@@ -1246,6 +1246,35 @@ withTempVault((vault) => {
             registryStillThere != null && registryStillThere.includes("Water the plants")
         );
     }
+
+    // ===== HC-V0205-SEED-MIGRATE-DUE-* — applyTaskDueScheduledRenameMigration =====
+    // The seed's spice/tasks/task-20260101-120000-abcd.md fixture carries a
+    // `scheduled: 2026-01-01` key with a blank `due:` key. Earlier in the same
+    // install run, applyTaskNoteHeal (HC-TASKHEAL-SEED-*) renames that file to
+    // the readable "Do the thing.md" — so by the time
+    // applyTaskDueScheduledRenameMigration runs, this is the note under test.
+    // The rename migration should move the scheduled value into due and strip
+    // the scheduled key entirely.
+    {
+        let migTask = null;
+        try { migTask = helpers.readNote(vault, "spice/tasks/Do the thing.md"); } catch (e) {}
+        ok(
+            "HC-V0205-SEED-MIGRATE-DUE-1 seed task note with scheduled+blank-due migrated",
+            migTask != null
+        );
+        if (migTask != null) {
+            const { frontmatter: migFm } = helpers.parseFrontmatter(migTask);
+            ok(
+                "HC-V0205-SEED-MIGRATE-DUE-2 due now carries the old scheduled value",
+                migFm.due === "2026-01-01",
+                `actual due=${migFm.due}`
+            );
+            ok(
+                "HC-V0205-SEED-MIGRATE-DUE-3 scheduled key no longer present",
+                !/^scheduled:/m.test(migTask)
+            );
+        }
+    }
 });
 
 // =============================================================================

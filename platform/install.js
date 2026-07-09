@@ -9767,26 +9767,31 @@ async function applyTaskDueScheduledRenameMigration(tp, manifest, variables, his
     try { content = await adapter.read(path); }
     catch (e) { errors.push({ path, error: e && e.message }); continue; }
 
-    const schedMatch = /^scheduled:\s*(.*)$/m.exec(content);
+    // NOTE: [ \t]* (not \s*) right after the colon — \s* would cross the
+    // newline into the FOLLOWING frontmatter line whenever this key's value
+    // is blank (e.g. "due:\npriority:" — \s* greedily eats the blank line's
+    // newline, then (.*) captures "priority:" as if it were due's value).
+    // That silently made a blank `due:` look non-blank, skipping the copy.
+    const schedMatch = /^scheduled:[ \t]*(.*)$/m.exec(content);
     if (!schedMatch) { skipped++; continue; }
     const schedValue = schedMatch[1].trim();
 
-    const dueMatch = /^due:\s*(.*)$/m.exec(content);
+    const dueMatch = /^due:[ \t]*(.*)$/m.exec(content);
     const dueIsBlank = !dueMatch || dueMatch[1].trim() === "";
 
     let updated = content;
     if (dueIsBlank && schedValue) {
       // Move the scheduled value into due (only when due is currently blank).
       if (dueMatch) {
-        updated = updated.replace(/^due:\s*.*$/m, "due: " + schedValue);
+        updated = updated.replace(/^due:[ \t]*.*$/m, "due: " + schedValue);
       } else {
         // No due key at all (very old note) — insert one right after the
         // scheduled line so we don't have to guess at overall key order.
-        updated = updated.replace(/^scheduled:\s*.*$/m, (m) => m + "\ndue: " + schedValue);
+        updated = updated.replace(/^scheduled:[ \t]*.*$/m, (m) => m + "\ndue: " + schedValue);
       }
     }
     // Always strip the scheduled line itself, whether or not we moved its value.
-    updated = updated.replace(/^scheduled:\s*.*\n?/m, "");
+    updated = updated.replace(/^scheduled:[ \t]*.*\n?/m, "");
 
     if (updated === content) { skipped++; continue; }
 
