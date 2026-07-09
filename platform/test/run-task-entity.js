@@ -477,8 +477,8 @@ ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching g
 
 // TaskTodayList is the daily live-query widget. Its render() is browser-only
 // (exercised in-vault), but buildBands is a PURE partition helper mirroring
-// TaskEntity.queryToday: open-only, today = scheduled === todayStr, overdue =
-// scheduled < todayStr. We load it the same bare-class way and call the static
+// TaskEntity.queryToday: open-only, today = due === todayStr, overdue =
+// due < todayStr. We load it the same bare-class way and call the static
 // through an INSTANCE so a regression to instance-less statics fails loudly.
 const TaskTodayListClass = loadClass('mechanisms/task-entity/task-today-list.js', 'TaskTodayList');
 const TaskTodayList = new TaskTodayListClass();
@@ -611,20 +611,20 @@ ok('TNV-7 _linkEntries coerces links[] to renderable markdown strings', () => {
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   const res = TaskTodayList.buildBands([
-    { scheduled: '2026-07-01', status: 'open' },
-    { scheduled: '2026-06-29', status: 'open' },
-    { scheduled: '2026-07-01', status: 'done' },
+    { due: '2026-07-01', status: 'open' },
+    { due: '2026-06-29', status: 'open' },
+    { due: '2026-07-01', status: 'done' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single open 07-01: got ' + res.today.length);
   assert(res.overdue.length === 1, 'overdue = the open 06-29: got ' + res.overdue.length);
 });
 
-// TTL-2. buildBands excludes future-scheduled + unscheduled open tasks.
+// TTL-2. buildBands excludes future-due + unscheduled open tasks.
 ok('TTL-2 buildBands excludes future + unscheduled open tasks', () => {
   const res = TaskTodayList.buildBands([
-    { scheduled: '2026-07-02', status: 'open' },  // future → neither
-    { scheduled: '', status: 'open' },            // unscheduled → neither
-    { scheduled: null, status: 'open' },          // unscheduled → neither
+    { due: '2026-07-02', status: 'open' },  // future → neither
+    { due: '', status: 'open' },            // unscheduled → neither
+    { due: null, status: 'open' },          // unscheduled → neither
   ], '2026-07-01');
   assert(res.today.length === 0, 'no today: got ' + res.today.length);
   assert(res.overdue.length === 0, 'no overdue: got ' + res.overdue.length);
@@ -640,32 +640,32 @@ ok('TTL-3 buildBands tolerates non-array input', () => {
 // TTL-4. buildBands EXCLUDES tasks that belong elsewhere (FIX 1 — dedup): a task
 // with a project_slug renders in its Project section, and a meeting-sourced task
 // renders in Meeting Tasks — so neither may ALSO show in the Today/Overdue bands
-// (that duplicate was the bug). Today/Overdue = open, scheduled, NO project, NOT
+// (that duplicate was the bug). Today/Overdue = open, due, NO project, NOT
 // meeting-sourced (personal daily tasks only).
 ok('TTL-4 buildBands excludes project-connected + meeting-sourced tasks (dedup)', () => {
   const res = TaskTodayList.buildBands([
-    // Scheduled today, but has a project → shown in its Project section, NOT today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
-    // Scheduled today, meeting-sourced → shown in Meeting Tasks, NOT today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
-    // Plain scheduled-today personal task (no project, source daily) → IN today.
-    { scheduled: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
+    // Due today, but has a project → shown in its Project section, NOT today.
+    { due: '2026-07-01', status: 'open', project_slug: 'sauce', source: 'daily' },
+    // Due today, meeting-sourced → shown in Meeting Tasks, NOT today.
+    { due: '2026-07-01', status: 'open', project_slug: '', source: 'meeting' },
+    // Plain due-today personal task (no project, source daily) → IN today.
+    { due: '2026-07-01', status: 'open', project_slug: '', source: 'daily' },
     // Overdue but has a project → excluded from overdue too.
-    { scheduled: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
+    { due: '2026-06-30', status: 'open', project_slug: 'sauce', source: 'daily' },
     // Overdue meeting-sourced → excluded from overdue too.
-    { scheduled: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
+    { due: '2026-06-30', status: 'open', project_slug: '', source: 'meeting' },
     // Plain overdue personal task → IN overdue.
-    { scheduled: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
+    { due: '2026-06-29', status: 'open', project_slug: '', source: 'daily' },
   ], '2026-07-01');
   assert(res.today.length === 1, 'today = the single plain personal 07-01: got ' + res.today.length);
-  assert(res.today[0].scheduled === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
+  assert(res.today[0].due === '2026-07-01' && !res.today[0].project_slug && res.today[0].source !== 'meeting',
     'today band holds only the personal daily task');
   assert(res.overdue.length === 1, 'overdue = the single plain personal 06-29: got ' + res.overdue.length);
-  assert(res.overdue[0].scheduled === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
+  assert(res.overdue[0].due === '2026-06-29' && !res.overdue[0].project_slug && res.overdue[0].source !== 'meeting',
     'overdue band holds only the personal daily task');
   // A whitespace-only project_slug is treated as "no project" (still shown in today).
   const ws = TaskTodayList.buildBands([
-    { scheduled: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
+    { due: '2026-07-01', status: 'open', project_slug: '   ', source: 'daily' },
   ], '2026-07-01');
   assert(ws.today.length === 1, 'whitespace-only project_slug → still a personal task: got ' + ws.today.length);
 });
@@ -699,11 +699,11 @@ ok('DT-2 parseNote coerces Luxon due → string', () => {
   assert(parsed.due === '2026-07-01', 'due is the string, not a DateTime: got ' + JSON.stringify(parsed.due));
 });
 
-// DT-3. THE REPRO — Luxon-scheduled open tasks must land in a band, not vanish.
+// DT-3. THE REPRO — Luxon-due open tasks must land in a band, not vanish.
 ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
   const tasks = [
-    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-07-01') }),
-    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-06-28') }),
+    TaskEntity.parseNote({ status: 'open', due: luxon('2026-07-01') }),
+    TaskEntity.parseNote({ status: 'open', due: luxon('2026-06-28') }),
   ];
   const res = TaskTodayList.buildBands(tasks, '2026-07-01');
   assert(res.today.length === 1, 'today = the 07-01 Luxon task: got ' + res.today.length);
@@ -712,11 +712,11 @@ ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
 
 // ---------- buildBands sort order (Today/Overdue chronological ordering) ----------
 
-ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-overdue first)', () => {
+ok('TBB-SORT-1 buildBands sorts overdue ascending by due (oldest/most-overdue first)', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-05', title: 'C' },
-    { status: 'open', scheduled: '2026-07-01', title: 'A' },
-    { status: 'open', scheduled: '2026-07-03', title: 'B' },
+    { status: 'open', due: '2026-07-05', title: 'C' },
+    { status: 'open', due: '2026-07-01', title: 'A' },
+    { status: 'open', due: '2026-07-03', title: 'B' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.overdue.map((t) => t.title);
@@ -724,24 +724,30 @@ ok('TBB-SORT-1 buildBands sorts overdue ascending by scheduled (oldest/most-over
     'expected A,B,C (oldest first), got ' + JSON.stringify(order));
 });
 
-ok('TBB-SORT-2 buildBands sorts today ascending by due (earliest deadline first; undated last)', () => {
+// NOTE: `due` now drives BOTH band membership (buildBands's today/overdue split)
+// and the secondary within-Today sort key (today.sort by a.due/b.due — see the
+// plan's Task 3: that sort block is left unchanged, a leftover secondary sort
+// that's now a no-op tie for same-due tasks since membership already pins every
+// Today-band task's `due` to todayStr). So every fixture row here necessarily
+// shares the SAME due (todayStr) to land in Today at all, and the sort collapses
+// to the title tie-break in all cases — this test now documents that behavior.
+ok('TBB-SORT-2 buildBands sorts today by title when due ties (secondary sort is a no-op post-merge)', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-10', title: 'Later' },
-    { status: 'open', scheduled: '2026-07-08', due: '', title: 'NoDue' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Soonest' },
-    { status: 'open', scheduled: '2026-07-08', due: null, title: 'AlsoNoDue' },
+    { status: 'open', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', due: '2026-07-08', title: 'beta' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.today.map((t) => t.title);
-  assert(JSON.stringify(order) === JSON.stringify(['Soonest', 'Later', 'AlsoNoDue', 'NoDue']),
-    'expected Soonest,Later,AlsoNoDue,NoDue (earliest due first, undated last, tie-broken by title), got ' + JSON.stringify(order));
+  assert(JSON.stringify(order) === JSON.stringify(['Alpha', 'beta', 'zeta']),
+    'expected case-insensitive alpha order (title tie-break), got ' + JSON.stringify(order));
 });
 
 ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
   const tasks = [
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'zeta' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'Alpha' },
-    { status: 'open', scheduled: '2026-07-08', due: '2026-07-08', title: 'beta' },
+    { status: 'open', due: '2026-07-08', title: 'zeta' },
+    { status: 'open', due: '2026-07-08', title: 'Alpha' },
+    { status: 'open', due: '2026-07-08', title: 'beta' },
   ];
   const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
   const order = bands.today.map((t) => t.title);
