@@ -906,4 +906,49 @@ failures += !run("wiki adapter config sets pageLabel 'Pages'", () => {
   assert.strictEqual(config.pageLabel, "Pages");
 });
 
+failures += !run("empty page pane is SUPPRESSED entirely when sections exist (no label, no links row, no BeaconCards empty box)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const calls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) }, MenuPopover: { open: () => {} } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    getLinks: () => [{ url: "https://example.com", text: "Example" }],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(calls.length, 0, "BeaconCards must NOT be called");
+  assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 0, "pane not created");
+  assert.strictEqual(els.filter((e) => e.className === "se-links-row").length, 0, "links row suppressed with the pane");
+  assert.strictEqual(els.filter((e) => e.className === "se-group-label se-pane-label").length, 0, "pane label suppressed too");
+  delete global.customJS;
+});
+
+failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the pane empty-state message", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const calls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/empty/Empty.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki/empty" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 1, "pane still renders on a truly-empty leaf");
+  assert.strictEqual(calls.length, 1, "BeaconCards still called — its built-in empty message communicates the real 'nothing here'");
+  assert.deepStrictEqual(calls[0].pages, [], "called with zero pages");
+  delete global.customJS;
+});
+
 process.exit(failures > 0 ? 1 : 0);

@@ -71,8 +71,15 @@ class SectionExplorer {
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
 
-    const pane = root.createEl("div", { cls: "se-page-pane" });
+    // Empty-state suppression: when the hub has sections but no direct pages,
+    // an empty pane ("Nothing here yet.") IS redundant chrome — the rail
+    // already communicates the structure. Only a truly-empty leaf (0 sections
+    // AND 0 pages) keeps the pane so its empty message means something.
     const pages = adapter.listPages(dv, ctx, null);
+    const pageCount = Array.isArray(pages) ? pages.length : (pages && pages.length) || 0;
+    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) return;
+
+    const pane = root.createEl("div", { cls: "se-page-pane" });
     this._renderPagePane(dv, adapter, ctx, null, pages, pane);
   }
 
