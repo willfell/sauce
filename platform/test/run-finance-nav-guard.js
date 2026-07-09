@@ -7,8 +7,11 @@
 // (v0.204.0+), its Go▾ launcher already lists all 7 hubs — FinanceNav's
 // Section 1 cross-hub button row, and the single "<X> Hub" back-buttons in
 // entity/defaults context, become redundant and must be SKIPPED. Prev/Next
-// sibling nav and "+ New X"/defaults-link (not covered by the chrome bar)
-// must still render regardless. Minimal DOM/app stubs — no real Dataview.
+// sibling nav (not covered by the chrome bar) must still render regardless.
+// "+ New X" is now ALSO guarded (v0.205.0+ — FinanceChromeBar's own primary
+// button, to the right of the compass, owns it once migrated); the
+// defaults-page link (Budget/Paycheck/Debt Defaults) is untouched either way.
+// Minimal DOM/app stubs — no real Dataview.
 
 const fs = require('fs');
 const path = require('path');
@@ -48,8 +51,12 @@ async function run() {
   const prevWindow = global.window;
   const prevCustomJS = global.customJS;
   const accentButtonCalls = [];
+  const entityCreateCalls = [];
   global.app = { workspace: { openLinkText: () => {} }, vault: { getMarkdownFiles: () => [] }, metadataCache: { getFileCache: () => ({ frontmatter: {} }) } };
-  global.customJS = { AccentButton: { render: (row, opts) => { accentButtonCalls.push(opts && opts.label); return makeStubEl(); } } };
+  global.customJS = {
+    AccentButton: { render: (row, opts) => { accentButtonCalls.push(opts && opts.label); return makeStubEl(); } },
+    EntityCreate: { render: async (_shim, opts) => { entityCreateCalls.push(opts && opts.instance); } },
+  };
   global.window = { customJS: global.customJS };
 
   try {
@@ -110,6 +117,48 @@ async function run() {
       await new FinanceNav().render(dv);
       ok('FNG-6 defaults-budget + no chrome: "Budgets Hub" back-button still rendered',
         accentButtonCalls.includes('Budgets Hub'), 'calls=' + JSON.stringify(accentButtonCalls));
+    }
+
+    // FNG-7/8 — hub-budgets: "+ New Budget" is now FinanceChromeBar's own
+    // primary button (right of the compass) once migrated — the inline
+    // EntityCreate.render call must be SKIPPED, but the "Budget Defaults"
+    // link (not covered by the chrome bar) still renders either way.
+    {
+      const { dv } = makeDv(true, { file: { path: 'spice/finance/budgets/Budgets.md' }, type: 'budgets-hub' });
+      accentButtonCalls.length = 0; entityCreateCalls.length = 0;
+      await new FinanceNav().render(dv);
+      ok('FNG-7 hub-budgets + chromePresent: EntityCreate not invoked, Budget Defaults link still renders',
+        entityCreateCalls.length === 0 && accentButtonCalls.includes('Budget Defaults'),
+        'entityCreateCalls=' + JSON.stringify(entityCreateCalls) + ' accentButtonCalls=' + JSON.stringify(accentButtonCalls));
+    }
+    {
+      const { dv } = makeDv(false, { file: { path: 'spice/finance/budgets/Budgets.md' }, type: 'budgets-hub' });
+      accentButtonCalls.length = 0; entityCreateCalls.length = 0;
+      await new FinanceNav().render(dv);
+      ok('FNG-8 hub-budgets + no chrome: EntityCreate(instance:"budget") still invoked, Budget Defaults link still renders',
+        entityCreateCalls.includes('budget') && accentButtonCalls.includes('Budget Defaults'),
+        'entityCreateCalls=' + JSON.stringify(entityCreateCalls) + ' accentButtonCalls=' + JSON.stringify(accentButtonCalls));
+    }
+
+    // FNG-9/10 — hub-invoices: no defaults link exists for invoices, so once
+    // "+ New Invoice" moves to the chrome-bar primary there is NOTHING left
+    // to show in this section — the whole row + trailing divider must vanish,
+    // same posture as the already-covered defaults-page case (FNG-5).
+    {
+      const { dv, container } = makeDv(true, { file: { path: 'spice/finance/invoices/Invoices.md' }, type: 'invoices-hub' });
+      entityCreateCalls.length = 0;
+      await new FinanceNav().render(dv);
+      const root = container.children[0];
+      ok('FNG-9 hub-invoices + chromePresent: entire row + divider skipped (root has no children)',
+        root && root.children.length === 0 && entityCreateCalls.length === 0,
+        'childCount=' + (root && root.children.length) + ' entityCreateCalls=' + JSON.stringify(entityCreateCalls));
+    }
+    {
+      const { dv } = makeDv(false, { file: { path: 'spice/finance/invoices/Invoices.md' }, type: 'invoices-hub' });
+      entityCreateCalls.length = 0;
+      await new FinanceNav().render(dv);
+      ok('FNG-10 hub-invoices + no chrome: EntityCreate(instance:"invoice") still invoked',
+        entityCreateCalls.includes('invoice'), 'entityCreateCalls=' + JSON.stringify(entityCreateCalls));
     }
   } finally {
     global.app = prevApp;

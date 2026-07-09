@@ -99,7 +99,9 @@ await dv.view("ranch/views/customjs-guard", { class: "PersonNavButtons" });
   ok('CBC3-PEOPLE-4: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'person') === after);
 }
 
-// ---- people-hub: SpaceNavButtons present, gets stripped + PeopleChromeBar inserted ----
+// ---- people-hub: SpaceNavButtons present, gets stripped + PeopleChromeBar inserted;
+// the standalone EntityCreate block ("+ New Person" — v0.205.0 moved to
+// PeopleChromeBar's own primary, right of the compass) is stripped too ----
 {
   const before = `---
 type: people-hub
@@ -112,6 +114,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
+// entity-create:person — installer-managed; do not delete this comment
 await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "person" }] });
 \`\`\`
 
@@ -120,7 +123,41 @@ await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ in
   const after = _healNoteChromeBody(before, 'people-hub');
   ok('CBC3-PEOPLEHUB-1: people-hub heal inserts PeopleChromeBar', after.includes('class: "PeopleChromeBar"'));
   ok('CBC3-PEOPLEHUB-2: people-hub heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
-  ok('CBC3-PEOPLEHUB-3: people-hub heal KEEPS the EntityCreate button', after.includes('class: "EntityCreate"'));
+  ok('CBC3-PEOPLEHUB-3: people-hub heal strips the now-redundant EntityCreate block', !after.includes('class: "EntityCreate"'));
+  ok('CBC3-PEOPLEHUB-4: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'people-hub') === after);
+}
+
+// ---- people-hub real-world shape: already chrome-swapped by a prior cycle
+// (PeopleChromeBar present, no more SpaceNavButtons) but the EntityCreate
+// block is still standalone below it — the strip must still fire even though
+// the chrome-swap half of the transform is a no-op ----
+{
+  const before = `---
+type: people-hub
+tags:
+  - people-hub
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "PeopleChromeBar" });
+\`\`\`
+
+\`\`\`dataviewjs
+// entity-create:person — installer-managed; do not delete this comment
+await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "person" }] });
+\`\`\`
+
+---
+
+## All People
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "PeopleHubCards" });
+\`\`\`
+`;
+  const after = _healNoteChromeBody(before, 'people-hub');
+  ok('CBC3-PEOPLEHUB-5: an already-chrome-swapped People.md still gets its EntityCreate block stripped',
+    !after.includes('class: "EntityCreate"') && after.includes('class: "PeopleHubCards"'));
 }
 
 // ---- products: product body carries SpaceNavButtons only ----

@@ -35,11 +35,10 @@ class MeetingChromeBar {
         return null;
       },
       surfaceSpec: (ctx) => {
-        // The hub's own EntityCreate block + MeetingsHubCards already cover
-        // creation/listing — the bar here is breadcrumb (empty, no `type:` to
-        // key a trail off) + Vault Go▾ launcher only, same partial-integration
-        // shape as FinanceChromeBar on its hub-adjacent surfaces.
-        if (ctx.context === "meetings-hub") return { primary: null, overflow: [], leaf: false };
+        // MeetingsHubCards still owns the listing below the bar, but "+ New
+        // Meeting" is now the bar's own primary (right of the compass) —
+        // same shape as ReaderChromeBar's reader-hub "+ New article".
+        if (ctx.context === "meetings-hub") return { primary: { id: "new-meeting", label: "+ New Meeting", icon: ICON.plus }, overflow: [], leaf: false };
         return {
           primary: { id: "new-task", label: "New Task", icon: ICON.plus },
           overflow: [
@@ -50,6 +49,12 @@ class MeetingChromeBar {
         };
       },
       dispatch: (dv, ctx, id) => {
+        if (id === "new-meeting") {
+          if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
+            customJS.EntityCreate.create({ instance: "meeting", dv });
+          } else if (typeof Notice === "function") { new Notice("MeetingChromeBar: EntityCreate unavailable — reinstall meetings blueprint.", 6000); }
+          return;
+        }
         if (id === "new-task") {
           if (customJS && customJS.MeetingLeafActions && typeof customJS.MeetingLeafActions._onNewTask === "function") {
             customJS.MeetingLeafActions._onNewTask(dv);

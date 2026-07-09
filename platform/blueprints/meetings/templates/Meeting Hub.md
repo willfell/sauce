@@ -15,14 +15,6 @@ await dv.view("{{views_path}}/customjs-guard", { class: "MeetingChromeBar" });
 ```
 
 ```dataviewjs
-// entity-create:meeting — installer-managed; do not delete this comment
-await dv.view("{{views_path}}/customjs-guard", { class: "EntityCreate", args: [{ instance: "meeting" }] });
-```
-
-
----
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Meetings" }] });
 ```
 
