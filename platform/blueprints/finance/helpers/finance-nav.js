@@ -94,8 +94,8 @@ class FinanceNav {
 
         // Section 2 (when applicable): context row + divider
         if (mode.startsWith("hub-") && mode !== "hub-finance") {
-            await this._renderHubContext(dv, root, mode);
-            this._hr(root);
+            const rendered = await this._renderHubContext(dv, root, mode, chromePresent);
+            if (rendered) this._hr(root);
         } else if (mode.startsWith("entity-")) {
             this._renderEntityContext(root, mode, page, chromePresent);
             this._hr(root);
@@ -198,10 +198,7 @@ class FinanceNav {
         }
     }
 
-    async _renderHubContext(dv, root, mode) {
-        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
-
+    async _renderHubContext(dv, root, mode, chromePresent) {
         const config = {
             "hub-budgets":   { instance: "budget",   defaultsLabel: "Budget Defaults",   defaultsPath: "spice/finance/Budget Defaults.md",   defaultsIcon: this._icon("settings") },
             "hub-paychecks": { instance: "paycheck", defaultsLabel: "Paycheck Defaults", defaultsPath: "spice/finance/Paycheck Defaults.md", defaultsIcon: this._icon("settings") },
@@ -211,31 +208,44 @@ class FinanceNav {
             "hub-savings":   { instance: "savings",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
         };
         const cfg = config[mode];
-        if (!cfg) return;
+        if (!cfg) return false;
 
-        // + New <X> via EntityCreate (poll for cold-load race; carried from v0.110.1/0.110.3)
-        const subContainer = row.createEl("div");
-        subContainer.style.cssText = "display: inline-flex;";
-        const shim = Object.create(dv);
-        shim.container = subContainer;
-        for (let i = 0; i < 100 && !window.customJS?.EntityCreate; i++) {
-            await new Promise((r) => setTimeout(r, 50));
-        }
-        if (window.customJS?.EntityCreate) {
-            await customJS.EntityCreate.render(shim, { instance: cfg.instance });
-        } else {
-            const ph = subContainer.createEl("em", { text: "EntityCreate unavailable" });
-            ph.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+        // + New <X> — owned by FinanceChromeBar's primary button (right of the
+        // compass) once migrated; only fall back to this inline render on an
+        // unmigrated note (no .finance-chrome-root present).
+        const showNewButton = !chromePresent;
+        const showDefaults = !!(cfg.defaultsPath && cfg.defaultsLabel);
+        if (!showNewButton && !showDefaults) return false;
+
+        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+
+        if (showNewButton) {
+            // via EntityCreate (poll for cold-load race; carried from v0.110.1/0.110.3)
+            const subContainer = row.createEl("div");
+            subContainer.style.cssText = "display: inline-flex;";
+            const shim = Object.create(dv);
+            shim.container = subContainer;
+            for (let i = 0; i < 100 && !window.customJS?.EntityCreate; i++) {
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            if (window.customJS?.EntityCreate) {
+                await customJS.EntityCreate.render(shim, { instance: cfg.instance });
+            } else {
+                const ph = subContainer.createEl("em", { text: "EntityCreate unavailable" });
+                ph.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+            }
         }
 
         // <X> Defaults link
-        if (cfg.defaultsPath && cfg.defaultsLabel) {
+        if (showDefaults) {
             customJS.AccentButton.render(row, {
                 label: cfg.defaultsLabel,
                 icon: cfg.defaultsIcon,
                 onClick: () => app.workspace.openLinkText(cfg.defaultsPath, "")
             });
         }
+        return true;
     }
 
     _renderEntityContext(root, mode, page, chromePresent) {

@@ -110,7 +110,7 @@ class SpaceNavButtons {
   // menu. Only the first entry per source can claim a pin slot. Pure;
   // Node-testable. Returns { pinned: entry[], rest: entry[] }.
   _partitionEntries(entries) {
-    const PINNED_SOURCES = ["home", "to-do", "scratch", "project", "meetings"];
+    const PINNED_SOURCES = ["home", "to-do", "scratch", "project", "meetings", "journal"];
     const firstBySource = {};
     for (const e of (entries || [])) {
       if (e && e._source && !firstBySource[e._source]) firstBySource[e._source] = e;

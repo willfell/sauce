@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.204.1",
+  "workshop_version": "0.205.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -79,7 +79,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.15.0",
+      "version": "2.15.1",
       "path": "mechanisms/nav-buttons"
     },
     {
@@ -176,6 +176,11 @@
       "name": "chrome-bar",
       "version": "0.3.1",
       "path": "mechanisms/chrome-bar"
+    },
+    {
+      "name": "section-explorer",
+      "version": "0.1.0",
+      "path": "mechanisms/section-explorer"
     }
   ],
   "blueprints": [
@@ -196,12 +201,12 @@
     },
     {
       "name": "meetings",
-      "version": "0.17.0",
+      "version": "0.18.0",
       "path": "blueprints/meetings"
     },
     {
       "name": "people",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "path": "blueprints/people"
     },
     {
@@ -231,7 +236,7 @@
     },
     {
       "name": "finance",
-      "version": "0.18.1",
+      "version": "0.19.0",
       "path": "blueprints/finance"
     },
     {

@@ -18,20 +18,27 @@ const cfg = inst._config();
   ok('PCB-DETECT-1 people-hub/person classify; non-people → null',
     hub && hub.context === 'people-hub' && person && person.context === 'person' && off === null);
 }
-// PCB-SPEC — no primary/overflow anywhere (creation is a separate EntityCreate block on the hub); person is leaf, hub is not.
+// PCB-SPEC — hub gets a "+ New Person" primary (right of the compass; its old
+// standalone EntityCreate block was retired) + no overflow, not leaf; person is leaf, no primary.
 {
   const h = cfg.surfaceSpec({ context: 'people-hub' });
   const p = cfg.surfaceSpec({ context: 'person' });
-  ok('PCB-SPEC-1 hub: primary null + overflow empty + not leaf',
-    h.primary === null && h.overflow.length === 0 && h.leaf === false);
+  ok('PCB-SPEC-1 hub: primary "+ New Person" (id new-person) + overflow empty + not leaf',
+    h.primary && h.primary.id === 'new-person' && h.primary.label === '+ New Person' && h.overflow.length === 0 && h.leaf === false);
   ok('PCB-SPEC-2 person: primary null + overflow empty + leaf',
     p.primary === null && p.overflow.length === 0 && p.leaf === true);
 }
-// PCB-DISPATCH — never throws on unknown id (no-op surface).
+// PCB-DISPATCH — "new-person" routes to EntityCreate.create; unknown id is a no-op; never throws.
 {
+  const calls = [];
+  const prevCJS = global.customJS;
+  global.customJS = { EntityCreate: { create: (opts) => calls.push(opts) } };
+  cfg.dispatch({}, { context: 'people-hub' }, 'new-person');
   let threw = false;
   try { cfg.dispatch({}, { context: 'person' }, 'unknown-id'); } catch (_e) { threw = true; }
-  ok('PCB-DISPATCH-1 dispatch never throws (no-op surface)', !threw);
+  global.customJS = prevCJS;
+  ok('PCB-DISPATCH-1 "new-person" → EntityCreate.create({instance:"person"})', calls.length === 1 && calls[0].instance === 'person');
+  ok('PCB-DISPATCH-2 dispatch never throws (unknown id is a no-op)', !threw);
 }
 // PCB-DEST — destinations lead with a { section:"This people" } marker + include a People label entry;
 // the hub omits its own self-link.

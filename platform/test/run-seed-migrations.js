@@ -626,6 +626,30 @@ withTempVault((vault) => {
             _hasBar(hubBody) && _hasBar(infraBody) && _hasBar(awsBody) && _hasBar(vpcBody),
             `hub=${_hasBar(hubBody)} infra=${_hasBar(infraBody)} aws=${_hasBar(awsBody)} vpc=${_hasBar(vpcBody)}`
         );
+
+        // WIKI-11: section-explorer heal — Wiki.md ends up with links: [] backfilled
+        // into frontmatter. The heal only touches frontmatter here (class NAME
+        // "WikiTree" was kept unchanged per Task 9 — only the body was redirected to
+        // delegate to SectionExplorer — so no body-marker heal is needed for wiki).
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-11 root hub links: [] backfilled into frontmatter by install",
+            /links:\s*\[\]/.test(hubBody),
+            `hubBody snippet=${hubBody.slice(0, 200)}`
+        );
+
+        // WIKI-12/13: the same links: [] backfill heal fires for wiki-section notes
+        // too — not just the wiki-hub type checked by WIKI-11. infraBody/awsBody are
+        // both real wiki-section fixtures already read above for WIKI-8/WIKI-10.
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-12 infra section hub links: [] backfilled into frontmatter by install",
+            /links:\s*\[\]/.test(infraBody),
+            `infraBody snippet=${infraBody.slice(0, 200)}`
+        );
+        ok(
+            "HC-WIKI-SEED-MIGRATE-WIKI-13 aws section hub links: [] backfilled into frontmatter by install",
+            /links:\s*\[\]/.test(awsBody),
+            `awsBody snippet=${awsBody.slice(0, 200)}`
+        );
     }
 
     // ===== HC-V0RDR-SEED-READER-* — reader blueprint seed coverage =====
@@ -2004,6 +2028,70 @@ async function runDocsHubModernizeFamily() {
             console.log(`  KEEP_SEED_VAULT=1: ${dhRoot}`);
         } else {
             try { fs.rmSync(dhRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
+// =============================================================================
+// HC-SEHEAL-* — section-explorer `links: []` frontmatter backfill heal.
+//
+// _healSectionLinksFrontmatter (pure, idempotent) inserts `links: []` into the
+// frontmatter of wiki-hub / wiki-section / docs-hub / section-hub notes that
+// lack the key. Wiki types are covered by the full seed-vault install (see
+// HC-WIKI-SEED-MIGRATE-WIKI-11 above, which reads spice/wiki/Wiki.md after a
+// full `main()` install run). docs-hub and section-hub notes are NOT part of
+// the fully-installed seed vault (the seed install short-circuits on project
+// version match for per-blueprint apply* fns), so this exercises them here by
+// directly invoking applyProjectChromeBarHeal — the project-side per-note heal
+// loop that iterates PROJECT_CHROME_TYPES (which includes "docs-hub" and
+// "section-hub") — against the docshub-legacy (docs-hub) and docsec-project
+// (section-hub) committed fixtures, neither of which carries a `links` key.
+// =============================================================================
+async function runSectionLinksFrontmatterFamily() {
+    const { applyProjectChromeBarHeal } = require("../install.js");
+
+    const slRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-seheal-"));
+    try {
+        const DH_PROJ_DIR = "spice/projects/docshub-legacy";
+        const DS_PROJ_DIR = "spice/projects/docsec-project";
+        helpers.copyDir(path.join(SEED_DIR, DH_PROJ_DIR), path.join(slRoot, DH_PROJ_DIR));
+        helpers.copyDir(path.join(SEED_DIR, DS_PROJ_DIR), path.join(slRoot, DS_PROJ_DIR));
+
+        const DOCS_HUB = path.join(slRoot, DH_PROJ_DIR, "docs/Docs.md");
+        const SECTION_HUB = path.join(slRoot, DS_PROJ_DIR, "docs/knowledge/Knowledge.md");
+
+        // Sanity: neither committed fixture carries a links key yet.
+        const docsHubBefore = fs.readFileSync(DOCS_HUB, "utf8");
+        const sectionHubBefore = fs.readFileSync(SECTION_HUB, "utf8");
+        ok("HC-SEHEAL-A0 docs-hub fixture has no links key before heal", !/^links:/m.test(docsHubBefore));
+        ok("HC-SEHEAL-B0 section-hub fixture has no links key before heal", !/^links:/m.test(sectionHubBefore));
+
+        const adapter = makeFsAdapter(slRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        await applyProjectChromeBarHeal(tp, manifest, variables, history, git);
+
+        const docsHubAfter = fs.readFileSync(DOCS_HUB, "utf8");
+        const sectionHubAfter = fs.readFileSync(SECTION_HUB, "utf8");
+        ok("HC-SEHEAL-A1 docs-hub note gets links: [] backfilled", /links:\s*\[\]/.test(docsHubAfter));
+        ok("HC-SEHEAL-B1 section-hub note gets links: [] backfilled", /links:\s*\[\]/.test(sectionHubAfter));
+
+        // Idempotency — second pass is a byte-identical no-op.
+        const history2 = [];
+        await applyProjectChromeBarHeal(tp, manifest, variables, history2, git);
+        const docsHubSecond = fs.readFileSync(DOCS_HUB, "utf8");
+        const sectionHubSecond = fs.readFileSync(SECTION_HUB, "utf8");
+        ok("HC-SEHEAL-A2 second pass: docs-hub byte-identical (idempotent)", docsHubAfter === docsHubSecond);
+        ok("HC-SEHEAL-B2 second pass: section-hub byte-identical (idempotent)", sectionHubAfter === sectionHubSecond);
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${slRoot}`);
+        } else {
+            try { fs.rmSync(slRoot, { recursive: true, force: true }); } catch (e) {}
         }
     }
 }
@@ -4039,6 +4127,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-DOCSHUB-SEED-MIGRATE-DOCSHUB-FAMILY");
+    })
+    .then(() => runSectionLinksFrontmatterFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-SEHEAL-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-SEHEAL-FAMILY");
     })
     .then(() => runFinanceMigrateFamily())
     .catch((e) => {
