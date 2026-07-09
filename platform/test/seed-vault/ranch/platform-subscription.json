@@ -109,7 +109,7 @@
   "blueprints": [
     {
       "name": "boards",
-      "version": "0.2.1"
+      "version": "0.3.0"
     },
     {
       "name": "cowork",
@@ -149,7 +149,7 @@
     },
     {
       "name": "finance",
-      "version": "0.17.0"
+      "version": "0.18.0"
     },
     {
       "name": "scratch",
