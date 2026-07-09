@@ -542,7 +542,7 @@
               "wide"
             ]
           },
-          "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
         },
         {
           "filename_pattern": "Board-{{prompts.month}}.md",
@@ -886,6 +886,36 @@
         ],
         "current": {
           "label": "lit:Plan"
+        }
+      },
+      "invoice-board-card": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Invoices",
+            "link": "spice/finance/invoices/Invoices.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "time-log": {
+        "ancestors": [
+          {
+            "label": "lit:Finance",
+            "link": "spice/finance/Finance.md"
+          },
+          {
+            "label": "lit:Invoices",
+            "link": "spice/finance/invoices/Invoices.md"
+          }
+        ],
+        "current": {
+          "label": "fm:month|file:basename"
         }
       }
     }

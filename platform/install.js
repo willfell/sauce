@@ -6045,6 +6045,7 @@ function _healNoteChromeBody(body, type) {
     "budget": "FinanceChromeBar", "paycheck": "FinanceChromeBar", "invoice": "FinanceChromeBar", "debt": "FinanceChromeBar",
     "month": "FinanceChromeBar", "savings-account": "FinanceChromeBar",
     "budget-defaults": "FinanceChromeBar", "paycheck-defaults": "FinanceChromeBar", "debt-defaults": "FinanceChromeBar", "finance-plan": "FinanceChromeBar",
+    "invoice-board-card": "FinanceChromeBar", "time-log": "FinanceChromeBar",
   };
   const barClass = CHROME_BAR_MAP[type];
   if (barClass) out = _healChromeBarMigration(out, type, barClass);
@@ -6512,7 +6513,7 @@ async function applyNoteChromeHeal(tp, history, git) {
         const type = _noteChromeFrontmatterType(before);
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
-        const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan"];
+        const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan", "invoice-board-card", "time-log"];
         if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
         const after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         if (after === before) continue;

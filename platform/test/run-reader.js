@@ -249,6 +249,17 @@ function art(title, status, capturedAt, extra) {
   catch (e) { clipErr = String(e && e.message || e); }
   ok('HC-READER-10d assets/reader-clip.json parses and has path "spice/reader"',
      !!clip && clip.path === 'spice/reader', clipErr || ('path=' + (clip && clip.path)));
+
+  // HC-READER-10e — the Web Clipper capture template's noteContentFormat is the
+  // ONLY source of chrome for a freshly-clipped article (it's never healed —
+  // applyNoteChromeHeal only touches EXISTING vault files, not the browser
+  // extension's own captured content). It must carry ReaderChromeBar + no
+  // legacy blocks, same contract as templates/Reader Article.md above, or
+  // every newly clipped article regresses to the old visible button row.
+  const ncf = clip && clip.noteContentFormat || '';
+  ok('HC-READER-10e reader-clip.json noteContentFormat: ReaderChromeBar + ReaderArticleView, no legacy nav/actions blocks',
+     hasBlock(ncf, 'ReaderChromeBar') && hasBlock(ncf, 'ReaderArticleView') &&
+     !hasBlock(ncf, 'Breadcrumb') && !hasBlock(ncf, 'SpaceNavButtons') && !hasBlock(ncf, 'ReaderArticleActions'));
 }
 
 // ---------------------------------------------------------------------------

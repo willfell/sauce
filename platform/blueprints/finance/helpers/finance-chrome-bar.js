@@ -8,9 +8,13 @@
  * chrome-owned actions on any surface (FinanceNav already owns "+ New X"
  * and defaults links) — primary/overflow are always empty. FinanceNav is
  * left completely untouched below the bar; nothing here retires or
- * duplicates its logic. Detects by page.type across all 17 finance
+ * duplicates its logic. Detects by page.type across all 19 finance
  * frontmatter types (7 hubs, 6 entities, 3 defaults pages, the
- * finance-plan singleton). Instance methods; never-throw; cold-load-safe.
+ * finance-plan singleton, plus 2 auxiliary leaf types — invoice-board-card
+ * kanban cards and per-invoice time-log notes — that FinanceNav never
+ * correctly classified either, since neither has "+ New X"/defaults/
+ * prev-next semantics; they just get the same Go▾ hub list as any other
+ * leaf). Instance methods; never-throw; cold-load-safe.
  */
 class FinanceChromeBar {
   get ICON() {
@@ -38,6 +42,7 @@ class FinanceChromeBar {
     const HUB_TYPES = ["finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub"];
     const ENTITY_TYPES = ["budget", "paycheck", "invoice", "debt", "month", "savings-account"];
     const DEFAULTS_TYPES = ["budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan"];
+    const AUX_TYPES = ["invoice-board-card", "time-log"];
     const HUBS = [
       { key: "finance-hub", label: "Finance", icon: ICON.wallet, path: "spice/finance/Finance.md" },
       { key: "budgets-hub", label: "Budgets", icon: ICON.calculator, path: "spice/finance/budgets/Budgets.md" },
@@ -51,7 +56,7 @@ class FinanceChromeBar {
     return {
       detect: (dv, page) => {
         const t = page && page.type;
-        if (!HUB_TYPES.includes(t) && !ENTITY_TYPES.includes(t) && !DEFAULTS_TYPES.includes(t)) return null;
+        if (!HUB_TYPES.includes(t) && !ENTITY_TYPES.includes(t) && !DEFAULTS_TYPES.includes(t) && !AUX_TYPES.includes(t)) return null;
         return { context: t, path: (page.file && page.file.path) || "" };
       },
       surfaceSpec: (ctx) => ({ primary: null, overflow: [], leaf: !HUB_TYPES.includes(ctx.context) }),

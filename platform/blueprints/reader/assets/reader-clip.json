@@ -18,5 +18,5 @@
     { "name": "summary", "value": "{{\"a neutral 2-3 sentence summary of this article\"}}", "type": "text" },
     { "name": "tags", "value": "{{\"1-4 lowercase topical tags for this article, comma separated\"}}", "type": "multitext" }
   ],
-  "noteContentFormat": "```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"ReaderArticleActions\" });\n```\n\n```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"ReaderArticleView\" });\n```\n\n[//]: # (READER_HIGHLIGHTS)\n\n{{highlights}}\n\n[//]: # (READER_CONTENT)\n\n{{content}}\n"
+  "noteContentFormat": "```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"ReaderChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"{{views_path}}/customjs-guard\", { class: \"ReaderArticleView\" });\n```\n\n[//]: # (READER_HIGHLIGHTS)\n\n{{highlights}}\n\n[//]: # (READER_CONTENT)\n\n{{content}}\n"
 }
