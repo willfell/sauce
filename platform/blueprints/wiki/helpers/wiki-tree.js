@@ -57,7 +57,17 @@ class WikiTree {
         if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.makeAdapter !== "function"
             || typeof customJS.SectionExplorer.render !== "function") return;
         const adapter = customJS.SectionExplorer.makeAdapter(this._config);
-        customJS.SectionExplorer.render({ ...dv, container }, adapter);
+        // NOTE: do NOT use `{ ...dv, container }` here — Obsidian's real `dv` is
+        // a class instance; `pages`/`current` live on its prototype, not as own
+        // enumerable properties, so a plain object-spread silently drops them
+        // (adapter.listSections/listPages then throw or no-op, rendering an
+        // empty rail even though matching pages exist). Rebuild explicitly,
+        // matching the _makeProxyDv idiom used everywhere else in this codebase.
+        customJS.SectionExplorer.render({
+            container,
+            current: dv.current.bind(dv),
+            pages: dv.pages.bind(dv),
+        }, adapter);
 
         // Recently updated — hub only. Rendered as cards (like sections/pages),
         // each tagged with the section the page came from. Kept as WikiTree's own
