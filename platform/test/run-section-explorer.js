@@ -394,4 +394,31 @@ failures += !run("_addLinkPure + adapter.writeLinks integration (no DOM)", () =>
   assert.deepStrictEqual(writes[0].links, [{ url: "https://x.com", text: "X" }]);
 });
 
+failures += !run("wiki adapter config: renameSection renames folder + updates title frontmatter", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  const renameCalls = [];
+  const fmWrites = [];
+  global.app = {
+    fileManager: {
+      renameFile: (file, newPath) => { renameCalls.push({ file, newPath }); return Promise.resolve(); },
+      processFrontMatter: (file, fn) => { const fm = {}; fn(fm); fmWrites.push({ file, fm }); return Promise.resolve(); },
+    },
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    workspace: { openLinkText: () => {} },
+  };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const section = { title: "EMS", hubPath: "spice/wiki/ems/EMS.md", folder: "spice/wiki/ems" };
+  wt._config = wt._buildConfig({ container: {} }, { file: { path: "spice/wiki/ems/EMS.md" } });
+  wt._config.renameSection(section, "Networking");
+  assert.strictEqual(renameCalls.length, 1, "expected exactly one folder rename");
+  assert.strictEqual(renameCalls[0].newPath, "spice/wiki/networking");
+  assert.strictEqual(fmWrites.length, 1, "expected exactly one frontmatter write (title)");
+  assert.strictEqual(fmWrites[0].fm.title, "Networking");
+  delete global.app;
+});
+
 process.exit(failures > 0 ? 1 : 0);

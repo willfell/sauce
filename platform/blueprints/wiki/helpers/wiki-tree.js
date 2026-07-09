@@ -11,6 +11,8 @@ class WikiTree {
         const filePath = cur.file.path;
         const scopePath = filePath.slice(0, filePath.lastIndexOf("/"));
 
+        this._config = this._buildConfig(dv, cur);
+
         const ctx = customJS.DocSearch.render(dv, {
             scopePath,
             recursive: true,
@@ -44,46 +46,21 @@ class WikiTree {
         // recursively: a flat list of every matching doc, each tagged with its section.
         // `pages` is already the full recursive subtree under scopePath, so the query
         // naturally scopes to "the folder you're in, and everything below it". An empty
-        // query falls through to the normal browse view (sections + this folder's docs).
+        // query falls through to the normal browse view (SectionExplorer).
         if (ctx && ctx.hasActiveFilter) {
             this._renderSearchResults(dv, proxyDv, scopePath, pages, ctx);
             return;
         }
 
-        // Sub-sections — rows, sorted by last-edited (default) with a Recent | A–Z toggle.
-        const subs = this._immediateChildFolders(scopePath, pages);
-        if (subs.length) {
-            customJS.SectionLabel.render(proxyDv, { text: "Sections" });
-            const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-            this._renderSectionCards(dv, proxyDv, subs, folderIcon);
-        }
-
-        // Pages in this folder
-        const docs = this._immediatePages(scopePath, pages).filter(p => customJS.DocSearch.matches(p, ctx));
-        if (docs.length) {
-            if (subs.length) {
-                customJS.SectionLabel.render(proxyDv, { text: "Pages" });
-            }
-            const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-            customJS.BeaconCards.render(proxyDv, {
-                pages: docs,
-                layout: "stacked",
-                columns: 2,
-                title: (p) => p.title || p.file.name,
-                icon: () => fileIcon,
-                target: (p) => p.file.path,
-                // subtitle (not meta) — meta only renders in row layout; grid cards
-                // surface the detail as a muted second line.
-                subtitle: (p) => {
-                    const created = p.created_at ? (window.moment ? window.moment(typeof p.created_at.toISO === "function" ? p.created_at.toISO() : String(p.created_at)).format("MMM D") : "") : "";
-                    const edited = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
-                    return created ? "created " + created + " · edited " + edited : (edited ? "edited " + edited : "");
-                },
-            });
-        }
+        // Browse view — delegate the rail (sections) + page pane (this folder's docs +
+        // pinned links) to the shared SectionExplorer mechanism.
+        const adapter = customJS.SectionExplorer.makeAdapter(this._config);
+        customJS.SectionExplorer.render({ ...dv, container }, adapter);
 
         // Recently updated — hub only. Rendered as cards (like sections/pages),
-        // each tagged with the section the page came from.
+        // each tagged with the section the page came from. Kept as WikiTree's own
+        // rendering (out of scope for SectionExplorer, which only knows about a
+        // single section's sections/pages, not a cross-subtree "recent" view).
         if (cur.type === "wiki-hub") {
             const allPages = dv.pages('"spice/wiki"');
             const allArr = allPages.array ? allPages.array() : Array.from(allPages);
@@ -208,71 +185,75 @@ class WikiTree {
         return "in " + parts.join(" / ");
     }
 
-    // Section cards as full-width ROWS (title left, sub-sections · docs · edited right),
-    // sorted by LAST-EDITED by default with a "Recent | A–Z" toggle. The chosen mode
-    // lives on dv.container so it survives search-driven re-renders; toggling re-sorts
-    // only these cards. This is the single Sections renderer, so the toggle is
-    // consistent on the hub AND every section / sub-section note.
-    _renderSectionCards(dv, proxyDv, subs, folderIcon) {
-        const host = proxyDv.container;
-        const meta = (s) => {
-            const parts = [];
-            if (s.subSectionCount) parts.push(s.subSectionCount + " section" + (s.subSectionCount === 1 ? "" : "s"));
-            parts.push(s.pageCount + " doc" + (s.pageCount === 1 ? "" : "s"));
-            if (s.maxMtime && window.moment) parts.push("edited " + window.moment(s.maxMtime).fromNow());
-            return parts.join(" · ");
+    // ── SectionExplorer adapter config — builds the wiki-specific
+    // resolveContext/listSections/listPages/getLinks/writeLinks/canDelete/
+    // deleteSection/renameSection/icons that SectionExplorer.render needs.
+    _buildConfig(dv, cur) {
+        const filePath = cur.file.path;
+        const scopePath = filePath.slice(0, filePath.lastIndexOf("/"));
+        const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+        const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+        const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
+
+        return {
+            resolveContext: () => ({ scopePath }),
+            listSections: (dv2, ctx) => {
+                const rawPages = dv2.pages('"' + ctx.scopePath + '"');
+                const pages = rawPages.array ? rawPages.array() : Array.from(rawPages);
+                return this._immediateChildFolders(ctx.scopePath, pages).map((s) => ({
+                    title: s.title,
+                    hubPath: s.hubPath,
+                    folder: s.folder,
+                    pageCount: s.pageCount,
+                    subSectionCount: s.subSectionCount,
+                    maxMtime: s.maxMtime,
+                    materialized: !!s.hubPath,
+                }));
+            },
+            listPages: (dv2, ctx) => {
+                const rawPages = dv2.pages('"' + ctx.scopePath + '"');
+                const pages = rawPages.array ? rawPages.array() : Array.from(rawPages);
+                return this._immediatePages(ctx.scopePath, pages);
+            },
+            getLinks: (target) => {
+                if (!target || !target.hubPath) return [];
+                const page = dv.page ? dv.page(target.hubPath) : null;
+                return (page && Array.isArray(page.links)) ? page.links : [];
+            },
+            writeLinks: (target, links) => {
+                if (!target || !target.hubPath) return Promise.resolve();
+                const f = app.vault.getAbstractFileByPath(target.hubPath);
+                if (!f) return Promise.resolve();
+                return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+            },
+            canDelete: (section) => !!section.hubPath && !section.pageCount && !section.subSectionCount,
+            deleteSection: (section) => {
+                const f = app.vault.getAbstractFileByPath(section.folder);
+                if (!f) return Promise.resolve();
+                return app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve();
+            },
+            renameSection: (section, newTitle) => {
+                const parent = section.folder.slice(0, section.folder.lastIndexOf("/"));
+                const newSlug = this._slugify(newTitle);
+                const newFolder = parent + "/" + newSlug;
+                const folderFile = app.vault.getAbstractFileByPath(section.folder);
+                const renamePromise = folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve();
+                const hubFile = app.vault.getAbstractFileByPath(section.hubPath);
+                const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.title = newTitle; }) : Promise.resolve();
+                return Promise.all([renamePromise, fmPromise]);
+            },
+            icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
+            rootClass: "se-root",
         };
-        const renderCards = (container, ordered) => {
-            const cdv = this._makeProxyDv(dv, container);
-            customJS.BeaconCards.render(cdv, {
-                pages: ordered,
-                layout: "row",
-                sort: () => 0,   // keep OUR order (synthetic pages have no file.mtime for BeaconCards' default sort)
-                title: (s) => s.title,
-                icon: () => folderIcon,
-                // BeaconCards navigates via `target` (→ openLinkText), NOT `link`. Section
-                // entries are plain objects (no .file.path) → need an explicit target.
-                target: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
-                meta,
-            });
-        };
+    }
 
-        // A single section → no toggle, just the card.
-        if (subs.length < 2) { renderCards(host, subs); return; }
-
-        const sortRecent = (list) => [...list].sort((a, b) => (b.maxMtime || 0) - (a.maxMtime || 0));
-        const sortAlpha  = (list) => [...list].sort((a, b) => String(a.title).localeCompare(String(b.title)));
-
-        const toggle = host.createEl("div");
-        toggle.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; margin: -2px 0 0 0;";
-        const cardsWrap = host.createEl("div");
-
-        const modes = [{ key: "recent", label: "Recent" }, { key: "alpha", label: "A–Z" }];
-        const pills = {};
-        const getMode = () => (dv.container.__wikiSectionSort === "alpha" ? "alpha" : "recent");
-        const paint = () => {
-            const mode = getMode();
-            for (const m of modes) {
-                const active = m.key === mode;
-                pills[m.key].style.cssText = "cursor: pointer; font-size: 0.72em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--background-modifier-border); " +
-                    (active ? "background: var(--interactive-accent); color: var(--text-on-accent); border-color: var(--interactive-accent);"
-                            : "background: transparent; color: var(--text-muted);");
-            }
-            cardsWrap.empty();
-            renderCards(cardsWrap, mode === "alpha" ? sortAlpha(subs) : sortRecent(subs));
-        };
-        for (const m of modes) {
-            const pill = toggle.createEl("span");
-            pill.textContent = m.label;
-            pill.onclick = () => { dv.container.__wikiSectionSort = m.key; paint(); };
-            pills[m.key] = pill;
-        }
-        paint();
+    _slugify(label) {
+        return String(label || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     }
 
     // Aggregates each immediate child section: pageCount (docs, recursive),
     // subSectionCount (immediate sub-section folders), and maxMtime (last edit of
-    // ANY note in the subtree). The card meta surfaces all three.
+    // ANY note in the subtree). Ported verbatim (still used by _buildConfig.listSections).
     _immediateChildFolders(scopePath, pages) {
         const seen = new Map();
         for (const p of pages) {
