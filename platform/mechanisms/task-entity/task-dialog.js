@@ -55,6 +55,10 @@ class TaskDialog {
     _chromeBody() { return TaskDialog._chromeBody(); }
     _payloadFromState(state) { return TaskDialog._payloadFromState(state); }
     _recurrenceValidity(recurrence, isSupportedFn) { return TaskDialog._recurrenceValidity(recurrence, isSupportedFn); }
+    _composeRecurrenceGrammar(freq, opts) { return TaskDialog._composeRecurrenceGrammar(freq, opts); }
+    _ordinalSuffix(n) { return TaskDialog._ordinalSuffix(n); }
+    _recurrenceStateFromDescribe(described) { return TaskDialog._recurrenceStateFromDescribe(described); }
+    _recurrencePickerValid(state) { return TaskDialog._recurrencePickerValid(state); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
 
@@ -124,6 +128,101 @@ class TaskDialog {
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '');
+    }
+
+    /**
+     * Compose a RecurrenceParser grammar string from the dialog's structured
+     * picker state. `freq` is one of 'none' | 'daily' | 'weekday' | 'weekly' |
+     * 'monthly'; `opts.days` is an array of 0(Sun)..6(Sat), `opts.weeks` is the
+     * "every N weeks" interval (weekly only, N<=1 omits the wrapper),
+     * `opts.dayOfMonth` is 1..31 (monthly only). Days are de-duped, filtered to
+     * 0..6, and sorted Sun..Sat so click order never affects the output — the
+     * composed string is deterministic. Weekly with zero valid days, or
+     * monthly with an out-of-range/missing day, both return "" (never a
+     * malformed "every " with nothing after it). Pure, never throws.
+     */
+    static _composeRecurrenceGrammar(freq, opts) {
+        const o = opts || {};
+        switch (freq) {
+            case 'daily':
+                return 'every day';
+            case 'weekday':
+                return 'every weekday';
+            case 'monthly': {
+                const day = parseInt(o.dayOfMonth, 10);
+                if (!Number.isInteger(day) || day < 1 || day > 31) return '';
+                return 'every ' + day + TaskDialog._ordinalSuffix(day) + ' of month';
+            }
+            case 'weekly': {
+                const raw = Array.isArray(o.days) ? o.days : [];
+                const uniq = Array.from(new Set(raw.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort((a, b) => a - b);
+                if (uniq.length === 0) return '';
+                const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const dayNames = uniq.map((d) => DOW_NAMES[d]).join(' ');
+                const weeks = parseInt(o.weeks, 10);
+                if (Number.isInteger(weeks) && weeks > 1) return 'every ' + weeks + ' weeks on ' + dayNames;
+                return 'every ' + dayNames;
+            }
+            case 'none':
+            default:
+                return '';
+        }
+    }
+
+    /** English ordinal suffix for a day-of-month number (1st, 2nd, 3rd, 4th..11th..21st..). */
+    static _ordinalSuffix(n) {
+        const v = n % 100;
+        if (v >= 11 && v <= 13) return 'th';
+        switch (n % 10) {
+            case 1: return 'st';
+            case 2: return 'nd';
+            case 3: return 'rd';
+            default: return 'th';
+        }
+    }
+
+    /**
+     * Reverse-map RecurrenceParser.describe()'s output into the picker's
+     * initial UI state — { freq, days, weeks, dayOfMonth } — for hydrating
+     * the dialog when editing a task that already has a recurrence. A `null`
+     * input (no recurrence, or an unsupported/legacy grammar) maps to
+     * freq: 'none' with everything blank, never throws.
+     */
+    static _recurrenceStateFromDescribe(described) {
+        const BLANK = { freq: 'none', days: [], weeks: 1, dayOfMonth: null };
+        if (!described) return BLANK;
+        switch (described.kind) {
+            case 'daily':
+                return Object.assign({}, BLANK, { freq: 'daily' });
+            case 'weekday-block':
+                return Object.assign({}, BLANK, { freq: 'weekday' });
+            case 'weekend-block':
+                return Object.assign({}, BLANK, { freq: 'weekly', days: [0, 6] });
+            case 'day-of-month':
+                return Object.assign({}, BLANK, { freq: 'monthly', dayOfMonth: described.day || null });
+            case 'weekday-set':
+                return Object.assign({}, BLANK, { freq: 'weekly', days: Array.isArray(described.days) ? described.days.slice() : [] });
+            case 'every-n-weeks-on-day':
+                return Object.assign({}, BLANK, {
+                    freq: 'weekly',
+                    days: Array.isArray(described.days) ? described.days.slice() : [],
+                    weeks: described.weeks || 1,
+                });
+            default:
+                return BLANK;
+        }
+    }
+
+    /**
+     * Gate for Save: the only structurally-invalid picker state is Weekly
+     * with zero days toggled (which would silently compose to "" — i.e.
+     * "doesn't repeat" — contradicting the user's choice of Weekly). Every
+     * other frequency is always valid. Pure, never throws.
+     */
+    static _recurrencePickerValid(state) {
+        const s = state || {};
+        if (s.recurrenceFreq !== 'weekly') return true;
+        return Array.isArray(s.recurrenceDays) && s.recurrenceDays.length > 0;
     }
 
     /**
