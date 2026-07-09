@@ -158,7 +158,6 @@ class ProjectDocsIndex {
       persist: false,
       entityType: "doc-note",
       onChange: (c) => {
-        this._currentCtx = c;
         c.resultsContainer.empty();
         this._renderTerminal(dv, docsFolder, c);
       },
@@ -166,10 +165,6 @@ class ProjectDocsIndex {
     // Wiki parity: normalize the shared search strip's top gap to 12px (it ships
     // a 2px top margin) so the space above the search matches the divider grammar.
     try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
-    if (this._currentCtx) {
-      Object.assign(filterCtx, this._currentCtx);
-    }
-
     // Tier 3 — either the search-mode results list, or (no active filter) the
     // browse view rendered by the shared SectionExplorer mechanism.
     this._renderTerminal(dv, docsFolder, filterCtx);

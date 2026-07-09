@@ -71,17 +71,12 @@ class SectionHub {
       persist: false,
       entityType: "doc-note",
       onChange: (ctx) => {
-        this._currentCtx = ctx;
         ctx.resultsContainer.empty();
         this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, ctx);
       },
     });
     // Wiki parity: normalize the shared search strip's top gap to 12px.
     try { const strip = dv.container.querySelector(".doc-search-strip"); if (strip && strip.style) strip.style.marginTop = "12px"; } catch (_e) {}
-    if (this._currentCtx) {
-      Object.assign(filterCtx, this._currentCtx);
-    }
-
     this._config = this._buildConfig(cur, depth, projectSlug, sectionSlug, sectionName);
 
     // ── Tier 3: list (leading hairline + sub-sections + docs) ─────────────────

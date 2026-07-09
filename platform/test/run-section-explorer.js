@@ -629,4 +629,71 @@ failures += !run("REGRESSION: section-explorer manifest ships its CSS via snippe
   );
 });
 
+// ── Regression: SectionHub/ProjectDocsIndex are customJS SINGLETONS — one
+// instance reused for every note. DocSearch.render() creates a brand-new
+// resultsContainer per call, but the (now-deleted) `Object.assign(filterCtx,
+// this._currentCtx)` restore overwrote the fresh ctx (incl. resultsContainer)
+// with the one captured by the LAST onChange anywhere in the vault, so all
+// content rendered into a detached, invisible container ("no docs" despite
+// real matches). WikiTree never had the mechanism and works.
+failures += !run("REGRESSION: a prior render's search onChange must not hijack a later render's resultsContainer (ProjectDocsIndex singleton)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+
+  const SectionExplorer = loadClass();
+  let capturedOnChange = null;
+  global.customJS = {
+    SectionExplorer: new SectionExplorer(),
+    DocSearch: {
+      render: (dv, opts) => {
+        capturedOnChange = opts.onChange;
+        return { hasActiveFilter: false, resultsContainer: dv.container.createEl("div", { cls: "results" }) };
+      },
+      matches: () => true,
+    },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    MenuPopover: { open: () => {} },
+    BeaconCards: { render: () => {} },
+    AccentButton: { render: () => {} },
+  };
+  // Unrelated latent quirk: _buildConfig's getLinks references a bare `dv`
+  // identifier (not in scope) — stub a global so this regression test can
+  // reach its own assertions instead of dying on that ReferenceError.
+  global.dv = { page: () => null };
+
+  const pagesFor = (slug) => [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { path: `spice/projects/${slug}/docs/knowledge/Knowledge.md`, name: "Knowledge", folder: `spice/projects/${slug}/docs/knowledge`, mtime: { ts: 1 } } },
+  ];
+
+  const pdi = new ProjectDocsIndex();
+
+  // Render #1 on note A, then simulate a search keystroke: onChange fires with
+  // a ctx bound to note A's (soon-stale) resultsContainer.
+  const { container: containerA } = makeDomStub();
+  const curA = { file: { path: "spice/projects/aaa/docs/Docs.md", folder: "spice/projects/aaa/docs" }, type: "docs-hub" };
+  pdi.render(makeClassShapedDv(containerA, pagesFor("aaa"), curA));
+  assert.ok(capturedOnChange, "expected DocSearch.render to receive an onChange");
+  const staleStub = makeDomStub();
+  capturedOnChange({ hasActiveFilter: false, resultsContainer: staleStub.container, text: "", tags: new Set() });
+  // The onChange itself legitimately re-renders note A's browse view into its
+  // own container — baseline that count; render #2 must not ADD to it.
+  const staleRowsAfterOnChange = staleStub.els.filter((e) => e.className === "se-rail-row").length;
+
+  // Render #2 on note B (fresh containers). All browse content must land under
+  // note B's own DOM — nothing may leak into the stale ctx's container.
+  const { container: containerB, els: elsB } = makeDomStub();
+  const curB = { file: { path: "spice/projects/bbb/docs/Docs.md", folder: "spice/projects/bbb/docs" }, type: "docs-hub" };
+  pdi.render(makeClassShapedDv(containerB, pagesFor("bbb"), curB));
+
+  const rowsInB = elsB.filter((e) => e.className === "se-rail-row");
+  const rowsInStale = staleStub.els.filter((e) => e.className === "se-rail-row");
+  assert.strictEqual(rowsInStale.length, staleRowsAfterOnChange, "no NEW rail rows may render into the PRIOR render's stale resultsContainer");
+  assert.strictEqual(rowsInB.length, 1, "render #2's rail rows must land in ITS OWN resultsContainer — got " + rowsInB.length + " (stale-_currentCtx hijack)");
+  delete global.customJS;
+  delete global.dv;
+});
+
 process.exit(failures > 0 ? 1 : 0);
