@@ -46,6 +46,7 @@ class SectionExplorer {
       icons: config.icons || { folder: "", file: "" },
       rootClass: config.rootClass || "se-root",
       pageLabel: config.pageLabel || "Docs",
+      listRecent: config.listRecent ? ((dv, ctx) => config.listRecent(dv, ctx) || []) : null,
     };
   }
 
@@ -71,47 +72,104 @@ class SectionExplorer {
     const sections = adapter.listSections(dv, ctx);
     this._renderRail(dv, adapter, ctx, sections, root);
 
-    // Empty-state suppression: when the hub has sections but no direct pages,
-    // an empty pane ("Nothing here yet.") IS redundant chrome — the rail
-    // already communicates the structure. Only a truly-empty leaf (0 sections
-    // AND 0 pages) keeps the pane so its empty message means something.
+    // No docs at this level but real sections in the rail — fill the pane
+    // with the subtree's recently-updated docs when the adapter provides
+    // them; otherwise (no listRecent / nothing recent) suppress the pane —
+    // an empty "Nothing here yet." box next to a populated rail is noise.
+    // A truly-empty leaf (0 sections AND 0 pages) keeps the pane so its
+    // empty message means something.
     const pages = adapter.listPages(dv, ctx, null);
     const pageCount = Array.isArray(pages) ? pages.length : (pages && pages.length) || 0;
-    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) return;
+    if (pageCount === 0 && Array.isArray(sections) && sections.length > 0) {
+      const recent = adapter.listRecent ? adapter.listRecent(dv, ctx) : [];
+      if (!Array.isArray(recent) || recent.length === 0) return;
+      const recentPane = root.createEl("div", { cls: "se-page-pane" });
+      this._renderRecentPane(dv, adapter, ctx, recent, recentPane);
+      return;
+    }
 
     const pane = root.createEl("div", { cls: "se-page-pane" });
     this._renderPagePane(dv, adapter, ctx, null, pages, pane);
   }
 
-  _renderPagePane(dv, adapter, ctx, section, pages, pane) {
-    const links = adapter.getLinks(section || ctx);
-    if (Array.isArray(links) && links.length > 0) {
-      const linksRow = pane.createEl("div", { cls: "se-links-row" });
-      for (const link of links) {
-        const a = linksRow.createEl("a", { cls: "se-link-chip" });
-        a.textContent = link.text || link.url;
-        if (this._isSafeUrl(link.url)) {
-          a.href = link.url;
-          a.target = "_blank";
-          a.rel = "noopener";
-        }
-        // Unsafe/malformed URLs: no href set — chip stays visible as plain
-        // text instead of a live link, and is never silently dropped.
-      }
-    }
+  // Recent mode — a hub/section with zero direct docs shows the subtree's
+  // recently-updated docs instead of an empty pane. Links row still renders
+  // (the hub's own pinned links stay reachable), then the recent card grid.
+  _renderRecentPane(dv, adapter, ctx, recent, pane) {
+    this._renderLinksRow(adapter, ctx, pane);
+    pane.createEl("div", { cls: "se-group-label se-pane-label", text: "Recently updated" });
+    this._renderDocCards(pane, adapter, recent);
+  }
 
-    if (typeof customJS === "undefined" || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") return;
+  // Pinned-links chips row — shared by the normal page pane and recent mode.
+  _renderLinksRow(adapter, target, pane) {
+    const links = adapter.getLinks(target);
+    if (!Array.isArray(links) || links.length === 0) return;
+    const linksRow = pane.createEl("div", { cls: "se-links-row" });
+    for (const link of links) {
+      const a = linksRow.createEl("a", { cls: "se-link-chip" });
+      a.textContent = link.text || link.url;
+      if (this._isSafeUrl(link.url)) {
+        a.href = link.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+      }
+      // Unsafe/malformed URLs: no href set — chip stays visible as plain
+      // text instead of a live link, and is never silently dropped.
+    }
+  }
+
+  _renderPagePane(dv, adapter, ctx, section, pages, pane) {
+    this._renderLinksRow(adapter, section || ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
-    const proxyDv = this._makeProxyDv(dv, pane);
-    const fileIcon = adapter.icons.file || "";
-    customJS.BeaconCards.render(proxyDv, {
-      pages,
-      layout: "stacked",
-      columns: 2,
-      title: (p) => p.title || (p.file && p.file.name),
-      icon: () => fileIcon,
-      target: (p) => p.file && p.file.path,
-    });
+    const cards = (Array.isArray(pages) ? pages : Array.from(pages || [])).map((p) => this._docCardModel(p));
+    this._renderDocCards(pane, adapter, cards);
+  }
+
+  // Normalize a Dataview page into the doc-card model {title, path, mtime, where}.
+  _docCardModel(p) {
+    return {
+      title: (p && p.title) || (p && p.file && p.file.name) || "",
+      path: (p && p.file && p.file.path) || "",
+      mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || 0,
+      where: null,
+    };
+  }
+
+  // Mechanism-owned doc cards — the pane's visual language lives here (not in
+  // BeaconCards) so docs read distinctly from rail section rows: each card
+  // carries a bordered accent icon BADGE (the "this is a document" mark),
+  // where rail rows use a flat inline folder icon.
+  _renderDocCards(pane, adapter, cards) {
+    if (!Array.isArray(cards) || cards.length === 0) {
+      const empty = pane.createEl("div", { cls: "se-doc-empty" });
+      empty.textContent = "Nothing here yet.";
+      return;
+    }
+    const grid = pane.createEl("div", { cls: "se-doc-grid" });
+    for (const c of cards) {
+      const card = grid.createEl("div", { cls: "se-doc-card" });
+      const icon = card.createEl("span", { cls: "se-doc-icon" });
+      icon.innerHTML = adapter.icons.file || "";
+      const body = card.createEl("div", { cls: "se-doc-body" });
+      const title = body.createEl("div", { cls: "se-doc-title" });
+      title.textContent = c.title;
+      const sub = body.createEl("div", { cls: "se-doc-sub" });
+      sub.textContent = this._docCardSub(c);
+      card.onclick = () => {
+        if (c.path) { try { app.workspace.openLinkText(c.path, "", false); } catch (_e) { /* never-throw */ } }
+      };
+    }
+  }
+
+  // "in <section> · 2 hours ago" (recent mode) / "edited 2 hours ago" (docs mode).
+  _docCardSub(c) {
+    let ago = "";
+    try {
+      if (c.mtime && typeof window !== "undefined" && window.moment) ago = window.moment(c.mtime).fromNow();
+    } catch (_e) { /* cosmetic */ }
+    if (c.where) return ago ? ("in " + c.where + " · " + ago) : ("in " + c.where);
+    return ago ? ("edited " + ago) : "";
   }
 
   _isSafeUrl(url) {
@@ -128,14 +186,6 @@ class SectionExplorer {
       const lower = trimmed.toLowerCase();
       return SectionExplorer.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
     } catch (_e) { return false; }
-  }
-
-  _makeProxyDv(dv, container) {
-    return {
-      container,
-      current: dv.current ? dv.current.bind(dv) : (() => null),
-      pages: dv.pages ? dv.pages.bind(dv) : (() => []),
-    };
   }
 
   _renderRail(dv, adapter, ctx, sections, root) {
@@ -327,6 +377,64 @@ class SectionExplorer {
   _openDeleteConfirm(dv, adapter, section) {
     if (!adapter.canDelete(section)) return;
     try { adapter.deleteSection(section); } catch (_e) { /* never-throw */ }
+  }
+
+  // ── renderNoteLinks — pinned links on a LEAF note (wiki-page / doc-note).
+  // Called by WikiChromeBar/ProjectChromeBar right after the bar renders, so
+  // every existing note gets the feature with zero body migration. Renders the
+  // note's frontmatter links[] as clickable cards plus an always-present
+  // "＋ Add link" pill that reuses the existing add-link modal, writing back to
+  // THIS note via processFrontMatter (creates the links key on first write).
+  renderNoteLinks(dv) {
+    try {
+      const container = (dv && dv.container) ? dv.container : dv;
+      if (!container || typeof container.createEl !== "function") return;
+      // RenderSafe overlays partial cold-load pages when available (v0.200.1).
+      let page = null;
+      try {
+        if (typeof customJS !== "undefined" && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function") {
+          page = customJS.RenderSafe.page(dv);
+        }
+      } catch (_e) { page = null; }
+      if (!page) { try { page = dv.current ? dv.current() : null; } catch (_e) { page = null; } }
+      if (!page || !page.file || !page.file.path) return;
+
+      const strip = container.createEl("div", { cls: "se-note-links" });
+      const links = Array.isArray(page.links) ? page.links : [];
+      const linkIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+      for (const link of links) {
+        if (!link || !link.url) continue;
+        const a = strip.createEl("a", { cls: "se-note-link-card" });
+        a.innerHTML = linkIcon + `<span class="se-note-link-text">${this._escape(link.text || link.url)}</span>`;
+        if (this._isSafeUrl(link.url)) {
+          a.href = link.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+        }
+        // Unsafe/malformed URLs: no href — the card stays visible as dead
+        // text, never silently dropped (same rule as the pane link chips).
+      }
+      const add = strip.createEl("span", { cls: "se-note-link-add" });
+      add.textContent = "＋ Add link";
+      const noteAdapter = this._noteSelfAdapter(page);
+      add.onclick = () => this._openAddLinkForm(dv, noteAdapter, null);
+    } catch (_e) { /* never-throw */ }
+  }
+
+  // Self-adapter for the CURRENT note — the minimal getLinks/writeLinks surface
+  // _openAddLinkForm needs, bound to this note's own frontmatter.
+  _noteSelfAdapter(page) {
+    const notePath = page.file.path;
+    return {
+      getLinks: () => (Array.isArray(page.links) ? page.links : []),
+      writeLinks: (_target, links) => {
+        try {
+          const f = app.vault.getAbstractFileByPath(notePath);
+          if (!f) return Promise.resolve();
+          return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+        } catch (_e) { return Promise.resolve(); }
+      },
+    };
   }
 
   _escape(s) {

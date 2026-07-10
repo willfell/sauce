@@ -71,6 +71,10 @@ function run(name, fn) {
 
 let failures = 0;
 
+// Async tests register here and run in the async tail before process.exit —
+// everything above stays synchronous `failures += !run(...)`.
+const ASYNC_TESTS = [];
+
 failures += !run("makeAdapter returns an object exposing render-ready shape", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
@@ -136,16 +140,14 @@ failures += !run("rail rows show meta (doc/section counts) and re-sort on toggle
   assert.ok(meta, "expected a meta line mentioning doc count");
 });
 
-failures += !run("page pane renders BeaconCards.render with the section's pages", () => {
+failures += !run("page pane renders mechanism-owned doc cards (no BeaconCards)", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  const { container } = makeDomStub();
-  const calls = [];
-  global.customJS = {
-    BeaconCards: { render: (proxyDv, opts) => { calls.push(opts); } },
-  };
+  const beaconCalls = [];
+  global.customJS = { BeaconCards: { render: (d, o) => beaconCalls.push(o) } };
+  const { container, els } = makeDomStub();
   const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
-  const pages = [{ file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }];
+  const pages = [{ title: null, file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1000 } } }];
   const adapter = se.makeAdapter({
     resolveContext: () => ({ scopePath: "spice/wiki" }),
     listSections: () => [],
@@ -155,8 +157,15 @@ failures += !run("page pane renders BeaconCards.render with the section's pages"
     rootClass: "se-root",
   });
   se.render(dv, adapter);
-  assert.strictEqual(calls.length, 1, "expected BeaconCards.render to be called once");
-  assert.strictEqual(calls[0].pages.length, 1);
+  assert.strictEqual(beaconCalls.length, 0, "BeaconCards must NOT be called by the pane anymore");
+  const grid = els.find((e) => e.className === "se-doc-grid");
+  assert.ok(grid, "expected a se-doc-grid");
+  const cards = els.filter((e) => e.className === "se-doc-card");
+  assert.strictEqual(cards.length, 1);
+  const title = els.find((e) => e.className === "se-doc-title");
+  assert.strictEqual(title.textContent, "Runbook");
+  const icon = els.find((e) => e.className === "se-doc-icon");
+  assert.ok(icon, "expected the doc icon badge");
   delete global.customJS;
 });
 
@@ -929,11 +938,10 @@ failures += !run("empty page pane is SUPPRESSED entirely when sections exist (no
   delete global.customJS;
 });
 
-failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the pane empty-state message", () => {
+failures += !run("genuinely empty leaf (0 sections AND 0 pages) shows the mechanism-owned empty-state box", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  const calls = [];
-  global.customJS = { BeaconCards: { render: (d, o) => calls.push(o) } };
+  global.customJS = {};
   const { container, els } = makeDomStub();
   const dv = { container, current: () => ({ file: { path: "spice/wiki/empty/Empty.md" } }) };
   const adapter = se.makeAdapter({
@@ -946,9 +954,288 @@ failures += !run("genuinely empty leaf (0 sections AND 0 pages) still shows the 
   });
   se.render(dv, adapter);
   assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 1, "pane still renders on a truly-empty leaf");
-  assert.strictEqual(calls.length, 1, "BeaconCards still called — its built-in empty message communicates the real 'nothing here'");
-  assert.deepStrictEqual(calls[0].pages, [], "called with zero pages");
+  const empty = els.find((e) => e.className === "se-doc-empty");
+  assert.ok(empty, "expected the mechanism-owned empty-state box");
+  assert.strictEqual(empty.textContent, "Nothing here yet.");
   delete global.customJS;
 });
 
-process.exit(failures > 0 ? 1 : 0);
+failures += !run("hub with sections but 0 root pages renders 'Recently updated' cards from listRecent", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { MenuPopover: { open: () => {} } };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+    listPages: () => [],
+    listRecent: () => [
+      { title: "Kargo Step by Step", path: "spice/wiki/ems/Kargo.md", mtime: 2000, where: "EMS" },
+      { title: "POC Links", path: "spice/wiki/links/POC.md", mtime: 1000, where: "Links" },
+    ],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const label = els.find((e) => e.className === "se-group-label se-pane-label");
+  assert.ok(label, "expected a pane label in recent mode");
+  assert.strictEqual(label.textContent, "Recently updated");
+  const cards = els.filter((e) => e.className === "se-doc-card");
+  assert.strictEqual(cards.length, 2, "expected one card per recent doc");
+  const subs = els.filter((e) => e.className === "se-doc-sub").map((e) => e.textContent);
+  assert.ok(subs.some((s) => s.startsWith("in EMS")), "recent card subtitle carries its section (got: " + JSON.stringify(subs) + ")");
+  delete global.customJS;
+});
+
+failures += !run("hub with sections, 0 root pages and NO listRecent (or empty) still suppresses the pane", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = { MenuPopover: { open: () => {} } };
+  const mk = (listRecent) => {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const cfg = {
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [{ title: "EMS", hubPath: "e.md", folder: "e", pageCount: 2, subSectionCount: 0, maxMtime: 1, materialized: true }],
+      listPages: () => [],
+      getLinks: () => [],
+      icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+      rootClass: "se-root",
+    };
+    if (listRecent) cfg.listRecent = listRecent;
+    se.render(dv, se.makeAdapter(cfg));
+    return els;
+  };
+  for (const els of [mk(null), mk(() => [])]) {
+    assert.strictEqual(els.filter((e) => e.className === "se-page-pane").length, 0, "pane must stay suppressed without recent content");
+  }
+  delete global.customJS;
+});
+
+failures += !run("pane with real root pages ignores listRecent (normal docs mode)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  global.customJS = {};
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/ems/EMS.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki/ems" }),
+    listSections: () => [],
+    listPages: () => [{ title: null, file: { name: "Runbook", path: "spice/wiki/ems/Runbook.md", mtime: { ts: 1 } } }],
+    listRecent: () => [{ title: "ShouldNotShow", path: "x.md", mtime: 9, where: "X" }],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const label = els.find((e) => e.className === "se-group-label se-pane-label");
+  assert.strictEqual(label.textContent, "Docs");
+  const titles = els.filter((e) => e.className === "se-doc-title").map((e) => e.textContent);
+  assert.deepStrictEqual(titles, ["Runbook"]);
+  delete global.customJS;
+});
+
+failures += !run("wiki adapter listRecent returns subtree-recent pages with section subtitles, capped at 8", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  const factory = new Function("module", "exports", treeSrc + "\nmodule.exports = WikiTree;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiTree = mod.exports;
+  const wt = new WikiTree();
+  const pages = [
+    { type: "wiki-section", title: "EMS", file: { name: "EMS", path: "spice/wiki/ems/EMS.md", mtime: { ts: 1 } } },
+  ];
+  for (let i = 0; i < 10; i++) {
+    pages.push({ type: "wiki-page", title: "Page " + i, file: { name: "Page " + i, path: "spice/wiki/ems/Page " + i + ".md", mtime: { ts: 100 + i } } });
+  }
+  const dvStub = {
+    page: () => null,
+    pages: () => { const arr = pages.slice(); arr.array = () => arr; return arr; },
+  };
+  const config = wt._buildConfig(dvStub, { file: { path: "spice/wiki/Wiki.md" } });
+  assert.strictEqual(typeof config.listRecent, "function", "wiki config must expose listRecent");
+  const recent = config.listRecent(dvStub, { scopePath: "spice/wiki" });
+  assert.strictEqual(recent.length, 8, "capped at 8");
+  assert.strictEqual(recent[0].title, "Page 9", "most recent first");
+  assert.strictEqual(recent[0].where, "EMS", "where = the page's section display title");
+  assert.strictEqual(recent[0].mtime, 109);
+});
+
+failures += !run("WikiTree hub render no longer draws its own Recently-Updated grid (moved into the pane)", () => {
+  const treeSrc = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-tree.js"), "utf8");
+  assert.ok(!/Recently updated/.test(treeSrc), "wiki-tree.js must not render its own 'Recently updated' section anymore");
+});
+
+failures += !run("project docs-index adapter listRecent returns subtree-recent doc-notes with section subtitles", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const docsFolder = "spice/projects/foo/docs";
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Knowledge", file: { name: "Knowledge", path: docsFolder + "/knowledge/Knowledge.md", folder: docsFolder + "/knowledge", mtime: { ts: 1 } } },
+    { type: "doc-note", file: { name: "Dashboards", path: docsFolder + "/knowledge/Dashboards.md", folder: docsFolder + "/knowledge", mtime: { ts: 500 } } },
+    { type: "doc-note", file: { name: "Older", path: docsFolder + "/knowledge/Older.md", folder: docsFolder + "/knowledge", mtime: { ts: 100 } } },
+  ];
+  const dvStub = { page: () => null, pages: () => { const a = pages.slice(); a.array = () => a; a.where = (fn) => { const r = a.filter(fn); r.array = () => r; return r; }; return a; } };
+  const config = pdi._buildConfig(dvStub, { file: { path: docsFolder + "/Docs.md" } }, { projectSlug: "foo", projectPath: "spice/projects/foo", docsFolder, scopePath: docsFolder });
+  assert.strictEqual(typeof config.listRecent, "function");
+  const recent = config.listRecent(dvStub, { scopePath: docsFolder });
+  assert.strictEqual(recent.length, 2);
+  assert.strictEqual(recent[0].title, "Dashboards");
+  assert.strictEqual(recent[0].where, "Knowledge");
+});
+
+failures += !run("section-hub adapter exposes listRecent (subtree-recent doc-notes)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const dvStub = { page: () => null, pages: () => { const a = []; a.array = () => a; a.where = (fn) => { const r = a.filter(fn); r.array = () => r; return r; }; return a; } };
+  const config = sh._buildConfig(dvStub, { file: { path: "spice/projects/foo/docs/ems/EMS.md", folder: "spice/projects/foo/docs/ems" }, project_slug: "foo", section_slug: "ems", section: "EMS", depth: 1 }, 1, "foo", "ems", "EMS");
+  assert.strictEqual(typeof config.listRecent, "function");
+  assert.deepStrictEqual(config.listRecent(dvStub, {}), []);
+});
+
+failures += !run("renderNoteLinks: chips for saved links + a trailing Add-link pill; unsafe schemes stay dead text", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = {
+    container,
+    current: () => ({ type: "wiki-page", links: [
+      { url: "https://grafana.example.com", text: "Grafana" },
+      { url: "javascript:alert(1)", text: "evil" },
+    ], file: { path: "spice/wiki/ems/Runbook.md" } }),
+  };
+  se.renderNoteLinks(dv);
+  const strip = els.find((e) => e.className === "se-note-links");
+  assert.ok(strip, "expected a se-note-links strip");
+  const cards = els.filter((e) => e.className === "se-note-link-card");
+  assert.strictEqual(cards.length, 2, "one card per saved link, unsafe ones included as dead text");
+  const good = cards.find((c) => c.innerHTML.includes("Grafana"));
+  assert.strictEqual(good.href, "https://grafana.example.com");
+  assert.strictEqual(good.target, "_blank");
+  assert.ok(String(good.rel).includes("noopener"));
+  const evil = cards.find((c) => c.innerHTML.includes("evil"));
+  assert.ok(!evil.href, "unsafe scheme gets no href");
+  const add = els.find((e) => e.className === "se-note-link-add");
+  assert.ok(add, "expected the Add-link pill");
+});
+
+failures += !run("renderNoteLinks: zero/missing links still renders just the Add-link pill", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ type: "doc-note", file: { path: "spice/projects/foo/docs/knowledge/D.md" } }) };
+  se.renderNoteLinks(dv);
+  assert.strictEqual(els.filter((e) => e.className === "se-note-link-card").length, 0);
+  assert.ok(els.find((e) => e.className === "se-note-link-add"), "Add-link pill always present");
+});
+
+failures += !run("renderNoteLinks add pill: writeLinks path appends via processFrontMatter and creates links[] when absent", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const fmWrites = [];
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    fileManager: { processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ file: f, fm }); return Promise.resolve(); } },
+    workspace: { openLinkText: () => {} },
+  };
+  const page = { type: "wiki-page", file: { path: "spice/wiki/ems/Runbook.md" } }; // no links key at all
+  const noteAdapter = se._noteSelfAdapter(page);
+  const current = noteAdapter.getLinks();
+  assert.deepStrictEqual(current, [], "missing links[] tolerated as empty");
+  const result = se._addLinkPure(current, { url: "https://x.com", text: "X" });
+  noteAdapter.writeLinks(null, result.links);
+  assert.strictEqual(fmWrites.length, 1);
+  assert.strictEqual(fmWrites[0].file.path, "spice/wiki/ems/Runbook.md");
+  assert.deepStrictEqual(fmWrites[0].fm.links, [{ url: "https://x.com", text: "X" }]);
+  delete global.app;
+});
+
+failures += !run("renderNoteLinks: cold-load partial page (no file) renders nothing and never throws", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => null };
+  se.renderNoteLinks(dv);   // must not throw
+  assert.strictEqual(els.filter((e) => e.className === "se-note-links").length, 0);
+});
+
+failures += !run("WikiChromeBar.render calls SectionExplorer.renderNoteLinks on wiki-page only", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-chrome-bar.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = WikiChromeBar;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiChromeBar = mod.exports;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: { makeAdapter: (c) => c, render: () => {} },
+    SectionExplorer: { renderNoteLinks: (dv) => calls.push(dv) },
+  };
+  try {
+    const bar = new WikiChromeBar();
+    const mk = (type) => ({ container: { createEl: () => ({}) }, current: () => ({ type, file: { path: "p.md" } }) });
+    bar.render(mk("wiki-page"));
+    assert.strictEqual(calls.length, 1, "wiki-page must trigger renderNoteLinks");
+    bar.render(mk("wiki-hub"));
+    bar.render(mk("wiki-section"));
+    assert.strictEqual(calls.length, 1, "hubs/sections must NOT trigger renderNoteLinks");
+  } finally {
+    delete global.customJS;
+  }
+});
+
+ASYNC_TESTS.push({ name: "ProjectChromeBar.render calls SectionExplorer.renderNoteLinks on doc-note only", fn: async () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-chrome-bar.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectChromeBar;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectChromeBar = mod.exports;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: { makeAdapter: (c) => c, render: () => {} },
+    SectionExplorer: { renderNoteLinks: (dv) => calls.push(dv) },
+  };
+  try {
+    const bar = new ProjectChromeBar();
+    const mk = (type, path2) => ({ container: { createEl: () => ({}) }, current: () => ({ type, file: { path: path2, folder: path2.slice(0, path2.lastIndexOf("/")) } }) });
+    await bar.render(mk("doc-note", "spice/projects/foo/docs/knowledge/D.md"));
+    assert.strictEqual(calls.length, 1, "doc-note must trigger renderNoteLinks");
+    await bar.render(mk("docs-hub", "spice/projects/foo/docs/Docs.md"));
+    await bar.render(mk("section-hub", "spice/projects/foo/docs/k/K.md"));
+    assert.strictEqual(calls.length, 1, "hubs must NOT trigger renderNoteLinks");
+  } finally {
+    delete global.customJS;
+  }
+}});
+
+failures += !run("wiki + project blueprint manifests declare depends_on section-explorer", () => {
+  for (const bp of ["wiki", "project"]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, `../blueprints/${bp}/manifest.json`), "utf8"));
+    const dep = (manifest.depends_on || []).find((d) => d.name === "section-explorer");
+    assert.ok(dep, bp + " manifest must depend on section-explorer");
+    assert.ok(dep.range, bp + " dep must declare a range");
+  }
+});
+
+// Async tail — runs the queued async tests, then exits with the final tally.
+(async () => {
+  for (const t of ASYNC_TESTS) {
+    try {
+      await t.fn();
+      console.log("PASS " + t.name);
+    } catch (e) {
+      console.log("FAIL " + t.name + " — " + e.message);
+      failures += 1;
+    }
+  }
+  process.exit(failures > 0 ? 1 : 0);
+})();

@@ -306,6 +306,35 @@ class ProjectDocsIndex {
       },
       icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
       rootClass: "se-root",
+      // Recent mode: recent doc-notes across the whole docs subtree, each
+      // tagged with its section-hub display title.
+      listRecent: (dv2) => {
+        try {
+          const rawPages = dv2.pages(`"${docsFolder}"`);
+          const all = rawPages.array ? rawPages.array() : Array.from(rawPages);
+          const sectionByFolder = {};
+          for (const p of all) {
+            if (p && p.type === "section-hub" && p.file && p.file.path) {
+              const f = String(p.file.folder != null ? p.file.folder : p.file.path.slice(0, p.file.path.lastIndexOf("/")));
+              const label = this._stripLink(p.section) || (p.file.name ? String(p.file.name).replace(/\.md$/, "") : "");
+              if (label) sectionByFolder[f] = label;
+            }
+          }
+          return all
+            .filter((p) => p && p.type === "doc-note" && p.file && p.file.path)
+            .sort((a, b) => ((b.file.mtime && b.file.mtime.ts) || 0) - ((a.file.mtime && a.file.mtime.ts) || 0))
+            .slice(0, 8)
+            .map((p) => {
+              const f = String(p.file.folder != null ? p.file.folder : p.file.path.slice(0, p.file.path.lastIndexOf("/")));
+              return {
+                title: p.title || p.file.name,
+                path: p.file.path,
+                mtime: (p.file.mtime && p.file.mtime.ts) || 0,
+                where: (f !== docsFolder ? (sectionByFolder[f] || f.slice(f.lastIndexOf("/") + 1)) : null),
+              };
+            });
+        } catch (_e) { return []; }
+      },
     };
   }
 

@@ -29,7 +29,7 @@
 .se-rail-cards {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
 /* Header row: "Sections" group label left, sort toggle right. */
@@ -117,9 +117,15 @@
 }
 .se-rail-title svg { flex-shrink: 0; }
 .se-rail-title-text {
+  /* Long section names WRAP (2-line clamp) instead of hard-ellipsizing. */
+  font-size: 0.95em;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .se-rail-meta {
   font-size: 0.78em;
@@ -179,6 +185,135 @@
 
 .se-pane-label {
   margin-bottom: 2px;
+}
+
+/* ── Doc cards — the pane's own card language. The bordered accent icon badge
+ * is the "this is a document" identity mark; section rows use a flat inline
+ * folder icon, so the two read differently at a glance. ─────────────────── */
+.se-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 8px;
+}
+.se-root.se-mobile .se-doc-grid { grid-template-columns: 1fr; }
+
+.se-doc-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  transition: transform 0.15s var(--se-ease), box-shadow 0.15s var(--se-ease), border-color 0.15s var(--se-ease);
+}
+.se-doc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+  border-color: var(--interactive-accent);
+}
+.se-doc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--interactive-accent);
+  background: var(--background-primary);
+}
+.se-doc-icon svg { width: 15px; height: 15px; }
+.se-doc-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.se-doc-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.se-doc-sub {
+  font-size: 0.78em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.se-doc-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+/* Desktop rail | pane separation. */
+@media (min-width: 721px) {
+  .se-root:not(.se-mobile) > .se-page-pane {
+    border-left: 1px solid var(--background-modifier-border);
+    padding-left: 18px;
+  }
+}
+/* Narrow-pane fallback (mirrors the .se-root column switch): one card per
+ * row so titles don't hard-truncate when the pane is narrow but app.isMobile
+ * is false (desktop split panes). */
+@media (max-width: 720px) {
+  .se-doc-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Leaf-note pinned links (renderNoteLinks — rendered OUTSIDE .se-root,
+ * directly under the note's chrome bar). ────────────────────────────────── */
+.se-note-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px 0;
+}
+.se-note-link-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  font-weight: 500;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.se-note-link-card svg { color: var(--interactive-accent); flex-shrink: 0; }
+.se-note-link-card[href]:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+.se-note-link-card:not([href]) { color: var(--text-faint); cursor: default; }
+.se-note-link-add {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 500;
+  color: var(--text-muted);
+  border: 1px dashed var(--background-modifier-border);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.se-note-link-add:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
 }
 
 @keyframes sectionExplorerRailIn {

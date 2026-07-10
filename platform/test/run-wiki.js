@@ -276,12 +276,14 @@ const pages = [
 {
   const src = fs.readFileSync(TREE_SRC, 'utf8');
   const seSrc = fs.readFileSync(SE_SRC, 'utf8');
-  ok('W8a SectionExplorer section-card nav uses BeaconCards `target:` (not `link:`)',
-     /target:\s*\(p\)\s*=>/.test(seSrc) && !/\blink:\s*\(/.test(seSrc));
+  // v0.210: SectionExplorer renders its OWN doc cards (openLinkText nav) —
+  // BeaconCards left the pane, so the old `target:` assertion is retired.
+  ok('W8a SectionExplorer doc-card nav opens via openLinkText (no dead `link:` opt)',
+     /openLinkText\(c\.path/.test(seSrc) && !/\blink:\s*\(/.test(seSrc));
   ok('W8a2 WikiTree page-card nav uses BeaconCards `target:` (not `link:`)',
      /target:\s*\(p\)\s*=>/.test(src) && !/\blink:\s*\(/.test(src));
-  ok('W8b recent-updates renders via BeaconCards (no no-op raw <a href>)',
-     /pages:\s*recent/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
+  ok('W8b recent-updates flow through the adapter listRecent (no no-op raw <a href>)',
+     /listRecent:\s*\(/.test(src) && !/innerHTML\s*=\s*'<a href/.test(src));
 }
 
 // ---------------------------------------------------------------------------
@@ -363,12 +365,16 @@ const pages = [
   ];
   const dv = { container: makeEl3(), current: () => ({ type: 'wiki-hub', file: { path: 'spice/wiki/Wiki.md' } }), pages: () => ({ array: () => wikiPages }) };
   const TreeCls = new Function('customJS', 'window', `${treeSrc}\nreturn WikiTree;`)(fakeCustomJS, { moment: null });
-  new TreeCls().render(dv);
-  const recentCall = bcCalls.find(c => c.subtitle && c.pages && c.pages[0] && c.pages[0].type === 'wiki-page' && /^in /.test(String(c.subtitle(c.pages[0]))));
-  ok('W10a recently-updated renders as BeaconCards grid (target + subtitle fns)',
-     !!recentCall && typeof recentCall.target === 'function' && recentCall.layout === 'stacked' && recentCall.columns === 2);
-  ok('W10b recent card subtitle names the section it came from ("in testing")',
-     recentCall && recentCall.subtitle(recentCall.pages[0]) === 'in testing');
+  // v0.210: the hub's recently-updated grid moved INTO SectionExplorer's page
+  // pane — WikiTree supplies it via the adapter config's listRecent instead of
+  // rendering BeaconCards itself. Pin the config contract directly.
+  const wt = new TreeCls();
+  const cfg = wt._buildConfig(dv, dv.current());
+  const recent = cfg.listRecent(dv, { scopePath: 'spice/wiki' });
+  ok('W10a recently-updated flows through the adapter listRecent (card models, most-recent first)',
+     Array.isArray(recent) && recent.length === 1 && recent[0].path === 'spice/wiki/testing/what.md' && recent[0].mtime === 5000);
+  ok('W10b recent card carries the section it came from ("testing")',
+     recent[0].where === 'testing');
 }
 
 // ---------------------------------------------------------------------------
@@ -422,8 +428,11 @@ const pages = [
   const leafSrc = fs.readFileSync(LEAF_SRC, 'utf8');
   const hubSrc  = fs.readFileSync(path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-hub-actions.js'), 'utf8');
   ok('W13a wiki search does not persist (persist: false)', /persist:\s*false/.test(treeSrc));
-  ok('W13b recently-updated uses the note (file) icon, not a clock',
-     /const recentIcon = [^;]*M14 2H6a2/.test(treeSrc) && !/const recentIcon = [^;]*circle cx="12" cy="12" r="9"/.test(treeSrc));
+  // v0.210: recent cards render in SectionExplorer's pane with the adapter's
+  // file icon (the same note glyph the doc cards use) — the tree-local
+  // recentIcon is gone with the old grid.
+  ok('W13b recently-updated renders with the adapter note (file) icon, not a clock',
+     /listRecent:\s*\(/.test(treeSrc) && /const fileIcon = [^;]*M14 2H6a2/.test(treeSrc) && !/recentIcon/.test(treeSrc));
   ok('W13c move dialog is an indented tree (depth), not a flat <select>',
      /opt\.depth/.test(leafSrc) && !/document\.createElement\("select"\)/.test(leafSrc));
   ok('W13d divider margins give breathing room (12px line-break, not squished)',

@@ -364,9 +364,11 @@
         "platform/blueprints/wiki/helpers/wiki-tree.js",
         "platform/blueprints/project/helpers/project-docs-index.js",
         "platform/blueprints/project/helpers/section-hub.js",
+        "platform/blueprints/wiki/helpers/wiki-chrome-bar.js",
+        "platform/blueprints/project/helpers/project-chrome-bar.js",
         "platform/install.js"
       ],
-      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware)."
+      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware). v0.210: contract extended to LEAF types wiki-page + doc-note — links[] rendered as clickable cards + an '＋ Add link' pill via SectionExplorer.renderNoteLinks (invoked by WikiChromeBar/ProjectChromeBar after the bar). NOT backfilled on leaf notes: the links key is created lazily on first write via processFrontMatter."
     }
   ]
 }

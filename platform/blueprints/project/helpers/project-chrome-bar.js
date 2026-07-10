@@ -728,7 +728,22 @@ class ProjectChromeBar {
   async render(dv) {
     try {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.render !== "function") return;
-      return await customJS.ChromeBar.render(dv, this._adapter());
+      const result = await customJS.ChromeBar.render(dv, this._adapter());
+      this._renderNoteLinks(dv);
+      return result;
+    } catch (_e) { /* never throw */ }
+  }
+
+  // Leaf-note pinned links (v0.210): doc-notes get their links[] strip +
+  // "＋ Add link" pill right under the bar via the shared SectionExplorer helper.
+  _renderNoteLinks(dv) {
+    try {
+      let page = null;
+      try { page = dv && dv.current ? dv.current() : null; } catch (_e) { page = null; }
+      if (!page || page.type !== "doc-note") return;
+      if (typeof customJS === "undefined" || !customJS.SectionExplorer
+        || typeof customJS.SectionExplorer.renderNoteLinks !== "function") return;
+      customJS.SectionExplorer.renderNoteLinks(dv);
     } catch (_e) { /* never throw */ }
   }
 }

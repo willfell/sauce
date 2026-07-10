@@ -53,6 +53,10 @@
     {
       "name": "chrome-bar",
       "range": ">=0.2.0"
+    },
+    {
+      "name": "section-explorer",
+      "range": ">=0.3.0"
     }
   ],
   "breadcrumb": {

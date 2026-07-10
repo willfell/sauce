@@ -69,50 +69,8 @@ class WikiTree {
             pages: dv.pages.bind(dv),
         }, adapter);
 
-        // Recently updated — hub only. Rendered as cards (like sections/pages),
-        // each tagged with the section the page came from. Kept as WikiTree's own
-        // rendering (out of scope for SectionExplorer, which only knows about a
-        // single section's sections/pages, not a cross-subtree "recent" view).
-        if (cur.type === "wiki-hub") {
-            const allPages = dv.pages('"spice/wiki"');
-            const allArr = allPages.array ? allPages.array() : Array.from(allPages);
-            const recent = this._recentPages(allArr, 8).filter(p => customJS.DocSearch.matches(p, ctx));
-            if (recent.length) {
-                customJS.SectionLabel.render(proxyDv, { text: "Recently updated" });
-                // Map each folder → its section display title (from the wiki-section hub there).
-                const sectionByFolder = {};
-                for (const p of allArr) {
-                    if (p && p.type === "wiki-section" && p.file && p.file.path) {
-                        const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
-                        sectionByFolder[f] = (p.title && String(p.title).trim()) || p.file.path.slice(p.file.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-                    }
-                }
-                const sectionOf = (p) => {
-                    if (!p.file || !p.file.path) return "";
-                    const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
-                    if (!f || f === scopePath) return "";   // scopePath is "spice/wiki" on the hub → root-level page
-                    return sectionByFolder[f] || f.slice(f.lastIndexOf("/") + 1);
-                };
-                // Use the note (file) icon — same as the page cards — so recent items read as notes.
-                const recentIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-                customJS.BeaconCards.render(proxyDv, {
-                    pages: recent,
-                    // Stays a GRID (2 columns); the section + when-updated detail shows
-                    // as a muted second line (subtitle — meta only renders in row layout).
-                    layout: "stacked",
-                    columns: 2,
-                    title: (p) => p.title || p.file.name,
-                    icon: () => recentIcon,
-                    target: (p) => p.file.path,
-                    subtitle: (p) => {
-                        const sec = sectionOf(p);
-                        const ago = (p.file.mtime && window.moment) ? window.moment(p.file.mtime.ts).fromNow() : "";
-                        const where = sec ? ("in " + sec) : "in Wiki";
-                        return ago ? (where + " · " + ago) : where;
-                    },
-                });
-            }
-        }
+        // The hub's cross-subtree recent grid moved INTO SectionExplorer's page
+        // pane (the adapter config's listRecent) — nothing else renders here.
     }
 
     _makeProxyDv(dv, container) {
@@ -257,6 +215,33 @@ class WikiTree {
             icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
             rootClass: "se-root",
             pageLabel: "Pages",
+            // Recent mode for the pane: recent wiki-pages across THIS scope's
+            // subtree (hub = whole wiki; section = its own subtree), each tagged
+            // with the section it lives in. Replaces the hub-only grid WikiTree
+            // used to draw below SectionExplorer.
+            listRecent: (dv2, ctx) => {
+                try {
+                    const rawPages = dv2.pages('"' + ctx.scopePath + '"');
+                    const all = rawPages.array ? rawPages.array() : Array.from(rawPages);
+                    const sectionByFolder = {};
+                    for (const p of all) {
+                        if (p && p.type === "wiki-section" && p.file && p.file.path) {
+                            const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+                            sectionByFolder[f] = (p.title && String(p.title).trim()) || p.file.path.slice(p.file.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
+                        }
+                    }
+                    return this._recentPages(all, 8).map((p) => {
+                        const f = p.file.path.slice(0, p.file.path.lastIndexOf("/"));
+                        const where = (f && f !== ctx.scopePath) ? (sectionByFolder[f] || f.slice(f.lastIndexOf("/") + 1)) : "";
+                        return {
+                            title: p.title || p.file.name,
+                            path: p.file.path,
+                            mtime: (p.file.mtime && p.file.mtime.ts != null) ? p.file.mtime.ts : 0,
+                            where: where || null,
+                        };
+                    });
+                } catch (_e) { return []; }
+            },
         };
     }
 
