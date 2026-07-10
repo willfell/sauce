@@ -160,26 +160,26 @@
         }
       }
     ],
-    "scratch": [
+    "sticky-notes": [
       {
         "kind": "command",
-        "source": "commands/scratch.md",
-        "dest": ".claude/commands/scratch.md",
-        "version": "0.7.0"
+        "source": "commands/sticky-notes.md",
+        "dest": ".claude/commands/sticky-notes.md",
+        "version": "0.9.0"
       },
       {
         "kind": "skill",
-        "source": "skills/new-scratch/SKILL.md",
-        "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
-        "version": "0.7.0"
+        "source": "skills/new-sticky-note/SKILL.md",
+        "dest": ".claude/skills/sticky-notes/new-sticky-note/SKILL.md",
+        "version": "0.9.0"
       },
       {
         "kind": "claude_md_row",
         "table": "resolvers",
         "row": {
-          "topic": "Scratch",
-          "path": "spice/scratch",
-          "command": "/scratch"
+          "topic": "Sticky Notes",
+          "path": "spice/sticky-notes",
+          "command": "/sticky-notes"
         }
       }
     ],
@@ -493,7 +493,7 @@
         "row": {
           "topic": "Cowork Atomic Notes (cron output)",
           "path": "spice/cowork/daily/",
-          "command": "(cron-only — NOT spice/daily/)"
+          "command": "(cron-only \u2014 NOT spice/daily/)"
         }
       },
       {

@@ -23,8 +23,8 @@
       "template": "ranch/templates/Meeting Hub.md"
     },
     {
-      "folder": "spice/scratch",
-      "template": "ranch/templates/Scratch.md"
+      "folder": "spice/sticky-notes",
+      "template": "ranch/templates/Sticky Note.md"
     },
     {
       "folder": "spice/to-do",

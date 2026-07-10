@@ -1,0 +1,11 @@
+---
+type: sticky-note
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
+day: "<% tp.date.now("YYYY-MM-DD") %>"
+time: "<% tp.date.now("HH:mm") %>"
+day_link: "[[Sticky-Day-<% tp.date.now('YYYY-MM-DD') %>]]"
+---
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "StickyChromeBar" });
+```

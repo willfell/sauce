@@ -1,24 +1,24 @@
 /**
- * ScratchDayMigrate (CustomJS)
+ * StickyDayMigrate (CustomJS)
  *
- * Pure-helper migration class for scratch frontmatter `day:` field. Rewrites:
+ * Pure-helper migration class for sticky-note frontmatter `day:` field. Rewrites:
  *   (a) YAML-unquoted dates that parsed as JS Date → quoted YYYY-MM-DD string
  *       recovered from the file path or filename (NOT the Date's getDate(),
  *       which carries the bug the migration is closing — see landmine note
- *       in scratch-day-list.js v0.5.2).
+ *       in sticky-day-list.js v0.5.2).
  *   (b) Missing day: when the file path or filename encodes YYYY-MM-DD,
  *       synthesizes the string.
  *
  * Idempotent: post-migration files have `day:` as a quoted YYYY-MM-DD string,
  * which exits the migration immediately via the first guard.
  *
- * Driven once-per-session by ScratchDayMigrateInit (the customjs startup-script).
- * Manual re-run available via Cmd+P → "Sauce: Re-migrate scratch day frontmatter".
+ * Driven once-per-session by StickyDayMigrateInit (the customjs startup-script).
+ * Manual re-run available via Cmd+P → "Sauce: Re-migrate sticky-note day frontmatter".
  *
  * v0.5.2 (sauce v0.84.1): initial release. Closes timezone-attribution drift
- * for late-night scratches whose YAML day: was unquoted.
+ * for late-night sticky notes whose YAML day: was unquoted.
  */
-class ScratchDayMigrate {
+class StickyDayMigrate {
   constructor() {
     this._lastRunDay = null;
   }
@@ -58,7 +58,7 @@ class ScratchDayMigrate {
 
   /**
    * Pull a YYYY-MM-DD from either a `/YYYY-MM-DD/` path segment OR a
-   * `Scratch-*-YYYY-MM-DD` filename pattern. Returns null if neither matches.
+   * `Sticky-*-YYYY-MM-DD` filename pattern. Returns null if neither matches.
    */
   _extractDateFromPath(p) {
     if (typeof p !== "string" || p.length === 0) return null;
@@ -86,7 +86,7 @@ class ScratchDayMigrate {
   }
 
   /**
-   * Vault scan: walk spice/scratch/**​/*.md, migrate each. Caches per-day
+   * Vault scan: walk spice/sticky-notes/**​/*.md, migrate each. Caches per-day
    * (instance-level last-run YYYY-MM-DD), short-circuits same-day re-invokes.
    *
    * @param {boolean} force — bypass once-per-day cache (used by manual command)
@@ -103,13 +103,13 @@ class ScratchDayMigrate {
       return { scanned: 0, migrated: 0, skipped: true };
     }
     const files = app.vault.getMarkdownFiles().filter(f =>
-      f && typeof f.path === "string" && f.path.startsWith("spice/scratch/"));
+      f && typeof f.path === "string" && f.path.startsWith("spice/sticky-notes/"));
     let migrated = 0;
     for (const f of files) {
       try {
         if (await this.migrate(f)) migrated++;
       } catch (e) {
-        if (typeof console !== "undefined") console.warn("[ScratchDayMigrate]", f.path, e && e.message);
+        if (typeof console !== "undefined") console.warn("[StickyDayMigrate]", f.path, e && e.message);
       }
     }
     this._lastRunDay = today;
