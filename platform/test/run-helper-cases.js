@@ -4328,82 +4328,84 @@ async function caseHCPR2ItemsSchema() {
 }
 
 // ============================================================
-// v0.37.0 S3.1 — Scratch blueprint file-presence + content shape (SHC-S1..S6).
-// Six sub-asserts confirming the scratch blueprint sources committed in S1/S2
+// v0.37.0 S3.1 — Sticky-notes blueprint file-presence + content shape (SHC-S1..S6).
+// Six sub-asserts confirming the sticky-notes blueprint sources committed in S1/S2
 // are on disk with the expected manifest fields, frontmatter types, Dataview
 // calls, and CustomJS class declarations. Pure static reads; no scaffold.
+// (Renamed from the scratch blueprint in the sticky-notes rewrite; the 3 legacy
+// action classes were dropped in the chrome-bar adoption, so S11..S14 are gone.)
 // ============================================================
 async function caseSHCS1ManifestFields() {
-  console.log("\n--- Case SHC-S1: scratch manifest.json exists with expected core fields ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "manifest.json");
-  assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
+  console.log("\n--- Case SHC-S1: sticky-notes manifest.json exists with expected core fields ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "manifest.json");
+  assertTrue("SHC-S1: sticky-notes/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
-  assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, VERSION_SNAPSHOT.components.scratch, "SHC-S1: manifest.version === \"0.6.0\"");
-  assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
+  assertEqual(m.name, "sticky-notes", "SHC-S1: manifest.name === \"sticky-notes\"");
+  assertEqual(m.version, VERSION_SNAPSHOT.components["sticky-notes"], "SHC-S1: manifest.version === \"0.9.0\"");
+  assertEqual(m.module_directory, "sticky-notes", "SHC-S1: manifest.module_directory === \"sticky-notes\"");
 }
 
 async function caseSHCS2ScratchTemplate() {
-  console.log("\n--- Case SHC-S2: templates/Scratch.md frontmatter + retired-lazy-create + Scratch-Day back-link ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch.md");
+  console.log("\n--- Case SHC-S2: templates/Sticky Note.md frontmatter + retired-lazy-create + Sticky-Day back-link ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "templates", "Sticky Note.md");
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S2: Scratch.md first line is ---", body.split("\n")[0] === "---");
-  assertTrue("SHC-S2: Scratch.md contains type: scratch", body.includes("type: scratch"));
-  assertTrue("SHC-S2: Scratch.md no longer contains <%* %> Templater block (lazy-create retired in v0.2.0)",
+  assertTrue("SHC-S2: Sticky Note.md first line is ---", body.split("\n")[0] === "---");
+  assertTrue("SHC-S2: Sticky Note.md contains type: sticky-note", body.includes("type: sticky-note"));
+  assertTrue("SHC-S2: Sticky Note.md no longer contains <%* %> Templater block (lazy-create retired in v0.2.0)",
     !/<%\*[\s\S]*?%>/.test(body));
-  assertTrue("SHC-S2: Scratch.md back-link wikilink uses Scratch-Day- prefix",
-    /\[\[Scratch-Day-/.test(body));
+  assertTrue("SHC-S2: Sticky Note.md back-link wikilink uses Sticky-Day- prefix",
+    /\[\[Sticky-Day-/.test(body));
 }
 
 async function caseSHCS3ScratchDayHubTemplate() {
-  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchChromeBar + ScratchDayList calls ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
-  assertTrue("SHC-S3: Scratch Day Hub.md exists on disk", fs.existsSync(p));
+  console.log("\n--- Case SHC-S3: templates/Sticky Day Hub.md type + StickyChromeBar + StickyDayList calls ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "templates", "Sticky Day Hub.md");
+  assertTrue("SHC-S3: Sticky Day Hub.md exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S3: Scratch Day Hub.md contains type: scratch-day", body.includes("type: scratch-day"));
-  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchChromeBar via dv.view",
-    /class:\s*"ScratchChromeBar"/.test(body));
-  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayList via dv.view",
-    /class:\s*"ScratchDayList"/.test(body));
+  assertTrue("SHC-S3: Sticky Day Hub.md contains type: sticky-day", body.includes("type: sticky-day"));
+  assertTrue("SHC-S3: Sticky Day Hub.md invokes StickyChromeBar via dv.view",
+    /class:\s*"StickyChromeBar"/.test(body));
+  assertTrue("SHC-S3: Sticky Day Hub.md invokes StickyDayList via dv.view",
+    /class:\s*"StickyDayList"/.test(body));
 }
 
 async function caseSHCS4ScratchHubTemplate() {
-  console.log("\n--- Case SHC-S4: templates/Scratch Hub.md type + ScratchHubCards Dataview call ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Hub.md");
+  console.log("\n--- Case SHC-S4: templates/Sticky Hub.md type + StickyHubCards Dataview call ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "templates", "Sticky Hub.md");
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S4: Scratch Hub.md contains type: scratch-hub", body.includes("type: scratch-hub"));
-  assertTrue("SHC-S4: Scratch Hub.md invokes ScratchHubCards via dv.view",
-    /class:\s*"ScratchHubCards"/.test(body));
+  assertTrue("SHC-S4: Sticky Hub.md contains type: sticky-hub", body.includes("type: sticky-hub"));
+  assertTrue("SHC-S4: Sticky Hub.md invokes StickyHubCards via dv.view",
+    /class:\s*"StickyHubCards"/.test(body));
 }
 
 async function caseSHCS5ScratchHubCardsHelper() {
-  console.log("\n--- Case SHC-S5: helpers/scratch-hub-cards.js declares class ScratchHubCards ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-hub-cards.js");
-  assertTrue("SHC-S5: scratch-hub-cards.js exists on disk", fs.existsSync(p));
+  console.log("\n--- Case SHC-S5: helpers/sticky-hub-cards.js declares class StickyHubCards ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "helpers", "sticky-hub-cards.js");
+  assertTrue("SHC-S5: sticky-hub-cards.js exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S5: scratch-hub-cards.js declares class ScratchHubCards",
-    /^class\s+ScratchHubCards\b/m.test(body));
+  assertTrue("SHC-S5: sticky-hub-cards.js declares class StickyHubCards",
+    /^class\s+StickyHubCards\b/m.test(body));
 }
 
 async function caseSHCS6ScratchDayListHelper() {
-  console.log("\n--- Case SHC-S6: helpers/scratch-day-list.js declares class ScratchDayList ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-list.js");
-  assertTrue("SHC-S6: scratch-day-list.js exists on disk", fs.existsSync(p));
+  console.log("\n--- Case SHC-S6: helpers/sticky-day-list.js declares class StickyDayList ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "helpers", "sticky-day-list.js");
+  assertTrue("SHC-S6: sticky-day-list.js exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S6: scratch-day-list.js declares class ScratchDayList",
-    /^class\s+ScratchDayList\b/m.test(body));
+  assertTrue("SHC-S6: sticky-day-list.js declares class StickyDayList",
+    /^class\s+StickyDayList\b/m.test(body));
 }
 
 async function caseSHCS7ScratchNewButtonHelper() {
-  console.log("\n--- Case SHC-S7: scratch-new-button.js deleted (v0.46.0 S7 — migrated to entity-create) ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-new-button.js");
-  assertTrue("SHC-S7: scratch-new-button.js has been deleted (legacy, unreferenced since v0.2.2)", !fs.existsSync(p));
-  const manifestPath = path.join(BLUEPRINTS_DIR, "scratch", "manifest.json");
+  console.log("\n--- Case SHC-S7: sticky-new-button.js absent (legacy new-button pattern never carried into sticky-notes) ---");
+  const p = path.join(BLUEPRINTS_DIR, "sticky-notes", "helpers", "sticky-new-button.js");
+  assertTrue("SHC-S7: sticky-new-button.js absent (button creation delegated to entity-create)", !fs.existsSync(p));
+  const manifestPath = path.join(BLUEPRINTS_DIR, "sticky-notes", "manifest.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  assertTrue("SHC-S7: ScratchNewButton removed from manifest customjs_classes",
-    !(manifest.customjs_classes || []).includes("ScratchNewButton"));
-  assertTrue("SHC-S7: scratch-new-button.js removed from manifest files[]",
-    !(manifest.files || []).some(f => f.source && f.source.includes("scratch-new-button")));
+  assertTrue("SHC-S7: StickyNewButton not present in manifest customjs_classes",
+    !(manifest.customjs_classes || []).includes("StickyNewButton"));
+  assertTrue("SHC-S7: sticky-new-button.js not present in manifest files[]",
+    !(manifest.files || []).some(f => f.source && f.source.includes("sticky-new-button")));
 }
 
 // ============================================================
@@ -4435,59 +4437,12 @@ async function caseSHCS11ProjectNavButtonsNoCreate() {
     !/_createProject\s*\(/.test(body) && !/_promptForProjectName\s*\(/.test(body) && !/_renderProjectsHub\s*\(/.test(body));
 }
 
-async function caseSHCS11ScratchDayActionsNoNewScratch() {
-  console.log("\n--- Case SHC-S11-scratch-day-actions: scratch-day-actions.js no newScratch method (v0.46.0 S7) ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
-  assertTrue("SHC-S11-scratch-day-actions: source file exists", fs.existsSync(p));
-  const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S11-scratch-day-actions: scratch-day-actions.js no longer has newScratch method body",
-    !/\bnewScratch\s*\(/.test(body));
-}
-
-async function caseSHCS12ScratchDayActionsRowOfTwo() {
-  console.log("\n--- Case SHC-S12: scratch-day-actions.js renders + New Scratch + Hub in one flex row ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
-  assertTrue("SHC-S12: source file exists", fs.existsSync(p));
-  const body = fs.readFileSync(p, "utf8");
-  const newScratchLabel = /label:\s*["']\+ New Scratch["']/.test(body);
-  const hubLabel = /label:\s*["']Hub["']/.test(body);
-  const delegatesToEntityCreate = /customJS\.EntityCreate\.create\(\s*\{\s*instance:\s*["']scratch["']/.test(body);
-  const flexRow = /display:\s*flex.*max-width:\s*600px/.test(body);
-  const bothFlexTrue = (body.match(/flex:\s*true/g) || []).length >= 2;
-  const ok = newScratchLabel && hubLabel && delegatesToEntityCreate && flexRow && bothFlexTrue;
-  assertTrue("SHC-S12: scratch-day-actions.js missing new-scratch+hub flex-row pair or EntityCreate delegate", ok);
-}
-
-async function caseSHCS13ScratchDayHubNoEntityCreateBlock() {
-  console.log("\n--- Case SHC-S13: Scratch Day Hub.md no longer carries the entity-create:scratch sentinel ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
-  assertTrue("SHC-S13: Scratch Day Hub.md exists on disk", fs.existsSync(p));
-  const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S13: Scratch Day Hub.md must NOT contain `// entity-create:scratch` sentinel (block ownership moved to ScratchDayActions in scratch v0.5.0)",
-    !/\/\/\s*entity-create:scratch\b/.test(body));
-  assertTrue("SHC-S13: Scratch Day Hub.md must NOT call customJS.EntityCreate.render (button is rendered by ScratchDayActions)",
-    !/customJS\.EntityCreate\.render/.test(body));
-  assertTrue("SHC-S13: ScratchChromeBar block present (replaces ScratchDayActions)",
-    /class:\s*"ScratchChromeBar"/.test(body));
-}
-
-async function caseSHCS14ScratchDayActionsSelfHeal() {
-  // v0.5.1 PATCH (sauce v0.69.0): ScratchDayActions self-heals existing day-hub
-  // notes carrying the legacy entity-create:scratch dataviewjs block (created
-  // from v0.4.x templates). Asserts the helper has _stripLegacyEntityCreateBlock,
-  // calls it from render() before the row layout, anchors on the sentinel
-  // comment, and uses app.vault.modify to write the cleaned body.
-  console.log("\n--- Case SHC-S14: scratch-day-actions.js self-heals legacy entity-create:scratch block ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
-  const body = fs.readFileSync(p, "utf8");
-  const hasHelper = /_stripLegacyEntityCreateBlock\s*\(/.test(body);
-  const callsHelper = /await\s+this\._stripLegacyEntityCreateBlock\s*\(\s*dv\s*\)/.test(body);
-  const anchorsOnSentinel = /entity-create:scratch/.test(body);
-  const usesVaultModify = /app\.vault\.modify\s*\(/.test(body);
-  const ok = hasHelper && callsHelper && anchorsOnSentinel && usesVaultModify;
-  assertTrue("SHC-S14: scratch-day-actions.js missing self-heal helper or call-site or sentinel anchor or vault.modify",
-    ok);
-}
+// SHC-S11-scratch-day-actions / S12 / S13 / S14 removed in the sticky-notes
+// rewrite: they covered the ScratchDayActions helper + its entity-create:scratch
+// self-heal, but that action class (and the two sibling action classes) were
+// dropped when the day-hub adopted StickyChromeBar. The surviving day-hub shape
+// (StickyChromeBar + StickyDayList, no entity-create sentinel) is pinned by
+// SHC-S3 above.
 
 async function caseSHCS11FinanceBudget() {
   console.log("\n--- Case SHC-S11-finance-budget: new-budget-button.js deleted (v0.46.0 S8) ---");
@@ -4641,7 +4596,7 @@ async function caseDDT1DailyTemplateShape() {
 }
 
 // -------------------------------------------------------------------------
-// LAT-1: the daily to-do / meeting / scratch-day action helpers now OWN their
+// LAT-1: the daily to-do / meeting action helpers now OWN their
 // chrome dividers. Each renders a top + bottom <hr> (12px breathing room) INSIDE
 // its own dataviewjs block (the wiki methodology), and the template drops the
 // literal `---`. This is the real fix for the gap the older "tight `---` in the
@@ -4654,12 +4609,14 @@ async function caseDDT1DailyTemplateShape() {
 // or a helper divider is dropped.
 // -------------------------------------------------------------------------
 async function caseLAT1LeafActionsOwnDividers() {
-  console.log("\n--- Case LAT-1: leaf-action helpers own their <hr> dividers; templates carry no `---` (to-do / meetings / scratch) ---");
+  console.log("\n--- Case LAT-1: leaf-action helpers own their <hr> dividers; templates carry no `---` (to-do / meetings) ---");
   const DIVIDER_STYLE = /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/;
+  // The scratch-day-actions case was dropped in the sticky-notes rewrite: that
+  // action helper (and the literal `---` it replaced) was retired when the
+  // day hub adopted StickyChromeBar, which owns its own chrome.
   const cases = [
     { tpl: ["to-do", "templates", "Today To-Do.md"], helper: ["to-do", "helpers", "todo-leaf-actions.js"], cls: "ToDoLeafActions", gated: true },
     { tpl: ["meetings", "templates", "Meeting.md"], helper: ["meetings", "helpers", "meeting-leaf-actions.js"], cls: "MeetingLeafActions", gated: false },
-    { tpl: ["scratch", "templates", "Scratch Day Hub.md"], helper: ["scratch", "helpers", "scratch-day-actions.js"], cls: "ScratchDayActions", gated: false },
   ];
   for (const c of cases) {
     const tp = path.join(BLUEPRINTS_DIR, ...c.tpl);
@@ -7038,7 +6995,7 @@ async function casePDC4EmptyStateCallout() {
 
 // v0.50.1 BUG-A: customjs-guard dispatches via `render` method by default.
 // PDC-5 guards against regressions to `view` (which all sibling helpers like
-// ScratchHubCards / ProjectNotesCards / ProjectsHubCards use as `render`).
+// StickyHubCards / ProjectNotesCards / ProjectsHubCards use as `render`).
 async function casePDC5RenderMethodNotView() {
   console.log("\n--- Case PDC-5: ProjectDocsCards uses render method (not view) ---");
   const src = fs.readFileSync(
@@ -7291,7 +7248,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.11.0", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.11.0", journal: "0.2.0", "sticky-notes": "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7310,8 +7267,8 @@ async function caseFA4TimelineTemplates() {
   const checks = [
     ["daily/content/daily-template.md", "cowork-daily"],
     ["journal/templates/Today Journal.md", "journal"],
-    ["scratch/templates/Scratch.md", "scratch"],
-    ["scratch/templates/Scratch Day Hub.md", "scratch-day"],
+    ["sticky-notes/templates/Sticky Note.md", "sticky-note"],
+    ["sticky-notes/templates/Sticky Day Hub.md", "sticky-day"],
   ];
   for (const [rel, expectedType] of checks) {
     const body = fs.readFileSync(
@@ -7327,7 +7284,7 @@ async function caseFA4TimelineTemplates() {
 
 async function caseFA4TimelineRuleFragmentsExtends() {
   console.log("\n--- Case FA4-EXTENDS: timeline rule_fragments declare extends ---");
-  for (const bp of ["daily", "journal", "scratch"]) {
+  for (const bp of ["daily", "journal", "sticky-notes"]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const allExtend = m.rule_fragments.every(rf =>
@@ -8674,9 +8631,8 @@ async function caseHCV01340RenderSafe() {
   const BARE = /dv\.current\(\)\s*\.(?!\s)/;
   for (const rel of [
     "platform/blueprints/project/helpers/project-nav-buttons.js",
-    "platform/blueprints/scratch/helpers/scratch-day-actions.js",
-    "platform/blueprints/scratch/helpers/scratch-day-list.js",
-    "platform/blueprints/scratch/helpers/scratch-leaf-actions.js",
+    "platform/blueprints/sticky-notes/helpers/sticky-day-list.js",
+    "platform/blueprints/sticky-notes/helpers/sticky-chrome-bar.js",
     "platform/blueprints/trips/helpers/trip-nav-buttons.js",
     "platform/blueprints/trips/helpers/trip-sections-cards.js",
   ]) {
@@ -15283,7 +15239,7 @@ async function caseHCV0128FinancePlanning() {
   await caseMCS2BodySubstitutionAtMaterializeTime();
   await caseMCS3MissingSourceLogsErrorContinuesLoop();
 
-  // v0.37.0 S3.1 — scratch blueprint file-presence + shape cases.
+  // v0.37.0 S3.1 — sticky-notes blueprint file-presence + shape cases.
   await caseSHCS1ManifestFields();
   await caseSHCS2ScratchTemplate();
   await caseSHCS3ScratchDayHubTemplate();
@@ -15295,10 +15251,8 @@ async function caseHCV0128FinancePlanning() {
   await caseSHCS11Meetings();
   await caseSHCS11People();
   await caseSHCS11ProjectNavButtonsNoCreate();
-  await caseSHCS11ScratchDayActionsNoNewScratch();
-  await caseSHCS12ScratchDayActionsRowOfTwo();
-  await caseSHCS13ScratchDayHubNoEntityCreateBlock();
-  await caseSHCS14ScratchDayActionsSelfHeal();
+  // SHC-S11..S14 scratch-day-actions cases removed — the action class they
+  // covered was dropped in the sticky-notes chrome-bar adoption (see SHC-S3).
   await caseSHCS11FinanceBudget();
   await caseSHCS11FinancePaycheck();
   await caseSHCS11FinanceInvoice();
@@ -15528,7 +15482,7 @@ async function caseHCV0128FinancePlanning() {
   await caseFA3TaskBoardCardRegexFix();
   await caseFA3RuleFragmentsExtends();
 
-  // v0.56.0 FA-4 — timeline wave canonical vocab (daily + journal + scratch)
+  // v0.56.0 FA-4 — timeline wave canonical vocab (daily + journal + sticky-notes)
   await caseFA4TimelineManifests();
   await caseFA4TimelineTemplates();
   await caseFA4TimelineRuleFragmentsExtends();

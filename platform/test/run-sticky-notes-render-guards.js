@@ -1,17 +1,18 @@
 'use strict';
 
-// run-scratch-render-guards.js — cold-load render coverage for the scratch
-// blueprint's 5 render widgets. Autoloop queue item
-// cov-blueprint-scratch-widget-render.
+// run-sticky-notes-render-guards.js — cold-load render coverage for the
+// sticky-notes blueprint's render widgets. Autoloop queue item
+// cov-blueprint-sticky-notes-widget-render (retained after the sticky-notes rename).
 //
-// ScratchLeafActions and ScratchHubActions had NO render()-execution test
-// anywhere (only structural references); the others have partial coverage in
-// run-scratch.js / run-helper-cases.js but no cold-load/embed guard test. This
-// harness drives all 5 widgets' render() through the cold-load path — Dataview
-// not indexed (dv.current() undefined/null, empty dv.pages) — in a normal
-// container AND a `.markdown-embed` context, asserting no throw. All 5 carry a
-// cold-load guard (markdown-embed early-return or customJS.RenderSafe.page); this
-// is the render-safe net the project/cowork/to-do widgets already have.
+// The three surviving render widgets — StickyHubCards, StickyDayList, and
+// StickyChromeBar — are driven through their render() path via the cold-load
+// path (Dataview not indexed: dv.current() undefined/null, empty dv.pages) in a
+// normal container AND a `.markdown-embed` context, asserting no throw. Each
+// carries a cold-load guard (markdown-embed early-return, customJS.RenderSafe.page,
+// or an absent-ChromeBar early-return); this is the render-safe net the
+// project/cowork/to-do widgets already have. (The 3 legacy action classes —
+// StickyDayActions/StickyLeafActions/StickyHubActions — were dropped in the
+// chrome-bar adoption, so they are no longer covered here.)
 //
 // Stubs mirror run-todo-render-guards.js (empty dv.pages chainable, tolerant DOM
 // proxy with firstChild→null, chainable window.moment, real RenderSafe, no-op
@@ -129,11 +130,9 @@ global.window = Object.assign(global.window || {}, { customJS: global.customJS, 
 global.moment = momentFn;
 
 const widgets = [
-    { name: 'ScratchHubCards',   path: 'platform/blueprints/scratch/helpers/scratch-hub-cards.js' },
-    { name: 'ScratchDayList',    path: 'platform/blueprints/scratch/helpers/scratch-day-list.js' },
-    { name: 'ScratchDayActions', path: 'platform/blueprints/scratch/helpers/scratch-day-actions.js' },
-    { name: 'ScratchLeafActions',path: 'platform/blueprints/scratch/helpers/scratch-leaf-actions.js' },
-    { name: 'ScratchHubActions', path: 'platform/blueprints/scratch/helpers/scratch-hub-actions.js' },
+    { name: 'StickyHubCards',  path: 'platform/blueprints/sticky-notes/helpers/sticky-hub-cards.js' },
+    { name: 'StickyDayList',   path: 'platform/blueprints/sticky-notes/helpers/sticky-day-list.js' },
+    { name: 'StickyChromeBar', path: 'platform/blueprints/sticky-notes/helpers/sticky-chrome-bar.js' },
 ];
 
 const variants = [
@@ -146,9 +145,9 @@ const variants = [
     for (const w of widgets) {
         let WidgetClass;
         try { WidgetClass = loadWidget(w.path, w.name); }
-        catch (e) { await guard(`SCRATCHGUARD-load ${w.name}`, () => { throw e; }); continue; }
+        catch (e) { await guard(`STICKYGUARD-load ${w.name}`, () => { throw e; }); continue; }
         for (const v of variants) {
-            await guard(`SCRATCHGUARD ${w.name} — ${v.label}`, async () => {
+            await guard(`STICKYGUARD ${w.name} — ${v.label}`, async () => {
                 const inst = new WidgetClass();
                 await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
             });

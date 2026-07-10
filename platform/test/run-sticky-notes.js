@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// run-scratch.js — sub-asserts for scratch blueprint helpers.
+// run-sticky-notes.js — sub-asserts for sticky-notes blueprint helpers.
 // Hosts HC-V0841-A1 (_coerceDay regression on Date inputs) +
-// HC-V0841-A2 (ScratchDayMigrate behavior).
+// HC-V0841-A2 (StickyDayMigrate behavior).
 //
-// Usage: node platform/test/run-scratch.js
+// Usage: node platform/test/run-sticky-notes.js
 // Exit: 0 = all pass; 1 = any fail.
 
 "use strict";
@@ -12,8 +12,8 @@ const fs = require("fs");
 const path = require("path");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
-const SDL_PATH = path.join(WORKSHOP, "platform/blueprints/scratch/helpers/scratch-day-list.js");
-const SDM_PATH = path.join(WORKSHOP, "platform/blueprints/scratch/helpers/scratch-day-migrate.js");
+const SDL_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-list.js");
+const SDM_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-migrate.js");
 
 let pass = 0;
 let fail = 0;
@@ -45,21 +45,21 @@ function assertEq(label, actual, expected) {
   return true;
 }
 
-// Load ScratchDayList class via new Function() wrap; expose it for
+// Load StickyDayList class via new Function() wrap; expose it for
 // _coerceDay testing without an Obsidian runtime.
-function loadScratchDayList() {
+function loadStickyDayList() {
   const src = fs.readFileSync(SDL_PATH, "utf8");
   const wrapper = new Function("module", "exports",
-    src + "\nmodule.exports = ScratchDayList;");
+    src + "\nmodule.exports = StickyDayList;");
   const mod = { exports: {} };
   wrapper(mod, mod.exports);
   return mod.exports;
 }
 
-console.log("\n--- HC-V0841-A1: scratch-day-list._coerceDay() regression ---");
+console.log("\n--- HC-V0841-A1: sticky-day-list._coerceDay() regression ---");
 
-const ScratchDayList = loadScratchDayList();
-const sdl = new ScratchDayList();
+const StickyDayList = loadStickyDayList();
+const sdl = new StickyDayList();
 
 // A1.1: string YYYY-MM-DD passes through.
 assertEq("HC-V0841-A1.1 _coerceDay('2026-06-01') → '2026-06-01'",
@@ -86,25 +86,25 @@ assertEq("HC-V0841-A1.5a _coerceDay(null) → null", sdl._coerceDay(null), null)
 assertEq("HC-V0841-A1.5b _coerceDay(undefined) → null", sdl._coerceDay(undefined), null);
 assertEq("HC-V0841-A1.5c _coerceDay({}) → null", sdl._coerceDay({}), null);
 
-console.log("\n--- HC-V0841-A2: ScratchDayMigrate behavior ---");
+console.log("\n--- HC-V0841-A2: StickyDayMigrate behavior ---");
 
-// Load ScratchDayMigrate class.
-function loadScratchDayMigrate() {
+// Load StickyDayMigrate class.
+function loadStickyDayMigrate() {
   const src = fs.readFileSync(SDM_PATH, "utf8");
   const wrapper = new Function("module", "exports",
-    src + "\nmodule.exports = ScratchDayMigrate;");
+    src + "\nmodule.exports = StickyDayMigrate;");
   const mod = { exports: {} };
   wrapper(mod, mod.exports);
   return mod.exports;
 }
 
-const ScratchDayMigrate = loadScratchDayMigrate();
-const sdm = new ScratchDayMigrate();
+const StickyDayMigrate = loadStickyDayMigrate();
+const sdm = new StickyDayMigrate();
 
 // A2.1: quoted string day passes through unchanged.
 {
-  const fm = { type: "scratch", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/2026/05-May/2026-05-31/Scratch-2026-05-31-22-30.md" };
+  const fm = { type: "sticky-note", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
   const before = JSON.stringify(fm);
   const changed = sdm._migrateFrontmatter(fm, fakeFile);
   assertTrue("HC-V0841-A2.1a quoted string day → no change",
@@ -118,8 +118,8 @@ const sdm = new ScratchDayMigrate();
 // new Date("2026-05-31T00:00:00.000Z"). The migration must use the FILE PATH
 // segment to recover the user-intended local date (not the Date's getDate()).
 {
-  const fm = { type: "scratch", day: new Date("2026-05-31T00:00:00.000Z"), created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/2026/05-May/2026-05-31/Scratch-2026-05-31-22-30.md" };
+  const fm = { type: "sticky-note", day: new Date("2026-05-31T00:00:00.000Z"), created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
   const changed = sdm._migrateFrontmatter(fm, fakeFile);
   assertTrue("HC-V0841-A2.2a Date day → migration recorded change",
     changed === true);
@@ -129,8 +129,8 @@ const sdm = new ScratchDayMigrate();
 
 // A2.3: missing day but path encodes /YYYY-MM-DD/ → day synthesized.
 {
-  const fm = { type: "scratch", created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/2026/05-May/2026-05-31/Scratch-2026-05-31-22-30.md" };
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
   const changed = sdm._migrateFrontmatter(fm, fakeFile);
   assertTrue("HC-V0841-A2.3a missing day, path has date → migration recorded change",
     changed === true);
@@ -138,10 +138,10 @@ const sdm = new ScratchDayMigrate();
     fm.day, "2026-05-31");
 }
 
-// A2.4: missing day, filename encodes Scratch-*-YYYY-MM-DD → day synthesized.
+// A2.4: missing day, filename encodes Sticky-*-YYYY-MM-DD → day synthesized.
 {
-  const fm = { type: "scratch", created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/Scratch-2026-05-31-22-30.md" };
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/Sticky-2026-05-31-22-30.md" };
   const changed = sdm._migrateFrontmatter(fm, fakeFile);
   assertTrue("HC-V0841-A2.4a missing day, filename has date → migration recorded change",
     changed === true);
@@ -151,8 +151,8 @@ const sdm = new ScratchDayMigrate();
 
 // A2.5: missing day, no date anywhere → no change, returns false.
 {
-  const fm = { type: "scratch", created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/Untitled.md" };
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/Untitled.md" };
   const changed = sdm._migrateFrontmatter(fm, fakeFile);
   assertTrue("HC-V0841-A2.5 unrecoverable day → no change",
     changed === false);
@@ -160,8 +160,8 @@ const sdm = new ScratchDayMigrate();
 
 // A2.6: idempotency — running again on post-migration state is a no-op.
 {
-  const fm = { type: "scratch", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
-  const fakeFile = { path: "spice/scratch/2026/05-May/2026-05-31/Scratch-2026-05-31-22-30.md" };
+  const fm = { type: "sticky-note", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
   const before = JSON.stringify(fm);
   sdm._migrateFrontmatter(fm, fakeFile);
   sdm._migrateFrontmatter(fm, fakeFile);
@@ -169,39 +169,22 @@ const sdm = new ScratchDayMigrate();
     JSON.stringify(fm), before);
 }
 
-// A2.7: manifest wiring — scratch manifest declares both classes and the
+// A2.7: manifest wiring — sticky-notes manifest declares both classes and the
 // startup-script + files entries.
 {
-  const SCRATCH_MANIFEST = path.join(WORKSHOP, "platform/blueprints/scratch/manifest.json");
-  const m = JSON.parse(fs.readFileSync(SCRATCH_MANIFEST, "utf8"));
-  assertTrue("HC-V0841-A2.7a customjs_classes contains ScratchDayMigrate",
-    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("ScratchDayMigrate") >= 0);
-  assertTrue("HC-V0841-A2.7b customjs_classes contains ScratchDayMigrateInit",
-    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("ScratchDayMigrateInit") >= 0);
-  assertTrue("HC-V0841-A2.7c customjs_startup_scripts contains ScratchDayMigrateInit",
-    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.indexOf("ScratchDayMigrateInit") >= 0);
+  const STICKY_MANIFEST = path.join(WORKSHOP, "platform/blueprints/sticky-notes/manifest.json");
+  const m = JSON.parse(fs.readFileSync(STICKY_MANIFEST, "utf8"));
+  assertTrue("HC-V0841-A2.7a customjs_classes contains StickyDayMigrate",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("StickyDayMigrate") >= 0);
+  assertTrue("HC-V0841-A2.7b customjs_classes contains StickyDayMigrateInit",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("StickyDayMigrateInit") >= 0);
+  assertTrue("HC-V0841-A2.7c customjs_startup_scripts contains StickyDayMigrateInit",
+    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.indexOf("StickyDayMigrateInit") >= 0);
   const fileSources = (m.files || []).map(f => f && f.source);
-  assertTrue("HC-V0841-A2.7d files[] includes scratch-day-migrate.js",
-    fileSources.indexOf("helpers/scratch-day-migrate.js") >= 0);
-  assertTrue("HC-V0841-A2.7e files[] includes scratch-day-migrate-init.js",
-    fileSources.indexOf("helpers/scratch-day-migrate-init.js") >= 0);
-}
-
-// ── HC-ADIV-SCRATCH: ScratchDayActions owns its own <hr> dividers ───────────
-// Wiki methodology — the action helper renders a top + bottom <hr> (12px
-// breathing room) INSIDE its own dataviewjs block, and the Scratch Day Hub
-// template drops the literal `---`, so the separators hug the buttons instead of
-// leaving the big Obsidian inter-block gap. Mirrors run-wiki.js W13d/W14c.
-{
-  const sdaSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/scratch/helpers/scratch-day-actions.js"), "utf8");
-  assertTrue("HC-ADIV-SCRATCH-1 ScratchDayActions renders top+bottom <hr> (2 hrs)",
-    (sdaSrc.match(/createEl\(["']hr["']\)/g) || []).length >= 2);
-  assertTrue("HC-ADIV-SCRATCH-2 hr dividers use the 12px breathing-room margin",
-    /border-top: 1px solid var\(--background-modifier-border\); margin: 12px 0;/.test(sdaSrc));
-  const sdhTpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/scratch/templates/Scratch Day Hub.md"), "utf8");
-  assertTrue("HC-ADIV-SCRATCH-3 Scratch Day Hub.md no longer brackets ScratchDayActions with `---`",
-    !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ScratchDayActions/.test(sdhTpl) &&
-    !/ScratchDayActions[\s\S]*?\n```\n+-{3,}/.test(sdhTpl));
+  assertTrue("HC-V0841-A2.7d files[] includes sticky-day-migrate.js",
+    fileSources.indexOf("helpers/sticky-day-migrate.js") >= 0);
+  assertTrue("HC-V0841-A2.7e files[] includes sticky-day-migrate-init.js",
+    fileSources.indexOf("helpers/sticky-day-migrate-init.js") >= 0);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
