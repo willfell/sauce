@@ -261,6 +261,12 @@
     padding-left: 18px;
   }
 }
+/* Narrow-pane fallback (mirrors the .se-root column switch): one card per
+ * row so titles don't hard-truncate when the pane is narrow but app.isMobile
+ * is false (desktop split panes). */
+@media (max-width: 720px) {
+  .se-doc-grid { grid-template-columns: 1fr; }
+}
 
 /* ── Leaf-note pinned links (renderNoteLinks — rendered OUTSIDE .se-root,
  * directly under the note's chrome bar). ────────────────────────────────── */
