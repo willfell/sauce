@@ -1325,6 +1325,84 @@ failures += !run("already-SAVED schemeless links get an https:// href at render 
   }
 });
 
+failures += !run("add-link modal: title + styled inputs + Cancel/primary buttons; Cancel closes without write; primary writes normalized", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const writes = [];
+  const adapter = { getLinks: () => [], writeLinks: (t, links) => writes.push(links) };
+
+  const findDeep = (el, pred, out = []) => {
+    if (pred(el)) out.push(el);
+    for (const c of el.children || []) findDeep(c, pred, out);
+    return out;
+  };
+
+  // Cancel path — closes, no write.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  let overlay = doc.body.children[0];
+  assert.ok(overlay, "overlay mounted");
+  let titles = findDeep(overlay, (e) => e.className === "se-modal-title");
+  assert.strictEqual(titles.length, 1, "expected a modal title");
+  assert.strictEqual(titles[0].textContent, "Add link");
+  let inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  assert.strictEqual(inputs.length, 2, "expected two styled inputs (url + label)");
+  const cancel = findDeep(overlay, (e) => e.className === "se-modal-btn")[0];
+  assert.ok(cancel && cancel.textContent === "Cancel", "expected a Cancel button");
+  cancel.onclick();
+  assert.strictEqual(doc.body.children.length, 0, "Cancel closes the modal");
+  assert.strictEqual(writes.length, 0, "Cancel writes nothing");
+
+  // Primary path — normalized write + close.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  overlay = doc.body.children[0];
+  inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  inputs[0].value = "google.com";
+  inputs[1].value = "Google";
+  const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+  assert.ok(primary, "expected a primary button");
+  primary.onclick();
+  assert.deepStrictEqual(writes, [[{ url: "https://google.com", text: "Google" }]], "primary writes the normalized link");
+  assert.strictEqual(doc.body.children.length, 0, "primary closes the modal");
+
+  // Enter in the URL input submits too.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  overlay = doc.body.children[0];
+  inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  inputs[0].value = "https://b.com";
+  assert.strictEqual(typeof inputs[0].onkeydown, "function", "url input listens for Enter");
+  inputs[0].onkeydown({ key: "Enter" });
+  assert.strictEqual(writes.length, 2, "Enter submits");
+  delete global.document;
+});
+
+failures += !run("rename modal gets the same chrome (title + input + Cancel/primary)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const renames = [];
+  const adapter = { renameSection: (s, t) => renames.push(t) };
+  const findDeep = (el, pred, out = []) => {
+    if (pred(el)) out.push(el);
+    for (const c of el.children || []) findDeep(c, pred, out);
+    return out;
+  };
+  se._openRenameDialog(null, adapter, { title: "EMS" });
+  const overlay = doc.body.children[0];
+  const title = findDeep(overlay, (e) => e.className === "se-modal-title")[0];
+  assert.ok(title && title.textContent === "Rename section");
+  const input = findDeep(overlay, (e) => e.className === "se-modal-input")[0];
+  assert.strictEqual(input.value, "EMS", "input prefilled with current title");
+  const cancel = findDeep(overlay, (e) => e.className === "se-modal-btn")[0];
+  assert.ok(cancel && cancel.textContent === "Cancel");
+  input.value = "Networking";
+  const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+  primary.onclick();
+  assert.deepStrictEqual(renames, ["Networking"]);
+  assert.strictEqual(doc.body.children.length, 0);
+  delete global.document;
+});
+
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
   for (const t of ASYNC_TESTS) {

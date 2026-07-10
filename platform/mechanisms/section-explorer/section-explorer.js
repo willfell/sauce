@@ -305,7 +305,8 @@ class SectionExplorer {
     overlay.className = className;
     overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
     const panel = doc.createElement("div");
-    panel.style.cssText = "background:var(--background-primary);border-radius:12px;padding:16px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
+    panel.className = "se-modal-panel";
+    panel.style.cssText = "background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:12px;padding:18px;width:min(420px,90vw);box-shadow:0 8px 30px rgba(0,0,0,0.3);";
 
     // Single teardown for ALL dismiss paths (backdrop, Escape) — removes
     // overlay AND the keydown listener so a stale Escape handler can never
@@ -340,50 +341,83 @@ class SectionExplorer {
     return overlay;
   }
 
+  // ── Shared modal chrome — title, styled input, Cancel + primary button row.
+  // Classes are styled by the section-explorer.css snippet; light inline
+  // styles keep the dialog readable even if the snippet is disabled.
+  _modalTitle(doc, panel, text) {
+    const t = doc.createElement("div");
+    t.className = "se-modal-title";
+    t.textContent = text;
+    t.style.cssText = "font-weight:600;font-size:1.05em;margin-bottom:12px;color:var(--text-normal);";
+    panel.appendChild(t);
+    return t;
+  }
+
+  _modalInput(doc, panel, opts) {
+    const input = doc.createElement("input");
+    input.className = "se-modal-input";
+    if (opts && opts.placeholder) input.placeholder = opts.placeholder;
+    if (opts && opts.value != null) input.value = opts.value;
+    input.style.cssText = "width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--background-modifier-border);background:var(--background-modifier-form-field, var(--background-primary));color:var(--text-normal);font-size:0.95em;outline:none;";
+    if (opts && typeof opts.onEnter === "function") {
+      input.onkeydown = (e) => { if (e && e.key === "Enter") opts.onEnter(); };
+    }
+    panel.appendChild(input);
+    return input;
+  }
+
+  _modalButtons(doc, panel, close, primaryLabel, onPrimary) {
+    const row = doc.createElement("div");
+    row.className = "se-modal-btns";
+    row.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:8px;";
+    const cancel = doc.createElement("button");
+    cancel.className = "se-modal-btn";
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "padding:7px 14px;border-radius:8px;border:1px solid var(--background-modifier-border);background:transparent;color:var(--text-muted);cursor:pointer;font-size:0.9em;";
+    cancel.onclick = () => close();
+    const primary = doc.createElement("button");
+    primary.className = "se-modal-btn se-modal-btn-primary";
+    primary.textContent = primaryLabel;
+    primary.style.cssText = "padding:7px 14px;border-radius:8px;border:none;background:var(--interactive-accent);color:var(--text-on-accent);cursor:pointer;font-weight:600;font-size:0.9em;";
+    primary.onclick = () => onPrimary();
+    row.appendChild(cancel);
+    row.appendChild(primary);
+    panel.appendChild(row);
+    return { cancel, primary };
+  }
+
   // Real add-link modal — pure mutation this calls (_addLinkPure) is
-  // covered directly by tests; the DOM shell is exercised via _openModal's
-  // Escape/ghost-click guard tests (dogfood-only for the rest, matching the
-  // established precedent for this kind of dialog).
+  // covered directly by tests; Cancel/primary/Enter wiring is covered by the
+  // modal-chrome tests against the doc stub.
   _openAddLinkForm(dv, adapter, section) {
     this._openModal("se-link-modal-overlay", (panel, close, doc) => {
-      const urlInput = doc.createElement("input");
-      urlInput.placeholder = "https://…";
-      urlInput.style.cssText = "width:100%;margin-bottom:8px;";
-      const textInput = doc.createElement("input");
-      textInput.placeholder = "Label (optional)";
-      textInput.style.cssText = "width:100%;margin-bottom:12px;";
-      const addBtn = doc.createElement("button");
-      addBtn.textContent = "Add link";
-      addBtn.onclick = () => {
+      this._modalTitle(doc, panel, "Add link");
+      const submit = () => {
         const current = adapter.getLinks(section) || [];
         const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
         if (result.changed) { try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ } }
         close();
       };
-      panel.appendChild(urlInput);
-      panel.appendChild(textInput);
-      panel.appendChild(addBtn);
+      const urlInput = this._modalInput(doc, panel, { placeholder: "https://…", onEnter: () => submit() });
+      const textInput = this._modalInput(doc, panel, { placeholder: "Label (optional)", onEnter: () => submit() });
+      this._modalButtons(doc, panel, close, "Add link", submit);
     });
   }
 
   // Real rename modal — calls adapter.renameSection (where wiki-vs-project
-  // rename mechanics diverge; see Task 9). Same testability rationale above.
+  // rename mechanics diverge). Same chrome as the add-link modal.
   _openRenameDialog(dv, adapter, section) {
     this._openModal("se-rename-modal-overlay", (panel, close, doc) => {
-      const nameInput = doc.createElement("input");
-      nameInput.value = section.title || "";
-      nameInput.style.cssText = "width:100%;margin-bottom:12px;";
-      const saveBtn = doc.createElement("button");
-      saveBtn.textContent = "Rename";
-      saveBtn.onclick = () => {
+      this._modalTitle(doc, panel, "Rename section");
+      const submit = () => {
         const newTitle = String(nameInput.value || "").trim();
         if (newTitle && newTitle !== section.title) {
           try { adapter.renameSection(section, newTitle); } catch (_e) { /* never-throw */ }
         }
         close();
       };
-      panel.appendChild(nameInput);
-      panel.appendChild(saveBtn);
+      const nameInput = this._modalInput(doc, panel, { value: section.title || "", onEnter: () => submit() });
+      this._modalButtons(doc, panel, close, "Rename", submit);
     });
   }
 
