@@ -9,7 +9,7 @@
  *
  * Layout (v2.12.0): prev/next-day arrows on top (space-between, when the daily
  * blueprint is installed), then a fixed 3-COLUMN GRID of pinned quick-nav
- * buttons — Home | To-Do | Scratch  /  Projects | Meetings | Go to… — where
+ * buttons — Home | To-Do | Sticky Notes  /  Projects | Meetings | Go to… — where
  * the final cell is the "Go to…" launcher holding EVERY OTHER blueprint. Pins
  * are chosen by _partitionEntries via a fixed _source order; any pinned source
  * absent from the registry simply drops its cell (the grid reflows). Each pinned
@@ -110,7 +110,7 @@ class SpaceNavButtons {
   // menu. Only the first entry per source can claim a pin slot. Pure;
   // Node-testable. Returns { pinned: entry[], rest: entry[] }.
   _partitionEntries(entries) {
-    const PINNED_SOURCES = ["home", "to-do", "scratch", "project", "meetings", "journal"];
+    const PINNED_SOURCES = ["home", "to-do", "sticky-notes", "project", "meetings", "journal"];
     const firstBySource = {};
     for (const e of (entries || [])) {
       if (e && e._source && !firstBySource[e._source]) firstBySource[e._source] = e;
@@ -128,7 +128,7 @@ class SpaceNavButtons {
   // Gate the prev/next-day arrow row (and its whole-vault getMarkdownFiles sweep)
   // to notes actually INSIDE the daily folder — not every note merely because the
   // daily blueprint is installed. Folder-path predicate (a basename date regex
-  // would leak meeting/scratch/to-do notes, which also carry date basenames).
+  // would leak meeting/sticky-note/to-do notes, which also carry date basenames).
   // Pure + Node-testable.
   static _shouldShowDayArrows(currentPath, dailyMeta) {
     return !!(dailyMeta && dailyMeta.folder && currentPath
@@ -193,7 +193,7 @@ class SpaceNavButtons {
     const dailyMeta = await this._readDailyNotesMeta();
 
     // ── Chrome: prev/next-day arrows on top; a fixed 3-column grid below —
-    //    Home | To-Do | Scratch  /  Projects | Meetings | Go to… (the rest). ──
+    //    Home | To-Do | Sticky Notes  /  Projects | Meetings | Go to… (the rest). ──
     const chrome = container.createEl("div");
     chrome.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
 
@@ -298,7 +298,7 @@ class SpaceNavButtons {
     };
   }
 
-  // Pinned quick-nav button for any entry (Home / To-Do / Scratch / Projects /
+  // Pinned quick-nav button for any entry (Home / To-Do / Sticky Notes / Projects /
   // Meetings). Dispatches the entry's own registry action via the unchanged
   // _dispatchAction. Label is ellipsised so it never overflows its grid cell.
   _renderEntryButton(row, entry, dv) {

@@ -4,7 +4,7 @@
  *   Cowork | Daily Hub | Weekly Hub | Monthly Hub
  *
  * The button corresponding to the CURRENT note is omitted (so each hub
- * renders 3 buttons pointing at the other 3). Mirrors ScratchDayActions
+ * renders 3 buttons pointing at the other 3). Mirrors the AccentButton row
  * aesthetic.
  *
  * Usage in DataviewJS (via customjs-guard):

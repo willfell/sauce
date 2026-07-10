@@ -40,17 +40,17 @@ const all = [
   { id: 'pe', label: 'People',   _source: 'people',   action: { type: 'openLink', target: 'Pe.md' } },
   { id: 't',  label: 'To Do',    _source: 'to-do',    action: { type: 'openLink', target: 'T.md' } },
   { id: 'me', label: 'Meetings', _source: 'meetings', action: { type: 'openLink', target: 'M.md' } },
-  { id: 'sc', label: 'Scratch',  _source: 'scratch',  action: { type: 'openLink', target: 'S.md' } },
+  { id: 'sc', label: 'Sticky Notes', _source: 'sticky-notes', action: { type: 'openLink', target: 'S.md' } },
   { id: 'w',  label: 'Wiki',     _source: 'wiki',     action: { type: 'openLink', target: 'W.md' } },
   { id: 'pr', label: 'Projects', _source: 'project',  action: { type: 'openLink', target: 'P.md' } },
   { id: 'h',  label: 'Home',     _source: 'home',     action: { type: 'invoke_command', command_id: 'homepage:open-homepage' } },
   { id: 'j',  label: 'Journal',  _source: 'journal',  action: { type: 'openLink', target: 'J.md' } },
 ];
 const part = inst2._partitionEntries(all);
-// pinned in the FIXED source order: home, to-do, scratch, project, meetings, journal.
+// pinned in the FIXED source order: home, to-do, sticky-notes, project, meetings, journal.
 ok('NL-6 pins exactly the 6 fixed sources', part.pinned.length === 6);
-ok('NL-7 pinned are in fixed source order (home,to-do,scratch,project,meetings,journal)',
-  part.pinned.map(e => e._source).join(',') === 'home,to-do,scratch,project,meetings,journal');
+ok('NL-7 pinned are in fixed source order (home,to-do,sticky-notes,project,meetings,journal)',
+  part.pinned.map(e => e._source).join(',') === 'home,to-do,sticky-notes,project,meetings,journal');
 ok('NL-8 rest = everything else (incl. Daily now), original order preserved',
   part.rest.map(e => e.id).join(',') === 'd,co,pe,w');
 // Absent pinned source simply drops its cell; extra entries per source → rest.
@@ -66,7 +66,7 @@ ok('NL-9 missing pins drop out; only first-per-source pins; extras → rest',
 // ── _shouldShowDayArrows: gate the prev/next-day arrow sweep to daily notes ──
 // The whole-vault getMarkdownFiles() sweep must fire ONLY when viewing a note
 // inside the daily folder — not on every note merely because the daily blueprint
-// is installed. Folder-PATH predicate (not basename regex: meeting/scratch/to-do
+// is installed. Folder-PATH predicate (not basename regex: meeting/sticky-note/to-do
 // notes carry date basenames and would leak through a basename gate).
 ok('NL-ARROW-1 daily note in the daily folder → arrows shown',
   SpaceNavButtons._shouldShowDayArrows('spice/daily/2026-07-03.md', { folder: 'spice/daily' }) === true);

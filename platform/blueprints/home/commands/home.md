@@ -11,7 +11,7 @@ Drives the home blueprint installed at `spice/home/`. Use this when you want to:
 
 - Open the Home command center (`spice/home/Home.md`), the vault's landing page
 - Locate or audit the `SpaceHome` panel rendered on the home note
-- Quick-capture a task or scratch from the home dashboard
+- Quick-capture a task or sticky note from the home dashboard
 - Glance at today's dashboard (tasks + meetings + recent activity) without opening a daily note
 
 ## Vault layout
@@ -38,7 +38,7 @@ The Home note renders a `SpaceHome` panel via CustomJS:
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceHome" });
 ```
 
-The panel shows a greeting (with a glance count line), a subtle **＋ quick-add** at the top-right that opens a dropdown (jot a task, or New Meeting / New Scratch / Open today's daily), and a compact today's-dashboard view (tasks, meetings, recent activity). If the panel does not render (or appears with stale data), trigger Cmd+R after install to re-register the `SpaceHome` CustomJS class.
+The panel shows a greeting (with a glance count line), a subtle **＋ quick-add** at the top-right that opens a dropdown (jot a task, or New Meeting / New Sticky Note / Open today's daily), and a compact today's-dashboard view (tasks, meetings, recent activity). If the panel does not render (or appears with stale data), trigger Cmd+R after install to re-register the `SpaceHome` CustomJS class.
 
 ## Refresh or audit
 

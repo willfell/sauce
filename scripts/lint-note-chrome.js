@@ -5,7 +5,7 @@
 // Enforces the canonical "note-chrome standard" across blueprint templates that
 // have ADOPTED it. The adopted set is derived DYNAMICALLY, never hardcoded: a
 // blueprint is adopted iff its `manifest.json` carries a top-level `breadcrumb`
-// key. Today that is exactly { project, meetings, scratch, to-do }; later
+// key. Today that is exactly { project, meetings, sticky-notes, to-do }; later
 // adoption waves widen the set by adding a `breadcrumb` block, and this gate
 // starts enforcing the new blueprint automatically. Un-adopted blueprints
 // (daily, journal, finance, trips, people, products, teams, cowork, …) still
@@ -204,7 +204,7 @@ function checkNoLiteralChromeDivider(content, opts) {
     const violations = [];
     // Scoped to the `project` blueprint this cycle: only project templates have
     // been converted to the helper-owned SectionLabel.divider() grammar. Other
-    // adopted blueprints (meetings / scratch / to-do) still legitimately carry a
+    // adopted blueprints (meetings / sticky-notes / to-do) still legitimately carry a
     // literal chrome `---` and are retrofitted in later cycles. See
     // Docs/plans/2026-07-02-project-blueprint-chrome-overhaul-design.md §S1.
     if (!opts || opts.blueprint !== 'project') return violations;

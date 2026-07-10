@@ -4695,9 +4695,9 @@ async function caseDDA2ActivityShimPagesDelegate() {
 }
 
 async function caseDDA4DashboardAllowlist() {
-  // v0.5.2 (v0.64.2): _DEFAULT_DASHBOARD_BLUEPRINTS drops scratch-day + to-do.
+  // v0.5.2 (v0.64.2): _DEFAULT_DASHBOARD_BLUEPRINTS drops sticky-day + to-do.
   // v0.5.3 (v0.64.3): also drops `meeting` — has its own dedicated panel.
-  console.log("\n--- Case DD-A4: dashboard allowlist drops scratch-day + to-do + meeting ---");
+  console.log("\n--- Case DD-A4: dashboard allowlist drops sticky-day + to-do + meeting ---");
   const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
   const body = fs.readFileSync(p, "utf8");
   const getterMatch = body.match(/_DEFAULT_DASHBOARD_BLUEPRINTS\s*\(\)\s*\{[\s\S]*?return\s*\[([\s\S]*?)\]/);
@@ -4706,13 +4706,13 @@ async function caseDDA4DashboardAllowlist() {
     return;
   }
   const listSource = getterMatch[1];
-  const hasScratchDay = /"scratch-day"/.test(listSource);
+  const hasStickyDay = /"sticky-day"/.test(listSource);
   const hasToDo = /"to-do"/.test(listSource);
   const hasMeeting = /"meeting"/.test(listSource);
-  const hasScratch = /"scratch"/.test(listSource);
+  const hasStickyNote = /"sticky-note"/.test(listSource);
   const hasProject = /"project"/.test(listSource);
-  const ok = !hasScratchDay && !hasToDo && !hasMeeting && hasScratch && hasProject;
-  assertTrue("DD-A4: allowlist still contains scratch-day, to-do, or meeting (noise/duplicate types)", ok);
+  const ok = !hasStickyDay && !hasToDo && !hasMeeting && hasStickyNote && hasProject;
+  assertTrue("DD-A4: allowlist still contains sticky-day, to-do, or meeting (noise/duplicate types)", ok);
 }
 
 async function caseDDA6ResolveTitleDefensive() {
@@ -16072,13 +16072,13 @@ async function caseHCV0128FinancePlanning() {
     assertTrue("HC-V070-1a: passes framed: true to ActivityFeed.render",      /framed:\s*true/.test(src));
     assertTrue("HC-V070-1b: passes bucketRules with cowork bucketKey",        /bucketKey:\s*"cowork"/.test(src));
     assertTrue("HC-V070-1c: passes groupOrder array starting with cowork",    /groupOrder:\s*\[\s*"cowork"/.test(src));
-    assertTrue("HC-V070-1d: passes groupOrderBottom containing scratch",      /groupOrderBottom:\s*\[\s*"scratch"\s*\]/.test(src));
+    assertTrue("HC-V070-1d: passes groupOrderBottom containing sticky-note",  /groupOrderBottom:\s*\[\s*"sticky-note"\s*\]/.test(src));
     // "Daily Hub Scratch Notes" card: the scratch section now OPENS by default
     // (no longer defaultClosed) and renders oldest-first via ascendingGroups.
-    assertTrue("HC-V070-1e: no longer defaultCloses the scratch group (opens by default)",
-      !/defaultClosed:\s*\[[^\]]*"scratch"[^\]]*\]/.test(src));
-    assertTrue("HC-V070-1i: passes ascendingGroups: [\"scratch\"] (oldest-first)",
-      /ascendingGroups:\s*\[\s*"scratch"\s*\]/.test(src));
+    assertTrue("HC-V070-1e: no longer defaultCloses the sticky-note group (opens by default)",
+      !/defaultClosed:\s*\[[^\]]*"sticky-note"[^\]]*\]/.test(src));
+    assertTrue("HC-V070-1i: passes ascendingGroups: [\"sticky-note\"] (oldest-first)",
+      /ascendingGroups:\s*\[\s*"sticky-note"\s*\]/.test(src));
     assertTrue("HC-V070-1f: _BLUEPRINT_COLORS contains cowork entry",         /cowork:\s*"var\(--color-blue\)"/.test(src));
     assertTrue("HC-V070-1g: flatGrouped:true no longer present",              !/flatGrouped:\s*true/.test(src));
     assertTrue("HC-V070-1h: _buildAccentSegments helper removed",             !/_buildAccentSegments\s*\(/.test(src));

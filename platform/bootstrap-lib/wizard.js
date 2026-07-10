@@ -35,8 +35,8 @@ function _loadInquirer() {
 
 const DEFAULT_MECHANISMS_CHECKED = [
     "customjs-guard",
-    "render-safe",   // v0.13x.0 — project/scratch/trips blueprints (project +
-                     // scratch are in the default blueprint set) depend on
+    "render-safe",   // v0.13x.0 — project/sticky-notes/trips blueprints (project +
+                     // sticky-notes are in the default blueprint set) depend on
                      // render-safe since this release; pre-include so
                      // fresh-vault bootstrap doesn't skip them. Same class of
                      // bug as the section-label / breadcrumb entries below.

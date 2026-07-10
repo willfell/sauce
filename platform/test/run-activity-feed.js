@@ -118,7 +118,7 @@ if (src.length > 0) {
   }
 
   // AF-7: canonical default blueprint types — at least these 10.
-  const canonical = ["daily", "meeting", "scratch", "cowork-daily", "to-do", "journal", "project", "person", "team", "trip"];
+  const canonical = ["daily", "meeting", "sticky-note", "cowork-daily", "to-do", "journal", "project", "person", "team", "trip"];
   for (const t of canonical) {
     assertTrue(`AF-7.${t}: default blueprint type '${t}' present in source`,
       new RegExp("\"" + t + "\"").test(src));
@@ -321,12 +321,12 @@ function renderAndCapture(opts, pagesSeed) {
 // AF-A1 — asOf anchor.
 try {
   const pageX = {
-    type: "scratch",
+    type: "sticky-note",
     created_at: "2026-05-15T10:00:00-06:00",
     file: { name: "page-x.md", path: "page-x.md" },
   };
   const pageY = {
-    type: "scratch",
+    type: "sticky-note",
     created_at: "2026-05-19T10:00:00-06:00",
     file: { name: "page-y.md", path: "page-y.md" },
   };
@@ -827,7 +827,7 @@ try {
 try {
   const pages = [
     { file: { path: "j.md", name: "j" }, type: "journal", created_at: "2026-05-19T09:00:00Z" },
-    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "sticky-note", created_at: "2026-05-19T10:00:00Z" },
     { file: { path: "c.md", name: "c" }, type: "cowork",  created_at: "2026-05-19T11:00:00Z" },
     { file: { path: "p.md", name: "p" }, type: "project", created_at: "2026-05-19T12:00:00Z" },
   ];
@@ -837,17 +837,17 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-19",
-    blueprints: ["journal", "scratch", "cowork", "project"],
+    blueprints: ["journal", "sticky-note", "cowork", "project"],
     framed: true,
     groupOrder: ["cowork", "project"],
-    groupOrderBottom: ["scratch"],
+    groupOrderBottom: ["sticky-note"],
   });
   const html = dv.container.innerHTML;
   const order = [];
   const re = /data-group="([^"]+)"/g;
   let m; while ((m = re.exec(html)) !== null) order.push(m[1]);
-  assertEq("AF-V070-ORDER-1: group order = [cowork, project, journal, scratch]",
-    order, ["cowork", "project", "journal", "scratch"]);
+  assertEq("AF-V070-ORDER-1: group order = [cowork, project, journal, sticky-note]",
+    order, ["cowork", "project", "journal", "sticky-note"]);
 } catch (e) {
   assertTrue("AF-V070-ORDER-1: group order", false, e && e.message);
 }
@@ -879,7 +879,7 @@ try {
 try {
   const pages = [
     { file: { path: "c.md", name: "c" }, type: "cowork",  created_at: "2026-05-19T11:00:00Z" },
-    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "sticky-note", created_at: "2026-05-19T10:00:00Z" },
   ];
   const dv = v066_makeFakeDv(pages);
   const ActivityFeed = v066_loadAF();
@@ -887,11 +887,11 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-19",
-    blueprints: ["cowork", "scratch"],
+    blueprints: ["cowork", "sticky-note"],
     framed: true,
     groupOrder: ["cowork"],
-    groupOrderBottom: ["scratch"],
-    defaultClosed: ["scratch"],
+    groupOrderBottom: ["sticky-note"],
+    defaultClosed: ["sticky-note"],
   });
   const findGroups = (el) => {
     const out = [];
@@ -913,7 +913,7 @@ try {
   const byKey = {};
   for (const g of groupEls) byKey[g.dataset.group] = findDetails(g);
   assertTrue("AF-V070-CLOSED-1a: cowork <details> has open=true",  byKey.cowork  && byKey.cowork.open === true);
-  assertTrue("AF-V070-CLOSED-1b: scratch <details> has open=false", byKey.scratch && byKey.scratch.open === false);
+  assertTrue("AF-V070-CLOSED-1b: sticky-note <details> has open=false", byKey["sticky-note"] && byKey["sticky-note"].open === false);
 } catch (e) {
   assertTrue("AF-V070-CLOSED-1: defaultClosed", false, e && e.message);
 }
@@ -1013,7 +1013,7 @@ try {
 try {
   const pages = [
     { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
-    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "sticky-note", created_at: "2026-05-19T10:00:00Z" },
   ];
   const dv = v066_makeFakeDv(pages);
   const ActivityFeed = v066_loadAF();
@@ -1021,14 +1021,14 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-19",
-    blueprints: ["cowork", "scratch"],
+    blueprints: ["cowork", "sticky-note"],
     framed: true,
     groupOrder: ["cowork"],
-    groupOrderBottom: ["cowork", "scratch"],
+    groupOrderBottom: ["cowork", "sticky-note"],
   });
   const html = dv.container.innerHTML;
   const cIdx = html.indexOf('data-group="cowork"');
-  const sIdx = html.indexOf('data-group="scratch"');
+  const sIdx = html.indexOf('data-group="sticky-note"');
   assertTrue("AF-V070-CONFLICT-1: top wins when key listed in both arrays", cIdx >= 0 && sIdx > cIdx);
 } catch (e) {
   assertTrue("AF-V070-CONFLICT-1: ordering conflict resolution", false, e && e.message);
@@ -1044,7 +1044,7 @@ console.log("\n--- Pass 6: v0.4.1 strict created_at semantics ---");
 // Mobile sync had re-touched the files.
 try {
   const page = {
-    type: "scratch",
+    type: "sticky-note",
     created_at: "2026-05-20T16:44:15-06:00",                 // yesterday
     file: {
       path: "stale.md",
@@ -1058,7 +1058,7 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     includeMtime: true,
     framed: true,
   });
@@ -1072,7 +1072,7 @@ try {
 // AF-V071-2: legacy page WITHOUT created_at — mtime fallback still works.
 try {
   const page = {
-    type: "scratch",
+    type: "sticky-note",
     file: {
       path: "legacy.md",
       name: "legacy.md",
@@ -1085,7 +1085,7 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     includeMtime: true,
     framed: true,
   });
@@ -1100,7 +1100,7 @@ try {
 // (created_at wins; mtime being old shouldn't disqualify a newly-created note.)
 try {
   const page = {
-    type: "scratch",
+    type: "sticky-note",
     created_at: "2026-05-21T09:00:00-06:00",                 // today
     file: {
       path: "fresh.md",
@@ -1114,7 +1114,7 @@ try {
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     includeMtime: true,
     framed: true,
   });
@@ -1179,18 +1179,18 @@ try {
 
 // AF-V0710-PREVIEW-1: groupPreviewBuilder appends preview text to a defaultClosed group header
 try {
-  const pA = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", frontmatter: { summary: "Migrating mesh state to prod" }, created_at: "2026-05-21T10:00:00Z" };
-  const pB = { file: { path: "spice/s/b.md", name: "b" }, type: "scratch", frontmatter: { summary: "Reviewing PR backlog" },         created_at: "2026-05-21T11:00:00Z" };
+  const pA = { file: { path: "spice/s/a.md", name: "a" }, type: "sticky-note", frontmatter: { summary: "Migrating mesh state to prod" }, created_at: "2026-05-21T10:00:00Z" };
+  const pB = { file: { path: "spice/s/b.md", name: "b" }, type: "sticky-note", frontmatter: { summary: "Reviewing PR backlog" },         created_at: "2026-05-21T11:00:00Z" };
   const dv = v066_makeFakeDv([pA, pB]);
   const ActivityFeed = v066_loadAF();
   const af = new ActivityFeed();
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     framed: true,
     groupBy: "blueprint",
-    defaultClosed: ["scratch"],
+    defaultClosed: ["sticky-note"],
     groupPreviewBuilder: function (pages) {
       return (pages[0] && pages[0].frontmatter && pages[0].frontmatter.summary) || "";
     },
@@ -1208,17 +1208,17 @@ try {
 // AF-V0710-PREVIEW-2: 80-char truncation + trailing ellipsis
 try {
   const longSummary = "x".repeat(120);
-  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", frontmatter: { summary: longSummary }, created_at: "2026-05-21T10:00:00Z" };
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "sticky-note", frontmatter: { summary: longSummary }, created_at: "2026-05-21T10:00:00Z" };
   const dv = v066_makeFakeDv([p]);
   const ActivityFeed = v066_loadAF();
   const af = new ActivityFeed();
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     framed: true,
     groupBy: "blueprint",
-    defaultClosed: ["scratch"],
+    defaultClosed: ["sticky-note"],
     groupPreviewBuilder: function (pages) {
       return pages[0].frontmatter.summary;
     },
@@ -1235,17 +1235,17 @@ try {
 
 // AF-V0710-PREVIEW-3: builder returning empty string preserves count-only header
 try {
-  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", created_at: "2026-05-21T10:00:00Z" };
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "sticky-note", created_at: "2026-05-21T10:00:00Z" };
   const dv = v066_makeFakeDv([p]);
   const ActivityFeed = v066_loadAF();
   const af = new ActivityFeed();
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     framed: true,
     groupBy: "blueprint",
-    defaultClosed: ["scratch"],
+    defaultClosed: ["sticky-note"],
     groupPreviewBuilder: function () { return ""; },
   });
   const html = dv.container.innerHTML;
@@ -1257,17 +1257,17 @@ try {
 
 // AF-V0710-PREVIEW-4: opt omitted entirely preserves count-only header
 try {
-  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", created_at: "2026-05-21T10:00:00Z" };
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "sticky-note", created_at: "2026-05-21T10:00:00Z" };
   const dv = v066_makeFakeDv([p]);
   const ActivityFeed = v066_loadAF();
   const af = new ActivityFeed();
   af.render(dv, {
     scope: "today",
     asOf: "2026-05-21",
-    blueprints: ["scratch"],
+    blueprints: ["sticky-note"],
     framed: true,
     groupBy: "blueprint",
-    defaultClosed: ["scratch"],
+    defaultClosed: ["sticky-note"],
     // no groupPreviewBuilder
   });
   const html = dv.container.innerHTML;
@@ -1495,65 +1495,65 @@ assertTrue("HC-V0841-D2 _renderFramedGroup retains the toggle event listener",
 // ── AF-ASC: ascendingGroups renders a named group oldest-first ────────────
 console.log("\n--- AF-ASC: ascendingGroups (oldest-first per group) ---");
 
-// Build three scratch pages on the same day with distinct created_at, fed in
+// Build three sticky-note pages on the same day with distinct created_at, fed in
 // a SHUFFLED order (09:00, 10:00, 08:00). tsKeys[0]="day" is absent on the
 // pages, so the global newest-first sort ties and preserves input order —
 // meaning WITHOUT the opt the render order is [09,10,08] (not ascending).
 function afAscSeed() {
   const day = "2026-05-21";
-  const mk = (name, hh) => ({ file: { path: "spice/s/" + name + ".md", name }, type: "scratch", created_at: day + "T" + hh + ":00:00Z" });
-  return { day, pages: [mk("scratch-0900", "09"), mk("scratch-1000", "10"), mk("scratch-0800", "08")] };
+  const mk = (name, hh) => ({ file: { path: "spice/s/" + name + ".md", name }, type: "sticky-note", created_at: day + "T" + hh + ":00:00Z" });
+  return { day, pages: [mk("sticky-note-0900", "09"), mk("sticky-note-1000", "10"), mk("sticky-note-0800", "08")] };
 }
 
-// AF-ASC-1 — with ascendingGroups:["scratch"], rows render oldest-first.
+// AF-ASC-1 — with ascendingGroups:["sticky-note"], rows render oldest-first.
 // (Red without the Pass B.5 change: default order would be [09,10,08].)
 try {
   const { day, pages } = afAscSeed();
   const dv = v066_makeFakeDv(pages);
   const af = new (v066_loadAF())();
   af.render(dv, {
-    scope: "today", asOf: day, blueprints: ["scratch"], framed: true, groupBy: "blueprint",
+    scope: "today", asOf: day, blueprints: ["sticky-note"], framed: true, groupBy: "blueprint",
     tsKeys: ["day", "created_at", "status_changed_at"],
-    ascendingGroups: ["scratch"],
+    ascendingGroups: ["sticky-note"],
   });
   const html = dv.container.innerHTML;
-  const i08 = html.indexOf("scratch-0800"), i09 = html.indexOf("scratch-0900"), i10 = html.indexOf("scratch-1000");
-  assertTrue("AF-ASC-1a: all three scratch rows rendered", i08 >= 0 && i09 >= 0 && i10 >= 0);
-  assertTrue("AF-ASC-1b: ascendingGroups renders scratch oldest-first (0800 < 0900 < 1000)",
+  const i08 = html.indexOf("sticky-note-0800"), i09 = html.indexOf("sticky-note-0900"), i10 = html.indexOf("sticky-note-1000");
+  assertTrue("AF-ASC-1a: all three sticky-note rows rendered", i08 >= 0 && i09 >= 0 && i10 >= 0);
+  assertTrue("AF-ASC-1b: ascendingGroups renders sticky-note oldest-first (0800 < 0900 < 1000)",
     i08 < i09 && i09 < i10, "render order was 08=" + i08 + " 09=" + i09 + " 10=" + i10);
 } catch (e) {
   assertTrue("AF-ASC-1: ascendingGroups oldest-first", false, e && e.message);
 }
 
-// AF-ASC-2 — opt-in guard: WITHOUT ascendingGroups the scratch group is not
+// AF-ASC-2 — opt-in guard: WITHOUT ascendingGroups the sticky-note group is not
 // reordered ascending (the new opt must not change default behavior).
 try {
   const { day, pages } = afAscSeed();
   const dv = v066_makeFakeDv(pages);
   const af = new (v066_loadAF())();
   af.render(dv, {
-    scope: "today", asOf: day, blueprints: ["scratch"], framed: true, groupBy: "blueprint",
+    scope: "today", asOf: day, blueprints: ["sticky-note"], framed: true, groupBy: "blueprint",
     tsKeys: ["day", "created_at", "status_changed_at"],
   });
   const html = dv.container.innerHTML;
-  const i08 = html.indexOf("scratch-0800"), i09 = html.indexOf("scratch-0900"), i10 = html.indexOf("scratch-1000");
-  assertTrue("AF-ASC-2: without ascendingGroups scratch is NOT reordered ascending (opt-in only)",
+  const i08 = html.indexOf("sticky-note-0800"), i09 = html.indexOf("sticky-note-0900"), i10 = html.indexOf("sticky-note-1000");
+  assertTrue("AF-ASC-2: without ascendingGroups sticky-note is NOT reordered ascending (opt-in only)",
     !(i08 < i09 && i09 < i10), "render order was 08=" + i08 + " 09=" + i09 + " 10=" + i10);
 } catch (e) {
   assertTrue("AF-ASC-2: opt-in default unchanged", false, e && e.message);
 }
 
-// AF-ASC-3 — daily dashboard wiring: the scratch section opens by default and
+// AF-ASC-3 — daily dashboard wiring: the sticky-note section opens by default and
 // renders oldest-first. (Red without the space-daily-dashboard.js config edit.)
 try {
   const dailyDashSrc = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
-  assertTrue("AF-ASC-3a: daily dashboard passes ascendingGroups: ['scratch']",
-    /ascendingGroups:\s*\[\s*["']scratch["']\s*\]/.test(dailyDashSrc),
-    "space-daily-dashboard.js must pass ascendingGroups: ['scratch'] so the daily hub renders scratch oldest-first");
-  assertTrue("AF-ASC-3b: daily dashboard no longer defaultCloses the scratch group",
-    !/defaultClosed:\s*\[[^\]]*["']scratch["'][^\]]*\]/.test(dailyDashSrc),
-    "space-daily-dashboard.js must not list 'scratch' in defaultClosed so the section opens by default");
+  assertTrue("AF-ASC-3a: daily dashboard passes ascendingGroups: ['sticky-note']",
+    /ascendingGroups:\s*\[\s*["']sticky-note["']\s*\]/.test(dailyDashSrc),
+    "space-daily-dashboard.js must pass ascendingGroups: ['sticky-note'] so the daily hub renders sticky-note oldest-first");
+  assertTrue("AF-ASC-3b: daily dashboard no longer defaultCloses the sticky-note group",
+    !/defaultClosed:\s*\[[^\]]*["']sticky-note["'][^\]]*\]/.test(dailyDashSrc),
+    "space-daily-dashboard.js must not list 'sticky-note' in defaultClosed so the section opens by default");
 } catch (e) {
   assertTrue("AF-ASC-3: daily dashboard wiring", false, e && e.message);
 }

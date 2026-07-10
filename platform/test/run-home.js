@@ -16,7 +16,7 @@
  *                 greeting → glance → capture band (1 input + 3 buttons) → dashboard
  *                 mount, under .sauce-home
  *   HOME-CAP    — SpaceHome._captureSpec() shape (3 buttons) + per-button dispatch
- *                 wiring (meeting/scratch → EntityCreate.create, openDaily →
+ *                 wiring (meeting/sticky-note → EntityCreate.create, openDaily →
  *                 app.commands.executeCommandById("daily-notes")) + the inline
  *                 "Jot a task…" capture wired to TaskDialog.createQuick
  *
@@ -262,7 +262,7 @@ function descendants(el) {
     `_captureSpec should return exactly 2 entries (todo is inline; openDaily removed); got ${JSON.stringify(spec)}`);
   const keys = Array.isArray(spec) ? spec.map((s) => s && s.key) : [];
   assertEq("HOME-CAP-2 key[0] meeting", keys[0], "meeting");
-  assertEq("HOME-CAP-3 key[1] scratch", keys[1], "scratch");
+  assertEq("HOME-CAP-3 key[1] sticky-note", keys[1], "sticky-note");
   assertTrue("HOME-CAP-4 openDaily entry removed", keys.indexOf("openDaily") < 0,
     `the Open-today's-daily button must be gone; got ${JSON.stringify(keys)}`);
   assertTrue("HOME-CAP-5 no 'todo' entry remains", keys.indexOf("todo") < 0,
@@ -353,7 +353,7 @@ function descendants(el) {
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
       const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
       assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
-      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/scratch)", items.length, 2);
+      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/sticky-note)", items.length, 2);
       assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
@@ -519,12 +519,12 @@ function descendants(el) {
     assertTrue("HOME-CAP-8c clicking + again closes the menu", menu && !isOpen(menu),
       "clicking + again should remove is-open");
 
-    // ── Item dispatch: order is [meeting, scratch] (Open-daily removed). ──
+    // ── Item dispatch: order is [meeting, sticky-note] (Open-daily removed). ──
     await fire(items[0]);
     await fire(items[1]);
-    assertEq("HOME-CAP-11 meeting+scratch → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
+    assertEq("HOME-CAP-11 meeting+sticky-note → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
     assertEq("HOME-CAP-12 meeting → instance 'meeting'", calls.entityCreate[0] && calls.entityCreate[0].instance, "meeting");
-    assertEq("HOME-CAP-13 scratch → instance 'scratch'", calls.entityCreate[1] && calls.entityCreate[1].instance, "scratch");
+    assertEq("HOME-CAP-13 sticky-note → instance 'sticky-note'", calls.entityCreate[1] && calls.entityCreate[1].instance, "sticky-note");
     assertTrue("HOME-CAP-14 EntityCreate.create receives dv", calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
       "EntityCreate.create must receive the live dv");
 
