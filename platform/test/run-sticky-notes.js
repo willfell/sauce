@@ -1,0 +1,250 @@
+#!/usr/bin/env node
+// run-sticky-notes.js — sub-asserts for sticky-notes blueprint helpers.
+// Hosts HC-V0841-A1 (_coerceDay regression on Date inputs) +
+// HC-V0841-A2 (StickyDayMigrate behavior).
+//
+// Usage: node platform/test/run-sticky-notes.js
+// Exit: 0 = all pass; 1 = any fail.
+
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+
+const WORKSHOP = path.resolve(__dirname, "../..");
+const SDL_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-list.js");
+const SDM_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-migrate.js");
+const SHC_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-hub-cards.js");
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+
+function assertTrue(label, cond, hint) {
+  if (!cond) {
+    fail++;
+    failures.push(`FAIL: ${label}${hint ? ` — ${hint}` : ""}`);
+    console.log(`  FAIL: ${label}${hint ? ` — ${hint}` : ""}`);
+    return false;
+  }
+  pass++;
+  console.log(`  PASS: ${label}`);
+  return true;
+}
+
+function assertEq(label, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    fail++;
+    failures.push(`FAIL: ${label}\n  expected ${e}\n  actual   ${a}`);
+    console.log(`  FAIL: ${label}`);
+    return false;
+  }
+  pass++;
+  console.log(`  PASS: ${label}`);
+  return true;
+}
+
+// Load StickyDayList class via new Function() wrap; expose it for
+// _coerceDay testing without an Obsidian runtime.
+function loadStickyDayList() {
+  const src = fs.readFileSync(SDL_PATH, "utf8");
+  const wrapper = new Function("module", "exports",
+    src + "\nmodule.exports = StickyDayList;");
+  const mod = { exports: {} };
+  wrapper(mod, mod.exports);
+  return mod.exports;
+}
+
+console.log("\n--- HC-V0841-A1: sticky-day-list._coerceDay() regression ---");
+
+const StickyDayList = loadStickyDayList();
+const sdl = new StickyDayList();
+
+// A1.1: string YYYY-MM-DD passes through.
+assertEq("HC-V0841-A1.1 _coerceDay('2026-06-01') → '2026-06-01'",
+  sdl._coerceDay("2026-06-01"), "2026-06-01");
+
+// A1.2: string with extra trailing chars sliced to first 10.
+assertEq("HC-V0841-A1.2 _coerceDay('2026-06-01T05:00:00Z') → '2026-06-01'",
+  sdl._coerceDay("2026-06-01T05:00:00Z"), "2026-06-01");
+
+// A1.3: Luxon-like object (duck-typed via toISODate()) passes through.
+const fakeLuxon = { toISODate: () => "2026-06-01" };
+assertEq("HC-V0841-A1.3 _coerceDay(Luxon-like) → '2026-06-01'",
+  sdl._coerceDay(fakeLuxon), "2026-06-01");
+
+// A1.4: Date input → null (the regression fix). Old code would have
+// returned getFullYear/Month/Date local-extracted from UTC instant,
+// silently flipping the day for any user west of UTC.
+const utcMidnight = new Date("2026-06-01T00:00:00.000Z");
+assertEq("HC-V0841-A1.4 _coerceDay(new Date('2026-06-01T00:00:00Z')) → null",
+  sdl._coerceDay(utcMidnight), null);
+
+// A1.5: null / undefined / nonsense → null.
+assertEq("HC-V0841-A1.5a _coerceDay(null) → null", sdl._coerceDay(null), null);
+assertEq("HC-V0841-A1.5b _coerceDay(undefined) → null", sdl._coerceDay(undefined), null);
+assertEq("HC-V0841-A1.5c _coerceDay({}) → null", sdl._coerceDay({}), null);
+
+console.log("\n--- HC-V0841-A2: StickyDayMigrate behavior ---");
+
+// Load StickyDayMigrate class.
+function loadStickyDayMigrate() {
+  const src = fs.readFileSync(SDM_PATH, "utf8");
+  const wrapper = new Function("module", "exports",
+    src + "\nmodule.exports = StickyDayMigrate;");
+  const mod = { exports: {} };
+  wrapper(mod, mod.exports);
+  return mod.exports;
+}
+
+const StickyDayMigrate = loadStickyDayMigrate();
+const sdm = new StickyDayMigrate();
+
+// A2.1: quoted string day passes through unchanged.
+{
+  const fm = { type: "sticky-note", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
+  const before = JSON.stringify(fm);
+  const changed = sdm._migrateFrontmatter(fm, fakeFile);
+  assertTrue("HC-V0841-A2.1a quoted string day → no change",
+    changed === false);
+  assertEq("HC-V0841-A2.1b quoted string day → frontmatter byte-stable",
+    JSON.stringify(fm), before);
+}
+
+// A2.2: Date day (the unquoted-YAML case) → rewritten to local YYYY-MM-DD string.
+// Mirrors the YAML parser's behavior: an unquoted `day: 2026-05-31` becomes
+// new Date("2026-05-31T00:00:00.000Z"). The migration must use the FILE PATH
+// segment to recover the user-intended local date (not the Date's getDate()).
+{
+  const fm = { type: "sticky-note", day: new Date("2026-05-31T00:00:00.000Z"), created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
+  const changed = sdm._migrateFrontmatter(fm, fakeFile);
+  assertTrue("HC-V0841-A2.2a Date day → migration recorded change",
+    changed === true);
+  assertEq("HC-V0841-A2.2b Date day → rewritten as quoted string from path",
+    fm.day, "2026-05-31");
+}
+
+// A2.3: missing day but path encodes /YYYY-MM-DD/ → day synthesized.
+{
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
+  const changed = sdm._migrateFrontmatter(fm, fakeFile);
+  assertTrue("HC-V0841-A2.3a missing day, path has date → migration recorded change",
+    changed === true);
+  assertEq("HC-V0841-A2.3b missing day, path has date → synthesized",
+    fm.day, "2026-05-31");
+}
+
+// A2.4: missing day, filename encodes Sticky-*-YYYY-MM-DD → day synthesized.
+{
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/Sticky-2026-05-31-22-30.md" };
+  const changed = sdm._migrateFrontmatter(fm, fakeFile);
+  assertTrue("HC-V0841-A2.4a missing day, filename has date → migration recorded change",
+    changed === true);
+  assertEq("HC-V0841-A2.4b missing day, filename has date → synthesized",
+    fm.day, "2026-05-31");
+}
+
+// A2.5: missing day, no date anywhere → no change, returns false.
+{
+  const fm = { type: "sticky-note", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/Untitled.md" };
+  const changed = sdm._migrateFrontmatter(fm, fakeFile);
+  assertTrue("HC-V0841-A2.5 unrecoverable day → no change",
+    changed === false);
+}
+
+// A2.6: idempotency — running again on post-migration state is a no-op.
+{
+  const fm = { type: "sticky-note", day: "2026-05-31", created_at: "2026-05-31T22:30:00-06:00" };
+  const fakeFile = { path: "spice/sticky-notes/2026/05-May/2026-05-31/Sticky-2026-05-31-22-30.md" };
+  const before = JSON.stringify(fm);
+  sdm._migrateFrontmatter(fm, fakeFile);
+  sdm._migrateFrontmatter(fm, fakeFile);
+  assertEq("HC-V0841-A2.6 re-migrate post-migration → byte-stable",
+    JSON.stringify(fm), before);
+}
+
+// A2.7: manifest wiring — sticky-notes manifest declares both classes and the
+// startup-script + files entries.
+{
+  const STICKY_MANIFEST = path.join(WORKSHOP, "platform/blueprints/sticky-notes/manifest.json");
+  const m = JSON.parse(fs.readFileSync(STICKY_MANIFEST, "utf8"));
+  assertTrue("HC-V0841-A2.7a customjs_classes contains StickyDayMigrate",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("StickyDayMigrate") >= 0);
+  assertTrue("HC-V0841-A2.7b customjs_classes contains StickyDayMigrateInit",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.indexOf("StickyDayMigrateInit") >= 0);
+  assertTrue("HC-V0841-A2.7c customjs_startup_scripts contains StickyDayMigrateInit",
+    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.indexOf("StickyDayMigrateInit") >= 0);
+  const fileSources = (m.files || []).map(f => f && f.source);
+  assertTrue("HC-V0841-A2.7d files[] includes sticky-day-migrate.js",
+    fileSources.indexOf("helpers/sticky-day-migrate.js") >= 0);
+  assertTrue("HC-V0841-A2.7e files[] includes sticky-day-migrate-init.js",
+    fileSources.indexOf("helpers/sticky-day-migrate-init.js") >= 0);
+}
+
+console.log("\n--- STHC-ALL: sticky-hub-cards Days|All toggle + search ---");
+
+// Load StickyHubCards class via new Function() wrap.
+function loadStickyHubCards() {
+  const src = fs.readFileSync(SHC_PATH, "utf8");
+  const wrapper = new Function("module", "exports",
+    src + "\nmodule.exports = StickyHubCards;");
+  const mod = { exports: {} };
+  wrapper(mod, mod.exports);
+  return mod.exports;
+}
+
+const StickyHubCards = loadStickyHubCards();
+const hc = new StickyHubCards();
+
+// STHC-ALL-1: _matchesFilter — title hit, filename hit, body hit, miss, empty.
+assertTrue("STHC-ALL-1a title match",
+  hc._matchesFilter({ title: "Grocery run", file: { name: "Sticky-2026-07-08-09-15-00.md" } }, "grocery", "") === true);
+assertTrue("STHC-ALL-1b filename match",
+  hc._matchesFilter({ file: { name: "Sticky-2026-07-08-09-15-00.md" } }, "07-08", "") === true);
+assertTrue("STHC-ALL-1c body match (title+name miss)",
+  hc._matchesFilter({ file: { name: "x.md" } }, "kubernetes", "notes about Kubernetes upgrade") === true);
+assertTrue("STHC-ALL-1d miss",
+  hc._matchesFilter({ title: "a", file: { name: "b.md" } }, "zzz", "body") === false);
+assertTrue("STHC-ALL-1e empty needle matches",
+  hc._matchesFilter({ file: { name: "b.md" } }, "", "") === true);
+
+// STHC-ALL-2: _mode defaults "days", survives via container property.
+assertEq("STHC-ALL-2a _mode({}) → days", hc._mode({}), "days");
+assertEq("STHC-ALL-2b _mode({__stickyHubMode:'all'}) → all",
+  hc._mode({ __stickyHubMode: "all" }), "all");
+
+// STHC-ALL-3: _extractPreviewFromBody skips frontmatter + fences, returns first
+// content line (≤80 chars).
+{
+  const sample = [
+    "---",
+    "type: sticky-note",
+    "day: \"2026-07-08\"",
+    "---",
+    "",
+    "```js",
+    "const x = 1;",
+    "```",
+    "First real content line",
+    "second line",
+  ].join("\n");
+  assertEq("STHC-ALL-3 _extractPreviewFromBody → first content line",
+    hc._extractPreviewFromBody(sample), "First real content line");
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────
+
+console.log(`\n${pass} passed, ${fail} failed`);
+if (fail > 0) {
+  console.log("\n--- failures ---");
+  failures.forEach(f => console.log(f));
+  process.exit(1);
+}
+process.exit(0);

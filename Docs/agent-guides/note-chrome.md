@@ -4,7 +4,7 @@ purpose: Vault-wide note-chrome standard. Locks the breadcrumb / nav grammar, th
 
 # Note-chrome standard — vault-wide
 
-Authored across the note-chrome arc (`section-label` v0.122.0, `breadcrumb` mechanism v0.123.0, adoption wave 1 v0.124.0). Every template in an **adopted** blueprint (one declaring a `breadcrumb` block in its manifest — currently `project`, `meetings`, `scratch`, `to-do`) MUST conform. Other blueprints adopt in later waves.
+Authored across the note-chrome arc (`section-label` v0.122.0, `breadcrumb` mechanism v0.123.0, adoption wave 1 v0.124.0). Every template in an **adopted** blueprint (one declaring a `breadcrumb` block in its manifest — currently `project`, `meetings`, `sticky-notes`, `to-do`) MUST conform. Other blueprints adopt in later waves.
 
 When you change a template or helper that renders into an adopted-blueprint note, read this file first. For project-only conventions (section ordering, proxyDv shim, card meta-line format, naming) see [`project-blueprint-ui.md`](project-blueprint-ui.md) — note-chrome.md is the vault-wide generalization; that file remains the project-specific doc.
 
@@ -32,7 +32,7 @@ Rules:
 
 ### 1b. Chrome order (project surfaces) — SUPERSEDED, see §1c
 
-> **SUPERSEDED FOR THE PROJECT BLUEPRINT (button-nav-refactor).** The stacked chrome below — Breadcrumb + SpaceNavButtons + ProjectNavButtons (core + More▾) + per-surface action rows + search strip — is replaced on project surfaces by the single `ProjectChromeBar` in §1c. It is kept here as historical reference for un-migrated notes and for the install heal that reshapes them. **Other adopted blueprints (wiki / finance / trips / meetings / scratch / to-do) still follow this stacked grammar — they did NOT change.**
+> **SUPERSEDED FOR THE PROJECT BLUEPRINT (button-nav-refactor).** The stacked chrome below — Breadcrumb + SpaceNavButtons + ProjectNavButtons (core + More▾) + per-surface action rows + search strip — is replaced on project surfaces by the single `ProjectChromeBar` in §1c. It is kept here as historical reference for un-migrated notes and for the install heal that reshapes them. **Other adopted blueprints (wiki / finance / trips / meetings / sticky-notes / to-do) still follow this stacked grammar — they did NOT change.**
 
 ```
 Breadcrumb            ← no divider (one unit with nav)
@@ -59,7 +59,7 @@ The project blueprint replaces the whole §1b stack with **one** `ProjectChromeB
 ```
 
 - **Left — breadcrumb.** The `customJS.Breadcrumb.buildSegments` trail rendered as `/`-joined clickable crumbs (ancestors link via `_openNavTarget`; the current crumb is plain muted text). This is the sole up-nav affordance.
-- **Right — `Go ▾` launcher.** ONE unified launcher replacing both SpaceNavButtons and ProjectNavButtons. It opens a `MenuPopover` listing a **This project** section (the project's OTHER destinations — atlas / Board / Map / Docs / To-Do / Helpful Links, current surface omitted, each existence-gated) then a **Vault** section (the pinned registry sources home/to-do/scratch/project/meetings). There is no separate `More ▾` on the project blueprint any more.
+- **Right — `Go ▾` launcher.** ONE unified launcher replacing both SpaceNavButtons and ProjectNavButtons. It opens a `MenuPopover` listing a **This project** section (the project's OTHER destinations — atlas / Board / Map / Docs / To-Do / Helpful Links, current surface omitted, each existence-gated) then a **Vault** section (the pinned registry sources home/to-do/sticky-notes/project/meetings). There is no separate `More ▾` on the project blueprint any more.
 - **Right — one primary action.** A single `AccentButton` on non-leaf surfaces (New Task / New Doc / Add workstream / New Project / Add link / …), from the pure `_surfaceSpec(context)`.
 - **Right — `⋯` overflow.** A `MenuPopover` of the surface's secondary actions (New Section / Move docs / Remove workstream / Manage links / …). Suppressed when the surface declares no overflow.
 - **Leaf / entity surfaces are nav-only** — doc-notes, task-notes, boards, cards: breadcrumb + `Go ▾` + optional `⋯` (e.g. a doc-note's Move), no primary button.
@@ -90,7 +90,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 - **breaks any `[[note#Heading]]` anchor link** that targeted the old heading, and
 - **shows a dataviewjs code block in edit mode** instead of a heading.
 
-This is the accepted, documented cost of the standard. Heals are `.sauce-backup`-reversible (see §6), and adopted-blueprint notes (meetings / scratch / daily to-do) are ephemeral and rarely heading-anchored.
+This is the accepted, documented cost of the standard. Heals are `.sauce-backup`-reversible (see §6), and adopted-blueprint notes (meetings / sticky-notes / daily to-do) are ephemeral and rarely heading-anchored.
 
 **Scope:** the rule applies only to **adopted** blueprints (those with a `breadcrumb` manifest block).
 
@@ -121,7 +121,7 @@ The installer's `applyBreadcrumb` aggregates every blueprint's block into `ranch
 - **Link templates:** `"…{<chain>}…{<chain>}…"` — any empty slot voids the whole link (segment renders as plain bold label instead).
 - **Predicates:** optional `when: { "fm:<field>": "present"|"absent"|"<literal>" }`, AND-conjoined across keys, gating a single ancestor.
 
-**Dispatch is by frontmatter `type` ALONE** across all contributions — first-match-wins with a one-time `console.warn` on collision. So **`type` values must be globally unique** across blueprints (`meeting` / `scratch` / `scratch-day` / `to-do` / `project` / `project-todo` / … do not collide today). Top-level hubs render NO trail: either their `type` isn't in the registry, or they're tag-based hubs with no `type` field at all.
+**Dispatch is by frontmatter `type` ALONE** across all contributions — first-match-wins with a one-time `console.warn` on collision. So **`type` values must be globally unique** across blueprints (`meeting` / `sticky-note` / `sticky-day` / `to-do` / `project` / `project-todo` / … do not collide today). Top-level hubs render NO trail: either their `type` isn't in the registry, or they're tag-based hubs with no `type` field at all.
 
 ## 4. Open-mode rule
 
@@ -134,14 +134,14 @@ Brand-new notes open in **read / preview**, never edit-with-title-selected. The 
 - **Nav-buttons row:** `flex-wrap: wrap`, and each label gets `text-overflow: ellipsis` + `overflow: hidden` + `white-space: nowrap` + `min-width: 0` so long labels truncate instead of overflowing the button.
 - **Accent-button hover:** mutate individual style props (`style.background` / `style.color`). NEVER rebuild `cssText` on hover — that caused button jitter (fixed at `accent-button` v0.1.2).
 - **Core + overflow nav — SUPERSEDED for the project blueprint (button-nav-refactor).** The project blueprint no longer renders a `core row + More ▾`; the single `Go ▾` launcher in §1c is the project nav. This rule still describes the pattern on **un-migrated** project notes and the shared overlay teardown reused by `MenuPopover`. (Original: a project surface showed a few **core** destinations inline + a **`More ▾`** button opening a `document.body` overlay for the rest — never a wrapping row of 6+ buttons. `ProjectNavButtons` core = `Project · Board · Docs` (+ a context `Task: <X>`); overflow = `Map · To-Do · Helpful Links`. The overlay uses ONE `close()` that removes the node **and** the Escape keydown listener — no leak; suppress `More ▾` when overflow is empty.)
-- **Action rows — SUPERSEDED for the project blueprint (button-nav-refactor).** The project blueprint folds these sibling actions into the §1c bar's one primary `AccentButton` + the `⋯` overflow menu, not a full-width row. This rule still holds for the other adopted blueprints (wiki / finance / trips / meetings / scratch) and un-migrated project notes. (Original: a set of sibling actions render as **ONE full-width row**: `display:flex; gap:8px; flex-wrap:wrap;` with each button `flex:1 1 0; min-width:96px;`; the row renders a leading hairline per §1a.)
+- **Action rows — SUPERSEDED for the project blueprint (button-nav-refactor).** The project blueprint folds these sibling actions into the §1c bar's one primary `AccentButton` + the `⋯` overflow menu, not a full-width row. This rule still holds for the other adopted blueprints (wiki / finance / trips / meetings / sticky-notes) and un-migrated project notes. (Original: a set of sibling actions render as **ONE full-width row**: `display:flex; gap:8px; flex-wrap:wrap;` with each button `flex:1 1 0; min-width:96px;`; the row renders a leading hairline per §1a.)
 - **Simple search (docs/section hubs):** pass `DocSearch.render(dv, { hideTags:true, hideNativeSearch:true, persist:false })` — a bare text input, no tag chips, no scoped-search button, empty on every return.
 
 ## 6. Migration posture
 
 - **Managed adopted-blueprint TEMPLATES conform** — new notes are born correct.
 - **EXISTING notes are healed at install** by `applyNoteChromeHeal` (per-vault, idempotent, `.sauce-backup` snapshot before any write, fence-aware H2 rewrite, fails loud but never throws). It keys on the dataviewjs invocation substring + frontmatter `type`, never on display markers. **Never hand-edit a note body to conform** — the heal owns it.
-- **Heal scope** is notes with frontmatter `type` ∈ {`meeting`, `scratch`, `scratch-day`, `to-do`}. **Tag-based hubs without a `type` field** (e.g. Meeting Hub, `tags: meetings-hub`) are outside that dispatch's reach by construction (it keys on `type:`, which these notes never carry). Meeting Hub is healed by a dedicated, separately-wired `applyMeetingsHubChromeBarHeal` (scans `spice/meetings/hubs/` for the `meetings-hub` tag, reuses the same `_healChromeBarMigration` transform) — see `platform/install.js`. Any future tag-based hub without a `type:` field needs the same treatment: a small dedicated heal, not an extension of `applyNoteChromeHeal`'s type-keyed dispatch.
+- **Heal scope** is notes with frontmatter `type` ∈ {`meeting`, `sticky-note`, `sticky-day`, `sticky-hub`, `scratch`, `scratch-day`, `scratch-hub`, `to-do`} (the `scratch` trio is kept alongside the sticky types as belt-and-suspenders for vaults mid-migration). **Tag-based hubs without a `type` field** (e.g. Meeting Hub, `tags: meetings-hub`) are outside that dispatch's reach by construction (it keys on `type:`, which these notes never carry). Meeting Hub is healed by a dedicated, separately-wired `applyMeetingsHubChromeBarHeal` (scans `spice/meetings/hubs/` for the `meetings-hub` tag, reuses the same `_healChromeBarMigration` transform) — see `platform/install.js`. Any future tag-based hub without a `type:` field needs the same treatment: a small dedicated heal, not an extension of `applyNoteChromeHeal`'s type-keyed dispatch.
 
 ## 7. Cross-references
 

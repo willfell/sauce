@@ -34,7 +34,7 @@
  *                        default card title (`p.file.name`). Use to surface
  *                        frontmatter `title:` / `aliases[0]` / first heading
  *                        for prettier display when the filename is opaque
- *                        (e.g. timestamp-based scratch filenames). Added v0.1.2.
+ *                        (e.g. timestamp-based sticky-note filenames). Added v0.1.2.
  *
  *   collapsible:         boolean (default false) — when true and groupBy is
  *                        "blueprint", wrap each group in a `<details>` /
@@ -574,7 +574,7 @@ class ActivityFeed {
     // NEW additive opt — group keys whose rows render OLDEST-first (ascending
     // created_at) instead of inheriting the global newest-first sort. Opt-in:
     // default empty preserves the descending order for every existing caller.
-    // Used by the daily dashboard so today's scratch notes read in the order
+    // Used by the daily dashboard so today's sticky notes read in the order
     // they were taken through the day (first-made first).
     const ascendingGroups = new Set(Array.isArray(safe.ascendingGroups) ? safe.ascendingGroups.map(String) : []);
     // NEW v0.5.0 additive opts
@@ -732,7 +732,7 @@ class ActivityFeed {
     // v0.7.1 (sauce v0.84.1): defaultClosed groups always start closed at
     // session boot. Without the `!isClosed` gate, a single past user-toggle
     // persists `open:true` and defeats the curated default on every
-    // subsequent render — observed for the "scratch" group on the daily
+    // subsequent render — observed for the "sticky-note" group on the daily
     // dashboard. User toggles still work within a session (the toggle
     // listener below still writes), so a re-expanded group stays open until
     // reload.
@@ -941,8 +941,8 @@ class ActivityFeed {
     return [
       "daily",
       "meeting",
-      "scratch",
-      "scratch-day",
+      "sticky-note",
+      "sticky-day",
       "cowork-daily",
       "cowork-weekly",
       "cowork-weekly-synthesis",

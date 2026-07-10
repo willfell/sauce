@@ -373,7 +373,7 @@ class ProjectChromeBar {
   // ProjectNavButtons.render() computes from ctx.projectDir/projectSlug (Project,
   // Board, Docs, Map, To-Do, Helpful Links); each is gated on existence where the
   // source gates, and the destination equal to the CURRENT surface is omitted.
-  // Vault destinations are the pinned registry sources (home/to-do/scratch/
+  // Vault destinations are the pinned registry sources (home/to-do/sticky-notes/
   // project/meetings order) read from ranch/nav-buttons-registry.json. Never
   // throws: a missing helper / registry / vault index degrades to fewer entries.
   async _navEntries(dv, ctx) {

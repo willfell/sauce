@@ -40,7 +40,7 @@ sauce bootstrap
 
 This runs an interactive wizard that:
 
-1. Asks which **blueprints** you want (daily notes, meetings, scratch, projects, cowork, etc.). Accept the defaults for a first run — you can re-bootstrap later to add or drop blueprints.
+1. Asks which **blueprints** you want (daily notes, meetings, sticky notes, projects, cowork, etc.). Accept the defaults for a first run — you can re-bootstrap later to add or drop blueprints.
 2. Asks which **plugins** to install — sauce will fetch them from Obsidian's community plugin index.
 3. Writes a `ranch/platform-subscription.json` in your vault recording your choices.
 4. Runs the installer to materialize everything: templates, Dataview views, slash commands, CustomJS helpers, plugin configs.
@@ -164,7 +164,7 @@ If `sauce wizard` isn't available or you'd rather hand-edit, open `ranch/platfor
 
 - **Customize prompts.** Edit `spice/cowork/prompts/*.md` to control what each orchestrator emits. Empty prompts produce stub notes; populated prompts drive the actual analysis.
 - **Add your own scheduled jobs.** See [`Docs/cowork-consumer-extensions.md`](cowork-consumer-extensions.md) for a worked sprint-sync example (custom job pulling ADO activity into a daily atomic note).
-- **Explore other blueprints.** `/project`, `/meetings`, `/scratch`, `/daily` slash commands navigate the per-blueprint hubs. Each blueprint installs its own `spice/<name>/` directory with the relevant note types, templates, and dashboards.
+- **Explore other blueprints.** `/project`, `/meetings`, `/sticky-notes`, `/daily` slash commands navigate the per-blueprint hubs. Each blueprint installs its own `spice/<name>/` directory with the relevant note types, templates, and dashboards.
 - **Audit drift.** `/audit` from within Claude Code reports any inconsistencies between the installed state and the canonical platform — surfaces things like prompts you've customized or files you've edited that would be reverted on next `sauce update`.
 
 ## When something doesn't work

@@ -9,7 +9,7 @@
  *                            "Clear day — nothing scheduled"),
  *   3. a QUICK-CAPTURE band — an inline "Jot a task…" input + Add (one-gesture
  *                            task create, no modal), then 3 one-tap buttons:
- *                            ＋ Meeting, ＋ Scratch, Open today's daily,
+ *                            ＋ Meeting, ＋ Sticky Note, Open today's daily,
  *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
@@ -201,14 +201,14 @@ class SpaceHome {
    * NOTE: the `todo` entry was REMOVED — task capture is now an inline
    * "Jot a task…" input + Add button (built in render, wired to
    * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
-   * 3 remaining buttons: ＋ Meeting, ＋ Scratch, Open today's daily.
+   * 3 remaining buttons: ＋ Meeting, ＋ Sticky Note, Open today's daily.
    */
   static _captureSpec() {
     const svg = (inner) =>
       `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
     return [
       { key: "meeting", label: "＋ Meeting", icon: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`) },
-      { key: "scratch", label: "＋ Scratch", icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
+      { key: "sticky-note", label: "＋ Sticky Note", icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
     ];
   }
 
@@ -428,7 +428,7 @@ class SpaceHome {
 
     // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
     // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
-    // It holds a one-gesture "Jot a task…" input + New Meeting / New Scratch /
+    // It holds a one-gesture "Jot a task…" input + New Meeting / New Sticky Note /
     // Open today's daily. Outside-click + Escape close it (guarded — no-op on a
     // cold/stub document so this never throws out of render).
     const addWrap = head.createEl("div", { cls: "sauce-home-add-wrap" });
@@ -510,7 +510,7 @@ class SpaceHome {
       }
     });
 
-    // Menu — the secondary capture actions: ＋ Meeting, ＋ Scratch, Open daily.
+    // Menu — the secondary capture actions: ＋ Meeting, ＋ Sticky Note, Open daily.
     for (const item of SpaceHome._captureSpec()) {
       const mi = menu.createEl("button", { cls: "sauce-home-add-item" });
       mi.setAttribute("type", "button");
@@ -559,7 +559,7 @@ class SpaceHome {
    * so a not-yet-registered mechanism (cold load) no-ops instead of throwing out
    * of the click handler. Grep-verified entrypoints:
    *   meeting   → customJS.EntityCreate.create({ instance:'meeting', dv })
-   *   scratch   → customJS.EntityCreate.create({ instance:'scratch', dv })
+   *   sticky-note → customJS.EntityCreate.create({ instance:'sticky-note', dv })
    *   openDaily → app.commands.executeCommandById("daily-notes")
    * (The former `todo` button is gone — task capture is now the inline
    * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
@@ -578,9 +578,9 @@ class SpaceHome {
         }
         return;
       }
-      if (key === "scratch") {
+      if (key === "sticky-note") {
         if (cjs && cjs.EntityCreate && typeof cjs.EntityCreate.create === "function") {
-          cjs.EntityCreate.create({ instance: "scratch", dv: dv });
+          cjs.EntityCreate.create({ instance: "sticky-note", dv: dv });
         }
         return;
       }

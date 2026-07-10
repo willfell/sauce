@@ -1,0 +1,23 @@
+{
+  "contributions": {
+    "sticky-notes": [
+      {
+        "scope": {
+          "path_glob": "spice/sticky-notes/**/Sticky-2*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "equals": "sticky-note"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^Sticky-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}(-\\d{2})?\\.md$"
+      }
+    ]
+  }
+}
