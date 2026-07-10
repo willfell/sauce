@@ -109,8 +109,9 @@ class SectionExplorer {
     for (const link of links) {
       const a = linksRow.createEl("a", { cls: "se-link-chip" });
       a.textContent = link.text || link.url;
-      if (this._isSafeUrl(link.url)) {
-        a.href = link.url;
+      const href = this._normalizeUrl(link.url);
+      if (this._isSafeUrl(href)) {
+        a.href = href;
         a.target = "_blank";
         a.rel = "noopener";
       }
@@ -265,12 +266,24 @@ class SectionExplorer {
   // behaviorally identical without a cross-mechanism dependency.
   _addLinkPure(links, entry) {
     const list = Array.isArray(links) ? links.slice() : [];
-    const url = String((entry && entry.url) || "").trim();
+    const url = this._normalizeUrl(String((entry && entry.url) || ""));
     const text = String((entry && entry.text) || "").trim();
     if (!url) return { links: list, changed: false, reason: "empty-url" };
-    if (list.some((l) => l.url === url)) return { links: list, changed: false, reason: "duplicate" };
+    // Compare NORMALIZED forms so "google.com" duplicates "https://google.com".
+    if (list.some((l) => this._normalizeUrl(l && l.url) === url)) return { links: list, changed: false, reason: "duplicate" };
     list.push({ url, text: text || url });
     return { links: list, changed: true };
+  }
+
+  // Schemeless URLs ("google.com") stored/rendered as-is become RELATIVE hrefs
+  // that resolve against the app origin — clicking one opens whatever the
+  // webview decides, not the site the user meant. These links are web links by
+  // design (the dialog placeholder is https://…), so default the scheme.
+  _normalizeUrl(url) {
+    const trimmed = String(url == null ? "" : url).trim();
+    if (!trimmed) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
+    return "https://" + trimmed;
   }
 
   // Shared modal chassis for _openAddLinkForm/_openRenameDialog — mirrors
@@ -406,8 +419,9 @@ class SectionExplorer {
         if (!link || !link.url) continue;
         const a = strip.createEl("a", { cls: "se-note-link-card" });
         a.innerHTML = linkIcon + `<span class="se-note-link-text">${this._escape(link.text || link.url)}</span>`;
-        if (this._isSafeUrl(link.url)) {
-          a.href = link.url;
+        const href = this._normalizeUrl(link.url);
+        if (this._isSafeUrl(href)) {
+          a.href = href;
           a.target = "_blank";
           a.rel = "noopener";
         }

@@ -1277,6 +1277,54 @@ failures += !run("wiki + project blueprint manifests declare depends_on section-
   }
 });
 
+failures += !run("_addLinkPure normalizes schemeless URLs to https:// (google.com would otherwise resolve relative and open garbage)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let r = se._addLinkPure([], { url: "google.com", text: "Google" });
+  assert.strictEqual(r.changed, true);
+  assert.strictEqual(r.links[0].url, "https://google.com", "schemeless url stored with https:// prefix");
+  // Already-schemed URLs pass through untouched.
+  r = se._addLinkPure([], { url: "https://a.com", text: "A" });
+  assert.strictEqual(r.links[0].url, "https://a.com");
+  r = se._addLinkPure([], { url: "mailto:x@y.com" });
+  assert.strictEqual(r.links[0].url, "mailto:x@y.com");
+  // Duplicate detection happens on the NORMALIZED form.
+  r = se._addLinkPure([{ url: "https://google.com", text: "G" }], { url: "google.com", text: "dup" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "duplicate");
+});
+
+failures += !run("already-SAVED schemeless links get an https:// href at render time (note links + pane chips)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  // renderNoteLinks path.
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ type: "wiki-page", links: [{ url: "yahoo.com", text: "Yahoo" }], file: { path: "spice/wiki/x/Y.md" } }) };
+    se.renderNoteLinks(dv);
+    const card = els.find((e) => e.className === "se-note-link-card");
+    assert.strictEqual(card.href, "https://yahoo.com", "note-link href normalized — got " + card.href);
+  }
+  // Pane chips path (_renderLinksRow via the page pane).
+  {
+    const { container, els } = makeDomStub();
+    global.customJS = {};
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [{ title: null, file: { name: "P", path: "spice/wiki/P.md", mtime: { ts: 1 } } }],
+      getLinks: () => [{ url: "google.com", text: "G" }],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const chip = els.find((e) => e.className === "se-link-chip");
+    assert.strictEqual(chip.href, "https://google.com", "pane chip href normalized — got " + chip.href);
+    delete global.customJS;
+  }
+});
+
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
   for (const t of ASYNC_TESTS) {
