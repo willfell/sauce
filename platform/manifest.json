@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.210.1",
+  "workshop_version": "0.211.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -49,7 +49,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.8.1",
+      "version": "0.9.0",
       "path": "mechanisms/activity-feed"
     },
     {
@@ -79,7 +79,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.15.1",
+      "version": "2.16.0",
       "path": "mechanisms/nav-buttons"
     },
     {
@@ -114,7 +114,7 @@
     },
     {
       "name": "icons",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "path": "mechanisms/icons"
     },
     {
@@ -191,12 +191,12 @@
     },
     {
       "name": "cowork",
-      "version": "0.40.3",
+      "version": "0.41.0",
       "path": "blueprints/cowork"
     },
     {
       "name": "daily",
-      "version": "0.18.3",
+      "version": "0.19.0",
       "path": "blueprints/daily"
     },
     {
@@ -216,7 +216,7 @@
     },
     {
       "name": "project",
-      "version": "1.47.1",
+      "version": "1.48.0",
       "path": "blueprints/project"
     },
     {
@@ -241,7 +241,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.9.0",
+      "version": "0.10.0",
       "path": "blueprints/sticky-notes"
     },
     {
@@ -256,7 +256,7 @@
     },
     {
       "name": "home",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "path": "blueprints/home"
     },
     {
