@@ -107,7 +107,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.3.0"
+      "version": "0.4.0"
     }
   ],
   "blueprints": [
@@ -137,7 +137,7 @@
     },
     {
       "name": "project",
-      "version": "1.46.0"
+      "version": "1.47.0"
     },
     {
       "name": "to-do",
@@ -165,7 +165,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.6.0"
+      "version": "0.7.0"
     },
     {
       "name": "reader",
