@@ -171,7 +171,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | `people` | 0.6.0 | — | `spice/people/` |
 | `products` | 0.3.0 | — | `spice/products/` |
 | `project` | 1.18.0 | `/project` | `spice/projects/` |
-| `scratch` | 0.5.2 | `/scratch` | `spice/scratch/` |
+| `sticky-notes` | 0.9.0 | `/sticky-notes` | `spice/sticky-notes/` |
 | `teams` | 0.3.0 | — | `spice/teams/` |
 | `to-do` | 0.3.3 | — | `spice/to-do/` |
 | `trips` | 0.3.0 | — | `spice/trips/` |
