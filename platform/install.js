@@ -1241,6 +1241,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // The Breadcrumb mechanism reads from this registry at render time.
   await applyBreadcrumb(tp, mech, variables, history, git);
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
+  await applyScratchToStickyNotesMigration(tp, mech, variables, history, git); // NEW v0.9.0 sticky-notes rename — per-item phase (gated manifest.name==="sticky-notes"), before per-vault applyNoteChromeHeal
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
@@ -2149,6 +2150,318 @@ function _rewriteWikiToDocsBody(body) {
   // 6. entity-create sentinel comment (defensive)
   body = body.replace(/entity-create:wiki-note/g, 'entity-create:doc-note');
   return body;
+}
+
+// ============================================================================
+// applyScratchToStickyNotesMigration — v0.9.0 sticky-notes rename.
+// One-time, idempotent, backup-guarded migration that converts a pre-rename
+// consumer vault (scratch blueprint) to the new sticky-notes shape.
+// Existence-gated on `spice/scratch` (NOT _migrationGated — a structural move
+// must always run whenever the old tree survives, mirroring applyWikiToDocsMigration).
+// Runs in the per-item pipeline gated on manifest.name === "sticky-notes",
+// BEFORE the per-vault applyNoteChromeHeal block. Moves + renames the tree,
+// rewrites frontmatter/class-refs/links vault-wide, then prunes every orphaned
+// scratch-era installer artifact (files, registries, customjs startup entry,
+// templater folder-template, claude_surface files, installed-ledger entry).
+// The SAME install run writes the NEW sticky-notes keys/entries through the
+// normal per-item steps, so this only DELETES the old "scratch" keys (disjoint,
+// order-independent). Every prune is defensive: existence-guarded, backed up,
+// wrapped in its own try/catch, emits a history event, and never throws.
+//
+// Pure helper: rename a scratch-era basename to its sticky-notes counterpart.
+// isRoot === true means the file sits directly in spice/scratch (i.e. the hub
+// Scratch.md). Exported for unit tests in run-sticky-notes-rename-migration.js.
+function _stickyRenameFor(basename, isRoot) {
+  if (isRoot && basename === "Scratch.md") return "Sticky.md";
+  if (/^Scratch-Day-/.test(basename)) return basename.replace(/^Scratch-Day-/, "Sticky-Day-");
+  if (/^Scratch-/.test(basename)) return basename.replace(/^Scratch-/, "Sticky-");
+  return basename;
+}
+
+// Pure helper: rewrite a markdown body's scratch-era frontmatter/class-refs/
+// links/paths to the sticky-notes shape. Anchored rewrites only (type-lines,
+// class idents, [[Scratch- links, spice/scratch/ paths) so prose words like
+// "scratchpad" survive untouched. Exported for unit tests.
+function _rewriteScratchToStickyBody(body) {
+  if (typeof body !== "string") return body;
+  let out = body;
+  // frontmatter types (order: longest first, so scratch-day/-hub win before scratch)
+  out = out.replace(/^type:\s*["']?scratch-day["']?\s*$/m, "type: sticky-day");
+  out = out.replace(/^type:\s*["']?scratch-hub["']?\s*$/m, "type: sticky-hub");
+  out = out.replace(/^type:\s*["']?scratch["']?\s*$/m, "type: sticky-note");
+  // tags blocks (bullet + inline-flow), mirror _rewriteWikiToDocsBody. The
+  // negative-lookahead (?!-) on the generic scratch rule stops it double-hitting
+  // an already-matched `scratch-day` fragment.
+  out = out.replace(/(\btags\s*:[\s\S]*?)(["']?)scratch-day\2/g, "$1$2sticky-day$2");
+  out = out.replace(/(\btags\s*:[\s\S]*?)(["']?)scratch\2(?!-)/g, "$1$2sticky-note$2");
+  // customJS class refs
+  out = out.replace(/ScratchChromeBar/g, "StickyChromeBar");
+  out = out.replace(/ScratchDayList/g, "StickyDayList");
+  out = out.replace(/ScratchHubCards/g, "StickyHubCards");
+  out = out.replace(/ScratchDayMigrate/g, "StickyDayMigrate");
+  // hub-specific path BEFORE generic path so Scratch.md is renamed too
+  out = out.replace(/spice\/scratch\/Scratch\.md/g, "spice/sticky-notes/Sticky.md");
+  // Sticky-Day- before generic spice/scratch (filename token in wikilinks/paths)
+  out = out.replace(/Scratch-Day-/g, "Sticky-Day-");
+  out = out.replace(/spice\/scratch/g, "spice/sticky-notes");
+  out = out.replace(/ranch\/templates\/Scratch Hub\.md/g, "ranch/templates/Sticky Hub.md");
+  // wikilinks: [[Scratch-<digit>… (leaf/day) and bare [[Scratch]] (hub)
+  out = out.replace(/\[\[Scratch-(\d)/g, "[[Sticky-$1");
+  out = out.replace(/\[\[Scratch\]\]/g, "[[Sticky]]");
+  // entity-create sentinel comment
+  out = out.replace(/entity-create:scratch/g, "entity-create:sticky-note");
+  return out;
+}
+
+async function applyScratchToStickyNotesMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "sticky-notes") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const oldRoot = "spice/scratch";
+  const newRoot = "spice/sticky-notes";
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupBase = `.sauce-backup/sticky-notes-rename/${ts}`;
+  const pushEvent = (event, reason) => {
+    if (!history) return;
+    history.push({
+      event, step: "scratch_to_sticky_rename", name: "sticky-notes", reason,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  };
+
+  // Existence gate + idempotency: if the old tree is gone there is nothing to
+  // migrate. (Prunes below are also individually existence-guarded, so a
+  // partially-migrated vault whose spice/scratch is already gone re-running
+  // here is a clean no-op.)
+  if (!(await adapter.exists(oldRoot))) return;
+
+  let movedCount = 0;
+  let rewroteCount = 0;
+  let prunedCount = 0;
+
+  // --- 1. Backup the whole spice/scratch tree before any destructive op. ---
+  try {
+    await _copyDirRecursive(adapter, oldRoot, `${backupBase}/${oldRoot}`);
+  } catch (e) {
+    pushEvent("warning", `backup of ${oldRoot} failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  // --- 2. Walk + rename + rewrite each file into the new tree. ---
+  //     _stickyRenameFor's isRoot flag: file sits DIRECTLY in spice/scratch.
+  async function migrateTree(srcDir, atRootLevel) {
+    let listing;
+    try { listing = await adapter.list(srcDir); } catch (_e) { return; }
+    for (const f of (listing.files || [])) {
+      const base = f.split("/").pop();
+      const renamed = _stickyRenameFor(base, atRootLevel);
+      const relDir = srcDir.substring(oldRoot.length); // "" or "/2026/06-June/…"
+      const destDir = `${newRoot}${relDir}`;
+      const destPath = `${destDir}/${renamed}`;
+      // Ensure nested parent folders exist (segment-walk mkdir idiom).
+      const segs = destDir.split("/");
+      let acc = "";
+      for (const seg of segs) {
+        acc = acc ? `${acc}/${seg}` : seg;
+        if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* implied */ } }
+      }
+      let body;
+      try { body = await adapter.read(f); } catch (_e) { continue; }
+      const rewritten = _rewriteScratchToStickyBody(body);
+      if (rewritten !== body) rewroteCount += 1;
+      await adapter.write(destPath, rewritten);
+      movedCount += 1;
+    }
+    for (const sub of (listing.folders || [])) {
+      await migrateTree(sub, false);
+    }
+  }
+  try {
+    await migrateTree(oldRoot, true);
+    // Remove the old tree once fully copied+renamed.
+    await _rmDirRecursive(adapter, oldRoot);
+  } catch (e) {
+    pushEvent("warning", `tree move failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  // --- 3. Vault-wide cross-ref rewrite (skip backups, trash, already-migrated). ---
+  try {
+    const allMd = await _listAllMarkdownRecursive(adapter, "");
+    for (const fpath of allMd) {
+      if (fpath.startsWith(".sauce-backup/")) continue;
+      if (fpath.startsWith(".trash/")) continue;
+      if (fpath.startsWith(`${newRoot}/`) || fpath === `${newRoot}`) continue;
+      let body;
+      try { body = await adapter.read(fpath); } catch (_e) { continue; }
+      const rewritten = _rewriteScratchToStickyBody(body);
+      if (rewritten !== body) {
+        await adapter.write(fpath, rewritten);
+        rewroteCount += 1;
+      }
+    }
+  } catch (e) {
+    pushEvent("warning", `vault-wide cross-ref rewrite failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  // --- 4. Prune orphaned scratch-era installer artifacts. ---
+  //     Each prune: existence-guarded → backup → delete → history event → never throw.
+  const backupFile = async (p) => {
+    try {
+      const body = await adapter.read(p);
+      const dest = `${backupBase}/${p}`;
+      const parent = dest.substring(0, dest.lastIndexOf("/"));
+      const segs = parent.split("/");
+      let acc = "";
+      for (const seg of segs) {
+        acc = acc ? `${acc}/${seg}` : seg;
+        if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* implied */ } }
+      }
+      await adapter.write(dest, body);
+    } catch (_e) { /* best-effort backup */ }
+  };
+
+  // 4a. loose files.
+  const looseFiles = [
+    "ranch/templates/Scratch.md",
+    "ranch/templates/Scratch Day Hub.md",
+    "ranch/rules/scratch.json",
+    "ranch/rules/scratch-day-hub.json",
+    ".claude/commands/scratch.md",
+  ];
+  for (const p of looseFiles) {
+    try {
+      if (await adapter.exists(p) && !(await _isDirLike(adapter, p))) {
+        await backupFile(p);
+        await adapter.remove(p);
+        prunedCount += 1;
+        pushEvent("info", `pruned artifact ${p}`);
+      }
+    } catch (e) {
+      pushEvent("warning", `prune ${p} failed: ${e && e.message ? e.message : String(e)}`);
+    }
+  }
+
+  // 4b. directories (backup tree then remove recursively).
+  const looseDirs = ["ranch/scripts/scratch", ".claude/skills/scratch"];
+  for (const d of looseDirs) {
+    try {
+      if (await adapter.exists(d)) {
+        try { await _copyDirRecursive(adapter, d, `${backupBase}/${d}`); } catch (_e) { /* best-effort */ }
+        await _rmDirRecursive(adapter, d);
+        prunedCount += 1;
+        pushEvent("info", `pruned artifact dir ${d}`);
+      }
+    } catch (e) {
+      pushEvent("warning", `prune dir ${d} failed: ${e && e.message ? e.message : String(e)}`);
+    }
+  }
+
+  // 4c. registries — delete the "scratch"-keyed contribution/entry. Both real
+  //     ({schema_version, contributions}) and legacy bare-dict shapes handled.
+  const pruneRegistryScratchKey = async (p, opts) => {
+    try {
+      if (!(await adapter.exists(p))) return;
+      let reg;
+      try { reg = JSON.parse(await adapter.read(p)); } catch (_e) { return; }
+      let mutated = false;
+      if (reg && reg.contributions && typeof reg.contributions === "object" && "scratch" in reg.contributions) {
+        delete reg.contributions.scratch;
+        mutated = true;
+      }
+      // Legacy bare-dict shape (no `contributions` wrapper).
+      if (reg && !reg.contributions && typeof reg === "object" && "scratch" in reg) {
+        delete reg.scratch;
+        mutated = true;
+      }
+      // entity-create `entries` array carries a `blueprint` field.
+      if (opts && opts.pruneEntries && Array.isArray(reg.entries)) {
+        const before = reg.entries.length;
+        reg.entries = reg.entries.filter((e) => !(e && e.blueprint === "scratch"));
+        if (reg.entries.length !== before) mutated = true;
+      }
+      if (mutated) {
+        await backupFile(p);
+        await adapter.write(p, JSON.stringify(reg, null, 2));
+        prunedCount += 1;
+        pushEvent("info", `pruned scratch key from ${p}`);
+      }
+    } catch (e) {
+      pushEvent("warning", `prune registry ${p} failed: ${e && e.message ? e.message : String(e)}`);
+    }
+  };
+  await pruneRegistryScratchKey("ranch/nav-buttons-registry.json", {});
+  await pruneRegistryScratchKey("ranch/entity-create-registry.json", { pruneEntries: true });
+  await pruneRegistryScratchKey("ranch/breadcrumb-registry.json", {});
+  await pruneRegistryScratchKey("ranch/claude-surface-registry.json", {});
+
+  // 4d. customjs startup — remove ScratchDayMigrateInit.
+  try {
+    const p = ".obsidian/plugins/customjs/data.json";
+    if (await adapter.exists(p)) {
+      const data = JSON.parse(await adapter.read(p));
+      if (Array.isArray(data.startupScriptNames) && data.startupScriptNames.includes("ScratchDayMigrateInit")) {
+        data.startupScriptNames = data.startupScriptNames.filter((n) => n !== "ScratchDayMigrateInit");
+        await backupFile(p);
+        await adapter.write(p, JSON.stringify(data, null, 2));
+        prunedCount += 1;
+        pushEvent("info", "pruned ScratchDayMigrateInit from customjs startup");
+      }
+    }
+  } catch (e) {
+    pushEvent("warning", `prune customjs startup failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  // 4e. templater — remove any folder_templates entry for spice/scratch.
+  try {
+    const p = ".obsidian/plugins/templater-obsidian/data.json";
+    if (await adapter.exists(p)) {
+      const data = JSON.parse(await adapter.read(p));
+      if (Array.isArray(data.folder_templates)) {
+        const before = data.folder_templates.length;
+        data.folder_templates = data.folder_templates.filter((x) => !(x && x.folder === "spice/scratch"));
+        if (data.folder_templates.length !== before) {
+          await backupFile(p);
+          await adapter.write(p, JSON.stringify(data, null, 2));
+          prunedCount += 1;
+          pushEvent("info", "pruned spice/scratch templater folder-template");
+        }
+      }
+    }
+  } catch (e) {
+    pushEvent("warning", `prune templater folder failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  // 4f. installed ledger — remove the "scratch" blueprint entry.
+  try {
+    const p = "ranch/platform-installed.json";
+    if (await adapter.exists(p)) {
+      const led = JSON.parse(await adapter.read(p));
+      if (Array.isArray(led.blueprints) && led.blueprints.some((b) => b && b.name === "scratch")) {
+        led.blueprints = led.blueprints.filter((b) => !(b && b.name === "scratch"));
+        await backupFile(p);
+        await adapter.write(p, JSON.stringify(led, null, 2));
+        prunedCount += 1;
+        pushEvent("info", "pruned scratch entry from platform-installed ledger");
+      }
+    }
+  } catch (e) {
+    pushEvent("warning", `prune installed ledger failed: ${e && e.message ? e.message : String(e)}`);
+  }
+
+  pushEvent("info", `moved ${movedCount} notes, rewrote ${rewroteCount} cross-refs, pruned ${prunedCount} artifacts`);
+}
+
+// Helper: does an adapter path look like a directory (has children) rather than
+// a file? Used so a loose-file prune never trips on a same-named directory.
+async function _isDirLike(adapter, p) {
+  try {
+    const listing = await adapter.list(p);
+    return (listing && ((listing.files && listing.files.length) || (listing.folders && listing.folders.length))) ? true : false;
+  } catch (_e) {
+    return false;
+  }
 }
 
 // Helpers for recursive copy/remove against tp.app.vault.adapter.
@@ -6038,6 +6351,9 @@ function _healNoteChromeBody(body, type) {
   if (type === 'to-do')       out = _stripDividersAroundActionBlock(out, 'ToDoLeafActions');
   if (type === 'meeting')     out = _stripDividersAroundActionBlock(out, 'MeetingLeafActions');
   if (type === 'scratch-day') out = _stripDividersAroundActionBlock(out, 'ScratchDayActions');
+  // v0.9.0: NO sticky-day line here on purpose — migrated bodies already had
+  // their class refs rewritten and no longer contain ScratchDayActions; only
+  // legacy pre-migration scratch-day bodies still carry it (kept above).
   // Step 8 (chrome-bar cycle 2) — migrate to-do / meeting / scratch notes from
   // legacy stacked chrome (Breadcrumb + SpaceNavButtons + action-helper blocks)
   // to the single <Bp>ChromeBar block. Mirrors _healWikiChromeBody's approach:
@@ -6046,7 +6362,11 @@ function _healNoteChromeBody(body, type) {
   const CHROME_BAR_MAP = {
     "to-do": "ToDoChromeBar", "to-do-hub": "ToDoChromeBar", "project-todo": "ToDoChromeBar", "to-do-recurring": "ToDoChromeBar",
     "meeting": "MeetingChromeBar",
-    "scratch-hub": "ScratchChromeBar", "scratch-day": "ScratchChromeBar", "scratch": "ScratchChromeBar",
+    // v0.9.0 sticky-notes rename: a stray un-migrated scratch-typed note heals to
+    // StickyChromeBar (the class that actually exists post-rename). Scratch keys
+    // KEPT so a partially-migrated vault still routes. New sticky types added.
+    "scratch-hub": "StickyChromeBar", "scratch-day": "StickyChromeBar", "scratch": "StickyChromeBar",
+    "sticky-hub": "StickyChromeBar", "sticky-day": "StickyChromeBar", "sticky-note": "StickyChromeBar",
     "trips-hub": "TripsChromeBar", "trip": "TripsChromeBar", "trip-section": "TripsChromeBar", "trip-board-card": "TripsChromeBar",
     "reader-hub": "ReaderChromeBar", "reader-article": "ReaderChromeBar",
     "people-hub": "PeopleChromeBar", "person": "PeopleChromeBar",
@@ -6531,7 +6851,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/sticky-notes", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6553,7 +6873,7 @@ async function applyNoteChromeHeal(tp, history, git) {
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
         const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan", "invoice-board-card", "time-log"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "sticky-note", "sticky-day", "sticky-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
         let after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         after = _healSectionLinksFrontmatter(after, type);
         if (after === before) continue;
@@ -20538,6 +20858,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyWikiToDocsMigration = applyWikiToDocsMigration;
     module.exports.applyDocsBackfill = applyDocsBackfill;
     module.exports._rewriteWikiToDocsBody = _rewriteWikiToDocsBody;
+    // v0.9.0 sticky-notes rename — expose migration + pure helpers for
+    // run-sticky-notes-rename-migration.js (SNRM-1..3). Pure additive.
+    module.exports.applyScratchToStickyNotesMigration = applyScratchToStickyNotesMigration;
+    module.exports._rewriteScratchToStickyBody = _rewriteScratchToStickyBody;
+    module.exports._stickyRenameFor = _stickyRenameFor;
     // v0.100.2 — docs-hub "+ New Doc" button repair (run-wiki-to-docs-migration.js DHBR-1..3).
     module.exports.applyDocsHubButtonRepair = applyDocsHubButtonRepair;
     module.exports._repairDocsHubButtonBody = _repairDocsHubButtonBody;
