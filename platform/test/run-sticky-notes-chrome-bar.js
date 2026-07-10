@@ -140,6 +140,10 @@ const cfg = inst._config();
   ok('STCB-BANNER-2 exactly one banner after double render (dedup)', live1.length === 1);
   ok('STCB-BANNER-3a titled banner shows title text',
     live1[0].children.some((h) => h.textContent === 'Grocery list'));
+  ok('STCB-BANNER-4 banner has a divider (hr) under the title',
+    live1[0].children.some((n) => n.tag === 'hr'));
+  ok('STCB-BANNER-5 banner is left-aligned (no max-width/auto-margin centering)',
+    !/max-width/.test(live1[0].style.cssText) && !/margin:[^;]*auto/.test(live1[0].style.cssText));
 
   const c2 = makeContainer();
   inst._renderTitleBanner(c2, emptyPage, { path: 'spice/sticky-notes/y.md' });
