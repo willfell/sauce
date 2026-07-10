@@ -7248,12 +7248,25 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
+  // Numeric per-part compare — a string `>=` breaks once a component crosses
+  // 0.10.x ("0.10.0" >= "0.4.0" is false lexicographically). Prior cycles
+  // worked around it by raising floors; this compares versions properly so a
+  // MINOR bump past x.10 no longer re-triggers the baseline.
+  const semverGte = (a, b) => {
+    const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] || 0) > (pb[i] || 0)) return true;
+      if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    }
+    return true;
+  };
   const floors = { daily: "0.11.0", journal: "0.2.0", "sticky-notes": "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     assertTrue(`FA4-MANIFEST-${bp}: version >= ${floors[bp]}`,
-      typeof m.version === "string" && m.version >= floors[bp],
+      typeof m.version === "string" && semverGte(m.version, floors[bp]),
       `got: ${m.version}`);
   }
 }
