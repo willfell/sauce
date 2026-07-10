@@ -28,7 +28,7 @@
  *
  * v0.3.3 (v0.64.3) PATCH:
  *  - BUGFIX `_resolveTitle` was crashing with `aliases.values is not a
- *    function` when scratch / meeting notes had no `aliases:` frontmatter.
+ *    function` when sticky note / meeting notes had no `aliases:` frontmatter.
  *    Dataview's `p.file.aliases` is a Proxy/DataArray where `.values` is
  *    a non-callable property (not Array.prototype.values). The throw
  *    aborted BeaconCards mid-render, leaving the activity-panel cards
@@ -38,13 +38,13 @@
  *    "Today's Meetings" panel; duplicate inside Activity was noise.
  *
  * v0.3.2 (v0.64.2) PATCH:
- *  - Activity panel allowlist drops `scratch-day` + `to-do` — both are
+ *  - Activity panel allowlist drops `sticky-day` + `to-do` — both are
  *    per-day auto-created notes that flood the activity stream with
  *    predictable daily noise (one new entry every morning each).
  *  - Smart title resolver `_resolveTitle(p)` — tries `title:` frontmatter,
  *    then `aliases[0]`, then first heading in `file.outline`, then falls
  *    back to filename. Surfaces user-meaningful titles for timestamp-named
- *    scratches once the user adds `title:` or `aliases:`.
+ *    sticky notes once the user adds `title:` or `aliases:`.
  *  - Visual polish: each of the 3 main sections (Tasks / Meetings /
  *    Activity) wrapped in `<details>` with a colored left border
  *    (cyan / blue / purple); default open. Activity sub-groups (one per
@@ -546,18 +546,21 @@ class SpaceDailyDashboard {
       groupBy: "blueprint",
       blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
       getTitle: (p) => this._resolveTitle(p),
-      // v0.10.0 (sauce v0.70.0) — framed renderer + cowork bucket + pin order + scratch closed
+      // v0.10.0 (sauce v0.70.0) — framed renderer + cowork bucket + pin order + sticky-note closed
       framed: true,
       bucketRules: [
         { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
       ],
       groupOrder: ["cowork", "project", "kanban", "trip"],
-      groupOrderBottom: ["scratch"],
-      // Scratch group now opens by default (was defaultClosed) and renders
-      // oldest-first so the day's scratch notes read in the order they were
-      // taken. See the "Daily Hub Scratch Notes" card.
+      groupOrderBottom: ["sticky-note"],
+      // Sticky-note group now opens by default (was defaultClosed) and renders
+      // oldest-first so the day's sticky notes read in the order they were
+      // taken. See the "Daily Hub Sticky Notes" card.
       defaultClosed: [],
-      ascendingGroups: ["scratch"],
+      ascendingGroups: ["sticky-note"],
+      // Render the sticky-note group header as "Sticky Notes" instead of the
+      // raw type id "sticky-note" (activity-feed groupLabels opt).
+      groupLabels: { "sticky-note": "Sticky Notes" },
       colorByType: this._BLUEPRINT_COLORS,
       rollUpRoots: this._buildRollupRules(dv),
       metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
@@ -590,7 +593,7 @@ class SpaceDailyDashboard {
       },
       // v0.11.0 (sauce v0.71.0) — collapsed groups show a one-line preview
       // from the most-recent page's summary. Activity-feed only invokes
-      // this builder for defaultClosed groups (currently scratch), so the
+      // this builder for defaultClosed groups (currently sticky-note), so the
       // cowork bucket (open by default) won't trigger it.
       groupPreviewBuilder: (pages) => {
         if (!Array.isArray(pages) || pages.length === 0) return "";
@@ -604,10 +607,10 @@ class SpaceDailyDashboard {
   }
 
   get _DEFAULT_DASHBOARD_BLUEPRINTS() {
-    // v0.5.2 (v0.64.2): drop scratch-day + to-do — both are per-day auto-created
+    // v0.5.2 (v0.64.2): drop sticky-day + to-do — both are per-day auto-created
     // notes that pollute the activity panel with predictable daily noise.
     // The user creates a fresh ToDo-YYYY-MM-DD.md every morning and a
-    // Scratch-Day-YYYY-MM-DD.md whenever a scratch is taken; neither is a
+    // Sticky-Day-YYYY-MM-DD.md whenever a sticky note is taken; neither is a
     // meaningful "activity" signal.
     // v0.5.3 (v0.64.3): drop `meeting` — already has its own dedicated top-level
     // panel ("Today's Meetings"); duplicating inside Activity is noise.
@@ -615,7 +618,7 @@ class SpaceDailyDashboard {
     // scheduled-job atomic notes surface under their own groups in the
     // "Today's Activity" panel (groupBy: "blueprint" already on).
     return [
-      "scratch", "journal",
+      "sticky-note", "journal",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice",
       "kanban", "board-card",
@@ -634,7 +637,7 @@ class SpaceDailyDashboard {
       // Activity-feed groups
       cowork:    "var(--color-blue)",   // v0.10.0 — synthetic bucket from bucketRules; sub-type pills stay neutral
       meeting:   "var(--color-blue)",
-      scratch:   "var(--color-orange)",
+      "sticky-note": "var(--color-orange)",
       project:   "var(--color-green)",
       person:    "var(--color-purple)",
       team:      "var(--color-pink)",

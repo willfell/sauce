@@ -234,8 +234,8 @@ ok("EC-FOLDER-3 {{current_file.folder}} === '' when no current_file",
 
 // 7d. {{current_file.frontmatter.<key>|today}} — the note's frontmatter value,
 // falling back to TODAY's YYYY-MM-DD when the key is absent/empty. Fixes the
-// Home "+" dropdown scratch bug: Home.md has no `day` frontmatter, so the plain
-// {{current_file.frontmatter.day}} resolved "" → malformed spice/scratch/Scratch--HH-mm
+// Home "+" dropdown sticky-note bug: Home.md has no `day` frontmatter, so the plain
+// {{current_file.frontmatter.day}} resolved "" → malformed spice/sticky-notes/Sticky--HH-mm
 // + empty day frontmatter. Mirrors the {{current_file.folder}} missing-field fallback.
 ok("EC-DAY-1 {{...day|today}} uses current_file day when present (day-hub/daily inheritance)",
     inst._substitute("{{current_file.frontmatter.day|today}}", baseCtx({ current_file: { day: "2026-07-01" } })) === "2026-07-01");
@@ -244,24 +244,24 @@ ok("EC-DAY-2 {{...day|today}} falls back to today when current_file has no day (
 ok("EC-DAY-3 {{...day|today}} === today when no current_file at all",
     inst._substitute("{{current_file.frontmatter.day|today}}", baseCtx()) === "2026-05-14");
 ok("EC-DAY-4 {{...day|today}}-routed → today's 3-level routed path when absent",
-    inst._substitute("spice/scratch/{{current_file.frontmatter.day|today}}-routed", baseCtx()) === "spice/scratch/2026/05-May/2026-05-14");
+    inst._substitute("spice/sticky-notes/{{current_file.frontmatter.day|today}}-routed", baseCtx()) === "spice/sticky-notes/2026/05-May/2026-05-14");
 ok("EC-DAY-5 {{...day|today}}-routed uses the PRESENT day (no fallback)",
-    inst._substitute("spice/scratch/{{current_file.frontmatter.day|today}}-routed", baseCtx({ current_file: { day: "2026-07-01" } })) === "spice/scratch/2026/07-July/2026-07-01");
-ok("EC-DAY-6 Scratch-{{...day|today}}- fills today when absent (no double-dash)",
-    inst._substitute("Scratch-{{current_file.frontmatter.day|today}}-", baseCtx()) === "Scratch-2026-05-14-");
+    inst._substitute("spice/sticky-notes/{{current_file.frontmatter.day|today}}-routed", baseCtx({ current_file: { day: "2026-07-01" } })) === "spice/sticky-notes/2026/07-July/2026-07-01");
+ok("EC-DAY-6 Sticky-{{...day|today}}- fills today when absent (no double-dash)",
+    inst._substitute("Sticky-{{current_file.frontmatter.day|today}}-", baseCtx()) === "Sticky-2026-05-14-");
 ok("EC-DAY-7 plain {{...day}} STILL === '' when absent (no regression to existing token)",
     inst._substitute("{{current_file.frontmatter.day}}", baseCtx()) === "");
 
 // 7e. The shipped instances are consistent + creatable from a dateless context
-// (Home + dropdown): scratch uses the |today fallback; meeting derives dates from
+// (Home + dropdown): sticky-note uses the |today fallback; meeting derives dates from
 // {{now...}}/date-patterns (no current_file dependency), so it already works.
 {
-    const scratchM = require(path.join(ROOT, "platform/blueprints/scratch/manifest.json"));
-    const sc = (scratchM.new_entity_buttons || []).find((b) => b.id === "scratch") || {};
-    ok("EC-DAY-8 scratch instance day tokens use the |today fallback everywhere",
+    const stickyM = require(path.join(ROOT, "platform/blueprints/sticky-notes/manifest.json"));
+    const sc = (stickyM.new_entity_buttons || []).find((b) => b.id === "sticky-note") || {};
+    ok("EC-DAY-8 sticky-note instance day tokens use the |today fallback everywhere",
         JSON.stringify(sc.destination || {}).includes("frontmatter.day|today}}")
         && (sc.frontmatter_template || {}).day === "{{current_file.frontmatter.day|today}}",
-        `scratch destination/day must use {{current_file.frontmatter.day|today}}; got ${JSON.stringify(sc.destination)} / day=${(sc.frontmatter_template||{}).day}`);
+        `sticky-note destination/day must use {{current_file.frontmatter.day|today}}; got ${JSON.stringify(sc.destination)} / day=${(sc.frontmatter_template||{}).day}`);
     const meetM = require(path.join(ROOT, "platform/blueprints/meetings/manifest.json"));
     const me = (meetM.new_entity_buttons || []).find((b) => b.id === "meeting") || {};
     ok("EC-DAY-9 meeting instance dates come from now/date-patterns (no current_file dep → works from Home)",
