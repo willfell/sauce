@@ -224,10 +224,14 @@
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  border: 1px solid var(--background-modifier-border);
+  border: none;
   color: var(--interactive-accent);
-  background: var(--background-primary);
+  /* Soft accent tint — reads as an intentional badge instead of a mismatched
+   * gray chip. First line is the fallback for renderers without color-mix. */
+  background: var(--background-modifier-hover);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
 }
+.se-doc-icon svg { opacity: 0.9; }
 .se-doc-icon svg { width: 15px; height: 15px; }
 .se-doc-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 .se-doc-title {
@@ -266,6 +270,22 @@
  * is false (desktop split panes). */
 @media (max-width: 720px) {
   .se-doc-grid { grid-template-columns: 1fr; }
+}
+
+/* Stacked layouts (mobile + narrow-pane fallback): the pane sits BELOW the
+ * rail, so give the Sections → Recently-updated/Docs boundary real air — a
+ * hairline separator with breathing room above and below it. */
+.se-root.se-mobile > .se-page-pane {
+  border-top: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
+  margin-top: 18px;
+  padding-top: 10px;
+}
+@media (max-width: 720px) {
+  .se-root:not(.se-mobile) > .se-page-pane {
+    border-top: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
+    margin-top: 18px;
+    padding-top: 10px;
+  }
 }
 
 /* ── Leaf-note pinned links (renderNoteLinks — rendered OUTSIDE .se-root,

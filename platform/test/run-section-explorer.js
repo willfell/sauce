@@ -1217,6 +1217,57 @@ ASYNC_TESTS.push({ name: "ProjectChromeBar.render calls SectionExplorer.renderNo
   }
 }});
 
+failures += !run("section-hub listSections: depth-2 sub-section rows carry REAL recursive doc counts (not hardcoded 0)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const base = "spice/projects/sauce/docs/blueprints";
+  const pages = [
+    { type: "section-hub", depth: 2, section: "How they Work", file: { name: "How they Work", path: base + "/how-they-work/How they Work.md", folder: base + "/how-they-work", mtime: { ts: 10 } } },
+    { type: "doc-note", file: { name: "Projects Blueprint", path: base + "/how-they-work/Projects Blueprint.md", folder: base + "/how-they-work", mtime: { ts: 500 } } },
+    { type: "doc-note", file: { name: "To Do Blueprint", path: base + "/how-they-work/To Do Blueprint.md", folder: base + "/how-they-work", mtime: { ts: 300 } } },
+    { type: "section-hub", depth: 2, section: "Finance", file: { name: "Finance", path: base + "/finance/Finance.md", folder: base + "/finance", mtime: { ts: 20 } } },
+    { type: "doc-note", file: { name: "Finance Brainstorming", path: base + "/finance/Finance Brainstorming.md", folder: base + "/finance", mtime: { ts: 100 } } },
+  ];
+  const mkArr = (a) => { a.array = () => a; a.where = (fn) => mkArr(a.filter(fn)); a.map = Array.prototype.map.bind(a); return a; };
+  const dvStub = { page: () => null, pages: () => mkArr(pages.slice()) };
+  const config = sh._buildConfig(dvStub, { file: { path: base + "/Blueprints.md", folder: base } }, 1, "sauce", "blueprints", "Blueprints");
+  const sections = config.listSections(dvStub, { sectionPath: base });
+  assert.strictEqual(sections.length, 2);
+  const how = sections.find((s) => s.title === "How they Work");
+  const fin = sections.find((s) => s.title === "Finance");
+  assert.strictEqual(how.pageCount, 2, "How they Work has 2 real docs — got " + how.pageCount);
+  assert.strictEqual(fin.pageCount, 1, "Finance has 1 real doc — got " + fin.pageCount);
+  assert.strictEqual(how.maxMtime, 500, "maxMtime reflects the newest doc in the sub-section");
+});
+
+failures += !run("docs-hub listSections: section rows carry real subSectionCount (depth-2 hubs inside)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const docsFolder = "spice/projects/sauce/docs";
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Blueprints", file: { name: "Blueprints", path: docsFolder + "/blueprints/Blueprints.md", folder: docsFolder + "/blueprints", mtime: { ts: 1 } } },
+    { type: "section-hub", depth: 2, section: "Finance", file: { name: "Finance", path: docsFolder + "/blueprints/finance/Finance.md", folder: docsFolder + "/blueprints/finance", mtime: { ts: 2 } } },
+    { type: "section-hub", depth: 2, section: "How they Work", file: { name: "How they Work", path: docsFolder + "/blueprints/how-they-work/How they Work.md", folder: docsFolder + "/blueprints/how-they-work", mtime: { ts: 3 } } },
+    { type: "doc-note", file: { name: "Finance Brainstorming", path: docsFolder + "/blueprints/finance/FB.md", folder: docsFolder + "/blueprints/finance", mtime: { ts: 100 } } },
+  ];
+  const mkArr = (a) => { a.array = () => a; a.where = (fn) => mkArr(a.filter(fn)); return a; };
+  const dvStub = { page: () => null, pages: () => mkArr(pages.slice()) };
+  const config = pdi._buildConfig(dvStub, { file: { path: docsFolder + "/Docs.md", folder: docsFolder } }, { projectSlug: "sauce", projectPath: "spice/projects/sauce", docsFolder, scopePath: docsFolder });
+  const sections = config.listSections(dvStub);
+  const bp = sections.find((s) => s.title === "Blueprints");
+  assert.ok(bp, "expected the discovered Blueprints section");
+  assert.strictEqual(bp.subSectionCount, 2, "Blueprints contains 2 depth-2 sub-sections — got " + bp.subSectionCount);
+  assert.strictEqual(bp.pageCount, 1, "recursive doc count still works");
+});
+
 failures += !run("wiki + project blueprint manifests declare depends_on section-explorer", () => {
   for (const bp of ["wiki", "project"]) {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, `../blueprints/${bp}/manifest.json`), "utf8"));
@@ -1224,6 +1275,132 @@ failures += !run("wiki + project blueprint manifests declare depends_on section-
     assert.ok(dep, bp + " manifest must depend on section-explorer");
     assert.ok(dep.range, bp + " dep must declare a range");
   }
+});
+
+failures += !run("_addLinkPure normalizes schemeless URLs to https:// (google.com would otherwise resolve relative and open garbage)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let r = se._addLinkPure([], { url: "google.com", text: "Google" });
+  assert.strictEqual(r.changed, true);
+  assert.strictEqual(r.links[0].url, "https://google.com", "schemeless url stored with https:// prefix");
+  // Already-schemed URLs pass through untouched.
+  r = se._addLinkPure([], { url: "https://a.com", text: "A" });
+  assert.strictEqual(r.links[0].url, "https://a.com");
+  r = se._addLinkPure([], { url: "mailto:x@y.com" });
+  assert.strictEqual(r.links[0].url, "mailto:x@y.com");
+  // Duplicate detection happens on the NORMALIZED form.
+  r = se._addLinkPure([{ url: "https://google.com", text: "G" }], { url: "google.com", text: "dup" });
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.reason, "duplicate");
+});
+
+failures += !run("already-SAVED schemeless links get an https:// href at render time (note links + pane chips)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  // renderNoteLinks path.
+  {
+    const { container, els } = makeDomStub();
+    const dv = { container, current: () => ({ type: "wiki-page", links: [{ url: "yahoo.com", text: "Yahoo" }], file: { path: "spice/wiki/x/Y.md" } }) };
+    se.renderNoteLinks(dv);
+    const card = els.find((e) => e.className === "se-note-link-card");
+    assert.strictEqual(card.href, "https://yahoo.com", "note-link href normalized — got " + card.href);
+  }
+  // Pane chips path (_renderLinksRow via the page pane).
+  {
+    const { container, els } = makeDomStub();
+    global.customJS = {};
+    const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki" }),
+      listSections: () => [],
+      listPages: () => [{ title: null, file: { name: "P", path: "spice/wiki/P.md", mtime: { ts: 1 } } }],
+      getLinks: () => [{ url: "google.com", text: "G" }],
+      icons: { folder: "<svg/>", file: "<svg/>" },
+      rootClass: "se-root",
+    });
+    se.render(dv, adapter);
+    const chip = els.find((e) => e.className === "se-link-chip");
+    assert.strictEqual(chip.href, "https://google.com", "pane chip href normalized — got " + chip.href);
+    delete global.customJS;
+  }
+});
+
+failures += !run("add-link modal: title + styled inputs + Cancel/primary buttons; Cancel closes without write; primary writes normalized", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const writes = [];
+  const adapter = { getLinks: () => [], writeLinks: (t, links) => writes.push(links) };
+
+  const findDeep = (el, pred, out = []) => {
+    if (pred(el)) out.push(el);
+    for (const c of el.children || []) findDeep(c, pred, out);
+    return out;
+  };
+
+  // Cancel path — closes, no write.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  let overlay = doc.body.children[0];
+  assert.ok(overlay, "overlay mounted");
+  let titles = findDeep(overlay, (e) => e.className === "se-modal-title");
+  assert.strictEqual(titles.length, 1, "expected a modal title");
+  assert.strictEqual(titles[0].textContent, "Add link");
+  let inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  assert.strictEqual(inputs.length, 2, "expected two styled inputs (url + label)");
+  const cancel = findDeep(overlay, (e) => e.className === "se-modal-btn")[0];
+  assert.ok(cancel && cancel.textContent === "Cancel", "expected a Cancel button");
+  cancel.onclick();
+  assert.strictEqual(doc.body.children.length, 0, "Cancel closes the modal");
+  assert.strictEqual(writes.length, 0, "Cancel writes nothing");
+
+  // Primary path — normalized write + close.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  overlay = doc.body.children[0];
+  inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  inputs[0].value = "google.com";
+  inputs[1].value = "Google";
+  const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+  assert.ok(primary, "expected a primary button");
+  primary.onclick();
+  assert.deepStrictEqual(writes, [[{ url: "https://google.com", text: "Google" }]], "primary writes the normalized link");
+  assert.strictEqual(doc.body.children.length, 0, "primary closes the modal");
+
+  // Enter in the URL input submits too.
+  se._openAddLinkForm(null, adapter, { title: "EMS" });
+  overlay = doc.body.children[0];
+  inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
+  inputs[0].value = "https://b.com";
+  assert.strictEqual(typeof inputs[0].onkeydown, "function", "url input listens for Enter");
+  inputs[0].onkeydown({ key: "Enter" });
+  assert.strictEqual(writes.length, 2, "Enter submits");
+  delete global.document;
+});
+
+failures += !run("rename modal gets the same chrome (title + input + Cancel/primary)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const doc = makeDocStub();
+  const renames = [];
+  const adapter = { renameSection: (s, t) => renames.push(t) };
+  const findDeep = (el, pred, out = []) => {
+    if (pred(el)) out.push(el);
+    for (const c of el.children || []) findDeep(c, pred, out);
+    return out;
+  };
+  se._openRenameDialog(null, adapter, { title: "EMS" });
+  const overlay = doc.body.children[0];
+  const title = findDeep(overlay, (e) => e.className === "se-modal-title")[0];
+  assert.ok(title && title.textContent === "Rename section");
+  const input = findDeep(overlay, (e) => e.className === "se-modal-input")[0];
+  assert.strictEqual(input.value, "EMS", "input prefilled with current title");
+  const cancel = findDeep(overlay, (e) => e.className === "se-modal-btn")[0];
+  assert.ok(cancel && cancel.textContent === "Cancel");
+  input.value = "Networking";
+  const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+  primary.onclick();
+  assert.deepStrictEqual(renames, ["Networking"]);
+  assert.strictEqual(doc.body.children.length, 0);
+  delete global.document;
 });
 
 // Async tail — runs the queued async tests, then exits with the final tally.
