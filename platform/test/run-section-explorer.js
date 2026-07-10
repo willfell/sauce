@@ -1217,6 +1217,57 @@ ASYNC_TESTS.push({ name: "ProjectChromeBar.render calls SectionExplorer.renderNo
   }
 }});
 
+failures += !run("section-hub listSections: depth-2 sub-section rows carry REAL recursive doc counts (not hardcoded 0)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/section-hub.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = SectionHub;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const SectionHub = mod.exports;
+  const sh = new SectionHub();
+  const base = "spice/projects/sauce/docs/blueprints";
+  const pages = [
+    { type: "section-hub", depth: 2, section: "How they Work", file: { name: "How they Work", path: base + "/how-they-work/How they Work.md", folder: base + "/how-they-work", mtime: { ts: 10 } } },
+    { type: "doc-note", file: { name: "Projects Blueprint", path: base + "/how-they-work/Projects Blueprint.md", folder: base + "/how-they-work", mtime: { ts: 500 } } },
+    { type: "doc-note", file: { name: "To Do Blueprint", path: base + "/how-they-work/To Do Blueprint.md", folder: base + "/how-they-work", mtime: { ts: 300 } } },
+    { type: "section-hub", depth: 2, section: "Finance", file: { name: "Finance", path: base + "/finance/Finance.md", folder: base + "/finance", mtime: { ts: 20 } } },
+    { type: "doc-note", file: { name: "Finance Brainstorming", path: base + "/finance/Finance Brainstorming.md", folder: base + "/finance", mtime: { ts: 100 } } },
+  ];
+  const mkArr = (a) => { a.array = () => a; a.where = (fn) => mkArr(a.filter(fn)); a.map = Array.prototype.map.bind(a); return a; };
+  const dvStub = { page: () => null, pages: () => mkArr(pages.slice()) };
+  const config = sh._buildConfig(dvStub, { file: { path: base + "/Blueprints.md", folder: base } }, 1, "sauce", "blueprints", "Blueprints");
+  const sections = config.listSections(dvStub, { sectionPath: base });
+  assert.strictEqual(sections.length, 2);
+  const how = sections.find((s) => s.title === "How they Work");
+  const fin = sections.find((s) => s.title === "Finance");
+  assert.strictEqual(how.pageCount, 2, "How they Work has 2 real docs — got " + how.pageCount);
+  assert.strictEqual(fin.pageCount, 1, "Finance has 1 real doc — got " + fin.pageCount);
+  assert.strictEqual(how.maxMtime, 500, "maxMtime reflects the newest doc in the sub-section");
+});
+
+failures += !run("docs-hub listSections: section rows carry real subSectionCount (depth-2 hubs inside)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-docs-index.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectDocsIndex;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectDocsIndex = mod.exports;
+  const pdi = new ProjectDocsIndex();
+  const docsFolder = "spice/projects/sauce/docs";
+  const pages = [
+    { type: "section-hub", depth: 1, section: "Blueprints", file: { name: "Blueprints", path: docsFolder + "/blueprints/Blueprints.md", folder: docsFolder + "/blueprints", mtime: { ts: 1 } } },
+    { type: "section-hub", depth: 2, section: "Finance", file: { name: "Finance", path: docsFolder + "/blueprints/finance/Finance.md", folder: docsFolder + "/blueprints/finance", mtime: { ts: 2 } } },
+    { type: "section-hub", depth: 2, section: "How they Work", file: { name: "How they Work", path: docsFolder + "/blueprints/how-they-work/How they Work.md", folder: docsFolder + "/blueprints/how-they-work", mtime: { ts: 3 } } },
+    { type: "doc-note", file: { name: "Finance Brainstorming", path: docsFolder + "/blueprints/finance/FB.md", folder: docsFolder + "/blueprints/finance", mtime: { ts: 100 } } },
+  ];
+  const mkArr = (a) => { a.array = () => a; a.where = (fn) => mkArr(a.filter(fn)); return a; };
+  const dvStub = { page: () => null, pages: () => mkArr(pages.slice()) };
+  const config = pdi._buildConfig(dvStub, { file: { path: docsFolder + "/Docs.md", folder: docsFolder } }, { projectSlug: "sauce", projectPath: "spice/projects/sauce", docsFolder, scopePath: docsFolder });
+  const sections = config.listSections(dvStub);
+  const bp = sections.find((s) => s.title === "Blueprints");
+  assert.ok(bp, "expected the discovered Blueprints section");
+  assert.strictEqual(bp.subSectionCount, 2, "Blueprints contains 2 depth-2 sub-sections — got " + bp.subSectionCount);
+  assert.strictEqual(bp.pageCount, 1, "recursive doc count still works");
+});
+
 failures += !run("wiki + project blueprint manifests declare depends_on section-explorer", () => {
   for (const bp of ["wiki", "project"]) {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, `../blueprints/${bp}/manifest.json`), "utf8"));

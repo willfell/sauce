@@ -237,17 +237,35 @@ class SectionHub {
       listSections: (dv2, c) => {
         if (depth !== 1) return []; // depth-2 (sub-section) is a leaf — no further nesting
         try {
-          return dv2.pages(`"${c.sectionPath}"`)
+          const all = dv2.pages(`"${c.sectionPath}"`);
+          const allArr = all.array ? all.array() : Array.from(all);
+          return all
             .where((p) => p.type === "section-hub" && p.depth === 2)
-            .map((p) => ({
-              title: p.section || p.file.name,
-              hubPath: p.file.path,
-              folder: p.file.folder,
-              materialized: true,
-              pageCount: 0,
-              subSectionCount: 0,
-              maxMtime: p.file.mtime?.ts || 0,
-            }));
+            .map((p) => {
+              const subFolder = String(p.file.folder != null ? p.file.folder : p.file.path.slice(0, p.file.path.lastIndexOf("/")));
+              // Real recursive doc count for the sub-section (was hardcoded 0 —
+              // every card read "0 docs" and Delete was wrongly enabled).
+              let pageCount = 0;
+              let maxMtime = p.file.mtime?.ts || 0;
+              for (const d of allArr) {
+                if (!d || d.type !== "doc-note" || !d.file || !d.file.path) continue;
+                const df = String(d.file.folder != null ? d.file.folder : d.file.path.slice(0, d.file.path.lastIndexOf("/")));
+                if (df === subFolder || df.startsWith(subFolder + "/")) {
+                  pageCount += 1;
+                  const ts = d.file.mtime?.ts || 0;
+                  if (ts > maxMtime) maxMtime = ts;
+                }
+              }
+              return {
+                title: p.section || p.file.name,
+                hubPath: p.file.path,
+                folder: subFolder,
+                materialized: true,
+                pageCount,
+                subSectionCount: 0,
+                maxMtime,
+              };
+            });
         } catch (_e) { return []; }
       },
       listPages: (dv2, c) => {

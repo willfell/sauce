@@ -255,13 +255,22 @@ class ProjectDocsIndex {
             const ts = d.file.mtime?.ts || 0;
             if (ts > maxMtime) maxMtime = ts;
           }
+          // Real sub-section count (depth-2 hubs living under this section) —
+          // was hardcoded 0, so "N sections" never showed on docs-hub cards.
+          let subSectionCount = 0;
+          try {
+            const subs = dv2.pages(`"${docsFolder}"`)
+              .where((p) => p && p.type === "section-hub" && Number(p.depth) === 2
+                && String(p.file.folder || "").startsWith(sectionFolder + "/"));
+            subSectionCount = (subs.array ? subs.array() : Array.from(subs)).length;
+          } catch (_e) { subSectionCount = 0; }
           return {
             title: label,
             folder: sectionFolder,
             hubPath: hub ? hub.file.path : null,
             materialized: !!hub,
             pageCount: docsInSection.length,
-            subSectionCount: 0,
+            subSectionCount,
             maxMtime,
           };
         });
