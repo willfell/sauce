@@ -5,9 +5,18 @@
     {
       "id": "cowork-eod-review-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/eod-review@1.0.0.json",
-      "accepted_versions": ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"],
+      "accepted_versions": [
+        "1.0.0",
+        "1.1.0",
+        "1.2.0",
+        "1.3.0",
+        "1.4.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/eod-review/SKILL.md",
@@ -18,9 +27,15 @@
     {
       "id": "cowork-morning-briefing-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/morning-briefing@1.0.0.json",
-      "accepted_versions": ["1.0.0", "1.1.0"],
+      "accepted_versions": [
+        "1.0.0",
+        "1.1.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md",
@@ -31,9 +46,15 @@
     {
       "id": "cowork-midday-tripwire-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/midday-tripwire@1.0.0.json",
-      "accepted_versions": ["1.0.0", "1.1.0"],
+      "accepted_versions": [
+        "1.0.0",
+        "1.1.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/midday-tripwire/SKILL.md",
@@ -44,9 +65,15 @@
     {
       "id": "cowork-weekly-review-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/weekly-review@1.0.0.json",
-      "accepted_versions": ["1.0.0", "1.1.0"],
+      "accepted_versions": [
+        "1.0.0",
+        "1.1.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/weekly-review/SKILL.md",
@@ -57,9 +84,15 @@
     {
       "id": "cowork-monthly-review-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/monthly-review@1.0.0.json",
-      "accepted_versions": ["1.0.0", "1.1.0"],
+      "accepted_versions": [
+        "1.0.0",
+        "1.1.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/monthly-review/SKILL.md",
@@ -70,9 +103,14 @@
     {
       "id": "cowork-morning-briefing-cold-sidecar",
       "kind": "sidecar-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/schemas/morning-briefing-cold@1.0.0.json",
-      "accepted_versions": ["1.0.0"],
+      "accepted_versions": [
+        "1.0.0"
+      ],
       "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
       "consumers": [
         "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md"
@@ -82,9 +120,14 @@
     {
       "id": "scheduled-job-contract",
       "kind": "contract",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/scheduled-job-contract.json",
-      "accepted_versions": ["0.35.1"],
+      "accepted_versions": [
+        "0.35.1"
+      ],
       "validator": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
       "consumers": [
         "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
@@ -96,7 +139,10 @@
     {
       "id": "cowork-kind-titles",
       "kind": "data-file",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/kind-titles.json",
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
@@ -106,7 +152,10 @@
     {
       "id": "cowork-kind-patterns",
       "kind": "data-file",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/kind-patterns.json",
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
@@ -116,7 +165,10 @@
     {
       "id": "cowork-kind-classifier-cache",
       "kind": "data-file",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/kind-classifier-cache.json",
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
@@ -126,7 +178,10 @@
     {
       "id": "cowork-cadence-freshness-windows",
       "kind": "data-file",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/data/cadence-freshness-windows.json",
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
@@ -136,9 +191,17 @@
     {
       "id": "cowork-learned-weights",
       "kind": "learned-state-schema",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/helpers/ingest-feedback-helper.js",
-      "accepted_versions": ["2", "3", "4", "5"],
+      "accepted_versions": [
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
       "validator": "platform/blueprints/cowork/helpers/ingest-feedback-helper.js",
       "consumers": [
         "platform/blueprints/cowork/helpers/learn-from-checks-helper.js",
@@ -149,7 +212,10 @@
     {
       "id": "finance-rule-fragments",
       "kind": "rule-fragment-bundle",
-      "owner": { "type": "blueprint", "name": "finance" },
+      "owner": {
+        "type": "blueprint",
+        "name": "finance"
+      },
       "source": "platform/blueprints/finance/manifest.json",
       "validator": "platform/install.js",
       "consumers": [
@@ -163,7 +229,10 @@
     {
       "id": "reader-rule-fragments",
       "kind": "rule-fragment-bundle",
-      "owner": { "type": "blueprint", "name": "reader" },
+      "owner": {
+        "type": "blueprint",
+        "name": "reader"
+      },
       "source": "platform/blueprints/reader/manifest.json",
       "validator": "platform/install.js",
       "consumers": [
@@ -176,7 +245,10 @@
     {
       "id": "cowork-rule-fragments",
       "kind": "rule-fragment-bundle",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/manifest.json",
       "validator": "platform/install.js",
       "consumers": [
@@ -187,7 +259,10 @@
     {
       "id": "project-rule-fragments",
       "kind": "rule-fragment-bundle",
-      "owner": { "type": "blueprint", "name": "project" },
+      "owner": {
+        "type": "blueprint",
+        "name": "project"
+      },
       "source": "platform/blueprints/project/manifest.json",
       "consumers": [
         "platform/mechanisms/breadcrumb/breadcrumb.js",
@@ -199,7 +274,10 @@
     {
       "id": "workshop-platform-manifest",
       "kind": "workshop-manifest",
-      "owner": { "type": "workshop", "name": "sauce" },
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
       "source": "platform/manifest.json",
       "validator": "scripts/check-version-sync.js",
       "consumers": [
@@ -213,7 +291,10 @@
     {
       "id": "workshop-platform-subscription",
       "kind": "workshop-manifest",
-      "owner": { "type": "workshop", "name": "sauce" },
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
       "source": "ranch/platform-subscription.json",
       "consumers": [
         "platform/install.js",
@@ -224,7 +305,10 @@
     {
       "id": "finance-new-entity-buttons",
       "kind": "entity-create-prompts",
-      "owner": { "type": "blueprint", "name": "finance" },
+      "owner": {
+        "type": "blueprint",
+        "name": "finance"
+      },
       "source": "platform/blueprints/finance/manifest.json",
       "validator": "platform/mechanisms/entity-create/entity-create.js",
       "consumers": [
@@ -235,7 +319,10 @@
     {
       "id": "cowork-vault-config-engagement",
       "kind": "helper-read-contract",
-      "owner": { "type": "blueprint", "name": "cowork" },
+      "owner": {
+        "type": "blueprint",
+        "name": "cowork"
+      },
       "source": "platform/blueprints/cowork/helpers/read-user-preferences-helper.js",
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js",
@@ -247,7 +334,10 @@
     {
       "id": "finance-monthly-overview-page-read",
       "kind": "helper-read-contract",
-      "owner": { "type": "blueprint", "name": "finance" },
+      "owner": {
+        "type": "blueprint",
+        "name": "finance"
+      },
       "source": "platform/blueprints/finance/helpers/monthly-overview.js",
       "consumers": [
         "platform/blueprints/finance/templates/Budget Template.md"
@@ -257,7 +347,10 @@
     {
       "id": "finance-plan-state-read",
       "kind": "helper-read-contract",
-      "owner": { "type": "blueprint", "name": "finance" },
+      "owner": {
+        "type": "blueprint",
+        "name": "finance"
+      },
       "source": "platform/blueprints/finance/helpers/finance-math.js",
       "consumers": [
         "platform/blueprints/finance/helpers/finance-plan-dashboard.js",
@@ -269,7 +362,10 @@
     {
       "id": "to-do-recurring-frontmatter",
       "kind": "contract",
-      "owner": { "type": "blueprint", "name": "to-do" },
+      "owner": {
+        "type": "blueprint",
+        "name": "to-do"
+      },
       "source": "platform/blueprints/to-do/manifest.json",
       "consumers": [
         "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
@@ -280,7 +376,10 @@
     {
       "id": "project-todo-frontmatter",
       "kind": "contract",
-      "owner": { "type": "blueprint", "name": "project" },
+      "owner": {
+        "type": "blueprint",
+        "name": "project"
+      },
       "source": "platform/blueprints/project/manifest.json",
       "consumers": [
         "platform/blueprints/to-do/helpers/todo-create-task.js",
@@ -292,7 +391,10 @@
     {
       "id": "breadcrumb-registry",
       "kind": "data-file",
-      "owner": { "type": "mechanism", "name": "breadcrumb" },
+      "owner": {
+        "type": "mechanism",
+        "name": "breadcrumb"
+      },
       "source": "ranch/breadcrumb-registry.json",
       "consumers": [
         "platform/mechanisms/breadcrumb/breadcrumb.js"
@@ -302,7 +404,10 @@
     {
       "id": "nav-buttons-registry",
       "kind": "data-file",
-      "owner": { "type": "mechanism", "name": "nav-buttons" },
+      "owner": {
+        "type": "mechanism",
+        "name": "nav-buttons"
+      },
       "source": "ranch/nav-buttons-registry.json",
       "consumers": [
         "platform/mechanisms/nav-buttons/space-nav-buttons.js"
@@ -312,7 +417,10 @@
     {
       "id": "entity-create-registry",
       "kind": "data-file",
-      "owner": { "type": "mechanism", "name": "entity-create" },
+      "owner": {
+        "type": "mechanism",
+        "name": "entity-create"
+      },
       "source": "ranch/entity-create-registry.json",
       "consumers": [
         "platform/mechanisms/entity-create/entity-create.js"
@@ -322,7 +430,10 @@
     {
       "id": "task-entity-frontmatter",
       "kind": "contract",
-      "owner": { "type": "mechanism", "name": "task-entity" },
+      "owner": {
+        "type": "mechanism",
+        "name": "task-entity"
+      },
       "source": "platform/mechanisms/task-entity/manifest.json",
       "consumers": [
         "platform/mechanisms/task-entity/task-entity.js"
@@ -332,7 +443,10 @@
     {
       "id": "trips-rule-fragments",
       "kind": "rule-fragment-bundle",
-      "owner": { "type": "blueprint", "name": "trips" },
+      "owner": {
+        "type": "blueprint",
+        "name": "trips"
+      },
       "source": "platform/blueprints/trips/manifest.json",
       "consumers": [
         "platform/blueprints/trips/helpers/trips-hub-cards.js",
@@ -345,7 +459,10 @@
     {
       "id": "doc-search-mechanism",
       "kind": "helper-read-contract",
-      "owner": { "type": "mechanism", "name": "doc-search" },
+      "owner": {
+        "type": "mechanism",
+        "name": "doc-search"
+      },
       "source": "platform/mechanisms/doc-search/doc-search.js",
       "consumers": [
         "platform/blueprints/project/helpers/project-docs-index.js",
@@ -358,15 +475,20 @@
     {
       "id": "section-explorer-links-frontmatter",
       "kind": "contract",
-      "owner": { "type": "mechanism", "name": "section-explorer" },
+      "owner": {
+        "type": "mechanism",
+        "name": "section-explorer"
+      },
       "source": "platform/mechanisms/section-explorer/manifest.json",
       "consumers": [
         "platform/blueprints/wiki/helpers/wiki-tree.js",
         "platform/blueprints/project/helpers/project-docs-index.js",
         "platform/blueprints/project/helpers/section-hub.js",
-        "platform/install.js"
+        "platform/install.js",
+        "platform/blueprints/wiki/helpers/wiki-chrome-bar.js",
+        "platform/blueprints/project/helpers/project-chrome-bar.js"
       ],
-      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware)."
+      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware). v0.210: contract extended to LEAF types wiki-page + doc-note — links[] rendered as clickable cards + '＋ Add link' pill via SectionExplorer.renderNoteLinks (invoked by WikiChromeBar/ProjectChromeBar after the bar). NOT backfilled on leaf notes: the links key is created lazily on first write via processFrontMatter."
     }
   ]
 }

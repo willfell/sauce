@@ -71,6 +71,10 @@ function run(name, fn) {
 
 let failures = 0;
 
+// Async tests register here and run in the async tail before process.exit —
+// everything above stays synchronous `failures += !run(...)`.
+const ASYNC_TESTS = [];
+
 failures += !run("makeAdapter returns an object exposing render-ready shape", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
@@ -1165,4 +1169,73 @@ failures += !run("renderNoteLinks: cold-load partial page (no file) renders noth
   assert.strictEqual(els.filter((e) => e.className === "se-note-links").length, 0);
 });
 
-process.exit(failures > 0 ? 1 : 0);
+failures += !run("WikiChromeBar.render calls SectionExplorer.renderNoteLinks on wiki-page only", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/wiki/helpers/wiki-chrome-bar.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = WikiChromeBar;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const WikiChromeBar = mod.exports;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: { makeAdapter: (c) => c, render: () => {} },
+    SectionExplorer: { renderNoteLinks: (dv) => calls.push(dv) },
+  };
+  try {
+    const bar = new WikiChromeBar();
+    const mk = (type) => ({ container: { createEl: () => ({}) }, current: () => ({ type, file: { path: "p.md" } }) });
+    bar.render(mk("wiki-page"));
+    assert.strictEqual(calls.length, 1, "wiki-page must trigger renderNoteLinks");
+    bar.render(mk("wiki-hub"));
+    bar.render(mk("wiki-section"));
+    assert.strictEqual(calls.length, 1, "hubs/sections must NOT trigger renderNoteLinks");
+  } finally {
+    delete global.customJS;
+  }
+});
+
+ASYNC_TESTS.push({ name: "ProjectChromeBar.render calls SectionExplorer.renderNoteLinks on doc-note only", fn: async () => {
+  const src = fs.readFileSync(path.join(__dirname, "../blueprints/project/helpers/project-chrome-bar.js"), "utf8");
+  const factory = new Function("module", "exports", src + "\nmodule.exports = ProjectChromeBar;");
+  const mod = { exports: {} };
+  factory(mod, mod.exports);
+  const ProjectChromeBar = mod.exports;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: { makeAdapter: (c) => c, render: () => {} },
+    SectionExplorer: { renderNoteLinks: (dv) => calls.push(dv) },
+  };
+  try {
+    const bar = new ProjectChromeBar();
+    const mk = (type, path2) => ({ container: { createEl: () => ({}) }, current: () => ({ type, file: { path: path2, folder: path2.slice(0, path2.lastIndexOf("/")) } }) });
+    await bar.render(mk("doc-note", "spice/projects/foo/docs/knowledge/D.md"));
+    assert.strictEqual(calls.length, 1, "doc-note must trigger renderNoteLinks");
+    await bar.render(mk("docs-hub", "spice/projects/foo/docs/Docs.md"));
+    await bar.render(mk("section-hub", "spice/projects/foo/docs/k/K.md"));
+    assert.strictEqual(calls.length, 1, "hubs must NOT trigger renderNoteLinks");
+  } finally {
+    delete global.customJS;
+  }
+}});
+
+failures += !run("wiki + project blueprint manifests declare depends_on section-explorer", () => {
+  for (const bp of ["wiki", "project"]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, `../blueprints/${bp}/manifest.json`), "utf8"));
+    const dep = (manifest.depends_on || []).find((d) => d.name === "section-explorer");
+    assert.ok(dep, bp + " manifest must depend on section-explorer");
+    assert.ok(dep.range, bp + " dep must declare a range");
+  }
+});
+
+// Async tail — runs the queued async tests, then exits with the final tally.
+(async () => {
+  for (const t of ASYNC_TESTS) {
+    try {
+      await t.fn();
+      console.log("PASS " + t.name);
+    } catch (e) {
+      console.log("FAIL " + t.name + " — " + e.message);
+      failures += 1;
+    }
+  }
+  process.exit(failures > 0 ? 1 : 0);
+})();

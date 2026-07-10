@@ -20,7 +20,23 @@ class WikiChromeBar {
     try {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
         || typeof customJS.ChromeBar.render !== "function") return;
-      return customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      const result = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      this._renderNoteLinks(dv);
+      return result;
+    } catch (_e) { /* never throw */ }
+  }
+
+  // Leaf-note pinned links (v0.210): wiki-page notes get their links[] strip +
+  // "＋ Add link" pill right under the bar, via the shared SectionExplorer
+  // helper. Cold-load-guarded; hubs/sections render theirs in the explorer pane.
+  _renderNoteLinks(dv) {
+    try {
+      let page = null;
+      try { page = dv && dv.current ? dv.current() : null; } catch (_e) { page = null; }
+      if (!page || page.type !== "wiki-page") return;
+      if (typeof customJS === "undefined" || !customJS.SectionExplorer
+        || typeof customJS.SectionExplorer.renderNoteLinks !== "function") return;
+      customJS.SectionExplorer.renderNoteLinks(dv);
     } catch (_e) { /* never throw */ }
   }
 
