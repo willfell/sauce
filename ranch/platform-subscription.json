@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.211.0",
+  "workshop_version": "0.211.1",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -122,7 +122,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.0"
+      "version": "0.10.1"
     },
     {
       "name": "people",
