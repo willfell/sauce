@@ -37,6 +37,7 @@ const PATH_TO_TYPE = {
     "daily": "daily",
     "journal": "journal",
     "scratch": "scratch",
+    "sticky-notes": "sticky-note",
     "cowork": "cowork-daily",   // overridden by sub-path below
     "finance": null,             // ambiguous: budget / paycheck / invoice
     "to-do": "to-do",

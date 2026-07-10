@@ -1,4 +1,4 @@
-class ScratchChromeBar {
+class StickyChromeBar {
   get ICON() {
     return {
       pencilPlus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/><line x1="20" y1="2" x2="20" y2="8"/><line x1="23" y1="5" x2="17" y2="5"/></svg>`,
@@ -18,27 +18,27 @@ class ScratchChromeBar {
 
   _config() {
     const ICON = this.ICON;
-    const ROOT = "spice/scratch";
+    const ROOT = "spice/sticky-notes";
     return {
       detect: (dv, page) => {
         const t = page && page.type;
-        if (t === "scratch-hub") return { context: "scratch-hub", path: (page.file && page.file.path) || "" };
-        if (t === "scratch-day") return { context: "scratch-day", path: (page.file && page.file.path) || "", day: page.day };
-        if (t === "scratch") return { context: "scratch", path: (page.file && page.file.path) || "", day: page.day };
+        if (t === "sticky-hub") return { context: "sticky-hub", path: (page.file && page.file.path) || "" };
+        if (t === "sticky-day") return { context: "sticky-day", path: (page.file && page.file.path) || "", day: page.day };
+        if (t === "sticky-note") return { context: "sticky-note", path: (page.file && page.file.path) || "", day: page.day };
         return null;
       },
       surfaceSpec: (ctx) => {
-        if (ctx.context === "scratch-hub") {
+        if (ctx.context === "sticky-hub") {
           return { primary: { id: "today", label: "Today", icon: ICON.today }, overflow: [], leaf: false };
         }
-        if (ctx.context === "scratch-day") {
+        if (ctx.context === "sticky-day") {
           return {
-            primary: { id: "new-scratch", label: "+ New Scratch", icon: ICON.pencilPlus },
+            primary: { id: "new-sticky-note", label: "+ New Sticky Note", icon: ICON.pencilPlus },
             overflow: [{ id: "hub", label: "Hub", icon: ICON.home }],
             leaf: false,
           };
         }
-        if (ctx.context === "scratch") {
+        if (ctx.context === "sticky-note") {
           return {
             primary: null,
             overflow: [
@@ -55,14 +55,14 @@ class ScratchChromeBar {
           this._openToday(dv);
           return;
         }
-        if (id === "new-scratch") {
+        if (id === "new-sticky-note") {
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
-            customJS.EntityCreate.create({ instance: "scratch", dv });
-          } else if (typeof Notice === "function") { new Notice("ScratchChromeBar: EntityCreate unavailable.", 8000); }
+            customJS.EntityCreate.create({ instance: "sticky-note", dv });
+          } else if (typeof Notice === "function") { new Notice("StickyChromeBar: EntityCreate unavailable.", 8000); }
           return;
         }
         if (id === "hub") {
-          try { app.workspace.openLinkText("spice/scratch/Scratch.md", ""); } catch (_e) {}
+          try { app.workspace.openLinkText("spice/sticky-notes/Sticky.md", ""); } catch (_e) {}
           return;
         }
         if (id === "back-day") {
@@ -71,27 +71,27 @@ class ScratchChromeBar {
           const mo = window.moment(day, "YYYY-MM-DD", true);
           if (!mo.isValid()) return;
           const folder = mo.format("YYYY/MM-MMMM");
-          const dayHubPath = `spice/scratch/${folder}/${day}/Scratch-Day-${day}.md`;
+          const dayHubPath = `spice/sticky-notes/${folder}/${day}/Sticky-Day-${day}.md`;
           try { app.workspace.openLinkText(dayHubPath, ""); } catch (_e) {}
           return;
         }
       },
       destinations: (dv, ctx) => {
-        const out = [{ section: "This scratch" }];
+        const out = [{ section: "This sticky note" }];
         const open = (p) => { try { customJS.ChromeBar.openNavTarget(p, dv); } catch (_e) {} };
         let curPath = ctx && ctx.path;
         if (!curPath) { try { const c = dv && dv.current ? dv.current() : null; curPath = (c && c.file && c.file.path) || ""; } catch (_e) { curPath = ""; } }
-        const hubPath = "spice/scratch/Scratch.md";
+        const hubPath = "spice/sticky-notes/Sticky.md";
         if (curPath !== hubPath) {
-          out.push({ label: "Scratch Hub", icon: ICON.home, _navTarget: hubPath, onSelect: () => open(hubPath) });
+          out.push({ label: "Sticky Notes Hub", icon: ICON.home, _navTarget: hubPath, onSelect: () => open(hubPath) });
         }
-        if (ctx.context !== "scratch-hub") {
+        if (ctx.context !== "sticky-hub") {
           const day = this._resolveDay(dv, ctx);
           if (day) {
             const mo = window.moment(day, "YYYY-MM-DD", true);
             if (mo.isValid()) {
               const folder = mo.format("YYYY/MM-MMMM");
-              const dayHubPath = `spice/scratch/${folder}/${day}/Scratch-Day-${day}.md`;
+              const dayHubPath = `spice/sticky-notes/${folder}/${day}/Sticky-Day-${day}.md`;
               if (curPath !== dayHubPath) {
                 out.push({ label: "Day Hub", icon: ICON.today, _navTarget: dayHubPath, onSelect: () => open(dayHubPath) });
               }
@@ -100,8 +100,8 @@ class ScratchChromeBar {
         }
         return out;
       },
-      rootClass: "scratch-chrome-root",
-      btnClass: (v) => `scratch-chrome-btn scratch-chrome-btn-${v}`,
+      rootClass: "sticky-chrome-root",
+      btnClass: (v) => `sticky-chrome-btn sticky-chrome-btn-${v}`,
     };
   }
 
@@ -134,28 +134,28 @@ class ScratchChromeBar {
     const day = window.moment().format("YYYY-MM-DD");
     const mo = window.moment(day, "YYYY-MM-DD", true);
     const monthFolder = mo.format("YYYY/MM-MMMM");
-    const folder = `spice/scratch/${monthFolder}/${day}`;
-    const dayHubPath = `${folder}/Scratch-Day-${day}.md`;
+    const folder = `spice/sticky-notes/${monthFolder}/${day}`;
+    const dayHubPath = `${folder}/Sticky-Day-${day}.md`;
     const existing = app.vault.getAbstractFileByPath(dayHubPath);
     if (existing) { app.workspace.openLinkText(dayHubPath, ""); return; }
     const tpPlugin = app.plugins.plugins["templater-obsidian"];
     if (!tpPlugin || !tpPlugin.templater) {
-      if (typeof Notice === "function") new Notice("ScratchChromeBar: Templater plugin not enabled.", 8000);
+      if (typeof Notice === "function") new Notice("StickyChromeBar: Templater plugin not enabled.", 8000);
       return;
     }
-    const templateFile = app.vault.getAbstractFileByPath("ranch/templates/Scratch Day Hub.md");
+    const templateFile = app.vault.getAbstractFileByPath("ranch/templates/Sticky Day Hub.md");
     if (!templateFile) {
-      if (typeof Notice === "function") new Notice("ScratchChromeBar: template not found.", 8000);
+      if (typeof Notice === "function") new Notice("StickyChromeBar: template not found.", 8000);
       return;
     }
     if (!app.vault.getAbstractFileByPath(folder)) {
       try { await app.vault.createFolder(folder); }
-      catch (e) { if (!/already exists|exists/i.test((e && e.message) || "")) { if (typeof Notice === "function") new Notice("ScratchChromeBar: cannot create folder — " + (e.message || e), 8000); return; } }
+      catch (e) { if (!/already exists|exists/i.test((e && e.message) || "")) { if (typeof Notice === "function") new Notice("StickyChromeBar: cannot create folder — " + (e.message || e), 8000); return; } }
     }
-    try { await tpPlugin.templater.create_new_note_from_template(templateFile, folder, `Scratch-Day-${day}`, true); }
+    try { await tpPlugin.templater.create_new_note_from_template(templateFile, folder, `Sticky-Day-${day}`, true); }
     catch (e) {
       if (/already exists|exists/i.test((e && e.message) || "")) { app.workspace.openLinkText(dayHubPath, ""); return; }
-      if (typeof Notice === "function") new Notice("ScratchChromeBar: Templater create failed — " + (e.message || e), 8000);
+      if (typeof Notice === "function") new Notice("StickyChromeBar: Templater create failed — " + (e.message || e), 8000);
     }
   }
 }

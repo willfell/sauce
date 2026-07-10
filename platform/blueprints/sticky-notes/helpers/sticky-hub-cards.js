@@ -1,12 +1,12 @@
 /**
- * ScratchHubCards (CustomJS)
- * Renders one card per day with at least one scratch, latest first.
+ * StickyHubCards (CustomJS)
+ * Renders one card per day with at least one sticky note, latest first.
  * Click a card → opens that day's day-index page.
  *
  * Usage in DataviewJS (via customjs-guard):
- *   await dv.view("ranch/views/customjs-guard", { class: "ScratchHubCards" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "StickyHubCards" });
  */
-class ScratchHubCards {
+class StickyHubCards {
     _coerceDay(raw) {
         if (typeof raw === "string") return raw.slice(0, 10);
         if (raw && typeof raw.toISODate === "function") return raw.toISODate();
@@ -23,9 +23,9 @@ class ScratchHubCards {
         if (dv.container.closest(".markdown-embed")) return;
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
-        const scratches = dv.pages('"spice/scratch"').where(p => p.type === "scratch");
+        const stickies = dv.pages('"spice/sticky-notes"').where(p => p.type === "sticky-note");
         const byDay = new Map();
-        for (const s of scratches) {
+        for (const s of stickies) {
             const k = this._coerceDay(s.day);
             if (!k) continue;
             if (!byDay.has(k)) byDay.set(k, { day: k, count: 0, latestMtime: 0, sample: null });
@@ -39,7 +39,7 @@ class ScratchHubCards {
             const m = window.moment(e.day, "YYYY-MM-DD", true);
             const dayName = m.isValid() ? m.format("dddd") : "Unknown";
             const monthFolder = m.isValid() ? m.format("YYYY/MM-MMMM") : "";
-            const dayHubPath = `spice/scratch/${monthFolder}/${e.day}/Scratch-Day-${e.day}.md`;
+            const dayHubPath = `spice/sticky-notes/${monthFolder}/${e.day}/Sticky-Day-${e.day}.md`;
             return {
                 file: { name: `${dayName} ${e.day}`, path: dayHubPath, mtime: { ts: e.latestMtime } },
                 _count: e.count,
@@ -57,11 +57,11 @@ class ScratchHubCards {
             icon: () => pencil,
             meta: (p) => {
                 const when = window.moment(p.file.mtime.ts).fromNow();
-                return `<span>${p._count} scratch${p._count === 1 ? "" : "es"}</span><span title="Latest">${when}</span>`;
+                return `<span>${p._count} sticky note${p._count === 1 ? "" : "s"}</span><span title="Latest">${when}</span>`;
             },
             target: (p) => p.file.path,
             sort: (a, b) => b._day.localeCompare(a._day),
-            empty: "No scratches yet. Hit the Scratch nav-button to capture your first."
+            empty: "No sticky notes yet. Hit the Sticky Notes nav-button to capture your first."
         });
     }
 }

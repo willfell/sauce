@@ -1,6 +1,6 @@
 /**
- * ScratchDayList (CustomJS)
- * Renders all scratches for a given day as BeaconCards in row layout.
+ * StickyDayList (CustomJS)
+ * Renders all sticky notes for a given day as BeaconCards in row layout.
  * Title = p.title frontmatter if present, else first non-fenced body line,
  *         else filename.
  * Meta = "edited X ago" relative time from file mtime.
@@ -10,11 +10,11 @@
  *
  * Usage:
  *   await dv.view("ranch/views/customjs-guard", {
- *     class: "ScratchDayList",
+ *     class: "StickyDayList",
  *     args: [{ day: dv.current().day }]
  *   });
  */
-class ScratchDayList {
+class StickyDayList {
     _coerceDay(raw) {
         if (typeof raw === "string") return raw.slice(0, 10);
         if (raw && typeof raw.toISODate === "function") return raw.toISODate();
@@ -22,9 +22,9 @@ class ScratchDayList {
         // timezone affinity — getFullYear/Month/Date pull LOCAL-time components
         // off a UTC-anchored instant, which silently shifts a YAML-parsed
         // unquoted "day: 2026-06-01" (= 2026-06-01T00:00:00Z) to 2026-05-31
-        // for any user west of UTC. Returning null drops the scratch from the
+        // for any user west of UTC. Returning null drops the sticky note from the
         // day-list rather than mis-attributing it; the migration helper
-        // (ScratchDayMigrate, Stage 3) rewrites unquoted YAML dates as quoted
+        // (StickyDayMigrate, Stage 3) rewrites unquoted YAML dates as quoted
         // strings so the dropped branch becomes unreachable in practice.
         return null;
     }
@@ -57,24 +57,24 @@ class ScratchDayList {
     async render(dv, args) {
         if (dv.container.closest(".markdown-embed")) return;
 
-        const myGen = (dv.container.__scratchRenderGen || 0) + 1;
-        dv.container.__scratchRenderGen = myGen;
-        const isStale = () => dv.container.__scratchRenderGen !== myGen;
+        const myGen = (dv.container.__stickyRenderGen || 0) + 1;
+        dv.container.__stickyRenderGen = myGen;
+        const isStale = () => dv.container.__stickyRenderGen !== myGen;
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const day = await this._pollForDayArg(args, dv);
         if (isStale()) return;
         if (!day) {
-            dv.paragraph("ScratchDayList: missing `day` arg.");
+            dv.paragraph("StickyDayList: missing `day` arg.");
             return;
         }
 
-        const scratches = dv.pages('"spice/scratch"')
-            .where(p => p.type === "scratch" && this._coerceDay(p.day) === day);
+        const stickies = dv.pages('"spice/sticky-notes"')
+            .where(p => p.type === "sticky-note" && this._coerceDay(p.day) === day);
 
         const items = [];
-        for (const s of scratches) {
+        for (const s of stickies) {
             let title = (s.title && String(s.title).trim()) || "";
             if (!title) {
                 try {
@@ -104,7 +104,7 @@ class ScratchDayList {
             },
             target: (p) => p.file.path,
             sort: (a, b) => (b._mtime || 0) - (a._mtime || 0),
-            empty: "No scratches for this day yet. Hit + New Scratch above to capture one."
+            empty: "No sticky notes for this day yet. Hit + New Sticky Note above to capture one."
         });
     }
 }
