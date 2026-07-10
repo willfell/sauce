@@ -2267,6 +2267,15 @@ async function applyScratchToStickyNotesMigration(tp, manifest, variables, histo
         acc = acc ? `${acc}/${seg}` : seg;
         if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* implied */ } }
       }
+      // Never clobber an installer-fresh dest. The only file that can already
+      // exist here is the boilerplate hub (spice/sticky-notes/Sticky.md), which
+      // the files[] step wrote earlier in THIS install with the current shape
+      // (# Sticky Notes heading, StickyChromeBar/StickyHubCards). User + dated
+      // notes (leaf, day-hub, user notes) carry unique names install never
+      // materializes, so they never pre-exist. Letting the fresh hub win avoids
+      // a migrated vault surfacing a stale "# Scratch" heading. The pre-migration
+      // original is still captured in the .sauce-backup snapshot taken above.
+      if (await adapter.exists(destPath)) continue;
       let body;
       try { body = await adapter.read(f); } catch (_e) { continue; }
       const rewritten = _rewriteScratchToStickyBody(body);

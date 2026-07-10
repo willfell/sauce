@@ -175,7 +175,7 @@ withTempVault((vault) => {
         ["spice/finance/debts/Debts.md", "debts-hub", "FM-4"],
         ["spice/finance/Budget Defaults.md", "budget-defaults", "FM-5"],
         ["spice/projects/Projects.md", "projects-hub", "FM-6"],
-        ["spice/scratch/Scratch.md", "scratch-hub", "FM-7"],
+        ["spice/sticky-notes/Sticky.md", "sticky-hub", "FM-7"],
         ["spice/to-do/All-ToDos.md", "to-do-hub", "FM-8"],
         ["spice/people/People.md", "people-hub", "FM-9"],
         ["spice/products/Products.md", "products-hub", "FM-10"],
@@ -196,9 +196,13 @@ withTempVault((vault) => {
     }
 
     // ===== HC-V01100-SEED-PRESERVE-* — hand-authored notes preserved =====
+    // PRESERVE-2 (the scratch user note) is INTENTIONALLY moved+rewritten by
+    // applyScratchToStickyNotesMigration (folder spice/scratch → spice/sticky-notes,
+    // frontmatter type/tags scratch → sticky-note). It is no longer byte-equal, so
+    // it moved out of this bit-for-bit array; the HC-SEED-MIGRATE-STICKY family below
+    // asserts its move + user-prose preservation instead.
     const preserved = [
         ["spice/daily/2026-06-14.md", "PRESERVE-1"],
-        ["spice/scratch/2026-06-14-test-scratch.md", "PRESERVE-2"],
         ["spice/meetings/2026-06-14 Test Meeting.md", "PRESERVE-3"],
     ];
     for (const [relPath, tag] of preserved) {
@@ -288,7 +292,7 @@ withTempVault((vault) => {
         ["spice/projects/Projects.md", "ProjectsHubCards", "BODY-13"],
         ["spice/people/People.md", "PeopleHubCards", "BODY-14"],
         ["spice/products/Products.md", "ProductsHubCards", "BODY-15"],
-        ["spice/scratch/Scratch.md", "ScratchHubCards", "BODY-16"],
+        ["spice/sticky-notes/Sticky.md", "StickyHubCards", "BODY-16"],
         ["spice/to-do/All-ToDos.md", "ToDoAllList", "BODY-17"],
     ];
     for (const [relPath, classSubstr, tag] of bodyChecks) {
@@ -724,6 +728,98 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V09-SEED-MIGRATE-STICKY-* — applyScratchToStickyNotesMigration (v0.9.0) =====
+    // The seed subscribes sticky-notes@0.9.0 (swapped from scratch@0.8.0) and carries
+    // the pre-rename spice/scratch/** tree + scratch-era installer artifacts. On install
+    // the migration moves+renames+retypes the tree, rewrites cross-refs vault-wide, and
+    // prunes every orphaned scratch artifact. This family asserts that end state.
+    ok("HC-V09-SEED-MIGRATE-STICKY-1 spice/scratch removed",
+       !fs.existsSync(path.join(vault, "spice/scratch")));
+    ok("HC-V09-SEED-MIGRATE-STICKY-2 spice/sticky-notes exists",
+       helpers.dirExists(vault, "spice/sticky-notes"));
+    {
+        const hub = helpers.fileExists(vault, "spice/sticky-notes/Sticky.md")
+            ? helpers.readNote(vault, "spice/sticky-notes/Sticky.md") : "";
+        ok("HC-V09-SEED-MIGRATE-STICKY-3 hub Sticky.md typed sticky-hub",
+           /^type:\s*sticky-hub\s*$/m.test(hub));
+        // The installer-fresh hub (files[] step) wins over the migrated old hub
+        // (skip-if-dest-exists guard), so the heading reads "# Sticky Notes",
+        // never a stale "# Scratch" carried over from the pre-rename Scratch.md.
+        ok("HC-V09-SEED-MIGRATE-STICKY-3b hub heading is fresh '# Sticky Notes' (no stale '# Scratch')",
+           /^#\s+Sticky Notes\s*$/m.test(hub) && !/^#\s+Scratch\s*$/m.test(hub));
+    }
+    {
+        // The scratch user note moved (folder-only rename; body retyped scratch → sticky-note)
+        // but its user prose is preserved verbatim.
+        const rel = "spice/sticky-notes/2026-06-14-test-scratch.md";
+        const exists = helpers.fileExists(vault, rel);
+        const body = exists ? helpers.readNote(vault, rel) : "";
+        ok("HC-V09-SEED-MIGRATE-STICKY-4 user note moved to spice/sticky-notes intact",
+           exists && body.includes("A scratch is wherever you put it down.")
+                  && body.includes("If it changes, install broke a non-negotiable."),
+           `exists=${exists}`);
+    }
+    {
+        const leaf = helpers.fileExists(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-2026-06-17-14-30.md")
+            ? helpers.readNote(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-2026-06-17-14-30.md") : "";
+        ok("HC-V09-SEED-MIGRATE-STICKY-5 leaf renamed Sticky-*.md + typed sticky-note",
+           /^type:\s*sticky-note\s*$/m.test(leaf));
+    }
+    {
+        const dayHub = helpers.fileExists(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-Day-2026-06-17.md")
+            ? helpers.readNote(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-Day-2026-06-17.md") : "";
+        ok("HC-V09-SEED-MIGRATE-STICKY-6 day-hub renamed Sticky-Day-*.md + typed sticky-day",
+           /^type:\s*sticky-day\s*$/m.test(dayHub));
+    }
+    ok("HC-V09-SEED-MIGRATE-STICKY-7 ranch/scripts/scratch pruned, sticky helpers present",
+       !fs.existsSync(path.join(vault, "ranch/scripts/scratch"))
+       && helpers.fileExists(vault, "ranch/scripts/sticky-notes/sticky-chrome-bar.js"));
+    ok("HC-V09-SEED-MIGRATE-STICKY-8 ranch/rules scratch pruned, sticky-note rule present",
+       !fs.existsSync(path.join(vault, "ranch/rules/scratch.json"))
+       && helpers.fileExists(vault, "ranch/rules/sticky-note.json"));
+    {
+        let navReg = null;
+        try { navReg = helpers.readJson(vault, "ranch/nav-buttons-registry.json"); } catch (e) {}
+        const hasScratch = navReg && (
+            ("scratch" in navReg) ||
+            (navReg.contributions && typeof navReg.contributions === "object" && "scratch" in navReg.contributions)
+        );
+        ok("HC-V09-SEED-MIGRATE-STICKY-9 nav-buttons-registry scratch key pruned",
+           navReg !== null && !hasScratch);
+    }
+    ok("HC-V09-SEED-MIGRATE-STICKY-10 .claude/commands scratch.md pruned, sticky-notes.md present",
+       !fs.existsSync(path.join(vault, ".claude/commands/scratch.md"))
+       && helpers.fileExists(vault, ".claude/commands/sticky-notes.md"));
+    {
+        let cjs = null;
+        try { cjs = helpers.readJson(vault, ".obsidian/plugins/customjs/data.json"); } catch (e) {}
+        const names = (cjs && Array.isArray(cjs.startupScriptNames)) ? cjs.startupScriptNames : [];
+        ok("HC-V09-SEED-MIGRATE-STICKY-11 customjs startup swapped ScratchDayMigrateInit → StickyDayMigrateInit",
+           cjs !== null && !names.includes("ScratchDayMigrateInit") && names.includes("StickyDayMigrateInit"),
+           `startupScriptNames=${JSON.stringify(names)}`);
+    }
+    {
+        const base = path.join(vault, ".sauce-backup/sticky-notes-rename");
+        let ok12 = false;
+        try { ok12 = fs.existsSync(base) && fs.readdirSync(base).length > 0; } catch (e) {}
+        ok("HC-V09-SEED-MIGRATE-STICKY-12 .sauce-backup/sticky-notes-rename snapshot written", ok12);
+    }
+    {
+        // .claude/skills/scratch dir pruned, sticky-notes skill dir present.
+        ok("HC-V09-SEED-MIGRATE-STICKY-13 .claude/skills scratch dir pruned, sticky-notes present",
+           !fs.existsSync(path.join(vault, ".claude/skills/scratch"))
+           && helpers.dirExists(vault, ".claude/skills/sticky-notes"));
+    }
+    {
+        // Installed ledger no longer carries the "scratch" blueprint entry.
+        let led = null;
+        try { led = helpers.readJson(vault, "ranch/platform-installed.json"); } catch (e) {}
+        const hasScratchBp = led && Array.isArray(led.blueprints)
+            && led.blueprints.some((b) => b && b.name === "scratch");
+        ok("HC-V09-SEED-MIGRATE-STICKY-14 platform-installed ledger scratch blueprint pruned",
+           led !== null && !hasScratchBp);
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
@@ -799,30 +895,35 @@ withTempVault((vault) => {
     ok("HC-V01240-SEED-CHROME-1 meeting MeetingChromeBar injected (replaces Breadcrumb)", /class:\s*"MeetingChromeBar"/.test(mtg));
     ok("HC-V01240-SEED-CHROME-2 meeting ## Attendees rewritten to SectionLabel",
        !/^##\s+Attendees\s*$/m.test(mtg) && /SectionLabel[\s\S]*Attendees/.test(mtg));
-    const scr = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-2026-06-17-14-30.md");
-    ok("HC-V01240-SEED-CHROME-3 scratch ScratchChromeBar injected (replaces Breadcrumb)", /class:\s*"ScratchChromeBar"/.test(scr));
+    // Post-migration the scratch leaf is renamed to a sticky-notes leaf and healed
+    // to StickyChromeBar (the migration moved+retyped it; applyNoteChromeHeal then
+    // injected the ChromeBar for the sticky-note type).
+    const scr = helpers.readNote(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-2026-06-17-14-30.md");
+    ok("HC-V01240-SEED-CHROME-3 sticky-note StickyChromeBar injected (replaces Breadcrumb)", /class:\s*"StickyChromeBar"/.test(scr));
     const td = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
     ok("HC-V01240-SEED-CHROME-4 to-do ToDoChromeBar injected (replaces Breadcrumb)", /class:\s*"ToDoChromeBar"/.test(td));
     ok("HC-V01240-SEED-CHROME-5 .sauce-backup snapshot exists", fs.existsSync(path.join(vault, ".sauce-backup")));
     ok("HC-V01240-SEED-CHROME-6 meeting ChromeBar injected exactly once",
        (mtg.match(/class:\s*"MeetingChromeBar"/g) || []).length === 1);
-    const sd = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-Day-2026-06-17.md");
-    ok("HC-V01240-SEED-CHROME-7 scratch-day ScratchChromeBar injected after H1",
-       /class:\s*"ScratchChromeBar"/.test(sd) &&
-       sd.indexOf("# ") < sd.indexOf('class: "ScratchChromeBar"'));
+    const sd = helpers.readNote(vault, "spice/sticky-notes/2026/06-June/2026-06-17/Sticky-Day-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-7 sticky-day StickyChromeBar injected after H1",
+       /class:\s*"StickyChromeBar"/.test(sd) &&
+       sd.indexOf("# ") < sd.indexOf('class: "StickyChromeBar"'));
 
-    // ===== HC-ADIV-SEED-* — action-bar divider strip (ScratchDayActions owns <hr>) =====
-    // The seed scratch-day fixture brackets its ScratchDayActions block with a
-    // blank-line-padded `---` (an older template shape). ScratchDayActions now
-    // renders its OWN top+bottom <hr> dividers, so applyNoteChromeHeal (step 7,
-    // _stripDividersAroundActionBlock) removes the now-redundant `---` on both
-    // sides. `sd` is post-two-install, so a clean result also proves idempotency.
-    ok("HC-ADIV-SEED-1 scratch-day `---` before ScratchDayActions stripped by heal",
-       !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*ScratchDayActions/.test(sd));
-    ok("HC-ADIV-SEED-2 scratch-day `---` after ScratchDayActions stripped by heal",
-       !/ScratchDayActions[\s\S]*?\n```\n+-{3,}/.test(sd));
-    ok("HC-ADIV-SEED-3 ScratchChromeBar block present (replaces ScratchDayActions after ChromeBar migration)",
-       /class:\s*"ScratchChromeBar"/.test(sd));
+    // ===== HC-ADIV-SEED-* — action-bar divider strip → post-rename ChromeBar state =====
+    // The seed day-hub fixture carried a pre-ChromeBar shape (SpaceNavButtons +
+    // ScratchDayActions bracketed by blank-line-padded `---`). Post v0.9.0 rename,
+    // applyScratchToStickyNotesMigration retypes it to sticky-day and
+    // applyNoteChromeHeal converts it to a single StickyChromeBar + StickyDayList
+    // body — no ScratchDayActions/ScratchLeafActions class survives, and the old
+    // divider-strip is a no-op. These assertions now prove that clean end state
+    // (post-two-install, so a clean `sd` also proves idempotency).
+    ok("HC-ADIV-SEED-1 no leftover ScratchDayActions/ScratchLeafActions class in healed day-hub",
+       !/Scratch(Day|Leaf)Actions/.test(sd));
+    ok("HC-ADIV-SEED-2 no `---` brackets a SpaceNavButtons action block (legacy chrome gone)",
+       !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*SpaceNavButtons/.test(sd));
+    ok("HC-ADIV-SEED-3 StickyChromeBar + StickyDayList present (post-ChromeBar migration)",
+       /class:\s*"StickyChromeBar"/.test(sd) && /class:\s*"StickyDayList"/.test(sd));
     // Direct unit — _stripDividersAroundActionBlock: strips both sides, idempotent,
     // and a no-op when the block is not bracketed by `---`.
     {
