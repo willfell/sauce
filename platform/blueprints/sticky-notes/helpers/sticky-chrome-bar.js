@@ -12,7 +12,91 @@ class StickyChromeBar {
     try {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
         || typeof customJS.ChromeBar.render !== "function") return;
-      return customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      const out = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      this._maybeRenderBanner(dv);
+      return out;
+    } catch (_e) { /* never throw */ }
+  }
+
+  // On a leaf sticky note, render a clickable title banner below the chrome bar.
+  _maybeRenderBanner(dv) {
+    try {
+      if (!dv || !dv.container) return;
+      const page = customJS && customJS.RenderSafe ? customJS.RenderSafe.page(dv) : (dv.current ? dv.current() : null);
+      if (!page || page.type !== "sticky-note") return;
+      const filePath = page.file && page.file.path;
+      if (!filePath) return;
+      const file = (typeof app !== "undefined" && app.vault && typeof app.vault.getAbstractFileByPath === "function")
+        ? app.vault.getAbstractFileByPath(filePath) : null;
+      this._renderTitleBanner(dv.container, page, file);
+    } catch (_e) { /* never throw */ }
+  }
+
+  _bannerText(page) {
+    const t = page && page.title != null ? String(page.title).trim() : "";
+    return t.length > 0 ? t : null;
+  }
+
+  _headingStyle(hasTitle) {
+    return hasTitle
+      ? "font-size: 1.35em; font-weight: 700; color: var(--text-normal); line-height: 1.3;"
+      : "font-size: 1.1em; font-weight: 500; color: var(--text-muted); font-style: italic;";
+  }
+
+  _renderTitleBanner(container, page, file) {
+    if (!container || typeof container.createEl !== "function") return;
+    // Dedup across Dataview dual-fire re-renders.
+    try {
+      if (typeof container.querySelectorAll === "function") {
+        (container.querySelectorAll(".sticky-title-banner") || []).forEach((e) => { try { e.remove(); } catch (_e) {} });
+      }
+    } catch (_e) {}
+    const banner = container.createEl("div", { cls: "sticky-title-banner" });
+    banner.style.cssText = "cursor: pointer; max-width: 640px; margin: 6px auto 10px; padding: 4px 2px;";
+    const text = this._bannerText(page);
+    const placeholder = "Untitled sticky note — click to name";
+    const h = banner.createEl("div", { text: text || placeholder });
+    h.style.cssText = this._headingStyle(!!text);
+    banner.title = "Click to rename";
+    banner.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
+      const nt = newTitle && String(newTitle).trim();
+      h.textContent = nt || placeholder;
+      h.style.cssText = this._headingStyle(!!nt);
+    }));
+  }
+
+  _openRenameDialog(file, current, onDone) {
+    try {
+      if (!file || typeof app === "undefined" || !app.fileManager
+        || typeof app.fileManager.processFrontMatter !== "function") return;
+      if (typeof document === "undefined" || !document.body || typeof document.body.createEl !== "function") return;
+      const overlay = document.body.createEl("div");
+      overlay.style.cssText = "position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;";
+      const box = overlay.createEl("div");
+      box.style.cssText = "background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 16px; width: min(420px, 90vw); display: flex; flex-direction: column; gap: 10px;";
+      box.createEl("div", { text: "Sticky note title" }).style.cssText = "font-weight: 600;";
+      const input = box.createEl("input", { type: "text", value: current || "" });
+      input.style.cssText = "padding: 6px 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
+      const row = box.createEl("div");
+      row.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+      const close = () => { try { overlay.remove(); } catch (_e) {} };
+      const save = async () => {
+        const v = (input.value || "").trim();
+        try { await app.fileManager.processFrontMatter(file, (fm) => { fm.title = v; }); } catch (_e) {}
+        close();
+        try { if (typeof onDone === "function") onDone(v); } catch (_e) {}
+      };
+      const cancelBtn = row.createEl("button", { text: "Cancel" });
+      cancelBtn.addEventListener("click", close);
+      const saveBtn = row.createEl("button", { text: "Save" });
+      saveBtn.style.cssText = "background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;";
+      saveBtn.addEventListener("click", () => { save(); });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); save(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+      setTimeout(() => { try { input.focus(); } catch (_e) {} }, 0);
     } catch (_e) { /* never throw */ }
   }
 

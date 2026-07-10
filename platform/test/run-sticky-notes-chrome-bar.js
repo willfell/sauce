@@ -93,5 +93,60 @@ const cfg = inst._config();
     cfg.rootClass === 'sticky-chrome-root' && cfg.btnClass('go') === 'sticky-chrome-btn sticky-chrome-btn-go');
 }
 
+// STCB-BANNER-1 — _bannerText pure fallback.
+{
+  ok('STCB-BANNER-1a title used', inst._bannerText({ title: 'Grocery list' }) === 'Grocery list');
+  ok('STCB-BANNER-1b whitespace title → null', inst._bannerText({ title: '  ' }) === null);
+  ok('STCB-BANNER-1c missing title → null', inst._bannerText({}) === null);
+}
+
+// STCB-BANNER-2/3 — _renderTitleBanner appends one .sticky-title-banner, dedupes on re-render.
+{
+  // Minimal faithful DOM stub: nodes record class + support createEl / style / addEventListener /
+  // querySelectorAll (returns prior banner nodes so the real dedup logic can .remove() them).
+  const makeNode = (tag, opts) => {
+    const node = {
+      tag,
+      cls: (opts && opts.cls) || '',
+      textContent: (opts && opts.text) || '',
+      title: '',
+      style: { cssText: '' },
+      children: [],
+      _removed: false,
+      createEl(t, o) { const c = makeNode(t, o); this.children.push(c); return c; },
+      addEventListener() {},
+      remove() { this._removed = true; },
+    };
+    return node;
+  };
+  const makeContainer = () => {
+    const container = makeNode('div', {});
+    container.querySelectorAll = (sel) => {
+      const cls = sel.replace(/^\./, '');
+      // return only live (not-removed) matching direct children
+      return container.children.filter((c) => !c._removed && c.cls === cls);
+    };
+    return container;
+  };
+
+  const titledPage = { title: 'Grocery list', file: { path: 'spice/sticky-notes/x.md' } };
+  const emptyPage = { file: { path: 'spice/sticky-notes/y.md' } };
+  const fileStub = { path: 'spice/sticky-notes/x.md' };
+
+  const c1 = makeContainer();
+  inst._renderTitleBanner(c1, titledPage, fileStub);
+  inst._renderTitleBanner(c1, titledPage, fileStub);
+  const live1 = c1.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
+  ok('STCB-BANNER-2 exactly one banner after double render (dedup)', live1.length === 1);
+  ok('STCB-BANNER-3a titled banner shows title text',
+    live1[0].children.some((h) => h.textContent === 'Grocery list'));
+
+  const c2 = makeContainer();
+  inst._renderTitleBanner(c2, emptyPage, { path: 'spice/sticky-notes/y.md' });
+  const live2 = c2.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
+  ok('STCB-BANNER-3b empty banner shows placeholder text',
+    live2[0].children.some((h) => /Untitled sticky note/.test(h.textContent)));
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);
