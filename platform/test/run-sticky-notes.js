@@ -14,6 +14,7 @@ const path = require("path");
 const WORKSHOP = path.resolve(__dirname, "../..");
 const SDL_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-list.js");
 const SDM_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-day-migrate.js");
+const SHC_PATH = path.join(WORKSHOP, "platform/blueprints/sticky-notes/helpers/sticky-hub-cards.js");
 
 let pass = 0;
 let fail = 0;
@@ -185,6 +186,57 @@ const sdm = new StickyDayMigrate();
     fileSources.indexOf("helpers/sticky-day-migrate.js") >= 0);
   assertTrue("HC-V0841-A2.7e files[] includes sticky-day-migrate-init.js",
     fileSources.indexOf("helpers/sticky-day-migrate-init.js") >= 0);
+}
+
+console.log("\n--- STHC-ALL: sticky-hub-cards Days|All toggle + search ---");
+
+// Load StickyHubCards class via new Function() wrap.
+function loadStickyHubCards() {
+  const src = fs.readFileSync(SHC_PATH, "utf8");
+  const wrapper = new Function("module", "exports",
+    src + "\nmodule.exports = StickyHubCards;");
+  const mod = { exports: {} };
+  wrapper(mod, mod.exports);
+  return mod.exports;
+}
+
+const StickyHubCards = loadStickyHubCards();
+const hc = new StickyHubCards();
+
+// STHC-ALL-1: _matchesFilter — title hit, filename hit, body hit, miss, empty.
+assertTrue("STHC-ALL-1a title match",
+  hc._matchesFilter({ title: "Grocery run", file: { name: "Sticky-2026-07-08-09-15-00.md" } }, "grocery", "") === true);
+assertTrue("STHC-ALL-1b filename match",
+  hc._matchesFilter({ file: { name: "Sticky-2026-07-08-09-15-00.md" } }, "07-08", "") === true);
+assertTrue("STHC-ALL-1c body match (title+name miss)",
+  hc._matchesFilter({ file: { name: "x.md" } }, "kubernetes", "notes about Kubernetes upgrade") === true);
+assertTrue("STHC-ALL-1d miss",
+  hc._matchesFilter({ title: "a", file: { name: "b.md" } }, "zzz", "body") === false);
+assertTrue("STHC-ALL-1e empty needle matches",
+  hc._matchesFilter({ file: { name: "b.md" } }, "", "") === true);
+
+// STHC-ALL-2: _mode defaults "days", survives via container property.
+assertEq("STHC-ALL-2a _mode({}) → days", hc._mode({}), "days");
+assertEq("STHC-ALL-2b _mode({__stickyHubMode:'all'}) → all",
+  hc._mode({ __stickyHubMode: "all" }), "all");
+
+// STHC-ALL-3: _extractPreviewFromBody skips frontmatter + fences, returns first
+// content line (≤80 chars).
+{
+  const sample = [
+    "---",
+    "type: sticky-note",
+    "day: \"2026-07-08\"",
+    "---",
+    "",
+    "```js",
+    "const x = 1;",
+    "```",
+    "First real content line",
+    "second line",
+  ].join("\n");
+  assertEq("STHC-ALL-3 _extractPreviewFromBody → first content line",
+    hc._extractPreviewFromBody(sample), "First real content line");
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
