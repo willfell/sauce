@@ -1099,4 +1099,70 @@ failures += !run("section-hub adapter exposes listRecent (subtree-recent doc-not
   assert.deepStrictEqual(config.listRecent(dvStub, {}), []);
 });
 
+failures += !run("renderNoteLinks: chips for saved links + a trailing Add-link pill; unsafe schemes stay dead text", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = {
+    container,
+    current: () => ({ type: "wiki-page", links: [
+      { url: "https://grafana.example.com", text: "Grafana" },
+      { url: "javascript:alert(1)", text: "evil" },
+    ], file: { path: "spice/wiki/ems/Runbook.md" } }),
+  };
+  se.renderNoteLinks(dv);
+  const strip = els.find((e) => e.className === "se-note-links");
+  assert.ok(strip, "expected a se-note-links strip");
+  const cards = els.filter((e) => e.className === "se-note-link-card");
+  assert.strictEqual(cards.length, 2, "one card per saved link, unsafe ones included as dead text");
+  const good = cards.find((c) => c.innerHTML.includes("Grafana"));
+  assert.strictEqual(good.href, "https://grafana.example.com");
+  assert.strictEqual(good.target, "_blank");
+  assert.ok(String(good.rel).includes("noopener"));
+  const evil = cards.find((c) => c.innerHTML.includes("evil"));
+  assert.ok(!evil.href, "unsafe scheme gets no href");
+  const add = els.find((e) => e.className === "se-note-link-add");
+  assert.ok(add, "expected the Add-link pill");
+});
+
+failures += !run("renderNoteLinks: zero/missing links still renders just the Add-link pill", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ type: "doc-note", file: { path: "spice/projects/foo/docs/knowledge/D.md" } }) };
+  se.renderNoteLinks(dv);
+  assert.strictEqual(els.filter((e) => e.className === "se-note-link-card").length, 0);
+  assert.ok(els.find((e) => e.className === "se-note-link-add"), "Add-link pill always present");
+});
+
+failures += !run("renderNoteLinks add pill: writeLinks path appends via processFrontMatter and creates links[] when absent", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const fmWrites = [];
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    fileManager: { processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ file: f, fm }); return Promise.resolve(); } },
+    workspace: { openLinkText: () => {} },
+  };
+  const page = { type: "wiki-page", file: { path: "spice/wiki/ems/Runbook.md" } }; // no links key at all
+  const noteAdapter = se._noteSelfAdapter(page);
+  const current = noteAdapter.getLinks();
+  assert.deepStrictEqual(current, [], "missing links[] tolerated as empty");
+  const result = se._addLinkPure(current, { url: "https://x.com", text: "X" });
+  noteAdapter.writeLinks(null, result.links);
+  assert.strictEqual(fmWrites.length, 1);
+  assert.strictEqual(fmWrites[0].file.path, "spice/wiki/ems/Runbook.md");
+  assert.deepStrictEqual(fmWrites[0].fm.links, [{ url: "https://x.com", text: "X" }]);
+  delete global.app;
+});
+
+failures += !run("renderNoteLinks: cold-load partial page (no file) renders nothing and never throws", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => null };
+  se.renderNoteLinks(dv);   // must not throw
+  assert.strictEqual(els.filter((e) => e.className === "se-note-links").length, 0);
+});
+
 process.exit(failures > 0 ? 1 : 0);

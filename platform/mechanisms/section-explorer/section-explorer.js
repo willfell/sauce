@@ -379,6 +379,64 @@ class SectionExplorer {
     try { adapter.deleteSection(section); } catch (_e) { /* never-throw */ }
   }
 
+  // ── renderNoteLinks — pinned links on a LEAF note (wiki-page / doc-note).
+  // Called by WikiChromeBar/ProjectChromeBar right after the bar renders, so
+  // every existing note gets the feature with zero body migration. Renders the
+  // note's frontmatter links[] as clickable cards plus an always-present
+  // "＋ Add link" pill that reuses the existing add-link modal, writing back to
+  // THIS note via processFrontMatter (creates the links key on first write).
+  renderNoteLinks(dv) {
+    try {
+      const container = (dv && dv.container) ? dv.container : dv;
+      if (!container || typeof container.createEl !== "function") return;
+      // RenderSafe overlays partial cold-load pages when available (v0.200.1).
+      let page = null;
+      try {
+        if (typeof customJS !== "undefined" && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function") {
+          page = customJS.RenderSafe.page(dv);
+        }
+      } catch (_e) { page = null; }
+      if (!page) { try { page = dv.current ? dv.current() : null; } catch (_e) { page = null; } }
+      if (!page || !page.file || !page.file.path) return;
+
+      const strip = container.createEl("div", { cls: "se-note-links" });
+      const links = Array.isArray(page.links) ? page.links : [];
+      const linkIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+      for (const link of links) {
+        if (!link || !link.url) continue;
+        const a = strip.createEl("a", { cls: "se-note-link-card" });
+        a.innerHTML = linkIcon + `<span class="se-note-link-text">${this._escape(link.text || link.url)}</span>`;
+        if (this._isSafeUrl(link.url)) {
+          a.href = link.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+        }
+        // Unsafe/malformed URLs: no href — the card stays visible as dead
+        // text, never silently dropped (same rule as the pane link chips).
+      }
+      const add = strip.createEl("span", { cls: "se-note-link-add" });
+      add.textContent = "＋ Add link";
+      const noteAdapter = this._noteSelfAdapter(page);
+      add.onclick = () => this._openAddLinkForm(dv, noteAdapter, null);
+    } catch (_e) { /* never-throw */ }
+  }
+
+  // Self-adapter for the CURRENT note — the minimal getLinks/writeLinks surface
+  // _openAddLinkForm needs, bound to this note's own frontmatter.
+  _noteSelfAdapter(page) {
+    const notePath = page.file.path;
+    return {
+      getLinks: () => (Array.isArray(page.links) ? page.links : []),
+      writeLinks: (_target, links) => {
+        try {
+          const f = app.vault.getAbstractFileByPath(notePath);
+          if (!f) return Promise.resolve();
+          return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+        } catch (_e) { return Promise.resolve(); }
+      },
+    };
+  }
+
   _escape(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   }
