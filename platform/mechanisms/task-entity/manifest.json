@@ -7,6 +7,14 @@
     {
       "name": "customjs-guard",
       "range": ">=1.0.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
+    },
+    {
+      "name": "breadcrumb",
+      "range": ">=0.1.0"
     }
   ],
   "customjs_classes": [
@@ -16,7 +24,8 @@
     "TaskNoteView",
     "TaskMeetingList",
     "TaskProjectList",
-    "TaskDoneTodayList"
+    "TaskDoneTodayList",
+    "TaskChromeBar"
   ],
   "files": [
     {
@@ -49,5 +58,16 @@
     }
   ],
   "post_install": [],
-  "rule_fragments": []
+  "rule_fragments": [],
+  "breadcrumb": {
+    "types": {
+      "task": {
+        "ancestors": [
+          { "label": "lit:To-Do" },
+          { "when": { "fm:parent_task": "present" }, "label": "fm:parent_task", "link": "spice/tasks/{fm:parent_task}.md" }
+        ],
+        "current": { "label": "fm:title|file:basename" }
+      }
+    }
+  }
 }
