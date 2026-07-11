@@ -693,6 +693,35 @@ class TaskNoteView {
                         } catch (_e) { /* best-effort */ }
                     };
                     addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
+
+                    // ----- Completed subtasks — collapsible history (mirrors
+                    // TaskDoneTodayList's exact convention: reuse the shared
+                    // renderTaskRow for a uniform row, then pre-check the
+                    // checkbox afterward since renderTaskRow always starts
+                    // unchecked). Uses allSubtasks (unfiltered — open+done),
+                    // NOT openSubtasks, so a completed subtask shows up here
+                    // instead of vanishing with no trace. Rendered only when
+                    // there's at least one done subtask — no empty clutter.
+                    const doneSubtasks = allSubtasks.filter(t => t && t.status === 'done');
+                    if (doneSubtasks.length) {
+                        const doneDetails = card.createEl('details');
+                        doneDetails.setAttribute('open', '');
+                        doneDetails.style.cssText = 'width:100%; box-sizing:border-box; margin-top:6px;';
+                        const doneSummary = doneDetails.createEl('summary');
+                        doneSummary.style.cssText = 'cursor:pointer; user-select:none; list-style:none; font-size:0.68em; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); font-weight:600;';
+                        doneSummary.textContent = 'Completed (' + doneSubtasks.length + ')';
+                        const doneList = doneDetails.createEl('div');
+                        doneList.style.cssText = 'display:flex; flex-direction:column; gap:2px; margin-top:4px;';
+                        if (TTL && typeof TTL.renderTaskRow === 'function') {
+                            for (const st of doneSubtasks) {
+                                try {
+                                    const row = TTL.renderTaskRow(doneList, st, null);
+                                    const cb = row && row.querySelector && row.querySelector('input[type="checkbox"]');
+                                    if (cb) cb.checked = true;
+                                } catch (_e) {}
+                            }
+                        }
+                    }
                 } catch (_e) { /* SUBTASKS section best-effort — never break the card */ }
             }
 
