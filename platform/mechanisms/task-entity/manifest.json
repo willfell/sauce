@@ -1,6 +1,6 @@
 {
   "name": "task-entity",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "kind": "mechanism",
   "description": "Note-per-task core for the to-do model: every task becomes its own tiny note under spice/tasks/ with `type: task` frontmatter (status/scheduled/due/priority/project/source/created_at/completed_at), and surfaces live-query those notes. Exposes `customJS.TaskEntity` with the pure, side-effect-free core: deterministic `taskFilename` (title+HHmmss hash → collision-resistant name; no Date.now/Math.random), `composeNote` (schema-exact frontmatter, empty-string-not-omitted dates for simple edits), `parseNote` (normalize status→open + blank dates→null), `queryToday` (open-only today/overdue partition), and `validatePayload`. One note per task → a bad write can only touch one task, never a whole day's list; recoverable delete (status: deleted) and backup-first migration follow in later tasks. Foundation for the TaskDialog + TaskTodayList consumers added in subsequent cycle tasks.",
   "depends_on": [
@@ -67,10 +67,20 @@
     "types": {
       "task": {
         "ancestors": [
-          { "label": "lit:To-Do" },
-          { "when": { "fm:parent_task": "present" }, "label": "fm:parent_task", "link": "spice/tasks/{fm:parent_task}.md" }
+          {
+            "label": "lit:To-Do"
+          },
+          {
+            "when": {
+              "fm:parent_task": "present"
+            },
+            "label": "fm:parent_task",
+            "link": "spice/tasks/{fm:parent_task}.md"
+          }
         ],
-        "current": { "label": "fm:title|file:basename" }
+        "current": {
+          "label": "fm:title|file:basename"
+        }
       }
     }
   }
