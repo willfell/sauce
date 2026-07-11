@@ -1241,6 +1241,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // The Breadcrumb mechanism reads from this registry at render time.
   await applyBreadcrumb(tp, mech, variables, history, git);
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
+  await applyJournalMultiEntryMigration(tp, mech, variables, history, git); // NEW v0.212.0 journal multi-entry — per-item phase (gated manifest.name==="journal"), converts flat Journal-YYYY-MM-DD.md into day-folder+day-hub+leaf shape
   await applyScratchToStickyNotesMigration(tp, mech, variables, history, git); // NEW v0.9.0 sticky-notes rename — per-item phase (gated manifest.name==="sticky-notes"), before per-vault applyNoteChromeHeal
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
@@ -2150,6 +2151,101 @@ function _rewriteWikiToDocsBody(body) {
   // 6. entity-create sentinel comment (defensive)
   body = body.replace(/entity-create:wiki-note/g, 'entity-create:doc-note');
   return body;
+}
+
+// applyJournalMultiEntryMigration — v0.212.0 journal multi-entry. Converts
+// pre-multi-entry journal vaults (flat spice/journal/**/Journal-YYYY-MM-DD.md,
+// type: journal) into the day-folder + day-hub + leaf-entry shape mirroring
+// sticky-notes. Per-file gated — NOT a whole-tree rename like
+// applyScratchToStickyNotesMigration, because the module_directory root name
+// (spice/journal) is unchanged, so no cross-vault link rewrite or old-artifact
+// pruning is needed. The old flat note already lives inside its correct
+// YYYY/MM-MMMM/ folder (per journal's pre-v0.4.0 folder_date_pattern), so the
+// new day-folder is just that same parent dir + "/<day>" — no date-library
+// month-name computation required. Runs per-item, gated on
+// manifest.name === "journal". Idempotent: once a flat note is converted, its
+// path no longer matches the flat-filename regex, so re-running finds
+// nothing to do. Backup-before-write, never-throw.
+async function applyJournalMultiEntryMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "journal") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/journal";
+  if (!(await adapter.exists(root))) return;
+
+  const viewsPath = (variables && variables.views_path) || "ranch/views";
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupBase = `.sauce-backup/journal-multi-entry/${ts}`;
+  const pushEvent = (event, reason) => {
+    if (!history) return;
+    history.push({
+      event, step: "journal_multi_entry_migration", name: "journal", reason,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  };
+
+  const mkdirp = async (dir) => {
+    const segs = dir.split("/");
+    let acc = "";
+    for (const seg of segs) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* implied */ } }
+    }
+  };
+  const backupFile = async (p, body) => {
+    try {
+      const dest = `${backupBase}/${p}`;
+      await mkdirp(dest.substring(0, dest.lastIndexOf("/")));
+      await adapter.write(dest, body);
+    } catch (_e) { /* best-effort backup */ }
+  };
+
+  let migratedCount = 0;
+  let errors = 0;
+  let allMd;
+  try { allMd = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) { pushEvent("warning", `listing failed: ${e && e.message ? e.message : String(e)}`); return; }
+
+  for (const fpath of allMd) {
+    const base = fpath.split("/").pop();
+    const m = base.match(/^Journal-(\d{4}-\d{2}-\d{2})\.md$/);
+    if (!m) continue; // Journal-Day-*, already-migrated leaves, and Journal.md itself don't match
+    const day = m[1];
+    let body;
+    try { body = await adapter.read(fpath); } catch (_e) { errors++; continue; }
+    if (!/^type:\s*["']?journal["']?\s*$/m.test(body)) continue; // safety: only migrate journal-typed flat notes
+
+    const parentDir = fpath.substring(0, fpath.lastIndexOf("/")); // e.g. spice/journal/2026/07-July
+    const dayDir = `${parentDir}/${day}`;
+    const dayHubPath = `${dayDir}/Journal-Day-${day}.md`;
+    const leafPath = `${dayDir}/Journal-${day}-00-00-00.md`;
+    if (await adapter.exists(leafPath)) continue; // already migrated
+
+    try {
+      await backupFile(fpath, body);
+      await mkdirp(dayDir);
+
+      const createdAtMatch = body.match(/^created_at:\s*["']?([^"'\n]+)["']?\s*$/m);
+      const createdAt = createdAtMatch ? createdAtMatch[1] : `${day}T00:00:00Z`;
+      const bodyAfterFrontmatter = body.split(/^---\s*$/m).slice(2).join("---");
+
+      const dayHubBody = `---\ntype: journal-day\ncreated_at: "${new Date().toISOString()}"\nday: "${day}"\n---\n\n\`\`\`dataviewjs\nawait dv.view("${viewsPath}/customjs-guard", { class: "JournalChromeBar" });\n\`\`\`\n\n\`\`\`dataviewjs\nawait dv.view("${viewsPath}/customjs-guard", { class: "JournalDayList", args: [{ day: dv.current()?.day }] });\n\`\`\`\n`;
+      const leafBody = `---\ntype: journal-entry\ncreated_at: "${createdAt}"\nday: "${day}"\ntime: "00:00"\nday_link: "[[Journal-Day-${day}]]"\n---\n\n\`\`\`dataviewjs\nawait dv.view("${viewsPath}/customjs-guard", { class: "JournalChromeBar" });\n\`\`\`\n${bodyAfterFrontmatter}`;
+
+      if (!(await adapter.exists(dayHubPath))) await adapter.write(dayHubPath, dayHubBody);
+      await adapter.write(leafPath, leafBody);
+      await adapter.remove(fpath);
+      migratedCount++;
+    } catch (e) {
+      errors++;
+      pushEvent("warning", `migrate ${fpath} failed: ${e && e.message ? e.message : String(e)}`);
+    }
+  }
+
+  if (migratedCount > 0 || errors > 0) {
+    pushEvent("info", `journal_multi_entry_migration: migrated=${migratedCount} errors=${errors}`);
+  }
 }
 
 // ============================================================================
@@ -20870,6 +20966,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.9.0 sticky-notes rename — expose migration + pure helpers for
     // run-sticky-notes-rename-migration.js (SNRM-1..3). Pure additive.
     module.exports.applyScratchToStickyNotesMigration = applyScratchToStickyNotesMigration;
+    module.exports.applyJournalMultiEntryMigration = applyJournalMultiEntryMigration;
     module.exports._rewriteScratchToStickyBody = _rewriteScratchToStickyBody;
     module.exports._stickyRenameFor = _stickyRenameFor;
     // v0.100.2 — docs-hub "+ New Doc" button repair (run-wiki-to-docs-migration.js DHBR-1..3).
