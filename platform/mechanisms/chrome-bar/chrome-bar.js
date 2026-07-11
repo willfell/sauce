@@ -293,5 +293,10 @@ class ChromeBar {
         },
       });
     }
+
+    // ── Trailing hairline divider — always rendered, last element of root,
+    // owns the nav-to-content boundary so no adapter/blueprint needs its own.
+    const divider = root.createEl("div", { cls: "chrome-bar-divider" });
+    divider.style.cssText = "border-top: 1px solid var(--background-modifier-border-hover); margin-top: 10px;";
   }
 }

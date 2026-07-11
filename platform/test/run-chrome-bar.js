@@ -112,6 +112,8 @@ async function cbRenderCases() {
   const dotsBtn = desc.find((e) => e.className && String(e.className).includes('pcb-btn-dots'));
   ok('CB-RENDER-2 renders Go (pcb-btn-go), primary (pcb-btn-primary), ⋯ (pcb-btn-dots) via adapter.btnClass', !!goBtn && !!primaryBtn && !!dotsBtn);
   ok('CB-RENDER-3 renders a breadcrumb sub-div', desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
+  const divider = desc.find((e) => e.className && String(e.className).includes('chrome-bar-divider'));
+  ok('CB-RENDER-3b renders a trailing divider after the bar row', !!divider);
   if (goBtn && typeof goBtn.onclick === 'function') await goBtn.onclick();
   ok('CB-RENDER-4 clicking Go calls MenuPopover.open with the adapter.navEntries', menuOpens.length === 1 && menuOpens[0].entries === navEntries);
   if (primaryBtn && typeof primaryBtn.onclick === 'function') primaryBtn.onclick();
