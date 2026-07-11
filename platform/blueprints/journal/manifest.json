@@ -6,34 +6,82 @@
   "skills_dir": ".claude/skills/journal",
   "description": "Multi-entry journal: global hub (spice/journal/Journal.md, Days | All tabs + search), per-day day-hub (Journal-Day-YYYY-MM-DD.md) under YYYY/MM-MMMM/YYYY-MM-DD/ sub-folders, timestamped leaf entries (Journal-YYYY-MM-DD-HH-mm-ss.md, optional title prompt). Mirrors the sticky-notes (v0.10.0) day-hub/leaf/migrate pattern. v0.4.0 replaces the prior single-note-per-day shape (type: journal, one flat Journal-YYYY-MM-DD.md) — an install migration converts existing flat notes into the new folder/filenames/types.",
   "depends_on": [
-    { "name": "nav-buttons", "range": ">=2.6.1" },
-    { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "convenience", "range": ">=0.1.0" },
-    { "name": "chrome-bar", "range": ">=0.3.0" },
-    { "name": "cards", "range": ">=0.2.4" },
-    { "name": "accent-button", "range": ">=0.1.0" },
-    { "name": "entity-create", "range": ">=0.4.0" },
-    { "name": "platform-claude", "range": ">=0.1.1" },
-    { "name": "breadcrumb", "range": ">=0.1.0" },
-    { "name": "render-safe", "range": ">=0.1.0" },
-    { "name": "doc-search", "range": ">=0.1.0" }
+    {
+      "name": "nav-buttons",
+      "range": ">=2.6.1"
+    },
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "convenience",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.0"
+    },
+    {
+      "name": "cards",
+      "range": ">=0.2.4"
+    },
+    {
+      "name": "accent-button",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "entity-create",
+      "range": ">=0.4.0"
+    },
+    {
+      "name": "platform-claude",
+      "range": ">=0.1.1"
+    },
+    {
+      "name": "breadcrumb",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "render-safe",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "doc-search",
+      "range": ">=0.1.0"
+    }
   ],
   "breadcrumb": {
     "types": {
       "journal-entry": {
         "ancestors": [
-          { "label": "lit:Journal" },
-          { "label": "path:3" },
-          { "label": "path:4", "link": "spice/journal/{path:2}/{path:3}/{path:4}/Journal-Day-{path:4}.md" }
+          {
+            "label": "lit:Journal"
+          },
+          {
+            "label": "path:3"
+          },
+          {
+            "label": "path:4",
+            "link": "spice/journal/{path:2}/{path:3}/{path:4}/Journal-Day-{path:4}.md"
+          }
         ],
-        "current": { "label": "fm:time|file:basename" }
+        "current": {
+          "label": "fm:time|file:basename"
+        }
       },
       "journal-day": {
         "ancestors": [
-          { "label": "lit:Journal" },
-          { "label": "path:3" }
+          {
+            "label": "lit:Journal"
+          },
+          {
+            "label": "path:3"
+          }
         ],
-        "current": { "label": "path:4" }
+        "current": {
+          "label": "path:4"
+        }
       }
     }
   },
@@ -82,7 +130,11 @@
     {
       "kind": "claude_md_row",
       "table": "resolvers",
-      "row": { "topic": "Journal", "path": "{{module_directory}}", "command": "/journal" }
+      "row": {
+        "topic": "Journal",
+        "path": "{{module_directory}}",
+        "command": "/journal"
+      }
     }
   ],
   "nav_buttons": [
@@ -108,7 +160,12 @@
       "label": "+ New Journal Entry",
       "icon": "pencil-plus",
       "prompts": [
-        { "key": "title", "label": "Journal entry title (optional)", "type": "string", "required": false }
+        {
+          "key": "title",
+          "label": "Journal entry title (optional)",
+          "type": "string",
+          "required": false
+        }
       ],
       "destination": {
         "folder_prefix": "spice/journal/{{current_file.frontmatter.day|today}}-routed",
@@ -126,20 +183,34 @@
     }
   ],
   "templater_folder_templates": [
-    { "folder": "{{module_directory}}", "template": "{{templates_path}}/Journal Entry.md" }
+    {
+      "folder": "{{module_directory}}",
+      "template": "{{templates_path}}/Journal Entry.md"
+    }
   ],
   "post_install": [
-    { "type": "notice", "message": "Journal upgraded: entries now live in a day-hub — click the Journal nav-button to open today's hub, then + New Journal Entry to capture." }
+    {
+      "type": "notice",
+      "message": "Journal upgraded: entries now live in a day-hub — click the Journal nav-button to open today's hub, then + New Journal Entry to capture."
+    }
   ],
   "rule_fragments": [
     {
       "target": "journal-entry",
       "fragment": {
-        "scope": { "path_glob": "spice/journal/**/Journal-2*.md" },
+        "scope": {
+          "path_glob": "spice/journal/**/Journal-2*.md"
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type": { "required": true, "equals": "journal-entry" },
-          "day": { "required": true, "type": "string" }
+          "type": {
+            "required": true,
+            "equals": "journal-entry"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
         },
         "naming_pattern": "^Journal-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}(-\\d{2})?\\.md$"
       }
@@ -147,11 +218,19 @@
     {
       "target": "journal-day-hub",
       "fragment": {
-        "scope": { "path_glob": "spice/journal/**/Journal-Day-*.md" },
+        "scope": {
+          "path_glob": "spice/journal/**/Journal-Day-*.md"
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type": { "required": true, "equals": "journal-day" },
-          "day": { "required": true, "type": "string" }
+          "type": {
+            "required": true,
+            "equals": "journal-day"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
         },
         "naming_pattern": "^Journal-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
