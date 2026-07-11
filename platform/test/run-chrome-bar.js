@@ -43,6 +43,41 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
 
 // ── (Task 3 appends CB-BTN-*, Task 4 CB-VAULT-*, Task 5 CB-RENDER-* here) ──
 // PLACEHOLDER-ANCHOR: additional cases inserted above the summary block below.
+// ── CB-HOME-1..3 — CHROME_ICONS.home glyph + render() emits a Home button
+// before the Go button, wired to adapter.openNavTarget("spice/home/Home.md").
+{
+  const ic = inst.CHROME_ICONS;
+  ok('CB-HOME-1 CHROME_ICONS has a home SVG', ic && /svg/.test(ic.home));
+}
+async function cbHomeButtonCase() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([]) },
+    MenuPopover: { open: () => makeEl('div') },
+  };
+  const opened = [];
+  const adapter = {
+    resolve: () => ({ ctx: {}, spec: { primary: null, overflow: [] } }),
+    navEntries: async () => ([]),
+    dispatch: () => {},
+    openNavTarget: (p) => opened.push(p),
+    rootClass: 'x-root',
+    btnClass: (v) => `x-btn x-btn-${v}`,
+  };
+  const container = makeEl('div');
+  const dv = { container, current: () => ({ file: { path: 'spice/x/y.md', name: 'y' } }) };
+  await inst.render(dv, adapter);
+  const desc = allDescendants(container);
+  const homeBtn = desc.find((e) => e.className && String(e.className).includes('x-btn-home'));
+  ok('CB-HOME-2 renders a Home button (x-btn-home via adapter.btnClass)', !!homeBtn);
+  if (homeBtn && typeof homeBtn.onclick === 'function') homeBtn.onclick();
+  ok('CB-HOME-3 clicking Home calls adapter.openNavTarget("spice/home/Home.md")',
+    opened.length === 1 && opened[0] === 'spice/home/Home.md');
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
 // ── CB-RENDER-1..6 — render(dv, adapter): guards, adapter.resolve gate, root/btn
 // classes from the adapter, Go/primary/⋯ wiring to adapter.navEntries/dispatch.
 async function cbRenderCases() {
@@ -208,6 +243,7 @@ async function cbFactoryCases() {
   await cbVaultCases();
   await cbVaultEmpty();
   await cbRenderCases();
+  await cbHomeButtonCase();
   await cbFactoryCases();
   summarize();
 })();

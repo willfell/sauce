@@ -21,6 +21,7 @@ class ChromeBar {
       compass: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>`,
       chevronDown: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
       moreHorizontal: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+      home: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     };
   }
 
@@ -238,6 +239,13 @@ class ChromeBar {
     // ── RIGHT — controls (Go ▾ · primary · ⋯), pushed right via margin-left:auto ─
     const right = bar.createEl("div");
     right.style.cssText = "margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
+
+    // 0. Home — icon-only, persistent link back to the Home command center.
+    this.renderChromeButton(right, {
+      cls: adapter.btnClass("home"),
+      icon: ICON.home,
+      onClick: () => adapter.openNavTarget("spice/home/Home.md", dv),
+    });
 
     // 1. Go ▾ launcher — icon-only (compass + a small caret), no "Go" text.
     const goIcon = `<span style="display:inline-flex;align-items:center;gap:2px;">${ICON.compass}${ICON.chevronDown}</span>`;
