@@ -7279,7 +7279,7 @@ async function caseFA4TimelineTemplates() {
   // the cowork-daily shape moved to DD-T1 above.
   const checks = [
     ["daily/content/daily-template.md", "cowork-daily"],
-    ["journal/templates/Today Journal.md", "journal"],
+    ["journal/templates/Journal Entry.md", "journal-entry"],
     ["sticky-notes/templates/Sticky Note.md", "sticky-note"],
     ["sticky-notes/templates/Sticky Day Hub.md", "sticky-day"],
   ];
