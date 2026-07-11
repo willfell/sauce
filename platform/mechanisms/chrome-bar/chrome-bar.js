@@ -162,6 +162,7 @@ class ChromeBar {
       },
       dispatch: (dv, ctx, id) => { try { config.dispatch(dv, ctx, id); } catch (_e) { /* never throw */ } },
       openNavTarget: (p, dv) => self.openNavTarget(p, dv),
+      dayNav: (typeof config.dayNav === "function") ? config.dayNav : undefined,
       rootClass: config.rootClass,
       btnClass: config.btnClass,
     };
