@@ -827,6 +827,55 @@ ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
   assert(TaskNoteViewClass._subtaskProgressText(null) === '', 'null -> empty string, never throws');
 });
 
+// ---------- TaskEntity.subtaskCountsByParent (SCP-*) ----------
+//
+// Pure grouping core: given an array of ALREADY-PARSED tasks (parseNote
+// output — parent_task already coerced to a basename string, '' when unset),
+// group by parent_task and count { done, total }. Parents with zero children
+// are simply absent from the map (no zero-entries) so callers can do a plain
+// `counts[basename] || null` presence check.
+
+ok('SCP-1 _groupSubtaskCounts groups children by parent_task and counts done/total', () => {
+  const tasks = [
+    { parent_task: 'Groceries', status: 'open' },
+    { parent_task: 'Groceries', status: 'done' },
+    { parent_task: 'Groceries', status: 'done' },
+    { parent_task: 'Errands', status: 'open' },
+  ];
+  const counts = TaskEntity._groupSubtaskCounts(tasks);
+  assert(deepEq(counts.Groceries, { done: 2, total: 3 }), 'Groceries: 2/3, got ' + JSON.stringify(counts.Groceries));
+  assert(deepEq(counts.Errands, { done: 0, total: 1 }), 'Errands: 0/1, got ' + JSON.stringify(counts.Errands));
+});
+
+ok('SCP-2 _groupSubtaskCounts ignores tasks with no parent_task (not subtasks)', () => {
+  const tasks = [
+    { parent_task: '', status: 'open' },
+    { parent_task: null, status: 'done' },
+    { parent_task: 'Groceries', status: 'open' },
+  ];
+  const counts = TaskEntity._groupSubtaskCounts(tasks);
+  assert(Object.keys(counts).length === 1, 'only Groceries present, got ' + JSON.stringify(counts));
+  assert(deepEq(counts.Groceries, { done: 0, total: 1 }), 'Groceries: 0/1');
+});
+
+ok('SCP-3 _groupSubtaskCounts returns {} for null/non-array/empty input', () => {
+  assert(deepEq(TaskEntity._groupSubtaskCounts(null), {}), 'null -> {}');
+  assert(deepEq(TaskEntity._groupSubtaskCounts([]), {}), 'empty -> {}');
+  assert(deepEq(TaskEntity._groupSubtaskCounts('not an array'), {}), 'non-array -> {}');
+});
+
+ok('SCP-4 _groupSubtaskCounts tolerates malformed entries without throwing', () => {
+  const tasks = [null, undefined, { status: 'open' }, { parent_task: 'X' }, { parent_task: 'X', status: 'done' }];
+  let counts;
+  assert((() => { counts = TaskEntity._groupSubtaskCounts(tasks); return true; })(), 'never throws');
+  assert(deepEq(counts.X, { done: 1, total: 2 }), 'X: 1/2 (missing status treated as open), got ' + JSON.stringify(counts.X));
+});
+
+ok('SCP-5 subtaskCountsByParent is a function (class + instance) and delegates to _groupSubtaskCounts', () => {
+  assert(typeof TaskEntityClass.subtaskCountsByParent === 'function', 'static on the class');
+  assert(typeof TaskEntity.subtaskCountsByParent === 'function', 'delegator on the instance');
+});
+
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   const res = TaskTodayList.buildBands([
