@@ -6371,6 +6371,7 @@ function _healNoteChromeBody(body, type) {
   const CHROME_BAR_MAP = {
     "to-do": "ToDoChromeBar", "to-do-hub": "ToDoChromeBar", "project-todo": "ToDoChromeBar", "to-do-recurring": "ToDoChromeBar",
     "meeting": "MeetingChromeBar",
+    "task": "TaskChromeBar",
     // v0.9.0 sticky-notes rename: a stray un-migrated scratch-typed note heals to
     // StickyChromeBar (the class that actually exists post-rename). Scratch keys
     // KEPT so a partially-migrated vault still routes. New sticky types added.
@@ -6860,7 +6861,7 @@ function _healReaderChromeBody(raw) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/sticky-notes", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/sticky-notes", "spice/to-do", "spice/people", "spice/wiki", "spice/projects", "spice/trips", "spice/reader", "spice/products", "spice/teams", "spice/journal", "spice/boards", "spice/finance", "spice/tasks"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -6882,7 +6883,7 @@ async function applyNoteChromeHeal(tp, history, git) {
         const WIKI_TYPES = ["wiki-hub", "wiki-section", "wiki-page"];
         const CYCLE3_TYPES = ["trips-hub", "trip", "trip-section", "trip-board-card", "reader-hub", "reader-article", "people-hub", "products-hub", "product", "teams-hub", "team", "journal"];
         const CYCLE4_TYPES = ["board-card", "finance-hub", "budgets-hub", "paychecks-hub", "invoices-hub", "debts-hub", "months-hub", "savings-hub", "budget", "paycheck", "invoice", "debt", "month", "savings-account", "budget-defaults", "paycheck-defaults", "debt-defaults", "finance-plan", "invoice-board-card", "time-log"];
-        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "sticky-note", "sticky-day", "sticky-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
+        if (!["meeting", "scratch", "scratch-day", "scratch-hub", "sticky-note", "sticky-day", "sticky-hub", "to-do", "to-do-hub", "project-todo", "to-do-recurring", "person", "task", ...WIKI_TYPES, ...CYCLE3_TYPES, ...CYCLE4_TYPES].includes(type)) continue;
         let after = WIKI_TYPES.includes(type) ? _healWikiChromeBody(before, type) : _healNoteChromeBody(before, type);
         after = _healSectionLinksFrontmatter(after, type);
         if (after === before) continue;
