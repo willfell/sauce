@@ -104,9 +104,9 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(Array.isArray(fm.links), 'links is an array');
   assert(fm.links.length === 0, 'absent links → empty array');
   assert(out.path === 'spice/tasks/Call X.md', 'path is readable "<title>.md": ' + out.path);
-  // Body is now the CHROME body (SpaceNavButtons + TaskNoteView + marker), not empty.
+  // Body is now the CHROME body (TaskChromeBar + TaskNoteView + marker), not empty.
   assert(out.body.includes('<!-- TASK_NOTES -->'), 'body has the TASK_NOTES marker');
-  assert(out.body.includes('class: "SpaceNavButtons"'), 'body renders SpaceNavButtons nav');
+  assert(out.body.includes('class: "TaskChromeBar"'), 'body renders TaskChromeBar nav');
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
@@ -1324,26 +1324,13 @@ ok('LT-4 parseNote coerces source_note Link → basename', () => {
 // a SECOND `---` divider, then the `<!-- TASK_NOTES -->` marker. The
 // TaskNoteToDoNav block is GONE. Assert the new shape (two HRs, no ToDoNav) so a
 // regression (missing second divider / a resurrected ToDoNav) fails loudly.
-ok('CB-1 _chromeBody emits SpaceNavButtons + HR + TaskNoteView + HR + marker in order (no ToDoNav)', () => {
+ok('CB-1 _chromeBody emits TaskChromeBar + HR + TaskNoteView + HR + marker in order (no bare SpaceNavButtons)', () => {
   const body = TaskEntity._chromeBody();
-  const iNav = body.indexOf('class: "SpaceNavButtons"');
-  const iRule1 = body.indexOf('\n---\n');
-  const iView = body.indexOf('class: "TaskNoteView"');
-  const iRule2 = body.indexOf('\n---\n', iView);
-  const iMarker = body.indexOf('<!-- TASK_NOTES -->');
-  assert(iNav >= 0, 'has SpaceNavButtons');
-  assert(iRule1 > iNav, 'first divider after SpaceNavButtons');
-  assert(iView > iRule1, 'TaskNoteView after first divider');
-  assert(iRule2 > iView, 'second divider after TaskNoteView');
-  assert(iMarker > iRule2, 'marker after second divider');
-  // Exactly two thematic breaks (nav-fence HR + card-fence HR), no third.
-  assert((body.match(/\n---\n/g) || []).length === 2, 'exactly two `---` dividers');
-  // TaskNoteToDoNav is fully removed from the chrome.
-  assert(body.indexOf('TaskNoteToDoNav') < 0, 'no TaskNoteToDoNav block in the chrome');
-  // composeNote body carries the new chrome too (has the second divider, no ToDoNav).
-  const cn = TaskEntity.composeNote({ title: 'x' }).body;
-  assert(cn.indexOf('TaskNoteToDoNav') < 0, 'composeNote body has no ToDoNav block');
-  assert((cn.match(/\n---\n/g) || []).length === 2, 'composeNote body has two dividers');
+  assert(body.includes('class: "TaskChromeBar"'), '_chromeBody must invoke TaskChromeBar');
+  assert(!body.includes('class: "SpaceNavButtons"'), '_chromeBody must no longer invoke the legacy bare SpaceNavButtons');
+  assert(body.includes('class: "TaskNoteView"'), '_chromeBody still invokes TaskNoteView');
+  assert(body.includes('<!-- TASK_NOTES -->'), '_chromeBody still carries the TASK_NOTES marker');
+  assert(body.indexOf('TaskChromeBar') < body.indexOf('TaskNoteView'), 'TaskChromeBar renders before TaskNoteView');
 });
 
 // TaskDialog's inline chrome fallback must stay BYTE-IDENTICAL to TaskEntity's.

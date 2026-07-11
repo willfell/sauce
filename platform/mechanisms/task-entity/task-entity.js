@@ -255,7 +255,8 @@ class TaskEntity {
      * The canonical CHROME body for a task note (no user notes yet). Task notes
      * are written at RUNTIME (app.vault.create), not through the template
      * installer, so the customjs-guard refs are MATERIALIZED here rather than
-     * left as installer tokens. SpaceNavButtons gives vault-global nav; the
+     * left as installer tokens. TaskChromeBar gives the shared breadcrumb + Go ▾
+     * nav bar (see task-entity's manifest breadcrumb.types.task declaration); the
      * TaskNoteView widget renders the clean task card. The two `---` thematic
      * breaks fence the card: nav → HR → card → HR → notes. The
      * `<!-- TASK_NOTES -->` marker separates the (regenerable) chrome above from
@@ -271,7 +272,7 @@ class TaskEntity {
     static _chromeBody() {
         return '\n' +
             '```dataviewjs\n' +
-            'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });\n' +
             '```\n' +
             '\n' +
             '---\n' +
