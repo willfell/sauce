@@ -173,6 +173,15 @@ class TaskTodayList {
             parsed = [];
         }
 
+        // Attach an optional subtask-count summary to each task BEFORE banding
+        // it — one shared vault-wide query (TaskEntity.subtaskCountsByParent),
+        // not a per-row query, so N tasks cost one extra dv.pages() call, not N.
+        const subtaskCounts = (typeof TE.subtaskCountsByParent === 'function') ? TE.subtaskCountsByParent(dv) : {};
+        for (const t of parsed) {
+            const basename = t && t.path ? t.path.split('/').pop().replace(/\.md$/i, '') : '';
+            t.subtask_count = subtaskCounts[basename] || null;
+        }
+
         const bands = TaskTodayList.buildBands(parsed, today);
 
         // ----- Render -----
@@ -391,13 +400,20 @@ class TaskTodayList {
 
         const chips = rightCluster.createEl('div', { cls: 'sauce-task-today-chips' });
         chips.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0;';
-        const addChip = (label) => {
-            const chip = chips.createEl('span', { text: label });
+        const addChip = (label, cls) => {
+            const chip = chips.createEl('span', { text: label, cls: cls });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
         if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
+        // Subtask-progress chip — OPTIONAL, attached by the caller (daily /
+        // project / meeting render() via TaskEntity.subtaskCountsByParent), NOT
+        // queried here (renderTaskRow stays dv-free by design). Shown only when
+        // the task actually has ≥1 subtask.
+        if (task && task.subtask_count && task.subtask_count.total > 0) {
+            addChip(task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
+        }
 
         // Row actions at the FAR-RIGHT end of the cluster. When the shared
         // MenuPopover primitive is available we collapse the row's three controls

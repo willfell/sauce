@@ -102,6 +102,14 @@ class TaskMeetingList {
 
         const mine = parsed.filter(t => TaskMeetingList._matches(t, meetingBasename));
 
+        // Attach an optional subtask-count summary to each task — one shared
+        // vault-wide query, not a per-row query (mirrors TaskTodayList.render).
+        const subtaskCounts = (typeof TE.subtaskCountsByParent === 'function') ? TE.subtaskCountsByParent(dv) : {};
+        for (const t of mine) {
+            const basename = t && t.path ? t.path.split('/').pop().replace(/\.md$/i, '') : '';
+            t.subtask_count = subtaskCounts[basename] || null;
+        }
+
         // ----- Render -----
         const wrap = dv.container.createEl('div', { cls: 'sauce-task-meeting' });
         wrap.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin: 4px 0; width: 100%; box-sizing: border-box;';

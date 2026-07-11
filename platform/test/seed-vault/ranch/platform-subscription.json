@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.11.0"
+      "version": "0.11.1"
     },
     {
       "name": "breadcrumb",
@@ -157,7 +157,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.0"
+      "version": "0.10.1"
     },
     {
       "name": "teams",

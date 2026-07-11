@@ -51,17 +51,25 @@ class StickyChromeBar {
         (container.querySelectorAll(".sticky-title-banner") || []).forEach((e) => { try { e.remove(); } catch (_e) {} });
       }
     } catch (_e) {}
+    // Full-width, LEFT-aligned banner (no max-width/auto-margin centering) so
+    // the title sits flush-left under the chrome bar, followed by a divider
+    // separating it from the note body.
     const banner = container.createEl("div", { cls: "sticky-title-banner" });
-    banner.style.cssText = "cursor: pointer; max-width: 640px; margin: 6px auto 10px; padding: 4px 2px;";
+    banner.style.cssText = "margin: 6px 0 0 0;";
     const text = this._bannerText(page);
     const placeholder = "Untitled sticky note — click to name";
+    const titleStyle = (has) => this._headingStyle(has) + " cursor: pointer; padding: 2px 0; text-align: left;";
     const h = banner.createEl("div", { text: text || placeholder });
-    h.style.cssText = this._headingStyle(!!text);
-    banner.title = "Click to rename";
-    banner.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
+    h.style.cssText = titleStyle(!!text);
+    h.title = "Click to rename";
+    // Divider under the title (uses the more-visible border-hover var so it
+    // reads on dark themes, matching the project blueprint's divider grammar).
+    const hr = banner.createEl("hr");
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 8px 0 12px 0;";
+    h.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
       const nt = newTitle && String(newTitle).trim();
       h.textContent = nt || placeholder;
-      h.style.cssText = this._headingStyle(!!nt);
+      h.style.cssText = titleStyle(!!nt);
     }));
   }
 

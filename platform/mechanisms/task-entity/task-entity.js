@@ -33,6 +33,8 @@
  *   TaskEntity.composeNote(payload)          → { path, frontmatter, body }
  *   TaskEntity.parseNote(page)               → normalized object
  *   TaskEntity.queryToday(tasks, todayStr)   → { today, overdue }
+ *   TaskEntity._groupSubtaskCounts(parsedTasks)  → { [parentBasename]: {done,total} }
+ *   TaskEntity.subtaskCountsByParent(dv)          → { [parentBasename]: {done,total} }
  *   TaskEntity.validatePayload(payload)      → { valid, reason }
  */
 class TaskEntity {
@@ -57,6 +59,8 @@ class TaskEntity {
     _sanitizeTitle(title) { return TaskEntity._sanitizeTitle(title); }
     _uniqueName(baseFilename, existsFn) { return TaskEntity._uniqueName(baseFilename, existsFn); }
     _chromeBody() { return TaskEntity._chromeBody(); }
+    _groupSubtaskCounts(parsedTasks) { return TaskEntity._groupSubtaskCounts(parsedTasks); }
+    subtaskCountsByParent(dv) { return TaskEntity.subtaskCountsByParent(dv); }
 
     // ---------- Static pure helpers ----------
 
@@ -397,6 +401,54 @@ class TaskEntity {
             // due > todayStr (future) → excluded from both buckets.
         }
         return { today: today, overdue: overdue };
+    }
+
+    /**
+     * Group an array of ALREADY-PARSED tasks (parseNote output, or any object
+     * with `{ parent_task, status }`) by `parent_task` and count how many are
+     * done vs. total. A task with no `parent_task` (empty string or nullish —
+     * not a subtask) is skipped entirely. A parent with zero children is
+     * simply ABSENT from the returned map (no zero-entries), so callers do a
+     * plain `counts[basename] || null` presence check. Missing/malformed
+     * `status` is treated as "open" (matches parseNote's own default). Pure,
+     * null/non-array-tolerant (→ {}); never throws.
+     */
+    static _groupSubtaskCounts(parsedTasks) {
+        const counts = {};
+        const list = Array.isArray(parsedTasks) ? parsedTasks : [];
+        for (const t of list) {
+            if (!t) continue;
+            const parent = String(t.parent_task == null ? '' : t.parent_task).trim();
+            if (!parent) continue;
+            if (!counts[parent]) counts[parent] = { done: 0, total: 0 };
+            counts[parent].total += 1;
+            if ((t.status || 'open') === 'done') counts[parent].done += 1;
+        }
+        return counts;
+    }
+
+    /**
+     * Live-query wrapper around `_groupSubtaskCounts`: fetches every task note
+     * under `spice/tasks/` (open AND done — a subtask's total shouldn't shrink
+     * once it's completed — excluding only the recoverable `_trash/`), parses
+     * each via `parseNote`, and groups by parent. This is the SINGLE shared
+     * definition of "how many subtasks does this task have, and how many are
+     * done" for every surface that doesn't already hold the full child list
+     * locally (daily, project, meeting task rows). Guarded — a missing/broken
+     * `dv` or a cold-load query failure yields `{}`, never throws.
+     */
+    static subtaskCountsByParent(dv) {
+        try {
+            if (!dv || typeof dv.pages !== 'function') return {};
+            const raw = dv.pages('"spice/tasks"').where(p =>
+                p && p.type === 'task' && p.file && p.file.path
+                && !p.file.path.includes('/_trash/'));
+            const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
+            const parsed = arr.map(p => TaskEntity.parseNote(p));
+            return TaskEntity._groupSubtaskCounts(parsed);
+        } catch (_e) {
+            return {};
+        }
     }
 
     /**
