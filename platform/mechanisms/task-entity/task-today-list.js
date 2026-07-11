@@ -173,6 +173,15 @@ class TaskTodayList {
             parsed = [];
         }
 
+        // Attach an optional subtask-count summary to each task BEFORE banding
+        // it — one shared vault-wide query (TaskEntity.subtaskCountsByParent),
+        // not a per-row query, so N tasks cost one extra dv.pages() call, not N.
+        const subtaskCounts = (typeof TE.subtaskCountsByParent === 'function') ? TE.subtaskCountsByParent(dv) : {};
+        for (const t of parsed) {
+            const basename = t && t.path ? t.path.split('/').pop().replace(/\.md$/i, '') : '';
+            t.subtask_count = subtaskCounts[basename] || null;
+        }
+
         const bands = TaskTodayList.buildBands(parsed, today);
 
         // ----- Render -----
