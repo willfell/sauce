@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.11.1"
+      "version": "0.12.0"
     },
     {
       "name": "breadcrumb",
@@ -145,7 +145,7 @@
     },
     {
       "name": "journal",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "trips",

@@ -1241,7 +1241,7 @@ class TaskDialog {
 
     /**
      * CREATE — write ONE new file. Compose via TaskEntity, validate, then build
-     * the final body as CHROME (SpaceNavButtons + TaskNoteView + marker) with the
+     * the final body as CHROME (TaskChromeBar + TaskNoteView + marker) with the
      * typed user notes appended BELOW the `<!-- TASK_NOTES -->` marker. The
      * filename is the readable "<title>.md"; since titles can collide, dedupe the
      * base against the vault (" 2", " 3", …) so we never clobber an existing task.
@@ -1584,7 +1584,7 @@ class TaskDialog {
         }
         return '\n' +
             '```dataviewjs\n' +
-            'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });\n' +
             '```\n' +
             '\n' +
             '---\n' +
