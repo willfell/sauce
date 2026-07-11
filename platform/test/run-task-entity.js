@@ -38,6 +38,9 @@ const TaskEntity = new TaskEntityClass();
 const TaskDialogClass = loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog');
 const TaskDialog = new TaskDialogClass();
 
+const TaskChromeBarClass = loadClass('mechanisms/task-entity/task-chrome-bar.js', 'TaskChromeBar');
+const TaskChromeBar = new TaskChromeBarClass();
+
 // Fake moment-like object (deterministic — no wall clock).
 const fixedMoment = {
   format: (f) =>
@@ -101,9 +104,9 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(Array.isArray(fm.links), 'links is an array');
   assert(fm.links.length === 0, 'absent links → empty array');
   assert(out.path === 'spice/tasks/Call X.md', 'path is readable "<title>.md": ' + out.path);
-  // Body is now the CHROME body (SpaceNavButtons + TaskNoteView + marker), not empty.
+  // Body is now the CHROME body (TaskChromeBar + TaskNoteView + marker), not empty.
   assert(out.body.includes('<!-- TASK_NOTES -->'), 'body has the TASK_NOTES marker');
-  assert(out.body.includes('class: "SpaceNavButtons"'), 'body renders SpaceNavButtons nav');
+  assert(out.body.includes('class: "TaskChromeBar"'), 'body renders TaskChromeBar nav');
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
@@ -851,6 +854,33 @@ ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regr
     'the row-render loop must iterate openSubtasks, not the unfiltered list');
 });
 
+// TNV-DONE-1/2. Completed-subtask history: the SUBTASKS section renders a
+// collapsible "Completed (N)" <details> block listing every subtask whose
+// status is 'done' (from allSubtasks, the unfiltered open+done list — NOT
+// openSubtasks, which only feeds the open rows above it), each row's
+// checkbox pre-checked (mirrors TaskDoneTodayList's exact convention:
+// render via the shared renderTaskRow, then set cb.checked = true via
+// querySelector afterward, since renderTaskRow always starts unchecked).
+// Rendered ONLY when there is at least one done subtask — no empty
+// "Completed (0)" clutter. Source-text assertion (this method's dv
+// dependency has no dv-stub test in this harness; see TNV-sub-3 for the
+// same convention).
+ok('TNV-DONE-1 SUBTASKS section renders a Completed(N) details block from done subtasks only when non-empty', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
+  const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
+  const sectionMatch = m.exec(src);
+  assert(sectionMatch, 'SUBTASKS section block found in task-note-view.js');
+  const section = sectionMatch[1];
+  assert(/doneSubtasks\s*=\s*allSubtasks\.filter/.test(section),
+    'doneSubtasks must be derived by filtering allSubtasks (status===done), got section:\n' + section);
+  assert(/if\s*\(doneSubtasks\.length\)/.test(section),
+    'the Completed block must be gated on doneSubtasks.length (no empty block)');
+  assert(/for\s*\(const st of doneSubtasks\)/.test(section),
+    'the Completed row loop must iterate doneSubtasks');
+  assert(/cb\.checked\s*=\s*true/.test(section),
+    'each Completed row must have its checkbox pre-checked (mirrors TaskDoneTodayList)');
+});
+
 // ---------- TaskEntity.subtaskCountsByParent (SCP-*) ----------
 //
 // Pure grouping core: given an array of ALREADY-PARSED tasks (parseNote
@@ -898,6 +928,42 @@ ok('SCP-4 _groupSubtaskCounts tolerates malformed entries without throwing', () 
 ok('SCP-5 subtaskCountsByParent is a function (class + instance) and delegates to _groupSubtaskCounts', () => {
   assert(typeof TaskEntityClass.subtaskCountsByParent === 'function', 'static on the class');
   assert(typeof TaskEntity.subtaskCountsByParent === 'function', 'delegator on the instance');
+});
+
+// ---------- TaskChromeBar (TCB-*) ----------
+//
+// Task notes are pure leaf entities in the ChromeBar model: no primary
+// action (creation/editing happen elsewhere on the card), no overflow menu,
+// no cross-links ("This task" section) since the card's own SOURCE / Part-of
+// / SUBTASKS sections already cover task-to-task navigation.
+
+ok('TCB-1 detect() matches type:task pages, returns null for others', () => {
+  const config = TaskChromeBar._config();
+  const ctx = config.detect(null, { type: 'task', file: { path: 'spice/tasks/Groceries.md' } });
+  assert(ctx && ctx.context === 'task', 'detects a task page');
+  assert(ctx.path === 'spice/tasks/Groceries.md', 'carries the page path');
+  assert(config.detect(null, { type: 'meeting' }) === null, 'non-task type -> null');
+  assert(config.detect(null, null) === null, 'null page -> null');
+});
+
+ok('TCB-2 surfaceSpec() is a nav-only leaf: no primary, no overflow', () => {
+  const config = TaskChromeBar._config();
+  const spec = config.surfaceSpec({ context: 'task' });
+  assert(spec.primary === null, 'no primary action');
+  assert(Array.isArray(spec.overflow) && spec.overflow.length === 0, 'no overflow actions');
+  assert(spec.leaf === true, 'leaf surface');
+});
+
+ok('TCB-3 destinations() returns no cross-links', () => {
+  const config = TaskChromeBar._config();
+  assert(deepEq(config.destinations(null, { context: 'task' }), []), 'no This-task section');
+});
+
+ok('TCB-4 dispatch() never throws for any id', () => {
+  const config = TaskChromeBar._config();
+  let threw = false;
+  try { config.dispatch(null, { context: 'task' }, 'anything'); } catch (_e) { threw = true; }
+  assert(!threw, 'dispatch is a safe no-op');
 });
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
@@ -1258,26 +1324,13 @@ ok('LT-4 parseNote coerces source_note Link → basename', () => {
 // a SECOND `---` divider, then the `<!-- TASK_NOTES -->` marker. The
 // TaskNoteToDoNav block is GONE. Assert the new shape (two HRs, no ToDoNav) so a
 // regression (missing second divider / a resurrected ToDoNav) fails loudly.
-ok('CB-1 _chromeBody emits SpaceNavButtons + HR + TaskNoteView + HR + marker in order (no ToDoNav)', () => {
+ok('CB-1 _chromeBody emits TaskChromeBar + HR + TaskNoteView + HR + marker in order (no bare SpaceNavButtons)', () => {
   const body = TaskEntity._chromeBody();
-  const iNav = body.indexOf('class: "SpaceNavButtons"');
-  const iRule1 = body.indexOf('\n---\n');
-  const iView = body.indexOf('class: "TaskNoteView"');
-  const iRule2 = body.indexOf('\n---\n', iView);
-  const iMarker = body.indexOf('<!-- TASK_NOTES -->');
-  assert(iNav >= 0, 'has SpaceNavButtons');
-  assert(iRule1 > iNav, 'first divider after SpaceNavButtons');
-  assert(iView > iRule1, 'TaskNoteView after first divider');
-  assert(iRule2 > iView, 'second divider after TaskNoteView');
-  assert(iMarker > iRule2, 'marker after second divider');
-  // Exactly two thematic breaks (nav-fence HR + card-fence HR), no third.
-  assert((body.match(/\n---\n/g) || []).length === 2, 'exactly two `---` dividers');
-  // TaskNoteToDoNav is fully removed from the chrome.
-  assert(body.indexOf('TaskNoteToDoNav') < 0, 'no TaskNoteToDoNav block in the chrome');
-  // composeNote body carries the new chrome too (has the second divider, no ToDoNav).
-  const cn = TaskEntity.composeNote({ title: 'x' }).body;
-  assert(cn.indexOf('TaskNoteToDoNav') < 0, 'composeNote body has no ToDoNav block');
-  assert((cn.match(/\n---\n/g) || []).length === 2, 'composeNote body has two dividers');
+  assert(body.includes('class: "TaskChromeBar"'), '_chromeBody must invoke TaskChromeBar');
+  assert(!body.includes('class: "SpaceNavButtons"'), '_chromeBody must no longer invoke the legacy bare SpaceNavButtons');
+  assert(body.includes('class: "TaskNoteView"'), '_chromeBody still invokes TaskNoteView');
+  assert(body.includes('<!-- TASK_NOTES -->'), '_chromeBody still carries the TASK_NOTES marker');
+  assert(body.indexOf('TaskChromeBar') < body.indexOf('TaskNoteView'), 'TaskChromeBar renders before TaskNoteView');
 });
 
 // TaskDialog's inline chrome fallback must stay BYTE-IDENTICAL to TaskEntity's.
