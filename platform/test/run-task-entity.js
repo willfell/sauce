@@ -827,6 +827,79 @@ ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
   assert(TaskNoteViewClass._subtaskProgressText(null) === '', 'null -> empty string, never throws');
 });
 
+// TNV-sub-3. Regression test for the "subtask checkbox reappears / double-click
+// errors" bug: the SUBTASKS section's live query fetched ALL non-trashed
+// children (open + done) and rendered EVERY one of them as a checkbox row. A
+// completed subtask (moved to _done/ but still under spice/tasks/) would
+// therefore be re-fetched and re-rendered unchecked on Dataview's next
+// auto-refresh, and a second click called markDone on the now-stale path,
+// throwing "task file not found". Fix: split the fetched list into
+// `allSubtasks` (unfiltered — feeds the N/M progress count, unchanged) and
+// `openSubtasks` (status === 'open' — the ONLY thing passed to the row-render
+// loop). Source-text assertion (this method's dv dependency has no dv-stub
+// test in this harness; see TaskTodayList/TaskProjectList/TaskMeetingList
+// render() for the same convention).
+ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regression)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
+  const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
+  const sectionMatch = m.exec(src);
+  assert(sectionMatch, 'SUBTASKS section block found in task-note-view.js');
+  const section = sectionMatch[1];
+  assert(/openSubtasks\s*=\s*allSubtasks\.filter/.test(section),
+    'openSubtasks must be derived by filtering allSubtasks (status===open), got section:\n' + section);
+  assert(/for\s*\(const st of openSubtasks\)/.test(section),
+    'the row-render loop must iterate openSubtasks, not the unfiltered list');
+});
+
+// ---------- TaskEntity.subtaskCountsByParent (SCP-*) ----------
+//
+// Pure grouping core: given an array of ALREADY-PARSED tasks (parseNote
+// output — parent_task already coerced to a basename string, '' when unset),
+// group by parent_task and count { done, total }. Parents with zero children
+// are simply absent from the map (no zero-entries) so callers can do a plain
+// `counts[basename] || null` presence check.
+
+ok('SCP-1 _groupSubtaskCounts groups children by parent_task and counts done/total', () => {
+  const tasks = [
+    { parent_task: 'Groceries', status: 'open' },
+    { parent_task: 'Groceries', status: 'done' },
+    { parent_task: 'Groceries', status: 'done' },
+    { parent_task: 'Errands', status: 'open' },
+  ];
+  const counts = TaskEntity._groupSubtaskCounts(tasks);
+  assert(deepEq(counts.Groceries, { done: 2, total: 3 }), 'Groceries: 2/3, got ' + JSON.stringify(counts.Groceries));
+  assert(deepEq(counts.Errands, { done: 0, total: 1 }), 'Errands: 0/1, got ' + JSON.stringify(counts.Errands));
+});
+
+ok('SCP-2 _groupSubtaskCounts ignores tasks with no parent_task (not subtasks)', () => {
+  const tasks = [
+    { parent_task: '', status: 'open' },
+    { parent_task: null, status: 'done' },
+    { parent_task: 'Groceries', status: 'open' },
+  ];
+  const counts = TaskEntity._groupSubtaskCounts(tasks);
+  assert(Object.keys(counts).length === 1, 'only Groceries present, got ' + JSON.stringify(counts));
+  assert(deepEq(counts.Groceries, { done: 0, total: 1 }), 'Groceries: 0/1');
+});
+
+ok('SCP-3 _groupSubtaskCounts returns {} for null/non-array/empty input', () => {
+  assert(deepEq(TaskEntity._groupSubtaskCounts(null), {}), 'null -> {}');
+  assert(deepEq(TaskEntity._groupSubtaskCounts([]), {}), 'empty -> {}');
+  assert(deepEq(TaskEntity._groupSubtaskCounts('not an array'), {}), 'non-array -> {}');
+});
+
+ok('SCP-4 _groupSubtaskCounts tolerates malformed entries without throwing', () => {
+  const tasks = [null, undefined, { status: 'open' }, { parent_task: 'X' }, { parent_task: 'X', status: 'done' }];
+  let counts;
+  assert((() => { counts = TaskEntity._groupSubtaskCounts(tasks); return true; })(), 'never throws');
+  assert(deepEq(counts.X, { done: 1, total: 2 }), 'X: 1/2 (missing status treated as open), got ' + JSON.stringify(counts.X));
+});
+
+ok('SCP-5 subtaskCountsByParent is a function (class + instance) and delegates to _groupSubtaskCounts', () => {
+  assert(typeof TaskEntityClass.subtaskCountsByParent === 'function', 'static on the class');
+  assert(typeof TaskEntity.subtaskCountsByParent === 'function', 'delegator on the instance');
+});
+
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
 ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   const res = TaskTodayList.buildBands([
@@ -1247,6 +1320,32 @@ ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink
   // Nullish → "".
   assert(TaskTodayList._projectChipText(null) === '', 'null → ""');
   assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
+});
+
+// RTR-SUB-1/2. Subtask-count chip: renderTaskRow reads an OPTIONAL
+// `task.subtask_count = { done, total }` (attached by the CALLER — daily /
+// project / meeting render() via TaskEntity.subtaskCountsByParent — never
+// queried by renderTaskRow itself, which stays dv-free per its existing
+// design). When present and total > 0, render one more chip
+// "{done}/{total} subtasks" with cls 'sauce-task-today-subtask-chip' so tests
+// (and nothing else) can find it. Absent or total===0 → no chip.
+ok('RTR-SUB-1 renderTaskRow renders the subtask-count chip when subtask_count.total > 0', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'Groceries', path: 'spice/tasks/Groceries.md', subtask_count: { done: 2, total: 5 } };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  const chip = findByClsAttr(row, 'sauce-task-today-subtask-chip');
+  assert(chip, 'subtask chip exists');
+  assert(chip.textContent === '2/5 subtasks', 'chip text is "2/5 subtasks", got ' + chip.textContent);
+});
+
+ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent or total is 0', () => {
+  const container1 = makeRowStubEl('div');
+  const row1 = TaskTodayList.renderTaskRow(container1, { title: 'No subtasks', path: 'spice/tasks/X.md' }, null);
+  assert(!findByClsAttr(row1, 'sauce-task-today-subtask-chip'), 'no chip when subtask_count absent');
+
+  const container2 = makeRowStubEl('div');
+  const row2 = TaskTodayList.renderTaskRow(container2, { title: 'Zero total', path: 'spice/tasks/Y.md', subtask_count: { done: 0, total: 0 } }, null);
+  assert(!findByClsAttr(row2, 'sauce-task-today-subtask-chip'), 'no chip when total is 0');
 });
 
 // RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
