@@ -49,6 +49,7 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
   const ic = inst.CHROME_ICONS;
   ok('CB-HOME-1 CHROME_ICONS has a home SVG', ic && /svg/.test(ic.home));
 }
+
 async function cbHomeButtonCase() {
   const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
   global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
@@ -199,6 +200,44 @@ async function cbVaultEmpty() {
   ok('CB-BTN-5 labeled button renders the label inside a span', (btn.innerHTML || '').indexOf('New Task') >= 0 && (btn.innerHTML || '').indexOf('<span') >= 0);
 }
 
+// ── CB-DAYNAV-1..3 — adapter.dayNav(dv) overrides the breadcrumb left-slot
+// with prev/next day-nav spans; absent on every other adapter (no regression).
+async function cbDayNavCase() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([{ label: 'SHOULD NOT RENDER', link: 'x.md' }]) },
+    MenuPopover: { open: () => makeEl('div') },
+  };
+  const adapter = {
+    resolve: () => ({ ctx: {}, spec: { primary: null, overflow: [] } }),
+    navEntries: async () => ([]),
+    dispatch: () => {},
+    openNavTarget: () => {},
+    dayNav: () => ({
+      prevLabel: 'Tue, Jul 7', prevPath: 'spice/daily/2026-07-07.md',
+      nextLabel: 'Thu, Jul 9', nextPath: null, // no later daily note → inert
+    }),
+    rootClass: 'x-root',
+    btnClass: (v) => `x-btn x-btn-${v}`,
+  };
+  const container = makeEl('div');
+  const dv = { container, current: () => ({ file: { path: 'spice/daily/2026-07-08.md', name: '2026-07-08' } }) };
+  await inst.render(dv, adapter);
+  const desc = allDescendants(container);
+  ok('CB-DAYNAV-1 breadcrumb is NOT rendered when adapter.dayNav is present',
+    !desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
+  const dayNavEl = desc.find((e) => e.className && String(e.className).includes('chrome-bar-day-nav'));
+  ok('CB-DAYNAV-2 renders a day-nav element with both labels', !!dayNavEl
+    && String(dayNavEl.innerHTML || '').includes('Tue, Jul 7')
+    && String(dayNavEl.innerHTML || '').includes('Thu, Jul 9'));
+  const nextSpan = allDescendants(dayNavEl).find((e) => e.className && String(e.className).includes('chrome-bar-day-nav-next'));
+  ok('CB-DAYNAV-3 a null nextPath renders an inert (no onclick) next control', !!nextSpan && typeof nextSpan.onclick !== 'function');
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
+
 function summarize() {
   const failed = results.filter(([, c]) => !c);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
@@ -245,6 +284,7 @@ async function cbFactoryCases() {
   await cbVaultCases();
   await cbVaultEmpty();
   await cbRenderCases();
+  await cbDayNavCase();
   await cbHomeButtonCase();
   await cbFactoryCases();
   summarize();

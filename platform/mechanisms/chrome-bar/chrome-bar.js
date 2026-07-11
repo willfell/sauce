@@ -203,37 +203,61 @@ class ChromeBar {
     const bar = root.createEl("div");
     bar.style.cssText = "display: flex; align-items: center; gap: 10px; flex-wrap: wrap;";
 
-    // ── LEFT — breadcrumb crumbs ──────────────────────────────────────────────
-    let segments = [];
-    try {
-      if (customJS && customJS.Breadcrumb && typeof customJS.Breadcrumb.buildSegments === "function") {
-        segments = await customJS.Breadcrumb.buildSegments(dv);
+    // ── LEFT — day-nav override, else breadcrumb crumbs ──────────────────────
+    if (typeof adapter.dayNav === "function") {
+      let nav = null;
+      try { nav = await adapter.dayNav(dv); } catch (_e) { nav = null; }
+      if (nav) {
+        const left = bar.createEl("div", { cls: "chrome-bar-day-nav" });
+        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; gap: 6px; min-width: 0;";
+        const mkSide = (label, targetPath, cls) => {
+          const el = left.createEl(targetPath ? "a" : "span", { cls: "chrome-bar-day-nav-" + cls });
+          el.innerHTML = label || "—";
+          el.style.cssText = targetPath
+            ? "cursor: pointer; text-decoration: none; color: var(--text-muted);"
+            : "opacity: 0.4;";
+          if (targetPath) el.onclick = (e) => { if (e && e.preventDefault) e.preventDefault(); adapter.openNavTarget(targetPath, dv); };
+          return el;
+        };
+        const prevEl = mkSide(nav.prevLabel, nav.prevPath, "prev");
+        const sep = left.createEl("span");
+        sep.innerHTML = "&rarr;";
+        sep.style.cssText = "opacity: 0.5;";
+        const nextEl = mkSide(nav.nextLabel, nav.nextPath, "next");
+        left.innerHTML = (prevEl.innerHTML || "") + (sep.innerHTML || "") + (nextEl.innerHTML || "");
       }
-    } catch (_e) { segments = []; }
-    if (Array.isArray(segments) && segments.length > 0) {
-      const left = bar.createEl("div", { cls: "project-breadcrumb" });
-      left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;";
-      segments.forEach((seg, i) => {
-        if (i > 0) {
-          const sep = left.createEl("span");
-          sep.textContent = " / ";
-          sep.style.cssText = "opacity: 0.5; margin: 0 2px;";
+    } else {
+      let segments = [];
+      try {
+        if (customJS && customJS.Breadcrumb && typeof customJS.Breadcrumb.buildSegments === "function") {
+          segments = await customJS.Breadcrumb.buildSegments(dv);
         }
-        if (seg && seg.link) {
-          const a = left.createEl("a");
-          a.textContent = seg.label;
-          a.style.cssText = "color: var(--text-muted); cursor: pointer; text-decoration: none;";
-          const target = seg.link;
-          a.onclick = (e) => {
-            if (e && e.preventDefault) e.preventDefault();
-            adapter.openNavTarget(target, dv);
-          };
-        } else {
-          const cur = left.createEl("span");
-          cur.textContent = (seg && seg.label) || "";
-          cur.style.cssText = "color: var(--text-muted);";
-        }
-      });
+      } catch (_e) { segments = []; }
+      if (Array.isArray(segments) && segments.length > 0) {
+        const left = bar.createEl("div", { cls: "project-breadcrumb" });
+        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;";
+        segments.forEach((seg, i) => {
+          if (i > 0) {
+            const sep = left.createEl("span");
+            sep.textContent = " / ";
+            sep.style.cssText = "opacity: 0.5; margin: 0 2px;";
+          }
+          if (seg && seg.link) {
+            const a = left.createEl("a");
+            a.textContent = seg.label;
+            a.style.cssText = "color: var(--text-muted); cursor: pointer; text-decoration: none;";
+            const target = seg.link;
+            a.onclick = (e) => {
+              if (e && e.preventDefault) e.preventDefault();
+              adapter.openNavTarget(target, dv);
+            };
+          } else {
+            const cur = left.createEl("span");
+            cur.textContent = (seg && seg.label) || "";
+            cur.style.cssText = "color: var(--text-muted);";
+          }
+        });
+      }
     }
 
     // ── RIGHT — controls (Go ▾ · primary · ⋯), pushed right via margin-left:auto ─
