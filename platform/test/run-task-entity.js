@@ -1322,6 +1322,32 @@ ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink
   assert(TaskTodayList._projectChipText('') === '', 'empty → ""');
 });
 
+// RTR-SUB-1/2. Subtask-count chip: renderTaskRow reads an OPTIONAL
+// `task.subtask_count = { done, total }` (attached by the CALLER — daily /
+// project / meeting render() via TaskEntity.subtaskCountsByParent — never
+// queried by renderTaskRow itself, which stays dv-free per its existing
+// design). When present and total > 0, render one more chip
+// "{done}/{total} subtasks" with cls 'sauce-task-today-subtask-chip' so tests
+// (and nothing else) can find it. Absent or total===0 → no chip.
+ok('RTR-SUB-1 renderTaskRow renders the subtask-count chip when subtask_count.total > 0', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'Groceries', path: 'spice/tasks/Groceries.md', subtask_count: { done: 2, total: 5 } };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  const chip = findByClsAttr(row, 'sauce-task-today-subtask-chip');
+  assert(chip, 'subtask chip exists');
+  assert(chip.textContent === '2/5 subtasks', 'chip text is "2/5 subtasks", got ' + chip.textContent);
+});
+
+ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent or total is 0', () => {
+  const container1 = makeRowStubEl('div');
+  const row1 = TaskTodayList.renderTaskRow(container1, { title: 'No subtasks', path: 'spice/tasks/X.md' }, null);
+  assert(!findByClsAttr(row1, 'sauce-task-today-subtask-chip'), 'no chip when subtask_count absent');
+
+  const container2 = makeRowStubEl('div');
+  const row2 = TaskTodayList.renderTaskRow(container2, { title: 'Zero total', path: 'spice/tasks/Y.md', subtask_count: { done: 0, total: 0 } }, null);
+  assert(!findByClsAttr(row2, 'sauce-task-today-subtask-chip'), 'no chip when total is 0');
+});
+
 // RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
 // edit dialog. Drives the REAL renderTaskRow against a DOM stub + a fake app +
 // a TaskDialog spy — the same faithful pattern as RIL-2 (not a hand-built replica).
