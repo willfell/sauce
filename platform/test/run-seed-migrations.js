@@ -1190,8 +1190,8 @@ withTempVault((vault) => {
         try { healedTask = helpers.readNote(vault, "spice/tasks/Do the thing.md"); } catch (e) {}
         ok("HC-TASKHEAL-SEED-3 healed task note has the <!-- TASK_NOTES --> marker",
            healedTask.includes("<!-- TASK_NOTES -->"));
-        ok("HC-TASKHEAL-SEED-4 healed task note has SpaceNavButtons + TaskNoteView chrome",
-           /class:\s*"SpaceNavButtons"/.test(healedTask) && /class:\s*"TaskNoteView"/.test(healedTask));
+        ok("HC-TASKHEAL-SEED-4 healed task note has TaskChromeBar + TaskNoteView chrome",
+           /class:\s*"TaskChromeBar"/.test(healedTask) && /class:\s*"TaskNoteView"/.test(healedTask));
         ok("HC-TASKHEAL-SEED-5 healed task note frontmatter (title) preserved",
            /^title:\s*Do the thing\s*$/m.test(healedTask));
         ok("HC-TASKHEAL-SEED-6 .sauce-backup snapshot exists",
@@ -3319,8 +3319,8 @@ async function runTaskEntitySurfacesFamily() {
            !/class:\s*"TaskNoteToDoNav"/.test(upgraded));
         ok("HC-TE-SURF-3a upgraded note gains the second `---` HR before the marker",
            /```\r?\n\r?\n---\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
-        ok("HC-TE-SURF-3b upgraded note keeps SpaceNavButtons + TaskNoteView chrome",
-           /class:\s*"SpaceNavButtons"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
+        ok("HC-TE-SURF-3b upgraded note keeps TaskChromeBar + TaskNoteView chrome",
+           /class:\s*"TaskChromeBar"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
         ok("HC-TE-SURF-3c user notes below the marker preserved",
            upgraded.includes("My handwritten notes about the milk task."));
         ok("HC-TE-SURF-3d exactly one <!-- TASK_NOTES --> marker after upgrade",

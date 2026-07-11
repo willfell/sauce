@@ -11381,7 +11381,7 @@ async function applyProjectTasksToEntityMigration(tp, history, git) {
 function _taskNoteChromeBody() {
   return "\n" +
     "```dataviewjs\n" +
-    "await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskChromeBar\" });\n" +
     "```\n" +
     "\n" +
     "---\n" +
