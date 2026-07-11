@@ -38,6 +38,9 @@ const TaskEntity = new TaskEntityClass();
 const TaskDialogClass = loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog');
 const TaskDialog = new TaskDialogClass();
 
+const TaskChromeBarClass = loadClass('mechanisms/task-entity/task-chrome-bar.js', 'TaskChromeBar');
+const TaskChromeBar = new TaskChromeBarClass();
+
 // Fake moment-like object (deterministic — no wall clock).
 const fixedMoment = {
   format: (f) =>
@@ -925,6 +928,42 @@ ok('SCP-4 _groupSubtaskCounts tolerates malformed entries without throwing', () 
 ok('SCP-5 subtaskCountsByParent is a function (class + instance) and delegates to _groupSubtaskCounts', () => {
   assert(typeof TaskEntityClass.subtaskCountsByParent === 'function', 'static on the class');
   assert(typeof TaskEntity.subtaskCountsByParent === 'function', 'delegator on the instance');
+});
+
+// ---------- TaskChromeBar (TCB-*) ----------
+//
+// Task notes are pure leaf entities in the ChromeBar model: no primary
+// action (creation/editing happen elsewhere on the card), no overflow menu,
+// no cross-links ("This task" section) since the card's own SOURCE / Part-of
+// / SUBTASKS sections already cover task-to-task navigation.
+
+ok('TCB-1 detect() matches type:task pages, returns null for others', () => {
+  const config = TaskChromeBar._config();
+  const ctx = config.detect(null, { type: 'task', file: { path: 'spice/tasks/Groceries.md' } });
+  assert(ctx && ctx.context === 'task', 'detects a task page');
+  assert(ctx.path === 'spice/tasks/Groceries.md', 'carries the page path');
+  assert(config.detect(null, { type: 'meeting' }) === null, 'non-task type -> null');
+  assert(config.detect(null, null) === null, 'null page -> null');
+});
+
+ok('TCB-2 surfaceSpec() is a nav-only leaf: no primary, no overflow', () => {
+  const config = TaskChromeBar._config();
+  const spec = config.surfaceSpec({ context: 'task' });
+  assert(spec.primary === null, 'no primary action');
+  assert(Array.isArray(spec.overflow) && spec.overflow.length === 0, 'no overflow actions');
+  assert(spec.leaf === true, 'leaf surface');
+});
+
+ok('TCB-3 destinations() returns no cross-links', () => {
+  const config = TaskChromeBar._config();
+  assert(deepEq(config.destinations(null, { context: 'task' }), []), 'no This-task section');
+});
+
+ok('TCB-4 dispatch() never throws for any id', () => {
+  const config = TaskChromeBar._config();
+  let threw = false;
+  try { config.dispatch(null, { context: 'task' }, 'anything'); } catch (_e) { threw = true; }
+  assert(!threw, 'dispatch is a safe no-op');
 });
 
 // TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
