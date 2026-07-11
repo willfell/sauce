@@ -68,6 +68,17 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // fresh-vault bootstrap doesn't skip project with
                      // "depends on doc-search ... not subscribed". Same class
                      // of bug as the breadcrumb entry above.
+    "menu-popover",  // <this release> — chrome-bar (pre-included below) depends
+                     // on menu-popover >=0.2.0; pre-include so fresh-vault
+                     // bootstrap doesn't skip chrome-bar with "depends on
+                     // menu-popover ... not subscribed". Must precede
+                     // chrome-bar for deps-first install ordering.
+    "chrome-bar",    // <this release> — task-entity (in the default mechanism
+                     // set) gains a depends_on chrome-bar >=0.3.0; pre-include
+                     // so fresh-vault bootstrap doesn't skip task-entity with
+                     // "depends on chrome-bar ... not subscribed". Same class
+                     // of bug as the doc-search entry above. Must precede
+                     // task-entity for deps-first install ordering.
     "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
                      // blueprint set) gains a depends_on task-entity >=0.1.0 in
                      // this release to render the daily surface via TaskTodayList
