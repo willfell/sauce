@@ -827,6 +827,30 @@ ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
   assert(TaskNoteViewClass._subtaskProgressText(null) === '', 'null -> empty string, never throws');
 });
 
+// TNV-sub-3. Regression test for the "subtask checkbox reappears / double-click
+// errors" bug: the SUBTASKS section's live query fetched ALL non-trashed
+// children (open + done) and rendered EVERY one of them as a checkbox row. A
+// completed subtask (moved to _done/ but still under spice/tasks/) would
+// therefore be re-fetched and re-rendered unchecked on Dataview's next
+// auto-refresh, and a second click called markDone on the now-stale path,
+// throwing "task file not found". Fix: split the fetched list into
+// `allSubtasks` (unfiltered — feeds the N/M progress count, unchanged) and
+// `openSubtasks` (status === 'open' — the ONLY thing passed to the row-render
+// loop). Source-text assertion (this method's dv dependency has no dv-stub
+// test in this harness; see TaskTodayList/TaskProjectList/TaskMeetingList
+// render() for the same convention).
+ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regression)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
+  const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
+  const sectionMatch = m.exec(src);
+  assert(sectionMatch, 'SUBTASKS section block found in task-note-view.js');
+  const section = sectionMatch[1];
+  assert(/openSubtasks\s*=\s*allSubtasks\.filter/.test(section),
+    'openSubtasks must be derived by filtering allSubtasks (status===open), got section:\n' + section);
+  assert(/for\s*\(const st of openSubtasks\)/.test(section),
+    'the row-render loop must iterate openSubtasks, not the unfiltered list');
+});
+
 // ---------- TaskEntity.subtaskCountsByParent (SCP-*) ----------
 //
 // Pure grouping core: given an array of ALREADY-PARSED tasks (parseNote

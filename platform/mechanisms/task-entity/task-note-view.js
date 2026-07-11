@@ -630,7 +630,7 @@ class TaskNoteView {
             if (!isSubtask && filePath) {
                 try {
                     const thisBasename = filePath.split('/').pop().replace(/\.md$/i, '');
-                    let subtasks = [];
+                    let allSubtasks = [];
                     try {
                         const raw = dv.pages('"spice/tasks"').where(p => {
                             if (!p || p.type !== 'task' || !p.file || !p.file.path) return false;
@@ -644,15 +644,23 @@ class TaskNoteView {
                         });
                         const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
                         const TEsub = window.customJS && window.customJS.TaskEntity;
-                        subtasks = (TEsub && typeof TEsub.parseNote === 'function') ? arr.map(p => TEsub.parseNote(p)) : [];
-                    } catch (_e) { subtasks = []; }
+                        allSubtasks = (TEsub && typeof TEsub.parseNote === 'function') ? arr.map(p => TEsub.parseNote(p)) : [];
+                    } catch (_e) { allSubtasks = []; }
+                    // FIX: only OPEN subtasks are rendered as rows. Without this
+                    // filter, a just-completed subtask (moved to _done/, but still
+                    // under spice/tasks/ so still fetched above) reappears unchecked
+                    // on Dataview's next auto-refresh, and a second click calls
+                    // markDone on the now-stale path — "task file not found" error.
+                    // allSubtasks (open + done) still feeds the N/M progress count
+                    // below, which is correct as-is.
+                    const openSubtasks = allSubtasks.filter(t => t && t.status === 'open');
 
                     drawDivider();
                     const subHeadRow = card.createEl('div');
                     subHeadRow.style.cssText = 'display:flex; align-items:baseline; justify-content:space-between; gap:8px;';
                     const subLabel = subHeadRow.createEl('div', { text: 'SUBTASKS' });
                     subLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
-                    const progressText = TaskNoteView._subtaskProgressText(subtasks);
+                    const progressText = TaskNoteView._subtaskProgressText(allSubtasks);
                     if (progressText) {
                         const prog = subHeadRow.createEl('span', { text: progressText });
                         prog.style.cssText = 'font-size:0.78em; color:var(--text-muted);';
@@ -662,7 +670,7 @@ class TaskNoteView {
                     subList.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
                     const TTL = window.customJS && window.customJS.TaskTodayList;
                     if (TTL && typeof TTL.renderTaskRow === 'function') {
-                        for (const st of subtasks) {
+                        for (const st of openSubtasks) {
                             try { TTL.renderTaskRow(subList, st, null); } catch (_e) {}
                         }
                     }
