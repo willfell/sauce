@@ -570,7 +570,7 @@ module.exports = async function (tp) {
 
     // 6a5. task-entity — heal EXISTING task notes under spice/tasks/ (top level):
     // rename ugly `task-YYYYMMDD-HHmmss-hhhh.md` files to the readable
-    // `<title>.md`, and inject the standard chrome (SpaceNavButtons + TaskNoteView
+    // `<title>.md`, and inject the standard chrome (TaskChromeBar + TaskNoteView
     // + <!-- TASK_NOTES --> marker) into bare notes (preserving user body below the
     // marker). Runs AFTER applyDailyTasksToEntityMigration so migration-created
     // notes get healed the same install. Ungated, backup-first, idempotent

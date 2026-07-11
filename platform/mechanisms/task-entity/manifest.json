@@ -55,6 +55,10 @@
     {
       "source": "task-done-today-list.js",
       "dest": "{{scripts_path}}/task-entity/task-done-today-list.js"
+    },
+    {
+      "source": "task-chrome-bar.js",
+      "dest": "{{scripts_path}}/task-entity/task-chrome-bar.js"
     }
   ],
   "post_install": [],

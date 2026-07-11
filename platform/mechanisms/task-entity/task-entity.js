@@ -293,7 +293,7 @@ class TaskEntity {
      * Frontmatter keys are emitted in the canonical schema order. Absent
      * due / completed_at are emitted as EMPTY STRINGS (not omitted)
      * so downstream edits (setting a date) are a simple in-place field write.
-     * The body is the CHROME body (SpaceNavButtons + TaskNoteView + the
+     * The body is the CHROME body (TaskChromeBar + TaskNoteView + the
      * `<!-- TASK_NOTES -->` marker) so a freshly-created task note is never
      * bare; the caller appends any typed user notes BELOW the marker.
      *
