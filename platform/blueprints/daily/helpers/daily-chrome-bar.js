@@ -20,11 +20,14 @@ class DailyChromeBar {
    * date -> real file path via a live vault listing); this static only
    * computes WHICH date is nearest, so it's testable without any Obsidian
    * global. Never throws — malformed input returns all-null fields.
+   * `currentLabel` is the current day formatted the same way (e.g. "Jul 10")
+   * so the bar can render prev / CURRENT / next instead of just two dates
+   * connected by an arrow with no indication of which day is "today".
    */
   static resolveDayNav(currentDateStr, allDateStrs) {
     const cur = window.moment(currentDateStr, "YYYY-MM-DD", true);
     if (!cur || !cur.isValid || !cur.isValid()) {
-      return { prevLabel: null, prevPath: null, nextLabel: null, nextPath: null };
+      return { prevLabel: null, prevPath: null, currentLabel: null, nextLabel: null, nextPath: null };
     }
     const parsed = (Array.isArray(allDateStrs) ? allDateStrs : [])
       .map((s) => window.moment(s, "YYYY-MM-DD", true))
@@ -34,6 +37,7 @@ class DailyChromeBar {
     return {
       prevLabel: earlier ? earlier.format("ddd, MMM D") : null,
       prevPath: earlier ? earlier.format("YYYY-MM-DD") : null,
+      currentLabel: cur.format("MMM D"),
       nextLabel: later ? later.format("ddd, MMM D") : null,
       nextPath: later ? later.format("YYYY-MM-DD") : null,
     };
@@ -92,6 +96,7 @@ class DailyChromeBar {
       return {
         prevLabel: nav.prevLabel,
         prevPath: nav.prevPath ? (filesByDate[nav.prevPath] || null) : null,
+        currentLabel: nav.currentLabel,
         nextLabel: nav.nextLabel,
         nextPath: nav.nextPath ? (filesByDate[nav.nextPath] || null) : null,
       };
