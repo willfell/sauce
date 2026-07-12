@@ -177,6 +177,31 @@ function makeDv(embed, currentVal) {
         global.app.vault = savedVault;
     }
 
+    // ---------- _createTrip scaffolds the full default section set incl. Links ----------
+    {
+        const written = {};
+        const created = new Set();
+        const savedVault = global.app.vault;
+        // Every Template, Trip *.md resolves to an existing template file; the body
+        // is echoed verbatim so we can assert which section notes got written.
+        global.app.vault = {
+            getAbstractFileByPath: (p) => (/^ranch\/templates\/Template, Trip .*\.md$/.test(p)
+                ? { path: p } : (created.has(p) ? { path: p } : null)),
+            async createFolder(p) { created.add(p); },
+            async create(p, body) { written[p] = body; created.add(p); },
+            async read(f) { return `TPL:${f.path}`; },
+        };
+        const navC = new TripNavButtons();
+        await navC._createTrip({ name: 'Reunion', slug: 'reunion', start_date: '', end_date: '', location: '' });
+        const wrote = Object.keys(written);
+        ok('CREATE-4 _createTrip scaffolds a Links section note',
+            wrote.includes('spice/trips/reunion/Reunion — Links.md'), wrote.join('\n'));
+        ok('CREATE-5 _createTrip scaffolds every default section (Flights/Stay/Packing List/To Do/Notes/Links)',
+            ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes', 'Links']
+                .every(label => wrote.includes(`spice/trips/reunion/Reunion — ${label}.md`)), wrote.join('\n'));
+        global.app.vault = savedVault;
+    }
+
     // ---------- TripSectionsCards frontmatter grouping (behavioral) ----------
     {
         const TripSectionsCards = loadWidget('platform/blueprints/trips/helpers/trip-sections-cards.js', 'TripSectionsCards');
