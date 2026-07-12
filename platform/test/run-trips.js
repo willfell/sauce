@@ -113,42 +113,24 @@ function makeDv(embed, currentVal) {
 }
 
 (async () => {
-    // ---------- detectContext (behavioral) ----------
+    // TripNavButtons is now HEADLESS — it holds only trip/section creation logic
+    // (TripsChromeBar owns rendering + context detection + the launcher). The
+    // former detectContext / launcher-partition tests moved to
+    // run-trips-chrome-bar.js.
     const TripNavButtons = loadWidget('platform/blueprints/trips/helpers/trip-nav-buttons.js', 'TripNavButtons');
-    const nav = new TripNavButtons();
 
-    // pure path branches (no dv/page needed)
-    ok('TC-1 non-trip path → non-trip',
-        nav.detectContext('spice/notes/foo.md', null).context === 'non-trip');
-    ok('TC-2 spice/trips/Trips.md → trips-hub',
-        nav.detectContext('spice/trips/Trips.md', null).context === 'trips-hub');
-    ok('TC-3 trips path not under spice → non-trip',
-        nav.detectContext('vault/trips/Trips.md', null).context === 'non-trip');
+    // ---------- _sectionBody (behavioral): new custom sections carry ONLY a
+    //            single TripsChromeBar block, no legacy chrome. ----------
     {
-        const r = nav.detectContext('spice/trips/hawaii/board/hawaii-board.md', null);
-        ok('TC-4 <slug>/board/<name>-board.md → trip-board (slug carried)', r.context === 'trip-board' && r.slug === 'hawaii' && r.tripDir === 'spice/trips/hawaii', JSON.stringify(r));
+        const body = new TripNavButtons()._sectionBody("Weather", "Destin", "destin", "2026-07-12T10:00:00-06:00");
+        ok('SECBODY-1 new section body embeds TripsChromeBar + section_kind custom, no legacy chrome',
+            body.includes('class: "TripsChromeBar"')
+            && body.includes('section_kind: custom')
+            && !body.includes('class: "Breadcrumb"')
+            && !body.includes('class: "SpaceNavButtons"')
+            && !body.includes('class: "TripNavButtons"'),
+            body);
     }
-    {
-        const r = nav.detectContext('spice/trips/hawaii/board/go-snorkeling.md', null);
-        ok('TC-5 <slug>/board/<name>.md (not -board) → trip-card', r.context === 'trip-card' && r.slug === 'hawaii', JSON.stringify(r));
-    }
-    {
-        const r = nav.detectContext('spice/trips/hawaii/board/Go Snorkeling/Go Snorkeling.md', null);
-        ok('TC-6 folder-style promoted card (5 parts) → trip-card', r.context === 'trip-card' && r.slug === 'hawaii', JSON.stringify(r));
-    }
-
-    // trip-atlas vs trip-section branch depends on frontmatter type — stub RenderSafe.page + metadataCache.
-    function withFrontmatterType(type, fn) {
-        const savedRS = global.customJS.RenderSafe;
-        const savedMC = global.app.metadataCache;
-        global.customJS.RenderSafe = { page: () => ({ file: { path: 'x' } }) };
-        global.app.metadataCache = { getFileCache: () => ({ frontmatter: type ? { type } : {} }) };
-        try { return fn(); } finally { global.customJS.RenderSafe = savedRS; global.app.metadataCache = savedMC; }
-    }
-    ok('TC-7 <slug>/<file>.md with frontmatter type=trip → trip-atlas',
-        withFrontmatterType('trip', () => nav.detectContext('spice/trips/hawaii/Atlas.md', {}).context) === 'trip-atlas');
-    ok('TC-8 <slug>/<file>.md with non-trip frontmatter → trip-section',
-        withFrontmatterType('note', () => nav.detectContext('spice/trips/hawaii/Places.md', {}).context) === 'trip-section');
 
     // ---------- TripSectionKinds registry (behavioral) ----------
     const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
@@ -168,30 +150,6 @@ function makeDv(embed, currentVal) {
     ok('TSK-6 links kind registered at index 5 with label + icon',
         tsk.order('links') === 5 && tsk.labelFor('links') === 'Links'
         && /^<svg/.test(tsk.iconFor('links')));
-
-    // ---------- TripNavButtons launcher partition (behavioral) ----------
-    const navP = new TripNavButtons();
-    navP._siblingsFor = () => ([
-        { basename: "Dave's Wedding",           path: "spice/trips/daves-wedding/Dave's Wedding.md",           fm: { type: "trip", name: "Dave's Wedding" } },
-        { basename: "Dave's Wedding — Notes",   path: "spice/trips/daves-wedding/Dave's Wedding — Notes.md",   fm: { type: "trip-section", section: "Notes",   section_kind: "notes" } },
-        { basename: "Dave's Wedding — Flights", path: "spice/trips/daves-wedding/Dave's Wedding — Flights.md", fm: { type: "trip-section", section: "Flights", section_kind: "flights" } },
-    ]);
-    navP._boardPathIfExists = () => null;
-    {
-        const ctx = { context: "trip-section", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
-        const { primary, entries } = navP._tripMenuEntries(ctx, "spice/trips/daves-wedding/Dave's Wedding — Flights.md");
-        ok('NAV-1 primary points at the atlas', primary && primary.path.endsWith("Dave's Wedding.md"));
-        ok('NAV-2 menu excludes current + orders by section_kind + ends with New Section',
-            entries.map(e => e.label || e.action).join('|') === 'Notes|new-section',
-            JSON.stringify(entries.map(e => e.label || e.action)));
-    }
-    {
-        const ctxA = { context: "trip-atlas", slug: "daves-wedding", tripDir: "spice/trips/daves-wedding" };
-        const { primary, entries } = navP._tripMenuEntries(ctxA, "spice/trips/daves-wedding/Dave's Wedding.md");
-        ok('NAV-3 on atlas: no primary, menu lists both sections + New Section',
-            primary === null && entries.map(e => e.label || e.action).join('|') === 'Flights|Notes|new-section',
-            JSON.stringify([primary, entries.map(e => e.label || e.action)]));
-    }
 
     // ---------- create-flow naming + frontmatter (behavioral) ----------
     {
@@ -243,7 +201,6 @@ function makeDv(embed, currentVal) {
     // ---------- render() cold-load guards ----------
     const widgets = [
         { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },
-        { name: 'TripNavButtons',    path: 'platform/blueprints/trips/helpers/trip-nav-buttons.js' },
         { name: 'TripSectionsCards', path: 'platform/blueprints/trips/helpers/trip-sections-cards.js' },
     ];
     const variants = [
