@@ -9,7 +9,10 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.208.0` (closed 2026-07-09)
+- **Workshop version:** `0.213.0` (closed 2026-07-11)
+- **Most recent cycle:** Journal multi-entry — the `journal` blueprint (subscribed in `ero-sauce` + `headspace-sauce`) moves from one flat note/day to a 3-tier shape mirroring `sticky-notes`: global hub (`spice/journal/Journal.md`, Days | All tabs + `doc-search`), per-day day-hub (`Journal-Day-YYYY-MM-DD.md`), timestamped leaf entries (`Journal-YYYY-MM-DD-HH-mm-ss.md`, optional title prompt, click-to-rename banner). New types `journal-hub`/`journal-day`/`journal-entry` replace the single `journal` type. New install-time migration `applyJournalMultiEntryMigration` (structural, mirrors the shape of `applyScratchToStickyNotesMigration` but per-file gated, no whole-tree rename needed since `spice/journal` root is unchanged) converts existing flat `Journal-YYYY-MM-DD.md` notes into the day-folder shape on next install — deployed + verified live on `headspace-sauce` (dozens of real May/June/July entries migrated cleanly, zero flat notes remaining) and `ero-sauce` (no entries existed, correct no-op); `accuris-sauce` correctly untouched (never subscribed). journal 0.3.0 → 0.4.0. New `run-journal-multi-entry.js` harness (20 asserts: JournalHubCards/JournalDayList pure methods + 4 migration scenarios) + rewritten `run-journal-chrome-bar.js` (10 asserts, 3-surface dispatch). Full brainstorm → design → plan → subagent-driven implementation (8 tasks, each with a combined spec+quality review pass) → PR #407 → auto-released v0.212.0 (PR #408) → tap PR #370 auto-merged; a concurrent unrelated cycle landed moments later (v0.213.0, PR #410) before deploy, so brew/consumer-vault deploy targeted 0.213.0 (cumulative, includes journal 0.4.0). See `Docs/plans/2026-07-11-journal-multi-entry-result.md`.
+
+- **Workshop version (previous):** `0.208.0` (closed 2026-07-09)
 - **Most recent cycle:** Recurrence picker — replaces the task dialog's free-text "Repeats" grammar field (a mediocre UX per direct user feedback on the live v0.207.0 dialog) with a structured picker: a frequency dropdown (Doesn't repeat / Every day / Weekly / Every weekday / Monthly) plus contextual controls (Sun–Sat day-toggle buttons + an "every N week(s)" stepper for Weekly; a day-of-month field for Monthly). The stored `recurrence` value is UNCHANGED — still the same `RecurrenceParser` grammar string; the picker is purely a front-end grammar builder. New public `RecurrenceParser.describe(grammar)` reverse-maps a grammar string for edit-mode hydration; new `TaskDialog._composeRecurrenceGrammar`/`_recurrenceStateFromDescribe`/`_recurrencePickerValid` replace the deleted free-text `_recurrenceValidity` path. Zero schema change, zero migration, zero risk to any vault's existing recurring tasks. Deferred by explicit user instruction to a later cycle: a hover-revealed subtask open/done-count pill on task rows, and a hover-revealed inline Edit button (replacing "⋯ → Edit"). Executed directly (TDD, no subagent dispatch — five small pure-function tasks in two files). Survived a 3-round BEHIND treadmill. PR #388 → auto-released v0.208.0 (PR #390) → tap auto-merged → `brew upgrade` → deployed + verified live on all 3 vaults. See `Docs/plans/2026-07-09-recurrence-picker-result.md`.
 
 - **Workshop version (previous):** `0.207.0` (closed 2026-07-09)
@@ -166,7 +169,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | `boards` | 0.2.1 | — | `spice/boards/` |
 | `cowork` | 0.39.0 | — | `spice/cowork/` |
 | `daily` | 0.13.1 | `/daily` | `spice/daily/` |
-| `journal` | 0.2.0 | — | `spice/journal/` |
+| `journal` | 0.4.0 | `/journal` | `spice/journal/` |
 | `meetings` | 0.8.0 | `/meetings` | `spice/meetings/` |
 | `people` | 0.6.0 | — | `spice/people/` |
 | `products` | 0.3.0 | — | `spice/products/` |
