@@ -40,7 +40,9 @@
     "TripNavButtons",
     "TripSectionsCards",
     "TripsChromeBar",
-    "TripEntryList"
+    "TripEntryList",
+    "TripLinksPanel",
+    "TripLinksManager"
   ],
   "files": [
     {
@@ -66,6 +68,10 @@
     {
       "source": "templates/Trip Notes.md",
       "dest": "{{templates_path}}/Template, Trip Notes.md"
+    },
+    {
+      "source": "templates/Trip Links.md",
+      "dest": "{{templates_path}}/Template, Trip Links.md"
     },
     {
       "source": "templates/Trip Board.md",
@@ -98,6 +104,14 @@
     {
       "source": "helpers/trip-entry-list.js",
       "dest": "{{scripts_path}}/trips/trip-entry-list.js"
+    },
+    {
+      "source": "helpers/trip-links-panel.js",
+      "dest": "{{scripts_path}}/trips/trip-links-panel.js"
+    },
+    {
+      "source": "helpers/trip-links-manager.js",
+      "dest": "{{scripts_path}}/trips/trip-links-manager.js"
     },
     {
       "source": "content/Trips.md",
