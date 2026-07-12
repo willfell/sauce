@@ -305,6 +305,7 @@ class ActivityFeed {
         groupOrderBottom: Array.isArray(safeOpts.groupOrderBottom) ? safeOpts.groupOrderBottom : null,
         defaultClosed: Array.isArray(safeOpts.defaultClosed) ? safeOpts.defaultClosed : null,
         ascendingGroups: Array.isArray(safeOpts.ascendingGroups) ? safeOpts.ascendingGroups : null,
+        collapseThreshold: safeOpts.collapseThreshold,
         // v0.5.0 additive opts
         groupLabels: (safeOpts.groupLabels && typeof safeOpts.groupLabels === "object" && !Array.isArray(safeOpts.groupLabels)) ? safeOpts.groupLabels : null,
         groupPreviewBuilder: (typeof safeOpts.groupPreviewBuilder === "function") ? safeOpts.groupPreviewBuilder : null,
@@ -571,6 +572,13 @@ class ActivityFeed {
     const groupOrder = Array.isArray(safe.groupOrder) ? safe.groupOrder.map(String) : [];     // NEW v0.4.0
     const groupOrderBottom = Array.isArray(safe.groupOrderBottom) ? safe.groupOrderBottom.map(String) : [];  // NEW v0.4.0
     const defaultClosed = new Set(Array.isArray(safe.defaultClosed) ? safe.defaultClosed.map(String) : []);  // NEW v0.4.0
+    // NEW — count-based auto-collapse (2026-07-11 daily/home audit cycle). Any
+    // group exceeding this many items collapses by default, on top of (not
+    // instead of) the static defaultClosed list — the static list still forces
+    // a group closed regardless of count. Default 3 when omitted.
+    const collapseThreshold = (typeof safe.collapseThreshold === "number" && safe.collapseThreshold >= 0)
+      ? safe.collapseThreshold
+      : 3;
     // NEW additive opt — group keys whose rows render OLDEST-first (ascending
     // created_at) instead of inheriting the global newest-first sort. Opt-in:
     // default empty preserves the descending order for every existing caller.
@@ -666,7 +674,7 @@ class ActivityFeed {
     for (const t of sortedKeys) {
       const groupPages = groups.get(t);
       const color = (colorByType && colorByType[t]) ? colorByType[t] : "var(--color-base-50)";
-      const isClosed = defaultClosed.has(t);
+      const isClosed = defaultClosed.has(t) || (Array.isArray(groupPages) && groupPages.length > collapseThreshold);
 
       if (framed) {
         this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle, groupState });

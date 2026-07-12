@@ -21,6 +21,7 @@ class ChromeBar {
       compass: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>`,
       chevronDown: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
       moreHorizontal: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+      home: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     };
   }
 
@@ -161,6 +162,7 @@ class ChromeBar {
       },
       dispatch: (dv, ctx, id) => { try { config.dispatch(dv, ctx, id); } catch (_e) { /* never throw */ } },
       openNavTarget: (p, dv) => self.openNavTarget(p, dv),
+      dayNav: (typeof config.dayNav === "function") ? config.dayNav : undefined,
       rootClass: config.rootClass,
       btnClass: config.btnClass,
     };
@@ -202,42 +204,73 @@ class ChromeBar {
     const bar = root.createEl("div");
     bar.style.cssText = "display: flex; align-items: center; gap: 10px; flex-wrap: wrap;";
 
-    // ── LEFT — breadcrumb crumbs ──────────────────────────────────────────────
-    let segments = [];
-    try {
-      if (customJS && customJS.Breadcrumb && typeof customJS.Breadcrumb.buildSegments === "function") {
-        segments = await customJS.Breadcrumb.buildSegments(dv);
+    // ── LEFT — day-nav override, else breadcrumb crumbs ──────────────────────
+    if (typeof adapter.dayNav === "function") {
+      let nav = null;
+      try { nav = await adapter.dayNav(dv); } catch (_e) { nav = null; }
+      if (nav) {
+        const left = bar.createEl("div", { cls: "chrome-bar-day-nav" });
+        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; gap: 6px; min-width: 0;";
+        const mkSide = (label, targetPath, cls) => {
+          const el = left.createEl(targetPath ? "a" : "span", { cls: "chrome-bar-day-nav-" + cls });
+          el.innerHTML = label || "—";
+          el.style.cssText = targetPath
+            ? "cursor: pointer; text-decoration: none; color: var(--text-muted);"
+            : "opacity: 0.4;";
+          if (targetPath) el.onclick = (e) => { if (e && e.preventDefault) e.preventDefault(); adapter.openNavTarget(targetPath, dv); };
+          return el;
+        };
+        const prevEl = mkSide(nav.prevLabel, nav.prevPath, "prev");
+        const sep = left.createEl("span");
+        sep.innerHTML = "&rarr;";
+        sep.style.cssText = "opacity: 0.5;";
+        const nextEl = mkSide(nav.nextLabel, nav.nextPath, "next");
+        left.innerHTML = (prevEl.innerHTML || "") + (sep.innerHTML || "") + (nextEl.innerHTML || "");
       }
-    } catch (_e) { segments = []; }
-    if (Array.isArray(segments) && segments.length > 0) {
-      const left = bar.createEl("div", { cls: "project-breadcrumb" });
-      left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;";
-      segments.forEach((seg, i) => {
-        if (i > 0) {
-          const sep = left.createEl("span");
-          sep.textContent = " / ";
-          sep.style.cssText = "opacity: 0.5; margin: 0 2px;";
+    } else {
+      let segments = [];
+      try {
+        if (customJS && customJS.Breadcrumb && typeof customJS.Breadcrumb.buildSegments === "function") {
+          segments = await customJS.Breadcrumb.buildSegments(dv);
         }
-        if (seg && seg.link) {
-          const a = left.createEl("a");
-          a.textContent = seg.label;
-          a.style.cssText = "color: var(--text-muted); cursor: pointer; text-decoration: none;";
-          const target = seg.link;
-          a.onclick = (e) => {
-            if (e && e.preventDefault) e.preventDefault();
-            adapter.openNavTarget(target, dv);
-          };
-        } else {
-          const cur = left.createEl("span");
-          cur.textContent = (seg && seg.label) || "";
-          cur.style.cssText = "color: var(--text-muted);";
-        }
-      });
+      } catch (_e) { segments = []; }
+      if (Array.isArray(segments) && segments.length > 0) {
+        const left = bar.createEl("div", { cls: "project-breadcrumb" });
+        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;";
+        segments.forEach((seg, i) => {
+          if (i > 0) {
+            const sep = left.createEl("span");
+            sep.textContent = " / ";
+            sep.style.cssText = "opacity: 0.5; margin: 0 2px;";
+          }
+          if (seg && seg.link) {
+            const a = left.createEl("a");
+            a.textContent = seg.label;
+            a.style.cssText = "color: var(--text-muted); cursor: pointer; text-decoration: none;";
+            const target = seg.link;
+            a.onclick = (e) => {
+              if (e && e.preventDefault) e.preventDefault();
+              adapter.openNavTarget(target, dv);
+            };
+          } else {
+            const cur = left.createEl("span");
+            cur.textContent = (seg && seg.label) || "";
+            cur.style.cssText = "color: var(--text-muted);";
+          }
+        });
+      }
     }
 
     // ── RIGHT — controls (Go ▾ · primary · ⋯), pushed right via margin-left:auto ─
     const right = bar.createEl("div");
     right.style.cssText = "margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
+
+    // 0. Home — icon-only, persistent link back to the Home command center.
+    this.renderChromeButton(right, {
+      cls: adapter.btnClass("home"),
+      icon: ICON.home,
+      onClick: () => adapter.openNavTarget("spice/home/Home.md", dv),
+    });
 
     // 1. Go ▾ launcher — icon-only (compass + a small caret), no "Go" text.
     const goIcon = `<span style="display:inline-flex;align-items:center;gap:2px;">${ICON.compass}${ICON.chevronDown}</span>`;
@@ -285,5 +318,10 @@ class ChromeBar {
         },
       });
     }
+
+    // ── Trailing hairline divider — always rendered, last element of root,
+    // owns the nav-to-content boundary so no adapter/blueprint needs its own.
+    const divider = root.createEl("div", { cls: "chrome-bar-divider" });
+    divider.style.cssText = "border-top: 1px solid var(--background-modifier-border-hover); margin-top: 10px;";
   }
 }

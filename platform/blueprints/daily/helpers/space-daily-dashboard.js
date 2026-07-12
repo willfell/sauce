@@ -246,6 +246,7 @@ class SpaceDailyDashboard {
       const s = String(t);
       if (s === "project" || s.startsWith("project-")) return "project";
       if (s === "trip" || s.startsWith("trip-")) return "trip";
+      if (s === "wiki-page" || s === "wiki-section") return "wiki";
       return s;
     };
     const byBlueprint = {};
@@ -550,17 +551,20 @@ class SpaceDailyDashboard {
       framed: true,
       bucketRules: [
         { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
+        { bucketKey: "wiki", match: (t) => t === "wiki-page" || t === "wiki-section" },
       ],
-      groupOrder: ["cowork", "project", "kanban", "trip"],
+      groupOrder: ["cowork", "project", "wiki", "kanban", "trip"],
       groupOrderBottom: ["sticky-note"],
-      // Sticky-note group now opens by default (was defaultClosed) and renders
-      // oldest-first so the day's sticky notes read in the order they were
-      // taken. See the "Daily Hub Sticky Notes" card.
+      // Sticky-note renders oldest-first so the day's sticky notes read in
+      // the order they were taken. Open/closed-by-default now follows the
+      // SAME count-based collapseThreshold every other group uses (a prior
+      // task in this same cycle added activity-feed's collapseThreshold
+      // opt, default 3) — no more special-casing here.
       defaultClosed: [],
       ascendingGroups: ["sticky-note"],
       // Render the sticky-note group header as "Sticky Notes" instead of the
       // raw type id "sticky-note" (activity-feed groupLabels opt).
-      groupLabels: { "sticky-note": "Sticky Notes" },
+      groupLabels: { "sticky-note": "Sticky Notes", "wiki": "Wiki" },
       colorByType: this._BLUEPRINT_COLORS,
       rollUpRoots: this._buildRollupRules(dv),
       metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
@@ -617,11 +621,26 @@ class SpaceDailyDashboard {
     // v0.6.0 (v0.65.0 cowork-scheduling-cycle): add 6 cowork run-note types so
     // scheduled-job atomic notes surface under their own groups in the
     // "Today's Activity" panel (groupBy: "blueprint" already on).
+    //
+    // v0.14.0 (2026-07-11 daily/home audit cycle): wiki-page/wiki-section/
+    // doc-note added — wiki edits and project docs were previously INVISIBLE
+    // to Activity (allowlist filter runs before rollup logic, so an
+    // un-listed type never enters the query at all, not even via rollup).
+    // doc-note needs no new rollup rule: it already lives under
+    // spice/projects/<slug>/..., which the existing project rollup rule
+    // (see _ROLLUP_RULES below) already matches by path, so it folds into
+    // its parent project's hub card automatically once selectable.
+    //
+    // NOTE for future blueprint authors: any NEW per-day auto-created "hub"
+    // note type (the sticky-day/to-do shape) MUST be excluded here — see the
+    // v0.5.2/v0.5.3 comments above for precedent. Audited 2026-07-11: no
+    // such gap exists today across any subscribed blueprint.
     return [
       "sticky-note", "journal",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice",
       "kanban", "board-card",
+      "wiki-page", "wiki-section", "doc-note",
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
       "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
     ];
@@ -642,6 +661,7 @@ class SpaceDailyDashboard {
       person:    "var(--color-purple)",
       team:      "var(--color-pink)",
       product:   "var(--color-yellow)",
+      wiki:      "var(--color-yellow)",
       trip:      "var(--color-cyan)",
       journal:   "var(--color-red)",
       budget:    "var(--color-green)",
