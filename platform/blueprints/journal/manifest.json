@@ -59,24 +59,18 @@
             "label": "lit:Journal"
           },
           {
-            "label": "path:3"
-          },
-          {
             "label": "path:4",
             "link": "spice/journal/{path:2}/{path:3}/{path:4}/Journal-Day-{path:4}.md"
           }
         ],
         "current": {
-          "label": "fm:time|file:basename"
+          "label": "fm:title|file:basename"
         }
       },
       "journal-day": {
         "ancestors": [
           {
             "label": "lit:Journal"
-          },
-          {
-            "label": "path:3"
           }
         ],
         "current": {

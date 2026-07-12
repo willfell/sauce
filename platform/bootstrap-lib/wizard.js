@@ -68,6 +68,9 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // fresh-vault bootstrap doesn't skip project with
                      // "depends on doc-search ... not subscribed". Same class
                      // of bug as the breadcrumb entry above.
+    "nav-buttons",   // moved up from the tail of this list — chrome-bar (added
+                     // below) depends on nav-buttons, so it must precede
+                     // chrome-bar for deps-first install ordering.
     "menu-popover",  // <this release> — chrome-bar (pre-included below) depends
                      // on menu-popover >=0.2.0; pre-include so fresh-vault
                      // bootstrap doesn't skip chrome-bar with "depends on
@@ -77,7 +80,11 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // set) gains a depends_on chrome-bar >=0.3.0; pre-include
                      // so fresh-vault bootstrap doesn't skip task-entity with
                      // "depends on chrome-bar ... not subscribed". Same class
-                     // of bug as the doc-search entry above. Must precede
+                     // of bug as the doc-search entry above. chrome-bar itself
+                     // depends on nav-buttons, menu-popover, breadcrumb,
+                     // render-safe, and icons — all four of the latter are
+                     // already earlier in this list; nav-buttons + menu-popover
+                     // were moved/added directly above. Must precede
                      // task-entity for deps-first install ordering.
     "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
                      // blueprint set) gains a depends_on task-entity >=0.1.0 in
@@ -86,7 +93,6 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // skip to-do with "depends on task-entity ... not
                      // subscribed". Same class of bug as the breadcrumb entry
                      // above.
-    "nav-buttons",
     "cards",
     "accent-button",
     "styling",
