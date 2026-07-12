@@ -223,6 +223,31 @@ function makeDv(embed, currentVal) {
             JSON.stringify(rows2.map(r => [r.group, r.title])));
     }
 
+    // ---------- Trip Board Card template: chrome + breadcrumb frontmatter ----------
+    {
+        const cardTpl = fs.readFileSync(
+            path.join(__dirname, '..', 'blueprints', 'trips', 'templates', 'Trip Board Card.md'), 'utf8');
+        ok('TBC-1 card template mounts TripsChromeBar block',
+            cardTpl.includes('class: "TripsChromeBar"'), cardTpl);
+        ok('TBC-2 card template frontmatter declares type: trip-board-card',
+            /type:\s*trip-board-card/.test(cardTpl), cardTpl);
+        ok('TBC-3 card template writes trip + trip_slug frontmatter keys (for breadcrumb ancestors)',
+            /^trip:/m.test(cardTpl) && /^trip_slug:/m.test(cardTpl), cardTpl);
+    }
+
+    // ---------- manifest registers trip-board-card breadcrumb type ----------
+    {
+        const man = JSON.parse(fs.readFileSync(
+            path.join(__dirname, '..', 'blueprints', 'trips', 'manifest.json'), 'utf8'));
+        const t = man.breadcrumb && man.breadcrumb.types && man.breadcrumb.types['trip-board-card'];
+        ok('TBC-4 manifest breadcrumb.types["trip-board-card"] exists with 2 ancestors',
+            !!t && Array.isArray(t.ancestors) && t.ancestors.length === 2, JSON.stringify(t));
+        ok('TBC-5 trip-board-card ancestors resolve via fm:trip / fm:trip_slug',
+            !!t && t.ancestors[1] && t.ancestors[1].label === 'fm:trip'
+            && /\{fm:trip_slug\}/.test(t.ancestors[1].link) && /\{fm:trip\}/.test(t.ancestors[1].link),
+            JSON.stringify(t));
+    }
+
     // ---------- render() cold-load guards ----------
     const widgets = [
         { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },

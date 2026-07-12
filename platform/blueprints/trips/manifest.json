@@ -165,6 +165,21 @@
         "current": {
           "label": "fm:section|file:basename"
         }
+      },
+      "trip-board-card": {
+        "ancestors": [
+          {
+            "label": "lit:Trips",
+            "link": "spice/trips/Trips.md"
+          },
+          {
+            "label": "fm:trip",
+            "link": "spice/trips/{fm:trip_slug}/{fm:trip}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
       }
     }
   },
