@@ -24,6 +24,7 @@ function makeMoment(str, fmt, strict) {
       const mo = MONTHS[date.getUTCMonth()];
       const day = date.getUTCDate();
       if (f === 'ddd, MMM D') return `${wd}, ${mo} ${day}`;
+      if (f === 'MMM D') return `${mo} ${day}`;
       if (f === 'YYYY-MM-DD') return str;
       return str;
     },
@@ -77,6 +78,14 @@ const ok = (n, c) => { results.push([n, !!c]); console.log(`  ${c ? 'PASS' : 'FA
   const cfg = inst._config();
   const spec = cfg.surfaceSpec({});
   ok('DCB-5 surfaceSpec has no primary and empty overflow', spec.primary === null && Array.isArray(spec.overflow) && spec.overflow.length === 0);
+}
+// DCB-6: resolveDayNav — currentLabel formats the CURRENT day (not prev/next),
+// so the bar can show prev / CURRENT / next instead of two dates with no
+// indication of which one is "today" (2026-07-11 user report).
+{
+  const dates = ['2026-07-07', '2026-07-09'];
+  const nav = DailyChromeBar.resolveDayNav('2026-07-08', dates);
+  ok('DCB-6 currentLabel formats the CURRENT date (Jul 8), distinct from prev/next', nav.currentLabel === 'Jul 8');
 }
 
 const failed = results.filter(([, c]) => !c);

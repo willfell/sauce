@@ -211,13 +211,15 @@ async function cbDayNavCase() {
     Breadcrumb: { buildSegments: async () => ([{ label: 'SHOULD NOT RENDER', link: 'x.md' }]) },
     MenuPopover: { open: () => makeEl('div') },
   };
+  const opened = [];
   const adapter = {
     resolve: () => ({ ctx: {}, spec: { primary: null, overflow: [] } }),
     navEntries: async () => ([]),
     dispatch: () => {},
-    openNavTarget: () => {},
+    openNavTarget: (p) => opened.push(p),
     dayNav: () => ({
       prevLabel: 'Tue, Jul 7', prevPath: 'spice/daily/2026-07-07.md',
+      currentLabel: 'Jul 8',
       nextLabel: 'Thu, Jul 9', nextPath: null, // no later daily note → inert
     }),
     rootClass: 'x-root',
@@ -229,12 +231,23 @@ async function cbDayNavCase() {
   const desc = allDescendants(container);
   ok('CB-DAYNAV-1 breadcrumb is NOT rendered when adapter.dayNav is present',
     !desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
-  const dayNavEl = desc.find((e) => e.className && String(e.className).includes('chrome-bar-day-nav'));
-  ok('CB-DAYNAV-2 renders a day-nav element with both labels', !!dayNavEl
-    && String(dayNavEl.innerHTML || '').includes('Tue, Jul 7')
-    && String(dayNavEl.innerHTML || '').includes('Thu, Jul 9'));
+  const dayNavEl = desc.find((e) => e.className && e.className === 'chrome-bar-day-nav');
+  const dayNavHtml = dayNavEl ? allDescendants(dayNavEl).map((e) => e.innerHTML || e.textContent || '').join('|') : '';
+  ok('CB-DAYNAV-2 renders a day-nav element with prev/current/next labels', !!dayNavEl
+    && dayNavHtml.includes('Tue, Jul 7')
+    && dayNavHtml.includes('Jul 8')
+    && dayNavHtml.includes('Thu, Jul 9'));
   const nextSpan = allDescendants(dayNavEl).find((e) => e.className && String(e.className).includes('chrome-bar-day-nav-next'));
   ok('CB-DAYNAV-3 a null nextPath renders an inert (no onclick) next control', !!nextSpan && typeof nextSpan.onclick !== 'function');
+  const prevLink = allDescendants(dayNavEl).find((e) => e.className && String(e.className).includes('chrome-bar-day-nav-prev'));
+  ok('CB-DAYNAV-4 the prev control keeps a real, functioning onclick handler (regression: a stray innerHTML flatten used to wipe this)',
+    !!prevLink && typeof prevLink.onclick === 'function');
+  if (prevLink && typeof prevLink.onclick === 'function') prevLink.onclick({ preventDefault() {} });
+  ok('CB-DAYNAV-5 clicking prev actually calls adapter.openNavTarget with its path',
+    opened.length === 1 && opened[0] === 'spice/daily/2026-07-07.md');
+  const curEl = allDescendants(dayNavEl).find((e) => e.className && String(e.className).includes('chrome-bar-day-nav-current'));
+  ok('CB-DAYNAV-6 the current day renders as its own bold, non-clickable segment', !!curEl
+    && String(curEl.textContent || '') === 'Jul 8' && typeof curEl.onclick !== 'function');
   global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
 }
 

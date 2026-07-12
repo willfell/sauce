@@ -164,7 +164,7 @@
       "id": "wiki-hub",
       "label": "Wiki",
       "icon": "library",
-      "order": 135,
+      "order": 65,
       "action": {
         "type": "openLink",
         "target": "{{module_directory}}/Wiki.md"
