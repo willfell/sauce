@@ -38,17 +38,36 @@ class TripsChromeBar {
           path: (page.file && page.file.path) || "",
           tripSlug: page.trip_slug || null,
           tripName: page.name || null,
+          sectionKind: (page && page.section_kind) || null,
         };
       },
       surfaceSpec: (ctx) => {
         if (ctx.context === "trips-hub") {
           return { primary: { id: "new-trip", label: "New Trip", icon: ICON.plus }, overflow: [], leaf: false };
         }
-        const newSection = { id: "new-section", label: "New Section", icon: ICON.plus };
         if (ctx.context === "trip") {
-          return { primary: null, overflow: [newSection], leaf: false };
+          return {
+            primary: { id: "add-link", label: "Add link", icon: ICON.plus },
+            overflow: [{ id: "manage-links", label: "Manage links" }, { id: "new-section", label: "New Section" }],
+            leaf: false,
+          };
         }
-        // trip-section / trip-board-card — New Section is atlas-only
+        if (ctx.context === "trip-section") {
+          switch (ctx.sectionKind) {
+            case "flights":
+              return { primary: { id: "add-flight", label: "Add flight", icon: ICON.plus }, overflow: [], leaf: true };
+            case "stay":
+              return { primary: { id: "add-stay", label: "Add stay", icon: ICON.plus }, overflow: [], leaf: true };
+            case "packing-list":
+              return { primary: { id: "add-packing-item", label: "Add item", icon: ICON.plus }, overflow: [{ id: "add-packing-category", label: "Add category" }], leaf: true };
+            case "to-do":
+              return { primary: { id: "add-task", label: "Add task", icon: ICON.plus }, overflow: [], leaf: true };
+            default:
+              // notes / custom / null — read-only leaf.
+              return { primary: null, overflow: [], leaf: true };
+          }
+        }
+        // trip-board-card — bare leaf.
         return { primary: null, overflow: [], leaf: true };
       },
       // Returns the underlying promise chain (harmless for production onClick
@@ -90,6 +109,49 @@ class TripsChromeBar {
               }
             });
           });
+        }
+        // Per-section Add actions. TripEntryList is stored as an INSTANCE in the
+        // customJS registry; its field-spec statics live on the class, reachable
+        // via `.constructor`. Each case guards its helper — never throws.
+        const TEL = customJS && customJS.TripEntryList;
+        if (id === "add-flight") {
+          if (TEL && typeof TEL.openAdd === "function") return TEL.openAdd(dv, { key: "flights", kind: "flights", fields: TEL.constructor._flightFields() });
+          return;
+        }
+        if (id === "add-stay") {
+          if (TEL && typeof TEL.openAdd === "function") return TEL.openAdd(dv, { key: "stays", kind: "stay", fields: TEL.constructor._stayFields() });
+          return;
+        }
+        if (id === "add-packing-item") {
+          if (TEL && typeof TEL.openAdd === "function") {
+            let cats = [];
+            try {
+              const cur = dv && typeof dv.current === "function" ? dv.current() : null;
+              const items = (cur && cur.packing_items) || [];
+              for (const it of items) { const c = it && it.category; if (c && !cats.includes(c)) cats.push(c); }
+            } catch (_e) { cats = []; }
+            return TEL.openAdd(dv, { key: "packing_items", kind: "packing", group: true, checkbox: true, fields: TEL.constructor._packingItemFields(cats) });
+          }
+          return;
+        }
+        if (id === "add-packing-category") {
+          if (TEL && typeof TEL.openAddCategory === "function") return TEL.openAddCategory(dv, { key: "packing_items" });
+          return;
+        }
+        if (id === "add-link") {
+          const TL = customJS && customJS.TripLinks;
+          if (TL && typeof TL.openAdd === "function") return TL.openAdd(dv);
+          return;
+        }
+        if (id === "manage-links") {
+          const TL = customJS && customJS.TripLinks;
+          if (TL && typeof TL.openManage === "function") return TL.openManage(dv);
+          return;
+        }
+        if (id === "add-task") {
+          const TD = customJS && customJS.TaskDialog;
+          if (TD && typeof TD.open === "function") return TD.open({ surface: "trip", trip: { name: ctx.tripName, slug: ctx.tripSlug } });
+          return;
         }
       },
       // The Go ▾ "This trip" section: Trips Hub, the trip's own atlas (unless we ARE

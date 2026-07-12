@@ -311,6 +311,12 @@ class TaskEntity {
             || (moment && moment.format ? moment.format('YYYY-MM-DDTHH:mm:ssZ') : '');
         const project = (p.project && p.project.name) ? `[[${p.project.name}]]` : '';
         const projectSlug = (p.project && p.project.slug) ? p.project.slug : '';
+        // Trip linkage — PARALLEL and ADDITIVE to project (same shape/semantics):
+        // `trip` is a Dataview LINK-valued display field (`[[Name]]`), `trip_slug`
+        // a plain-string filter key. Empty (not omitted) when no trip is given so a
+        // later edit is a simple in-place field write, exactly like project.
+        const trip = (p.trip && p.trip.name) ? `[[${p.trip.name}]]` : '';
+        const tripSlug = (p.trip && p.trip.slug) ? String(p.trip.slug) : '';
         // Structured links (FIX 5) — an array of markdown link STRINGS that
         // TaskNoteView renders INSIDE the card (a note link `[[Note]]`, a web link
         // `[label](url)` / `<url>`). Normalized to a clean string array: coerce
@@ -328,6 +334,8 @@ class TaskEntity {
             priority: p.priority || '',
             project: project,
             project_slug: projectSlug,
+            trip: trip,
+            trip_slug: tripSlug,
             source: p.source || '',
             source_note: p.source_note || '',
             parent_task: p.parent_task || '',
@@ -359,6 +367,11 @@ class TaskEntity {
             priority: p.priority || '',
             project: p.project != null ? p.project : null,
             project_slug: p.project_slug != null ? p.project_slug : null,
+            // Trip linkage — parallel to project. `trip` is a `[[Name]]` LINK value,
+            // so coerce it to a comparable basename via _linkText (empty when absent);
+            // `trip_slug` stays a plain trimmed string filter key (empty when absent).
+            trip: TaskEntity._linkText(p.trip),
+            trip_slug: p.trip_slug ? String(p.trip_slug).trim() : '',
             source: p.source != null ? p.source : null,
             // Dataview surfaces a `[[Meeting]]` frontmatter value as a Link OBJECT,
             // not a string. Coerce to a comparable basename so the meeting task-list

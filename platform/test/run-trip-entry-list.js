@@ -81,5 +81,56 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
         r.changed === true && r.list.some(e => e.category === "Toiletries"), JSON.stringify(r));
 }
 
+// ---------- _inputTypeFor ----------
+{
+    ok('TYP-1 _inputTypeFor defaults to text', TripEntryList._inputTypeFor({ name: "x" }) === "text");
+    ok('TYP-2 _inputTypeFor passes through date', TripEntryList._inputTypeFor({ name: "x", type: "date" }) === "date");
+    ok('TYP-3 _inputTypeFor passes through time', TripEntryList._inputTypeFor({ name: "x", type: "time" }) === "time");
+    ok('TYP-4 _inputTypeFor maps link -> url', TripEntryList._inputTypeFor({ name: "x", type: "link" }) === "url");
+    ok('TYP-5 _inputTypeFor passes through select', TripEntryList._inputTypeFor({ name: "x", type: "select" }) === "select");
+}
+
+// ---------- _dateCss ----------
+{
+    const css = TripEntryList._dateCss();
+    ok('CSS-1 _dateCss includes iOS-safe appearance override',
+        css.includes("-webkit-appearance:none") && css.includes("max-width:100%"), css);
+}
+
+// ---------- _groupByDirection ----------
+{
+    const g = TripEntryList._groupByDirection([{ direction: "Return", airline: "DL" }, { direction: "Outbound", airline: "UA" }, { airline: "AA" }]);
+    ok('GRP-1 groups Outbound, Return, Other in order; empties dropped',
+        g.map(x => x.label).join(",") === "Outbound,Return,Other", JSON.stringify(g.map(x => x.label)));
+    ok('GRP-2 preserves input order within a group', g[0].entries[0].airline === "UA", JSON.stringify(g[0]));
+}
+
+// ---------- _packingItemFields ----------
+{
+    const spec = TripEntryList._packingItemFields(["Clothing", "Toiletries"]);
+    ok('PKF-1 single category field', spec.filter(f => f.name === "category").length === 1, JSON.stringify(spec));
+    const cat = spec.find(f => f.name === "category");
+    ok('PKF-2 category is a select sourced from existing categories, first auto',
+        cat.type === "select" && cat.options[0] === "Clothing", JSON.stringify(cat));
+    ok('PKF-3 has an item text field', spec.some(f => f.name === "item" && (f.type === "text" || !f.type)), JSON.stringify(spec));
+}
+
+// ---------- per-section field specs ----------
+{
+    const ff = TripEntryList._flightFields();
+    ok('FLD-1 flight fields carry direction select', ff.some(f => f.name === "direction" && f.type === "select"), JSON.stringify(ff));
+    ok('FLD-2 flight fields carry depart_date date', ff.some(f => f.name === "depart_date" && f.type === "date"));
+    ok('FLD-3 flight fields carry depart_time time', ff.some(f => f.name === "depart_time" && f.type === "time"));
+    ok('FLD-4 flight fields carry link', ff.some(f => f.name === "link" && f.type === "link"));
+    const sf = TripEntryList._stayFields();
+    ok('FLD-5 stay fields carry check_in date + link', sf.some(f => f.name === "check_in" && f.type === "date") && sf.some(f => f.name === "link" && f.type === "link"), JSON.stringify(sf));
+}
+
+// ---------- _fmtDateTime ----------
+{
+    ok('FMT-1 _fmtDateTime formats date + 12h time', TripEntryList._fmtDateTime("2026-08-01", "13:00") === "Aug 1, 1:00 PM", TripEntryList._fmtDateTime("2026-08-01", "13:00"));
+    ok('FMT-2 _fmtDateTime empty date+time -> ""', TripEntryList._fmtDateTime("", "") === "");
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

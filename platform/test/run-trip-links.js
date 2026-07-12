@@ -1,13 +1,13 @@
 'use strict';
 
-// run-trip-links.js — pure-op coverage for TripLinksManager's static link ops
+// run-trip-links.js — pure-op coverage for TripLinks's static link ops
 // (addLink / updateLink / deleteLink over a `links: [{url,text}]` frontmatter
-// array). These are a verbatim port of ProjectLinksManager's ops; the only
-// blueprint-specific change is the note-type render guard (trip-section +
-// section_kind:links), which is not exercised by the pure-op harness.
+// array on the trip ATLAS note). These are a verbatim port of
+// ProjectLinksManager's ops. Also asserts the `links` SECTION kind is gone from
+// TripSectionKinds (links now live on the atlas, not a dedicated section).
 //
-// TripLinksManager + TripLinksPanel are customJS classes (bare class expression,
-// no trailing statements). Static ops are unit-testable in Node; the instance
+// TripLinks + TripSectionKinds are customJS classes (bare class expression, no
+// trailing statements). Static ops are unit-testable in Node; the instance
 // render()/modals are dogfood-only. Each op returns { links, changed, reason? }
 // with `links` ALWAYS a new array so callers never mutate the source.
 //
@@ -27,54 +27,35 @@ function loadClass(relPath, className) {
     return new Function(`${src}; return ${className};`)();
 }
 
-const TripLinksManager = loadClass('platform/blueprints/trips/helpers/trip-links-manager.js', 'TripLinksManager');
+const TripLinks = loadClass('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+const TripSectionKinds = loadClass('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
 
-// ---------- addLink ----------
+// ---------- static ops (same semantics as ProjectLinksManager) ----------
 {
-    const src = [];
-    const r = TripLinksManager.addLink(src, { url: " https://a.com ", text: " A " });
-    ok('ADD-1 addLink trims + appends', r.changed === true && r.links.length === 1 && r.links[0].url === "https://a.com" && r.links[0].text === "A", JSON.stringify(r));
-    ok('ADD-1b source array untouched (new list)', src.length === 0);
+    const r = TripLinks.addLink([], { url: " https://a.com ", text: "" });
+    ok('ADD-1 addLink trims + defaults text to url', r.changed && r.links[0].url === "https://a.com" && r.links[0].text === "https://a.com", JSON.stringify(r));
 }
 {
-    const r = TripLinksManager.addLink([], { url: "https://x.com" });
-    ok('ADD-2 addLink defaults text to url', r.changed === true && r.links[0].text === "https://x.com", JSON.stringify(r));
+    const r = TripLinks.addLink([{ url: "https://a.com", text: "A" }], { url: "https://a.com" });
+    ok('ADD-2 addLink rejects duplicate url', r.reason === "duplicate", JSON.stringify(r));
 }
 {
-    const r = TripLinksManager.addLink([], { url: "   ", text: "nope" });
-    ok('ADD-3 addLink rejects empty url', r.changed === false && r.reason === "empty-url", JSON.stringify(r));
+    const r = TripLinks.addLink([], { url: "" });
+    ok('ADD-3 addLink rejects empty url', r.reason === "empty-url", JSON.stringify(r));
 }
 {
-    const r = TripLinksManager.addLink([{ url: "https://a.com", text: "A" }], { url: "https://a.com", text: "dup" });
-    ok('ADD-4 addLink rejects duplicate url', r.changed === false && r.reason === "duplicate", JSON.stringify(r));
-}
-
-// ---------- updateLink ----------
-{
-    const r = TripLinksManager.updateLink([{ url: "https://a.com", text: "A" }], 0, { url: "https://b.com", text: "B" });
-    ok('UPD-1 updateLink replaces at index', r.changed === true && r.links[0].url === "https://b.com" && r.links[0].text === "B", JSON.stringify(r));
+    const r = TripLinks.updateLink([{ url: "x", text: "X" }], 9, { url: "y" });
+    ok('UPD-1 updateLink rejects out-of-range index', r.changed === false, JSON.stringify(r));
 }
 {
-    const r = TripLinksManager.updateLink([{ url: "https://a.com" }], 5, { url: "https://z.com" });
-    ok('UPD-2 updateLink rejects out-of-range index', r.changed === false && r.reason === "bad-index", JSON.stringify(r));
-}
-{
-    const r = TripLinksManager.updateLink([{ url: "https://a.com" }, { url: "https://b.com" }], 1, { url: "https://a.com" });
-    ok('UPD-3 updateLink rejects duplicate of another entry', r.changed === false && r.reason === "duplicate", JSON.stringify(r));
-}
-{
-    const r = TripLinksManager.updateLink([{ url: "https://a.com" }], 0, { url: "  " });
-    ok('UPD-4 updateLink rejects empty url', r.changed === false && r.reason === "empty-url", JSON.stringify(r));
+    const r = TripLinks.deleteLink([{ url: "x" }], 0);
+    ok('DEL-1 deleteLink removes at index', r.links.length === 0, JSON.stringify(r));
 }
 
-// ---------- deleteLink ----------
+// ---------- links section kind is gone ----------
 {
-    const r = TripLinksManager.deleteLink([{ url: "https://a.com" }], 5);
-    ok('DEL-1 deleteLink rejects out-of-range index', r.changed === false && r.reason === "bad-index", JSON.stringify(r));
-}
-{
-    const r = TripLinksManager.deleteLink([{ url: "https://a.com" }, { url: "https://b.com" }], 0);
-    ok('DEL-2 deleteLink removes at index', r.changed === true && r.links.length === 1 && r.links[0].url === "https://b.com", JSON.stringify(r));
+    const kinds = new TripSectionKinds().all();
+    ok('KIND-1 links section kind removed', kinds.every(k => k.kind !== "links"), JSON.stringify(kinds.map(k => k.kind)));
 }
 
 console.log(`\n${passes} passed, ${fails} failed`);

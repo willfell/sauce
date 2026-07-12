@@ -57,5 +57,43 @@ const TripDashboard = loadClass('platform/blueprints/trips/helpers/trip-dashboar
     ok('PC-2 category placeholder (no item) not counted', Object.keys(r).length === 0, JSON.stringify(r));
 }
 
+// ---------- _countOpenTasks (by trip_slug, parity with TaskTripList) ----------
+{
+    const rows = [
+        { type: "task", status: "open", trip_slug: "bussin", source: "", file: { path: "spice/tasks/a.md" } },
+        { type: "task", status: "open", trip_slug: "other",  source: "", file: { path: "spice/tasks/b.md" } },
+        { type: "task", status: "open", trip_slug: "bussin", source: "meeting", file: { path: "spice/tasks/c.md" } },
+        { type: "task", status: "done", trip_slug: "bussin", source: "", file: { path: "spice/tasks/d.md" } },
+        { type: "task", status: "open", trip_slug: "bussin", source: "", file: { path: "spice/tasks/_trash/e.md" } },
+    ];
+    const mkArr = (a) => { a.where = (fn) => mkArr(a.filter(fn)); return a; };
+    const dv = { pages: () => mkArr(rows.slice()) };
+    ok('COT-1 counts only open non-meeting non-trashed tasks for the slug', TripDashboard._countOpenTasks(dv, "bussin") === 1);
+    ok('COT-2 empty slug → 0', TripDashboard._countOpenTasks(dv, "") === 0);
+    ok('COT-3 query throw → 0 (never throws)', TripDashboard._countOpenTasks({ pages(){ throw new Error("x"); } }, "bussin") === 0);
+}
+
+// ---------- _fmtDate ----------
+{
+    const r = TripDashboard._fmtDate("2026-08-01");
+    ok('FD-1 YYYY-MM-DD string', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate(new Date(Date.UTC(2026, 7, 1)));
+    ok('FD-2 Date object (UTC)', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate(1785542400000); // Date.UTC(2026,7,1)
+    ok('FD-3 epoch millis', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate("");
+    ok('FD-4 empty string', r === "", r);
+}
+{
+    const r = TripDashboard._fmtDate(null);
+    ok('FD-5 null', r === "", r);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

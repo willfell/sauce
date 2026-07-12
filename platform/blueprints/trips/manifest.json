@@ -42,9 +42,7 @@
     "TripDashboard",
     "TripsChromeBar",
     "TripEntryList",
-    "TripLinksPanel",
-    "TripLinksManager",
-    "TripToDoActions"
+    "TripLinks"
   ],
   "files": [
     {
@@ -70,10 +68,6 @@
     {
       "source": "templates/Trip Notes.md",
       "dest": "{{templates_path}}/Template, Trip Notes.md"
-    },
-    {
-      "source": "templates/Trip Links.md",
-      "dest": "{{templates_path}}/Template, Trip Links.md"
     },
     {
       "source": "templates/Trip Board.md",
@@ -112,16 +106,8 @@
       "dest": "{{scripts_path}}/trips/trip-entry-list.js"
     },
     {
-      "source": "helpers/trip-links-panel.js",
-      "dest": "{{scripts_path}}/trips/trip-links-panel.js"
-    },
-    {
-      "source": "helpers/trip-links-manager.js",
-      "dest": "{{scripts_path}}/trips/trip-links-manager.js"
-    },
-    {
-      "source": "helpers/trip-todo-actions.js",
-      "dest": "{{scripts_path}}/trips/trip-todo-actions.js"
+      "source": "helpers/trip-links.js",
+      "dest": "{{scripts_path}}/trips/trip-links.js"
     },
     {
       "source": "content/Trips.md",
@@ -179,6 +165,21 @@
         "current": {
           "label": "fm:section|file:basename"
         }
+      },
+      "trip-board-card": {
+        "ancestors": [
+          {
+            "label": "lit:Trips",
+            "link": "spice/trips/Trips.md"
+          },
+          {
+            "label": "fm:trip",
+            "link": "spice/trips/{fm:trip_slug}/{fm:trip}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
       }
     }
   },
@@ -228,7 +229,7 @@
               "section_kind": {
                 "required": true,
                 "type": "string",
-                "matches": "^(flights|stay|packing-list|to-do|notes|links|custom)$"
+                "matches": "^(flights|stay|packing-list|to-do|notes|custom)$"
               },
               "section": {
                 "required": true,

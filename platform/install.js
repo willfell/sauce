@@ -12535,7 +12535,6 @@ const TRIP_SECTION_KINDS = [
   { kind: "packing-list", label: "Packing List", legacy: "Trip Packing List" },
   { kind: "to-do",        label: "To Do",        legacy: "Trip To Do" },
   { kind: "notes",        label: "Notes",        legacy: "Trip Notes" },
-  { kind: "links",        label: "Links",        legacy: "Trip Links" },
 ];
 
 // Mirrors TripNavButtons._sanitizeFilename / TripSectionKinds helpers.
@@ -12692,6 +12691,31 @@ function _tripStripLegacyChrome(body) {
   return out;
 }
 
+// _tripEnsureAtlasLinks(body) — ensure the trip atlas frontmatter carries a
+// `links: []` key (v2 introduces per-trip links[]). If a `links:` key already
+// exists it's left untouched (idempotent). No frontmatter → return unchanged.
+// Pure, never throws. The key is appended inside the leading `---` block via the
+// same replace-or-insert helper the section heal uses, so it always lands INSIDE
+// the frontmatter.
+function _tripEnsureAtlasLinks(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  if (/^links\s*:/m.test(parts.fm)) return body; // already present
+  return _tripSetFmKey(body, "links", "links: []");
+}
+
+// _tripBoardCardChrome(body) — ensure a `type: trip-board-card` note carries
+// exactly one TripsChromeBar chrome block (v1 bare board cards had none). Reuses
+// _tripStripLegacyChrome's inject-if-missing + de-dupe logic. Only acts on notes
+// whose leading frontmatter type is trip-board-card; anything else is returned
+// unchanged. Pure, idempotent, never throws.
+function _tripBoardCardChrome(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  if (!/^type:\s*["']?trip-board-card["']?\s*$/m.test(parts.fm)) return body;
+  return _tripStripLegacyChrome(body);
+}
+
 async function applyTripsConformanceHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -12755,16 +12779,32 @@ async function applyTripsConformanceHeal(tp, history, git) {
         newAtlasBody = _tripHeadingToSectionLabel(newAtlasBody, "Mentions");
       }
       newAtlasBody = _tripRepairAtlasLinks(newAtlasBody, atlasBase);
+      newAtlasBody = _tripEnsureAtlasLinks(newAtlasBody); // v2: per-trip links[]
       const atlasNewPath = `${tripDir}/${atlasBase}.md`;
       if (atlasNewPath !== atlasPath || newAtlasBody !== atlasBody) {
         plan.push({ path: atlasPath, newPath: atlasNewPath, newBody: newAtlasBody });
       }
 
       // Section transforms (every OTHER top-level .md).
+      const retire = []; // v2: orphan `section_kind: links` notes → backup + remove
       for (const f of mdFiles) {
         if (f === atlasPath) continue;
         let body;
         try { body = await adapter.read(f); } catch (_e) { continue; }
+        // v2 retires the orphan v1 Links section note entirely (links now live in
+        // the atlas frontmatter). Detect via `section_kind: links` and skip its
+        // rename/rewrite — it's queued for backup + removal instead.
+        const fmR = body.match(/^---\n([\s\S]*?)\n---/);
+        if (fmR && /^section_kind\s*:\s*["']?links["']?\s*$/m.test(fmR[1])) {
+          retire.push(f);
+          continue;
+        }
+        // v2 board cards (bare `type: trip-board-card`) get the chrome bar.
+        if (fmR && /^type:\s*["']?trip-board-card["']?\s*$/m.test(fmR[1])) {
+          const nbCard = _tripBoardCardChrome(body);
+          if (nbCard !== body) plan.push({ path: f, newPath: f, newBody: nbCard });
+          continue;
+        }
         const legacy = f.split("/").pop().replace(/\.md$/, "");
         // Prefer the note's OWN canonical frontmatter (section_kind + section) when
         // present — this is what makes a re-run idempotent: once the file is renamed
@@ -12809,7 +12849,7 @@ async function applyTripsConformanceHeal(tp, history, git) {
         }
       }
 
-      if (plan.length === 0) { skipped += 1; continue; }
+      if (plan.length === 0 && retire.length === 0) { skipped += 1; continue; }
 
       // --- Collision guard: two sources (e.g. a legacy `Trip Flights.md` + a
       // hand-authored note already carrying section_kind: flights) can compute the
@@ -12843,9 +12883,15 @@ async function applyTripsConformanceHeal(tp, history, git) {
         }
       }
 
+      // --- Retire orphan v1 Links section notes (already backed up above via the
+      // whole-folder .sauce-backup copy). Remove from the live tree. ---
+      for (const f of retire) {
+        try { await adapter.remove(f); } catch (_e) { /* best-effort */ }
+      }
+
       healed += 1;
       history?.push({ event: "info", step: "trips_conformance_heal", name: slug,
-        reason: `healed ${slug}: atlas → ${atlasBase}.md + ${plan.length - 1} section(s); backup at .sauce-backup/trips/${slug}/${ts}`,
+        reason: `healed ${slug}: atlas → ${atlasBase}.md + ${plan.length - 1} section(s); retired ${retire.length} Links section(s); backup at .sauce-backup/trips/${slug}/${ts}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
     } catch (e) {
       warned += 1;
@@ -21298,6 +21344,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // trips (for run-trips-heal.js TRIPHEAL-*). Pure additive.
     module.exports.applyTripsConformanceHeal = applyTripsConformanceHeal;
     module.exports._tripStripLegacyChrome = _tripStripLegacyChrome;
+    module.exports._tripEnsureAtlasLinks = _tripEnsureAtlasLinks;
+    module.exports._tripBoardCardChrome = _tripBoardCardChrome;
     // home-scaffold heal — materialize + chrome-heal the singleton
     // spice/home/Home.md (for run-home.js HOME-HEAL-*). The pure body transform
     // is also extracted by regex in the harness; expose it explicitly too.

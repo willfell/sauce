@@ -42,6 +42,7 @@
     "test:project-chrome-heal-guard": "node platform/test/run-project-chrome-heal-guard.js",
     "test:customjs-loadable": "node platform/test/run-customjs-loadable.js",
     "test:task-entity": "node platform/test/run-task-entity.js",
+    "test:task-trip-list": "node platform/test/run-task-trip-list.js",
     "test:doc-search": "node platform/test/run-doc-search.js",
     "test:wiki": "node platform/test/run-wiki.js",
     "test:reader": "node platform/test/run-reader.js",

@@ -6,6 +6,7 @@ start_date: "{{START_DATE}}"
 end_date: "{{END_DATE}}"
 location: "{{LOCATION}}"
 people: []
+links: []
 cssclasses:
   - wide
 ---
@@ -16,6 +17,10 @@ await dv.view("{{views_path}}/customjs-guard", { class: "TripsChromeBar" });
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "TripDashboard", method: "render" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TripLinks", method: "render" });
 ```
 
 ```dataviewjs

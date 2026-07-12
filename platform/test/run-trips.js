@@ -135,8 +135,8 @@ function makeDv(embed, currentVal) {
     // ---------- TripSectionKinds registry (behavioral) ----------
     const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
     const tsk = new TripSectionKinds();
-    ok('TSK-1 all() has the 6 default kinds in order',
-        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes,links');
+    ok('TSK-1 all() has the 5 default kinds in order',
+        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes');
     ok('TSK-2 order() ranks defaults, custom last',
         tsk.order('flights') === 0 && tsk.order('notes') === 4 && tsk.order('custom') === 999);
     ok('TSK-3 labelFor maps kind → display',
@@ -147,9 +147,9 @@ function makeDv(embed, currentVal) {
         && tsk.kindFromLegacyBasename('Honorees') === 'custom');
     ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
         tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
-    ok('TSK-6 links kind registered at index 5 with label + icon',
-        tsk.order('links') === 5 && tsk.labelFor('links') === 'Links'
-        && /^<svg/.test(tsk.iconFor('links')));
+    ok('TSK-6 links kind is NOT a section kind (links live on the atlas)',
+        tsk.all().every(k => k.kind !== 'links') && tsk.labelFor('links') === null
+        && tsk.order('links') === 999);
 
     // ---------- create-flow naming + frontmatter (behavioral) ----------
     {
@@ -177,7 +177,7 @@ function makeDv(embed, currentVal) {
         global.app.vault = savedVault;
     }
 
-    // ---------- _createTrip scaffolds the full default section set incl. Links ----------
+    // ---------- _createTrip scaffolds the 5 default sections (Links live on the atlas, not a section) ----------
     {
         const written = {};
         const created = new Set();
@@ -194,10 +194,10 @@ function makeDv(embed, currentVal) {
         const navC = new TripNavButtons();
         await navC._createTrip({ name: 'Reunion', slug: 'reunion', start_date: '', end_date: '', location: '' });
         const wrote = Object.keys(written);
-        ok('CREATE-4 _createTrip scaffolds a Links section note',
-            wrote.includes('spice/trips/reunion/Reunion — Links.md'), wrote.join('\n'));
-        ok('CREATE-5 _createTrip scaffolds every default section (Flights/Stay/Packing List/To Do/Notes/Links)',
-            ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes', 'Links']
+        ok('CREATE-4 _createTrip does NOT scaffold a Links section note (links live on the atlas)',
+            !wrote.includes('spice/trips/reunion/Reunion — Links.md'), wrote.join('\n'));
+        ok('CREATE-5 _createTrip scaffolds every default section (Flights/Stay/Packing List/To Do/Notes)',
+            ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes']
                 .every(label => wrote.includes(`spice/trips/reunion/Reunion — ${label}.md`)), wrote.join('\n'));
         global.app.vault = savedVault;
     }
@@ -221,6 +221,31 @@ function makeDv(embed, currentVal) {
         ok('SECTIONS-2 board appended last in Default with title "Trip Board"',
             rows2.filter(r => r.group === 'Default Sections').map(r => r.title).join('|') === 'Flights|Trip Board',
             JSON.stringify(rows2.map(r => [r.group, r.title])));
+    }
+
+    // ---------- Trip Board Card template: chrome + breadcrumb frontmatter ----------
+    {
+        const cardTpl = fs.readFileSync(
+            path.join(__dirname, '..', 'blueprints', 'trips', 'templates', 'Trip Board Card.md'), 'utf8');
+        ok('TBC-1 card template mounts TripsChromeBar block',
+            cardTpl.includes('class: "TripsChromeBar"'), cardTpl);
+        ok('TBC-2 card template frontmatter declares type: trip-board-card',
+            /type:\s*trip-board-card/.test(cardTpl), cardTpl);
+        ok('TBC-3 card template writes trip + trip_slug frontmatter keys (for breadcrumb ancestors)',
+            /^trip:/m.test(cardTpl) && /^trip_slug:/m.test(cardTpl), cardTpl);
+    }
+
+    // ---------- manifest registers trip-board-card breadcrumb type ----------
+    {
+        const man = JSON.parse(fs.readFileSync(
+            path.join(__dirname, '..', 'blueprints', 'trips', 'manifest.json'), 'utf8'));
+        const t = man.breadcrumb && man.breadcrumb.types && man.breadcrumb.types['trip-board-card'];
+        ok('TBC-4 manifest breadcrumb.types["trip-board-card"] exists with 2 ancestors',
+            !!t && Array.isArray(t.ancestors) && t.ancestors.length === 2, JSON.stringify(t));
+        ok('TBC-5 trip-board-card ancestors resolve via fm:trip / fm:trip_slug',
+            !!t && t.ancestors[1] && t.ancestors[1].label === 'fm:trip'
+            && /\{fm:trip_slug\}/.test(t.ancestors[1].link) && /\{fm:trip\}/.test(t.ancestors[1].link),
+            JSON.stringify(t));
     }
 
     // ---------- render() cold-load guards ----------

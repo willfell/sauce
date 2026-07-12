@@ -74,59 +74,24 @@ ok('DLG-5 project destination tags project',
         mode: 'one-shot', title: 'Ship spec', destination: { type: 'project', slug: 'sauce', name: 'Sauce' }, priority: 'high'
     }) === '- [ ] Ship spec [project:: [[Sauce]]] [priority:: high]');
 
-// --- DLG-TRIP-1: _appendTripField pure helper ---
-ok('DLG-TRIP-1 appends [trip:: [[Name]]] when name truthy',
-    ToDoCreateTask._appendTripField('- [ ] Pack bags', 'Iceland 2026')
-    === '- [ ] Pack bags [trip:: [[Iceland 2026]]]');
-ok('DLG-TRIP-1a unchanged when trip name falsy',
-    ToDoCreateTask._appendTripField('- [ ] Pack bags', '') === '- [ ] Pack bags'
-    && ToDoCreateTask._appendTripField('- [ ] Pack bags', null) === '- [ ] Pack bags');
-
-// --- DLG-TRIP-2: serializePayloadToLine appends trip field (both modes) ---
-ok('DLG-TRIP-2 one-shot with trip',
+// --- DLG-NOTRIP-1: v1 inline trip-link is fully removed ---
+// v2 links trips via the real task-note model (TaskDialog + trip_slug), not an
+// inline [trip:: [[Name]]] field. serializePayloadToLine must never reference
+// a `trip` field, and the helper methods that built the old UI must be gone.
+ok('DLG-NOTRIP-1 serializePayloadToLine ignores a payload.trip field (one-shot)',
     ToDoCreateTask.serializePayloadToLine({
         mode: 'one-shot', title: 'Book hotel', destination: 'today', trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
-    }) === '- [ ] Book hotel [trip:: [[Iceland 2026]]]');
-ok('DLG-TRIP-2a one-shot with project AND trip (both survive)',
-    ToDoCreateTask.serializePayloadToLine({
-        mode: 'one-shot', title: 'X', destination: { type: 'project', slug: 'sauce', name: 'Sauce' },
-        trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
-    }) === '- [ ] X [project:: [[Sauce]]] [trip:: [[Iceland 2026]]]');
-ok('DLG-TRIP-2b recurring with trip',
+    }) === '- [ ] Book hotel');
+ok('DLG-NOTRIP-1a serializePayloadToLine ignores a payload.trip field (recurring)',
     ToDoCreateTask.serializePayloadToLine({
         mode: 'recurring', title: 'Check in', recurrenceGrammar: 'every day', trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
-    }) === '- [ ] Check in [recurrence:: every day] [trip:: [[Iceland 2026]]]');
-
-// --- DLG-TRIP-3: _loadTripList scans spice/trips, keeps type:trip ---
-(() => {
-    const inst = new ToDoCreateTask();
-    const makePages = (rows) => {
-        const chain = {
-            _rows: rows,
-            where(fn) { return makePages(this._rows.filter(fn)); },
-            map(fn) { return makePages(this._rows.map(fn)); },
-            array() { return this._rows; },
-        };
-        return chain;
-    };
-    sharedWindow.app = { plugins: { plugins: { dataview: { api: {
-        pages: (q) => {
-            ok('DLG-TRIP-3 queries spice/trips', q === '"spice/trips"', `got ${JSON.stringify(q)}`);
-            return makePages([
-                { type: 'trip', trip_slug: 'iceland-2026', file: { name: 'Iceland 2026' } },
-                { type: 'trip', file: { name: 'Ski Trip' } },            // no trip_slug → derived
-                { type: 'note', file: { name: 'Not a trip' } },          // filtered out
-            ]);
-        },
-    } } } } };
-    const trips = inst._loadTripList();
-    ok('DLG-TRIP-3a keeps only type:trip (2 of 3)', trips.length === 2, `got ${JSON.stringify(trips)}`);
-    ok('DLG-TRIP-3b uses trip_slug when present',
-        trips[0].slug === 'iceland-2026' && trips[0].name === 'Iceland 2026', `got ${JSON.stringify(trips[0])}`);
-    ok('DLG-TRIP-3c derives slug from name when trip_slug absent',
-        trips[1].slug === 'ski-trip' && trips[1].name === 'Ski Trip', `got ${JSON.stringify(trips[1])}`);
-    sharedWindow.app = undefined;
-})();
+    }) === '- [ ] Check in [recurrence:: every day]');
+ok('DLG-NOTRIP-1b static class has no _appendTripField helper',
+    typeof ToDoCreateTask._appendTripField === 'undefined');
+ok('DLG-NOTRIP-1c instance has no _renderTripSelect helper',
+    typeof (new ToDoCreateTask())._renderTripSelect === 'undefined');
+ok('DLG-NOTRIP-1d instance has no _loadTripList helper',
+    typeof (new ToDoCreateTask())._loadTripList === 'undefined');
 
 // --- DLG-6: composeRecurrenceGrammar daily ---
 ok('DLG-6 grammar daily',
@@ -726,7 +691,10 @@ function reloadWithDom() {
         `got dest.disabled = ${JSON.stringify(dest2 && dest2.disabled)}`);
 })();
 
-// --- DLG-TRIP-GATE: Trip <select> renders only when TripsChromeBar installed ---
+// --- DLG-NOTRIP-GATE: no Trip <select> anywhere, even with TripsChromeBar present ---
+// v2: trips are linked via TaskDialog + trip_slug, not this dialog. The old
+// gated Trip <select> must be gone from BOTH forms regardless of whether
+// window.customJS.TripsChromeBar is installed.
 (() => {
     const findTripSelect = (overlay) => {
         const selects = findAllDescendants(overlay, (el) => el.tagName === 'select');
@@ -735,7 +703,6 @@ function reloadWithDom() {
             return firstOpt && firstOpt._text === '— none —';
         }) || null;
     };
-    // Provide a Dataview API returning one trip so the select has content.
     const makeChain = (rows) => ({
         _rows: rows,
         where(fn) { return makeChain(this._rows.filter(fn)); },
@@ -744,21 +711,21 @@ function reloadWithDom() {
     });
     const dvApi = { pages: () => makeChain([{ type: 'trip', trip_slug: 'iceland-2026', file: { name: 'Iceland 2026' } }]) };
 
-    // PRESENT: TripsChromeBar installed → Trip select renders in the one-shot form.
-    const envOn = reloadWithDom();
-    envOn.sharedWindow.customJS = { TripsChromeBar: {} };
-    envOn.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
-    new envOn.Cls().open({ preselectDestination: 'today' });
-    ok('DLG-TRIP-GATE present: Trip select rendered when TripsChromeBar installed',
-        !!findTripSelect(envOn.getOverlay()));
+    // Even WITH TripsChromeBar installed → one-shot form has no Trip select.
+    const envOneShot = reloadWithDom();
+    envOneShot.sharedWindow.customJS = { TripsChromeBar: {} };
+    envOneShot.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
+    new envOneShot.Cls().open({ preselectDestination: 'today' });
+    ok('DLG-NOTRIP-GATE one-shot form: no Trip select even with TripsChromeBar installed',
+        !findTripSelect(envOneShot.getOverlay()));
 
-    // ABSENT: no TripsChromeBar → Trip select must NOT render.
-    const envOff = reloadWithDom();
-    envOff.sharedWindow.customJS = {};
-    envOff.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
-    new envOff.Cls().open({ preselectDestination: 'today' });
-    ok('DLG-TRIP-GATE absent: Trip select NOT rendered without TripsChromeBar',
-        !findTripSelect(envOff.getOverlay()));
+    // Even WITH TripsChromeBar installed → recurring form has no Trip select.
+    const envRecurring = reloadWithDom();
+    envRecurring.sharedWindow.customJS = { TripsChromeBar: {} };
+    envRecurring.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
+    new envRecurring.Cls().open({ preselectTab: 'recurring' });
+    ok('DLG-NOTRIP-GATE recurring form: no Trip select even with TripsChromeBar installed',
+        !findTripSelect(envRecurring.getOverlay()));
 })();
 
 // --- HC-V0127-DLG-EDIT-F: submit in edit mode invokes replaceTaskAt ---

@@ -213,6 +213,88 @@ class SpaceDailyDashboard {
   }
 
   /**
+   * TASK 10: SELECT the trips atlas notes (type:"trip" under spice/trips) whose
+   * start_date falls within [today, today + horizonDays] so the daily/home can
+   * surface an "Upcoming trips" panel. Pure + Node-testable (dv-stub via the
+   * DataArray .where(...).array() chain, byte-identical to selectMeetings).
+   *
+   * Returns a plain array of { name, path, daysAway } sorted ascending by
+   * daysAway (soonest first). daysAway is a whole-day UTC delta — today == 0,
+   * so a trip starting today is IN the window. Trips already begun (daysAway < 0)
+   * and beyond the horizon (> horizonDays) are dropped.
+   *
+   * UTC-safe: both today and each start_date are normalized to a UTC day-millis
+   * via _utcDay (tolerant of ISO "YYYY-MM-DD" string / Date / Luxon / epoch), so
+   * the delta never drifts with local timezone. No trips folder / bad dv / any
+   * throw → []. Never throws — a missing spice/trips (accuris, ero) renders nothing.
+   */
+  static selectUpcomingTrips(dv, todayStr, horizonDays = 14) {
+    try {
+      const todayMs = SpaceDailyDashboard._utcDay(todayStr);
+      if (todayMs == null) return [];
+      const r = dv.pages('"spice/trips"');
+      if (!r) return [];
+      // DataArray path (real Dataview + the harness chain stub): .where(...).array().
+      // Plain-array fallback so any bare-array dv-stub still exercises the filter.
+      let trips;
+      if (typeof r.where === "function") {
+        trips = r.where(p => p && p.type === "trip").array();
+      } else {
+        const arr = Array.isArray(r) ? r : Array.from(r);
+        trips = arr.filter(p => p && p.type === "trip");
+      }
+      const out = [];
+      for (const p of trips) {
+        const startMs = SpaceDailyDashboard._utcDay(p && p.start_date);
+        if (startMs == null) continue;
+        const daysAway = Math.round((startMs - todayMs) / 86400000);
+        if (daysAway < 0 || daysAway > horizonDays) continue;
+        out.push({
+          name: (p && p.name) || (p && p.file && p.file.name) || "Trip",
+          path: p && p.file && p.file.path,
+          daysAway,
+        });
+      }
+      out.sort((a, b) => a.daysAway - b.daysAway);
+      return out;
+    } catch (_e) {
+      return [];
+    }
+  }
+
+  /**
+   * TASK 10: normalize a date-ish value to a UTC day-boundary millis (00:00:00Z
+   * of that calendar day) or null. Tolerant of an ISO "YYYY-MM-DD" (or longer)
+   * string, a JS Date, a Luxon DateTime (duck-typed via .toISODate/.toISO), and
+   * an epoch number. Slicing the ISO to its first 10 chars + Date.UTC keeps the
+   * result timezone-independent so daysAway deltas are stable everywhere.
+   */
+  static _utcDay(v) {
+    try {
+      if (v == null) return null;
+      let iso = null;
+      if (typeof v === "string") {
+        iso = v;
+      } else if (typeof v.toISODate === "function") {
+        iso = v.toISODate();               // Luxon DateTime
+      } else if (typeof v.toISO === "function") {
+        iso = v.toISO();                    // Luxon DateTime (fallback)
+      } else if (v instanceof Date && !isNaN(v.getTime())) {
+        iso = v.toISOString();
+      } else if (typeof v === "number" && isFinite(v)) {
+        iso = new Date(v).toISOString();
+      }
+      if (typeof iso !== "string") return null;
+      const m = iso.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return null;
+      const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return isFinite(ms) ? ms : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  /**
    * Home command center count API (DRY): roll up the day's counts for the glance
    * line. Composes selectTasks (→ { open[], overdue, done }) with selectMeetings
    * (→ page[]) and returns integers only: { today, overdue, done, meetings }.
@@ -262,7 +344,8 @@ class SpaceDailyDashboard {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
       activity: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>`,
-      square: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>`
+      square: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>`,
+      mapPin: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`
     };
 
     // v0.10.6 (sauce v0.70.6): resolve the file containing THIS dataviewjs
@@ -331,7 +414,12 @@ class SpaceDailyDashboard {
     }
     const activityCount = activityPages.length;
 
-    const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || activityCount > 0;
+    // TASK 10: count upcoming trips (<=14 days) so a day whose ONLY signal is an
+    // approaching trip still shows the dashboard instead of the empty state.
+    // Never throws (selectUpcomingTrips returns [] on any error / missing folder).
+    const upcomingTripCount = SpaceDailyDashboard.selectUpcomingTrips(dv, today, 14).length;
+
+    const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || activityCount > 0 || upcomingTripCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
     // render so the 3 _renderSection calls don't each hit the adapter.
@@ -478,6 +566,43 @@ class SpaceDailyDashboard {
         empty: "(no meetings — should not render due to outer hasContent guard)"
       });
     }
+
+    // TASK 10: Upcoming trips — atlas notes (type:trip) whose start_date is
+    // within 14 days. Data selection lives in the pure static selectUpcomingTrips
+    // (Node-tested via SDD-TRIPS-*); this is just the dv adapter + a compact row
+    // list. Wrapped so it NEVER throws — a vault with no spice/trips (accuris, ero)
+    // simply produces [] and renders nothing.
+    try {
+      const trips = SpaceDailyDashboard.selectUpcomingTrips(dv, today, 14);
+      if (Array.isArray(trips) && trips.length > 0) {
+        const tripsBody = this._renderSection(container, {
+          accent: "cyan",
+          iconHtml: icons.mapPin,
+          title: "Upcoming trips",
+          rightHtml: `<span class="sauce-section-count-pill">${trips.length}</span>`,
+          defaultOpen: true,
+          stateKey: "sauce-daily-dashboard:trips",
+          sectionState,
+        });
+
+        const tripsList = tripsBody.createEl("ul");
+        tripsList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+
+        for (const trip of trips) {
+          const li = tripsList.createEl("li");
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
+          // Humanize the countdown: today / in 1 day / in N days.
+          const when = trip.daysAway === 0
+            ? "today"
+            : (trip.daysAway === 1 ? "in 1 day" : `in ${trip.daysAway} days`);
+          const label = li.createEl("span");
+          label.textContent = `${trip.name || "Trip"} — ${when}`;
+          if (trip.path) {
+            li.onclick = () => { app.workspace.openLinkText(trip.path, ""); };
+          }
+        }
+      }
+    } catch (_e) { /* trips panel is best-effort; never break the dashboard */ }
 
     if (activityCount > 0) {
       const activityBody = this._renderSection(container, {

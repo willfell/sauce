@@ -110,6 +110,32 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
+// 2t. composeNote — trip/trip_slug linkage mirrors project (additive).
+ok('TE-2t composeNote emits trip + trip_slug (parallel to project)', () => {
+  const out = TaskEntity.composeNote({ title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(out.frontmatter.trip === '[[Bussin]]', 'trip wikilink: ' + out.frontmatter.trip);
+  assert(out.frontmatter.trip_slug === 'bussin', 'trip_slug: ' + out.frontmatter.trip_slug);
+  // trip empty when only project given; project still works.
+  const fp = TaskEntity.composeNote({ title: 'X', project: { name: 'Acme', slug: 'acme' } }).frontmatter;
+  assert(fp.trip === '', 'trip empty when only project: ' + JSON.stringify(fp.trip));
+  assert(fp.trip_slug === '', 'trip_slug empty when only project: ' + JSON.stringify(fp.trip_slug));
+  assert(fp.project_slug === 'acme', 'project still works: ' + fp.project_slug);
+  // trip_slug sits immediately after project_slug in canonical order.
+  const keys = Object.keys(out.frontmatter);
+  assert(keys.indexOf('project_slug') === keys.indexOf('trip') - 1, 'trip follows project_slug: ' + keys.join(','));
+  assert(keys.indexOf('trip') === keys.indexOf('trip_slug') - 1, 'trip_slug follows trip: ' + keys.join(','));
+});
+
+// 2u. parseNote — trip_slug plain string preserved; trip coerced via _linkText.
+ok('TE-2u parseNote preserves trip_slug + coerces trip basename', () => {
+  const parsed = TaskEntity.parseNote({ type: 'task', trip: '[[Bussin]]', trip_slug: 'bussin', file: { path: 'spice/tasks/x.md' } });
+  assert(parsed.trip_slug === 'bussin', 'plain string preserved: ' + JSON.stringify(parsed.trip_slug));
+  assert(parsed.trip === 'Bussin', 'trip coerced to basename: ' + parsed.trip);
+  const bare = TaskEntity.parseNote({ type: 'task', file: { path: 'spice/tasks/y.md' } });
+  assert(bare.trip === '', 'absent trip -> empty string: ' + JSON.stringify(bare.trip));
+  assert(bare.trip_slug === '', 'absent trip_slug -> empty string: ' + JSON.stringify(bare.trip_slug));
+});
+
 // 3. composeNote — minimal payload → blank due, still valid.
 ok('TE-3 composeNote minimal payload → blank due + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
@@ -437,6 +463,30 @@ ok('TD-15 _payloadFromState includes state.links', () => {
   // Missing state.links → an empty array on the payload (never undefined).
   const p2 = TaskDialog._payloadFromState({ title: 't' });
   assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
+});
+
+// TD-15t. _payloadFromState carries a trip linkage onto the payload (parallel
+// to the project plumbing). state.tripName present → payload.trip = {name, slug}
+// (slug from state.tripSlug, or slugified from the name when absent). No
+// state.tripName → no payload.trip. Project flow is unaffected.
+ok('TD-15t _payloadFromState includes trip linkage (parallel project)', () => {
+  const p = TaskDialog._payloadFromState({ title: 't', tripName: 'Bussin', tripSlug: 'bussin' });
+  assert(deepEq(p.trip, { name: 'Bussin', slug: 'bussin' }), 'trip on payload: ' + JSON.stringify(p.trip));
+  // slug derived from name when tripSlug omitted.
+  const p2 = TaskDialog._payloadFromState({ title: 't', tripName: 'Road Trip' });
+  assert(deepEq(p2.trip, { name: 'Road Trip', slug: 'road-trip' }), 'trip slug derived: ' + JSON.stringify(p2.trip));
+  // No tripName → no payload.trip; project still works independently.
+  const p3 = TaskDialog._payloadFromState({ title: 't', projectName: 'Sauce' });
+  assert(p3.trip === undefined, 'no trip when tripName absent: ' + JSON.stringify(p3.trip));
+  assert(deepEq(p3.project, { name: 'Sauce', slug: 'sauce' }), 'project unaffected: ' + JSON.stringify(p3.project));
+});
+
+// TD-2t. defaultsForSurface threads a `trip` through for the trip surface,
+// parallel to how project is threaded (source 'trip').
+ok('TD-2t defaultsForSurface trip seeds trip + source', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'trip', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(deepEq(d.trip, { name: 'Bussin', slug: 'bussin' }), 'trip: ' + JSON.stringify(d.trip));
+  assert(d.source === 'trip', 'source trip: ' + d.source);
 });
 
 ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
@@ -1961,6 +2011,21 @@ async function runMarkDoneDeletedTests() {
     assert(app._renamed && app._renamed.to === 'spice/tasks/_done/task-x.md',
       'renamed into _done via donePath: ' + JSON.stringify(app._renamed));
     assert(app._createdFolders.includes('spice/tasks/_done'), '_done folder ensured: ' + JSON.stringify(app._createdFolders));
+  });
+
+  await okAsync('TD-SE-trip _saveEdit persists trip / trip_slug (parallel project), clears when absent', async () => {
+    const app = makeDialogApp('spice/tasks/task-t.md', { title: 'x', status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    // Edit a task with a trip linkage → trip / trip_slug written to the note fm.
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } }, '');
+    assert(app._file._fm.trip === '[[Bussin]]', 'trip wikilink written: ' + app._file._fm.trip);
+    assert(app._file._fm.trip_slug === 'bussin', 'trip_slug survives edit: ' + app._file._fm.trip_slug);
+    // A subsequent edit clearing the trip → both fields blanked (never left stale).
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel' }, '');
+    assert(app._file._fm.trip === '' && app._file._fm.trip_slug === '',
+      'trip cleared when absent: ' + JSON.stringify([app._file._fm.trip, app._file._fm.trip_slug]));
   });
 
   await okAsync('TD-MD-2 markDone with no app (cold load) → {ok:false, app unavailable}, never throws', async () => {

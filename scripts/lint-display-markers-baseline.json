@@ -82,32 +82,32 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 708,
+      "line": 672,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 709,
+      "line": 673,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 710,
+      "line": 674,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 775,
+      "line": 739,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 790,
+      "line": 754,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 792,
+      "line": 756,
       "snippet": "'## From Meetings',"
     },
     {

@@ -61,6 +61,21 @@ class TripEntryList {
     l[index] = Object.assign({}, l[index], { checked: !l[index].checked });
     return { list: l, changed: true };
   }
+  // Base form-field css shared by <input> and <select> controls.
+  static _fieldCss() {
+    return "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+  }
+  // iOS-safe date/time <input> css: strips the intrinsic control chrome that
+  // otherwise ignores width:100% (native picker still opens on tap).
+  static _dateCss() {
+    return TripEntryList._fieldCss() + " -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;";
+  }
+  // Maps a spec field to its <input type="…"> (or "select" to render a
+  // <select>). text/date/time/select pass through as-is; link -> url.
+  static _inputTypeFor(field) {
+    if (!field || !field.type) return "text";
+    return field.type === "link" ? "url" : field.type;
+  }
   static addCategory(list, category) {
     const l = Array.isArray(list) ? list.slice() : [];
     const c = String(category || "").trim();
@@ -68,6 +83,90 @@ class TripEntryList {
     if (l.some((e) => e && e.category === c)) return { list: l, changed: false, reason: "duplicate" };
     l.push({ category: c });
     return { list: l, changed: true };
+  }
+
+  // ── per-section field specs (SSOT — templates + chrome bar call these) ─────
+  // Flights: direction select + typed schedule fields + a booking link.
+  static _flightFields() {
+    return [
+      { name: "direction", label: "Direction", type: "select", options: ["Outbound", "Return"] },
+      { name: "airline", label: "Airline", type: "text", placeholder: "Delta" },
+      { name: "flight_no", label: "Flight #", type: "text", placeholder: "DL123" },
+      { name: "from", label: "From", type: "text", placeholder: "DEN" },
+      { name: "to", label: "To", type: "text", placeholder: "DTW" },
+      { name: "depart_date", label: "Depart date", type: "date" },
+      { name: "depart_time", label: "Depart time", type: "time" },
+      { name: "boarding_time", label: "Boarding time", type: "time" },
+      { name: "gate", label: "Gate", type: "text", placeholder: "A12" },
+      { name: "seat", label: "Seat", type: "text", placeholder: "14C" },
+      { name: "confirmation", label: "Confirmation", type: "text", placeholder: "ABC123" },
+      { name: "link", label: "Link", type: "link", placeholder: "https://…" },
+    ];
+  }
+  // Stays: lodging with check-in/out dates + a booking link.
+  static _stayFields() {
+    return [
+      { name: "name", label: "Name", type: "text", placeholder: "Hotel" },
+      { name: "address", label: "Address", type: "text", placeholder: "123 Main St" },
+      { name: "check_in", label: "Check in", type: "date" },
+      { name: "check_out", label: "Check out", type: "date" },
+      { name: "confirmation", label: "Confirmation", type: "text", placeholder: "ABC123" },
+      { name: "link", label: "Link", type: "link", placeholder: "https://…" },
+    ];
+  }
+  // Packing add-item: a SINGLE category select (auto-first) + the item text —
+  // no duplicate category field. `categories` = distinct existing categories.
+  static _packingItemFields(categories) {
+    return [
+      { name: "category", label: "Category", type: "select", options: (categories && categories.length ? categories : []) },
+      { name: "item", label: "Item", type: "text", placeholder: "Socks" },
+    ];
+  }
+
+  // ── flight direction grouping ─────────────────────────────────────────────
+  // Bucket entries into Outbound / Return / Other (blank/unknown -> Other),
+  // dropping empty groups, preserving input order within each group.
+  static _groupByDirection(items) {
+    const order = ["Outbound", "Return", "Other"];
+    const buckets = { Outbound: [], Return: [], Other: [] };
+    for (const e of Array.isArray(items) ? items : []) {
+      const d = e && e.direction;
+      const label = d === "Outbound" || d === "Return" ? d : "Other";
+      buckets[label].push(e);
+    }
+    return order.filter((l) => buckets[l].length).map((l) => ({ label: l, entries: buckets[l] }));
+  }
+
+  // ── date/time formatters ──────────────────────────────────────────────────
+  static _MONTHS() {
+    return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  }
+  // "YYYY-MM-DD" -> "MMM D, YYYY" (UTC-safe). Empty/malformed -> "".
+  static _fmtDate(v) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ""));
+    if (!m) return "";
+    const mon = TripEntryList._MONTHS()[parseInt(m[2], 10) - 1];
+    if (!mon) return "";
+    return mon + " " + parseInt(m[3], 10) + ", " + m[1];
+  }
+  // 24h "13:00" -> "1:00 PM"; "09:05" -> "9:05 AM". Empty -> "".
+  static _fmtTime(v) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ""));
+    if (!m) return "";
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return h + ":" + min + " " + ampm;
+  }
+  // "Aug 1, 1:00 PM" — MMM D (year-less) + ", " + 12h time. Blank date -> just
+  // the time; blank time -> just the date; both blank -> "".
+  static _fmtDateTime(dateStr, timeStr) {
+    const full = TripEntryList._fmtDate(dateStr);
+    const datePart = full ? full.replace(/, \d{4}$/, "") : ""; // MMM D
+    const timePart = TripEntryList._fmtTime(timeStr);
+    if (datePart && timePart) return datePart + ", " + timePart;
+    return datePart || timePart || "";
   }
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -82,14 +181,31 @@ class TripEntryList {
     const cur = dv.current && dv.current();
     const items = Array.isArray(cur && cur[spec.key]) ? cur[spec.key] : [];
 
-    const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
-
     if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
       customJS.SectionLabel.divider(c);
     }
 
     // ── rows ──────────────────────────────────────────────────────────────
-    if (spec.group) {
+    // The Add / Add category / Add item buttons now live on the chrome bar,
+    // which calls the headless openers below. Only the list + per-row
+    // edit/delete/checkbox controls render here.
+    const isFlights = spec.kind === "flights" || spec.key === "flights";
+    if (isFlights) {
+      // Flights: group by direction (Outbound / Return / Other), each group
+      // under a guarded SectionLabel, each leg a rich detail card. Track each
+      // entry's ABSOLUTE index in `items` so Edit/Delete target the right leg.
+      const withIdx = items.map((entry, absIndex) => ({ entry, absIndex }));
+      const groups = TripEntryList._groupByDirection(withIdx.map((w) => Object.assign({}, w.entry, { __i: w.absIndex })));
+      for (const g of groups) {
+        if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
+          customJS.SectionLabel.render(c, g.label);
+        } else {
+          const gh = c.createEl("div", { text: g.label });
+          if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
+        }
+        for (const e of g.entries) this._flightRow(c, dv, spec, items, e, e.__i);
+      }
+    } else if (spec.group) {
       // Grouped: bucket entries by category, preserving each row's ABSOLUTE
       // index in `items` so Edit/Delete/toggle target the right element.
       const groups = new Map();
@@ -106,18 +222,56 @@ class TripEntryList {
     } else {
       items.forEach((entry, absIndex) => this._row(c, dv, spec, items, entry, absIndex));
     }
+  }
 
-    // ── add controls ──────────────────────────────────────────────────────
-    const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 10px; margin: 10px auto 0; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
-    if (spec.group) {
-      const addCat = customJS.AccentButton.render(row, { label: "Add category", icon: plusIcon, onClick: () => this._onAddCategory(dv, spec) });
-      const addItem = customJS.AccentButton.render(row, { label: "Add item", icon: plusIcon, onClick: () => this._onAddItem(dv, spec) });
-      for (const btn of [addCat, addItem]) this._styleLeafBtn(btn);
-    } else {
-      const add = customJS.AccentButton.render(row, { label: "Add", icon: plusIcon, onClick: () => this._onAdd(dv, spec) });
-      this._styleLeafBtn(add);
+  // Rich flight leg: airline flight_no · direction / from → to / depart /
+  // board / gate / seat / confirmation / link, plus per-row Edit + Delete.
+  _flightRow(c, dv, spec, items, entry, absIndex) {
+    const e = entry || {};
+    const rowEl = c.createEl("div");
+    rowEl.style.cssText = "display:flex; align-items:flex-start; gap:8px; padding:8px 10px; margin-top:6px; border:1px solid var(--background-modifier-border); border-radius:6px;";
+    const body = rowEl.createEl("div");
+    body.style.cssText = "flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;";
+
+    const head = ((e.airline || "") + " " + (e.flight_no || "")).trim();
+    const hline = body.createEl("div", { text: head + (e.direction ? "  ·  " + e.direction : "") });
+    hline.style.cssText = "font-weight:600; font-size:0.9em;";
+
+    const route = ((e.from || "") + (e.from || e.to ? " → " : "") + (e.to || "")).trim();
+    if (route) {
+      const r = body.createEl("div", { text: route });
+      r.style.cssText = "font-size:0.82em; color:var(--text-muted);";
     }
+
+    const depart = TripEntryList._fmtDateTime(e.depart_date, e.depart_time);
+    if (depart) this._flightDetail(body, "Depart", depart);
+    if (e.boarding_time) this._flightDetail(body, "Board", TripEntryList._fmtTime(e.boarding_time));
+    if (e.gate) this._flightDetail(body, "Gate", e.gate);
+    if (e.seat) this._flightDetail(body, "Seat", e.seat);
+    if (e.confirmation) this._flightDetail(body, "Conf", e.confirmation);
+
+    if (e.link) {
+      const isWeb = /^[a-z]+:\/\//i.test(String(e.link));
+      const a = body.createEl("a", { text: isWeb ? "Open link ↗" : String(e.link).replace(/^\[\[|\]\]$/g, "") });
+      a.style.cssText = "font-size:0.8em; color:var(--text-accent); cursor:pointer; margin-top:2px;";
+      if (isWeb) { a.href = e.link; a.target = "_blank"; a.rel = "noopener"; }
+      else a.onclick = (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); app.workspace.openLinkText(String(e.link).replace(/^\[\[|\]\]$/g, ""), "", false); };
+    }
+
+    const editBtn = rowEl.createEl("button", { text: "Edit" });
+    editBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); font-size:0.8em;";
+    editBtn.onclick = () => this._onEdit(dv, spec, absIndex, e);
+    const delBtn = rowEl.createEl("button", { text: "Delete" });
+    delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); font-size:0.8em;";
+    delBtn.onclick = async () => {
+      const res = TripEntryList.deleteEntry(this._items(dv, spec), absIndex);
+      if (res.changed) await this._write(dv, spec, res.list);
+    };
+  }
+
+  _flightDetail(body, label, value) {
+    const d = body.createEl("div", { text: label + ": " + value });
+    d.style.cssText = "font-size:0.8em; color:var(--text-muted);";
   }
 
   // Render one entry row (bold title + muted subtitle, optional leading
@@ -201,6 +355,7 @@ class TripEntryList {
     this._openForm({
       title: "Add",
       fields: spec.fields || [],
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
         if (!res.changed) { new Notice("Enter at least one value."); return false; }
@@ -218,6 +373,7 @@ class TripEntryList {
       title: "Edit",
       fields: catField.concat(spec.fields || []),
       values: entry || {},
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.updateEntry(this._items(dv, spec), index, values);
         if (!res.changed) { new Notice("Nothing to update."); return false; }
@@ -227,10 +383,19 @@ class TripEntryList {
     });
   }
 
+  // Headless openers — the chrome bar calls these directly (bar owns the
+  // Add buttons now). openAdd(dv, spec) opens the add-entry form; the bar
+  // passes `spec` (may carry {key, kind, fields}). openAddCategory adds a
+  // packing category. These delegate to the same _on* handlers.
+  openAdd(dv, spec) { return this._onAdd(dv, spec || {}); }
+  openAddItem(dv, spec) { return this._onAddItem(dv, spec || {}); }
+  openAddCategory(dv, spec) { return this._onAddCategory(dv, spec || {}); }
+
   _onAddCategory(dv, spec) {
     this._openForm({
       title: "Add category",
       fields: [{ name: "category", label: "Category", placeholder: "e.g. Clothing" }],
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addCategory(this._items(dv, spec), values.category);
         if (!res.changed) { new Notice(res.reason === "duplicate" ? "That category already exists." : "Enter a category."); return false; }
@@ -241,11 +406,14 @@ class TripEntryList {
   }
 
   _onAddItem(dv, spec) {
-    const cats = this._categories(dv, spec);
-    const fields = [{ name: "category", label: "Category", select: cats }].concat(spec.fields || []);
+    // SINGLE category <select> (auto-first) + item text — no duplicate
+    // category field. Do NOT concat spec.fields (the template's fields carry
+    // their own category, which is what doubled the control).
+    const fields = TripEntryList._packingItemFields(this._categories(dv, spec));
     this._openForm({
       title: "Add item",
       fields,
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
         if (!res.changed) { new Notice("Enter at least one value."); return false; }
@@ -256,9 +424,13 @@ class TripEntryList {
   }
 
   // ── form modal ────────────────────────────────────────────────────────────
-  // fields: [{ name, label, placeholder?, select?:[...] }]. A `select` field
-  // renders a <select> populated from its options; otherwise a text <input>.
-  _openForm({ title, fields, values, onSubmit }) {
+  // fields: [{ name, label, placeholder?, select?:[...], type?, options?,
+  // optionsFrom? }]. A `select` array (legacy — the grouped category field)
+  // renders a <select> populated from its options. Otherwise `type` picks
+  // the control: "select" renders a <select> from `options` (or, when
+  // `optionsFrom === "categories"`, the distinct existing entry categories);
+  // any other type (text/date/time/link->url) renders a typed <input>.
+  _openForm({ title, fields, values, dv, spec, onSubmit }) {
     values = values || {};
     this._openModal({ title, build: (panel, close) => {
       const controls = [];
@@ -270,18 +442,29 @@ class TripEntryList {
         let input;
         if (Array.isArray(f.select)) {
           input = wrap.createEl("select");
-          input.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+          input.style.cssText = TripEntryList._fieldCss();
           for (const opt of f.select) {
             const o = input.createEl("option", { text: opt });
             o.value = opt;
           }
           if (values[f.name]) input.value = values[f.name];
+        } else if (TripEntryList._inputTypeFor(f) === "select") {
+          const opts = f.optionsFrom === "categories" ? this._categories(dv, spec) : (f.options || []);
+          input = wrap.createEl("select");
+          input.style.cssText = TripEntryList._fieldCss();
+          for (const opt of opts) {
+            const o = input.createEl("option", { text: opt });
+            o.value = opt;
+          }
+          if (opts.length) input.value = values[f.name] || opts[0];
+          input.onchange = () => { values[f.name] = input.value; };
         } else {
-          input = wrap.createEl("input");
-          input.type = "text";
+          const inputType = TripEntryList._inputTypeFor(f);
+          input = wrap.createEl("input", { type: inputType });
           input.value = values[f.name] || "";
           input.placeholder = f.placeholder || "";
-          input.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+          input.style.cssText = (inputType === "date" || inputType === "time") ? TripEntryList._dateCss() : TripEntryList._fieldCss();
+          input.oninput = () => { values[f.name] = input.value; };
         }
         controls.push({ name: f.name, input });
       }

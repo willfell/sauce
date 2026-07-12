@@ -1,24 +1,26 @@
-// trip-links-manager.js — TripLinksManager (Trip Links section).
+// trip-links.js — TripLinks (links on the trip ATLAS note).
 //
-// Add / edit / delete link dialogs on a trip's Links section note. Renders an
-// "Add link" + "Manage links" button row; the modals write the note's `links`
-// frontmatter via app.fileManager.processFrontMatter. The read-only list stays
-// owned by TripLinksPanel (rendered below this in the Trip Links template).
+// Links live in the trip atlas's (type: trip) `links` frontmatter array of
+// { url, text } entries. This one class owns all three concerns:
+//   - static addLink / updateLink / deleteLink — pure link-mutation ops (a
+//     verbatim port of ProjectLinksManager's, unit-tested in the Node harness);
+//   - instance openAdd(dv) / openManage(dv) — the add / edit / delete modals,
+//     wired from the atlas nav bar in a later task; they read + write the
+//     CURRENT note's `links` via app.fileManager.processFrontMatter;
+//   - instance render(dv) — a read-only card grid drawn on the atlas body,
+//     firing only when page.type === "trip", hidden when empty.
 //
-// Ported verbatim from ProjectLinksManager — only the render note-type guard
-// changes (trip-section + section_kind:links instead of the links-hub note).
-// The link normalization reuses TripLinksPanel._parse at runtime (with a minimal
-// fallback), so this ships to every vault with zero subscription churn.
+// Option B (no `links` mechanism dependency): the parse/render is INLINED so the
+// trips blueprint's dependency-set is unchanged and this ships to all vaults
+// with zero subscription churn.
 //
-// The pure link-mutation logic (addLink / updateLink / deleteLink) is static so
-// the Node harness exercises it directly; the modals + processFrontMatter are
-// dogfood-only (untestable in the harness), mirroring ProjectLinksManager.
-//
-// customJS stores classes as INSTANCES (customJS.TripLinksManager = new …),
-// so render + handlers are instance methods. This file MUST stay a bare class
-// expression with NO trailing statements — the customJS loader evals the whole
-// file as one expression `("+file+")` (lesson: customjs-no-trailing-statements).
-class TripLinksManager {
+// customJS stores classes as INSTANCES (customJS.TripLinks = new …), so the
+// modals + render are instance methods and the pure ops are static. This file
+// MUST stay a bare class expression with NO trailing statements — the customJS
+// loader evals the whole file as one expression `("+file+")`; a trailer would
+// make it "Unexpected token" and the class would silently never register
+// (lesson: customjs-no-trailing-statements). Never throws.
+class TripLinks {
   // ── pure link-mutation ops (unit-tested; operate on a parsed [{url,text}]) ──
   // Each returns { links, changed, reason? }; `links` is always a NEW array so
   // callers never mutate the source. url is trimmed + required; text defaults to
@@ -49,60 +51,128 @@ class TripLinksManager {
     return { links: list, changed: true };
   }
 
-  // Reuse the panel's canonical parse (Option B inline); minimal fallback if absent.
+  // Normalize a raw `links` frontmatter value into an ordered [{ url, text }].
+  // Accepts an array of objects ({url,text} | {url,label} | {href,text} |
+  // {link}/{title}/{name}), an array of bare URL strings, a JSON-encoded string
+  // of either, or null/undefined/garbage (-> []). Entries without a usable url
+  // are dropped; text defaults to the url; order is preserved; duplicate urls
+  // keep the first.
   _parse(value) {
-    const P = window.customJS && window.customJS.TripLinksPanel;
-    if (P && typeof P._parse === "function") return P._parse(value);
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter((x) => x && (x.url || typeof x === "string"))
-      .map((x) => (typeof x === "string" ? { url: x, text: x } : { url: String(x.url), text: String(x.text || x.url) }));
-  }
-
-  // ── render ─────────────────────────────────────────────────────────────────
-  async render(dv, opts = {}) {
-    const page = customJS.RenderSafe.page(dv);
-    if (!page || !page.file) return;              // cold-load guard
-    if (page.type !== "trip-section" || page.section_kind !== "links") return;  // only on the Links section
-    const c = (dv && dv.container) ? dv.container : dv;
-    if (!c || typeof c.createEl !== "function") return;
-    if (c.closest && c.closest(".markdown-embed")) return;
-
-    const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
-    const gearIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h2l.4 2.3a7 7 0 0 1 2 1.2l2.2-.9 1 1.7-1.7 1.5a7 7 0 0 1 0 2.4l1.7 1.5-1 1.7-2.2-.9a7 7 0 0 1-2 1.2L13 20h-2l-.4-2.3a7 7 0 0 1-2-1.2l-2.2.9-1-1.7 1.7-1.5a7 7 0 0 1 0-2.4L3.4 8.3l1-1.7 2.2.9a7 7 0 0 1 2-1.2z"/><circle cx="12" cy="12" r="3"/></svg>`;
-
-    // Leading hairline so the action row reads as its own chrome tier (the
-    // TripLinksPanel below renders its own leading divider for the trailing
-    // boundary). Guarded — SectionLabel is absent in cold-load harnesses.
-    if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
-      customJS.SectionLabel.divider(c);
+    let raw = value;
+    if (typeof raw === "string") {
+      const s = raw.trim();
+      if (!s) return [];
+      try { raw = JSON.parse(s); }
+      catch (_e) { raw = [s]; }
     }
-
-    // Wiki parity: ONE centered action row WITH flex-wrap — Add link · Manage
-    // links split evenly and break to their own lines on a very narrow phone
-    // instead of clipping (mirrors the nav row). Each button sized by _styleLeafBtn.
-    const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
-    const add = customJS.AccentButton.render(row, { label: "Add link", icon: plusIcon, onClick: () => this._onAdd(dv) });
-    const manage = customJS.AccentButton.render(row, { label: "Manage links", icon: gearIcon, onClick: () => this._onManage(dv) });
-    for (const btn of [add, manage]) {
-      this._styleLeafBtn(btn);
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const entry of raw) {
+      let url = "";
+      let text = "";
+      if (entry && typeof entry === "object") {
+        url = entry.url || entry.href || entry.link || "";
+        text = entry.text || entry.label || entry.title || entry.name || "";
+      } else if (typeof entry === "string") {
+        url = entry;
+      }
+      url = String(url == null ? "" : url).trim();
+      text = String(text == null ? "" : text).trim();
+      if (!url) continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ url, text: text || url });
     }
+    return out;
   }
 
-  // Wiki hub-button sizing (matches ProjectNavButtons._mobilize + the nav row):
-  // min-width 128 + 50% flex-basis so the container's flex-wrap breaks the buttons
-  // 2-up on a phone instead of clipping their labels. Readable + consistent.
-  _styleLeafBtn(btn) {
-    if (!btn || !btn.style) return btn;
-    btn.style.flex = "1 1 calc(50% - 6px)";
-    btn.style.minWidth = "128px";
-    btn.style.fontSize = "0.92em";
-    btn.style.padding = "9px 14px";
-    return btn;
+  // Best-effort hostname from a url string. Tries the URL parser, then a bare
+  // "scheme://host" / "host" regex, and finally falls back to the trimmed url.
+  // Never throws on a malformed value (cold-load / user-typed garbage safe).
+  _host(url) {
+    const s = String(url == null ? "" : url).trim();
+    if (!s) return "";
+    try {
+      const u = new URL(s);
+      if (u.hostname) return u.hostname.replace(/^www\./, "");
+    } catch (_e) { /* fall through to regex */ }
+    const m = s.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i) || s.match(/^([^/?#\s]+)/);
+    if (m && m[1]) return m[1].replace(/^www\./, "");
+    return s;
   }
 
-  // ── data + write ─────────────────────────────────────────────────────────
+  // Pure card model for the responsive grid: normalize + dedupe (via _parse),
+  // then derive a { text, url, host } per link. host = best-effort hostname;
+  // text falls back to the host when the entry carries no display text (or the
+  // text equals the raw url). Insertion order preserved; duplicates removed.
+  _linkCards(links) {
+    return this._parse(links).map((l) => {
+      const host = this._host(l.url);
+      const raw = String(l.text == null ? "" : l.text).trim();
+      const text = raw && raw !== l.url ? raw : (host || l.url);
+      return { text, url: l.url, host };
+    });
+  }
+
+  // ── read-only render ─────────────────────────────────────────────────────
+  // Draws the "Helpful Links" card grid on the trip ATLAS body. Fires ONLY when
+  // page.type === "trip"; reads the note's own `links`. Per the empty-state rule
+  // the panel renders NOTHING when there are no links (the nav-bar Add-link
+  // affordance owns the empty state). Cold-load safe; never throws.
+  render(dv, opts = {}) {
+    try {
+      const page = customJS.RenderSafe.page(dv);
+      if (!page || !page.file) return;              // cold-load guard
+      if (page.type !== "trip") return;             // only on the atlas note
+      const c = (dv && dv.container) ? dv.container : dv;
+      if (!c || typeof c.createEl !== "function") return;
+      if (c.closest && c.closest(".markdown-embed")) return;
+
+      const cards = this._linkCards(page.links);
+      if (!cards.length) return;                    // empty-state: render nothing
+
+      if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
+        customJS.SectionLabel.render(dv, { text: "Helpful Links" });
+      } else {
+        if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
+          customJS.SectionLabel.divider(c);
+        }
+        const lbl = c.createEl("div");
+        lbl.textContent = "Helpful Links";
+        if (lbl.style) lbl.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
+      }
+
+      const grid = c.createEl("div");
+      if (grid.style) grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px;";
+      for (const card of cards) {
+        const a = grid.createEl("a", { href: card.url });
+        if (a && typeof a.setAttr === "function") {
+          a.setAttr("target", "_blank");
+          a.setAttr("rel", "noopener");
+        }
+        if (a && a.style) {
+          a.style.cssText =
+            "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
+            "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
+            "background: var(--background-primary); color: var(--text-normal); " +
+            "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
+        }
+        if (a && typeof a.addEventListener === "function") {
+          a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
+          a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
+        }
+        const title = a.createEl("div", { text: card.text });
+        if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+        if (card.host) {
+          const host = a.createEl("div", { text: card.host });
+          if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+        }
+      }
+    } catch (_e) { /* never throw */ }
+  }
+
+  // ── data + write (operate on the CURRENT note — the trip atlas) ──────────
   _file(dv) {
     const cur = dv.current && dv.current();
     if (!cur || !cur.file) return null;
@@ -114,24 +184,24 @@ class TripLinksManager {
   }
   async _write(dv, links) {
     const file = this._file(dv);
-    if (!file) { new Notice("Could not resolve the Links section note."); return false; }
+    if (!file) { new Notice("Could not resolve the trip atlas note."); return false; }
     try {
       await app.fileManager.processFrontMatter(file, (fm) => { fm.links = links.map((l) => ({ url: l.url, text: l.text })); });
       return true;
     } catch (e) { new Notice("Could not save links: " + (e.message || e), 6000); return false; }
   }
 
-  // ── handlers ───────────────────────────────────────────────────────────────
-  _onAdd(dv) {
+  // ── entry points (wired from the atlas nav bar) ──────────────────────────
+  openAdd(dv) {
     this._openForm({ title: "Add link", url: "", text: "" }, async ({ url, text }) => {
-      const res = TripLinksManager.addLink(this._currentLinks(dv), { url, text });
+      const res = TripLinks.addLink(this._currentLinks(dv), { url, text });
       if (!res.changed) { new Notice(res.reason === "duplicate" ? "That URL is already in the list." : "Enter a URL."); return false; }
       if (await this._write(dv, res.links)) { new Notice("Link added."); return true; }
       return false;
     });
   }
 
-  _onManage(dv) {
+  openManage(dv) {
     const links = this._currentLinks(dv);
     if (!links.length) { new Notice("No links yet — use Add link."); return; }
     this._openModal({ title: "Manage links", build: (panel, close) => {
@@ -149,7 +219,7 @@ class TripLinksManager {
         editBtn.onclick = () => {
           close();
           this._openForm({ title: "Edit link", url: link.url, text: link.text }, async ({ url, text }) => {
-            const res = TripLinksManager.updateLink(this._currentLinks(dv), index, { url, text });
+            const res = TripLinks.updateLink(this._currentLinks(dv), index, { url, text });
             if (!res.changed) { new Notice(res.reason === "duplicate" ? "That URL is already in the list." : "Enter a URL."); return false; }
             if (await this._write(dv, res.links)) { new Notice("Link updated."); return true; }
             return false;
@@ -158,7 +228,7 @@ class TripLinksManager {
         const delBtn = rowEl.createEl("button", { text: "Delete" });
         delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
         delBtn.onclick = async () => {
-          const res = TripLinksManager.deleteLink(this._currentLinks(dv), index);
+          const res = TripLinks.deleteLink(this._currentLinks(dv), index);
           if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
           close();
         };
