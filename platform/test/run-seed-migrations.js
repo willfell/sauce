@@ -4191,8 +4191,14 @@ async function runHomeScaffoldHealFamily() {
             const body = existsVault(root, HOME) ? readVault(root, HOME) : "";
             ok("HC-HOME-SCAFFOLD-1b carries type: home frontmatter",
                /^type:\s*home\s*$/m.test(body), body.slice(0, 120));
-            ok("HC-HOME-SCAFFOLD-1c has SpaceHome + SpaceNavButtons chrome",
-               /class:\s*"SpaceHome"/.test(body) && /class:\s*"SpaceNavButtons"/.test(body));
+            // Fresh scaffold follows the home template's HomeChromeBar shape
+            // (the SpaceNavButtons chrome was retired from _HOME_CHROME so a
+            // brand-new Home.md is born new-shape and applyDailyHomeChromeBarHeal
+            // no-ops on it). The SEPARATE existing-note repair path
+            // (_healHomeChromeBody) still rebuilds SpaceNavButtons — exercised by
+            // HC-HOME-SCAFFOLD-2 below and run-home.js HOME-HEAL-*.
+            ok("HC-HOME-SCAFFOLD-1c has SpaceHome + HomeChromeBar chrome (no legacy SpaceNavButtons)",
+               /class:\s*"SpaceHome"/.test(body) && /class:\s*"HomeChromeBar"/.test(body) && !/class:\s*"SpaceNavButtons"/.test(body));
             await install.applyHomeScaffoldHeal(tp, history, git);
             ok("HC-HOME-SCAFFOLD-1d second run is a byte-identical no-op (healthy note)",
                readVault(root, HOME) === body);

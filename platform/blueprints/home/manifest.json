@@ -1,6 +1,6 @@
 {
   "name": "home",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "kind": "blueprint",
   "module_directory": "home",
   "skills_dir": ".claude/skills/home",
@@ -33,6 +33,10 @@
     {
       "name": "daily",
       "range": ">=0.16.2"
+    },
+    {
+      "name": "chrome-bar",
+      "range": ">=0.3.1"
     }
   ],
   "snippets": [
@@ -48,7 +52,8 @@
   },
   "customjs_classes": [
     "SpaceHome",
-    "HomeCommandsInit"
+    "HomeCommandsInit",
+    "HomeChromeBar"
   ],
   "customjs_startup_scripts": [
     "HomeCommandsInit"
@@ -70,6 +75,10 @@
     {
       "source": "helpers/home-commands-init.js",
       "dest": "{{scripts_path}}/home/home-commands-init.js"
+    },
+    {
+      "source": "helpers/home-chrome-bar.js",
+      "dest": "{{scripts_path}}/home/home-chrome-bar.js"
     }
   ],
   "claude_surface": [
