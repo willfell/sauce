@@ -10158,6 +10158,22 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
     completed_at: new Date().toISOString() });
 }
 
+// _stripCompletionEmojiSuffix — strips a trailing "✅ YYYY-MM-DD" annotation
+// (tolerant of surrounding/missing whitespace) from a title string. The
+// legacy Recurring Tasks.md registry supported CHECKED lines
+// (`- [x] Pay Rent ✅ 2026-07-06 [recurrence:: every day]`) where a user had
+// manually typed a checkmark + completion date as free text (a common
+// personal habit-tracking convention) — NOT a structured `[field:: value]`
+// annotation, so the existing inline-field strip in _parseRecurringRegistry
+// never touched it, and it survived verbatim into the migrated task note's
+// title (and, via TaskEntity.taskFilename, its filename). Pure,
+// null-tolerant (→ ""); a title with no such suffix passes through
+// unchanged; never throws.
+function _stripCompletionEmojiSuffix(title) {
+  const s = String(title == null ? "" : title);
+  return s.replace(/\s*✅\s*\d{4}-\d{2}-\d{2}\s*$/, "").trim();
+}
+
 // _parseRecurringRegistry — adapted from ToDoDailyRecurring.parseRegistryLine's
 // grammar, EXTENDED to also match checked (`- [x] ...`) lines. Section-scoped
 // the same way (`## Recurring Tasks` H2 OR the SectionLabel block form).
@@ -10190,7 +10206,7 @@ function _parseRecurringRegistry(content) {
       if (wl) val = wl[1];
       fields[mm[1]] = val;
     }
-    const title = rest.replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, "").trim();
+    const title = _stripCompletionEmojiSuffix(rest.replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, "").trim());
     if (!title) continue;
     const recurrence = fields.recurrence || null;
     if (!recurrence) { entries.push({ title, invalid: true }); continue; }
@@ -21115,6 +21131,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
+    module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
+    module.exports._parseRecurringRegistry = _parseRecurringRegistry;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;
     module.exports._composeDailyTaskNote = _composeDailyTaskNote;
     module.exports._composeEntityTaskFrontmatter = _composeEntityTaskFrontmatter;

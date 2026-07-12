@@ -1322,6 +1322,36 @@ withTempVault((vault) => {
         }
     }
 
+    // ===== STRIP-EMOJI-* / HC-REGISTRY-TITLE-* — _stripCompletionEmojiSuffix +
+    // _parseRecurringRegistry title-cleanup (direct unit tests, no seed-vault
+    // fixture needed) =====
+    {
+        const { _stripCompletionEmojiSuffix, _parseRecurringRegistry } = require("../install.js");
+
+        ok("STRIP-EMOJI-1 strips a trailing checkmark + date, with surrounding whitespace",
+           _stripCompletionEmojiSuffix("Pay Rent ✅ 2026-07-06") === "Pay Rent");
+        ok("STRIP-EMOJI-1b tolerates no space before the date",
+           _stripCompletionEmojiSuffix("Feed the dogs ✅2026-06-17") === "Feed the dogs");
+        ok("STRIP-EMOJI-2 leaves a title with no such suffix unchanged",
+           _stripCompletionEmojiSuffix("Call Dog Trainer back") === "Call Dog Trainer back");
+        ok("STRIP-EMOJI-3 null/empty input never throws",
+           _stripCompletionEmojiSuffix(null) === "" && _stripCompletionEmojiSuffix("") === "");
+
+        const registryBody = [
+            "## Recurring Tasks",
+            "- [x] Pay Rent ✅ 2026-07-06 [recurrence:: every day]",
+            "- [ ] Water plants [recurrence:: every 3 days]",
+            "## Last 7 days",
+        ].join("\n");
+        const entries = _parseRecurringRegistry(registryBody);
+        const payRent = entries.find((e) => e.title.indexOf("Pay Rent") === 0);
+        ok("HC-REGISTRY-TITLE-1 checked line with a manually-typed completion annotation yields a clean title",
+           payRent && payRent.title === "Pay Rent", `got: ${JSON.stringify(payRent)}`);
+        const waterPlants = entries.find((e) => e.title.indexOf("Water plants") === 0);
+        ok("HC-REGISTRY-TITLE-1b an unaffected line is untouched",
+           waterPlants && waterPlants.title === "Water plants", `got: ${JSON.stringify(waterPlants)}`);
+    }
+
     // ===== HC-V0202-SEED-MIGRATE-RECURRING-* — applyRecurringTasksMigrationHeal =====
     // The seed's spice/to-do/Recurring Tasks.md registry carries two entries in its
     // Recurring Tasks section: an UNCHECKED line ("Water the plants", the live shape)
