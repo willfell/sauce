@@ -153,8 +153,8 @@ function makeDv(embed, currentVal) {
     // ---------- TripSectionKinds registry (behavioral) ----------
     const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
     const tsk = new TripSectionKinds();
-    ok('TSK-1 all() has the 5 default kinds in order',
-        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes');
+    ok('TSK-1 all() has the 6 default kinds in order',
+        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes,links');
     ok('TSK-2 order() ranks defaults, custom last',
         tsk.order('flights') === 0 && tsk.order('notes') === 4 && tsk.order('custom') === 999);
     ok('TSK-3 labelFor maps kind → display',
@@ -165,6 +165,9 @@ function makeDv(embed, currentVal) {
         && tsk.kindFromLegacyBasename('Honorees') === 'custom');
     ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
         tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
+    ok('TSK-6 links kind registered at index 5 with label + icon',
+        tsk.order('links') === 5 && tsk.labelFor('links') === 'Links'
+        && /^<svg/.test(tsk.iconFor('links')));
 
     // ---------- TripNavButtons launcher partition (behavioral) ----------
     const navP = new TripNavButtons();
