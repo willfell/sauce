@@ -39,7 +39,8 @@
     "TripsHubCards",
     "TripNavButtons",
     "TripSectionsCards",
-    "TripsChromeBar"
+    "TripsChromeBar",
+    "TripEntryList"
   ],
   "files": [
     {
@@ -93,6 +94,10 @@
     {
       "source": "helpers/trips-chrome-bar.js",
       "dest": "{{scripts_path}}/trips/trips-chrome-bar.js"
+    },
+    {
+      "source": "helpers/trip-entry-list.js",
+      "dest": "{{scripts_path}}/trips/trip-entry-list.js"
     },
     {
       "source": "content/Trips.md",
