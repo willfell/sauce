@@ -109,11 +109,13 @@ class TripEntryList {
       { name: "to", label: "To", type: "text", placeholder: "DTW" },
       { name: "depart_date", label: "Depart date", type: "date" },
       { name: "depart_time", label: "Depart time", type: "time" },
-      { name: "boarding_time", label: "Boarding time", type: "time" },
+      { name: "arrival_date", label: "Arrival date", type: "date" },
+      { name: "arrival_time", label: "Arrival time", type: "time" },
       { name: "gate", label: "Gate", type: "text", placeholder: "A12" },
       { name: "seat", label: "Seat", type: "text", placeholder: "14C" },
       { name: "confirmation", label: "Confirmation", type: "text", placeholder: "ABC123" },
-      { name: "link", label: "Link", type: "link", placeholder: "https://…" },
+      { name: "delay_minutes", label: "Delay (min)", type: "number", placeholder: "0" },
+      { name: "link", label: "Link", type: "link" },
     ];
   }
   // Stays: lodging with check-in/out dates + a booking link.
