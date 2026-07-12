@@ -48,8 +48,8 @@ class TripsChromeBar {
         if (ctx.context === "trip") {
           return { primary: null, overflow: [newSection], leaf: false };
         }
-        // trip-section / trip-board-card
-        return { primary: null, overflow: [newSection], leaf: true };
+        // trip-section / trip-board-card — New Section is atlas-only
+        return { primary: null, overflow: [], leaf: true };
       },
       // Returns the underlying promise chain (harmless for production onClick
       // callers, which don't await it) so tests can `await cfg.dispatch(...)`

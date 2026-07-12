@@ -30,8 +30,9 @@ const cfg = inst._config();
   const c = cfg.surfaceSpec({ context: 'trip-board-card' });
   ok('TCB-SPEC-1 hub: primary new-trip + not leaf', h.primary.id === 'new-trip' && h.leaf === false);
   ok('TCB-SPEC-2 trip atlas: primary null + overflow new-section + not leaf', a.primary === null && a.overflow.some(o => o.id === 'new-section') && a.leaf === false);
-  ok('TCB-SPEC-3 trip-section: leaf + overflow new-section', s.leaf === true && s.overflow.some(o => o.id === 'new-section'));
-  ok('TCB-SPEC-4 trip-board-card: leaf + overflow new-section', c.leaf === true && c.overflow.some(o => o.id === 'new-section'));
+  ok('TCB-SPEC-3 trip-section: leaf + overflow empty (New Section is atlas-only)', s.leaf === true && Array.isArray(s.overflow) && s.overflow.length === 0);
+  ok('TCB-SPEC-4 trip-board-card: leaf + overflow empty (New Section is atlas-only)', c.leaf === true && Array.isArray(c.overflow) && c.overflow.length === 0);
+  ok('TCB-SPEC-5 trip atlas still offers new-section in overflow', a.overflow.some(o => o.id === 'new-section'));
 }
 // TCB-DISPATCH — new-trip → prompt+_createTrip; new-section → prompt+_createTripSection.
 async function main() {
