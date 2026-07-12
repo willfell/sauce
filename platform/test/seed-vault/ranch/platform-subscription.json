@@ -103,7 +103,7 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.4.0"
+      "version": "0.4.1"
     },
     {
       "name": "section-explorer",
@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.20.0"
+      "version": "0.20.1"
     },
     {
       "name": "meetings",
@@ -165,7 +165,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.7.0"
+      "version": "0.7.1"
     },
     {
       "name": "reader",

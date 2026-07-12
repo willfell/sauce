@@ -210,22 +210,28 @@ class ChromeBar {
       try { nav = await adapter.dayNav(dv); } catch (_e) { nav = null; }
       if (nav) {
         const left = bar.createEl("div", { cls: "chrome-bar-day-nav" });
-        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; gap: 6px; min-width: 0;";
-        const mkSide = (label, targetPath, cls) => {
+        left.style.cssText = "font-size: 0.85em; color: var(--text-muted); display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap;";
+        const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+        const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+        // Real <a>/<span> elements with real onclick handlers — NEVER flatten
+        // this into a parent innerHTML assignment afterward; that destroys
+        // the elements (and their onclick handlers) this function just built.
+        const mkSide = (label, targetPath, cls, chevronSvg, chevronFirst) => {
           const el = left.createEl(targetPath ? "a" : "span", { cls: "chrome-bar-day-nav-" + cls });
-          el.innerHTML = label || "—";
-          el.style.cssText = targetPath
-            ? "cursor: pointer; text-decoration: none; color: var(--text-muted);"
-            : "opacity: 0.4;";
+          const labelSpan = `<span>${label || "—"}</span>`;
+          el.innerHTML = chevronFirst ? (chevronSvg + labelSpan) : (labelSpan + chevronSvg);
+          el.style.cssText = "display: inline-flex; align-items: center; gap: 2px; "
+            + (targetPath ? "cursor: pointer; text-decoration: none; color: var(--text-muted);" : "opacity: 0.4;");
           if (targetPath) el.onclick = (e) => { if (e && e.preventDefault) e.preventDefault(); adapter.openNavTarget(targetPath, dv); };
           return el;
         };
-        const prevEl = mkSide(nav.prevLabel, nav.prevPath, "prev");
-        const sep = left.createEl("span");
-        sep.innerHTML = "&rarr;";
-        sep.style.cssText = "opacity: 0.5;";
-        const nextEl = mkSide(nav.nextLabel, nav.nextPath, "next");
-        left.innerHTML = (prevEl.innerHTML || "") + (sep.innerHTML || "") + (nextEl.innerHTML || "");
+        mkSide(nav.prevLabel, nav.prevPath, "prev", chevronLeft, true);
+        if (nav.currentLabel) {
+          const cur = left.createEl("span", { cls: "chrome-bar-day-nav-current" });
+          cur.textContent = nav.currentLabel;
+          cur.style.cssText = "font-weight: 600; color: var(--text-normal);";
+        }
+        mkSide(nav.nextLabel, nav.nextPath, "next", chevronRight, false);
       }
     } else {
       let segments = [];
