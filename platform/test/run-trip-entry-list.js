@@ -133,6 +133,16 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('FF-3 _fieldsFor packing derives item', TripEntryList._fieldsFor({ kind: "packing", __cats: ["A"] }).some(f => f.name === "item"));
     ok('FF-4 _fieldsFor explicit fields win', TripEntryList._fieldsFor({ fields: [{ name: "z" }] })[0].name === "z");
 }
+{
+    // Edit form: grouped (packing) → exactly ONE populated category select + item
+    // (no doubled category); flat sections → their kind's fields, no category.
+    const pe = TripEntryList._editFields({ group: true, kind: "packing" }, ["Clothing", "Toiletries"]);
+    ok('EF-1 packing edit has exactly one category field', pe.filter(f => f.name === "category").length === 1);
+    ok('EF-2 packing edit category select is populated', (pe.find(f => f.name === "category").options || [])[0] === "Clothing");
+    ok('EF-3 packing edit has item field', pe.some(f => f.name === "item"));
+    const fe = TripEntryList._editFields({ kind: "flights" }, []);
+    ok('EF-4 flight edit has fields, no stray category', fe.some(f => f.name === "airline") && fe.filter(f => f.name === "category").length === 0);
+}
 
 // ---------- flight schema: drop boarding, add arrival + delay ----------
 {

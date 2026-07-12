@@ -98,6 +98,14 @@ class TripEntryList {
     }
   }
 
+  // Fields for the Edit form. Grouped (packing) uses a SINGLE category <select>
+  // populated from existing categories + the item field — never doubled. Flat
+  // sections (flights/stay) present their kind's fields.
+  static _editFields(spec, categories) {
+    if (spec && spec.group) return TripEntryList._packingItemFields(categories || []);
+    return TripEntryList._fieldsFor(spec);
+  }
+
   // ── per-section field specs (SSOT — templates + chrome bar call these) ─────
   // Flights: direction select + typed schedule fields + a booking link.
   static _flightFields() {
@@ -551,12 +559,11 @@ class TripEntryList {
   }
 
   _onEdit(dv, spec, index, entry) {
-    // Grouped entries keep their category via a category <select>; flat ones
-    // just re-present spec.fields. Pre-fill from the existing entry.
-    const catField = spec.group ? [{ name: "category", label: "Category", select: this._categories(dv, spec) }] : [];
+    // Grouped (packing) → one populated category <select> + item; flat sections
+    // (flights/stay) → their kind's fields. Pre-fill from the existing entry.
     this._openForm({
       title: "Edit",
-      fields: catField.concat(TripEntryList._fieldsFor(spec)),
+      fields: TripEntryList._editFields(spec, this._categories(dv, spec)),
       values: entry || {},
       dv, spec,
       onSubmit: async (values) => {
