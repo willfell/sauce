@@ -11,7 +11,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.9.0"
+      "version": "0.10.0"
     },
     {
       "name": "kanban-status-sync",
@@ -103,7 +103,7 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "section-explorer",
@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.19.0"
+      "version": "0.20.0"
     },
     {
       "name": "meetings",
