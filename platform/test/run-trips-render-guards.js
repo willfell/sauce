@@ -132,10 +132,12 @@ global.app = {
 global.window = Object.assign(global.window || {}, { customJS: global.customJS, moment: momentFn, app: global.app });
 global.moment = momentFn;
 
+// TripNavButtons is intentionally absent: it was made headless (creation logic
+// only, no render()) — the shared TripsChromeBar renders trip chrome now.
 const widgets = [
     { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },
-    { name: 'TripNavButtons',    path: 'platform/blueprints/trips/helpers/trip-nav-buttons.js' },
     { name: 'TripSectionsCards', path: 'platform/blueprints/trips/helpers/trip-sections-cards.js' },
+    { name: 'TripEntryList',     path: 'platform/blueprints/trips/helpers/trip-entry-list.js' },
 ];
 
 // cold-load variants: Dataview not indexed → dv.current()/RenderSafe.page(dv)
