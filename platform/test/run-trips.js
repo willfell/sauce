@@ -135,8 +135,8 @@ function makeDv(embed, currentVal) {
     // ---------- TripSectionKinds registry (behavioral) ----------
     const TripSectionKinds = loadWidget('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
     const tsk = new TripSectionKinds();
-    ok('TSK-1 all() has the 6 default kinds in order',
-        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes,links');
+    ok('TSK-1 all() has the 5 default kinds in order',
+        tsk.all().map(k => k.kind).join(',') === 'flights,stay,packing-list,to-do,notes');
     ok('TSK-2 order() ranks defaults, custom last',
         tsk.order('flights') === 0 && tsk.order('notes') === 4 && tsk.order('custom') === 999);
     ok('TSK-3 labelFor maps kind → display',
@@ -147,9 +147,9 @@ function makeDv(embed, currentVal) {
         && tsk.kindFromLegacyBasename('Honorees') === 'custom');
     ok('TSK-5 iconFor returns non-empty svg for every default kind + fallback',
         tsk.all().every(k => /<svg/.test(tsk.iconFor(k.kind))) && /<svg/.test(tsk.iconFor('custom')));
-    ok('TSK-6 links kind registered at index 5 with label + icon',
-        tsk.order('links') === 5 && tsk.labelFor('links') === 'Links'
-        && /^<svg/.test(tsk.iconFor('links')));
+    ok('TSK-6 links kind is NOT a section kind (links live on the atlas)',
+        tsk.all().every(k => k.kind !== 'links') && tsk.labelFor('links') === null
+        && tsk.order('links') === 999);
 
     // ---------- create-flow naming + frontmatter (behavioral) ----------
     {
@@ -177,7 +177,7 @@ function makeDv(embed, currentVal) {
         global.app.vault = savedVault;
     }
 
-    // ---------- _createTrip scaffolds the full default section set incl. Links ----------
+    // ---------- _createTrip scaffolds the 5 default sections (Links live on the atlas, not a section) ----------
     {
         const written = {};
         const created = new Set();
@@ -194,10 +194,10 @@ function makeDv(embed, currentVal) {
         const navC = new TripNavButtons();
         await navC._createTrip({ name: 'Reunion', slug: 'reunion', start_date: '', end_date: '', location: '' });
         const wrote = Object.keys(written);
-        ok('CREATE-4 _createTrip scaffolds a Links section note',
-            wrote.includes('spice/trips/reunion/Reunion — Links.md'), wrote.join('\n'));
-        ok('CREATE-5 _createTrip scaffolds every default section (Flights/Stay/Packing List/To Do/Notes/Links)',
-            ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes', 'Links']
+        ok('CREATE-4 _createTrip does NOT scaffold a Links section note (links live on the atlas)',
+            !wrote.includes('spice/trips/reunion/Reunion — Links.md'), wrote.join('\n'));
+        ok('CREATE-5 _createTrip scaffolds every default section (Flights/Stay/Packing List/To Do/Notes)',
+            ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes']
                 .every(label => wrote.includes(`spice/trips/reunion/Reunion — ${label}.md`)), wrote.join('\n'));
         global.app.vault = savedVault;
     }

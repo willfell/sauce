@@ -139,6 +139,7 @@ const widgets = [
     { name: 'TripSectionsCards', path: 'platform/blueprints/trips/helpers/trip-sections-cards.js' },
     { name: 'TripDashboard',     path: 'platform/blueprints/trips/helpers/trip-dashboard.js' },
     { name: 'TripEntryList',     path: 'platform/blueprints/trips/helpers/trip-entry-list.js' },
+    { name: 'TripLinks',         path: 'platform/blueprints/trips/helpers/trip-links.js' },
 ];
 
 // cold-load variants: Dataview not indexed → dv.current()/RenderSafe.page(dv)

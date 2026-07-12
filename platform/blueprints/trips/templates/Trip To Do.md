@@ -10,7 +10,3 @@ created_at: "{{DATE}}"
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "TripsChromeBar" });
 ```
-
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "TripToDoActions", method: "render" });
-```

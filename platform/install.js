@@ -12535,7 +12535,6 @@ const TRIP_SECTION_KINDS = [
   { kind: "packing-list", label: "Packing List", legacy: "Trip Packing List" },
   { kind: "to-do",        label: "To Do",        legacy: "Trip To Do" },
   { kind: "notes",        label: "Notes",        legacy: "Trip Notes" },
-  { kind: "links",        label: "Links",        legacy: "Trip Links" },
 ];
 
 // Mirrors TripNavButtons._sanitizeFilename / TripSectionKinds helpers.
