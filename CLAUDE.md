@@ -53,6 +53,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | Install | .claude/commands/install.md | /install |
 | Meetings | spice/meetings | /meetings |
 | Projects | spice/projects | /project |
+| Reader | spice/reader | /reader |
 | Sticky Notes | spice/sticky-notes | /sticky-notes |
 | Upgrade | .claude/commands/upgrade.md | /upgrade |
 | Wiki | spice/wiki | /wiki |

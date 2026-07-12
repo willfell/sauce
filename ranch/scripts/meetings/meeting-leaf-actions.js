@@ -15,8 +15,55 @@ class MeetingLeafActions {
     if (s == null) return "";
     return String(s).replace(/^\[\[|\]\]$/g, "").trim();
   }
+  // cleanProjectName — extract the CLEAN project basename from a `project:`
+  // frontmatter value that may be a Dataview Link OBJECT (a RESOLVED link, with
+  // .path / .display), a `[[...]]` wikilink string, or a bare string. Dataview
+  // hands a `[[Connectors]]` frontmatter value back as a Link whose `.path` is
+  // the RESOLVED note path (`spice/projects/connectors/Connectors.md`); naively
+  // stripping `[[ ]]` off `String(link)` leaves the whole path + `|alias`, which
+  // then mangles into a path-slug. This mirrors TaskEntity._linkText semantics
+  // (last `/` segment, drop `.md`, drop a trailing `|alias`) so meeting-created
+  // tasks get the SAME clean {name, slug} a project-surface create would.
+  //   - Link object → basename of .path (else .display)
+  //   - "[[a/b/Connectors.md|Connectors]]" → "Connectors" (basename, .md + pipe stripped)
+  //   - "[[Bar]]" → "Bar";  "Plain" → "Plain";  nullish/empty → ""
+  static cleanProjectName(v) {
+    if (v == null) return "";
+    const baseOf = (s) => {
+      let out = String(s == null ? "" : s).trim();
+      const slash = out.lastIndexOf("/");
+      if (slash >= 0) out = out.slice(slash + 1);
+      return out.replace(/\.md$/i, "");
+    };
+    // Dataview Link object — has .path / .display / .subpath (not a string).
+    if (typeof v === "object" && ("path" in v || "display" in v || "subpath" in v)) {
+      if (v.path != null && String(v.path).trim() !== "") return baseOf(v.path);
+      if (v.display != null) return String(v.display).trim();
+      return "";
+    }
+    if (typeof v === "string") {
+      let s = v.trim();
+      const m = /^\[\[([^\]]*)\]\]$/.exec(s);
+      if (m) s = m[1].trim();
+      // Split off a `|label` alias → keep the target (before the pipe), then
+      // take its basename. For "[[a/b/Connectors.md|Connectors]]" the target is
+      // "a/b/Connectors.md" → basename "Connectors" (== the alias here).
+      const pipe = s.indexOf("|");
+      if (pipe >= 0) s = s.slice(0, pipe).trim();
+      return baseOf(s);
+    }
+    return String(v);
+  }
+  // _slugify — the SAME slug shape composeNote / the project list use: lowercase,
+  // non-alnum runs → "-", trimmed of leading/trailing "-". Pure.
+  static _slugify(name) {
+    return String(name == null ? "" : name)
+      .toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
   static resolveProjectPreselect(cur, projectList) {
-    const name = MeetingLeafActions.stripWikilink(cur && cur.project);
+    const name = MeetingLeafActions.cleanProjectName(cur && cur.project);
     if (!name) return "today";
     const hit = (projectList || []).find((p) => p.name === name);
     return hit ? { type: "project", slug: hit.slug, name: hit.name } : "today";
@@ -39,6 +86,7 @@ class MeetingLeafActions {
   // ── render ─────────────────────────────────────────────────────────────────
   async render(dv) {
     if (dv.container.closest(".markdown-embed")) return;
+    try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".meeting-chrome-root")) return; } catch (_e) {}
     const myGen = (dv.container.__meetingLeafRenderGen || 0) + 1;
     dv.container.__meetingLeafRenderGen = myGen;
     while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
@@ -47,19 +95,31 @@ class MeetingLeafActions {
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const usersIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
 
-    const row = dv.container.createEl("div");
-    row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+    // Chrome dividers owned by the helper (wiki methodology): render the action
+    // row bracketed by a top + bottom <hr> INSIDE this one dataviewjs block, so the
+    // separators hug the buttons (12px) instead of the big inter-block gap a
+    // template `---` leaves. The Meeting.md template carries no `---` around this
+    // block; a per-note install heal strips the legacy `---` from existing meetings.
+    const DIVIDER = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+    const wrap = dv.container.createEl("div");
+    wrap.style.cssText = "margin: 0;";
+    wrap.createEl("hr").style.cssText = DIVIDER;
+
+    const row = wrap.createEl("div");
+    row.style.cssText = "display: flex; gap: 12px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
 
     customJS.AccentButton.render(row, { label: "New Task", icon: plusIcon, onClick: () => this._onNewTask(dv), flex: true });
     customJS.AccentButton.render(row, { label: "Add to Project", icon: folderIcon, onClick: () => this._onAddToProject(dv), flex: true });
     customJS.AccentButton.render(row, { label: "Edit Attendees", icon: usersIcon, onClick: () => this._onEditAttendees(dv), flex: true });
+
+    wrap.createEl("hr").style.cssText = DIVIDER;
   }
 
   // ── data sources ───────────────────────────────────────────────────────────
   _listProjects(dv) {
     try {
       return dv.pages('"spice/projects"').where((p) => p && p.type === "project")
-        .map((p) => ({ slug: p.project_slug || String(p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: p.file.name }))
+        .map((p) => ({ slug: p.project_slug || String(p.name || p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: p.name || p.file.name }))
         .array();
     } catch (_e) { return []; }
   }
@@ -72,145 +132,49 @@ class MeetingLeafActions {
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
+  // v0.13.0 (task-entity meetings wiring): + New Task now creates ONE task-note
+  // via the task-entity mechanism's TaskDialog (surface: 'meeting'). No more
+  // custom inline modal + dual-write of raw markdown into the meeting's Action
+  // Items AND the project To-Do — the task lives as a single note under
+  // spice/tasks/, stamped with source: meeting + source_note: [[<meeting>]] +
+  // (when the meeting has a project: frontmatter) the project link/slug. The
+  // meeting's TaskMeetingList block live-queries those task-notes by source_note;
+  // the daily aggregators pick them up by source == meeting. Nothing is appended
+  // to any surface note.
   _onNewTask(dv) {
     const cur = dv.current && dv.current();
     if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
-    const meetingPath = cur.file.path;
-    const projectName = MeetingLeafActions.stripWikilink(cur.project);
-    const ti = window.customJS?.TaskInteractions;
-    if (!ti) {
-      new Notice("Install the task-interactions mechanism to create tasks from meetings.", 6000);
+    const TD = window.customJS && window.customJS.TaskDialog;
+    if (!TD || typeof TD.open !== "function") {
+      new Notice("Install the task-entity mechanism to create tasks from meetings.", 6000);
       return;
     }
-    this._openTaskModal(dv, projectName, async (payload) => {
-      if (!payload || !payload.title || !payload.title.trim()) return;
-      const fullPayload = {
-        mode: 'one-shot',
-        title: payload.title.trim(),
-        destination: projectName
-          ? { type: 'project', slug: this._projectSlugFor(projectName, dv), name: projectName }
-          : 'today',
-        priority: payload.priority || '',
-        due: payload.due || '',
+    // Meeting basename (no .md) → source_note wikilink so the task-note's
+    // TaskMeetingList query resolves back to this meeting.
+    const meetingBasename = String(cur.file.name || "").replace(/\.md$/i, "");
+    // Project (optional): only when the meeting carries a project: frontmatter.
+    // cur.project may be a RESOLVED Dataview Link (its .path is the full note
+    // path) — cleanProjectName extracts the CLEAN basename ("Connectors"), NOT
+    // the path, so the list lookup succeeds and composeNote gets the same clean
+    // {name, slug} a project-surface create would (no path-slug mangling).
+    const projectName = MeetingLeafActions.cleanProjectName(cur.project);
+    let project;
+    if (projectName) {
+      const hit = this._listProjects(dv).find((p) => p.name === projectName);
+      project = {
+        name: projectName,
+        slug: hit ? hit.slug : MeetingLeafActions._slugify(projectName),
       };
-      const serializedLine = ti.serializeTaskLine(fullPayload);
-      const mRes = await ti.appendTask(meetingPath, fullPayload, { serializedLine });
-      let pRes = null;
-      if (projectName) {
-        const projectTodoPath = this._projectTodoPath(projectName, dv);
-        if (projectTodoPath && app.vault.getAbstractFileByPath(projectTodoPath)) {
-          pRes = await ti.appendTask(projectTodoPath, fullPayload, { serializedLine });
-        } else {
-          pRes = { ok: false, reason: 'project-todo-missing' };
-        }
-      }
-      this._noticeDualWrite(meetingPath, projectName, mRes, pRes);
-    });
-  }
-
-  _openTaskModal(dv, projectName, onSubmit) {
-    this._openModal({ title: "New task", build: (panel, close) => {
-      const state = { title: "", due: "", priority: "" };
-      if (projectName) {
-        const chip = panel.createEl("div", { text: `Will be linked to: ${projectName}` });
-        chip.style.cssText = "margin:10px 0 4px; padding:5px 9px; border-radius:6px; background:var(--background-modifier-hover); color:var(--text-muted); font-size:0.85em; display:inline-block;";
-      }
-      const titleWrap = panel.createEl("div");
-      titleWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const titleLabel = titleWrap.createEl("label", { text: "Title" });
-      titleLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const titleInput = titleWrap.createEl("input"); titleInput.type = "text"; titleInput.placeholder = "Task title…";
-      titleInput.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const dueWrap = panel.createEl("div");
-      dueWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const dueLabel = dueWrap.createEl("label", { text: "Due (optional)" });
-      dueLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const dueInput = dueWrap.createEl("input"); dueInput.type = "date";
-      dueInput.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const prioWrap = panel.createEl("div");
-      prioWrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
-      const prioLabel = prioWrap.createEl("label", { text: "Priority (optional)" });
-      prioLabel.style.cssText = "font-size:0.85em; color:var(--text-muted);";
-      const chipsRow = prioWrap.createEl("div");
-      chipsRow.style.cssText = "display:flex; gap:6px; flex-wrap:wrap;";
-      const chipButtons = {};
-      const paintChips = () => {
-        for (const [k, btn] of Object.entries(chipButtons)) {
-          const active = state.priority === k;
-          btn.style.background = active ? "var(--interactive-accent)" : "var(--background-primary)";
-          btn.style.color = active ? "var(--text-on-accent)" : "var(--text-normal)";
-          btn.style.borderColor = active ? "var(--interactive-accent)" : "var(--background-modifier-border)";
-        }
-      };
-      for (const p of ["low", "medium", "high", "highest"]) {
-        const b = chipsRow.createEl("button", { text: p });
-        b.style.cssText = "padding:4px 10px; border-radius:14px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer; font-size:0.85em;";
-        b.onclick = (e) => { e.preventDefault(); state.priority = (state.priority === p ? "" : p); paintChips(); };
-        chipButtons[p] = b;
-      }
-      paintChips();
-      const save = panel.createEl("button", { text: "Add task" });
-      save.style.cssText = "margin-top:14px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
-      const updateSaveState = () => {
-        const enabled = !!(titleInput.value || "").trim();
-        save.disabled = !enabled;
-        save.style.opacity = enabled ? "1" : "0.5";
-        save.style.cursor = enabled ? "pointer" : "not-allowed";
-      };
-      titleInput.oninput = () => { state.title = titleInput.value; updateSaveState(); };
-      dueInput.oninput = () => { state.due = dueInput.value; };
-      updateSaveState();
-      save.onclick = async () => {
-        if (save.disabled) return;
-        try { await onSubmit({ title: state.title, due: state.due, priority: state.priority }); }
-        catch (e) { new Notice("Could not add task: " + (e.message || e), 6000); }
-        close();
-      };
-      // Enter in the Title field submits the task (skips the mouse). Ignore IME
-      // composition Enter; no-op while the button is disabled (empty title).
-      titleInput.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Enter" || ev.isComposing) return;
-        ev.preventDefault();
-        if (!save.disabled) save.click();
-      });
-      setTimeout(() => titleInput.focus(), 0);
-    }});
-  }
-
-  _projectSlugFor(name, dv) {
-    const projects = this._listProjects(dv);
-    const hit = projects.find((p) => p.name === name);
-    return hit ? hit.slug : String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  }
-
-  _projectTodoPath(name, dv) {
+    }
     try {
-      const hubs = dv.pages('"spice/projects"').where((p) => p && p.type === "project" && p.file.name === name).array();
-      if (hubs.length === 0) return null;
-      const folder = hubs[0].file.folder;
-      return `${folder}/${name} To-Do.md`;
-    } catch (_e) { return null; }
-  }
-
-  _noticeDualWrite(meetingPath, projectName, mRes, pRes) {
-    const meetingBase = meetingPath.split('/').pop().replace(/\.md$/, '');
-    if (mRes && !mRes.ok) {
-      new Notice(`Could not write to meeting: ${mRes.reason || 'unknown'}`, 6000);
-      return;
+      TD.open({
+        surface: "meeting",
+        sourceNote: "[[" + meetingBasename + "]]",
+        project,
+      });
+    } catch (e) {
+      new Notice("Could not open task dialog: " + (e.message || e), 6000);
     }
-    if (!projectName) {
-      new Notice(`Added to ${meetingBase}`);
-      return;
-    }
-    if (pRes && pRes.ok) {
-      new Notice(`Added to ${meetingBase} and ${projectName} To-Do`);
-      return;
-    }
-    if (pRes && pRes.reason === 'project-todo-missing') {
-      new Notice(`Added to ${meetingBase}; ${projectName} To-Do not found`);
-      return;
-    }
-    new Notice(`Added to ${meetingBase}; could not update ${projectName} To-Do: ${(pRes && pRes.reason) || 'unknown'}`);
   }
 
   _onAddToProject(dv) {

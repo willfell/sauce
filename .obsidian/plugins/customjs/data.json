@@ -5,7 +5,8 @@
     "ProjectTaskCreateListenerInit",
     "KanbanStatusSyncInit",
     "StickyDayMigrateInit",
-    "ToDoCreateTaskInit"
+    "ToDoCreateTaskInit",
+    "HomeCommandsInit"
   ],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false

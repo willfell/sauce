@@ -1,6 +1,7 @@
 ---
 type: sticky-hub
 ---
+
 # Sticky Notes
 
 ```dataviewjs

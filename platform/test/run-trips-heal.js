@@ -178,14 +178,16 @@ async function run() {
     ok('TRIPHEAL-2.8 created_at present', /^created_at:\s*/m.test(flights));
     ok('TRIPHEAL-2.9 no bare created: key', !/^created:\s*/m.test(flights));
 
-    // TRIPHEAL-3 — Breadcrumb chrome injected on atlas, section, and hub.
+    // TRIPHEAL-3 — canonical single TripsChromeBar on atlas, section, AND hub.
     const atlas = await adapter.read(`${tripDir}/Dave's Wedding.md`);
     const hub = await adapter.read('spice/trips/Trips.md');
-    // Atlas + section now carry the canonical single TripsChromeBar (which renders
-    // the breadcrumb) — the bare Breadcrumb inject is superseded. Legacy chrome gone.
+    // Atlas + section + hub now carry the canonical single TripsChromeBar (which
+    // renders the breadcrumb) — the bare Breadcrumb inject is superseded on every
+    // trip surface including the hub. Legacy chrome gone; no double breadcrumb.
     ok('TRIPHEAL-3.1 TripsChromeBar on atlas', atlas.includes('class: "TripsChromeBar"'));
     ok('TRIPHEAL-3.2 TripsChromeBar on Flights section', flights.includes('class: "TripsChromeBar"'));
-    ok('TRIPHEAL-3.3 Breadcrumb on hub', hub.includes('class: "Breadcrumb"'));
+    ok('TRIPHEAL-3.3 TripsChromeBar on hub (no separate Breadcrumb block)',
+      hub.includes('class: "TripsChromeBar"') && !hub.includes('class: "Breadcrumb"'));
     ok('TRIPHEAL-3.4 atlas legacy SpaceNavButtons/TripNavButtons stripped',
       !atlas.includes('class: "SpaceNavButtons"') && !atlas.includes('class: "TripNavButtons"'));
     ok('TRIPHEAL-3.5 atlas has exactly one TripsChromeBar',

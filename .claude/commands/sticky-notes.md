@@ -25,7 +25,7 @@ spice/sticky-notes/
 ```
 
 The nav-button's `runTemplaterTemplate` action computes:
-- `folder_prefix: {{module_directory}}` (`spice/sticky-notes` post-substitution)
+- `folder_prefix: spice/sticky-notes` (`spice/sticky-notes` post-substitution)
 - `folder_date_pattern: YYYY/MM-MMMM/YYYY-MM-DD`
 - `filename_prefix: Sticky-Day-`
 - `filename_date_pattern: YYYY-MM-DD`

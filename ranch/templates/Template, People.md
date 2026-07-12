@@ -12,6 +12,10 @@ phone:
 tags:
 ---
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "PeopleChromeBar" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "PersonNavButtons" });
 ```
 
@@ -25,7 +29,7 @@ await dv.view("ranch/views/customjs-guard", { class: "PersonNavButtons" });
 await dv.view("ranch/views/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [{ mode: "mentioning_person", personLink: dv.current().file.link, scopePath: "spice/meetings" }, { style: "cards", limit: 50 }]
+  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/meetings" }, { style: "cards", limit: 50 }]
 });
 ```
 
@@ -34,7 +38,7 @@ await dv.view("ranch/views/customjs-guard", {
 await dv.view("ranch/views/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [{ mode: "mentioning_person", personLink: dv.current().file.link, scopePath: "spice/daily" }, { style: "list", limit: 30 }]
+  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/daily" }, { style: "list", limit: 30 }]
 });
 ```
 

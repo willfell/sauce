@@ -28,7 +28,7 @@
   gap: 12px;
   margin: 0 0 14px 0;
 }
-.sauce-home .sauce-home-greeting { min-width: 0; }
+.sauce-home .sauce-home-greeting { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* The date — the sole header line: uppercase, tracked, in full-strength text,
  * with a short accent tick before it as the surface's signature. */
@@ -50,6 +50,28 @@
   border-radius: 2px;
   background: var(--interactive-accent);
   flex: 0 0 auto;
+}
+
+/* "‹ Yesterday" nav — a quiet icon button beside the date, same visual
+ * weight as the "+" quick-add so the header reads as one control cluster. */
+.sauce-home .sauce-home-prev-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--sh-radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms var(--sh-ease), color 120ms var(--sh-ease);
+}
+.sauce-home .sauce-home-prev-day:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 /* ── "+" quick-add button ──────────────────────────────────────────────── */

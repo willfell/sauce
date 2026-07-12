@@ -5,15 +5,8 @@ tags:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "PeopleChromeBar" });
 ```
-
-```dataviewjs
-// entity-create:person — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "person" }] });
-```
-
----
 
 ## All People
 

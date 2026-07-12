@@ -12860,14 +12860,17 @@ async function applyTripsConformanceHeal(tp, history, git) {
     const hubPath = `${TRIPS_ROOT}/Trips.md`;
     if (await adapter.exists(hubPath)) {
       const hubBody = await adapter.read(hubPath);
-      let nh = _tripInjectBreadcrumb(hubBody);
+      // The hub renders its breadcrumb via TripsChromeBar (trips-hub context).
+      // Strip any stray legacy Breadcrumb/SpaceNavButtons/TripNavButtons block so
+      // the hub never carries a second breadcrumb on top of the chrome bar.
+      let nh = _tripStripLegacyChrome(hubBody);
       nh = _tripHeadingToSectionLabel(nh, "All Trips");
       if (nh !== hubBody) {
         const backupPath = `.sauce-backup/trips/Trips.md.${ts}`;
         try { await adapter.write(backupPath, hubBody); } catch (_e) { /* best-effort */ }
         await adapter.write(hubPath, nh);
         history?.push({ event: "info", step: "trips_conformance_heal", name: "hub",
-          reason: `healed Trips.md (breadcrumb + All Trips SectionLabel)`,
+          reason: `healed Trips.md (single TripsChromeBar + All Trips SectionLabel)`,
           git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
       }
     }

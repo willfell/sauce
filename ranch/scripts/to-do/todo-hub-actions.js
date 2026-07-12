@@ -11,6 +11,7 @@
 class ToDoHubActions {
     async render(dv) {
         if (dv.container.closest('.markdown-embed')) return;
+        try { if (dv.container.closest('.markdown-preview-view')?.querySelector('.todo-chrome-root')) return; } catch (_e) {}
 
         const myGen = (dv.container.__toDoHubRenderGen || 0) + 1;
         dv.container.__toDoHubRenderGen = myGen;

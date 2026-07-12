@@ -25,4 +25,22 @@ class SectionLabel {
     lbl.textContent = String(opts.text);
     lbl.style.cssText = "font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 6px 0; font-weight: 600;";
   }
+
+  /**
+   * Standalone chrome hairline — the canonical divider owned by helpers.
+   * Replaces literal markdown `---` between chrome tiers so spacing is uniform
+   * and tunable in one place. See Docs/agent-guides/note-chrome.md.
+   * @param dv Dataview-like (real dv or proxyDv shim) with .container, OR a container element.
+   * @returns the created <hr> element.
+   */
+  divider(dv) {
+    const c = (dv && dv.container) || dv;
+    // 2026-07-03 UX pass: the bare hairline was 1px var(--background-modifier-border)
+    // at 12px — nearly invisible on dark themes, so button/search tiers read as one
+    // dense stack. Use --background-modifier-border-hover (clearly visible) + 18px
+    // breathing room so every tier boundary reads as a real separator.
+    const hr = c.createEl("hr");
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 18px 0;";
+    return hr;
+  }
 }

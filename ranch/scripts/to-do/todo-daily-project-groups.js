@@ -37,26 +37,50 @@ class ToDoDailyProjectGroups {
         const cur = dv.current();
         if (!cur || cur.type !== 'to-do') return;
 
+        // task-entity: group OPEN task-notes (spice/tasks/) by project. Task
+        // creation now writes note-per-task files, so this aggregator reads those
+        // instead of raw `file.tasks`. Rows render via the shared
+        // TaskTodayList.renderTaskRow (clickable → edit dialog, checkbox → done).
+        const TE = window.customJS && window.customJS.TaskEntity;
+        const TTL = window.customJS && window.customJS.TaskTodayList;
+        if (!TE || typeof TE.parseNote !== 'function' || !TTL || typeof TTL.renderTaskRow !== 'function') return;
+
         const projects = dv.pages('"spice/projects"').where(p => p && p.type === 'project').array();
         if (!projects.length) return;
+
+        const parsed = this._openProjectTaskNotes(dv, TE);
+        if (!parsed.length) return;
+
+        // Bucket parsed task-notes by project_slug.
+        const bySlug = new Map();
+        for (const t of parsed) {
+            const slug = String(t.project_slug == null ? '' : t.project_slug).trim();
+            if (!slug) continue;
+            if (!bySlug.has(slug)) bySlug.set(slug, []);
+            bySlug.get(slug).push(t);
+        }
 
         const blocks = [];
         for (const proj of projects) {
             const projName = proj.file && proj.file.name;
             const projSlug = proj.project_slug || this._slugify(projName);
             const projPath = proj.file && proj.file.path;
-            const tasks = this._collectProjectTasks(dv, projName, projSlug);
+            const tasks = bySlug.get(String(projSlug).trim()) || [];
             if (!tasks.length) continue;
             blocks.push({ projSlug, projName, projPath, tasks });
         }
         if (!blocks.length) return;
 
-        this._renderLabel(dv, 'Open Project Tasks');
+        const TD = window.customJS && window.customJS.TaskDialog;
+        // No "Open Project Tasks" umbrella label on the daily (FIX 3) — each project
+        // renders its own name/section label below, so the umbrella was redundant.
         for (const blk of blocks) {
             const anchor = document.createComment(` project-group-anchor-${blk.projSlug} `);
             dv.container.appendChild(anchor);
             this._renderLabel(dv, blk.projName, { link: blk.projPath });
-            for (const t of blk.tasks) this._renderTaskRow(dv.container, t);
+            for (const t of blk.tasks) {
+                try { TTL.renderTaskRow(dv.container, t, TD); } catch (_e) { /* one bad note */ }
+            }
         }
     }
 
@@ -64,15 +88,47 @@ class ToDoDailyProjectGroups {
         if (!dv || !dv.current) return;
         const cur = dv.current();
         if (!cur || cur.type !== 'project-todo') return;
-        const projName = ToDoDailyProjectGroups._normalizeProjectName(cur.project);
-        if (!projName) return;
 
-        const meetingTasks = this._collectMeetingTasksForProject(dv, projName);
-        if (!meetingTasks.length) return;
+        const TE = window.customJS && window.customJS.TaskEntity;
+        const TTL = window.customJS && window.customJS.TaskTodayList;
+        if (!TE || typeof TE.parseNote !== 'function' || !TTL || typeof TTL.renderTaskRow !== 'function') return;
+
+        const ourSlug = String(cur.project_slug == null ? '' : cur.project_slug).trim();
+        if (!ourSlug) return;
+
+        // "From Meetings" on a project To-Do: open task-notes for THIS project
+        // (project_slug match) that originated from a meeting (source == meeting).
+        const parsed = this._openProjectTaskNotes(dv, TE).filter(t =>
+            String(t.project_slug == null ? '' : t.project_slug).trim() === ourSlug
+            && t.source === 'meeting');
+        if (!parsed.length) return;
 
         // Note: no SectionLabel here; the "From Meetings" label is in the template
         // directly above this block. Helper just renders the rows.
-        for (const t of meetingTasks) this._renderTaskRow(dv.container, t);
+        const TD = window.customJS && window.customJS.TaskDialog;
+        for (const t of parsed) {
+            try { TTL.renderTaskRow(dv.container, t, TD); } catch (_e) { /* one bad note */ }
+        }
+    }
+
+    /**
+     * Live-query OPEN task-notes under spice/tasks/ (excluding _trash/ + _done/),
+     * returning parseNote() output. Shared by both scopes. Never throws — a bad
+     * query yields [].
+     */
+    _openProjectTaskNotes(dv, TE) {
+        try {
+            const raw = dv.pages('"spice/tasks"').where(p =>
+                p && p.type === 'task' && p.status === 'open'
+                && p.file && p.file.path
+                && !p.file.path.includes('/_trash/')
+                && !p.file.path.includes('/_done/'));
+            return raw.map(p => TE.parseNote(p)).array
+                ? raw.map(p => TE.parseNote(p)).array()
+                : Array.from(raw).map(p => TE.parseNote(p));
+        } catch (_e) {
+            return [];
+        }
     }
 
     // ---------- Render helpers ----------

@@ -11,18 +11,8 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "MeetingChromeBar" });
 ```
-
----
-
-```dataviewjs
-// entity-create:meeting — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "meeting" }] });
-```
-
-
----
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Meetings" }] });

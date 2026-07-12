@@ -41,13 +41,16 @@ class TaskDoneTodayList {
         } catch (_e) { return; }
 
         if (isStale()) return;
-        if (!doneTasks.length) return;
+
+        const hr = dv.container.createEl('hr');
+        hr.style.cssText = 'border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 18px 0;';
 
         const details = dv.container.createEl('details');
+        details.setAttribute('open', '');
         details.style.cssText = 'width: 100%; box-sizing: border-box; margin-top: 4px;';
 
         const summary = details.createEl('summary');
-        summary.style.cssText = 'cursor: pointer; color: var(--text-muted); font-size: 0.85em; padding: 4px 0; user-select: none; list-style: none;';
+        summary.style.cssText = 'cursor: pointer; user-select: none; list-style: none; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 6px 0; font-weight: 600;';
         summary.textContent = `Completed (${doneTasks.length})`;
 
         const list = details.createEl('div');
@@ -68,6 +71,14 @@ class TaskDoneTodayList {
 
     static filterToday(parsedTasks, todayStr) {
         if (!Array.isArray(parsedTasks) || !todayStr) return [];
-        return parsedTasks.filter(t => t && t.completed_at === todayStr);
+        return parsedTasks.filter(t => {
+            if (!t || !t.completed_at) return false;
+            const val = t.completed_at;
+            // Dataview parses ISO datetime frontmatter into Luxon DateTime objects.
+            if (typeof val === 'object' && val !== null && typeof val.toFormat === 'function') {
+                return val.toFormat('yyyy-MM-dd') === todayStr;
+            }
+            return String(val).slice(0, 10) === todayStr;
+        });
     }
 }

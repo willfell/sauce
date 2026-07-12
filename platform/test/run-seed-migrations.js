@@ -1305,14 +1305,20 @@ withTempVault((vault) => {
             );
         }
 
-        // HC-TRIPS-SEED-5: materialized hub contains Breadcrumb and no raw ## All Trips heading.
+        // HC-TRIPS-SEED-5: materialized hub renders its breadcrumb via TripsChromeBar
+        // (single chrome bar, no separate legacy Breadcrumb block) and no raw ## All Trips heading.
         {
             let hubBody = "";
             try { hubBody = helpers.readNote(vault, "spice/trips/Trips.md"); } catch (e) {}
             ok(
-                "HC-TRIPS-SEED-5 Trips.md hub contains class: \"Breadcrumb\"",
-                /class:\s*"Breadcrumb"/.test(hubBody),
-                `hub Breadcrumb missing`
+                "HC-TRIPS-SEED-5 Trips.md hub contains class: \"TripsChromeBar\"",
+                /class:\s*"TripsChromeBar"/.test(hubBody),
+                `hub TripsChromeBar missing`
+            );
+            ok(
+                "HC-TRIPS-SEED-5a Trips.md hub has NO legacy Breadcrumb block (no double breadcrumb)",
+                !/class:\s*"Breadcrumb"/.test(hubBody),
+                `hub still carries a legacy Breadcrumb block on top of TripsChromeBar`
             );
             ok(
                 "HC-TRIPS-SEED-5b Trips.md hub does NOT contain a raw ## All Trips heading",

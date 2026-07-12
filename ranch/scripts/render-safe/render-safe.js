@@ -21,18 +21,41 @@ class RenderSafe {
   // Returns the live Dataview page when indexed, else a shim built from the
   // active file (path/name + cached frontmatter), else null. Never throws.
   page(dv) {
+    let cur = null;
     try {
-      const cur = dv && typeof dv.current === 'function' ? dv.current() : null;
-      if (cur && cur.file) return cur;
-    } catch (_e) { /* fall through to active-file shim */ }
+      cur = dv && typeof dv.current === 'function' ? dv.current() : null;
+    } catch (_e) { cur = null; }
     try {
       const f = (typeof app !== 'undefined' && app.workspace && app.workspace.getActiveFile)
         ? app.workspace.getActiveFile() : null;
+      if (cur && cur.file) {
+        // Mobile cold-load: Dataview can hand back a page that has `.file` but has NOT
+        // yet populated its frontmatter fields (the note renders before the DV index is
+        // ready), so consumers reading `page.type` etc. get undefined and bail — an empty
+        // breadcrumb / chrome that never renders on phones. The fully-null case already
+        // falls through to the active-file shim below; this handles the PARTIAL case.
+        // When the DV page is for the ACTIVE file, overlay the metadataCache frontmatter
+        // for any field the DV page is missing — DV's own resolved values win where
+        // present. Return a shallow copy (never mutate the live DV page); keep DV's `.file`.
+        if (f && cur.file.path === f.path && app.metadataCache && app.metadataCache.getFileCache) {
+          const fm = (app.metadataCache.getFileCache(f) || {}).frontmatter;
+          if (fm) {
+            let needs = false;
+            for (const k in fm) { if (cur[k] === undefined) { needs = true; break; } }
+            if (needs) {
+              const merged = Object.assign({}, fm, cur);
+              if (cur.file && !merged.file) merged.file = cur.file;
+              return merged;
+            }
+          }
+        }
+        return cur;
+      }
       if (!f) return null;
-      const fm = (app.metadataCache && app.metadataCache.getFileCache)
+      const fm2 = (app.metadataCache && app.metadataCache.getFileCache)
         ? (app.metadataCache.getFileCache(f) || {}).frontmatter : null;
-      return Object.assign({ file: { path: f.path, name: f.basename } }, fm || {});
-    } catch (_e) { return null; }
+      return Object.assign({ file: { path: f.path, name: f.basename } }, fm2 || {});
+    } catch (_e) { return (cur && cur.file) ? cur : null; }
   }
 
   filePath(dv) { const p = this.page(dv); return (p && p.file && p.file.path) || null; }

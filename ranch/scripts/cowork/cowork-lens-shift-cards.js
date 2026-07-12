@@ -137,7 +137,7 @@ class CoworkLensShiftCards {
 
         for (const k of keys) {
             const { day, engagement_id, warm, cold } = pairs.get(k);
-            dv.header(3, `${day} — ${engagement_id}`);
+            window.customJS.SectionLabel.render(dv, { text: `${day} — ${engagement_id}` });
             if (warm) {
                 dv.paragraph(this._composeCardLabel(warm, "warm"));
             }

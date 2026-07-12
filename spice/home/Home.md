@@ -6,10 +6,8 @@ editor-width: 100
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "HomeChromeBar" });
 ```
-
----
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceHome" });

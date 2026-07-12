@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "Reader — Clip to Sauce",
+  "behavior": "create",
+  "path": "spice/reader",
+  "noteNameFormat": "{{title|safe_name}}",
+  "triggers": ["schema:@Article"],
+  "properties": [
+    { "name": "type", "value": "reader-article", "type": "text" },
+    { "name": "title", "value": "{{title}}", "type": "text" },
+    { "name": "url", "value": "{{url}}", "type": "text" },
+    { "name": "author", "value": "{{author}}", "type": "text" },
+    { "name": "site", "value": "{{site}}", "type": "text" },
+    { "name": "published", "value": "{{published|date:\"YYYY-MM-DD\"}}", "type": "date" },
+    { "name": "captured_at", "value": "{{date}}", "type": "date" },
+    { "name": "word_count", "value": "{{words}}", "type": "number" },
+    { "name": "status", "value": "unread", "type": "text" },
+    { "name": "summary", "value": "{{\"a neutral 2-3 sentence summary of this article\"}}", "type": "text" },
+    { "name": "tags", "value": "{{\"1-4 lowercase topical tags for this article, comma separated\"}}", "type": "multitext" }
+  ],
+  "noteContentFormat": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ReaderChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ReaderArticleView\" });\n```\n\n[//]: # (READER_HIGHLIGHTS)\n\n{{highlights}}\n\n[//]: # (READER_CONTENT)\n\n{{content}}\n"
+}
