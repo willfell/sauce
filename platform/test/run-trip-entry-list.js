@@ -126,6 +126,25 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('FLD-5 stay fields carry check_in date + link', sf.some(f => f.name === "check_in" && f.type === "date") && sf.some(f => f.name === "link" && f.type === "link"), JSON.stringify(sf));
 }
 
+// ---------- _fieldsFor (fixes edit dialog) ----------
+{
+    ok('FF-1 _fieldsFor flights derives airline', TripEntryList._fieldsFor({ kind: "flights" }).some(f => f.name === "airline"));
+    ok('FF-2 _fieldsFor stay derives check_in', TripEntryList._fieldsFor({ kind: "stay" }).some(f => f.name === "check_in"));
+    ok('FF-3 _fieldsFor packing derives item', TripEntryList._fieldsFor({ kind: "packing", __cats: ["A"] }).some(f => f.name === "item"));
+    ok('FF-4 _fieldsFor explicit fields win', TripEntryList._fieldsFor({ fields: [{ name: "z" }] })[0].name === "z");
+}
+
+// ---------- flight schema: drop boarding, add arrival + delay ----------
+{
+    const ff = TripEntryList._flightFields();
+    const n = ff.map(f => f.name);
+    ok('FS-1 no boarding_time', !n.includes("boarding_time"), JSON.stringify(n));
+    ok('FS-2 arrival_date date', n.includes("arrival_date") && ff.find(f => f.name === "arrival_date").type === "date", JSON.stringify(n));
+    ok('FS-3 arrival_time time', n.includes("arrival_time") && ff.find(f => f.name === "arrival_time").type === "time", JSON.stringify(n));
+    ok('FS-4 delay_minutes number', n.includes("delay_minutes") && ff.find(f => f.name === "delay_minutes").type === "number", JSON.stringify(n));
+    ok('FS-5 keeps depart_date/time + direction', n.includes("depart_date") && n.includes("depart_time") && n.includes("direction"), JSON.stringify(n));
+}
+
 // ---------- _fmtDateTime ----------
 {
     ok('FMT-1 _fmtDateTime formats date + 12h time', TripEntryList._fmtDateTime("2026-08-01", "13:00") === "Aug 1, 1:00 PM", TripEntryList._fmtDateTime("2026-08-01", "13:00"));

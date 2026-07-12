@@ -85,6 +85,19 @@ class TripEntryList {
     return { list: l, changed: true };
   }
 
+  // Derive the form fields from a render spec. Explicit spec.fields win;
+  // otherwise map spec.kind -> the per-section SSOT field list. Lets rows
+  // mounted with only {key, kind} (no fields) still build a full edit form.
+  static _fieldsFor(spec) {
+    if (spec && Array.isArray(spec.fields) && spec.fields.length) return spec.fields;
+    switch (spec && spec.kind) {
+      case "flights": return TripEntryList._flightFields();
+      case "stay": return TripEntryList._stayFields();
+      case "packing": return TripEntryList._packingItemFields(spec.__cats || []);
+      default: return [];
+    }
+  }
+
   // ── per-section field specs (SSOT — templates + chrome bar call these) ─────
   // Flights: direction select + typed schedule fields + a booking link.
   static _flightFields() {
@@ -354,7 +367,7 @@ class TripEntryList {
   _onAdd(dv, spec) {
     this._openForm({
       title: "Add",
-      fields: spec.fields || [],
+      fields: TripEntryList._fieldsFor(spec),
       dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
@@ -371,7 +384,7 @@ class TripEntryList {
     const catField = spec.group ? [{ name: "category", label: "Category", select: this._categories(dv, spec) }] : [];
     this._openForm({
       title: "Edit",
-      fields: catField.concat(spec.fields || []),
+      fields: catField.concat(TripEntryList._fieldsFor(spec)),
       values: entry || {},
       dv, spec,
       onSubmit: async (values) => {
