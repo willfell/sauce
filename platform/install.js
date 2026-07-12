@@ -10303,6 +10303,22 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
     completed_at: new Date().toISOString() });
 }
 
+// _stripCompletionEmojiSuffix — strips a trailing "✅ YYYY-MM-DD" annotation
+// (tolerant of surrounding/missing whitespace) from a title string. The
+// legacy Recurring Tasks.md registry supported CHECKED lines
+// (`- [x] Pay Rent ✅ 2026-07-06 [recurrence:: every day]`) where a user had
+// manually typed a checkmark + completion date as free text (a common
+// personal habit-tracking convention) — NOT a structured `[field:: value]`
+// annotation, so the existing inline-field strip in _parseRecurringRegistry
+// never touched it, and it survived verbatim into the migrated task note's
+// title (and, via TaskEntity.taskFilename, its filename). Pure,
+// null-tolerant (→ ""); a title with no such suffix passes through
+// unchanged; never throws.
+function _stripCompletionEmojiSuffix(title) {
+  const s = String(title == null ? "" : title);
+  return s.replace(/\s*✅\s*\d{4}-\d{2}-\d{2}\s*$/, "").trim();
+}
+
 // _parseRecurringRegistry — adapted from ToDoDailyRecurring.parseRegistryLine's
 // grammar, EXTENDED to also match checked (`- [x] ...`) lines. Section-scoped
 // the same way (`## Recurring Tasks` H2 OR the SectionLabel block form).
@@ -10335,7 +10351,7 @@ function _parseRecurringRegistry(content) {
       if (wl) val = wl[1];
       fields[mm[1]] = val;
     }
-    const title = rest.replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, "").trim();
+    const title = _stripCompletionEmojiSuffix(rest.replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, "").trim());
     if (!title) continue;
     const recurrence = fields.recurrence || null;
     if (!recurrence) { entries.push({ title, invalid: true }); continue; }
@@ -11651,7 +11667,7 @@ function _sanitizeTaskTitleForFilename(title) {
 }
 
 // applyTaskNoteHeal — ungated, idempotent, failure-loud-per-file heal for task
-// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Two jobs:
+// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Three jobs:
 //
 //   1. RENAME ugly-named notes: a basename matching the old deterministic form
 //      `task-YYYYMMDD-HHmmss-hhhh` is renamed to the readable
@@ -11662,13 +11678,20 @@ function _sanitizeTaskTitleForFilename(title) {
 //   2. INJECT CHROME into bare notes: a note whose body has NO
 //      `<!-- TASK_NOTES -->` marker gets the standard chrome body, with any
 //      existing user body text preserved BELOW the marker.
+//   3. CLEAN a corrupted title: a `title:` frontmatter value carrying a
+//      trailing "✅ YYYY-MM-DD" annotation (baked in by a legacy
+//      registry-migration parsing bug — see _stripCompletionEmojiSuffix) is
+//      cleaned in place, and the note is renamed to match via the SAME
+//      rename path job 1 uses (desired filename now always derives from the
+//      clean title, whichever job triggered the rename).
 //
-// Idempotent: a note already title-named AND already carrying the marker is
-// skipped (no write). Ungated (runs every install) since it back-injects NEW
-// content into existing notes, per the migration-lifecycle rule. Mirrors
-// applyProjectTodoOwnedTasksHeal / applyDailyTasksToEntityMigration posture:
-// .sauce-backup snapshot before write, per-file try/catch, never throws.
-// Signature matches applyProjectTodoOwnedTasksHeal: (tp, history, git).
+// Idempotent: a note already title-named, already clean-titled, AND already
+// carrying the marker is skipped (no write). Ungated (runs every install)
+// since it back-injects NEW content into existing notes, per the
+// migration-lifecycle rule. Mirrors applyProjectTodoOwnedTasksHeal /
+// applyDailyTasksToEntityMigration posture: .sauce-backup snapshot before
+// write, per-file try/catch, never throws. Signature matches
+// applyProjectTodoOwnedTasksHeal: (tp, history, git).
 async function applyTaskNoteHeal(tp, history, git) {
   try {
     if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
@@ -11757,7 +11780,9 @@ async function applyTaskNoteHeal(tp, history, git) {
         const fm = _parseFrontmatterStrict(before) || {};
         const rawTitle = fm.title != null ? String(fm.title).replace(/^"(.*)"$/, "$1") : "";
 
-        const needsRename = OLD_NAME_RE.test(stemNoExt);
+        const needsTitleCleanup = rawTitle !== _stripCompletionEmojiSuffix(rawTitle);
+        const cleanTitle = needsTitleCleanup ? _stripCompletionEmojiSuffix(rawTitle) : rawTitle;
+        const needsRename = OLD_NAME_RE.test(stemNoExt) || needsTitleCleanup;
         const needsChrome = !before.includes(MARKER);
         // Old-chrome upgrade: the note HAS the marker but its above-marker region
         // is a LEGACY chrome — either the v0.178 shape that still carries a
@@ -11779,9 +11804,16 @@ async function applyTaskNoteHeal(tp, history, git) {
         // copy-to-new + remove-old).
         let content = needsChrome ? _injectChrome(before)
           : (needsChromeUpgrade ? _upgradeChrome(before) : before);
+        if (needsTitleCleanup) {
+          const fmMatch = /^(---\r?\n[\s\S]*?\r?\n---)/.exec(content);
+          if (fmMatch) {
+            const fixedFm = fmMatch[1].replace(/^title:\s*.*$/m, "title: " + cleanTitle);
+            content = fixedFm + content.slice(fmMatch[1].length);
+          }
+        }
 
         if (needsRename) {
-          const desired = _sanitizeTaskTitleForFilename(rawTitle) + ".md";
+          const desired = _sanitizeTaskTitleForFilename(cleanTitle) + ".md";
           // Never collide with the file we're leaving, nor any existing note.
           existingNames.delete(basename);  // free the old name for reuse math
           const finalName = _uniqueName(desired);
@@ -21265,6 +21297,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
+    module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
+    module.exports._parseRecurringRegistry = _parseRecurringRegistry;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;
     module.exports._composeDailyTaskNote = _composeDailyTaskNote;
     module.exports._composeEntityTaskFrontmatter = _composeEntityTaskFrontmatter;

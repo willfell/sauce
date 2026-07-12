@@ -1401,6 +1401,20 @@ ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent
   assert(!findByClsAttr(row2, 'sauce-task-today-subtask-chip'), 'no chip when total is 0');
 });
 
+// RTR-DIV-1. Row separator: renderTaskRow's row element carries a real
+// (non-transparent) border-bottom hairline, so tasks read as visually
+// distinct rows on narrow (mobile) viewports instead of a dense undifferentiated
+// block. Uses var(--background-modifier-border-hover), NOT the plain
+// --background-modifier-border, which this project has already found reads as
+// near-invisible on dark themes (see the project-blueprint divider precedent).
+ok('RTR-DIV-1 renderTaskRow row has a real border-bottom divider color (not transparent)', () => {
+  const container = makeRowStubEl('div');
+  const task = { title: 'Task', path: 'spice/tasks/Task.md' };
+  const row = TaskTodayList.renderTaskRow(container, task, null);
+  assert(/border-bottom:\s*1px solid var\(--background-modifier-border-hover\)/.test(row.style.cssText || ''),
+    'row must have a real border-bottom divider, got: ' + row.style.cssText);
+});
+
 // RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
 // edit dialog. Drives the REAL renderTaskRow against a DOM stub + a fake app +
 // a TaskDialog spy — the same faithful pattern as RIL-2 (not a hand-built replica).
