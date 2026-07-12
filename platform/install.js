@@ -11522,7 +11522,7 @@ function _sanitizeTaskTitleForFilename(title) {
 }
 
 // applyTaskNoteHeal — ungated, idempotent, failure-loud-per-file heal for task
-// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Two jobs:
+// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Three jobs:
 //
 //   1. RENAME ugly-named notes: a basename matching the old deterministic form
 //      `task-YYYYMMDD-HHmmss-hhhh` is renamed to the readable
@@ -11533,13 +11533,20 @@ function _sanitizeTaskTitleForFilename(title) {
 //   2. INJECT CHROME into bare notes: a note whose body has NO
 //      `<!-- TASK_NOTES -->` marker gets the standard chrome body, with any
 //      existing user body text preserved BELOW the marker.
+//   3. CLEAN a corrupted title: a `title:` frontmatter value carrying a
+//      trailing "✅ YYYY-MM-DD" annotation (baked in by a legacy
+//      registry-migration parsing bug — see _stripCompletionEmojiSuffix) is
+//      cleaned in place, and the note is renamed to match via the SAME
+//      rename path job 1 uses (desired filename now always derives from the
+//      clean title, whichever job triggered the rename).
 //
-// Idempotent: a note already title-named AND already carrying the marker is
-// skipped (no write). Ungated (runs every install) since it back-injects NEW
-// content into existing notes, per the migration-lifecycle rule. Mirrors
-// applyProjectTodoOwnedTasksHeal / applyDailyTasksToEntityMigration posture:
-// .sauce-backup snapshot before write, per-file try/catch, never throws.
-// Signature matches applyProjectTodoOwnedTasksHeal: (tp, history, git).
+// Idempotent: a note already title-named, already clean-titled, AND already
+// carrying the marker is skipped (no write). Ungated (runs every install)
+// since it back-injects NEW content into existing notes, per the
+// migration-lifecycle rule. Mirrors applyProjectTodoOwnedTasksHeal /
+// applyDailyTasksToEntityMigration posture: .sauce-backup snapshot before
+// write, per-file try/catch, never throws. Signature matches
+// applyProjectTodoOwnedTasksHeal: (tp, history, git).
 async function applyTaskNoteHeal(tp, history, git) {
   try {
     if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
@@ -11628,7 +11635,9 @@ async function applyTaskNoteHeal(tp, history, git) {
         const fm = _parseFrontmatterStrict(before) || {};
         const rawTitle = fm.title != null ? String(fm.title).replace(/^"(.*)"$/, "$1") : "";
 
-        const needsRename = OLD_NAME_RE.test(stemNoExt);
+        const needsTitleCleanup = rawTitle !== _stripCompletionEmojiSuffix(rawTitle);
+        const cleanTitle = needsTitleCleanup ? _stripCompletionEmojiSuffix(rawTitle) : rawTitle;
+        const needsRename = OLD_NAME_RE.test(stemNoExt) || needsTitleCleanup;
         const needsChrome = !before.includes(MARKER);
         // Old-chrome upgrade: the note HAS the marker but its above-marker region
         // is a LEGACY chrome — either the v0.178 shape that still carries a
@@ -11650,9 +11659,16 @@ async function applyTaskNoteHeal(tp, history, git) {
         // copy-to-new + remove-old).
         let content = needsChrome ? _injectChrome(before)
           : (needsChromeUpgrade ? _upgradeChrome(before) : before);
+        if (needsTitleCleanup) {
+          const fmMatch = /^(---\r?\n[\s\S]*?\r?\n---)/.exec(content);
+          if (fmMatch) {
+            const fixedFm = fmMatch[1].replace(/^title:\s*.*$/m, "title: " + cleanTitle);
+            content = fixedFm + content.slice(fmMatch[1].length);
+          }
+        }
 
         if (needsRename) {
-          const desired = _sanitizeTaskTitleForFilename(rawTitle) + ".md";
+          const desired = _sanitizeTaskTitleForFilename(cleanTitle) + ".md";
           // Never collide with the file we're leaving, nor any existing note.
           existingNames.delete(basename);  // free the old name for reuse math
           const finalName = _uniqueName(desired);
