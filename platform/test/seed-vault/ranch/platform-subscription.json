@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.12.1"
+      "version": "0.13.0"
     },
     {
       "name": "breadcrumb",
@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.20.1"
+      "version": "0.21.0"
     },
     {
       "name": "meetings",
@@ -141,7 +141,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.23.0"
+      "version": "0.24.0"
     },
     {
       "name": "journal",
@@ -149,7 +149,7 @@
     },
     {
       "name": "trips",
-      "version": "0.7.0"
+      "version": "0.8.0"
     },
     {
       "name": "finance",
