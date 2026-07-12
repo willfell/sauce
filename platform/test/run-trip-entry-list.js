@@ -192,5 +192,20 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('FM-17 status null when depart unknown', TripEntryList._flightStatus({ depart_time: "", depart_date: "" }, dep) === null);
 }
 
+// ---------- effective depart/arrival display (rich card) ----------
+{
+    ok('EFF-1 _effDepartDisplay no delay',
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "" }) === "Jul 16, 9:39 AM",
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "" }));
+    ok('EFF-2 _effDepartDisplay shifts by delay',
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "30" }) === "Jul 16, 10:09 AM",
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "30" }));
+    ok('EFF-3 _effDepartDisplay unknown -> ""', TripEntryList._effDepartDisplay({}) === "",
+        JSON.stringify(TripEntryList._effDepartDisplay({})));
+    ok('EFF-4 _effArriveDisplay no delay',
+        TripEntryList._effArriveDisplay({ arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" }) === "Jul 16, 11:15 AM",
+        TripEntryList._effArriveDisplay({ arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" }));
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
