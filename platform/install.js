@@ -4395,9 +4395,16 @@ async function applyDailyHomeChromeBarHeal(tp, manifest, variables, history, git
     try {
       const before = await adapter.read(fpath);
       const isHome = fpath === "spice/home/Home.md";
-      // Daily notes are type-gated on cowork-daily so stray .md under spice/daily/
-      // (a README, an attachment sidecar) is never touched.
-      if (!isHome && _noteChromeFrontmatterType(before) !== "cowork-daily") { skipped += 1; continue; }
+      // Daily notes are type-gated so stray .md under spice/daily/ (a README,
+      // an attachment sidecar) is never touched. Accepts BOTH the current
+      // "cowork-daily" type AND the legacy "daily" type real consumer vaults
+      // still carry on notes predating the cowork-flavor frontmatter rename
+      // (daily@v0.5.0) — those notes were never migrated to the new type
+      // value, so gating on "cowork-daily" alone silently skipped every
+      // pre-rename daily note (found live: 232/282 real daily notes on a
+      // deployed consumer vault still had type: daily and were never healed).
+      const fmType = _noteChromeFrontmatterType(before);
+      if (!isHome && fmType !== "cowork-daily" && fmType !== "daily") { skipped += 1; continue; }
       const after = isHome ? _homeChromeBarBody(before) : _dailyChromeBarBody(before);
       if (after === before) { skipped += 1; continue; }
       const backupPath = `.sauce-backup/${ts}/${fpath}`;
