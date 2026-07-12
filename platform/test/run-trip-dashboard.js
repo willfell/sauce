@@ -57,5 +57,27 @@ const TripDashboard = loadClass('platform/blueprints/trips/helpers/trip-dashboar
     ok('PC-2 category placeholder (no item) not counted', Object.keys(r).length === 0, JSON.stringify(r));
 }
 
+// ---------- _fmtDate ----------
+{
+    const r = TripDashboard._fmtDate("2026-08-01");
+    ok('FD-1 YYYY-MM-DD string', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate(new Date(Date.UTC(2026, 7, 1)));
+    ok('FD-2 Date object (UTC)', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate(1785542400000); // Date.UTC(2026,7,1)
+    ok('FD-3 epoch millis', r === "Aug 1, 2026", r);
+}
+{
+    const r = TripDashboard._fmtDate("");
+    ok('FD-4 empty string', r === "", r);
+}
+{
+    const r = TripDashboard._fmtDate(null);
+    ok('FD-5 null', r === "", r);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

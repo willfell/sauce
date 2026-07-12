@@ -8,6 +8,25 @@ class TripDashboard {
     if(e!=null && n>e) return {state:"complete", days:Math.round((n-e)/DAY)};
     return {state:"in-progress", days:e!=null?Math.round((e-n)/DAY):0};
   }
+  static _fmtDate(v){
+    if(v===null||v===undefined||v==="") return "";
+    const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let d=null;
+    if(typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v)){
+      const ms=TripDashboard._utc(v);
+      if(ms==null) return "";
+      d=new Date(ms);
+    } else if(typeof v==="number"){
+      d=new Date(v);
+    } else if(v instanceof Date){
+      d=v;
+    } else if(v && typeof v==="object"){
+      const ms=(typeof v.toMillis==="function")?v.toMillis():(v.ts!=null?v.ts:v);
+      d=new Date(ms);
+    }
+    if(!d || isNaN(d.getTime())) return "";
+    return MONTHS[d.getUTCMonth()]+" "+d.getUTCDate()+", "+d.getUTCFullYear();
+  }
   static packingCounts(items){
     const out={}; (Array.isArray(items)?items:[]).forEach(it=>{ if(!it||!it.item) return; const c=it.category||"Uncategorized"; out[c]=out[c]||{total:0,checked:0}; out[c].total++; if(it.checked) out[c].checked++; }); return out;
   }
@@ -41,7 +60,7 @@ class TripDashboard {
       if(cd.state==="upcoming") stat("days to go", cd.days);
       else if(cd.state==="in-progress") stat("status","In progress");
       else if(cd.state==="complete") stat("status","Complete");
-      const dates = (page.start_date||"?")+" → "+(page.end_date||"?");
+      const dates = TripDashboard._fmtDate(page.start_date)+" – "+TripDashboard._fmtDate(page.end_date);
       stat("dates", dates);
       if(page.location) stat("where", page.location);
       stat("open tasks", openTasks);
