@@ -465,6 +465,30 @@ ok('TD-15 _payloadFromState includes state.links', () => {
   assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
 });
 
+// TD-15t. _payloadFromState carries a trip linkage onto the payload (parallel
+// to the project plumbing). state.tripName present → payload.trip = {name, slug}
+// (slug from state.tripSlug, or slugified from the name when absent). No
+// state.tripName → no payload.trip. Project flow is unaffected.
+ok('TD-15t _payloadFromState includes trip linkage (parallel project)', () => {
+  const p = TaskDialog._payloadFromState({ title: 't', tripName: 'Bussin', tripSlug: 'bussin' });
+  assert(deepEq(p.trip, { name: 'Bussin', slug: 'bussin' }), 'trip on payload: ' + JSON.stringify(p.trip));
+  // slug derived from name when tripSlug omitted.
+  const p2 = TaskDialog._payloadFromState({ title: 't', tripName: 'Road Trip' });
+  assert(deepEq(p2.trip, { name: 'Road Trip', slug: 'road-trip' }), 'trip slug derived: ' + JSON.stringify(p2.trip));
+  // No tripName → no payload.trip; project still works independently.
+  const p3 = TaskDialog._payloadFromState({ title: 't', projectName: 'Sauce' });
+  assert(p3.trip === undefined, 'no trip when tripName absent: ' + JSON.stringify(p3.trip));
+  assert(deepEq(p3.project, { name: 'Sauce', slug: 'sauce' }), 'project unaffected: ' + JSON.stringify(p3.project));
+});
+
+// TD-2t. defaultsForSurface threads a `trip` through for the trip surface,
+// parallel to how project is threaded (source 'trip').
+ok('TD-2t defaultsForSurface trip seeds trip + source', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'trip', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(deepEq(d.trip, { name: 'Bussin', slug: 'bussin' }), 'trip: ' + JSON.stringify(d.trip));
+  assert(d.source === 'trip', 'source trip: ' + d.source);
+});
+
 ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
   const state = { title: 'Feed the dogs', due: '2026-07-08', priority: '', projectName: '', source: 'manual', source_note: '', links: [], recurrence: 'every day' };
   const payload = TaskDialog._payloadFromState(state);

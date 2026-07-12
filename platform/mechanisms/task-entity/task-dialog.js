@@ -79,6 +79,8 @@ class TaskDialog {
                 return { due: o.today || '', source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
+            case 'trip':
+                return { trip: o.trip, source: 'trip' };
             case 'meeting': {
                 const out = { source: 'meeting' };
                 if (o.sourceNote != null) out.source_note = o.sourceNote;
@@ -663,6 +665,10 @@ class TaskDialog {
             priority: fm ? (fm.priority || '') : (defaults.priority || ''),
             // project as a display name (strip [[ ]] if present)
             projectName: fm ? TaskDialog._stripWikilink(fm.project) : (defaults.project && defaults.project.name) || '',
+            // trip linkage — parallel to project. On edit hydrate from the note's
+            // trip / trip_slug frontmatter; on create seed from defaults.trip.
+            tripName: fm ? TaskDialog._stripWikilink(fm.trip) : (defaults.trip && defaults.trip.name) || '',
+            tripSlug: fm ? (fm.trip_slug || '') : (defaults.trip && defaults.trip.slug) || '',
             notes: '',
             // Structured card links (FIX 5) — load the edit file's `links[]` (via
             // TaskEntity._normLinks so a Dataview-array-of-Link-objects coerces to
@@ -1236,6 +1242,8 @@ class TaskDialog {
         };
         const name = (s.projectName || '').trim();
         if (name) payload.project = { name, slug: TaskDialog._slugify(name) };
+        const tripName = (s.tripName || '').trim();
+        if (tripName) payload.trip = { name: tripName, slug: (s.tripSlug || '').trim() || TaskDialog._slugify(tripName) };
         return payload;
     }
 
