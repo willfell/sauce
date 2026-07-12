@@ -43,7 +43,7 @@
             "wide"
           ]
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingLeafActions\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Tasks\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TaskMeetingList\" });\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "ranch/templates/Meeting Hub.md"
@@ -376,7 +376,7 @@
           "phone": "",
           "tags": []
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PeopleChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "spice/people/People.md"
@@ -447,6 +447,45 @@
         },
         "body_template": "ranch/templates/Wiki Page.md"
       }
+    ],
+    "reader": [
+      {
+        "blueprint": "reader",
+        "id": "reader-article",
+        "label": "+ New article",
+        "icon": "file-plus",
+        "prompts": [
+          {
+            "key": "title",
+            "label": "Article title",
+            "type": "string",
+            "required": true,
+            "validate": "safe-filename"
+          },
+          {
+            "key": "url",
+            "label": "Article URL (optional)",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "destination": {
+          "folder_prefix": "spice/reader",
+          "filename_prefix": "{{prompts.title|sanitize-filename}}"
+        },
+        "frontmatter_template": {
+          "type": "reader-article",
+          "title": "{{prompts.title}}",
+          "status": "unread",
+          "url": "{{prompts.url}}",
+          "summary": "",
+          "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "tags": [
+            "reader-article"
+          ]
+        },
+        "body_template": "ranch/templates/Reader Article.md"
+      }
     ]
   },
   "entries": [
@@ -491,7 +530,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingLeafActions\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path), scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Tasks\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TaskMeetingList\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "ranch/templates/Meeting Hub.md"
@@ -818,7 +857,7 @@
         "phone": "",
         "tags": []
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PeopleChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current()?.file?.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "spice/people/People.md"
@@ -886,6 +925,43 @@
         ]
       },
       "body_template": "ranch/templates/Wiki Page.md"
+    },
+    {
+      "blueprint": "reader",
+      "id": "reader-article",
+      "label": "+ New article",
+      "icon": "file-plus",
+      "prompts": [
+        {
+          "key": "title",
+          "label": "Article title",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        },
+        {
+          "key": "url",
+          "label": "Article URL (optional)",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "destination": {
+        "folder_prefix": "spice/reader",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "reader-article",
+        "title": "{{prompts.title}}",
+        "status": "unread",
+        "url": "{{prompts.url}}",
+        "summary": "",
+        "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "tags": [
+          "reader-article"
+        ]
+      },
+      "body_template": "ranch/templates/Reader Article.md"
     }
   ]
 }

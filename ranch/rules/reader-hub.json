@@ -1,0 +1,18 @@
+{
+  "contributions": {
+    "reader": [
+      {
+        "scope": {
+          "path_glob": "spice/reader/Reader.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "equals": "reader-hub"
+          }
+        }
+      }
+    ]
+  }
+}

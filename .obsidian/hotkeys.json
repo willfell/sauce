@@ -15,14 +15,7 @@
       "key": "="
     }
   ],
-  "daily-notes": [
-    {
-      "modifiers": [
-        "Mod"
-      ],
-      "key": "["
-    }
-  ],
+  "daily-notes": [],
   "daily-notes:goto-today": [
     {
       "modifiers": [
@@ -46,6 +39,23 @@
         "Shift"
       ],
       "key": "t"
+    }
+  ],
+  "sauce-home:open": [
+    {
+      "modifiers": [
+        "Mod"
+      ],
+      "key": "["
+    }
+  ],
+  "homepage:open-homepage": [
+    {
+      "modifiers": [
+        "Mod",
+        "Shift"
+      ],
+      "key": "h"
     }
   ]
 }

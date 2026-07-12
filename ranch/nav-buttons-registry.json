@@ -112,6 +112,31 @@
           "target": "spice/wiki/Wiki.md"
         }
       }
+    ],
+    "home": [
+      {
+        "id": "home-open",
+        "label": "Home",
+        "icon": "home",
+        "order": 40,
+        "action": {
+          "type": "invoke_command",
+          "command_id": "homepage:open-homepage",
+          "read_mode_after": true
+        }
+      }
+    ],
+    "reader": [
+      {
+        "id": "reader-hub",
+        "label": "Reader",
+        "icon": "book-open",
+        "order": 140,
+        "action": {
+          "type": "openLink",
+          "target": "spice/reader/Reader.md"
+        }
+      }
     ]
   }
 }

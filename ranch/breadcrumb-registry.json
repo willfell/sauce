@@ -232,6 +232,48 @@
           }
         }
       }
+    },
+    "task-entity": {
+      "types": {
+        "task": {
+          "ancestors": [
+            {
+              "label": "lit:To-Do"
+            },
+            {
+              "when": {
+                "fm:parent_task": "present"
+              },
+              "label": "fm:parent_task",
+              "link": "spice/tasks/{fm:parent_task}.md"
+            }
+          ],
+          "current": {
+            "label": "fm:title|file:basename"
+          }
+        }
+      }
+    },
+    "reader": {
+      "types": {
+        "reader-hub": {
+          "ancestors": [],
+          "current": {
+            "label": "lit:Reader"
+          }
+        },
+        "reader-article": {
+          "ancestors": [
+            {
+              "label": "lit:Reader",
+              "link": "spice/reader/Reader.md"
+            }
+          ],
+          "current": {
+            "label": "fm:title|file:basename"
+          }
+        }
+      }
     }
   }
 }

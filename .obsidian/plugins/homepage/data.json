@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "homepages": {
+    "Main Homepage": {
+      "value": "spice/home/Home.md",
+      "kind": "File",
+      "openOnStartup": true,
+      "openMode": "Replace last note",
+      "manualOpenMode": "Replace last note",
+      "view": "Reading view",
+      "revertView": true,
+      "openWhenEmpty": false,
+      "refreshDataview": true,
+      "autoCreate": true,
+      "autoScroll": false,
+      "pin": false,
+      "commands": [
+        {
+          "id": "dataview:refresh-views",
+          "period": "Both"
+        }
+      ],
+      "alwaysApply": false,
+      "hideReleaseNotes": true
+    }
+  },
+  "separateMobile": false
+}

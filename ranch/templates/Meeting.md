@@ -65,20 +65,8 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+await dv.view("ranch/views/customjs-guard", { class: "MeetingChromeBar" });
 ```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
----
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "MeetingLeafActions" });
-```
-
----
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });
@@ -97,12 +85,6 @@ if (notePath) {
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });
-```
-
--
-
-```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
 ```
 
@@ -113,4 +95,12 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 ```
 
 <!-- ACTION_ITEMS_MARKER -->
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Tasks" }] });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TaskMeetingList" });
+```
 

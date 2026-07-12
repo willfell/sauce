@@ -8,12 +8,9 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "ToDoChromeBar" });
 ```
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
-```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Tasks", top: true }] });

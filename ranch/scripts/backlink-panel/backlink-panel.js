@@ -83,7 +83,7 @@ class BacklinkPanel {
    * @returns {Array}
    */
   _reverseQuery(dv, key, sortBy, limit) {
-    const currentFile = dv.current() && dv.current().file;
+    const currentFile = dv.current()?.file;
     if (!currentFile || !currentFile.path) return [];
     const currentPath = currentFile.path;
 

@@ -3,7 +3,8 @@
     "customjs-loader",
     "sauce-tasks-icons",
     "sauce-daily-dashboard",
-    "sauce-callouts"
+    "sauce-callouts",
+    "sauce-home"
   ],
   "cssTheme": "Baseline"
 }

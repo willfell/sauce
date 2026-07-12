@@ -50,14 +50,22 @@ class PersonNavButtons {
             chip.style.cssText = "display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--background-modifier-border); color: var(--text-muted); font-size: 0.72em; font-weight: 500; letter-spacing: 0.04em; text-transform: lowercase; flex-shrink: 0;";
         }
 
-        // Back-link button row.
-        const btnRow = root.createEl("div");
-        btnRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
-
-        customJS.AccentButton.render(btnRow, {
-            label: "Back to People",
-            icon: backIcon,
-            onClick: () => dv.app.workspace.openLinkText("People", "spice/people/", false)
-        });
+        // Back-link button row — guarded: once a note carries PeopleChromeBar, its
+        // Go ▾ launcher already supplies nav back to the People hub, so this
+        // now-redundant button is skipped. Falls back to rendering it when
+        // ChromeBar isn't present (unhealed/unmigrated note).
+        let chromePresent = false;
+        try {
+            chromePresent = !!(dv.container.closest && dv.container.closest(".markdown-preview-view")?.querySelector(".people-chrome-root"));
+        } catch (_e) { chromePresent = false; }
+        if (!chromePresent) {
+            const btnRow = root.createEl("div");
+            btnRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
+            customJS.AccentButton.render(btnRow, {
+                label: "Back to People",
+                icon: backIcon,
+                onClick: () => dv.app.workspace.openLinkText("People", "spice/people/", false)
+            });
+        }
     }
 }
