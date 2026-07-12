@@ -184,6 +184,87 @@ class TripEntryList {
     return datePart || timePart || "";
   }
 
+  // ── pure flight-time math (unit-tested; all guard null/blank, never throw) ──
+  // depart_date may be clean "2026-07-16" OR full ISO — slice(0,10) normalizes.
+  static _dayMs(v) {
+    if (!v) return null;
+    const s = String(v).slice(0, 10);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    if (typeof v === "number") {
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return null;
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+    return null;
+  }
+  static _toMin(t) {
+    const m = String(t || "").match(/^(\d{1,2}):(\d{2})$/);
+    return m ? +m[1] * 60 + +m[2] : null;
+  }
+  static _delayMin(leg) {
+    const n = parseInt(leg && leg.delay_minutes, 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  static _legDepartMs(leg) {
+    const d = TripEntryList._dayMs(leg && leg.depart_date), t = TripEntryList._toMin(leg && leg.depart_time);
+    return (d == null || t == null) ? null : d + t * 60000;
+  }
+  static _legArriveMs(leg) {
+    const d = TripEntryList._dayMs(leg && leg.arrival_date), t = TripEntryList._toMin(leg && leg.arrival_time);
+    return (d == null || t == null) ? null : d + t * 60000;
+  }
+  static _effDepartMs(leg) {
+    const b = TripEntryList._legDepartMs(leg);
+    return b == null ? null : b + TripEntryList._delayMin(leg) * 60000;
+  }
+  static _effArriveMs(leg) {
+    const b = TripEntryList._legArriveMs(leg);
+    return b == null ? null : b + TripEntryList._delayMin(leg) * 60000;
+  }
+  // Boarding = effective-depart − 40 min (auto, no stored field). "HH:MM" UTC.
+  static _boardingMin(leg) {
+    const e = TripEntryList._effDepartMs(leg);
+    if (e == null) return null;
+    const bt = new Date(e - 40 * 60000);
+    const hh = String(bt.getUTCHours()).padStart(2, "0");
+    const mm = String(bt.getUTCMinutes()).padStart(2, "0");
+    return hh + ":" + mm;
+  }
+  static _durationMin(leg) {
+    const d = TripEntryList._effDepartMs(leg), a = TripEntryList._effArriveMs(leg);
+    return (d == null || a == null) ? null : Math.round((a - d) / 60000);
+  }
+  static _fmtDur(min) {
+    if (min == null || min <= 0) return "";
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h}h ${m}m` : `${m}m`;
+  }
+  // Layover only for connecting same-direction legs (prev.to === next.from).
+  static _layoverMin(prev, next) {
+    if (!(prev && next && prev.direction === next.direction && prev.to && next.from && prev.to === next.from)) return null;
+    const a = TripEntryList._effArriveMs(prev), d = TripEntryList._effDepartMs(next);
+    return (a == null || d == null) ? null : Math.round((d - a) / 60000);
+  }
+  // Positive ms delta -> "N min" / "N hr" / "N days".
+  static _humanDelta(ms) {
+    const min = Math.round(ms / 60000);
+    if (min < 60) return min + " min";
+    const hr = Math.round(ms / 3600000);
+    if (hr < 24) return hr + " hr";
+    return Math.round(ms / 86400000) + " days";
+  }
+  static _flightStatus(leg, nowMs) {
+    const d = TripEntryList._effDepartMs(leg);
+    if (d == null) return null;
+    const a = TripEntryList._effArriveMs(leg);
+    const board = d - 40 * 60000;
+    if (a != null && nowMs >= a) return { label: "Landed", tone: "muted" };
+    if (nowMs >= d) return { label: a != null ? "In air" : "Departed", tone: "accent" };
+    if (nowMs >= board) return { label: "Boarding", tone: "warn" };
+    return { label: "in " + TripEntryList._humanDelta(d - nowMs), tone: "accent" };
+  }
+
   // ── render ────────────────────────────────────────────────────────────────
   async render(dv, spec = {}) {
     const page = customJS.RenderSafe.page(dv);

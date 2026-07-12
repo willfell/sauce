@@ -151,5 +151,46 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('FMT-2 _fmtDateTime empty date+time -> ""', TripEntryList._fmtDateTime("", "") === "");
 }
 
+// ---------- pure flight-time math ----------
+{
+    const leg = { depart_date: "2026-07-16", depart_time: "09:39", arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" };
+    ok('FM-1 _toMin parses HH:MM', TripEntryList._toMin("09:39") === 579, String(TripEntryList._toMin("09:39")));
+    ok('FM-2 _toMin blank -> null', TripEntryList._toMin("") === null, String(TripEntryList._toMin("")));
+    ok('FM-3 _boardingMin = depart - 40', TripEntryList._boardingMin(leg) === "08:59", TripEntryList._boardingMin(leg));
+    ok('FM-4 _durationMin', TripEntryList._durationMin(leg) === 96, String(TripEntryList._durationMin(leg)));
+    ok('FM-5 _fmtDur h+m', TripEntryList._fmtDur(96) === "1h 36m", TripEntryList._fmtDur(96));
+    ok('FM-6 _fmtDur m only', TripEntryList._fmtDur(45) === "45m", TripEntryList._fmtDur(45));
+
+    const del = Object.assign({}, leg, { delay_minutes: "30" });
+    ok('FM-7 _boardingMin cascades delay', TripEntryList._boardingMin(del) === "09:29", TripEntryList._boardingMin(del));
+    ok('FM-8 _delayMin parses / defaults 0', TripEntryList._delayMin(del) === 30 && TripEntryList._delayMin(leg) === 0,
+        TripEntryList._delayMin(del) + "/" + TripEntryList._delayMin(leg));
+
+    // layover only for connecting same-direction legs (prev.to === next.from)
+    const a = { direction: "Outbound", to: "ATL", arrival_date: "2026-07-16", arrival_time: "13:00" };
+    const b = { direction: "Outbound", from: "ATL", depart_date: "2026-07-16", depart_time: "13:45" };
+    ok('FM-9 _layoverMin connecting legs', TripEntryList._layoverMin(a, b) === 45, String(TripEntryList._layoverMin(a, b)));
+    ok('FM-10 _layoverMin null across directions',
+        TripEntryList._layoverMin(a, { direction: "Return", from: "ATL", depart_date: "2026-07-16", depart_time: "13:45" }) === null);
+    ok('FM-11 _layoverMin null different airport',
+        TripEntryList._layoverMin(a, { direction: "Outbound", from: "MCO", depart_date: "2026-07-16", depart_time: "13:45" }) === null);
+
+    // ISO date tolerance
+    ok('FM-12 _legDepartMs tolerates full ISO depart_date',
+        TripEntryList._legDepartMs({ depart_date: "2026-07-16T00:00:00.000-06:00", depart_time: "09:39" }) === TripEntryList._legDepartMs(leg));
+
+    // status at fixed now
+    const dep = TripEntryList._legDepartMs(leg);
+    ok('FM-13 status pre-boarding -> "in …"', TripEntryList._flightStatus(leg, dep - 90 * 60000).label.startsWith("in "),
+        JSON.stringify(TripEntryList._flightStatus(leg, dep - 90 * 60000)));
+    ok('FM-14 status Boarding within 40m window', TripEntryList._flightStatus(leg, dep - 20 * 60000).label === "Boarding",
+        JSON.stringify(TripEntryList._flightStatus(leg, dep - 20 * 60000)));
+    ok('FM-15 status In air after depart (arrival known)', TripEntryList._flightStatus(leg, dep + 5 * 60000).label === "In air",
+        JSON.stringify(TripEntryList._flightStatus(leg, dep + 5 * 60000)));
+    ok('FM-16 status Landed after arrival', TripEntryList._flightStatus(leg, TripEntryList._legArriveMs(leg) + 60000).label === "Landed",
+        JSON.stringify(TripEntryList._flightStatus(leg, TripEntryList._legArriveMs(leg) + 60000)));
+    ok('FM-17 status null when depart unknown', TripEntryList._flightStatus({ depart_time: "", depart_date: "" }, dep) === null);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
