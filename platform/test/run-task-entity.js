@@ -110,6 +110,32 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
+// 2t. composeNote — trip/trip_slug linkage mirrors project (additive).
+ok('TE-2t composeNote emits trip + trip_slug (parallel to project)', () => {
+  const out = TaskEntity.composeNote({ title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(out.frontmatter.trip === '[[Bussin]]', 'trip wikilink: ' + out.frontmatter.trip);
+  assert(out.frontmatter.trip_slug === 'bussin', 'trip_slug: ' + out.frontmatter.trip_slug);
+  // trip empty when only project given; project still works.
+  const fp = TaskEntity.composeNote({ title: 'X', project: { name: 'Acme', slug: 'acme' } }).frontmatter;
+  assert(fp.trip === '', 'trip empty when only project: ' + JSON.stringify(fp.trip));
+  assert(fp.trip_slug === '', 'trip_slug empty when only project: ' + JSON.stringify(fp.trip_slug));
+  assert(fp.project_slug === 'acme', 'project still works: ' + fp.project_slug);
+  // trip_slug sits immediately after project_slug in canonical order.
+  const keys = Object.keys(out.frontmatter);
+  assert(keys.indexOf('project_slug') === keys.indexOf('trip') - 1, 'trip follows project_slug: ' + keys.join(','));
+  assert(keys.indexOf('trip') === keys.indexOf('trip_slug') - 1, 'trip_slug follows trip: ' + keys.join(','));
+});
+
+// 2u. parseNote — trip_slug plain string preserved; trip coerced via _linkText.
+ok('TE-2u parseNote preserves trip_slug + coerces trip basename', () => {
+  const parsed = TaskEntity.parseNote({ type: 'task', trip: '[[Bussin]]', trip_slug: 'bussin', file: { path: 'spice/tasks/x.md' } });
+  assert(parsed.trip_slug === 'bussin', 'plain string preserved: ' + JSON.stringify(parsed.trip_slug));
+  assert(parsed.trip === 'Bussin', 'trip coerced to basename: ' + parsed.trip);
+  const bare = TaskEntity.parseNote({ type: 'task', file: { path: 'spice/tasks/y.md' } });
+  assert(bare.trip === '', 'absent trip -> empty string: ' + JSON.stringify(bare.trip));
+  assert(bare.trip_slug === '', 'absent trip_slug -> empty string: ' + JSON.stringify(bare.trip_slug));
+});
+
 // 3. composeNote — minimal payload → blank due, still valid.
 ok('TE-3 composeNote minimal payload → blank due + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
