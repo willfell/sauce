@@ -35,7 +35,7 @@ class TripDashboard {
   static _countOpenTasks(dv, tripSlug){
     const slug=String(tripSlug||"").trim(); if(!slug) return 0;
     try {
-      const rows=dv.pages('"spice/tasks"').where(p=>p&&p.type==="task"&&p.status==="open"&&String(p.trip_slug||"").trim()===slug&&String(p.source||"").trim()!=="meeting"&&!String(p.file.path).includes("/_trash/")&&!String(p.file.path).includes("/_done/"));
+      const rows=dv.pages('"spice/tasks"').where(p=>p&&p.type==="task"&&p.status==="open"&&String(p.trip_slug||"").trim()===slug&&String(p.source||"").trim()!=="meeting"&&p.file&&!String(p.file.path).includes("/_trash/")&&!String(p.file.path).includes("/_done/"));
       return rows?(rows.length||0):0;
     } catch(_e){ return 0; }
   }
