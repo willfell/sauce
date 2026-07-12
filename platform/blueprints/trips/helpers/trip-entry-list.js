@@ -61,6 +61,21 @@ class TripEntryList {
     l[index] = Object.assign({}, l[index], { checked: !l[index].checked });
     return { list: l, changed: true };
   }
+  // Base form-field css shared by <input> and <select> controls.
+  static _fieldCss() {
+    return "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+  }
+  // iOS-safe date/time <input> css: strips the intrinsic control chrome that
+  // otherwise ignores width:100% (native picker still opens on tap).
+  static _dateCss() {
+    return TripEntryList._fieldCss() + " -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;";
+  }
+  // Maps a spec field to its <input type="…"> (or "select" to render a
+  // <select>). text/date/time/select pass through as-is; link -> url.
+  static _inputTypeFor(field) {
+    if (!field || !field.type) return "text";
+    return field.type === "link" ? "url" : field.type;
+  }
   static addCategory(list, category) {
     const l = Array.isArray(list) ? list.slice() : [];
     const c = String(category || "").trim();
@@ -201,6 +216,7 @@ class TripEntryList {
     this._openForm({
       title: "Add",
       fields: spec.fields || [],
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
         if (!res.changed) { new Notice("Enter at least one value."); return false; }
@@ -218,6 +234,7 @@ class TripEntryList {
       title: "Edit",
       fields: catField.concat(spec.fields || []),
       values: entry || {},
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.updateEntry(this._items(dv, spec), index, values);
         if (!res.changed) { new Notice("Nothing to update."); return false; }
@@ -246,6 +263,7 @@ class TripEntryList {
     this._openForm({
       title: "Add item",
       fields,
+      dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
         if (!res.changed) { new Notice("Enter at least one value."); return false; }
@@ -256,9 +274,13 @@ class TripEntryList {
   }
 
   // ── form modal ────────────────────────────────────────────────────────────
-  // fields: [{ name, label, placeholder?, select?:[...] }]. A `select` field
-  // renders a <select> populated from its options; otherwise a text <input>.
-  _openForm({ title, fields, values, onSubmit }) {
+  // fields: [{ name, label, placeholder?, select?:[...], type?, options?,
+  // optionsFrom? }]. A `select` array (legacy — the grouped category field)
+  // renders a <select> populated from its options. Otherwise `type` picks
+  // the control: "select" renders a <select> from `options` (or, when
+  // `optionsFrom === "categories"`, the distinct existing entry categories);
+  // any other type (text/date/time/link->url) renders a typed <input>.
+  _openForm({ title, fields, values, dv, spec, onSubmit }) {
     values = values || {};
     this._openModal({ title, build: (panel, close) => {
       const controls = [];
@@ -270,18 +292,29 @@ class TripEntryList {
         let input;
         if (Array.isArray(f.select)) {
           input = wrap.createEl("select");
-          input.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+          input.style.cssText = TripEntryList._fieldCss();
           for (const opt of f.select) {
             const o = input.createEl("option", { text: opt });
             o.value = opt;
           }
           if (values[f.name]) input.value = values[f.name];
+        } else if (TripEntryList._inputTypeFor(f) === "select") {
+          const opts = f.optionsFrom === "categories" ? this._categories(dv, spec) : (f.options || []);
+          input = wrap.createEl("select");
+          input.style.cssText = TripEntryList._fieldCss();
+          for (const opt of opts) {
+            const o = input.createEl("option", { text: opt });
+            o.value = opt;
+          }
+          if (opts.length) input.value = values[f.name] || opts[0];
+          input.onchange = () => { values[f.name] = input.value; };
         } else {
-          input = wrap.createEl("input");
-          input.type = "text";
+          const inputType = TripEntryList._inputTypeFor(f);
+          input = wrap.createEl("input", { type: inputType });
           input.value = values[f.name] || "";
           input.placeholder = f.placeholder || "";
-          input.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
+          input.style.cssText = (inputType === "date" || inputType === "time") ? TripEntryList._dateCss() : TripEntryList._fieldCss();
+          input.oninput = () => { values[f.name] = input.value; };
         }
         controls.push({ name: f.name, input });
       }

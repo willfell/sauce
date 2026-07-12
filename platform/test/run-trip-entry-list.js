@@ -81,5 +81,21 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
         r.changed === true && r.list.some(e => e.category === "Toiletries"), JSON.stringify(r));
 }
 
+// ---------- _inputTypeFor ----------
+{
+    ok('TYP-1 _inputTypeFor defaults to text', TripEntryList._inputTypeFor({ name: "x" }) === "text");
+    ok('TYP-2 _inputTypeFor passes through date', TripEntryList._inputTypeFor({ name: "x", type: "date" }) === "date");
+    ok('TYP-3 _inputTypeFor passes through time', TripEntryList._inputTypeFor({ name: "x", type: "time" }) === "time");
+    ok('TYP-4 _inputTypeFor maps link -> url', TripEntryList._inputTypeFor({ name: "x", type: "link" }) === "url");
+    ok('TYP-5 _inputTypeFor passes through select', TripEntryList._inputTypeFor({ name: "x", type: "select" }) === "select");
+}
+
+// ---------- _dateCss ----------
+{
+    const css = TripEntryList._dateCss();
+    ok('CSS-1 _dateCss includes iOS-safe appearance override',
+        css.includes("-webkit-appearance:none") && css.includes("max-width:100%"), css);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
