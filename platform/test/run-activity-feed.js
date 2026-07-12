@@ -918,6 +918,59 @@ try {
   assertTrue("AF-V070-CLOSED-1: defaultClosed", false, e && e.message);
 }
 
+// AF-COLLAPSE-1: a group with exactly 3 pages (the threshold) stays OPEN.
+try {
+  const pages = [1, 2, 3].map((n) => ({ file: { path: `w${n}.md`, name: `w${n}` }, type: "wiki", created_at: `2026-05-19T1${n}:00:00Z` }));
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, { scope: "today", asOf: "2026-05-19", blueprints: ["wiki"], framed: true, groupOrder: ["wiki"] });
+  const findDetails = (el) => { for (const c of (el._children || [])) { if (c.tag === "details") return c; const inner = findDetails(c); if (inner) return inner; } return null; };
+  const d = findDetails(dv.container);
+  assertTrue("AF-COLLAPSE-1: exactly-3-item group stays open by default", d && d.open === true);
+} catch (e) {
+  assertTrue("AF-COLLAPSE-1: exactly-3-item group stays open by default", false, e && e.message);
+}
+// AF-COLLAPSE-2: a group with 4 pages (over the threshold) collapses by default.
+try {
+  const pages = [1, 2, 3, 4].map((n) => ({ file: { path: `w${n}.md`, name: `w${n}` }, type: "wiki", created_at: `2026-05-19T1${n}:00:00Z` }));
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, { scope: "today", asOf: "2026-05-19", blueprints: ["wiki"], framed: true, groupOrder: ["wiki"] });
+  const findDetails = (el) => { for (const c of (el._children || [])) { if (c.tag === "details") return c; const inner = findDetails(c); if (inner) return inner; } return null; };
+  const d = findDetails(dv.container);
+  assertTrue("AF-COLLAPSE-2: 4-item group collapses by default (no defaultClosed opt needed)", d && d.open === false);
+} catch (e) {
+  assertTrue("AF-COLLAPSE-2: 4-item group collapses by default", false, e && e.message);
+}
+// AF-COLLAPSE-3: a custom collapseThreshold is honored (2 items collapses at threshold:1).
+try {
+  const pages = [1, 2].map((n) => ({ file: { path: `w${n}.md`, name: `w${n}` }, type: "wiki", created_at: `2026-05-19T1${n}:00:00Z` }));
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, { scope: "today", asOf: "2026-05-19", blueprints: ["wiki"], framed: true, groupOrder: ["wiki"], collapseThreshold: 1 });
+  const findDetails = (el) => { for (const c of (el._children || [])) { if (c.tag === "details") return c; const inner = findDetails(c); if (inner) return inner; } return null; };
+  const d = findDetails(dv.container);
+  assertTrue("AF-COLLAPSE-3: explicit collapseThreshold:1 collapses a 2-item group", d && d.open === false);
+} catch (e) {
+  assertTrue("AF-COLLAPSE-3: explicit collapseThreshold honored", false, e && e.message);
+}
+// AF-COLLAPSE-4: defaultClosed still forces closed even when under threshold (1 item, threshold 3).
+try {
+  const pages = [{ file: { path: "w1.md", name: "w1" }, type: "wiki", created_at: "2026-05-19T11:00:00Z" }];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, { scope: "today", asOf: "2026-05-19", blueprints: ["wiki"], framed: true, groupOrder: ["wiki"], defaultClosed: ["wiki"] });
+  const findDetails = (el) => { for (const c of (el._children || [])) { if (c.tag === "details") return c; const inner = findDetails(c); if (inner) return inner; } return null; };
+  const d = findDetails(dv.container);
+  assertTrue("AF-COLLAPSE-4: defaultClosed still forces closed under the count threshold", d && d.open === false);
+} catch (e) {
+  assertTrue("AF-COLLAPSE-4: defaultClosed forces closed under threshold", false, e && e.message);
+}
+
 // AF-V070-FRAMED-1: framed DOM emits .sauce-group > details > summary.sauce-group-header + .sauce-group-body
 try {
   const pages = [

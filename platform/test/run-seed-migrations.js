@@ -1322,6 +1322,36 @@ withTempVault((vault) => {
         }
     }
 
+    // ===== STRIP-EMOJI-* / HC-REGISTRY-TITLE-* — _stripCompletionEmojiSuffix +
+    // _parseRecurringRegistry title-cleanup (direct unit tests, no seed-vault
+    // fixture needed) =====
+    {
+        const { _stripCompletionEmojiSuffix, _parseRecurringRegistry } = require("../install.js");
+
+        ok("STRIP-EMOJI-1 strips a trailing checkmark + date, with surrounding whitespace",
+           _stripCompletionEmojiSuffix("Pay Rent ✅ 2026-07-06") === "Pay Rent");
+        ok("STRIP-EMOJI-1b tolerates no space before the date",
+           _stripCompletionEmojiSuffix("Feed the dogs ✅2026-06-17") === "Feed the dogs");
+        ok("STRIP-EMOJI-2 leaves a title with no such suffix unchanged",
+           _stripCompletionEmojiSuffix("Call Dog Trainer back") === "Call Dog Trainer back");
+        ok("STRIP-EMOJI-3 null/empty input never throws",
+           _stripCompletionEmojiSuffix(null) === "" && _stripCompletionEmojiSuffix("") === "");
+
+        const registryBody = [
+            "## Recurring Tasks",
+            "- [x] Pay Rent ✅ 2026-07-06 [recurrence:: every day]",
+            "- [ ] Water plants [recurrence:: every 3 days]",
+            "## Last 7 days",
+        ].join("\n");
+        const entries = _parseRecurringRegistry(registryBody);
+        const payRent = entries.find((e) => e.title.indexOf("Pay Rent") === 0);
+        ok("HC-REGISTRY-TITLE-1 checked line with a manually-typed completion annotation yields a clean title",
+           payRent && payRent.title === "Pay Rent", `got: ${JSON.stringify(payRent)}`);
+        const waterPlants = entries.find((e) => e.title.indexOf("Water plants") === 0);
+        ok("HC-REGISTRY-TITLE-1b an unaffected line is untouched",
+           waterPlants && waterPlants.title === "Water plants", `got: ${JSON.stringify(waterPlants)}`);
+    }
+
     // ===== HC-V0202-SEED-MIGRATE-RECURRING-* — applyRecurringTasksMigrationHeal =====
     // The seed's spice/to-do/Recurring Tasks.md registry carries two entries in its
     // Recurring Tasks section: an UNCHECKED line ("Water the plants", the live shape)
@@ -4161,8 +4191,14 @@ async function runHomeScaffoldHealFamily() {
             const body = existsVault(root, HOME) ? readVault(root, HOME) : "";
             ok("HC-HOME-SCAFFOLD-1b carries type: home frontmatter",
                /^type:\s*home\s*$/m.test(body), body.slice(0, 120));
-            ok("HC-HOME-SCAFFOLD-1c has SpaceHome + SpaceNavButtons chrome",
-               /class:\s*"SpaceHome"/.test(body) && /class:\s*"SpaceNavButtons"/.test(body));
+            // Fresh scaffold follows the home template's HomeChromeBar shape
+            // (the SpaceNavButtons chrome was retired from _HOME_CHROME so a
+            // brand-new Home.md is born new-shape and applyDailyHomeChromeBarHeal
+            // no-ops on it). The SEPARATE existing-note repair path
+            // (_healHomeChromeBody) still rebuilds SpaceNavButtons — exercised by
+            // HC-HOME-SCAFFOLD-2 below and run-home.js HOME-HEAL-*.
+            ok("HC-HOME-SCAFFOLD-1c has SpaceHome + HomeChromeBar chrome (no legacy SpaceNavButtons)",
+               /class:\s*"SpaceHome"/.test(body) && /class:\s*"HomeChromeBar"/.test(body) && !/class:\s*"SpaceNavButtons"/.test(body));
             await install.applyHomeScaffoldHeal(tp, history, git);
             ok("HC-HOME-SCAFFOLD-1d second run is a byte-identical no-op (healthy note)",
                readVault(root, HOME) === body);
@@ -4200,6 +4236,96 @@ async function runHomeScaffoldHealFamily() {
             if (KEEP) console.log(`  KEEP_SEED_VAULT=1: ${r}`);
             else { try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) {} }
         }
+    }
+}
+
+async function runTaskHealTitleCleanupFamily() {
+    const install = require("../install.js");
+    const git = { commit: "test", tag: "test", dirty: false };
+    const roots = [];
+    const freshVault = () => {
+        const r = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-taskheal-title-"));
+        roots.push(r);
+        return r;
+    };
+    const readVault = (root, rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const existsVault = (root, rel) => fs.existsSync(path.join(root, rel));
+    const writeFixture = (root, rel, content) => {
+        const f = path.join(root, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+    const mkTp = (root) => ({ app: { vault: { adapter: makeFsAdapter(root) } } });
+
+    const corruptedBody = (title) => [
+        "---", "type: task", "title: " + title, "status: open",
+        "due: 2026-07-10", "recurrence: every day", "priority:", "project:",
+        "project_slug:", "source: migrated-from-registry", "source_note:",
+        "links: []", "created_at: 2026-07-08T23:47:39.078Z", 'completed_at: ""', "---", "",
+        "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });', "```",
+        "", "---", "",
+        "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', "```",
+        "", "---", "", "<!-- TASK_NOTES -->", "",
+    ].join("\n");
+
+    try {
+        // ----- 1. Corrupted title -> cleaned + renamed; clean note untouched; idempotent -----
+        {
+            const root = freshVault();
+            const CORRUPTED = "spice/tasks/Pay Rent ✅ 2026-07-06.md";
+            const CLEAN = "spice/tasks/Feed the cat.md";
+            writeFixture(root, CORRUPTED, corruptedBody("Pay Rent ✅ 2026-07-06"));
+            const cleanBody = corruptedBody("Feed the cat");
+            writeFixture(root, CLEAN, cleanBody);
+
+            const tp = mkTp(root), history = [];
+            await install.applyTaskNoteHeal(tp, history, git);
+
+            ok("HC-TASKHEAL-TITLE-1 corrupted note GONE from its original path",
+               !existsVault(root, CORRUPTED));
+            ok("HC-TASKHEAL-TITLE-1b renamed to the clean 'Pay Rent.md'",
+               existsVault(root, "spice/tasks/Pay Rent.md"));
+
+            const healed = existsVault(root, "spice/tasks/Pay Rent.md") ? readVault(root, "spice/tasks/Pay Rent.md") : "";
+            ok("HC-TASKHEAL-TITLE-1c frontmatter title cleaned to 'Pay Rent'",
+               /^title:\s*Pay Rent\s*$/m.test(healed), `got frontmatter: ${healed.slice(0, 200)}`);
+            ok("HC-TASKHEAL-TITLE-1d other frontmatter fields preserved (due/recurrence/status)",
+               /^due:\s*2026-07-10\s*$/m.test(healed) && /^recurrence:\s*every day\s*$/m.test(healed) && /^status:\s*open\s*$/m.test(healed));
+            ok("HC-TASKHEAL-TITLE-1e .sauce-backup snapshot written",
+               fs.existsSync(path.join(root, ".sauce-backup")));
+
+            ok("HC-TASKHEAL-TITLE-2 a clean note is left completely untouched",
+               readVault(root, CLEAN) === cleanBody);
+
+            // ----- Pass 2: idempotency -----
+            const history2 = [];
+            await install.applyTaskNoteHeal(tp, history2, git);
+            ok("HC-TASKHEAL-TITLE-3 second pass is a no-op — 'Pay Rent.md' unchanged",
+               readVault(root, "spice/tasks/Pay Rent.md") === healed);
+            ok("HC-TASKHEAL-TITLE-3b second pass does not create a ' 2' duplicate",
+               !existsVault(root, "spice/tasks/Pay Rent 2.md"));
+        }
+
+        // ----- 2. Collision: a pre-existing "Pay Rent.md" forces a dedupe rename -----
+        {
+            const root = freshVault();
+            writeFixture(root, "spice/tasks/Pay Rent.md", [
+                "---", "type: task", "title: Pay Rent", "status: open", "due: 2026-07-11",
+                "recurrence:", "priority:", "project:", "project_slug:", "source: daily",
+                "source_note:", "links: []", "created_at: 2026-07-01T00:00:00Z", 'completed_at: ""',
+                "---", "", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });', "```",
+                "", "---", "", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', "```",
+                "", "---", "", "<!-- TASK_NOTES -->", "",
+            ].join("\n"));
+            writeFixture(root, "spice/tasks/Pay Rent ✅ 2026-07-06.md", corruptedBody("Pay Rent ✅ 2026-07-06"));
+
+            const tp = mkTp(root), history = [];
+            await install.applyTaskNoteHeal(tp, history, git);
+            ok("HC-TASKHEAL-TITLE-4 collision dedupes to 'Pay Rent 2.md'",
+               existsVault(root, "spice/tasks/Pay Rent 2.md"));
+        }
+    } finally {
+        for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }); } catch (_e) {} }
     }
 }
 
@@ -4294,6 +4420,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-HOME-SCAFFOLD-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-HOME-SCAFFOLD-FAMILY");
+    })
+    .then(() => runTaskHealTitleCleanupFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-TASKHEAL-TITLE-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-TASKHEAL-TITLE-FAMILY");
     })
     .finally(() => {
         console.log("");

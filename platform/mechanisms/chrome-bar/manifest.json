@@ -1,6 +1,6 @@
 {
   "name": "chrome-bar",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "kind": "mechanism",
   "description": "Shared per-surface chrome bar. customJS.ChromeBar.render(dv, adapter) draws the breadcrumb-left + Go/primary/overflow-right control the project button-nav-refactor introduced, parameterized by a per-blueprint adapter (resolve/navEntries/dispatch/openNavTarget/rootClass/btnClass) so every blueprint renders the identical bar from ONE place. Also exposes renderChromeButton (the 32px icon-first hover-lift/press-scale button look), CHROME_ICONS (compass/chevronDown/moreHorizontal), and vaultEntries(dv, open) — the Go launcher's Vault section built from every registered nav-registry source, ordered via SpaceNavButtons.firstEntryPerSource and rendered as MenuPopover's 2-column grid.",
   "depends_on": [
