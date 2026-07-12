@@ -24,6 +24,7 @@
     "TaskNoteView",
     "TaskMeetingList",
     "TaskProjectList",
+    "TaskTripList",
     "TaskDoneTodayList",
     "TaskChromeBar"
   ],
@@ -51,6 +52,10 @@
     {
       "source": "task-project-list.js",
       "dest": "{{scripts_path}}/task-entity/task-project-list.js"
+    },
+    {
+      "source": "task-trip-list.js",
+      "dest": "{{scripts_path}}/task-entity/task-trip-list.js"
     },
     {
       "source": "task-done-today-list.js",
