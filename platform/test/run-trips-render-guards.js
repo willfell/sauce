@@ -137,6 +137,7 @@ global.moment = momentFn;
 const widgets = [
     { name: 'TripsHubCards',     path: 'platform/blueprints/trips/helpers/trips-hub-cards.js' },
     { name: 'TripSectionsCards', path: 'platform/blueprints/trips/helpers/trip-sections-cards.js' },
+    { name: 'TripDashboard',     path: 'platform/blueprints/trips/helpers/trip-dashboard.js' },
     { name: 'TripEntryList',     path: 'platform/blueprints/trips/helpers/trip-entry-list.js' },
 ];
 

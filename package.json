@@ -70,6 +70,7 @@
     "test:wiki-chrome-bar": "node platform/test/run-wiki-chrome-bar.js",
     "test:trips-chrome-bar": "node platform/test/run-trips-chrome-bar.js",
     "test:trip-entry-list": "node platform/test/run-trip-entry-list.js",
+    "test:trip-dashboard": "node platform/test/run-trip-dashboard.js",
     "test:trip-links": "node platform/test/run-trip-links.js",
     "test:reader-chrome-bar": "node platform/test/run-reader-chrome-bar.js",
     "test:people-chrome-bar": "node platform/test/run-people-chrome-bar.js",

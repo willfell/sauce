@@ -39,6 +39,7 @@
     "TripsHubCards",
     "TripNavButtons",
     "TripSectionsCards",
+    "TripDashboard",
     "TripsChromeBar",
     "TripEntryList",
     "TripLinksPanel",
@@ -97,6 +98,10 @@
     {
       "source": "helpers/trip-sections-cards.js",
       "dest": "{{scripts_path}}/trips/trip-sections-cards.js"
+    },
+    {
+      "source": "helpers/trip-dashboard.js",
+      "dest": "{{scripts_path}}/trips/trip-dashboard.js"
     },
     {
       "source": "helpers/trips-chrome-bar.js",
