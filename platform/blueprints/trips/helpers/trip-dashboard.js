@@ -97,35 +97,110 @@ class TripDashboard {
       const c=(dv&&dv.container)?dv.container:dv;
       if(!c||typeof c.createEl!=="function") return;
       if(c.closest && c.closest(".markdown-embed")) return;
-      // asOf = today's UTC yyyy-mm-dd
+
+      // asOf = today's UTC yyyy-mm-dd (once)
       const now=new Date();
       const asOf = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
       const cd = TripDashboard.countdown(page.start_date, page.end_date, asOf);
-      // sibling packing note via folder scan (pattern: TripSectionsCards)
-      let packing=[];
+
+      // open task count — task-entity notes keyed on trip_slug (parity TaskTripList).
+      const tripSlug = page.trip_slug || (String(page.file.path||"").split("/")[2]) || "";
+      const openTasks = TripDashboard._countOpenTasks(dv, tripSlug);
+
+      // ── sibling folder-scan: packing_items + flights + stays ──
+      let packing=null, flights=null, stays=null;
       try {
         const parts=String(page.file.path||"").split("/"); const ti=parts.indexOf("trips");
         if(ti>0 && parts[ti-1]==="spice" && parts.length===ti+3){ const dir="spice/trips/"+parts[ti+1];
           const folder=app.vault.getAbstractFileByPath(dir);
-          if(folder && folder.children){ for(const f of folder.children){ if(f.extension==="md"){ const fm=app.metadataCache.getFileCache(f)?.frontmatter||{}; if(fm.type==="trip-section" && fm.section_kind==="packing-list" && Array.isArray(fm.packing_items)){ packing=fm.packing_items; break; } } } }
+          if(folder && folder.children){ for(const f of folder.children){ if(f.extension!=="md") continue;
+            const fm=app.metadataCache.getFileCache(f)?.frontmatter||{};
+            if(fm.type!=="trip-section") continue;
+            if(fm.section_kind==="packing-list" && Array.isArray(fm.packing_items)) packing=fm.packing_items;
+            else if(fm.section_kind==="flights" && Array.isArray(fm.flights)) flights=fm.flights;
+            else if(fm.section_kind==="stay" && Array.isArray(fm.stays)) stays=fm.stays;
+          } }
         }
-      } catch(_e){}
-      const pc = TripDashboard.packingCounts(packing);
-      // open task count — trip tasks are task-entity notes keyed on trip_slug
-      // (parity with TaskTripList), not the retired inline [trip::] field.
-      const tripSlug = page.trip_slug || (String(page.file.path||"").split("/")[2]) || "";
-      const openTasks = TripDashboard._countOpenTasks(dv, tripSlug);
-      // ---- draw a compact card ----
-      const card=c.createEl("div"); card.style.cssText="display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:10px 14px; margin:4px auto 2px; max-width:720px; border:1px solid var(--background-modifier-border); border-radius:10px; background:var(--background-secondary);";
-      const stat=(label,value)=>{ const w=card.createEl("div"); w.style.cssText="display:flex; flex-direction:column; gap:2px;"; const v=w.createEl("div",{text:String(value)}); v.style.cssText="font-weight:700; font-size:1.05em;"; const l=w.createEl("div",{text:label}); l.style.cssText="font-size:0.72em; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em;"; };
-      if(cd.state==="upcoming") stat("days to go", cd.days);
-      else if(cd.state==="in-progress") stat("status","In progress");
-      else if(cd.state==="complete") stat("status","Complete");
-      const dates = TripDashboard._fmtDate(page.start_date)+" – "+TripDashboard._fmtDate(page.end_date);
-      stat("dates", dates);
+      } catch(_e){ /* sibling scan best-effort */ }
+
+      // shared render helpers ─────────────────────────────────────
+      const mkCard=()=>{ const card=c.createEl("div"); card.style.cssText="padding:12px 16px; margin:6px auto; max-width:720px; border:1px solid var(--background-modifier-border); border-radius:10px; background:var(--background-secondary);"; return card; };
+      const label=(parent,text)=>{ const l=parent.createEl("div",{text:String(text)}); l.style.cssText="font-size:0.72em; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em;"; return l; };
+      const header=(parent,text)=>{
+        if(customJS.SectionLabel && typeof customJS.SectionLabel.render==="function"){ try{ customJS.SectionLabel.render(parent, text); return; }catch(_e){} }
+        const h=parent.createEl("div",{text:String(text)}); h.style.cssText="font-weight:700; font-size:0.82em; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); margin:2px 0 8px;";
+      };
+
+      // ── Hero card ──
+      const hero=mkCard();
+      const bigWrap=hero.createEl("div"); bigWrap.style.cssText="display:flex; flex-direction:column; gap:2px; margin-bottom:10px;";
+      let bigVal, bigLabel="";
+      if(cd.state==="upcoming"){ bigVal=String(cd.days); bigLabel="days to go"; }
+      else if(cd.state==="in-progress"){ bigVal="In progress"; }
+      else if(cd.state==="complete"){ bigVal="Complete"; }
+      else { bigVal="—"; }
+      const bv=bigWrap.createEl("div",{text:bigVal}); bv.style.cssText="font-weight:800; font-size:1.9em; line-height:1.05; color:var(--interactive-accent);";
+      if(bigLabel) label(bigWrap,bigLabel);
+
+      const stats=hero.createEl("div"); stats.style.cssText="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start;";
+      const stat=(lbl,value)=>{ const w=stats.createEl("div"); w.style.cssText="display:flex; flex-direction:column; gap:2px;"; const v=w.createEl("div",{text:String(value)}); v.style.cssText="font-weight:700; font-size:1.02em;"; label(w,lbl); };
+      stat("dates", TripDashboard._fmtDate(page.start_date)+" – "+TripDashboard._fmtDate(page.end_date));
       if(page.location) stat("where", page.location);
       stat("open tasks", openTasks);
-      const cats=Object.keys(pc); if(cats.length){ const packed=cats.reduce((a,k)=>a+pc[k].checked,0); const tot=cats.reduce((a,k)=>a+pc[k].total,0); stat("packed", packed+"/"+tot); }
+
+      // ── Itinerary (Flights) block — omitted when no legs ──
+      const itin=TripDashboard._itinerary(flights);
+      if(itin.length){
+        const fc=mkCard(); header(fc,"Flights");
+        itin.forEach(g=>{
+          const row=fc.createEl("div"); row.style.cssText="display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:3px 0;";
+          const dep=g.departsMs!=null?(" · departs "+TripDashboard._fmtDate(g.departsMs)):"";
+          const t=row.createEl("div",{text:g.direction+" · "+g.route+dep}); t.style.cssText="font-size:0.95em;";
+          try {
+            const TEL=(typeof customJS!=="undefined")&&customJS.TripEntryList;
+            const grp=(flights||[]).filter(l=>l && (String(l.direction||"").trim()||"Other")===g.direction);
+            const firstLeg=grp[0];
+            if(TEL && typeof TEL._flightStatus==="function" && firstLeg){
+              const st=TEL._flightStatus(firstLeg, Date.now());
+              if(st && st.label){
+                const pill=row.createEl("span",{text:st.label});
+                const tone=st.tone==="warn"?"var(--color-yellow)":st.tone==="muted"?"var(--text-muted)":"var(--interactive-accent)";
+                pill.style.cssText="font-size:0.68em; text-transform:uppercase; letter-spacing:0.03em; padding:1px 7px; border-radius:8px; border:1px solid "+tone+"; color:"+tone+";";
+              }
+            }
+          } catch(_e){ /* status pill best-effort */ }
+        });
+      }
+
+      // ── Stay block — omitted when no stays ──
+      const ss=TripDashboard._staySummary(stays);
+      if(ss.length){
+        const sc=mkCard(); header(sc,"Stay");
+        ss.forEach(s=>{
+          const row=sc.createEl("div"); row.style.cssText="font-size:0.95em; padding:3px 0;";
+          const rng=(s.check_in||s.check_out)?(" · "+TripDashboard._fmtDate(s.check_in)+" → "+TripDashboard._fmtDate(s.check_out)):"";
+          row.createEl("span",{text:s.name+rng});
+        });
+      }
+
+      // ── Packing block — omitted when no packable items ──
+      if(packing && Array.isArray(packing) && packing.length){
+        const pc=TripDashboard.packingCounts(packing);
+        const cats=Object.keys(pc);
+        if(cats.length){
+          const packed=cats.reduce((a,k)=>a+pc[k].checked,0);
+          const tot=cats.reduce((a,k)=>a+pc[k].total,0);
+          if(tot>0){
+            const kc=mkCard(); header(kc,"Packing");
+            const line=kc.createEl("div",{text:packed+"/"+tot+" packed"}); line.style.cssText="font-size:0.95em; margin-bottom:6px;";
+            const pct=Math.max(0,Math.min(100,Math.round((packed/tot)*100)));
+            const bar=kc.createEl("div"); bar.style.cssText="height:8px; border-radius:6px; background:var(--background-modifier-border); overflow:hidden;";
+            const fill=bar.createEl("div"); fill.style.cssText="height:100%; width:"+pct+"%; background:var(--interactive-accent);";
+            const sub=cats.map(k=>k+" "+pc[k].checked+"/"+pc[k].total).join(" · ");
+            if(sub){ const sl=kc.createEl("div",{text:sub}); sl.style.cssText="font-size:0.72em; color:var(--text-muted); margin-top:6px;"; }
+          }
+        }
+      }
     } catch(_e){ /* never throw */ }
   }
 }
