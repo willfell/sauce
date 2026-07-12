@@ -30,6 +30,57 @@ class TripDashboard {
   static packingCounts(items){
     const out={}; (Array.isArray(items)?items:[]).forEach(it=>{ if(!it||!it.item) return; const c=it.category||"Uncategorized"; out[c]=out[c]||{total:0,checked:0}; out[c].total++; if(it.checked) out[c].checked++; }); return out;
   }
+  // Minimal local date/time parse mirroring TripEntryList._dayMs / _toMin, so
+  // itinerary math is unit-testable without customJS at load time.
+  static _dayMs(v){
+    if(!v) return null;
+    const m=String(v).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m?Date.UTC(+m[1],+m[2]-1,+m[3]):null;
+  }
+  static _toMin(t){
+    const m=String(t||"").match(/^(\d{1,2}):(\d{2})$/);
+    return m?(+m[1]*60+ +m[2]):null;
+  }
+  static _legMs(leg){
+    const d=TripDashboard._dayMs(leg&&leg.depart_date), t=TripDashboard._toMin(leg&&leg.depart_time);
+    return (d==null||t==null)?null:d+t*60000;
+  }
+  // Group flight legs by direction (Outbound, Return, then any other in
+  // first-seen order); build the airport chain per group, collapsing
+  // consecutive duplicates. departsMs = min leg-depart across the group.
+  static _itinerary(flights){
+    const legs=Array.isArray(flights)?flights:[];
+    const order=[]; const groups={};
+    legs.forEach(l=>{
+      if(!l) return;
+      const dir=String(l.direction||"").trim()||"Other";
+      if(!groups[dir]){ groups[dir]=[]; order.push(dir); }
+      groups[dir].push(l);
+    });
+    const rank=(d)=> d==="Outbound"?0 : d==="Return"?1 : 2;
+    order.sort((a,b)=>{ const ra=rank(a), rb=rank(b); return ra!==rb?ra-rb:order.indexOf(a)-order.indexOf(b); });
+    const out=[];
+    order.forEach(dir=>{
+      const gl=groups[dir];
+      if(!gl||!gl.length) return;
+      const chain=[];
+      gl.forEach(l=>{
+        if(l.from!=null && l.from!=="") chain.push(String(l.from));
+      });
+      const last=gl[gl.length-1];
+      if(last && last.to!=null && last.to!=="") chain.push(String(last.to));
+      const collapsed=[];
+      chain.forEach(a=>{ if(collapsed[collapsed.length-1]!==a) collapsed.push(a); });
+      const route=collapsed.join(" \u2192 ");
+      let departsMs=null;
+      gl.forEach(l=>{ const ms=TripDashboard._legMs(l); if(ms!=null && (departsMs==null||ms<departsMs)) departsMs=ms; });
+      out.push({direction:dir, route, departsMs});
+    });
+    return out;
+  }
+  static _staySummary(stays){
+    return (Array.isArray(stays)?stays:[]).filter(s=>s&&s.name).map(s=>({name:String(s.name), check_in:s.check_in||"", check_out:s.check_out||""}));
+  }
   // Open trip tasks = task-entity notes in spice/tasks keyed on trip_slug
   // (parity with TaskTripList._matches: open, non-meeting, not trashed/done).
   static _countOpenTasks(dv, tripSlug){
