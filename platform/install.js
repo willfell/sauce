@@ -1278,6 +1278,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
+  await applyDailyHomeChromeBarHeal(tp, mech, variables, history, git); // NEW (Daily/Home chrome-bar adoption) — forward-migrates existing Daily (cowork-daily) + Home notes from the legacy SpaceNavButtons chrome to the new DailyChromeBar/HomeChromeBar block. MUST run AFTER applyHomeScaffoldHeal so a freshly-scaffolded Home.md is in scope. Doubly-guarded (idempotent per-bar + type-gated on cowork-daily for dailies); .sauce-backup before write; never throws.
   await applyHomeHotkeyRemapHeal(tp, history, git); // NEW — retargets Cmd+[ from daily-notes to sauce-home:open on already-installed vaults
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
@@ -4357,6 +4358,67 @@ async function applyProjectChromeBarHeal(tp, manifest, variables, history, git) 
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
+// applyDailyHomeChromeBarHeal(tp, manifest, variables, history, git) — forward
+// migration for the Daily/Home chrome-bar adoption cycle. Walks every Daily note
+// (type: cowork-daily under spice/daily/) plus the singleton spice/home/Home.md
+// and rewrites the legacy SpaceNavButtons chrome onto the new
+// DailyChromeBar / HomeChromeBar block via the pure transforms
+// _dailyChromeBarBody / _homeChromeBarBody. Mirrors applyProjectChromeBarHeal's
+// posture exactly: .sauce-backup snapshot before any write, per-note try/catch
+// (fails-loud via a history warning but NEVER throws), full git fields on every
+// push, idempotent (both transforms are self-guarding no-ops on already-migrated
+// bodies). Ungated — runs on every install. MUST be wired AFTER
+// applyHomeScaffoldHeal so a freshly-scaffolded Home.md is already on disk (the
+// generic applyNoteChromeHeal runs too early in the sequence to see it, which is
+// why Daily/Home are intentionally NOT in CHROME_BAR_MAP).
+async function applyDailyHomeChromeBarHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  // Candidate discovery: every .md under spice/daily/ (filtered to cowork-daily
+  // by frontmatter type) + the singleton Home.md if present.
+  const candidates = [];
+  if (await adapter.exists("spice/daily")) {
+    try {
+      const dailyFiles = await _listAllMarkdownRecursive(adapter, "spice/daily");
+      for (const f of dailyFiles) candidates.push(f);
+    } catch (e) {
+      history?.push({ event: "warning", step: "daily_home_chrome_bar_heal", reason: `list failed for spice/daily: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  if (await adapter.exists("spice/home/Home.md")) candidates.push("spice/home/Home.md");
+
+  for (const fpath of candidates) {
+    try {
+      const before = await adapter.read(fpath);
+      const isHome = fpath === "spice/home/Home.md";
+      // Daily notes are type-gated on cowork-daily so stray .md under spice/daily/
+      // (a README, an attachment sidecar) is never touched.
+      if (!isHome && _noteChromeFrontmatterType(before) !== "cowork-daily") { skipped += 1; continue; }
+      const after = isHome ? _homeChromeBarBody(before) : _dailyChromeBarBody(before);
+      if (after === before) { skipped += 1; continue; }
+      const backupPath = `.sauce-backup/${ts}/${fpath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(fpath, after);
+      healed += 1;
+      history?.push({ event: "info", step: "daily_home_chrome_bar_heal", target: fpath, action: "migrated",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "daily_home_chrome_bar_heal", target: fpath, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "daily_home_chrome_bar_heal", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
 // _injectBoardCardBreadcrumb — pure transform (WS9 P0b chrome overhaul). Promoted
 // board-card notes (the file at spice/projects/<slug>/tasks/<Task>/<Task>.md, or a
 // deeper board card at .../board/<Card>/<Card>.md) shipped BEFORE the chrome
@@ -6739,6 +6801,77 @@ function _healChromeBarMigration(body, type, barClass) {
   return out;
 }
 
+// _dailyChromeBarBody(body) — pure, idempotent body transform. Rewrites a
+// legacy Daily note (type: cowork-daily) that still carries the old
+// SpaceNavButtons chrome block into the new DailyChromeBar block, stripping the
+// literal "---" chrome dividers the old daily template used (DailyChromeBar's
+// own trailing hairline divider now owns that boundary). The SpaceDailyDashboard
+// content block is preserved. Idempotent: a note already carrying a
+// DailyChromeBar block is returned UNCHANGED (never re-touch a healthy note).
+// Self-contained (no closure over module constants) mirroring
+// _healChromeBarMigration / _healWikiChromeBody so it's directly unit-testable.
+function _dailyChromeBarBody(body) {
+  if (typeof body !== "string") return body;
+  if (/class:\s*"DailyChromeBar"/.test(body)) return body; // idempotent guard
+  const VP = "ranch/views/customjs-guard";
+  const barBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "DailyChromeBar" });\n```';
+
+  // Split leading frontmatter off so its `---` fences are never candidates.
+  const fm = body.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  const head = fm ? body.slice(0, fm[0].length) : "";
+  let rest = fm ? body.slice(fm[0].length) : body;
+
+  // Strip the legacy SpaceNavButtons chrome block (fence-to-fence, optional
+  // leading `// comment` line inside the block), matching _healWikiChromeBody.
+  rest = rest.replace(
+    /```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"SpaceNavButtons"\s*\}\);\n```\n?/g,
+    ""
+  );
+  // Strip standalone `---` chrome dividers (a line that is only dashes),
+  // surrounded by blank lines, left by removing the nav block or padded by the
+  // old template around the dashboard.
+  rest = rest.replace(/(^|\n)[ \t]*-{3,}[ \t]*(?=\r?\n)/g, "$1");
+  // Collapse the blank-line runs the strips leave behind.
+  rest = rest.replace(/\n{3,}/g, "\n\n");
+  rest = rest.replace(/^\s*/, "");
+  rest = rest.replace(/\s*$/, "\n");
+
+  return head + (head ? "\n" : "") + barBlock + "\n\n" + rest;
+}
+
+// _homeChromeBarBody(body) — pure, idempotent body transform. Rewrites a legacy
+// Home.md (type: home) that still carries the old SpaceNavButtons chrome block
+// into the new HomeChromeBar block, preserving the SpaceHome content block and
+// the HOME_CHROME_END marker verbatim. Idempotent: a note already carrying a
+// HomeChromeBar block is returned UNCHANGED. Self-contained, mirroring
+// _dailyChromeBarBody above. Named to avoid colliding with the pre-existing
+// _healHomeChromeBody (which intentionally rebuilds the OLD SpaceNavButtons +
+// SpaceHome chrome above the marker for applyHomeScaffoldHeal).
+function _homeChromeBarBody(body) {
+  if (typeof body !== "string") return body;
+  if (/class:\s*"HomeChromeBar"/.test(body)) return body; // idempotent guard
+  const VP = "ranch/views/customjs-guard";
+  const barBlock = '```dataviewjs\nawait dv.view("' + VP + '", { class: "HomeChromeBar" });\n```';
+
+  const fm = body.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  const head = fm ? body.slice(0, fm[0].length) : "";
+  let rest = fm ? body.slice(fm[0].length) : body;
+
+  rest = rest.replace(
+    /```dataviewjs\n(?:\/\/[^\n]*\n)?await dv\.view\("[^"]*",\s*\{\s*class:\s*"SpaceNavButtons"\s*\}\);\n```\n?/g,
+    ""
+  );
+  // Strip standalone `---` chrome dividers, but NEVER the HOME_CHROME_END
+  // marker line ("[//]: # (...)") — the dash strip only targets pure-dash lines,
+  // so the marker is safe.
+  rest = rest.replace(/(^|\n)[ \t]*-{3,}[ \t]*(?=\r?\n)/g, "$1");
+  rest = rest.replace(/\n{3,}/g, "\n\n");
+  rest = rest.replace(/^\s*/, "");
+  rest = rest.replace(/\s*$/, "\n");
+
+  return head + (head ? "\n" : "") + barBlock + "\n\n" + rest;
+}
+
 // _healSectionLinksFrontmatter — pure, idempotent frontmatter transform. Backfills
 // `links: []` onto wiki-hub / wiki-section / docs-hub / section-hub notes that
 // lack the key (section-explorer's per-hub/section links contract — see
@@ -6805,19 +6938,24 @@ function _healWikiChromeBody(body, type) {
   return head + (head ? "\n" : "") + barBlock + sep + rest;
 }
 
-// _HOME_CHROME — canonical body chrome for spice/home/Home.md. Two customjs-guard
-// blocks (SpaceNavButtons → "---" → SpaceHome) terminated by an invisible
-// link-ref marker. Everything ABOVE the marker is platform-owned; anything the
-// user types BELOW it is preserved by the heal. Kept in lockstep with
-// blueprints/home/content/home-template.md ({{views_path}} resolves to
-// ranch/views, so the paths are byte-identical after render).
+// _HOME_CHROME — canonical body chrome for spice/home/Home.md written by the
+// FRESH-FILE scaffold branch of applyHomeScaffoldHeal. Two customjs-guard blocks
+// (HomeChromeBar → SpaceHome) terminated by an invisible link-ref marker.
+// Everything ABOVE the marker is platform-owned; anything the user types BELOW
+// it is preserved. Kept in lockstep with blueprints/home/content/home-template.md
+// ({{views_path}} resolves to ranch/views, so the paths are byte-identical after
+// render). The template adopted HomeChromeBar this cycle; this constant follows so
+// a brand-new Home.md is born in the new-bar shape and applyDailyHomeChromeBarHeal
+// no-ops on it (no scaffold-then-migrate churn / .sauce-backup on fresh installs).
+// NOTE: the SEPARATE _healHomeChromeBody() existing-note repair path still
+// rebuilds the older SpaceNavButtons+SpaceHome chrome (locked by run-home.js
+// HOME-HEAL-*); applyDailyHomeChromeBarHeal is what forward-migrates any such
+// repaired/legacy note onto HomeChromeBar.
 const _HOME_CHROME_MARKER = "[//]: # (HOME_CHROME_END)";
 const _HOME_CHROME = [
   '```dataviewjs',
-  'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+  'await dv.view("ranch/views/customjs-guard", { class: "HomeChromeBar" });',
   '```',
-  '',
-  '---',
   '',
   '```dataviewjs',
   'await dv.view("ranch/views/customjs-guard", { class: "SpaceHome" });',
@@ -21009,6 +21147,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectChromeBarHeal = applyProjectChromeBarHeal;
     module.exports._projectChromeBarBody = _projectChromeBarBody;
     module.exports.PROJECT_CHROME_TYPES = PROJECT_CHROME_TYPES;
+    // Daily/Home chrome-bar adoption — forward migration of legacy SpaceNavButtons
+    // chrome onto DailyChromeBar / HomeChromeBar (run-daily-home-chrome-bar-heal.js).
+    module.exports.applyDailyHomeChromeBarHeal = applyDailyHomeChromeBarHeal;
+    module.exports._dailyChromeBarBody = _dailyChromeBarBody;
+    module.exports._homeChromeBarBody = _homeChromeBarBody;
     // WS9 P0b — promoted board-card breadcrumb + type heal + pure transform
     // (run-v0127-project-hub-heal.js BC-BC-*).
     module.exports.applyBoardCardBreadcrumbHeal = applyBoardCardBreadcrumbHeal;

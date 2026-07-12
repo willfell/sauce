@@ -209,6 +209,33 @@ function loadActivityFeed(windowShim) {
       'expected byBlueprint.project === 2, got ' + JSON.stringify(byBlueprint));
   });
 
+  await ok('SDD-ALLOWLIST-1 wiki-page, wiki-section, doc-note are in the Activity allowlist', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    const list = dash._DEFAULT_DASHBOARD_BLUEPRINTS;
+    assert(list.includes('wiki-page'), 'expected _DEFAULT_DASHBOARD_BLUEPRINTS to include wiki-page');
+    assert(list.includes('wiki-section'), 'expected _DEFAULT_DASHBOARD_BLUEPRINTS to include wiki-section');
+    assert(list.includes('doc-note'), 'expected _DEFAULT_DASHBOARD_BLUEPRINTS to include doc-note');
+  });
+
+  await ok('SDD-ALLOWLIST-2 bucketByBlueprint folds wiki-page + wiki-section into "wiki"', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const testPages = [
+      { type: 'wiki-page' }, { type: 'wiki-section' }, { type: 'wiki-page' },
+    ];
+    const buckets = Dash.bucketByBlueprint(testPages);
+    assert(buckets.wiki === 3, 'expected buckets.wiki === 3, got ' + JSON.stringify(buckets));
+    assert(!('wiki-page' in buckets), 'expected no raw wiki-page bucket key');
+    assert(!('wiki-section' in buckets), 'expected no raw wiki-section bucket key');
+  });
+
+  await ok('SDD-ALLOWLIST-3 _BLUEPRINT_COLORS has a wiki accent color', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    assert(typeof dash._BLUEPRINT_COLORS.wiki === 'string' && dash._BLUEPRINT_COLORS.wiki.length > 0,
+      'expected _BLUEPRINT_COLORS.wiki to be a non-empty string');
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });

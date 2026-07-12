@@ -43,6 +43,42 @@ function allDescendants(el) { const out = []; for (const c of (el.children || []
 
 // ── (Task 3 appends CB-BTN-*, Task 4 CB-VAULT-*, Task 5 CB-RENDER-* here) ──
 // PLACEHOLDER-ANCHOR: additional cases inserted above the summary block below.
+// ── CB-HOME-1..3 — CHROME_ICONS.home glyph + render() emits a Home button
+// before the Go button, wired to adapter.openNavTarget("spice/home/Home.md").
+{
+  const ic = inst.CHROME_ICONS;
+  ok('CB-HOME-1 CHROME_ICONS has a home SVG', ic && /svg/.test(ic.home));
+}
+
+async function cbHomeButtonCase() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([]) },
+    MenuPopover: { open: () => makeEl('div') },
+  };
+  const opened = [];
+  const adapter = {
+    resolve: () => ({ ctx: {}, spec: { primary: null, overflow: [] } }),
+    navEntries: async () => ([]),
+    dispatch: () => {},
+    openNavTarget: (p) => opened.push(p),
+    rootClass: 'x-root',
+    btnClass: (v) => `x-btn x-btn-${v}`,
+  };
+  const container = makeEl('div');
+  const dv = { container, current: () => ({ file: { path: 'spice/x/y.md', name: 'y' } }) };
+  await inst.render(dv, adapter);
+  const desc = allDescendants(container);
+  const homeBtn = desc.find((e) => e.className && String(e.className).includes('x-btn-home'));
+  ok('CB-HOME-2 renders a Home button (x-btn-home via adapter.btnClass)', !!homeBtn);
+  if (homeBtn && typeof homeBtn.onclick === 'function') homeBtn.onclick();
+  ok('CB-HOME-3 clicking Home calls adapter.openNavTarget("spice/home/Home.md")',
+    opened.length === 1 && opened[0] === 'spice/home/Home.md');
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
 // ── CB-RENDER-1..6 — render(dv, adapter): guards, adapter.resolve gate, root/btn
 // classes from the adapter, Go/primary/⋯ wiring to adapter.navEntries/dispatch.
 async function cbRenderCases() {
@@ -77,6 +113,8 @@ async function cbRenderCases() {
   const dotsBtn = desc.find((e) => e.className && String(e.className).includes('pcb-btn-dots'));
   ok('CB-RENDER-2 renders Go (pcb-btn-go), primary (pcb-btn-primary), ⋯ (pcb-btn-dots) via adapter.btnClass', !!goBtn && !!primaryBtn && !!dotsBtn);
   ok('CB-RENDER-3 renders a breadcrumb sub-div', desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
+  const divider = desc.find((e) => e.className && String(e.className).includes('chrome-bar-divider'));
+  ok('CB-RENDER-3b renders a trailing divider after the bar row', !!divider);
   if (goBtn && typeof goBtn.onclick === 'function') await goBtn.onclick();
   ok('CB-RENDER-4 clicking Go calls MenuPopover.open with the adapter.navEntries', menuOpens.length === 1 && menuOpens[0].entries === navEntries);
   if (primaryBtn && typeof primaryBtn.onclick === 'function') primaryBtn.onclick();
@@ -162,6 +200,44 @@ async function cbVaultEmpty() {
   ok('CB-BTN-5 labeled button renders the label inside a span', (btn.innerHTML || '').indexOf('New Task') >= 0 && (btn.innerHTML || '').indexOf('<span') >= 0);
 }
 
+// ── CB-DAYNAV-1..3 — adapter.dayNav(dv) overrides the breadcrumb left-slot
+// with prev/next day-nav spans; absent on every other adapter (no regression).
+async function cbDayNavCase() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([{ label: 'SHOULD NOT RENDER', link: 'x.md' }]) },
+    MenuPopover: { open: () => makeEl('div') },
+  };
+  const adapter = {
+    resolve: () => ({ ctx: {}, spec: { primary: null, overflow: [] } }),
+    navEntries: async () => ([]),
+    dispatch: () => {},
+    openNavTarget: () => {},
+    dayNav: () => ({
+      prevLabel: 'Tue, Jul 7', prevPath: 'spice/daily/2026-07-07.md',
+      nextLabel: 'Thu, Jul 9', nextPath: null, // no later daily note → inert
+    }),
+    rootClass: 'x-root',
+    btnClass: (v) => `x-btn x-btn-${v}`,
+  };
+  const container = makeEl('div');
+  const dv = { container, current: () => ({ file: { path: 'spice/daily/2026-07-08.md', name: '2026-07-08' } }) };
+  await inst.render(dv, adapter);
+  const desc = allDescendants(container);
+  ok('CB-DAYNAV-1 breadcrumb is NOT rendered when adapter.dayNav is present',
+    !desc.some((e) => e.className && String(e.className).includes('project-breadcrumb')));
+  const dayNavEl = desc.find((e) => e.className && String(e.className).includes('chrome-bar-day-nav'));
+  ok('CB-DAYNAV-2 renders a day-nav element with both labels', !!dayNavEl
+    && String(dayNavEl.innerHTML || '').includes('Tue, Jul 7')
+    && String(dayNavEl.innerHTML || '').includes('Thu, Jul 9'));
+  const nextSpan = allDescendants(dayNavEl).find((e) => e.className && String(e.className).includes('chrome-bar-day-nav-next'));
+  ok('CB-DAYNAV-3 a null nextPath renders an inert (no onclick) next control', !!nextSpan && typeof nextSpan.onclick !== 'function');
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
+
 function summarize() {
   const failed = results.filter(([, c]) => !c);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
@@ -208,6 +284,8 @@ async function cbFactoryCases() {
   await cbVaultCases();
   await cbVaultEmpty();
   await cbRenderCases();
+  await cbDayNavCase();
+  await cbHomeButtonCase();
   await cbFactoryCases();
   summarize();
 })();
