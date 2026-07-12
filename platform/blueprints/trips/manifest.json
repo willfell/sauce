@@ -42,7 +42,8 @@
     "TripsChromeBar",
     "TripEntryList",
     "TripLinksPanel",
-    "TripLinksManager"
+    "TripLinksManager",
+    "TripToDoActions"
   ],
   "files": [
     {
@@ -112,6 +113,10 @@
     {
       "source": "helpers/trip-links-manager.js",
       "dest": "{{scripts_path}}/trips/trip-links-manager.js"
+    },
+    {
+      "source": "helpers/trip-todo-actions.js",
+      "dest": "{{scripts_path}}/trips/trip-todo-actions.js"
     },
     {
       "source": "content/Trips.md",

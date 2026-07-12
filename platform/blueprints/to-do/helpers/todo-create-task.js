@@ -52,7 +52,9 @@ class ToDoCreateTask {
             if (payload.recurrenceGrammar) parts.push(`[recurrence:: ${payload.recurrenceGrammar}]`);
             if (payload.project && payload.project.name) parts.push(`[project:: [[${payload.project.name}]]]`);
             if (payload.priority) parts.push(`[priority:: ${payload.priority}]`);
-            return parts.join(' ');
+            let recLine = parts.join(' ');
+            if (payload.trip && payload.trip.name) recLine = ToDoCreateTask._appendTripField(recLine, payload.trip.name);
+            return recLine;
         }
         // one-shot
         if (payload.destination && payload.destination.type === 'project' && payload.destination.name) {
@@ -61,7 +63,20 @@ class ToDoCreateTask {
         if (payload.priority) parts.push(`[priority:: ${payload.priority}]`);
         if (payload.due) parts.push(`[due:: ${payload.due}]`);
         if (payload.scheduled) parts.push(`[scheduled:: ${payload.scheduled}]`);
-        return parts.join(' ');
+        let line = parts.join(' ');
+        // Trips ↔ to-do link: append an inline `[trip:: [[Name]]]` dataview field
+        // when the task is linked to a trip (mirrors the [project:: ...] append).
+        if (payload.trip && payload.trip.name) line = ToDoCreateTask._appendTripField(line, payload.trip.name);
+        return line;
+    }
+
+    /**
+     * Append an inline `[trip:: [[<name>]]]` dataview field to a task line.
+     * Pure — returns the line unchanged when tripName is falsy.
+     */
+    static _appendTripField(line, tripName) {
+        if (!tripName) return line;
+        return line + ` [trip:: [[${tripName}]]]`;
     }
 
     static destinationPath(payload, vaultMoment) {
@@ -219,8 +234,18 @@ class ToDoCreateTask {
             frequency: 'daily',
             frequencyArg: null,
             project: null,
+            trip: null,
             editExisting: null,
         };
+
+        // Trips ↔ to-do link: pre-select a trip when opened from a trip's To Do
+        // note (TripToDoActions passes preselectTripSlug). Only meaningful when
+        // the trips blueprint is installed; _loadTripList returns [] otherwise so
+        // this is a safe no-op in trip-less vaults.
+        if (opts && opts.preselectTripSlug) {
+            const match = this._loadTripList().find(t => t.slug === opts.preselectTripSlug);
+            if (match) state.trip = { slug: match.slug, name: match.name };
+        }
 
         // v0.127.0 §F: editExisting mode — opening the modal pre-filled to update
         // an existing `- [ ] ` line in place. Forces one-shot tab (recurring edit
@@ -309,6 +334,11 @@ class ToDoCreateTask {
             }
             updateSubmit();
         };
+
+        // Trips ↔ to-do link: a Trip <select>, gated on the trips blueprint being
+        // installed (window.customJS.TripsChromeBar — the codebase's "is X
+        // installed" precedent). Vaults without trips never render this control.
+        this._renderTripSelect(host, state, label, () => updateSubmit);
 
         label('Priority');
         const chipRow = host.createDiv();
@@ -439,6 +469,9 @@ class ToDoCreateTask {
             }
             updateSubmit();
         };
+
+        // Trips ↔ to-do link (recurring): gated Trip <select>. See _renderTripSelect.
+        this._renderTripSelect(host, state, label, () => updateSubmit);
 
         label('Priority');
         const chipRow = host.createDiv();
@@ -577,6 +610,9 @@ class ToDoCreateTask {
             if (g) out.recurrenceGrammar = g;
             if (state.project) out.project = state.project;
         }
+        // Trips ↔ to-do link applies to BOTH modes (a task can link a project
+        // AND a trip). Only set when a trip was actually chosen.
+        if (state.trip && state.trip.name) out.trip = state.trip;
         return out;
     }
 
@@ -768,12 +804,68 @@ class ToDoCreateTask {
         return ToDoCreateTask._todayBody(tpl, isoNow);
     }
 
+    /**
+     * Render a Trip <select> — ONLY when the trips blueprint is installed
+     * (window.customJS.TripsChromeBar truthy). Populated from _loadTripList();
+     * empty option "— none —". Selection stored on state.trip = { slug, name },
+     * pre-selected from state.trip if already set (preselectTripSlug path).
+     * The caller passes its form-local `label(text)` closure + a getter for the
+     * rebound updateSubmit (footer binds it after this runs).
+     */
+    _renderTripSelect(host, state, label, getUpdateSubmit) {
+        if (!(window.customJS && window.customJS.TripsChromeBar)) return;
+        let trips = [];
+        try { trips = this._loadTripList() || []; } catch (_e) { trips = []; }
+        label('Trip (optional)');
+        const tripSel = host.createEl('select');
+        // Reuse the same field CSS as the other selects in these forms.
+        tripSel.style.cssText = 'width:100%; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
+        const noneOpt = tripSel.createEl('option', { text: '— none —' });
+        noneOpt.value = '';
+        for (const t of trips) {
+            const o = tripSel.createEl('option', { text: t.name });
+            o.value = `${t.slug}:${t.name}`;
+        }
+        if (state.trip && state.trip.slug) {
+            tripSel.value = `${state.trip.slug}:${state.trip.name}`;
+        }
+        tripSel.onchange = () => {
+            if (!tripSel.value) state.trip = null;
+            else {
+                const idx = tripSel.value.indexOf(':');
+                const slug = tripSel.value.slice(0, idx);
+                const name = tripSel.value.slice(idx + 1);
+                state.trip = { slug, name };
+            }
+            const us = getUpdateSubmit && getUpdateSubmit();
+            if (typeof us === 'function') us();
+        };
+    }
+
     _loadProjectList() {
         try {
             const dv = window.app.plugins.plugins.dataview && window.app.plugins.plugins.dataview.api;
             if (!dv) return [];
             return dv.pages('"spice/projects"').where(p => p && p.type === 'project').map(p => ({
                 slug: p.project_slug || String(p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+                name: p.file.name,
+            })).array();
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * Scan spice/trips for type:trip notes → [{ slug, name }]. Mirrors
+     * _loadProjectList; used only when the trips blueprint is installed (the
+     * caller gates the Trip <select> on window.customJS.TripsChromeBar).
+     */
+    _loadTripList() {
+        try {
+            const dv = window.app.plugins.plugins.dataview && window.app.plugins.plugins.dataview.api;
+            if (!dv) return [];
+            return dv.pages('"spice/trips"').where(p => p && p.type === 'trip').map(p => ({
+                slug: p.trip_slug || String(p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
                 name: p.file.name,
             })).array();
         } catch (e) {
