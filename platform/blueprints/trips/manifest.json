@@ -39,7 +39,12 @@
     "TripsHubCards",
     "TripNavButtons",
     "TripSectionsCards",
-    "TripsChromeBar"
+    "TripDashboard",
+    "TripsChromeBar",
+    "TripEntryList",
+    "TripLinksPanel",
+    "TripLinksManager",
+    "TripToDoActions"
   ],
   "files": [
     {
@@ -67,6 +72,10 @@
       "dest": "{{templates_path}}/Template, Trip Notes.md"
     },
     {
+      "source": "templates/Trip Links.md",
+      "dest": "{{templates_path}}/Template, Trip Links.md"
+    },
+    {
       "source": "templates/Trip Board.md",
       "dest": "{{templates_path}}/Template, Trip Board.md"
     },
@@ -91,8 +100,28 @@
       "dest": "{{scripts_path}}/trips/trip-sections-cards.js"
     },
     {
+      "source": "helpers/trip-dashboard.js",
+      "dest": "{{scripts_path}}/trips/trip-dashboard.js"
+    },
+    {
       "source": "helpers/trips-chrome-bar.js",
       "dest": "{{scripts_path}}/trips/trips-chrome-bar.js"
+    },
+    {
+      "source": "helpers/trip-entry-list.js",
+      "dest": "{{scripts_path}}/trips/trip-entry-list.js"
+    },
+    {
+      "source": "helpers/trip-links-panel.js",
+      "dest": "{{scripts_path}}/trips/trip-links-panel.js"
+    },
+    {
+      "source": "helpers/trip-links-manager.js",
+      "dest": "{{scripts_path}}/trips/trip-links-manager.js"
+    },
+    {
+      "source": "helpers/trip-todo-actions.js",
+      "dest": "{{scripts_path}}/trips/trip-todo-actions.js"
     },
     {
       "source": "content/Trips.md",
@@ -199,7 +228,7 @@
               "section_kind": {
                 "required": true,
                 "type": "string",
-                "matches": "^(flights|stay|packing-list|to-do|notes|custom)$"
+                "matches": "^(flights|stay|packing-list|to-do|notes|links|custom)$"
               },
               "section": {
                 "required": true,

@@ -74,6 +74,60 @@ ok('DLG-5 project destination tags project',
         mode: 'one-shot', title: 'Ship spec', destination: { type: 'project', slug: 'sauce', name: 'Sauce' }, priority: 'high'
     }) === '- [ ] Ship spec [project:: [[Sauce]]] [priority:: high]');
 
+// --- DLG-TRIP-1: _appendTripField pure helper ---
+ok('DLG-TRIP-1 appends [trip:: [[Name]]] when name truthy',
+    ToDoCreateTask._appendTripField('- [ ] Pack bags', 'Iceland 2026')
+    === '- [ ] Pack bags [trip:: [[Iceland 2026]]]');
+ok('DLG-TRIP-1a unchanged when trip name falsy',
+    ToDoCreateTask._appendTripField('- [ ] Pack bags', '') === '- [ ] Pack bags'
+    && ToDoCreateTask._appendTripField('- [ ] Pack bags', null) === '- [ ] Pack bags');
+
+// --- DLG-TRIP-2: serializePayloadToLine appends trip field (both modes) ---
+ok('DLG-TRIP-2 one-shot with trip',
+    ToDoCreateTask.serializePayloadToLine({
+        mode: 'one-shot', title: 'Book hotel', destination: 'today', trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
+    }) === '- [ ] Book hotel [trip:: [[Iceland 2026]]]');
+ok('DLG-TRIP-2a one-shot with project AND trip (both survive)',
+    ToDoCreateTask.serializePayloadToLine({
+        mode: 'one-shot', title: 'X', destination: { type: 'project', slug: 'sauce', name: 'Sauce' },
+        trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
+    }) === '- [ ] X [project:: [[Sauce]]] [trip:: [[Iceland 2026]]]');
+ok('DLG-TRIP-2b recurring with trip',
+    ToDoCreateTask.serializePayloadToLine({
+        mode: 'recurring', title: 'Check in', recurrenceGrammar: 'every day', trip: { slug: 'iceland-2026', name: 'Iceland 2026' },
+    }) === '- [ ] Check in [recurrence:: every day] [trip:: [[Iceland 2026]]]');
+
+// --- DLG-TRIP-3: _loadTripList scans spice/trips, keeps type:trip ---
+(() => {
+    const inst = new ToDoCreateTask();
+    const makePages = (rows) => {
+        const chain = {
+            _rows: rows,
+            where(fn) { return makePages(this._rows.filter(fn)); },
+            map(fn) { return makePages(this._rows.map(fn)); },
+            array() { return this._rows; },
+        };
+        return chain;
+    };
+    sharedWindow.app = { plugins: { plugins: { dataview: { api: {
+        pages: (q) => {
+            ok('DLG-TRIP-3 queries spice/trips', q === '"spice/trips"', `got ${JSON.stringify(q)}`);
+            return makePages([
+                { type: 'trip', trip_slug: 'iceland-2026', file: { name: 'Iceland 2026' } },
+                { type: 'trip', file: { name: 'Ski Trip' } },            // no trip_slug → derived
+                { type: 'note', file: { name: 'Not a trip' } },          // filtered out
+            ]);
+        },
+    } } } } };
+    const trips = inst._loadTripList();
+    ok('DLG-TRIP-3a keeps only type:trip (2 of 3)', trips.length === 2, `got ${JSON.stringify(trips)}`);
+    ok('DLG-TRIP-3b uses trip_slug when present',
+        trips[0].slug === 'iceland-2026' && trips[0].name === 'Iceland 2026', `got ${JSON.stringify(trips[0])}`);
+    ok('DLG-TRIP-3c derives slug from name when trip_slug absent',
+        trips[1].slug === 'ski-trip' && trips[1].name === 'Ski Trip', `got ${JSON.stringify(trips[1])}`);
+    sharedWindow.app = undefined;
+})();
+
 // --- DLG-6: composeRecurrenceGrammar daily ---
 ok('DLG-6 grammar daily',
     ToDoCreateTask.composeRecurrenceGrammar({ mode: 'recurring', frequency: 'daily' }) === 'every day');
@@ -670,6 +724,41 @@ function reloadWithDom() {
     ok('HC-V0127-DLG-EDIT-E-2 destSelect.disabled === false in create mode',
         !!dest2 && dest2.disabled === false,
         `got dest.disabled = ${JSON.stringify(dest2 && dest2.disabled)}`);
+})();
+
+// --- DLG-TRIP-GATE: Trip <select> renders only when TripsChromeBar installed ---
+(() => {
+    const findTripSelect = (overlay) => {
+        const selects = findAllDescendants(overlay, (el) => el.tagName === 'select');
+        return selects.find((s) => {
+            const firstOpt = (s.children || []).find((c) => c.tagName === 'option');
+            return firstOpt && firstOpt._text === '— none —';
+        }) || null;
+    };
+    // Provide a Dataview API returning one trip so the select has content.
+    const makeChain = (rows) => ({
+        _rows: rows,
+        where(fn) { return makeChain(this._rows.filter(fn)); },
+        map(fn) { return makeChain(this._rows.map(fn)); },
+        array() { return this._rows; },
+    });
+    const dvApi = { pages: () => makeChain([{ type: 'trip', trip_slug: 'iceland-2026', file: { name: 'Iceland 2026' } }]) };
+
+    // PRESENT: TripsChromeBar installed → Trip select renders in the one-shot form.
+    const envOn = reloadWithDom();
+    envOn.sharedWindow.customJS = { TripsChromeBar: {} };
+    envOn.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
+    new envOn.Cls().open({ preselectDestination: 'today' });
+    ok('DLG-TRIP-GATE present: Trip select rendered when TripsChromeBar installed',
+        !!findTripSelect(envOn.getOverlay()));
+
+    // ABSENT: no TripsChromeBar → Trip select must NOT render.
+    const envOff = reloadWithDom();
+    envOff.sharedWindow.customJS = {};
+    envOff.sharedWindow.app = { plugins: { plugins: { dataview: { api: dvApi } } } };
+    new envOff.Cls().open({ preselectDestination: 'today' });
+    ok('DLG-TRIP-GATE absent: Trip select NOT rendered without TripsChromeBar',
+        !findTripSelect(envOff.getOverlay()));
 })();
 
 // --- HC-V0127-DLG-EDIT-F: submit in edit mode invokes replaceTaskAt ---

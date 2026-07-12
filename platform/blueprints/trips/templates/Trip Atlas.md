@@ -15,6 +15,10 @@ await dv.view("{{views_path}}/customjs-guard", { class: "TripsChromeBar" });
 ```
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TripDashboard", method: "render" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "TripSectionsCards" });
 ```
 

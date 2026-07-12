@@ -19,6 +19,7 @@ const os = require('os');
 
 const install = require('../install.js');
 const applyTripsConformanceHeal = install.applyTripsConformanceHeal;
+const _tripStripLegacyChrome = install._tripStripLegacyChrome;
 
 let passed = 0;
 let failed = 0;
@@ -180,9 +181,15 @@ async function run() {
     // TRIPHEAL-3 — Breadcrumb chrome injected on atlas, section, and hub.
     const atlas = await adapter.read(`${tripDir}/Dave's Wedding.md`);
     const hub = await adapter.read('spice/trips/Trips.md');
-    ok('TRIPHEAL-3.1 Breadcrumb on atlas', atlas.includes('class: "Breadcrumb"'));
-    ok('TRIPHEAL-3.2 Breadcrumb on Flights section', flights.includes('class: "Breadcrumb"'));
+    // Atlas + section now carry the canonical single TripsChromeBar (which renders
+    // the breadcrumb) — the bare Breadcrumb inject is superseded. Legacy chrome gone.
+    ok('TRIPHEAL-3.1 TripsChromeBar on atlas', atlas.includes('class: "TripsChromeBar"'));
+    ok('TRIPHEAL-3.2 TripsChromeBar on Flights section', flights.includes('class: "TripsChromeBar"'));
     ok('TRIPHEAL-3.3 Breadcrumb on hub', hub.includes('class: "Breadcrumb"'));
+    ok('TRIPHEAL-3.4 atlas legacy SpaceNavButtons/TripNavButtons stripped',
+      !atlas.includes('class: "SpaceNavButtons"') && !atlas.includes('class: "TripNavButtons"'));
+    ok('TRIPHEAL-3.5 atlas has exactly one TripsChromeBar',
+      (atlas.match(/class:\s*"TripsChromeBar"/g) || []).length === 1);
 
     // TRIPHEAL-4 — hub `## All Trips` converted to a SectionLabel block.
     ok('TRIPHEAL-4.1 hub no longer has `## All Trips`', !/^##\s+All Trips\s*$/m.test(hub));
@@ -225,6 +232,7 @@ async function run() {
 
     await runFrontmatterEdgeCases();
     await runDollarAndCollisionCases();
+    runStripLegacyChromeUnit();
 
     console.log(`\nrun-trips-heal.js: ${passed} passed, ${failed} failed`);
     process.exit(failed === 0 ? 0 : 1);
@@ -331,6 +339,42 @@ async function runDollarAndCollisionCases() {
       const bodies = primary + '\n' + deconflicted;
       ok('TRIPHEAL-9.6 BOTH original bodies survive', bodies.includes('BODY-ALPHA') && bodies.includes('BODY-BETA'));
     } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
+  }
+}
+
+// TRIPHEAL-10 — pure _tripStripLegacyChrome(body) unit cases. Guard blocks are
+// authored EXACTLY as they appear in real notes (fenced ```dataviewjs whose body
+// is `await dv.view("ranch/views/customjs-guard", { class: "X" });`).
+function runStripLegacyChromeUnit() {
+  const guardBlock = (cls) =>
+    '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '" });\n```\n';
+  const FM = '---\ntype: trip\nname: "X"\n---\n';
+  const count = (s, cls) => (s.match(new RegExp('class:\\s*"' + cls + '"', 'g')) || []).length;
+
+  // (a) Breadcrumb + SpaceNavButtons + TripsChromeBar → both legacy removed, one CB.
+  {
+    const body = FM + '\n' + guardBlock('Breadcrumb') + '\n' + guardBlock('SpaceNavButtons') + '\n' + guardBlock('TripsChromeBar');
+    const out = _tripStripLegacyChrome(body);
+    ok('TRIPHEAL-10a.1 exactly one TripsChromeBar', count(out, 'TripsChromeBar') === 1, out);
+    ok('TRIPHEAL-10a.2 Breadcrumb removed', count(out, 'Breadcrumb') === 0);
+    ok('TRIPHEAL-10a.3 SpaceNavButtons removed', count(out, 'SpaceNavButtons') === 0);
+  }
+
+  // (b) Legacy TripNavButtons + NO TripsChromeBar → one CB, no TripNavButtons.
+  {
+    const body = FM + '\n' + guardBlock('TripNavButtons') + '\nSome prose.\n';
+    const out = _tripStripLegacyChrome(body);
+    ok('TRIPHEAL-10b.1 exactly one TripsChromeBar injected', count(out, 'TripsChromeBar') === 1, out);
+    ok('TRIPHEAL-10b.2 TripNavButtons removed', count(out, 'TripNavButtons') === 0);
+    ok('TRIPHEAL-10b.3 prose preserved', out.includes('Some prose.'));
+  }
+
+  // (c) Idempotent.
+  {
+    const body = FM + '\n' + guardBlock('Breadcrumb') + '\n' + guardBlock('TripsChromeBar');
+    const once = _tripStripLegacyChrome(body);
+    const twice = _tripStripLegacyChrome(once);
+    ok('TRIPHEAL-10c idempotent', twice === once, `once=${JSON.stringify(once)} twice=${JSON.stringify(twice)}`);
   }
 }
 

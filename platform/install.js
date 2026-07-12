@@ -12535,6 +12535,7 @@ const TRIP_SECTION_KINDS = [
   { kind: "packing-list", label: "Packing List", legacy: "Trip Packing List" },
   { kind: "to-do",        label: "To Do",        legacy: "Trip To Do" },
   { kind: "notes",        label: "Notes",        legacy: "Trip Notes" },
+  { kind: "links",        label: "Links",        legacy: "Trip Links" },
 ];
 
 // Mirrors TripNavButtons._sanitizeFilename / TripSectionKinds helpers.
@@ -12666,6 +12667,31 @@ function _tripStripLoneTripTag(body) {
   return `---\n${newFm}\n---\n` + parts.rest;
 }
 
+// _tripStripLegacyChrome(body) — forward-migrate a trip note's chrome to the
+// canonical single `TripsChromeBar` block. Strips every legacy standalone chrome
+// guard block (Breadcrumb / SpaceNavButtons / TripNavButtons — the "double
+// breadcrumb" bug when they coexist with a TripsChromeBar), ensures exactly ONE
+// TripsChromeBar block exists (injected right after the frontmatter when absent),
+// and de-dupes any extra TripsChromeBar blocks. Pure, never throws, idempotent.
+// Mirrors applyProjectChromeBarHeal's strip-legacy-then-ensure-one-ChromeBar
+// posture. Supersedes _tripInjectBreadcrumb for atlas/section notes.
+function _tripStripLegacyChrome(body) {
+  const guard = 'ranch/views/customjs-guard';
+  const legacyRe = /```dataviewjs\s*\n\s*await dv\.view\("[^"]*customjs-guard",\s*\{\s*class:\s*"(Breadcrumb|SpaceNavButtons|TripNavButtons)"[^}]*\}\s*\)\s*;?\s*\n```\n?/g;
+  let out = body.replace(legacyRe, '');
+  const chromeBlock = '```dataviewjs\nawait dv.view("' + guard + '", { class: "TripsChromeBar" });\n```\n';
+  if (!/class:\s*"TripsChromeBar"/.test(out)) {
+    const m = out.match(/^---\n[\s\S]*?\n---\n/);
+    if (m) out = m[0] + '\n' + chromeBlock + out.slice(m[0].length).replace(/^\n+/, '');
+    else out = chromeBlock + out;
+  }
+  let seen = false;
+  out = out.replace(/```dataviewjs\s*\n\s*await dv\.view\("[^"]*customjs-guard",\s*\{\s*class:\s*"TripsChromeBar"[^}]*\}\s*\)\s*;?\s*\n```\n?/g, (mBlock) => {
+    if (seen) return ''; seen = true; return mBlock;
+  });
+  return out;
+}
+
 async function applyTripsConformanceHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -12723,7 +12749,7 @@ async function applyTripsConformanceHeal(tp, history, git) {
 
       // Atlas transforms.
       let newAtlasBody = atlasBody;
-      newAtlasBody = _tripInjectBreadcrumb(newAtlasBody);
+      newAtlasBody = _tripStripLegacyChrome(newAtlasBody);
       // Only convert `## Mentions` when BOTH the heading and a BacklinkPanel exist.
       if (/^##\s+Mentions\s*$/m.test(newAtlasBody) && /BacklinkPanel/.test(newAtlasBody)) {
         newAtlasBody = _tripHeadingToSectionLabel(newAtlasBody, "Mentions");
@@ -12773,7 +12799,7 @@ async function applyTripsConformanceHeal(tp, history, git) {
         nb = _tripSetFmKey(nb, "trip", `trip: "[[${atlasBase}]]"`);
         nb = _tripSetFmKey(nb, "trip_slug", `trip_slug: ${slug}`);
         // Chrome + link repair.
-        nb = _tripInjectBreadcrumb(nb);
+        nb = _tripStripLegacyChrome(nb);
         nb = _tripRepairAtlasLinks(nb, atlasBase);
 
         const newBase = `${atlasBase} — ${sectionLabel}`;
@@ -21268,6 +21294,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // trips-conformance heal — rename + canonicalize + breadcrumb for existing
     // trips (for run-trips-heal.js TRIPHEAL-*). Pure additive.
     module.exports.applyTripsConformanceHeal = applyTripsConformanceHeal;
+    module.exports._tripStripLegacyChrome = _tripStripLegacyChrome;
     // home-scaffold heal — materialize + chrome-heal the singleton
     // spice/home/Home.md (for run-home.js HOME-HEAL-*). The pure body transform
     // is also extracted by regex in the harness; expose it explicitly too.
