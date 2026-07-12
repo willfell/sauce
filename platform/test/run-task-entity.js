@@ -2013,6 +2013,21 @@ async function runMarkDoneDeletedTests() {
     assert(app._createdFolders.includes('spice/tasks/_done'), '_done folder ensured: ' + JSON.stringify(app._createdFolders));
   });
 
+  await okAsync('TD-SE-trip _saveEdit persists trip / trip_slug (parallel project), clears when absent', async () => {
+    const app = makeDialogApp('spice/tasks/task-t.md', { title: 'x', status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    // Edit a task with a trip linkage → trip / trip_slug written to the note fm.
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } }, '');
+    assert(app._file._fm.trip === '[[Bussin]]', 'trip wikilink written: ' + app._file._fm.trip);
+    assert(app._file._fm.trip_slug === 'bussin', 'trip_slug survives edit: ' + app._file._fm.trip_slug);
+    // A subsequent edit clearing the trip → both fields blanked (never left stale).
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel' }, '');
+    assert(app._file._fm.trip === '' && app._file._fm.trip_slug === '',
+      'trip cleared when absent: ' + JSON.stringify([app._file._fm.trip, app._file._fm.trip_slug]));
+  });
+
   await okAsync('TD-MD-2 markDone with no app (cold load) → {ok:false, app unavailable}, never throws', async () => {
     global.window = { app: null };
     global.app = null;

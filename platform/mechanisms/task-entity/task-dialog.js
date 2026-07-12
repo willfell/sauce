@@ -1368,6 +1368,15 @@ class TaskDialog {
                 fm.project = '';
                 fm.project_slug = '';
             }
+            // trip linkage — parallel to project. Persist on edit so a trip task
+            // keeps its trip / trip_slug (else it drops out of TaskTripList).
+            if (payload.trip && payload.trip.name) {
+                fm.trip = '[[' + payload.trip.name + ']]';
+                fm.trip_slug = payload.trip.slug || TaskDialog._slugify(payload.trip.name);
+            } else {
+                fm.trip = '';
+                fm.trip_slug = '';
+            }
             // Structured card links (FIX 5) — a single-file frontmatter write,
             // preserving the one-file-write invariant. Always set (even to []) so
             // removing every chip persists as an empty list, not a stale value.
