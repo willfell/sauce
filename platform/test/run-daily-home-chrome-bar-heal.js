@@ -76,6 +76,33 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceDailyDashboard" });
 ---
 `;
 
+// LEGACY_DAILY_OLD_TYPE — the shape real consumer-vault notes still carry
+// from before the daily@v0.5.0 cowork-flavor frontmatter rename: type: daily
+// (not cowork-daily), no day/day_label fields. Found live on a deployed
+// vault: 232/282 real daily notes still have this exact shape and were
+// silently skipped by a heal gated on "cowork-daily" alone.
+const LEGACY_DAILY_OLD_TYPE = `---
+created_at: "2025-10-14T08:16:00-06:00"
+tags:
+  - "accuris"
+cssclasses:
+  - wide
+type: daily
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceDailyDashboard" });
+\`\`\`
+
+---
+`;
+
 const LEGACY_HOME = `---
 type: home
 cssclasses:
@@ -151,6 +178,21 @@ async function run() {
     ok('DHH-3c _dailyChromeBarBody idempotent', _dailyChromeBarBody(dailyOnce) === dailyOnce);
     const homeOnce = _homeChromeBarBody(LEGACY_HOME);
     ok('DHH-3d _homeChromeBarBody idempotent', _homeChromeBarBody(homeOnce) === homeOnce);
+  }
+
+  // DHH-6: a note with the LEGACY type: daily (pre-cowork-rename) also migrates
+  // — not just type: cowork-daily. This is the exact shape found live on a
+  // deployed vault that a "cowork-daily"-only gate silently skipped.
+  {
+    const p = 'spice/daily/2025/10-October/Tuesday-2025-10-14.md';
+    const adapter = makeAdapter({ [p]: LEGACY_DAILY_OLD_TYPE });
+    const history = [];
+    await applyDailyHomeChromeBarHeal(makeTp(adapter), { name: 'daily' }, {}, history, GIT);
+    const after = adapter._files.get(p);
+    ok('DHH-6a legacy type:daily note migrated: one DailyChromeBar block', (after.match(/class:\s*"DailyChromeBar"/g) || []).length === 1);
+    ok('DHH-6b legacy type:daily note migrated: no SpaceNavButtons block remains', !after.includes('class: "SpaceNavButtons"'));
+    ok('DHH-6c legacy type:daily note migrated: original type: daily frontmatter preserved', /type:\s*daily\b/.test(after));
+    ok('DHH-6d history event logged for the legacy-type daily note', history.some((h) => h.step === 'daily_home_chrome_bar_heal' && h.action === 'migrated' && h.target === p));
   }
 
   // DHH-4: no daily/home notes present → heal is a silent, harmless no-op.
