@@ -30,6 +30,15 @@ class TripDashboard {
   static packingCounts(items){
     const out={}; (Array.isArray(items)?items:[]).forEach(it=>{ if(!it||!it.item) return; const c=it.category||"Uncategorized"; out[c]=out[c]||{total:0,checked:0}; out[c].total++; if(it.checked) out[c].checked++; }); return out;
   }
+  // Open trip tasks = task-entity notes in spice/tasks keyed on trip_slug
+  // (parity with TaskTripList._matches: open, non-meeting, not trashed/done).
+  static _countOpenTasks(dv, tripSlug){
+    const slug=String(tripSlug||"").trim(); if(!slug) return 0;
+    try {
+      const rows=dv.pages('"spice/tasks"').where(p=>p&&p.type==="task"&&p.status==="open"&&String(p.trip_slug||"").trim()===slug&&String(p.source||"").trim()!=="meeting"&&!String(p.file.path).includes("/_trash/")&&!String(p.file.path).includes("/_done/"));
+      return rows?(rows.length||0):0;
+    } catch(_e){ return 0; }
+  }
   async render(dv){
     try {
       const page = customJS.RenderSafe.page(dv);
@@ -51,9 +60,10 @@ class TripDashboard {
         }
       } catch(_e){}
       const pc = TripDashboard.packingCounts(packing);
-      // open task count via [trip::] inline field
-      let openTasks=0;
-      try { const bare=String(page.name||page.file.name||"").replace(/\.md$/,""); const tasks=dv.pages().file.tasks.where(t=>!t.completed && t.text && t.text.includes("trip::") && t.text.includes(bare)); openTasks = tasks ? tasks.length : 0; } catch(_e){}
+      // open task count — trip tasks are task-entity notes keyed on trip_slug
+      // (parity with TaskTripList), not the retired inline [trip::] field.
+      const tripSlug = page.trip_slug || (String(page.file.path||"").split("/")[2]) || "";
+      const openTasks = TripDashboard._countOpenTasks(dv, tripSlug);
       // ---- draw a compact card ----
       const card=c.createEl("div"); card.style.cssText="display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:10px 14px; margin:4px auto 2px; max-width:720px; border:1px solid var(--background-modifier-border); border-radius:10px; background:var(--background-secondary);";
       const stat=(label,value)=>{ const w=card.createEl("div"); w.style.cssText="display:flex; flex-direction:column; gap:2px;"; const v=w.createEl("div",{text:String(value)}); v.style.cssText="font-weight:700; font-size:1.05em;"; const l=w.createEl("div",{text:label}); l.style.cssText="font-size:0.72em; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em;"; };
