@@ -1506,3 +1506,21 @@ sauce update --bump-pins
 - A few quiet bug fixes: the daily to-do page's "New Task" button now correctly shows the created task in Today; Home's Enter-key quick-capture is hardened against a possible event-swallowing race; Home's first paint per app session now waits for Obsidian's workspace layout to settle (a best-effort mitigation for a reported load-time flash/widen — not a confirmed fix).
 
 **User action required:** Cmd+R (or a full restart if that doesn't pick up the new `HomeCommandsInit` class) to load the updated classes and start using `Cmd+[` for Home.
+
+## Upgrading from v0.211.x — journal multi-entry (only affects vaults subscribed to `journal`)
+
+Only affects `ero-sauce` / `headspace-sauce`-style vaults subscribed to the `journal` blueprint — no action needed if you don't subscribe to it.
+
+```bash
+brew update && brew upgrade sauce
+cd /abs/path/to/vault
+sauce update --bump-pins
+```
+
+**What changes:**
+
+- **Journal is now multi-entry.** The old single flat note per day (`Journal-YYYY-MM-DD.md`) is replaced by a global hub (`spice/journal/Journal.md`, Days | All + search), a per-day day-hub, and timestamped leaf entries — the same shape as `sticky-notes`.
+- **Automatic migration.** An install-time step converts every existing flat `Journal-YYYY-MM-DD.md` note into the new day-folder shape (day-hub + a first leaf entry preserving the original body and `created_at`). Backed up to `.sauce-backup/journal-multi-entry/<timestamp>/` before any write; safe to run more than once.
+- **The Journal nav-button now opens the day-hub**, not a single note directly. Use the day-hub's `+ New Journal Entry` button to capture additional entries for the same day.
+
+**Effect of running this upgrade:** the migration runs once automatically; **Cmd+R** to load the new `JournalDayList` / `JournalHubCards` / rebuilt `JournalChromeBar` classes.
