@@ -69,6 +69,30 @@ const cfg = inst._config();
   ok('SCB-DISPATCH-2 hub → openLinkText(Sticky.md)', calls.some(c => c.openLink === 'spice/sticky-notes/Sticky.md'));
   ok('SCB-DISPATCH-3 back-day → openLinkText(Sticky-Day-*)', calls.some(c => c.openLink && c.openLink.includes('Sticky-Day-2026-07-06')));
 
+  // extend the stubs to catch the new dispatches
+  const calls2 = [];
+  global.customJS.SectionExplorer = {
+    _openAddLinkForm: (dv, adapter, target) => calls2.push({ addLink: target === null }),
+    _noteSelfAdapter: (p) => ({ getLinks: () => [], writeLinks: () => Promise.resolve() }),
+    renderNoteLinks: () => {},
+  };
+  global.customJS.RenderSafe = { page: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' }, title: 'T' }) };
+  global.app.vault.getAbstractFileByPath = () => ({ path: 'x.md', name: 'X' });
+  let renameCalled = false, moveCalled = false, deleteCalled = false;
+  inst._openRenameDialog = () => { renameCalled = true; };
+  inst._openMoveDayDialog = () => { moveCalled = true; };
+  inst._openDeleteDialog = () => { deleteCalled = true; };
+
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'rename');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'add-link');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md', day: '2026-07-06' }, 'move-day');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'delete');
+
+  ok('SCB-DISPATCH-4 rename → _openRenameDialog', renameCalled);
+  ok('SCB-DISPATCH-5 add-link → SectionExplorer._openAddLinkForm', calls2.some((c) => c.addLink === true));
+  ok('SCB-DISPATCH-6 move-day → _openMoveDayDialog', moveCalled);
+  ok('SCB-DISPATCH-7 delete → _openDeleteDialog', deleteCalled);
+
   global.customJS = prevCJS;
   delete global.window;
   delete global.app;

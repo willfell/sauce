@@ -274,6 +274,39 @@ class StickyChromeBar {
           try { app.workspace.openLinkText(dayHubPath, ""); } catch (_e) {}
           return;
         }
+        if (id === "rename") {
+          const file = ctx && ctx.path && typeof app !== "undefined" && app.vault
+            ? app.vault.getAbstractFileByPath(ctx.path) : null;
+          if (!file) return;
+          const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+            ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
+          const current = page && page.title != null ? String(page.title).trim() : "";
+          this._openRenameDialog(file, current, () => {});
+          return;
+        }
+        if (id === "add-link") {
+          if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer._openAddLinkForm === "function"
+            && typeof customJS.SectionExplorer._noteSelfAdapter === "function") {
+            const page = customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+              ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
+            if (page && page.file && page.file.path) {
+              customJS.SectionExplorer._openAddLinkForm(dv, customJS.SectionExplorer._noteSelfAdapter(page), null);
+            }
+          } else if (typeof Notice === "function") {
+            new Notice("StickyChromeBar: SectionExplorer unavailable.", 6000);
+          }
+          return;
+        }
+        if (id === "move-day") {
+          this._openMoveDayDialog(dv, ctx);
+          return;
+        }
+        if (id === "delete") {
+          const file = ctx && ctx.path && typeof app !== "undefined" && app.vault
+            ? app.vault.getAbstractFileByPath(ctx.path) : null;
+          this._openDeleteDialog(file, "spice/sticky-notes/Sticky.md", "sticky note");
+          return;
+        }
       },
       destinations: (dv, ctx) => {
         const out = [{ section: "This sticky note" }];
