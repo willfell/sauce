@@ -15,7 +15,7 @@ await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs
