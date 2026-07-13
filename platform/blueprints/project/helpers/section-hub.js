@@ -242,6 +242,7 @@ class SectionHub {
       move: {
         root: docsRoot,
         sectionType: "section-hub",
+        docType: "doc-note",
         rootLabel: "Docs (root)",
         // All section-hub folders under docsRoot as move targets (root first).
         enumerateSectionTargets: () => {
