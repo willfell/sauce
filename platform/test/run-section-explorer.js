@@ -1639,15 +1639,15 @@ failures += !run("openMovePicker: collapsed by default shows depth 0/1 + auto-ex
   assert.strictEqual(typeof overlay.__seCollapseAll, "function", "expected __seCollapseAll seam");
   assert.strictEqual(typeof overlay.__seSetFilter, "function", "expected __seSetFilter seam");
 
-  // On open: root + all depth-1, PLUS the auto-expanded current branch
-  // (yup/uh-huh visible because yup is expanded; yup/uh-huh/deep visible because
-  // uh-huh — the current folder — is also expanded to reveal the current row).
+  // On open: fully expanded — every folder that has children is expanded,
+  // so every target row (including deep siblings) is visible from the start.
   let visible = overlay.__seVisibleFolders();
+  assert.strictEqual(visible.length, targets.length, "open state shows every target (fully expanded)");
   assert.ok(visible.includes("spice/wiki"), "root visible");
   assert.ok(visible.includes("spice/wiki/okay"), "depth-1 okay visible");
   assert.ok(visible.includes("spice/wiki/yup"), "depth-1 yup visible");
   assert.ok(visible.includes("spice/wiki/yup/uh-huh"), "current-branch depth-2 visible");
-  assert.ok(!visible.includes("spice/wiki/okay/sub"), "collapsed okay/sub hidden on open");
+  assert.ok(visible.includes("spice/wiki/okay/sub"), "deep sibling okay/sub visible on open (fully expanded)");
 
   // A node with children renders a ▸/▾ toggle.
   const toggles = findDeepAll(overlay, (e) => e.className === "se-move-toggle");
@@ -1678,6 +1678,34 @@ failures += !run("openMovePicker: collapsed by default shows depth 0/1 + auto-ex
   okayRow.onclick();
   assert.deepStrictEqual(picks, ["spice/wiki/okay"]);
   assert.strictEqual(doc.body.children.length, 0, "picking closes the modal");
+  delete global.document;
+});
+
+failures += !run("openMovePicker: opens FULLY EXPANDED — every parent folder expanded, deepest descendants visible on open", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  makeDocStub();
+  const targets = movePickerTargets();
+  // currentFolder is a shallow node NOT on the deep branch; branch-seed alone
+  // would leave the deep/sub descendants collapsed. Full-expand must reveal all.
+  const overlay = se.openMovePicker({
+    targets,
+    currentFolder: "spice/wiki/okay",
+    title: "Move to section",
+    onPick: () => {},
+  });
+  assert.ok(overlay, "expected the picker overlay");
+  const visible = overlay.__seVisibleFolders();
+  // Every folder that HAS children must be expanded → all rows visible.
+  assert.strictEqual(visible.length, targets.length, "all target rows visible on open");
+  assert.ok(visible.includes("spice/wiki/yup/uh-huh"), "child of expanded yup visible");
+  assert.ok(visible.includes("spice/wiki/yup/uh-huh/deep"), "deepest grandchild visible on open");
+  assert.ok(visible.includes("spice/wiki/okay/sub"), "sibling-branch child visible on open");
+  // Collapse-all must still work to re-collapse back to the current branch.
+  overlay.__seCollapseAll();
+  const collapsed = overlay.__seVisibleFolders();
+  assert.ok(!collapsed.includes("spice/wiki/yup/uh-huh/deep"), "collapse-all hides deep descendants");
+  assert.ok(!collapsed.includes("spice/wiki/yup/uh-huh"), "collapse-all collapses the off-branch yup subtree");
   delete global.document;
 });
 

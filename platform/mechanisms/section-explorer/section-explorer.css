@@ -348,12 +348,12 @@
   flex-wrap: wrap;
 }
 .se-move-headbtn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-.se-move-list { max-height: 55vh; overflow-y: auto; margin-bottom: 12px; }
+.se-move-list { max-height: 62vh; overflow-y: auto; margin-bottom: 12px; }
 .se-move-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 9px 12px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;

@@ -669,7 +669,17 @@ class SectionExplorer {
       }
       return set;
     };
-    let expanded = branchSeed();
+    // Open FULLY EXPANDED: seed with every parent folder so all descendants
+    // (deep siblings included) are visible on open. Collapse-all re-collapses
+    // to the current branch (branchSeed) — see doCollapseAll below.
+    const expandAllSeed = () => {
+      const set = new Set();
+      for (const folder of byFolder.keys()) {
+        if (hasChildren(folder)) set.add(folder);
+      }
+      return set;
+    };
+    let expanded = expandAllSeed();
     let filterQuery = "";
     // Seams captured in-closure, then promoted onto the returned overlay below
     // (the overlay isn't in the DOM yet while buildFn runs, so we can't find it
@@ -677,6 +687,8 @@ class SectionExplorer {
     const seams = {};
 
     const overlayEl = this._openModal("se-move-modal-overlay", (panel, close, doc) => {
+      // Widen this modal only (the shared _openModal default is min(420px,90vw)).
+      if (panel.style) panel.style.width = "min(560px, 92vw)";
       this._modalTitle(doc, panel, o.title || "Move to section");
 
       const header = doc.createElement("div");
@@ -705,7 +717,7 @@ class SectionExplorer {
 
       const list = doc.createElement("div");
       list.className = "se-move-list";
-      list.style.cssText = "max-height:55vh;overflow-y:auto;margin-bottom:12px;";
+      list.style.cssText = "max-height:62vh;overflow-y:auto;margin-bottom:12px;";
       panel.appendChild(list);
 
       // doc.createElement returns bare nodes (no createEl); this helper mirrors
@@ -753,8 +765,8 @@ class SectionExplorer {
           const row = mkChild(list, "div", isCurrent ? "se-move-row is-current" : "se-move-row");
           if (row.classList && isCurrent) row.classList.add("is-current");
           row.__seFolder = folder;
-          const indent = 8 + (Number(t.depth) || 0) * 18;
-          row.style.cssText = "display:flex;align-items:center;gap:6px;padding:7px 10px;padding-left:" + indent + "px;border-radius:6px;cursor:" + (isCurrent ? "default" : "pointer") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (isCurrent ? "var(--text-faint)" : "var(--text-normal)") + ";";
+          const indent = 8 + (Number(t.depth) || 0) * 20;
+          row.style.cssText = "display:flex;align-items:center;gap:6px;padding:9px 12px;padding-left:" + indent + "px;border-radius:6px;cursor:" + (isCurrent ? "default" : "pointer") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (isCurrent ? "var(--text-faint)" : "var(--text-normal)") + ";";
           // Toggle (tree mode only) for nodes with children.
           if (!q && hasChildren(folder)) {
             const tog = mkChild(row, "span", "se-move-toggle");
