@@ -272,7 +272,13 @@ class TaskTodayList {
         // readable and forces the cluster to wrap instead. align-items:flex-start
         // pins the cluster to the top of the first title line while a long title
         // wraps within its own column.
-        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box;';
+        if (!TaskTodayList._rowDividerStyleInjected && typeof document !== 'undefined' && document.head) {
+            const s = document.createElement('style');
+            s.textContent = '.sauce-task-today-row:last-child { border-bottom: none !important; }';
+            document.head.appendChild(s);
+            TaskTodayList._rowDividerStyleInjected = true;
+        }
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 

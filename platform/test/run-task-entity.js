@@ -1526,14 +1526,14 @@ ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent
   assert(!findByClsAttr(row2, 'sauce-task-today-subtask-chip'), 'no chip when total is 0');
 });
 
-// RTR-DIV-1. Row separator removed: renderTaskRow no longer applies per-row
-// border-bottom (SectionLabel's leading <hr> provides inter-section separation).
-ok('RTR-DIV-1 renderTaskRow row has NO border-bottom (divider removed)', () => {
+// RTR-DIV-1. Row has border-bottom for inter-row separation; last-child
+// rule (injected in the browser) strips it at section boundaries.
+ok('RTR-DIV-1 renderTaskRow row has border-bottom divider', () => {
   const container = makeRowStubEl('div');
   const task = { title: 'Task', path: 'spice/tasks/Task.md' };
   const row = TaskTodayList.renderTaskRow(container, task, null);
-  assert(!/border-bottom/.test(row.style.cssText || ''),
-    'row must NOT have border-bottom, got: ' + row.style.cssText);
+  assert(/border-bottom/.test(row.style.cssText || ''),
+    'row must have border-bottom, got: ' + row.style.cssText);
 });
 
 // RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
