@@ -93,29 +93,22 @@ const cfg = inst._config();
     cfg.rootClass === 'sticky-chrome-root' && cfg.btnClass('go') === 'sticky-chrome-btn sticky-chrome-btn-go');
 }
 
-// STCB-BANNER-1 — _bannerText pure fallback.
+// STCB-BANNER-1 — _bannerText fallback: title → filename → null
 {
-  ok('STCB-BANNER-1a title used', inst._bannerText({ title: 'Grocery list' }) === 'Grocery list');
-  ok('STCB-BANNER-1b whitespace title → null', inst._bannerText({ title: '  ' }) === null);
-  ok('STCB-BANNER-1c missing title → null', inst._bannerText({}) === null);
+  ok('STCB-BANNER-1a title used', inst._bannerText({ title: 'Grocery list', file: { name: 'Sticky-2026-07-06-14-30' } }) === 'Grocery list');
+  ok('STCB-BANNER-1b whitespace title → filename', inst._bannerText({ title: '  ', file: { name: 'Sticky-X' } }) === 'Sticky-X');
+  ok('STCB-BANNER-1c missing title → filename', inst._bannerText({ file: { name: 'Sticky-Y' } }) === 'Sticky-Y');
+  ok('STCB-BANNER-1d nothing → null', inst._bannerText({}) === null);
 }
 
-// STCB-BANNER-2/3 — _renderTitleBanner appends one .sticky-title-banner, dedupes on re-render.
+// STCB-BANNER-2/3 — _renderTitleBanner: dedupes, label + hairline BELOW, correct order
 {
-  // Minimal faithful DOM stub: nodes record class + support createEl / style / addEventListener /
-  // querySelectorAll (returns prior banner nodes so the real dedup logic can .remove() them).
   const makeNode = (tag, opts) => {
     const node = {
-      tag,
-      cls: (opts && opts.cls) || '',
-      textContent: (opts && opts.text) || '',
-      title: '',
-      style: { cssText: '' },
-      children: [],
-      _removed: false,
+      tag, cls: (opts && opts.cls) || '', textContent: (opts && opts.text) || '',
+      title: '', style: { cssText: '' }, children: [], _removed: false,
       createEl(t, o) { const c = makeNode(t, o); this.children.push(c); return c; },
-      addEventListener() {},
-      remove() { this._removed = true; },
+      addEventListener() {}, remove() { this._removed = true; },
     };
     return node;
   };
@@ -123,33 +116,44 @@ const cfg = inst._config();
     const container = makeNode('div', {});
     container.querySelectorAll = (sel) => {
       const cls = sel.replace(/^\./, '');
-      // return only live (not-removed) matching direct children
       return container.children.filter((c) => !c._removed && c.cls === cls);
     };
     return container;
   };
 
-  const titledPage = { title: 'Grocery list', file: { path: 'spice/sticky-notes/x.md' } };
-  const emptyPage = { file: { path: 'spice/sticky-notes/y.md' } };
-  const fileStub = { path: 'spice/sticky-notes/x.md' };
+  const titledPage = { title: 'Grocery list', file: { path: 'x.md', name: 'Sticky-X' } };
+  const untitledPage = { file: { path: 'y.md', name: 'Sticky-Y' } };
+  const emptyPage = { file: { path: 'z.md' } };
+  const fileStub = { path: 'x.md' };
 
   const c1 = makeContainer();
   inst._renderTitleBanner(c1, titledPage, fileStub);
   inst._renderTitleBanner(c1, titledPage, fileStub);
   const live1 = c1.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
   ok('STCB-BANNER-2 exactly one banner after double render (dedup)', live1.length === 1);
+  const kids1 = live1[0].children;
   ok('STCB-BANNER-3a titled banner shows title text',
-    live1[0].children.some((h) => h.textContent === 'Grocery list'));
-  ok('STCB-BANNER-4 banner has a divider (hr) under the title',
-    live1[0].children.some((n) => n.tag === 'hr'));
-  ok('STCB-BANNER-5 banner is left-aligned (no max-width/auto-margin centering)',
-    !/max-width/.test(live1[0].style.cssText) && !/margin:[^;]*auto/.test(live1[0].style.cssText));
+    kids1.some((h) => h.textContent === 'Grocery list'));
+  ok('STCB-BANNER-3b banner has SectionLabel-style label (uppercase + 0.78em)',
+    kids1.some((h) => /text-transform:\s*uppercase/.test(h.style.cssText) && /font-size:\s*0\.78em/.test(h.style.cssText)));
+  const labelIdx1 = kids1.findIndex((n) => n.tag === 'div' && n.textContent === 'Grocery list');
+  const hrIdx1 = kids1.findIndex((n) => n.tag === 'hr');
+  ok('STCB-BANNER-4 hairline is BELOW label (hr appears after label in child order)',
+    labelIdx1 >= 0 && hrIdx1 > labelIdx1);
+  ok('STCB-BANNER-5 hairline uses border-hover var',
+    kids1[hrIdx1].style.cssText.includes('border-modifier-border-hover') || kids1[hrIdx1].style.cssText.includes('background-modifier-border-hover'));
 
   const c2 = makeContainer();
-  inst._renderTitleBanner(c2, emptyPage, { path: 'spice/sticky-notes/y.md' });
-  const live2 = c2.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
-  ok('STCB-BANNER-3b empty banner shows placeholder text',
-    live2[0].children.some((h) => /Untitled sticky note/.test(h.textContent)));
+  inst._renderTitleBanner(c2, untitledPage, { path: 'y.md' });
+  const kids2 = c2.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner')[0].children;
+  ok('STCB-BANNER-6 no-title falls back to filename stem',
+    kids2.some((h) => h.textContent === 'Sticky-Y'));
+
+  const c3 = makeContainer();
+  inst._renderTitleBanner(c3, emptyPage, { path: 'z.md' });
+  const kids3 = c3.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner')[0].children;
+  ok('STCB-BANNER-7 no title AND no filename → placeholder',
+    kids3.some((h) => /Untitled/i.test(h.textContent) && /italic/.test(h.style.cssText)));
 }
 
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
