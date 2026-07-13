@@ -107,7 +107,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.5.4"
+      "version": "0.6.0"
     }
   ],
   "blueprints": [
@@ -137,7 +137,7 @@
     },
     {
       "name": "project",
-      "version": "1.51.1"
+      "version": "1.52.0"
     },
     {
       "name": "to-do",
@@ -145,7 +145,7 @@
     },
     {
       "name": "journal",
-      "version": "0.4.2"
+      "version": "0.5.0"
     },
     {
       "name": "trips",
@@ -157,7 +157,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.2"
+      "version": "0.11.0"
     },
     {
       "name": "teams",
