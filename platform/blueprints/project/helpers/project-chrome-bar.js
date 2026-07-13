@@ -282,7 +282,8 @@ class ProjectChromeBar {
       case "docs-hub":
         return { primary: { id: "new-doc", label: "New Doc", icon: ICON.plus },
           overflow: [{ id: "new-section", label: "New Section", icon: ICON.docs },
-            { id: "move-docs", label: "Move docs", icon: ICON.move }], leaf: false };
+            { id: "move-docs", label: "Move docs", icon: ICON.move },
+            { id: "select-docs", label: "Select docs", icon: ICON.move }], leaf: false };
       case "section-hub":
         // Converged on the shared SectionExplorer surface: Move section (the hub
         // itself), Select docs (in-place bulk move), Delete section (recursive,
@@ -539,6 +540,23 @@ class ProjectChromeBar {
         }
         case "select-docs": {
           // Bulk-select docs to move via the shared modal picker.
+          // Docs atlas ROOT (docs-hub) — Docs.md is type:project, NOT a
+          // section-hub, so _projAdapterAndSection returns null. Build a
+          // docs-root adapter (SectionHub._buildDocsRootConfig reuses the same
+          // move block) and drive the picker with section === null, so it
+          // enumerates docs sitting directly at the docs root folder.
+          if (ctx && ctx.context === "docs-hub") {
+            const SE = (typeof customJS !== "undefined") && customJS.SectionExplorer;
+            const SH = (typeof customJS !== "undefined") && customJS.SectionHub;
+            if (!SE || !SH || typeof SH._buildDocsRootConfig !== "function"
+              || typeof SE.makeAdapter !== "function" || typeof SE.openSelectDocsPicker !== "function") {
+              missing("SectionExplorer"); return;
+            }
+            const adapter = SE.makeAdapter(SH._buildDocsRootConfig(dv, ctx.projectSlug));
+            SE.openSelectDocsPicker(dv, adapter, null);
+            return;
+          }
+          // Section hub — resolve the current section's adapter + descriptor.
           const a = this._projAdapterAndSection(dv);
           if (!a) { missing("SectionExplorer"); return; }
           if (typeof a.SE.openSelectDocsPicker === "function") { a.SE.openSelectDocsPicker(dv, a.adapter, a.section); return; }

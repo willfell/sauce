@@ -788,6 +788,32 @@ withTempVault((vault) => {
            led !== null && !hasScratchBp);
     }
 
+    // ===== HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-* — applyDepth2ParentSectionHeal =====
+    // A depth-2 section-hub (docsec-project/docs/misc/misc-subsection/Misc-Subsection.md)
+    // ships with a DRIFTED parent_section (== its own section name, "Misc-Subsection")
+    // instead of its real parent folder's section ("Misc"). The heal rewrites it to the
+    // parent-folder hub's section display name in wikilink form ("[[Misc]]"), matching
+    // the + New Sub-Section entity-create template. A correct sibling depth-2 hub
+    // (knowledge/advanced/Advanced.md, parent_section "[[Knowledge]]") proves the heal
+    // leaves already-correct notes untouched. Second-run no-op is covered by IDEMP-3.
+    {
+        const brokenRel = "spice/projects/docsec-project/docs/misc/misc-subsection/Misc-Subsection.md";
+        const correctRel = "spice/projects/docsec-project/docs/knowledge/advanced/Advanced.md";
+        let brokenFm = {}, correctFm = {};
+        try { brokenFm = helpers.parseFrontmatter(helpers.readNote(vault, brokenRel)).frontmatter; } catch (e) {}
+        try { correctFm = helpers.parseFrontmatter(helpers.readNote(vault, correctRel)).frontmatter; } catch (e) {}
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-1 drifted parent_section healed to parent folder section (wikilink)",
+           brokenFm.parent_section === "[[Misc]]",
+           `parent_section=${JSON.stringify(brokenFm.parent_section)}`);
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-2 correct depth-2 hub left untouched",
+           correctFm.parent_section === "[[Knowledge]]",
+           `parent_section=${JSON.stringify(correctFm.parent_section)}`);
+        let bkCount = 0;
+        try { bkCount = fs.readdirSync(path.join(vault, ".sauce-backup")).length; } catch (e) {}
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-3 .sauce-backup snapshot exists",
+           bkCount > 0);
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);

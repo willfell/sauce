@@ -229,6 +229,28 @@ failures += !run("page pane renders mechanism-owned doc cards (no BeaconCards)",
   delete global.customJS;
 });
 
+failures += !run("_docCardModel strips .md from the name fallback (no title)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const model = se._docCardModel({ file: { name: "Foo.md", path: "a/Foo.md" } });
+  assert.strictEqual(model.title, "Foo");
+});
+
+failures += !run("_docCardModel keeps explicit title over the name fallback", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const model = se._docCardModel({ title: "Real Title", file: { name: "Foo.md", path: "a/Foo.md" } });
+  assert.strictEqual(model.title, "Real Title");
+});
+
+failures += !run("select-docs row label derives basename without .md from a titleless path", () => {
+  // The row label uses `c.title || <basename-of-c.path without .md>`.
+  const c = { title: "", path: "a/Foo.md" };
+  const base = String(c.path || "").split("/").pop().replace(/\.md$/, "");
+  const label = c.title || base;
+  assert.strictEqual(label, "Foo");
+});
+
 failures += !run("pinned links render above the page grid, and render nothing when empty", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
@@ -1617,15 +1639,15 @@ failures += !run("openMovePicker: collapsed by default shows depth 0/1 + auto-ex
   assert.strictEqual(typeof overlay.__seCollapseAll, "function", "expected __seCollapseAll seam");
   assert.strictEqual(typeof overlay.__seSetFilter, "function", "expected __seSetFilter seam");
 
-  // On open: root + all depth-1, PLUS the auto-expanded current branch
-  // (yup/uh-huh visible because yup is expanded; yup/uh-huh/deep visible because
-  // uh-huh — the current folder — is also expanded to reveal the current row).
+  // On open: fully expanded — every folder that has children is expanded,
+  // so every target row (including deep siblings) is visible from the start.
   let visible = overlay.__seVisibleFolders();
+  assert.strictEqual(visible.length, targets.length, "open state shows every target (fully expanded)");
   assert.ok(visible.includes("spice/wiki"), "root visible");
   assert.ok(visible.includes("spice/wiki/okay"), "depth-1 okay visible");
   assert.ok(visible.includes("spice/wiki/yup"), "depth-1 yup visible");
   assert.ok(visible.includes("spice/wiki/yup/uh-huh"), "current-branch depth-2 visible");
-  assert.ok(!visible.includes("spice/wiki/okay/sub"), "collapsed okay/sub hidden on open");
+  assert.ok(visible.includes("spice/wiki/okay/sub"), "deep sibling okay/sub visible on open (fully expanded)");
 
   // A node with children renders a ▸/▾ toggle.
   const toggles = findDeepAll(overlay, (e) => e.className === "se-move-toggle");
@@ -1656,6 +1678,34 @@ failures += !run("openMovePicker: collapsed by default shows depth 0/1 + auto-ex
   okayRow.onclick();
   assert.deepStrictEqual(picks, ["spice/wiki/okay"]);
   assert.strictEqual(doc.body.children.length, 0, "picking closes the modal");
+  delete global.document;
+});
+
+failures += !run("openMovePicker: opens FULLY EXPANDED — every parent folder expanded, deepest descendants visible on open", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  makeDocStub();
+  const targets = movePickerTargets();
+  // currentFolder is a shallow node NOT on the deep branch; branch-seed alone
+  // would leave the deep/sub descendants collapsed. Full-expand must reveal all.
+  const overlay = se.openMovePicker({
+    targets,
+    currentFolder: "spice/wiki/okay",
+    title: "Move to section",
+    onPick: () => {},
+  });
+  assert.ok(overlay, "expected the picker overlay");
+  const visible = overlay.__seVisibleFolders();
+  // Every folder that HAS children must be expanded → all rows visible.
+  assert.strictEqual(visible.length, targets.length, "all target rows visible on open");
+  assert.ok(visible.includes("spice/wiki/yup/uh-huh"), "child of expanded yup visible");
+  assert.ok(visible.includes("spice/wiki/yup/uh-huh/deep"), "deepest grandchild visible on open");
+  assert.ok(visible.includes("spice/wiki/okay/sub"), "sibling-branch child visible on open");
+  // Collapse-all must still work to re-collapse back to the current branch.
+  overlay.__seCollapseAll();
+  const collapsed = overlay.__seVisibleFolders();
+  assert.ok(!collapsed.includes("spice/wiki/yup/uh-huh/deep"), "collapse-all hides deep descendants");
+  assert.ok(!collapsed.includes("spice/wiki/yup/uh-huh"), "collapse-all collapses the off-branch yup subtree");
   delete global.document;
 });
 
@@ -1947,6 +1997,157 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
   global.app = prevApp;
   delete global.document;
 });
+
+// ── Feature a: per-doc ⋯ menu (Rename · Move · Add link · Delete) on doc cards.
+// Doc cards are rendered by the shared _renderDocCards, used by BOTH blueprints,
+// so this must be blueprint-agnostic (generic file ops via app.*, Move delegating
+// to the adapter's move block — same machinery as section-move).
+
+// Render one doc card via the REAL render() path and return {se, els, opened, file}.
+function renderOneDocCard(getMenuEntries) {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const opened = [];
+  const file = { path: "spice/wiki/ems/Runbook.md", name: "Runbook.md", parent: { path: "spice/wiki/ems" } };
+  global.customJS = { MenuPopover: { open: (entries, opts) => opened.push({ entries, opts }) } };
+  const prevApp = global.app;
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => (p === file.path ? file : null) },
+    workspace: { openLinkText: () => {} },
+  };
+  const { container, els } = makeDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/Wiki.md" } }) };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [{ title: null, file: { name: "Runbook.md", path: file.path, mtime: { ts: 1000 } } }],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>", dots: "<svg/>" },
+    rootClass: "se-root",
+  });
+  se.render(dv, adapter);
+  const openMenu = () => {
+    const dots = els.find((e) => e.className === "se-doc-dots");
+    if (dots && dots.onclick) dots.onclick({ stopPropagation: () => {} });
+  };
+  if (typeof getMenuEntries === "function") getMenuEntries();
+  return { se, els, opened, file, adapter, dv, openMenu, cleanup: () => { global.app = prevApp; delete global.customJS; } };
+}
+
+failures += !run("doc card carries a se-doc-dots control that opens MenuPopover with Rename/Move/Add link/Delete (Delete danger)", () => {
+  const { els, opened, file, cleanup } = renderOneDocCard();
+  const dots = els.find((e) => e.className === "se-doc-dots");
+  assert.ok(dots, "expected a se-doc-dots control on the doc card");
+  // Clicking the dots must NOT open the note — it opens the menu; assert stopPropagation-safe.
+  let propagated = true;
+  dots.onclick({ stopPropagation: () => { propagated = false; } });
+  assert.strictEqual(propagated, false, "dots click must stopPropagation so the card's open handler doesn't fire");
+  assert.strictEqual(opened.length, 1, "expected MenuPopover.open called once");
+  const labels = opened[0].entries.filter((e) => e && e.label).map((e) => e.label);
+  assert.deepStrictEqual(labels, ["Rename", "Move", "Add link", "Delete"]);
+  const del = opened[0].entries.find((e) => e && e.label === "Delete");
+  assert.strictEqual(del.danger, true, "Delete entry must be danger-flagged");
+  assert.strictEqual(opened[0].opts && opened[0].opts.anchor, dots, "menu anchored to the dots element");
+  cleanup();
+});
+
+failures += !run("doc ⋯ Rename → renameFile(file, sameFolder + sanitized basename + .md)", () => {
+  const { se, opened, file, adapter, dv, openMenu, cleanup } = renderOneDocCard();
+  const renamed = [];
+  global.app.fileManager = { renameFile: (f, p) => { renamed.push({ f, p }); return Promise.resolve(); } };
+  const doc = makeDocStub();
+  openMenu();
+  const rename = opened[0].entries.find((e) => e.label === "Rename");
+  rename.onSelect();
+  // Modal mounted; type a new name with an illegal path separator to prove sanitize.
+  const overlay = doc.body.children[0];
+  const panel = overlay.children[0];
+  const input = panel.children.find((c) => c.className === "se-modal-input");
+  assert.ok(input, "expected a rename text input");
+  assert.strictEqual(input.value, "Runbook", "input defaults to the file basename (no .md)");
+  input.value = "New/Name";
+  const primary = findDeepBtn(panel);
+  primary.onclick();
+  assert.strictEqual(renamed.length, 1, "renameFile called once");
+  assert.strictEqual(renamed[0].f, file, "renamed the doc file itself");
+  assert.strictEqual(renamed[0].p, "spice/wiki/ems/NewName.md", "same folder + sanitized basename + .md");
+  delete global.document;
+  cleanup();
+});
+
+failures += !run("doc ⋯ Delete → confirm modal then trashFile(file) (recoverable, not immediate)", () => {
+  const { se, opened, file, adapter, dv, openMenu, cleanup } = renderOneDocCard();
+  const trashed = [];
+  global.app.fileManager = { trashFile: (f) => { trashed.push(f); return Promise.resolve(); } };
+  const doc = makeDocStub();
+  openMenu();
+  const del = opened[0].entries.find((e) => e.label === "Delete");
+  del.onSelect();
+  // Must be a real confirm: nothing trashed until the primary is clicked.
+  assert.strictEqual(trashed.length, 0, "delete must not fire immediately — a confirm modal is shown first");
+  const overlay = doc.body.children[0];
+  const panel = overlay.children[0];
+  const primary = findDeepBtn(panel);
+  primary.onclick();
+  assert.strictEqual(trashed.length, 1, "trashFile called once after confirm");
+  assert.strictEqual(trashed[0], file, "trashed the doc file itself (recoverable trash)");
+  delete global.document;
+  cleanup();
+});
+
+failures += !run("doc ⋯ Add link → processFrontMatter(file) pushes the new link onto fm.links (DOC's own frontmatter)", () => {
+  const { se, opened, file, adapter, dv, openMenu, cleanup } = renderOneDocCard();
+  const pfmCalls = [];
+  global.app.fileManager = {
+    processFrontMatter: (f, fn) => { const fm = { links: [{ url: "https://old.com", text: "Old" }] }; fn(fm); pfmCalls.push({ f, fm }); return Promise.resolve(); },
+  };
+  const doc = makeDocStub();
+  openMenu();
+  const add = opened[0].entries.find((e) => e.label === "Add link");
+  add.onSelect();
+  const overlay = doc.body.children[0];
+  const panel = overlay.children[0];
+  const inputs = panel.children.filter((c) => c.className === "se-modal-input");
+  assert.strictEqual(inputs.length, 2, "expected url + label inputs");
+  inputs[0].value = "https://new.com";
+  inputs[1].value = "New";
+  const primary = findDeepBtn(panel);
+  primary.onclick();
+  assert.strictEqual(pfmCalls.length, 1, "processFrontMatter called on the DOC's own file");
+  assert.strictEqual(pfmCalls[0].f, file, "targeted the doc file itself");
+  assert.deepStrictEqual(pfmCalls[0].fm.links, [{ url: "https://old.com", text: "Old" }, { url: "https://new.com", text: "New" }], "appended the new link to fm.links");
+  delete global.document;
+  cleanup();
+});
+
+failures += !run("doc ⋯ Move → openMovePicker opened; picking a folder calls applyDocMove(dv, file, folder, adapter)", () => {
+  const { se, opened, file, adapter, dv, openMenu, cleanup } = renderOneDocCard();
+  // Give the adapter a move block with folder targets.
+  adapter.move = { root: "spice/wiki", enumerateSectionTargets: () => ([{ folder: "spice/wiki/networking", label: "Networking", depth: 1 }]) };
+  const moveCalls = [];
+  se.openMovePicker = (opts) => { se.__lastMoveOpts = opts; };
+  se.applyDocMove = (d, f, folder, a) => { moveCalls.push({ f, folder, a }); };
+  openMenu();
+  const mv = opened[0].entries.find((e) => e.label === "Move");
+  mv.onSelect();
+  assert.ok(se.__lastMoveOpts && typeof se.__lastMoveOpts.onPick === "function", "openMovePicker invoked with an onPick");
+  assert.ok(Array.isArray(se.__lastMoveOpts.targets) && se.__lastMoveOpts.targets.length === 1, "targets enumerated from the adapter move block");
+  se.__lastMoveOpts.onPick("spice/wiki/networking");
+  assert.strictEqual(moveCalls.length, 1, "applyDocMove called once");
+  assert.strictEqual(moveCalls[0].f, file, "applyDocMove given the doc file");
+  assert.strictEqual(moveCalls[0].folder, "spice/wiki/networking", "applyDocMove given the picked folder");
+  cleanup();
+});
+
+function findDeepBtn(panel) {
+  const findDeep = (el, pred) => {
+    if (!el || typeof el !== "object") return null;
+    if (pred(el)) return el;
+    for (const c of (el.children || [])) { const hit = findDeep(c, pred); if (hit) return hit; }
+    return null;
+  };
+  return findDeep(panel, (c) => String(c.className || "").indexOf("se-modal-btn-primary") >= 0);
+}
 
 ASYNC_TESTS.push({ name: "moveSection: awaits rename, remaps child paths, patches frontmatter only on real TFiles (no ENOENT)", fn: async () => {
   const SectionExplorer = loadClass();

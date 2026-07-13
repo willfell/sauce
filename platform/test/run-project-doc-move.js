@@ -506,6 +506,47 @@ const D = Cls ? new Cls() : null;
     ok('SH21 canDelete false without a hubPath', cfg && cfg.canDelete({ folder: `${DOCS}/notes` }) === false);
     global.customJS = prevCJS;
   }
+
+  // sectionPath is folder-is-truth — derived from the note's real cur.file.folder,
+  // NOT reconstructed from parent_section frontmatter (which can be stale). Live
+  // bug: a depth-2 hub with parent_section:"Misc-Subsection" (should be "Misc")
+  // reconstructed docs/misc-subsection/misc-subsection — a folder that doesn't
+  // exist — so listPages returned 0 and the hub showed "Nothing here yet.".
+  {
+    const sh = SHCls ? new SHCls() : null;
+    // Minimal dv: _buildConfig closes over its args; only sectionPath (via
+    // resolveContext) is under test, so pages/page can return empties.
+    const dvStub = { pages: () => { const a = []; a.array = () => a; a.where = () => a; return a; }, page: () => null };
+
+    // SH22 — depth-2 with the EXACT live bug: parent_section stale
+    // ("Misc-Subsection" not "Misc"); folder-is-truth must ignore it.
+    const curBug = {
+      type: 'section-hub', depth: 2, project_slug: 'sauce',
+      section: 'Misc-Subsection', section_slug: 'misc-subsection', parent_section: 'Misc-Subsection',
+      file: {
+        name: 'Misc-Subsection.md',
+        folder: 'spice/projects/sauce/docs/misc/misc-subsection',
+        path: 'spice/projects/sauce/docs/misc/misc-subsection/Misc-Subsection.md',
+      },
+    };
+    const cfgBug = sh ? sh._buildConfig(dvStub, curBug, 2, 'sauce', 'misc-subsection', 'Misc-Subsection') : null;
+    ok('SH22 _buildConfig sectionPath = real folder (folder-is-truth, ignores stale parent_section)',
+      cfgBug && cfgBug.resolveContext().sectionPath === 'spice/projects/sauce/docs/misc/misc-subsection');
+
+    // SH23 — depth-1 non-regression: folder-is-truth still equals the depth-1 path.
+    const cur1 = {
+      type: 'section-hub', depth: 1, project_slug: 'sauce',
+      section: 'Misc', section_slug: 'misc',
+      file: {
+        name: 'Misc.md',
+        folder: 'spice/projects/sauce/docs/misc',
+        path: 'spice/projects/sauce/docs/misc/Misc.md',
+      },
+    };
+    const cfg1 = sh ? sh._buildConfig(dvStub, cur1, 1, 'sauce', 'misc', 'Misc') : null;
+    ok('SH23 _buildConfig sectionPath depth-1 non-regression',
+      cfg1 && cfg1.resolveContext().sectionPath === 'spice/projects/sauce/docs/misc');
+  }
 }
 
 const allPass = results.every(([, p]) => p);
