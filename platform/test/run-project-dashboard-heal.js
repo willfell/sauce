@@ -65,6 +65,17 @@ function modernHub() {
 function nonProject() {
     return "---\ntype: doc-note\n---\n\n" + block("Breadcrumb") + "\n";
 }
+// Partial migration: a Dashboard block WAS added, but a legacy panel block was
+// left behind (the v0.221 heal skipped it because a Dashboard block existed).
+function partialHub() {
+    return "---\ntype: project\nstatus: in-progress\n---\n\n" +
+        ["ProjectChromeBar", "ProjectDashboard", "ProjectMeetingsPanel"].map(block).join("\n\n") + "\n";
+}
+function countOccur(hay, needle) {
+    let n = 0, i = 0;
+    while ((i = hay.indexOf(needle, i)) !== -1) { n++; i += needle.length; }
+    return n;
+}
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -139,6 +150,35 @@ async function run() {
         let threw = false;
         try { await applyProjectDashboardConformanceHeal(makeTp(ad), {}, {}, [], GIT); } catch (_e) { threw = true; }
         ok("HEAL-8 no throw on empty vault", !threw);
+    }
+
+    // HEAL-9 — partial migration (Dashboard present + lingering legacy block) is
+    // swept: legacy stripped, exactly ONE Dashboard block kept, backup written,
+    // idempotent on 2nd run.
+    {
+        const ad = makeAdapter({
+            "spice/projects/dash-partial/Dash Partial.md": partialHub(),
+        });
+        const h = [];
+        await applyProjectDashboardConformanceHeal(makeTp(ad), {}, {}, h, GIT);
+        const after = await ad.read("spice/projects/dash-partial/Dash Partial.md");
+        ok("HEAL-9a lingering legacy block stripped", !after.includes('class: "ProjectMeetingsPanel"'), after);
+        ok("HEAL-9b exactly one Dashboard block (dedupe)", countOccur(after, 'class: "ProjectDashboard"') === 1,
+            String(countOccur(after, 'class: "ProjectDashboard"')));
+        ok("HEAL-9c ChromeBar preserved", after.includes('class: "ProjectChromeBar"'));
+        const backupKey = [...ad._files.keys()].find(k => k.startsWith(".sauce-backup/") && k.endsWith("Dash Partial.md"));
+        ok("HEAL-9d backup written", !!backupKey);
+        ok("HEAL-9e history healed event", h.some(e => e.action === "healed" && e.target && e.target.endsWith("Dash Partial.md")));
+
+        // Idempotent second pass — now fully conformant → skipped, no new writes.
+        const snapshot = new Map(); for (const [k, v] of ad._files) snapshot.set(k, v);
+        const h2 = [];
+        await applyProjectDashboardConformanceHeal(makeTp(ad), {}, {}, h2, GIT);
+        let identical = ad._files.size === snapshot.size;
+        if (identical) for (const [k, v] of snapshot) { if (ad._files.get(k) !== v) { identical = false; break; } }
+        ok("HEAL-9f idempotent on 2nd run", identical, "size before=" + snapshot.size + " after=" + ad._files.size);
+        ok("HEAL-9g 2nd run skipped_already_healed",
+            h2.some(e => e.action === "skipped_already_healed" && e.target && e.target.endsWith("Dash Partial.md")));
     }
 
     console.log("");

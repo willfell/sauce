@@ -5032,7 +5032,12 @@ async function applyProjectDashboardConformanceHeal(tp, manifest, variables, his
       if (!hubPath) continue;
 
       const before = await adapter.read(hubPath);
-      if (before.includes('class: "ProjectDashboard"')) {
+      const hasDash = before.includes('class: "ProjectDashboard"');
+      const hasLegacy = LEGACY_CLASSES.some((cls) => before.includes(`class: "${cls}"`));
+      // Skip ONLY when fully conformant: a Dashboard block present AND no legacy
+      // panel blocks lingering. A partially-migrated note (Dashboard present but
+      // a stray legacy block left behind) still needs the legacy block swept.
+      if (hasDash && !hasLegacy) {
         skipped += 1;
         if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", target: hubPath,
           action: "skipped_already_healed",
@@ -5055,18 +5060,22 @@ async function applyProjectDashboardConformanceHeal(tp, manifest, variables, his
       // Collapse runs of 3+ blank lines that stripping might have left behind.
       newContent = newContent.replace(/\n{3,}/g, "\n\n");
 
-      // Insert the dashboard block right after the ProjectChromeBar block.
-      const chromebarRx = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)\s*/;
-      if (chromebarRx.test(newContent)) {
-        newContent = newContent.replace(chromebarRx, (m, block) => block + "\n\n" + DASHBOARD_BLOCK + "\n\n");
-      } else {
-        // No ChromeBar anchor — prepend just after the frontmatter fence.
-        const fmEnd = newContent.match(/^---\n[\s\S]*?\n---\n/);
-        if (fmEnd) {
-          const idx = fmEnd[0].length;
-          newContent = newContent.slice(0, idx) + "\n" + DASHBOARD_BLOCK + "\n\n" + newContent.slice(idx);
+      // Insert the dashboard block right after the ProjectChromeBar block — but
+      // ONLY when one isn't already present, so a partial-migration note keeps
+      // its single existing Dashboard block (dedupe; never add a second).
+      if (!hasDash) {
+        const chromebarRx = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)\s*/;
+        if (chromebarRx.test(newContent)) {
+          newContent = newContent.replace(chromebarRx, (m, block) => block + "\n\n" + DASHBOARD_BLOCK + "\n\n");
         } else {
-          newContent = DASHBOARD_BLOCK + "\n\n" + newContent;
+          // No ChromeBar anchor — prepend just after the frontmatter fence.
+          const fmEnd = newContent.match(/^---\n[\s\S]*?\n---\n/);
+          if (fmEnd) {
+            const idx = fmEnd[0].length;
+            newContent = newContent.slice(0, idx) + "\n" + DASHBOARD_BLOCK + "\n\n" + newContent.slice(idx);
+          } else {
+            newContent = DASHBOARD_BLOCK + "\n\n" + newContent;
+          }
         }
       }
 
