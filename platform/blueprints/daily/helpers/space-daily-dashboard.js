@@ -645,21 +645,30 @@ class SpaceDailyDashboard {
           sectionState,
         });
 
-        const tripsList = tripsBody.createEl("ul");
-        tripsList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-
+        // Each trip renders as a card: a GREEN day pill + the trip name
+        // (no em dash) + a muted packing-progress line when packTotal > 0.
         for (const trip of trips) {
-          const li = tripsList.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
-          // Humanize the countdown: today / in 1 day / in N days.
-          const when = trip.daysAway === 0
-            ? "today"
-            : (trip.daysAway === 1 ? "in 1 day" : `in ${trip.daysAway} days`);
-          const label = li.createEl("span");
-          label.textContent = `${trip.name || "Trip"} — ${when}`;
-          if (trip.path) {
-            li.onclick = () => { app.workspace.openLinkText(trip.path, ""); };
+          const card = tripsBody.createEl("div");
+          card.style.cssText = "display:flex; align-items:center; gap:10px; padding:8px 12px; margin:6px 0; border:1px solid var(--background-modifier-border); border-radius:8px; background:var(--background-primary); cursor:pointer;";
+
+          const pill = card.createEl("span");
+          pill.textContent = trip.daysAway === 0
+            ? "Today"
+            : (trip.daysAway === 1 ? "1 day" : `${trip.daysAway} days`);
+          pill.style.cssText = "flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:3px 9px; border-radius:999px; background:color-mix(in srgb, var(--color-green) 22%, transparent); color:var(--color-green); font-weight:700; font-size:0.8em; white-space:nowrap;";
+
+          const col = card.createEl("div");
+          col.style.cssText = "flex:1; min-width:0;";
+          const nameEl = col.createEl("div");
+          nameEl.textContent = trip.name || "Trip";
+          nameEl.style.cssText = "font-weight:700; font-size:0.92em; word-break:break-word; overflow-wrap:anywhere;";
+          if (trip.packTotal > 0) {
+            const meta = col.createEl("div");
+            meta.textContent = `${trip.packed}/${trip.packTotal} packed`;
+            meta.style.cssText = "font-size:0.76em; color:var(--text-muted); margin-top:2px;";
           }
+
+          card.onclick = () => { if (trip.path) app.workspace.openLinkText(trip.path, ""); };
         }
       }
     } catch (_e) { /* trips panel is best-effort; never break the dashboard */ }
