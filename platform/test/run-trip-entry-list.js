@@ -234,6 +234,19 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
         cl.rows.length === 1 && cl.rows[0].entry.item === "Socks" && cl.rows[0].absIndex === 1, JSON.stringify(cl));
     const bb = b.find(x => x.category === "Bookbag");
     ok('PB-3 empty category kept as header', bb.rows.length === 0, JSON.stringify(bb));
+
+    // FEATURE 1: checked items sink to the bottom of their category (stable),
+    // absIndex preserved (points back into the ORIGINAL items array).
+    const s = TripEntryList._packingBuckets([
+        { category: "Clothing", item: "Socks", checked: true },
+        { category: "Clothing", item: "Underwear", checked: false },
+        { category: "Clothing", item: "Swim Trunks", checked: false },
+    ]);
+    const scl = s.find(x => x.category === "Clothing");
+    ok('PB-4 unchecked first, checked last (stable)',
+        scl.rows.map(r => r.entry.item).join(",") === "Underwear,Swim Trunks,Socks", JSON.stringify(scl.rows.map(r => r.entry.item)));
+    ok('PB-5 absIndex preserved after sink (Socks=0)', scl.rows.find(r => r.entry.item === "Socks").absIndex === 0, JSON.stringify(scl.rows));
+    ok('PB-6 absIndex preserved after sink (Underwear=1)', scl.rows.find(r => r.entry.item === "Underwear").absIndex === 1, JSON.stringify(scl.rows));
 }
 
 // ---------- _daysUntilDate (FIX 3) ----------

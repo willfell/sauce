@@ -174,7 +174,19 @@ class TripEntryList {
       if (!map.has(cat)) { map.set(cat, []); order.push(cat); }
       if (entry && entry.item) map.get(cat).push({ entry, absIndex });
     });
-    return order.map((cat) => ({ category: cat, rows: map.get(cat) }));
+    // Within each category, unchecked rows render first and checked-off rows
+    // sink to the bottom — stable within each group. absIndex is untouched
+    // (still points into the ORIGINAL items array); only display order changes.
+    return order.map((cat) => {
+      const rows = map.get(cat)
+        .map((r, i) => [r, i])
+        .sort((a, b) => {
+          const ca = !!a[0].entry.checked, cb = !!b[0].entry.checked;
+          return ca === cb ? a[1] - b[1] : (ca ? 1 : -1);
+        })
+        .map((x) => x[0]);
+      return { category: cat, rows };
+    });
   }
 
   // ── flight direction grouping ─────────────────────────────────────────────
