@@ -91,5 +91,45 @@ const cfg = inst._config();
   ok('JCB-BANNER-4 hairline BELOW label', hrIdx >= 0 && labelIdx >= 0 && hrIdx > labelIdx);
 }
 
+// JCB-SPEC — journal-entry overflow shape
+{
+  const inst = new JournalChromeBar();
+  const cfg = inst._config();
+  const l = cfg.surfaceSpec({ context: 'journal-entry' });
+  ok('JCB-SPEC-EXTRA-1 leaf overflow includes back-day,hub,rename,delete',
+    l.overflow.length === 4
+    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub'
+    && l.overflow[2].id === 'rename' && l.overflow[3].id === 'delete');
+}
+
+// JCB-DIALOG — _openDeleteDialog exists + never-throws under empty globals
+{
+  const inst = new JournalChromeBar();
+  ok('JCB-DIALOG-1 _openDeleteDialog function', typeof inst._openDeleteDialog === 'function');
+  const prevApp = global.app, prevDoc = global.document;
+  delete global.app; delete global.document;
+  let threw = false;
+  try { inst._openDeleteDialog(null, 'spice/journal/Journal.md', 'journal entry'); } catch (_e) { threw = true; }
+  ok('JCB-DIALOG-2 never-throws under missing app/document', !threw);
+  global.app = prevApp; global.document = prevDoc;
+}
+
+// JCB-DISPATCH — rename + delete route correctly
+{
+  const inst = new JournalChromeBar();
+  const cfg = inst._config();
+  let renameCalled = false, deleteCalled = false;
+  inst._openRenameDialog = () => { renameCalled = true; };
+  inst._openDeleteDialog = () => { deleteCalled = true; };
+  const prevApp = global.app, prevCJS = global.customJS;
+  global.app = { vault: { getAbstractFileByPath: () => ({ path: 'x.md' }) } };
+  global.customJS = { RenderSafe: { page: () => ({ file: { path: 'x.md' }, title: 'T' }) } };
+  cfg.dispatch({ current: () => ({}) }, { context: 'journal-entry', path: 'x.md' }, 'rename');
+  cfg.dispatch({ current: () => ({}) }, { context: 'journal-entry', path: 'x.md' }, 'delete');
+  ok('JCB-DISPATCH-RENAME rename opens rename dialog', renameCalled);
+  ok('JCB-DISPATCH-DELETE delete opens delete dialog', deleteCalled);
+  global.app = prevApp; global.customJS = prevCJS;
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);
