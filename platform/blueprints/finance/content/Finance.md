@@ -12,9 +12,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "FinanceChromeBar" });
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
-```
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "FinanceHubSummary" });
 ```

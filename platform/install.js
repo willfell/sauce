@@ -1285,6 +1285,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
   await applyFinanceUnifiedNavMigration(tp, mech, variables, history, git);    // NEW v0.111.0 — collapses FinanceHubActions + FinanceNavRow invocations to single-line FinanceNav
+  await applyFinanceHubNavBlockRemoval(tp, mech, variables, history, git);    // NEW — strips the now-redundant FinanceNav dataviewjs block from finance hub notes (FinanceChromeBar owns all hub chrome)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await applyBundledPlugin(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW — vendor + enable a first-party bundled plugin (sauce-plugin mechanism); gated on mech.bundled_plugin
@@ -13483,6 +13484,40 @@ async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git
     completed_at: new Date().toISOString() });
 }
 
+// applyFinanceHubNavBlockRemoval — strips the now-redundant FinanceNav
+// dataviewjs block (and its entity-create sentinel comment) from finance hub
+// notes. FinanceChromeBar owns all hub chrome (primary + overflow + nav);
+// FinanceNav on hubs was fully guarded by chromePresent but still created an
+// empty div and consumed a customjs-guard poll cycle for nothing. Idempotent.
+async function applyFinanceHubNavBlockRemoval(tp, mech, variables, history, git) {
+  const finDir = variables.spice_dir + "/finance";
+  const hubs = [
+    { path: finDir + "/Finance.md" },
+    { path: finDir + "/budgets/Budgets.md" },
+    { path: finDir + "/paychecks/Paychecks.md" },
+    { path: finDir + "/invoices/Invoices.md" },
+    { path: finDir + "/debts/Debts.md" },
+    { path: finDir + "/months/Months.md" },
+    { path: finDir + "/savings/Savings.md" },
+  ];
+  const BLOCK_RE = /\n```dataviewjs\n(?:\/\/ entity-create:\S+[^\n]*\n)?await dv\.view\([^)]*\{[^}]*class:\s*"FinanceNav"[^}]*\}\s*\);\n```/g;
+  let stripped = 0;
+  for (const { path: rel } of hubs) {
+    const file = tp.app.vault.getAbstractFileByPath(rel);
+    if (!file) continue;
+    const before = await tp.app.vault.read(file);
+    const after = before.replace(BLOCK_RE, "");
+    if (after !== before) {
+      await tp.app.vault.modify(file, after);
+      stripped++;
+    }
+  }
+  history?.push({ event: "info", step: "finance_hub_nav_block_removal", name: "finance",
+    summary: { stripped, total: hubs.length },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
 // applyFinancePaycheckBodyMigration — v0.107.0 CF-3 (finance 0.5.3). Heals
 // pre-v0.5.3 paycheck bodies (created from the older Paycheck Template):
 //
@@ -21328,6 +21363,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
     module.exports.applyFinanceUnifiedNavMigration = applyFinanceUnifiedNavMigration;
+    module.exports.applyFinanceHubNavBlockRemoval = applyFinanceHubNavBlockRemoval;
     // v0.112.0 S2 — months scaffolding + paycheck-debt-band injection.
     module.exports.applyFinanceMonthsScaffolding = applyFinanceMonthsScaffolding;
     // entity-create:month marker normalization (leading, not trailing) on the months hub.

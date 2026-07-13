@@ -12,11 +12,6 @@ await dv.view("{{views_path}}/customjs-guard", { class: "FinanceChromeBar" });
 ```
 
 ```dataviewjs
-// entity-create:debt — installer-managed; do not delete this comment
-await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
-```
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "DebtsHubSummary" });
 ```
 
