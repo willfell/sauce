@@ -1243,7 +1243,8 @@ class TaskDialog {
         const name = (s.projectName || '').trim();
         if (name) payload.project = { name, slug: TaskDialog._slugify(name) };
         const tripName = (s.tripName || '').trim();
-        if (tripName) payload.trip = { name: tripName, slug: (s.tripSlug || '').trim() || TaskDialog._slugify(tripName) };
+        const tripSlug = (s.tripSlug || '').trim();
+        if (tripName || tripSlug) payload.trip = { name: tripName || tripSlug, slug: tripSlug || TaskDialog._slugify(tripName) };
         return payload;
     }
 
@@ -1370,9 +1371,10 @@ class TaskDialog {
             }
             // trip linkage — parallel to project. Persist on edit so a trip task
             // keeps its trip / trip_slug (else it drops out of TaskTripList).
-            if (payload.trip && payload.trip.name) {
-                fm.trip = '[[' + payload.trip.name + ']]';
-                fm.trip_slug = payload.trip.slug || TaskDialog._slugify(payload.trip.name);
+            if (payload.trip && (payload.trip.name || payload.trip.slug)) {
+                const tName = payload.trip.name || payload.trip.slug;
+                fm.trip = '[[' + tName + ']]';
+                fm.trip_slug = payload.trip.slug || TaskDialog._slugify(tName);
             } else {
                 fm.trip = '';
                 fm.trip_slug = '';
