@@ -336,6 +336,78 @@
   border-color: var(--interactive-accent);
 }
 
+/* ── Move picker (collapsible section tree) + in-place select mode ─────────
+ * The move modal + select bar live OUTSIDE .se-root (the modal is body-mounted;
+ * the select bar re-renders the page pane), so these are intentionally not
+ * nested under .se-root. Native Obsidian tokens throughout. */
+.se-move-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.se-move-headbtn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.se-move-list { max-height: 55vh; overflow-y: auto; margin-bottom: 12px; }
+.se-move-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+  transition: background 0.12s ease;
+}
+.se-move-row:not(.is-current):hover { background: var(--background-modifier-hover); }
+.se-move-row.is-current { color: var(--text-faint); cursor: default; }
+.se-move-toggle {
+  flex: 0 0 auto;
+  width: 1em;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Sticky bulk-select bar above the doc grid; live "Move N →" button. */
+.se-select-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 4px;
+  background: var(--background-primary);
+}
+.se-select-move-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.se-select-move-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Selectable doc cards gain a leading checkbox; keep the badge + body aligned. */
+.se-doc-card.is-selectable { cursor: default; }
+.se-doc-card.is-selectable:hover { transform: none; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04); }
+.se-doc-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 2px 2px 0 0;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+
 @keyframes sectionExplorerRailIn {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
