@@ -2515,11 +2515,15 @@ async function runConfirmDeleteTests() {
   global.Notice = prevNotice;
 }
 
-// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..3) ----------
+// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..4) ----------
 // _reconcileAfterCreate registers a one-shot metadataCache 'changed' listener for
-// the new file's path → fires the Dataview force-refresh command → detaches. A
-// timeout fallback fires anyway. Never throws (absent APIs degrade to the natural
-// ~2.5s tick). No live spike: gating on the index event avoids the stale-index race.
+// the new file's path (or a 1200ms fallback if it's missed), then POLLS Dataview's
+// own `dv.page(path)` until Dataview itself reports the new page indexed before
+// firing the force-refresh command — metadataCache 'changed' only means Obsidian
+// re-parsed frontmatter, not that Dataview's separate async index caught up, so
+// firing on 'changed' alone can redraw from a stale index and never retrigger
+// (TD-REC-4 guards this). Absent Dataview API degrades to fire-on-signal. Never
+// throws (absent APIs degrade to the natural ~2.5s tick).
 function runReconcileTests() {
   ok('TD-REC-1 reconcile force-refreshes when the new file is indexed, then detaches', () => {
     const calls = { cmd: [], on: 0, off: 0 };
@@ -2554,6 +2558,35 @@ function runReconcileTests() {
     new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');   // must not throw
     new TaskDialogClass()._reconcileAfterCreate(null, 'p.md');  // null app → no throw
     assert(true, 'no throw');
+  });
+
+  ok('TD-REC-4 waits for Dataview to actually index the page before force-refreshing (root-cause regression)', () => {
+    const calls = { cmd: [] };
+    let handler = null;
+    const timers = [];
+    let pollCount = 0;
+    const indexedAfter = 2; // dv.page reports the new page only from the 3rd poll onward
+    const app = {
+      metadataCache: { on: (ev, fn) => { handler = { ev, fn }; return { ev }; }, offref: () => {} },
+      commands: { executeCommandById: (id) => calls.cmd.push(id) },
+      plugins: { plugins: { dataview: { api: { page: (p) => {
+        pollCount++;
+        return pollCount > indexedAfter ? { file: { path: p } } : null;
+      } } } } },
+      _setTimeout: (fn) => { timers.push(fn); return timers.length; },  // queued, drained manually below
+    };
+    new TaskDialogClass()._reconcileAfterCreate(app, 'spice/tasks/x.md');
+    handler.fn({ path: 'spice/tasks/x.md' }); // metadataCache fires — starts polling
+    assert(calls.cmd.length === 0, 'must NOT force-refresh before dv.page reports the new page indexed');
+    let guard = 0;
+    while (calls.cmd.length === 0 && guard < 30) {
+      const t = timers.shift();
+      assert(t, 'a retry timer should be queued while waiting for the index');
+      t();
+      guard++;
+    }
+    assert(calls.cmd.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh eventually fired once dv.page reported the new page');
+    assert(pollCount === indexedAfter + 1, 'polled dv.page exactly until it succeeded: ' + pollCount);
   });
 }
 
