@@ -3171,13 +3171,19 @@ async function testSelectTasksNotePerTask() {
   const res = SDD.selectTasks(fakeDv, today, TE);
   const titles = res.open.map((t) => t.title);
 
-  // open == TODAY ONLY (due == today); overdue is a COUNT, not in the list.
+  const overdueTitles = res.overdue.map((t) => t.title);
+
+  // open == TODAY ONLY (due == today); overdue is its OWN LIST (scheduled
+  // before today) — same shape as open, rendered as a distinguished tail.
   check("open list is today-only (3 tasks due today)", res.open.length === 3);
   check("every open row is due today", res.open.every((t) => t.due === "2026-07-02"));
   check("all sources present in the today list (daily + project + meeting)",
     titles.indexOf("daily today") >= 0 && titles.indexOf("proj today") >= 0 && titles.indexOf("mtg today") >= 0);
   check("overdue tasks are NOT in the open list", titles.indexOf("mtg overdue") < 0 && titles.indexOf("proj overdue") < 0);
-  check("overdue == 2 (all sources counted: meeting + project)", res.overdue === 2);
+  check("overdue is an array", Array.isArray(res.overdue));
+  check("overdue.length == 2 (all sources counted: meeting + project)", res.overdue.length === 2);
+  check("overdue list contains the overdue tasks (all sources)",
+    overdueTitles.indexOf("mtg overdue") >= 0 && overdueTitles.indexOf("proj overdue") >= 0);
   check("future excluded from open", titles.indexOf("future") < 0);
   check("unscheduled excluded from open", titles.indexOf("someday") < 0);
   check("_trash excluded from open", titles.indexOf("trashed") < 0);
@@ -3186,8 +3192,11 @@ async function testSelectTasksNotePerTask() {
   check("done == 2 (today incl datetime form; excl yesterday/no-date/trashed)", res.done === 2);
 
   const cold = SDD.selectTasks(fakeDv, today, null);
-  check("cold-load (no TE) → empty open + zero overdue + zero done",
-    cold.open.length === 0 && cold.overdue === 0 && cold.done === 0);
+  check("cold-load (no TE) → empty open + empty overdue + zero done",
+    cold.open.length === 0 && Array.isArray(cold.overdue) && cold.overdue.length === 0 && cold.done === 0);
+
+  const counts = SDD.computeCounts(fakeDv, today, TE);
+  check("computeCounts().overdue is still a number", typeof counts.overdue === "number" && counts.overdue === 2);
 
   return ok;
 }
@@ -3377,7 +3386,7 @@ async function runDashboardRender({ params, fileName }) {
   // One activity page dated on each candidate day so activityCount > 0 for
   // whichever `today` the render picks — ensures the flow reaches ActivityFeed.
   const activityPages = candidateDates.map((d) => ({
-    type: "journal", day: d,
+    type: "journal-entry", day: d,
     file: { name: `Journal-${d}`, path: `spice/journal/Journal-${d}.md` },
   }));
 
@@ -3867,8 +3876,8 @@ async function testRendHasNotes() {
       "task rows must render titles via the canonical inline-link renderer and click through to the task note (task.path)");
 
     assertTrue("HC-V0843-A2 Tasks call site title is bare 'Tasks' (no parenthetical count)",
-      /title:\s*["']Tasks["']/.test(sddSrc),
-      "Tasks _renderSection call must pass title: 'Tasks' as a plain string — counts move to rightHtml");
+      /titleHtml:\s*['"`].*sauce-section-title-link.*Tasks/.test(sddSrc),
+      "Tasks _renderSection call must render a bare 'Tasks' title (now a clickable sauce-section-title-link span) — counts move to rightHtml");
 
     assertTrue("HC-V0843-A3 Tasks call site references sauce-section-open-pill",
       /sauce-section-open-pill/.test(sddSrc),
