@@ -687,6 +687,95 @@ const pages = [
 }
 
 // ---------------------------------------------------------------------------
+// W20 — Task B: the DocSearch options in WikiTree.render hide the tag chips
+// (hideTags: true), matching the project blueprint.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+  // Assert hideTags: true appears within the DocSearch.render options object.
+  ok('W20a WikiTree DocSearch options include hideTags: true',
+     /customJS\.DocSearch\.render\(dv,\s*\{[\s\S]*?hideTags:\s*true[\s\S]*?\}\)/.test(treeSrc));
+}
+
+// ---------------------------------------------------------------------------
+// W21 — Task G: WikiTree._buildConfig returns a `move` block (folder-is-truth:
+// rewrite hooks return null, canAcceptSection true), an `emptySubsectionCount`
+// counting child sections, and a recursive-doc-count `canDelete` gate.
+// ---------------------------------------------------------------------------
+{
+  const treeSrc = fs.readFileSync(TREE_SRC, 'utf8');
+
+  // Load the REAL statics from section-explorer.js so the block behaves faithfully.
+  const SE = new Function(`${fs.readFileSync(SE_SRC, 'utf8')}\nreturn SectionExplorer;`)();
+
+  // Stub dv.pages to return our synthetic wiki subtree.
+  const subtree = [
+    makePage('wiki-section', 'spice/wiki/cooking/Cooking.md', 100),
+    makePage('wiki-section', 'spice/wiki/cooking/sauces/Sauces.md', 110),
+    makePage('wiki-page',    'spice/wiki/cooking/Recipe.md', 200),
+  ];
+  const dvStub = {
+    pages: (q) => {
+      // q is like '"spice/wiki/cooking"' — return matching subtree pages.
+      const m = String(q).replace(/"/g, '');
+      const arr = subtree.filter(p => {
+        const f = p.file.path.slice(0, p.file.path.lastIndexOf('/'));
+        return f === m || f.indexOf(m + '/') === 0;
+      });
+      return { array: () => arr };
+    },
+    current: () => ({ type: 'wiki-section', file: { path: 'spice/wiki/cooking/Cooking.md' } }),
+    page: () => null,
+  };
+
+  const TreeCls = new Function('customJS', `${treeSrc}\nreturn WikiTree;`)({ SectionExplorer: SE });
+  const tree = new TreeCls();
+  const cur = dvStub.current();
+  const cfg = tree._buildConfig(dvStub, cur);
+
+  // W21a — move block shape.
+  ok('W21a move block: root/sectionType/rootLabel present',
+     cfg.move && cfg.move.root === 'spice/wiki' && cfg.move.sectionType === 'wiki-section' && cfg.move.rootLabel === 'Wiki (root)');
+  ok('W21b move.rewriteOnDocMove() === null (folder-is-truth)',
+     typeof cfg.move.rewriteOnDocMove === 'function' && cfg.move.rewriteOnDocMove('spice/wiki/x', 'spice/wiki/y/D.md') === null);
+  ok('W21c move.rewriteOnSectionMove() === null',
+     typeof cfg.move.rewriteOnSectionMove === 'function' && cfg.move.rewriteOnSectionMove({}, 'spice/wiki') === null);
+  ok('W21d move.canAcceptSection() === true (arbitrary depth)',
+     typeof cfg.move.canAcceptSection === 'function' && cfg.move.canAcceptSection({}, 'spice/wiki/anything') === true);
+
+  // W21e — enumerateSectionTargets returns root-first section targets.
+  {
+    const targets = cfg.move.enumerateSectionTargets(dvStub);
+    const folders = targets.map(t => t.folder);
+    ok('W21e enumerateSectionTargets: root first, then wiki-section folders',
+       folders[0] === 'spice/wiki' &&
+       folders.includes('spice/wiki/cooking') &&
+       folders.includes('spice/wiki/cooking/sauces') &&
+       targets[0].label === 'Wiki (root)');
+  }
+
+  // W21f — emptySubsectionCount counts child section folders under the section.
+  ok('W21f emptySubsectionCount counts child sections (cooking has 1: sauces)',
+     typeof cfg.emptySubsectionCount === 'function' &&
+     cfg.emptySubsectionCount({ folder: 'spice/wiki/cooking' }) === 1);
+
+  // W21g — canDelete: false when a wiki-page exists in the subtree.
+  ok('W21g canDelete false when a wiki-page exists in the section subtree',
+     cfg.canDelete({ folder: 'spice/wiki/cooking', hubPath: 'spice/wiki/cooking/Cooking.md' }) === false);
+
+  // W21h — canDelete: true when the section subtree has no wiki-page.
+  {
+    // sauces subtree has only its own hub, no wiki-page.
+    ok('W21h canDelete true when the section subtree has no wiki-page',
+       cfg.canDelete({ folder: 'spice/wiki/cooking/sauces', hubPath: 'spice/wiki/cooking/sauces/Sauces.md' }) === true);
+  }
+
+  // W21i — canDelete false without a hubPath (never delete a phantom).
+  ok('W21i canDelete false when section has no hubPath',
+     cfg.canDelete({ folder: 'spice/wiki/cooking/sauces' }) === false);
+}
+
+// ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
 const passed = results.filter(([, p]) => p).length;

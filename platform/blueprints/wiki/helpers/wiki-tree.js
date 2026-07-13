@@ -18,6 +18,7 @@ class WikiTree {
             recursive: true,
             entityType: "wiki-page",
             persist: false,   // don't remember search text across visits to the note
+            hideTags: true,   // hide the tag-filter chips under the search bar (match project)
             onChange: (c) => {
                 c.resultsContainer.empty();
                 this._renderResults(dv, c, scopePath, cur);
@@ -196,7 +197,45 @@ class WikiTree {
                 if (!f) return Promise.resolve();
                 return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
             },
-            canDelete: (section) => !!section.hubPath && !section.pageCount && !section.subSectionCount,
+            // Recursive-doc-count delete gate: only allow deleting a materialized
+            // section (has a hub note) whose whole subtree contains NO wiki-pages.
+            // Empty sub-sections are fine (no docs lost) — see emptySubsectionCount.
+            canDelete: (section) => {
+                if (!section || !section.hubPath) return false;
+                try {
+                    const raw = dv.pages('"' + section.folder + '"');
+                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                    return customJS.SectionExplorer.subtreeDocCount(arr, section.folder, "wiki-page") === 0;
+                } catch (_e) { return false; }
+            },
+            // Count of child section folders under this section (folder-is-truth):
+            // used by the delete-confirm wording ("and N empty sub-section(s)").
+            emptySubsectionCount: (section) => {
+                try {
+                    const raw = dv.pages('"' + section.folder + '"');
+                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                    return customJS.SectionExplorer.childSectionFolders(arr, section.folder, "wiki-section").length;
+                } catch (_e) { return 0; }
+            },
+            // Shared-mechanism move block: wiki is folder-is-truth, so doc/section
+            // moves are pure folder renames (no frontmatter rewrite), and any depth
+            // is a legal destination.
+            move: {
+                root: "spice/wiki",
+                sectionType: "wiki-section",
+                rootLabel: "Wiki (root)",
+                enumerateSectionTargets: (dv2) => {
+                    const raw = dv2.pages('"spice/wiki"');
+                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                    return customJS.SectionExplorer.sectionTargets(arr, {
+                        root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)",
+                        labelOf: (p) => (p.title && String(p.title).trim()) || "",
+                    });
+                },
+                rewriteOnDocMove: () => null,      // folder-is-truth: no frontmatter rewrite
+                rewriteOnSectionMove: () => null,
+                canAcceptSection: () => true,      // arbitrary depth
+            },
             deleteSection: (section) => {
                 const f = app.vault.getAbstractFileByPath(section.folder);
                 if (!f) return Promise.resolve();

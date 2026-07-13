@@ -232,8 +232,84 @@ class SectionHub {
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
     const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
+    const docsRoot = `spice/projects/${projectSlug}/docs`;
     return {
       resolveContext: () => ({ sectionPath }),
+      // ── move block (shared SectionExplorer wiring) ──────────────────────────
+      // The mechanism reads this to drive the collapsible move picker, the
+      // in-place select-mode bulk move, and section-move. Project docs are a
+      // frontmatter cascade capped at 2 levels (section + sub-section).
+      move: {
+        root: docsRoot,
+        sectionType: "section-hub",
+        rootLabel: "Docs (root)",
+        // All section-hub folders under docsRoot as move targets (root first).
+        enumerateSectionTargets: (dv2) => {
+          try {
+            const raw = dv2.pages(`"${docsRoot}"`);
+            const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+            return customJS.SectionExplorer.sectionTargets(arr, {
+              root: docsRoot, sectionType: "section-hub", rootLabel: "Docs (root)",
+              labelOf: (p) => this._stripLink(p.section) || (p.title ? this._stripLink(p.title) : "") || "",
+            });
+          } catch (_e) { return []; }
+        },
+        // Derive {section, sub_section} from the destination folder relative to
+        // docsRoot (port of DocMoveDialog._destSection): root → both ""; depth-1
+        // → {section:<seg>, sub_section:""}; depth≥2 → {parent, leaf}.
+        rewriteOnDocMove: (destFolder) => {
+          const rel = String(destFolder).replace(/\/+$/, "");
+          if (rel === docsRoot || rel.indexOf(docsRoot + "/") !== 0) return { section: "", sub_section: "" };
+          const segs = rel.slice((docsRoot + "/").length).split("/").filter(Boolean);
+          if (segs.length <= 1) return { section: segs[0] || "", sub_section: "" };
+          return { section: segs[segs.length - 2], sub_section: segs[segs.length - 1] };
+        },
+        // Section-move cascade: patch the moved hub's depth + parent_section from
+        // the destination parent folder, and retarget each child sub-section's
+        // parent_section display-name to the moved section's title. Out of the
+        // docs tree → null (no-op).
+        rewriteOnSectionMove: (section, destParentFolder) => {
+          const rel = String(destParentFolder).replace(/\/+$/, "");
+          const underDocs = rel === docsRoot
+            ? []
+            : (rel.indexOf(docsRoot + "/") === 0 ? rel.slice((docsRoot + "/").length).split("/").filter(Boolean) : null);
+          if (underDocs === null) return null;
+          const newDepth = underDocs.length + 1;
+          const parentSection = underDocs.length >= 1 ? underDocs[underDocs.length - 1] : "";
+          const hubPatch = { depth: newDepth, parent_section: parentSection };
+          const kids = this._childHubsForRename ? (this._childHubsForRename(dv, section) || []) : [];
+          const movedTitle = this._stripLink(section && section.title) || (section && section.title) || "";
+          const childPatches = kids.map((k) => ({ path: k.path, patch: { parent_section: movedTitle } }));
+          return { hubPatch, childPatches };
+        },
+        // 2-level cap: the moved section lands at destDepth+1; if it has children,
+        // its deepest child would be one level below that. Cap the deepest at 2.
+        // (The shared picker already excludes own-folder + current-parent no-ops.)
+        canAcceptSection: (section, destFolder) => {
+          const rel = String(destFolder).replace(/\/+$/, "");
+          const destDepth = rel === docsRoot
+            ? 0
+            : (rel.indexOf(docsRoot + "/") === 0 ? rel.slice((docsRoot + "/").length).split("/").filter(Boolean).length : 99);
+          let hasChildren = false;
+          try {
+            const raw = dv.pages(`"${section.folder}"`);
+            const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+            hasChildren = customJS.SectionExplorer.childSectionFolders(arr, section.folder, "section-hub").length > 0;
+          } catch (_e) { hasChildren = false; }
+          const resultDepth = destDepth + 1;
+          const deepest = hasChildren ? resultDepth + 1 : resultDepth;
+          return deepest <= 2;
+        },
+      },
+      // Count of child section-hubs directly/recursively under a section (for the
+      // delete-confirm "N empty sub-section(s)" wording).
+      emptySubsectionCount: (section) => {
+        try {
+          const raw = dv.pages(`"${section.folder}"`);
+          const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+          return customJS.SectionExplorer.childSectionFolders(arr, section.folder, "section-hub").length;
+        } catch (_e) { return 0; }
+      },
       listSections: (dv2, c) => {
         if (depth !== 1) return []; // depth-2 (sub-section) is a leaf — no further nesting
         try {
@@ -284,7 +360,14 @@ class SectionHub {
         if (!f) return Promise.resolve();
         return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
       },
-      canDelete: (section) => !!(section && section.materialized) && !section.pageCount && !section.subSectionCount,
+      canDelete: (section) => {
+        if (!section || !section.hubPath) return false;
+        try {
+          const raw = dv.pages(`"${section.folder}"`);
+          const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+          return customJS.SectionExplorer.subtreeDocCount(arr, section.folder, "doc-note") === 0;
+        } catch (_e) { return false; }
+      },
       deleteSection: (section) => {
         if (!section || !section.materialized) return Promise.resolve();
         const f = app.vault.getAbstractFileByPath(section.folder);

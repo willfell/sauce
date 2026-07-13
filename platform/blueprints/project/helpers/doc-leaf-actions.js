@@ -73,14 +73,62 @@ class DocLeafActions {
     row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
     const currentPath = page.file.path;
     customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => {
-      // Prefer the wiki-style indented Move tree dialog; fall back to the legacy
-      // flat DocMove picker if the newer helper hasn't loaded (cold-load safety).
+      // Prefer the shared SectionExplorer collapsible move picker (converged
+      // path). Fall back to the wiki-style tree dialog, then the legacy flat
+      // DocMove picker, if the newer helpers haven't loaded (cold-load safety).
+      if (customJS?.SectionExplorer?.openMovePicker && this._openSharedMovePicker(dv, currentPath)) return;
       if (customJS?.DocMoveDialog?._openMoveDialog) {
         customJS.DocMoveDialog._openMoveDialog(dv, currentPath);
       } else {
         this._onMove(dv);
       }
     } });
+  }
+
+  // Open the shared SectionExplorer move picker for the active doc: build the
+  // project's section targets (root + every section-hub), and on pick apply the
+  // move via SectionExplorer.applyDocMove (which rewrites section/sub_section
+  // frontmatter from the destination folder via the inline adapter's move block).
+  // Returns true when it handled the click, false on any cold-load gap so the
+  // caller can fall back. Never throws.
+  _openSharedMovePicker(dv, currentPath) {
+    try {
+      const SE = customJS && customJS.SectionExplorer;
+      if (!SE || typeof SE.openMovePicker !== "function" || typeof SE.applyDocMove !== "function"
+        || typeof SE.sectionTargets !== "function") return false;
+      const file = app.workspace.getActiveFile();
+      if (!file) return false;
+      const projectDir = this.projectDirFor(currentPath);
+      if (!projectDir) return false;
+      const docsRoot = projectDir + "/docs";
+      let arr = [];
+      try {
+        const raw = dv.pages('"' + docsRoot + '"');
+        arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+      } catch (_e) { arr = []; }
+      const SH = customJS && customJS.SectionHub;
+      const stripLink = (SH && typeof SH._stripLink === "function") ? (v) => SH._stripLink(v) : (v) => (typeof v === "string" ? v : "");
+      const targets = SE.sectionTargets(arr, {
+        root: docsRoot, sectionType: "section-hub", rootLabel: "Docs (root)",
+        labelOf: (p) => stripLink(p.section) || "",
+      });
+      const currentFolder = currentPath.slice(0, currentPath.lastIndexOf("/"));
+      // Inline adapter: derive {section, sub_section} from the destination folder
+      // relative to docsRoot (mirrors SectionHub's move.rewriteOnDocMove).
+      const adapter = { move: { rewriteOnDocMove: (destFolder) => {
+        const rel = String(destFolder).replace(/\/+$/, "");
+        if (rel === docsRoot || rel.indexOf(docsRoot + "/") !== 0) return { section: "", sub_section: "" };
+        const segs = rel.slice((docsRoot + "/").length).split("/").filter(Boolean);
+        return segs.length <= 1 ? { section: segs[0] || "", sub_section: "" } : { section: segs[segs.length - 2], sub_section: segs[segs.length - 1] };
+      } } };
+      SE.openMovePicker({
+        targets,
+        currentFolder,
+        title: "Move to section",
+        onPick: (folder) => SE.applyDocMove(dv, file, folder, adapter),
+      });
+      return true;
+    } catch (_e) { return false; }
   }
 
   // ── data source ──────────────────────────────────────────────────────────
