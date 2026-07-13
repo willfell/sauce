@@ -157,7 +157,7 @@ class ProjectDashboard {
                 const content = await realApp.vault.read(boardFile);
                 let lane = "";
                 for (const line of String(content || "").split("\n")) {
-                    if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; }
+                    if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; }  // lint-display-markers:allow Kanban board lane parse, not a display marker
                     if (/^- \[ \] /.test(line) && lane !== "Completed") counts.board += 1;
                 }
             }
