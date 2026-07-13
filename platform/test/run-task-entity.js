@@ -475,9 +475,12 @@ ok('TD-15t _payloadFromState includes trip linkage (parallel project)', () => {
   // slug derived from name when tripSlug omitted.
   const p2 = TaskDialog._payloadFromState({ title: 't', tripName: 'Road Trip' });
   assert(deepEq(p2.trip, { name: 'Road Trip', slug: 'road-trip' }), 'trip slug derived: ' + JSON.stringify(p2.trip));
-  // No tripName → no payload.trip; project still works independently.
+  // Slug-only (a SECTION note has no `name`) → still links; name falls back to the slug.
+  const p4 = TaskDialog._payloadFromState({ title: 't', tripSlug: 'destin-florida' });
+  assert(deepEq(p4.trip, { name: 'destin-florida', slug: 'destin-florida' }), 'trip from slug only: ' + JSON.stringify(p4.trip));
+  // No trip name AND no trip slug → no payload.trip; project still works independently.
   const p3 = TaskDialog._payloadFromState({ title: 't', projectName: 'Sauce' });
-  assert(p3.trip === undefined, 'no trip when tripName absent: ' + JSON.stringify(p3.trip));
+  assert(p3.trip === undefined, 'no trip when name+slug absent: ' + JSON.stringify(p3.trip));
   assert(deepEq(p3.project, { name: 'Sauce', slug: 'sauce' }), 'project unaffected: ' + JSON.stringify(p3.project));
 });
 

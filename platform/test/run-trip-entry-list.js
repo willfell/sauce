@@ -217,5 +217,37 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
         TripEntryList._effArriveDisplay({ arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" }));
 }
 
+// ---------- _rowTitle / _rowSubtitle / _packingBuckets (FIX 1) ----------
+{
+    ok('RT-1 _rowTitle packing -> item', TripEntryList._rowTitle({ kind: "packing" }, { item: "Socks", category: "Clothing" }) === "Socks");
+    ok('RT-2 _rowTitle stay -> name', TripEntryList._rowTitle({ kind: "stay" }, { name: "Beach House" }) === "Beach House");
+    ok('RT-3 _rowTitle default -> item', TripEntryList._rowTitle({ fields: [] }, { item: "X" }) === "X");
+    ok('RS-1 _rowSubtitle stay -> date range',
+        TripEntryList._rowSubtitle({ kind: "stay" }, { check_in: "2026-07-16", check_out: "2026-07-20" }) === "Jul 16, 2026 → Jul 20, 2026",
+        TripEntryList._rowSubtitle({ kind: "stay" }, { check_in: "2026-07-16", check_out: "2026-07-20" }));
+    ok('RS-2 _rowSubtitle packing -> ""', TripEntryList._rowSubtitle({ kind: "packing" }, { item: "X" }) === "");
+
+    const b = TripEntryList._packingBuckets([{ category: "Clothing" }, { category: "Clothing", item: "Socks" }, { category: "Bookbag" }]);
+    ok('PB-1 two buckets first-seen order', b.length === 2, JSON.stringify(b.map(x => x.category)));
+    const cl = b.find(x => x.category === "Clothing");
+    ok('PB-2 Clothing keeps only item rows w/ absIndex',
+        cl.rows.length === 1 && cl.rows[0].entry.item === "Socks" && cl.rows[0].absIndex === 1, JSON.stringify(cl));
+    const bb = b.find(x => x.category === "Bookbag");
+    ok('PB-3 empty category kept as header', bb.rows.length === 0, JSON.stringify(bb));
+}
+
+// ---------- _daysUntilDate (FIX 3) ----------
+{
+    const now = Date.UTC(2026, 6, 12, 20, 0) / 1; // Jul 12
+    const legA = { depart_date: "2026-07-16", depart_time: "09:39", arrival_date: "2026-07-16", arrival_time: "11:15" };
+    const legB = { depart_date: "2026-07-16", depart_time: "13:39", arrival_date: "2026-07-16", arrival_time: "16:00" };
+    const sa = TripEntryList._flightStatus(legA, now).label, sb = TripEntryList._flightStatus(legB, now).label;
+    ok('DU-1 same-date legs give identical "in N days"', sa === sb && /days/.test(sa), sa + " / " + sb);
+    ok('DU-2 today -> 0', TripEntryList._daysUntilDate("2026-07-12", now) === 0, String(TripEntryList._daysUntilDate("2026-07-12", now)));
+    ok('DU-3 label self-consistent with _daysUntilDate',
+        TripEntryList._flightStatus(legA, now).label === "in " + TripEntryList._daysUntilDate("2026-07-16", now) + " days",
+        sa);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

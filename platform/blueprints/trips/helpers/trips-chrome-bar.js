@@ -10,6 +10,15 @@
  * to `overflow`. Instance methods; never-throw; cold-load-safe.
  */
 class TripsChromeBar {
+  // Strip a `[[Name]]` / `[[Name|Alias]]` wikilink to its display text (`Name`).
+  // Returns "" for falsy input. Used to derive the trip name on SECTION notes,
+  // which carry a `trip` wikilink but no `name` field.
+  static _linkText(v) {
+    if (!v) return "";
+    const m = String(v).match(/^\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$/);
+    return m ? m[1].trim() : String(v).trim();
+  }
+
   get ICON() {
     return {
       plus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
@@ -37,7 +46,7 @@ class TripsChromeBar {
           context: t,
           path: (page.file && page.file.path) || "",
           tripSlug: page.trip_slug || null,
-          tripName: page.name || null,
+          tripName: page.name || TripsChromeBar._linkText(page.trip) || null,
           sectionKind: (page && page.section_kind) || null,
         };
       },
