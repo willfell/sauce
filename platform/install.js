@@ -7289,7 +7289,7 @@ function _injectProjectNameFrontmatter(body, name) {
   const fmText = fmMatch[1];
   const typeMatch = fmText.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
   if (!typeMatch) return body;
-  if (!["map", "kanban", "task-note"].includes(typeMatch[1])) return body;
+  if (!["map", "kanban", "task-note", "project", "docs-hub", "section-hub", "doc-note", "links-hub", "project-todo"].includes(typeMatch[1])) return body;
   const escaped = String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
   const existing = fmText.match(/^project_name:\s*(.*)\s*$/m);
@@ -7364,7 +7364,7 @@ async function applyProjectNameBackfill(tp, manifest, variables, history, git) {
       try {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
-        if (!["map", "kanban", "task-note"].includes(type)) continue;
+        if (!["map", "kanban", "task-note", "project", "docs-hub", "section-hub", "doc-note", "links-hub", "project-todo"].includes(type)) continue;
         const after = _injectProjectNameFrontmatter(before, displayName);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyNoteChromeHeal).
