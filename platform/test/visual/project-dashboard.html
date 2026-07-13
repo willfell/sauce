@@ -1,0 +1,127 @@
+<!doctype html>
+<!--
+  Faithful HTML replica of the refined ProjectDashboard render output, for
+  Playwright visual verification (per lesson_verify_chrome_visually_with_playwright_harness).
+  Mirrors the exact inline styles emitted by project-dashboard.js:
+    - top card: transparent + hairline border, tiles raised (background-secondary)
+    - 3x2 tile grid (repeat(3, minmax(0,1fr))), Links tile has no count chip
+    - inline Links chips
+    - Open Tasks card + Recent Docs / Recent Meetings cards below the grid,
+      each headed by a SectionLabel (uppercase muted label + hairline).
+  Serve via `python3 -m http.server` (Playwright MCP blocks file://).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --background-primary: #1e1e1e;
+    --background-secondary: #262626;
+    --background-modifier-border: #3a3a3a;
+    --background-modifier-border-hover: #4a4a4a;
+    --background-modifier-hover: #333333;
+    --interactive-accent: #7f6df2;
+    --text-normal: #dcddde;
+    --text-muted: #9aa0a6;
+    --text-faint: #6b6b6b;
+    --text-on-accent: #ffffff;
+    --color-blue: #4c78e6;
+    --color-green: #58cc7c;
+    --color-red: #e15c5c;
+    --color-orange: #f0a04b;
+    --color-purple: #a56bd8;
+  }
+  body { background: var(--background-primary); color: var(--text-normal);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 16px; margin: 0; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const ICON = {
+  project: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>',
+  map: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>',
+  board: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>',
+  task: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>',
+  docs: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>',
+  todo: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  links: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+};
+const root = document.getElementById("root");
+function el(parent, tag, css) { const e = document.createElement(tag); if (css) e.style.cssText = css; parent.appendChild(e); return e; }
+
+// ── Top card ──────────────────────────────────────────────────────────
+const card = el(root, "div", "background:transparent; border:1px solid var(--background-modifier-border); border-radius:10px; padding:12px; max-width:720px; margin: 4px 0;");
+
+// header
+const hrow = el(card, "div", "display:flex; align-items:center; gap:8px; margin-bottom:12px;");
+const pill = el(hrow, "div", "display:inline-block; padding:2px 10px; border-radius:999px; font-size:0.75em; font-weight:600; text-transform:lowercase; color:var(--text-on-accent); background:var(--color-green); cursor:pointer;");
+pill.textContent = "in-progress";
+
+// tiles 3x2
+const grid = el(card, "div", "display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin-top:0;");
+const tiles = [
+  { label:"Docs", icon:ICON.docs, count:24 },
+  { label:"Board", icon:ICON.board, count:20 },
+  { label:"To-Do", icon:ICON.todo, count:0 },
+  { label:"Map", icon:ICON.map, count:18 },
+  { label:"Meetings", icon:ICON.project, count:0 },
+  { label:"Helpful Links", icon:ICON.links, noCount:true },
+];
+for (const t of tiles) {
+  const tile = el(grid, "div", "display:flex; flex-direction:column; align-items:flex-start; gap:4px; min-width:0; padding:10px 12px; border-radius:8px; background:var(--background-secondary); border:1px solid var(--background-modifier-border); cursor:pointer;");
+  el(tile, "div", "color:var(--text-muted); font-size:0;").innerHTML = t.icon;
+  el(tile, "div", "text-transform:uppercase; letter-spacing:0.03em; font-size:0.72em; color:var(--text-muted);").textContent = t.label;
+  if (!t.noCount) {
+    const chip = el(tile, "div", "font-size:1.4em; font-weight:600; color:" + (t.count > 0 ? "var(--interactive-accent)" : "var(--text-faint)") + ";");
+    chip.textContent = String(t.count);
+  }
+}
+
+// inline links chips
+const lwrap = el(card, "div", "margin-top:12px;");
+el(lwrap, "div", "text-transform:uppercase; letter-spacing:0.03em; font-size:0.72em; color:var(--text-muted); margin-bottom:6px;").textContent = "Links";
+const lrow = el(lwrap, "div", "display:flex; flex-wrap:wrap; gap:6px;");
+for (const label of ["github.com", "Design doc", "figma.com"]) {
+  el(lrow, "div", "display:inline-block; padding:3px 10px; border-radius:999px; background:var(--background-modifier-hover); color:var(--text-normal); font-size:0.78em; cursor:pointer;").textContent = label;
+}
+
+// ── SectionLabel helper (mirror mechanism output) ─────────────────────
+function sectionLabel(parent, text) {
+  const hr = el(parent, "hr", "border: none; border-top: 1px solid var(--background-modifier-border); margin: 10px 0 6px 0;");
+  el(parent, "div", "font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 6px 0; font-weight: 600;").textContent = text;
+}
+function fancyCard(parent) {
+  return el(parent, "div", "background:var(--background-secondary); border:1px solid var(--background-modifier-border); border-radius:8px; padding:6px 10px; margin-top:6px;");
+}
+function rowItem(card, icon, title, right) {
+  const row = el(card, "div", "display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer;");
+  el(row, "div", "color:var(--text-muted); font-size:0;").innerHTML = icon;
+  el(row, "div", "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.9em;").textContent = title;
+  el(row, "div", "margin-left:auto; font-size:0.75em; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em;").textContent = right;
+}
+
+// Open Tasks
+sectionLabel(root, "Open Tasks");
+let c = fancyCard(root);
+rowItem(c, ICON.todo, "Wire ProjectDashboard into template", "board");
+rowItem(c, ICON.todo, "Ship subtle-background tweak", "board");
+rowItem(c, ICON.todo, "Draft release notes", "to-do");
+
+// Recent Docs
+sectionLabel(root, "Recent Docs");
+c = fancyCard(root);
+rowItem(c, ICON.docs, "Finance Blueprint", "2h ago");
+rowItem(c, ICON.docs, "Projects Blueprint", "5h ago");
+rowItem(c, ICON.docs, "To Do Blueprint", "1d ago");
+
+// Recent Meetings
+sectionLabel(root, "Recent Meetings");
+c = fancyCard(root);
+rowItem(c, ICON.project, "2026-07-01 Overnight Retro", "3d ago");
+rowItem(c, ICON.project, "Weekly Planning", "6d ago");
+</script>
+</body>
+</html>
