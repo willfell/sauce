@@ -349,6 +349,7 @@ const D = Cls ? new Cls() : null;
     se.childSectionFolders = SECls.childSectionFolders;
     se.subtreeDocCount = SECls.subtreeDocCount;
     se.sectionTargets = SECls.sectionTargets;
+    se.pagesUnder = SECls.pagesUnder;   // dispatch-time enumeration (metadataCache)
     global.customJS = { SectionExplorer: se };
     try { return fn(); } finally { global.customJS = prevCJS; }
   };
@@ -362,6 +363,7 @@ const D = Cls ? new Cls() : null;
     global.customJS.SectionExplorer.childSectionFolders = SECls.childSectionFolders;
     global.customJS.SectionExplorer.subtreeDocCount = SECls.subtreeDocCount;
     global.customJS.SectionExplorer.sectionTargets = SECls.sectionTargets;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
     const sh = SHCls ? new SHCls() : null;
     const dv = makeDv(corpus);
     const cur = { file: { path: 'spice/projects/p/docs/knowledge/Knowledge.md', name: 'Knowledge' }, section: 'Knowledge', section_slug: 'knowledge', depth: 1 };
@@ -379,6 +381,19 @@ const D = Cls ? new Cls() : null;
     { type: 'section-hub', depth: 1, section: 'Notes', file: { path: `${DOCS}/notes/Notes.md`, folder: `${DOCS}/notes` } },
     { type: 'doc-note', file: { path: `${DOCS}/knowledge/advanced/Deep.md`, folder: `${DOCS}/knowledge/advanced` } },
   ];
+
+  // Dispatch-time enumeration/gates read the metadataCache (mobile-safe), not
+  // dv.pages — install a matching global.app built from the corpus.
+  const _prevApp = global.app;
+  global.app = {
+    vault: { getMarkdownFiles: () => corpus.map((p) => ({ path: p.file.path, name: p.file.path.slice(p.file.path.lastIndexOf('/') + 1) })) },
+    metadataCache: {
+      getFileCache: (f) => {
+        const p = corpus.find((pp) => pp.file.path === (f && f.path));
+        return p ? { frontmatter: { type: p.type, title: p.title, section: p.section, sub_section: p.sub_section, depth: p.depth, links: p.links } } : { frontmatter: {} };
+      },
+    },
+  };
 
   const { cfg } = buildBlock(corpus);
   ok('SH1 _buildConfig returns a move block', !!(cfg && cfg.move));
@@ -453,6 +468,7 @@ const D = Cls ? new Cls() : null;
     const prevCJS = global.customJS;
     global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
     global.customJS.SectionExplorer.sectionTargets = SECls.sectionTargets;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
     const t = mv && mv.enumerateSectionTargets(makeDv(corpus));
     global.customJS = prevCJS;
     ok('SH15 enumerateSectionTargets returns root + 3 section hubs',
@@ -466,6 +482,7 @@ const D = Cls ? new Cls() : null;
     const prevCJS = global.customJS;
     global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
     global.customJS.SectionExplorer.childSectionFolders = SECls.childSectionFolders;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
     const kSection = { folder: `${DOCS}/knowledge` };
     const nSection = { folder: `${DOCS}/notes` };
     ok('SH17 emptySubsectionCount counts child section-hubs (Knowledge → 1)',
@@ -481,6 +498,7 @@ const D = Cls ? new Cls() : null;
     const prevCJS = global.customJS;
     global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
     global.customJS.SectionExplorer.subtreeDocCount = SECls.subtreeDocCount;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
     const kSection = { folder: `${DOCS}/knowledge`, hubPath: `${DOCS}/knowledge/Knowledge.md` };
     const nSection = { folder: `${DOCS}/notes`, hubPath: `${DOCS}/notes/Notes.md` };
     ok('SH19 canDelete false when a doc-note exists in the subtree', cfg && cfg.canDelete(kSection) === false);

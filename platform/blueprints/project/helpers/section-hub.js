@@ -244,10 +244,10 @@ class SectionHub {
         sectionType: "section-hub",
         rootLabel: "Docs (root)",
         // All section-hub folders under docsRoot as move targets (root first).
-        enumerateSectionTargets: (dv2) => {
+        enumerateSectionTargets: () => {
           try {
-            const raw = dv2.pages(`"${docsRoot}"`);
-            const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+            // dv-independent: dispatch-time query via metadataCache (mobile-safe).
+            const arr = customJS.SectionExplorer.pagesUnder(docsRoot);
             return customJS.SectionExplorer.sectionTargets(arr, {
               root: docsRoot, sectionType: "section-hub", rootLabel: "Docs (root)",
               labelOf: (p) => this._stripLink(p.section) || (p.title ? this._stripLink(p.title) : "") || "",
@@ -292,8 +292,8 @@ class SectionHub {
             : (rel.indexOf(docsRoot + "/") === 0 ? rel.slice((docsRoot + "/").length).split("/").filter(Boolean).length : 99);
           let hasChildren = false;
           try {
-            const raw = dv.pages(`"${section.folder}"`);
-            const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+            // dv-independent (dispatch-time): metadataCache, mobile-safe.
+            const arr = customJS.SectionExplorer.pagesUnder(section.folder);
             hasChildren = customJS.SectionExplorer.childSectionFolders(arr, section.folder, "section-hub").length > 0;
           } catch (_e) { hasChildren = false; }
           const resultDepth = destDepth + 1;
@@ -305,8 +305,7 @@ class SectionHub {
       // delete-confirm "N empty sub-section(s)" wording).
       emptySubsectionCount: (section) => {
         try {
-          const raw = dv.pages(`"${section.folder}"`);
-          const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+          const arr = customJS.SectionExplorer.pagesUnder(section.folder);
           return customJS.SectionExplorer.childSectionFolders(arr, section.folder, "section-hub").length;
         } catch (_e) { return 0; }
       },
@@ -363,8 +362,7 @@ class SectionHub {
       canDelete: (section) => {
         if (!section || !section.hubPath) return false;
         try {
-          const raw = dv.pages(`"${section.folder}"`);
-          const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+          const arr = customJS.SectionExplorer.pagesUnder(section.folder);
           return customJS.SectionExplorer.subtreeDocCount(arr, section.folder, "doc-note") === 0;
         } catch (_e) { return false; }
       },
@@ -428,9 +426,10 @@ class SectionHub {
   // cascade. Never-throw (defensive against a cold-load / query error).
   _childHubsForRename(dv, section) {
     try {
-      const rows = dv.pages(`"${section.folder}"`).where((p) => p.type === "section-hub" && p.depth === 2);
-      const arr = rows.array ? rows.array() : Array.from(rows);
-      return arr.map((p) => ({ path: p.file.path }));
+      // dv-independent (called from rewriteOnSectionMove at dispatch time, where a
+      // torn-down mobile dv would throw): enumerate via the metadataCache.
+      const arr = customJS.SectionExplorer.pagesUnder(section.folder);
+      return arr.filter((p) => p.type === "section-hub" && Number(p.depth) === 2).map((p) => ({ path: p.file.path }));
     } catch (_e) { return []; }
   }
 

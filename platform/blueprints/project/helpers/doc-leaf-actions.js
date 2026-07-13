@@ -101,11 +101,10 @@ class DocLeafActions {
       const projectDir = this.projectDirFor(currentPath);
       if (!projectDir) return false;
       const docsRoot = projectDir + "/docs";
+      // dv-independent enumeration (mobile-safe): the captured dv is torn down by
+      // click time, so query the metadataCache directly.
       let arr = [];
-      try {
-        const raw = dv.pages('"' + docsRoot + '"');
-        arr = raw && raw.array ? raw.array() : Array.from(raw || []);
-      } catch (_e) { arr = []; }
+      try { arr = customJS.SectionExplorer.pagesUnder(docsRoot); } catch (_e) { arr = []; }
       const SH = customJS && customJS.SectionHub;
       const stripLink = (SH && typeof SH._stripLink === "function") ? (v) => SH._stripLink(v) : (v) => (typeof v === "string" ? v : "");
       const targets = SE.sectionTargets(arr, {

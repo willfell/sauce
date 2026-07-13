@@ -57,6 +57,24 @@ function makePage(type, filePath, mtimeTs, extra) {
   return Object.assign({ type, title: name, file: { path: filePath, folder, name, mtime: { ts: mtimeTs } } }, extra || {});
 }
 
+// Install a global.app whose vault.getMarkdownFiles + metadataCache.getFileCache
+// mirror the given page fixtures — so SectionExplorer.pagesUnder() (the mobile-safe,
+// dv-independent enumeration used at dispatch time) resolves the same data the old
+// dv.pages stubs fed. Returns the previous global.app so callers can restore it.
+function installApp(pages) {
+  const prev = global.app;
+  global.app = {
+    vault: { getMarkdownFiles: () => pages.map((p) => ({ path: p.file.path, name: p.file.path.slice(p.file.path.lastIndexOf('/') + 1) })) },
+    metadataCache: {
+      getFileCache: (f) => {
+        const p = pages.find((pp) => pp.file.path === (f && f.path));
+        return p ? { frontmatter: { type: p.type, title: p.title, section: p.section, sub_section: p.sub_section, depth: p.depth, links: p.links } } : { frontmatter: {} };
+      },
+    },
+  };
+  return prev;
+}
+
 const pages = [
   makePage('wiki-section', 'spice/wiki/a/A Hub.md',        1000),
   makePage('wiki-page',    'spice/wiki/a/Page-A1.md',      3000),
@@ -728,6 +746,10 @@ const pages = [
     page: () => null,
   };
 
+  // Dispatch-time enumeration/gates now read the metadataCache (mobile-safe), not
+  // dv.pages — install a matching global.app for the subtree.
+  const _prevApp = installApp(subtree);
+
   const TreeCls = new Function('customJS', `${treeSrc}\nreturn WikiTree;`)({ SectionExplorer: SE });
   const tree = new TreeCls();
   const cur = dvStub.current();
@@ -773,6 +795,8 @@ const pages = [
   // W21i — canDelete false without a hubPath (never delete a phantom).
   ok('W21i canDelete false when section has no hubPath',
      cfg.canDelete({ folder: 'spice/wiki/cooking/sauces' }) === false);
+
+  global.app = _prevApp;
 }
 
 // ---------------------------------------------------------------------------
