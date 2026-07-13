@@ -475,15 +475,15 @@ function allDescendants(el) {
     }),
   });
 
-  // PCB-DISPATCH-11 — select-docs → SectionExplorer.enterSelectMode(dv).
+  // PCB-DISPATCH-11 — select-docs → SectionExplorer.openSelectDocsPicker(dv, adapter, section).
   {
     const calls = [];
     const cjs = sectionHubStub();
-    cjs.SectionExplorer.enterSelectMode = (d) => calls.push({ d });
+    cjs.SectionExplorer.openSelectDocsPicker = (d, adapter, section) => calls.push({ d: d === undefined ? false : !!d, section: !!section });
     const dv = sectionHubDv();
     runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'select-docs'));
-    ok('PCB-DISPATCH-11 select-docs calls SectionExplorer.enterSelectMode once with dv',
-      calls.length === 1 && calls[0].d === dv);
+    ok('PCB-DISPATCH-11 select-docs calls SectionExplorer.openSelectDocsPicker once with dv+section',
+      calls.length === 1 && calls[0].d === true && calls[0].section === true);
   }
 
   // PCB-DISPATCH-12 — move-section → SectionExplorer._openMovePickerForSection(dv, adapter, section).

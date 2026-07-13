@@ -140,11 +140,13 @@ class WikiChromeBar {
           } catch (_e) { /* never-throw */ }
           return;
         }
-        // Bulk in-place select mode (hub + section).
+        // Bulk-select docs to move (modal picker; enumeration is
+        // mechanism-owned + mobile-safe). Hub + section surfaces.
         if (id === "select-docs") {
           try {
-            if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer.enterSelectMode === "function") {
-              customJS.SectionExplorer.enterSelectMode(dv);
+            const a = this._wikiAdapterAndSection(dv);
+            if (a && customJS.SectionExplorer && typeof customJS.SectionExplorer.openSelectDocsPicker === "function") {
+              customJS.SectionExplorer.openSelectDocsPicker(dv, a.adapter, a.section);
             }
           } catch (_e) { /* never-throw */ }
           return;

@@ -866,8 +866,8 @@ class SectionExplorer {
 
   // ── Select docs (modal picker) ────────────────────────────────────────────
   // Bulk-select the docs directly under a surface and move the checked set.
-  // Replaces the old in-place pane flip (enterSelectMode), which mutated a pane
-  // owned by a DIFFERENT dataviewjs block than the chrome bar dispatching the
+  // Replaces the old in-place pane flip (Task F select mode), which mutated a
+  // pane owned by a DIFFERENT dataviewjs block than the chrome bar dispatching the
   // click, and so silently no-op'd. Enumeration is dv-independent (pagesUnder →
   // metadataCache), so it is mobile-safe at dispatch time.
   openSelectDocsPicker(dv, adapter, section) {

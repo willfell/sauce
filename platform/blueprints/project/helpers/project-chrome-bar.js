@@ -538,9 +538,10 @@ class ProjectChromeBar {
           return;
         }
         case "select-docs": {
-          // In-place bulk-select on the section hub's doc pane (shared mechanism).
-          const SE = (typeof customJS !== "undefined") && customJS.SectionExplorer;
-          if (SE && typeof SE.enterSelectMode === "function") { SE.enterSelectMode(dv); return; }
+          // Bulk-select docs to move via the shared modal picker.
+          const a = this._projAdapterAndSection(dv);
+          if (!a) { missing("SectionExplorer"); return; }
+          if (typeof a.SE.openSelectDocsPicker === "function") { a.SE.openSelectDocsPicker(dv, a.adapter, a.section); return; }
           missing("SectionExplorer");
           return;
         }
