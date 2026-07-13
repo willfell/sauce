@@ -545,6 +545,8 @@ module.exports = async function (tp) {
     // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
     // reaches them (see note-chrome.md §6). Separate heal for that surface.
     await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+    await applyStickyHubTitleHeal(tp, installedNow.history, git);
+    await applyJournalHubTitleHeal(tp, installedNow.history, git);
 
     // 6a4. task-entity — convert the MOST-RECENT daily's open `- [ ]` lines into
     // note-per-task files under spice/tasks/ and swap the legacy capture/carryover
@@ -7376,6 +7378,70 @@ async function applyMeetingsHubChromeBarHeal(tp, history, git) {
   history?.push({ event: "info", step: "meetings_hub_chrome_bar_heal", name: "vault",
     reason: `healed ${healed}; ${warned} warning(s)`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// _stripHubH1 — pure helper: given a hub note body and its display label
+// (e.g. "Sticky Notes"), remove a single leading `# <label>` line and collapse
+// resulting triple-plus newlines to double. Returns the input unchanged when
+// no such line is present. Idempotent.
+function _stripHubH1(body, label) {
+  if (typeof body !== "string" || typeof label !== "string" || label.length === 0) return body;
+  const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^# ${esc}\\s*\\n?`, "m");
+  let out = body.replace(re, "");
+  if (out === body) return body;
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
+}
+
+async function applyStickyHubTitleHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const fpath = "spice/sticky-notes/Sticky.md";
+  if (!(await adapter.exists(fpath))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    const before = await adapter.read(fpath);
+    if (!/^type:\s*sticky-hub\s*$/m.test(before)) return;
+    const after = _stripHubH1(before, "Sticky Notes");
+    if (after === before) return;
+    const backupPath = `.sauce-backup/${ts}/${fpath}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) {}
+    try { await adapter.write(backupPath, before); } catch (_e) {}
+    await adapter.write(fpath, after);
+    history?.push({ event: "info", step: "sticky_hub_title_heal", target: fpath, action: "healed",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "sticky_hub_title_heal",
+      reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+async function applyJournalHubTitleHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const fpath = "spice/journal/Journal.md";
+  if (!(await adapter.exists(fpath))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    const before = await adapter.read(fpath);
+    if (!/^type:\s*journal-hub\s*$/m.test(before)) return;
+    const after = _stripHubH1(before, "Journal");
+    if (after === before) return;
+    const backupPath = `.sauce-backup/${ts}/${fpath}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) {}
+    try { await adapter.write(backupPath, before); } catch (_e) {}
+    await adapter.write(fpath, after);
+    history?.push({ event: "info", step: "journal_hub_title_heal", target: fpath, action: "healed",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "journal_hub_title_heal",
+      reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
 }
 
 // _resolveProjectDisplayName — given a project dir's markdown files (paths) +
@@ -21550,6 +21616,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
     module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
+    module.exports.applyStickyHubTitleHeal = applyStickyHubTitleHeal;
+    module.exports.applyJournalHubTitleHeal = applyJournalHubTitleHeal;
+    module.exports._stripHubH1 = _stripHubH1;
     module.exports._stripMeetingsHubEntityCreateBlock = _stripMeetingsHubEntityCreateBlock;
     module.exports._stripEntityCreateMarkerBlock = _stripEntityCreateMarkerBlock;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
