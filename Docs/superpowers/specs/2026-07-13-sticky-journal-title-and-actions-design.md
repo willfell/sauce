@@ -93,7 +93,7 @@ This produces the identical `.se-note-links` strip (link cards + `＋ Add link` 
 
 Only invoked on `sticky-note` context (guarded by the same detect that gates `_maybeRenderBanner` — banner already skips hub/day contexts).
 
-Dependency: `sticky-notes` manifest gains `{name: "section-explorer", range: ">=X.Y.Z"}` (current workshop version).
+Dependency: `sticky-notes` manifest gains `{name: "section-explorer", range: ">=0.5.4"}`.
 
 ### §S3 — Sticky ⋯ menu
 
