@@ -725,6 +725,46 @@ class TaskNoteView {
                 } catch (_e) { /* SUBTASKS section best-effort — never break the card */ }
             }
 
+            // ----- Full-width "Mark done" button (OPEN tasks only) -----
+            if (status === 'open') {
+                drawDivider();
+                const doneBtn = card.createEl('button', { text: 'Mark done' });
+                doneBtn.style.cssText = [
+                    'width:100%', 'box-sizing:border-box', 'min-height:38px',
+                    'padding:9px 14px', 'border-radius:var(--radius-s, 4px)',
+                    'border:1px solid var(--color-green, #4c9a5a)',
+                    'background:var(--color-green, #4c9a5a)',
+                    'color:var(--text-on-accent, #fff)', 'cursor:pointer',
+                    'font-size:0.95em', 'font-weight:600',
+                ].join(';') + ';';
+                doneBtn.addEventListener('mouseenter', () => {
+                    try { doneBtn.style.opacity = '0.85'; } catch (_e) {}
+                });
+                doneBtn.addEventListener('mouseleave', () => {
+                    try { doneBtn.style.opacity = '1'; } catch (_e) {}
+                });
+                doneBtn.addEventListener('click', async () => {
+                    try {
+                        const TD = window.customJS && window.customJS.TaskDialog;
+                        if (TD && typeof TD.markDone === 'function' && filePath) {
+                            doneBtn.disabled = true;
+                            doneBtn.textContent = 'Marking done…';
+                            await TD.markDone(filePath);
+                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                            try {
+                                if (window.app && window.app.commands && typeof window.app.commands.executeCommandById === 'function') {
+                                    window.app.commands.executeCommandById('dataview:dataview-force-refresh-views');
+                                }
+                            } catch (_e) {}
+                        }
+                    } catch (e) {
+                        doneBtn.disabled = false;
+                        doneBtn.textContent = 'Mark done';
+                        try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                    }
+                });
+            }
+
             // ----- Full-width primary "Edit task" button -----
             drawDivider();
             const editBtn = card.createEl('button', { text: 'Edit task' });

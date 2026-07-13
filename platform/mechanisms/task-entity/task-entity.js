@@ -275,13 +275,9 @@ class TaskEntity {
             'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });\n' +
             '```\n' +
             '\n' +
-            '---\n' +
-            '\n' +
             '```dataviewjs\n' +
             'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n' +
             '```\n' +
-            '\n' +
-            '---\n' +
             '\n' +
             '<!-- TASK_NOTES -->\n';
     }

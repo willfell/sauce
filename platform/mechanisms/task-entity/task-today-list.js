@@ -74,47 +74,38 @@ class TaskTodayList {
      * input (→ empty bands); never throws.
      */
     static buildBands(parsedTasks, todayStr) {
+        const PRIO_RANK = { highest: 4, high: 3, medium: 2, low: 1 };
+        const prioOf = (t) => PRIO_RANK[String(t.priority || '').toLowerCase()] || 0;
+
         const today = [];
         const overdue = [];
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
-            // Tasks that belong to another daily section are EXCLUDED here so they
-            // don't show TWICE (once in Today/Overdue, once below). A project task
-            // renders under its own "Project Tasks" section (ToDoDailyProjectGroups);
-            // a meeting-sourced task renders under "Meeting Tasks"
-            // (ToDoDailyUnassignedMeetings) — both of which surface ALL open matching
-            // task-notes, so nothing vanishes. Today/Overdue bands are therefore the
-            // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
-            if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
-            if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
-            if (t.parent_task && String(t.parent_task).trim() !== '') continue;   // shown in its parent's Subtasks section
+            if (t.project_slug && String(t.project_slug).trim() !== '') continue;
+            if (t.source === 'meeting') continue;
+            if (t.parent_task && String(t.parent_task).trim() !== '') continue;
+            if (t.trip_slug && String(t.trip_slug).trim() !== '') continue;
             const due = t.due;
-            if (!due) continue;
+            if (!due) { today.push(t); continue; }
             if (due === todayStr) today.push(t);
             else if (due < todayStr) overdue.push(t);
-            // due > todayStr (future) → excluded from both bands.
         }
-        // Overdue: oldest/most-overdue due date first — the task that's been
-        // sitting longest surfaces at the top. Tie-broken by title (case-insensitive).
-        overdue.sort((a, b) => {
-            const as = a.due || '';
-            const bs = b.due || '';
-            if (as !== bs) return as < bs ? -1 : 1;
-            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
-        });
-        // Today: earliest due deadline first; tasks with no due date sort LAST
-        // (empty string treated as "after" any real date). Tie-broken by title.
-        today.sort((a, b) => {
-            const ad = a.due || '';
-            const bd = b.due || '';
-            if (ad !== bd) {
-                if (ad === '') return 1;
-                if (bd === '') return -1;
-                return ad < bd ? -1 : 1;
-            }
-            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
-        });
+        const sortBand = (arr) => {
+            arr.sort((a, b) => {
+                const pa = prioOf(a), pb = prioOf(b);
+                if (pa !== pb) return pb - pa;
+                const ad = a.due || '', bd = b.due || '';
+                if (ad !== bd) {
+                    if (ad === '') return 1;
+                    if (bd === '') return -1;
+                    return ad < bd ? -1 : 1;
+                }
+                return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
+            });
+        };
+        sortBand(overdue);
+        sortBand(today);
         return { today: today, overdue: overdue };
     }
 
@@ -281,7 +272,7 @@ class TaskTodayList {
         // readable and forces the cluster to wrap instead. align-items:flex-start
         // pins the cluster to the top of the first title line while a long title
         // wraps within its own column.
-        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border-hover); width: 100%; box-sizing: border-box;';
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
@@ -435,10 +426,8 @@ class TaskTodayList {
         // guarded, so a cold-load just no-ops the tap. Never throws.
         const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const ICON = {
-            edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>'),
+            wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
             trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
-            open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
-            dots: svg('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
         };
         const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions' });
         actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
@@ -480,35 +469,10 @@ class TaskTodayList {
             }
         };
 
-        // Decide at RENDER time which affordance to draw: the single `⋯` popover
-        // menu when MenuPopover is available, else the legacy pencil + trash icons.
-        // This keeps the cold-load path on the exact prior behavior (nothing
-        // regresses when customJS isn't ready yet).
-        const MP = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || null;
-        const hasPopover = !!(MP && typeof MP.open === 'function');
-
-        if (hasPopover) {
-            // Single `⋯` button → anchored MenuPopover (Open note / Edit / Delete).
-            const dotsBtn = mkActionBtn('sauce-task-action-more', 'More actions', ICON.dots, false);
-            dotsBtn.addEventListener('click', (ev) => {
-                try { ev.stopPropagation(); } catch (_e) {}
-                const entries = [
-                    { label: 'Open note', icon: ICON.open, onSelect: () => openNote() },
-                    { label: 'Edit', icon: ICON.edit, onSelect: () => doEdit() },
-                    { label: 'Delete', icon: ICON.trash, danger: true, onSelect: () => { doDelete(); } },
-                ];
-                try {
-                    const popover = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || MP;
-                    if (popover && typeof popover.open === 'function') popover.open(entries, { anchor: dotsBtn });
-                } catch (_e) { /* never throw */ }
-            });
-        } else {
-            // LEGACY fallback — two inline icons (pencil = edit, trash = delete).
-            const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.edit, false);
-            editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
-            const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
-            delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
-        }
+        const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
+        editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
+        const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
+        delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
 
         return row;
     }
