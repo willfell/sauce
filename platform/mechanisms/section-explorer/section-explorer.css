@@ -372,30 +372,6 @@
   user-select: none;
 }
 
-/* Sticky bulk-select bar above the doc grid; live "Move N →" button. */
-.se-select-bar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 8px 0;
-  margin-bottom: 4px;
-  background: var(--background-primary);
-}
-.se-select-move-btn {
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: none;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  font-weight: 600;
-  font-size: 0.9em;
-  cursor: pointer;
-}
-.se-select-move-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
 /* Selectable doc cards gain a leading checkbox; keep the badge + body aligned. */
 .se-doc-card.is-selectable { cursor: default; }
 .se-doc-card.is-selectable:hover { transform: none; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04); }
