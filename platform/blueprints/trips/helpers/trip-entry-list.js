@@ -146,6 +146,37 @@ class TripEntryList {
     ];
   }
 
+  // ── row title / subtitle + packing buckets (pure) ────────────────────────
+  // Title for a generic row. spec.title(fn) wins; stay -> name; else -> item||name.
+  static _rowTitle(spec, entry) {
+    if (spec && typeof spec.title === "function") return spec.title(entry) || "";
+    if (spec && spec.kind === "stay") return (entry && entry.name) || "";
+    return (entry && (entry.item || entry.name)) || "";
+  }
+  // Subtitle for a generic row. spec.subtitle(fn) wins; stay -> check-in → check-out
+  // date range; else "".
+  static _rowSubtitle(spec, entry) {
+    if (spec && typeof spec.subtitle === "function") return spec.subtitle(entry) || "";
+    if (spec && spec.kind === "stay") {
+      const ci = TripEntryList._fmtDate(entry && entry.check_in), co = TripEntryList._fmtDate(entry && entry.check_out);
+      return (ci || co) ? (ci + " → " + co) : "";
+    }
+    return "";
+  }
+  // Bucket packing entries by category (first-seen order). "Add category" stores
+  // {category} with no item — those seed the bucket header but are NOT rows.
+  // Only entries with an `item` become rows (carrying their ABSOLUTE index).
+  static _packingBuckets(items) {
+    const order = [];
+    const map = new Map();
+    (Array.isArray(items) ? items : []).forEach((entry, absIndex) => {
+      const cat = (entry && entry.category) || "Uncategorized";
+      if (!map.has(cat)) { map.set(cat, []); order.push(cat); }
+      if (entry && entry.item) map.get(cat).push({ entry, absIndex });
+    });
+    return order.map((cat) => ({ category: cat, rows: map.get(cat) }));
+  }
+
   // ── flight direction grouping ─────────────────────────────────────────────
   // Bucket entries into Outbound / Return / Other (blank/unknown -> Other),
   // dropping empty groups, preserving input order within each group.
@@ -335,16 +366,11 @@ class TripEntryList {
     } else if (spec.group) {
       // Grouped: bucket entries by category, preserving each row's ABSOLUTE
       // index in `items` so Edit/Delete/toggle target the right element.
-      const groups = new Map();
-      items.forEach((entry, absIndex) => {
-        const cat = (entry && entry.category) || "Uncategorized";
-        if (!groups.has(cat)) groups.set(cat, []);
-        groups.get(cat).push({ entry, absIndex });
-      });
-      for (const [cat, members] of groups) {
-        const gh = c.createEl("div", { text: cat });
+      // Item-less "Add category" placeholders seed a header but are not rows.
+      for (const bucket of TripEntryList._packingBuckets(items)) {
+        const gh = c.createEl("div", { text: bucket.category });
         if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
-        for (const m of members) this._row(c, dv, spec, items, m.entry, m.absIndex);
+        for (const r of bucket.rows) this._row(c, dv, spec, items, r.entry, r.absIndex);
       }
     } else {
       items.forEach((entry, absIndex) => this._row(c, dv, spec, items, entry, absIndex));
@@ -484,9 +510,9 @@ class TripEntryList {
     }
     const label = rowEl.createEl("div");
     label.style.cssText = "flex:1; min-width:0;";
-    const title = label.createEl("div", { text: spec.title ? spec.title(entry) : "" });
+    const title = label.createEl("div", { text: TripEntryList._rowTitle(spec, entry) });
     title.style.cssText = "font-weight:600; font-size:0.9em; overflow:hidden; text-overflow:ellipsis;";
-    const subText = spec.subtitle ? spec.subtitle(entry) : "";
+    const subText = TripEntryList._rowSubtitle(spec, entry);
     if (subText) {
       const sub = label.createEl("div", { text: subText });
       sub.style.cssText = "font-size:0.76em; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;";
