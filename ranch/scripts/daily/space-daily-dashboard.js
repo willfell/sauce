@@ -238,12 +238,30 @@ class SpaceDailyDashboard {
       if (!r) return [];
       // DataArray path (real Dataview + the harness chain stub): .where(...).array().
       // Plain-array fallback so any bare-array dv-stub still exercises the filter.
-      let trips;
+      let all;
       if (typeof r.where === "function") {
-        trips = r.where(p => p && p.type === "trip").array();
+        all = r.array();
       } else {
-        const arr = Array.isArray(r) ? r : Array.from(r);
-        trips = arr.filter(p => p && p.type === "trip");
+        all = Array.isArray(r) ? r : Array.from(r);
+      }
+      const trips = all.filter(p => p && p.type === "trip");
+      // Build slug → { packed, total } from packing-list trip-sections. Only
+      // entries carrying a truthy `item` count toward total (placeholder /
+      // category-only rows are ignored); `checked` counts toward packed.
+      const slugByPacking = {};
+      for (const p of all) {
+        if (!p || p.type !== "trip-section" || p.section_kind !== "packing-list") continue;
+        const slug = p.trip_slug;
+        if (!slug) continue;
+        let packed = 0, total = 0;
+        const items = Array.isArray(p.packing_items) ? p.packing_items : [];
+        for (const it of items) {
+          if (it && it.item) {
+            total += 1;
+            if (it.checked) packed += 1;
+          }
+        }
+        slugByPacking[slug] = { packed, total };
       }
       const out = [];
       for (const p of trips) {
@@ -251,10 +269,22 @@ class SpaceDailyDashboard {
         if (startMs == null) continue;
         const daysAway = Math.round((startMs - todayMs) / 86400000);
         if (daysAway < 0 || daysAway > horizonDays) continue;
+        const path = p && p.file && p.file.path;
+        // slug = the segment after "trips" in spice/trips/<slug>/...
+        let slug = "";
+        if (typeof path === "string") {
+          const parts = path.split("/");
+          const ti = parts.indexOf("trips");
+          if (ti >= 0 && parts[ti + 1]) slug = parts[ti + 1];
+        }
+        const pack = slugByPacking[slug] || { packed: 0, total: 0 };
         out.push({
           name: (p && p.name) || (p && p.file && p.file.name) || "Trip",
-          path: p && p.file && p.file.path,
+          path,
           daysAway,
+          slug,
+          packed: pack.packed,
+          packTotal: pack.total,
         });
       }
       out.sort((a, b) => a.daysAway - b.daysAway);
@@ -615,21 +645,30 @@ class SpaceDailyDashboard {
           sectionState,
         });
 
-        const tripsList = tripsBody.createEl("ul");
-        tripsList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-
+        // Each trip renders as a card: a GREEN day pill + the trip name
+        // (no em dash) + a muted packing-progress line when packTotal > 0.
         for (const trip of trips) {
-          const li = tripsList.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
-          // Humanize the countdown: today / in 1 day / in N days.
-          const when = trip.daysAway === 0
-            ? "today"
-            : (trip.daysAway === 1 ? "in 1 day" : `in ${trip.daysAway} days`);
-          const label = li.createEl("span");
-          label.textContent = `${trip.name || "Trip"} — ${when}`;
-          if (trip.path) {
-            li.onclick = () => { app.workspace.openLinkText(trip.path, ""); };
+          const card = tripsBody.createEl("div");
+          card.style.cssText = "display:flex; align-items:center; gap:10px; padding:8px 12px; margin:6px 0; border:1px solid var(--background-modifier-border); border-radius:8px; background:var(--background-primary); cursor:pointer;";
+
+          const pill = card.createEl("span");
+          pill.textContent = trip.daysAway === 0
+            ? "Today"
+            : (trip.daysAway === 1 ? "1 day" : `${trip.daysAway} days`);
+          pill.style.cssText = "flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:3px 9px; border-radius:999px; background:color-mix(in srgb, var(--color-green) 22%, transparent); color:var(--color-green); font-weight:700; font-size:0.8em; white-space:nowrap;";
+
+          const col = card.createEl("div");
+          col.style.cssText = "flex:1; min-width:0;";
+          const nameEl = col.createEl("div");
+          nameEl.textContent = trip.name || "Trip";
+          nameEl.style.cssText = "font-weight:700; font-size:0.92em; word-break:break-word; overflow-wrap:anywhere;";
+          if (trip.packTotal > 0) {
+            const meta = col.createEl("div");
+            meta.textContent = `${trip.packed}/${trip.packTotal} packed`;
+            meta.style.cssText = "font-size:0.76em; color:var(--text-muted); margin-top:2px;";
           }
+
+          card.onclick = () => { if (trip.path) app.workspace.openLinkText(trip.path, ""); };
         }
       }
     } catch (_e) { /* trips panel is best-effort; never break the dashboard */ }

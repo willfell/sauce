@@ -289,6 +289,27 @@ function loadActivityFeed(windowShim) {
     assert(rows[1].daysAway === 6, 'expected second daysAway 6, got ' + rows[1].daysAway);
   });
 
+  await ok('SDD-TRIPS-4 selectUpcomingTrips computes per-trip packing progress', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dvStub = tripsDv([
+      { type: 'trip', name: 'Destin Florida', start_date: '2026-07-16',
+        file: { name: 'Destin Florida', path: 'spice/trips/destin-florida/Destin Florida.md' } },
+      { type: 'trip-section', section_kind: 'packing-list', trip_slug: 'destin-florida',
+        packing_items: [ { item: 'Socks', checked: true }, { item: 'Underwear', checked: false }, { category: 'Clothing' } ],
+        file: { name: 'Destin Florida — Packing', path: 'spice/trips/destin-florida/Destin Florida — Packing.md' } },
+      { type: 'trip', name: 'No Pack', start_date: '2026-07-14',
+        file: { name: 'No Pack', path: 'spice/trips/no-pack/No Pack.md' } },
+    ]);
+    const rows = Dash.selectUpcomingTrips(dvStub, '2026-07-12', 14);
+    const r = rows.find(x => x.name === 'Destin Florida');
+    assert(r, 'expected Destin Florida row');
+    assert(r.daysAway === 4, 'expected daysAway 4, got ' + r.daysAway);
+    assert(r.packTotal === 2 && r.packed === 1, 'expected packTotal 2/packed 1, got ' + r.packTotal + '/' + r.packed);
+    assert(typeof r.slug === 'string' && r.slug === 'destin-florida', 'expected slug destin-florida, got ' + r.slug);
+    const np = rows.find(x => x.name === 'No Pack');
+    assert(np && np.packTotal === 0, 'expected No Pack packTotal 0, got ' + (np && np.packTotal));
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });
