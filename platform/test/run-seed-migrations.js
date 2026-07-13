@@ -1238,6 +1238,18 @@ withTempVault((vault) => {
             "HC-TRIPS-SEED-1b spice/trips/summer-trip/Trip Atlas.md no longer exists",
             !helpers.fileExists(vault, "spice/trips/summer-trip/Trip Atlas.md")
         );
+        {
+            let atlasFm = {};
+            try {
+                const atlasNote = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip.md");
+                atlasFm = helpers.parseFrontmatter(atlasNote).frontmatter;
+            } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-1c atlas trip_slug: summer-trip",
+                atlasFm.trip_slug === "summer-trip",
+                `actual trip_slug=${atlasFm.trip_slug}`
+            );
+        }
 
         // HC-TRIPS-SEED-2: Flights section renamed + canonical frontmatter.
         ok(

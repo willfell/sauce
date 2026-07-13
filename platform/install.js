@@ -12773,6 +12773,7 @@ async function applyTripsConformanceHeal(tp, history, git) {
 
       // Atlas transforms.
       let newAtlasBody = atlasBody;
+      newAtlasBody = _tripSetFmKey(newAtlasBody, "trip_slug", `trip_slug: ${slug}`);
       newAtlasBody = _tripStripLegacyChrome(newAtlasBody);
       // Only convert `## Mentions` when BOTH the heading and a BacklinkPanel exist.
       if (/^##\s+Mentions\s*$/m.test(newAtlasBody) && /BacklinkPanel/.test(newAtlasBody)) {
