@@ -1911,6 +1911,49 @@ failures += !run("enterSelectMode: doc cards gain checkboxes; checking 2 → 'Mo
   delete global.Notice;
 });
 
+failures += !run("enterSelectMode: recent-pane (0 docs, ≥1 section) stashes the seam so select-docs works", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const movePickers = [];
+  const applied = [];
+  se.openMovePicker = (opts) => { movePickers.push(opts); return { __seVisibleFolders: () => [] }; };
+  se.applyDocMove = (dv, file, folder, adapter) => { applied.push({ path: file && file.path, folder }); };
+
+  global.customJS = {};
+  global.Notice = function () {};
+  const { container, els } = makeQueryableDomStub();
+  const dv = { container, current: () => ({ file: { path: "spice/wiki/hub/Hub.md" } }) };
+  const recentPages = [
+    { title: "R1", file: { name: "R1", path: "spice/wiki/sub/R1.md", mtime: { ts: 10 } } },
+    { title: "R2", file: { name: "R2", path: "spice/wiki/sub/R2.md", mtime: { ts: 20 } } },
+  ];
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki/hub" }),
+    listSections: () => [{ folder: "spice/wiki/hub/child", label: "Child", pageCount: 3, hubPath: "spice/wiki/hub/child/Child.md" }],
+    listPages: () => [],
+    listRecent: () => recentPages,
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+  });
+  adapter.move = { enumerateSectionTargets: () => [{ folder: "spice/wiki/food", label: "Food", depth: 1 }] };
+  se.render(dv, adapter);
+
+  const pane = els.find((e) => e.className === "se-page-pane");
+  assert.ok(pane, "expected a page pane even in recent mode");
+  assert.strictEqual(typeof pane.__seEnterSelectMode, "function", "recent-pane must stash the select-mode seam");
+
+  pane.__seEnterSelectMode();
+  const checks = els.filter((e) => e.tag === "input");
+  assert.strictEqual(checks.length, 2, "one checkbox per recent card");
+  checks[0].checked = true; checks[0].onchange();
+  const bar = els.find((e) => e.className === "se-select-bar");
+  assert.ok(bar, "expected the select bar");
+
+  delete global.customJS;
+  delete global.Notice;
+});
+
 failures += !run("enterSelectMode: checkbox click stops propagation so it doesn't open the note", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();

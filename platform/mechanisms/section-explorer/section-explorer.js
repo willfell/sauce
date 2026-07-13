@@ -236,7 +236,12 @@ class SectionExplorer {
   _renderRecentPane(dv, adapter, ctx, recent, pane) {
     this._renderLinksRow(adapter, ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: "Recently updated" });
-    this._renderDocCards(pane, adapter, recent);
+    const cards = (Array.isArray(recent) ? recent : Array.from(recent || [])).map((p) => this._docCardModel(p));
+    try {
+      pane.__seCtx = { dv, adapter, ctx, section: null, cards };
+      pane.__seEnterSelectMode = () => this._enterSelectModeOnPane(pane);
+    } catch (_e) { /* never-throw */ }
+    this._renderDocCards(pane, adapter, cards);
   }
 
   // Pinned-links chips row — shared by the normal page pane and recent mode.
@@ -275,9 +280,9 @@ class SectionExplorer {
   _docCardModel(p) {
     return {
       title: (p && p.title) || (p && p.file && p.file.name) || "",
-      path: (p && p.file && p.file.path) || "",
-      mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || 0,
-      where: null,
+      path: (p && p.file && p.file.path) || (p && p.path) || "",
+      mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || (p && p.mtime) || 0,
+      where: (p && p.where) || null,
     };
   }
 
