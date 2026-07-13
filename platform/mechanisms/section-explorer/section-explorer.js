@@ -121,6 +121,33 @@ class SectionExplorer {
     return [...out].sort((a, b) => a.localeCompare(b));
   }
 
+  // Mobile-robust page enumeration: read the metadata cache directly instead of a
+  // captured render-time dv.pages() (which throws / returns empty at dispatch time
+  // on mobile — the dataviewjs block that created `dv` is torn down by the time a
+  // ⋯-menu action fires). Returns Dataview-page-like objects for every markdown
+  // file under `root/`, carrying frontmatter type/title/section/depth + file path.
+  static pagesUnder(root) {
+    const out = [];
+    try {
+      if (typeof app === "undefined" || !app.vault || !app.metadataCache) return out;
+      const files = (typeof app.vault.getMarkdownFiles === "function") ? app.vault.getMarkdownFiles() : [];
+      const prefix = String(root == null ? "" : root).replace(/\/+$/, "") + "/";
+      for (const f of files) {
+        if (!f || !f.path || String(f.path).indexOf(prefix) !== 0) continue;
+        let fm = {};
+        try { const c = app.metadataCache.getFileCache(f); fm = (c && c.frontmatter) || {}; } catch (_e) { fm = {}; }
+        const path = String(f.path);
+        const folder = path.slice(0, path.lastIndexOf("/"));
+        out.push({
+          type: fm.type, title: fm.title, section: fm.section, sub_section: fm.sub_section,
+          depth: fm.depth, links: fm.links,
+          file: { path, folder, name: f.name || path.slice(path.lastIndexOf("/") + 1) },
+        });
+      }
+    } catch (_e) { /* never-throw */ }
+    return out;
+  }
+
   // ── makeAdapter — build a render(dv, adapter)-ready adapter from a per-
   // blueprint config. config = {
   //   resolveContext(dv) -> ctx|null,
@@ -841,8 +868,18 @@ class SectionExplorer {
   enterSelectMode(dv) {
     try {
       const container = (dv && dv.container) ? dv.container : dv;
-      if (!container || typeof container.querySelector !== "function") return;
-      const pane = container.querySelector(".se-page-pane");
+      // The ChromeBar that dispatches this renders in its OWN dataviewjs block,
+      // separate from the WikiTree/SectionHub block that renders the page pane —
+      // so the pane is NOT under dv.container. Search the shared note view (or the
+      // whole document) first, then fall back to the container.
+      let scope = null;
+      if (container && typeof container.closest === "function") {
+        scope = container.closest(".view-content") || container.closest(".workspace-leaf-content");
+      }
+      if (!scope && typeof document !== "undefined") scope = document;
+      let pane = null;
+      if (scope && typeof scope.querySelector === "function") pane = scope.querySelector(".se-page-pane");
+      if (!pane && container && typeof container.querySelector === "function") pane = container.querySelector(".se-page-pane");
       if (pane && typeof pane.__seEnterSelectMode === "function") pane.__seEnterSelectMode();
     } catch (_e) { /* never-throw */ }
   }

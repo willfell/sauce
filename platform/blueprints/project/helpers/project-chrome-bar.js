@@ -615,7 +615,11 @@ class ProjectChromeBar {
   _projAdapterAndSection(dv) {
     try {
       let cur = null;
-      try { cur = dv && typeof dv.current === "function" ? dv.current() : null; } catch (_e) { cur = null; }
+      try {
+        cur = (customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function")
+          ? customJS.RenderSafe.page(dv)
+          : (dv && typeof dv.current === "function" ? dv.current() : null);
+      } catch (_e) { cur = null; }
       if (!cur || !cur.file || cur.type !== "section-hub") return null;
       const SE = (typeof customJS !== "undefined") && customJS.SectionExplorer;
       const SH = (typeof customJS !== "undefined") && customJS.SectionHub;

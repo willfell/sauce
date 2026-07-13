@@ -52,7 +52,12 @@ class WikiChromeBar {
   // routes behave identically to the rail ⋯ menu.
   _wikiAdapterAndSection(dv) {
     try {
-      let cur = null; try { cur = dv && dv.current ? dv.current() : null; } catch (_e) { cur = null; }
+      let cur = null;
+      try {
+        cur = (customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function")
+          ? customJS.RenderSafe.page(dv)
+          : (dv && dv.current ? dv.current() : null);
+      } catch (_e) { cur = null; }
       if (!cur || !cur.file) return null;
       if (!customJS || !customJS.WikiTree || !customJS.SectionExplorer) return null;
       if (typeof customJS.WikiTree._buildConfig !== "function" || typeof customJS.SectionExplorer.makeAdapter !== "function") return null;
@@ -119,8 +124,9 @@ class WikiChromeBar {
             if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.openMovePicker !== "function") return;
             const file = (typeof app !== "undefined") ? app.workspace.getActiveFile() : null;
             if (!file || !file.path) return;
-            const raw = dv.pages('"spice/wiki"');
-            const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+            // dv-independent enumeration (mobile: the captured dv is torn down by
+            // click time, so dv.pages() throws / returns empty).
+            const arr = customJS.SectionExplorer.pagesUnder("spice/wiki");
             const targets = customJS.SectionExplorer.sectionTargets(arr, {
               root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)",
               labelOf: (p) => (p.title && String(p.title).trim()) || "",

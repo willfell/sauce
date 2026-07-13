@@ -38,6 +38,7 @@ const cfg = inst._config();
     WikiLeafActions: { _openMoveDialog: (dv, p) => calls.push({ legacyMove: p }) },
     SectionExplorer: {
       openMovePicker: (o) => calls.push({ move: o && o.currentFolder }),
+      pagesUnder: () => [],
       sectionTargets: () => [{ folder: 'spice/wiki', label: 'Wiki (root)', depth: 0 }],
       applyDocMove: () => {},
     },
@@ -100,6 +101,7 @@ const cfg = inst._config();
       _openDeleteConfirm: (dv, a, sec) => calls.push({ deleteSection: sec && sec.folder }),
       openMovePicker: (o) => calls.push({ openMovePicker: o && o.title }),
       applyDocMove: () => calls.push({ applyDocMove: true }),
+      pagesUnder: () => [],
       sectionTargets: () => [{ folder: 'spice/wiki', label: 'Wiki (root)', depth: 0 }],
     },
   };
