@@ -704,7 +704,16 @@ class TripEntryList {
           }
         });
       });
-      if (controls.length) setTimeout(() => controls[0].input.focus(), 0);
+      // Focus the first TEXT-like control (skip a leading <select>, e.g. the
+      // packing category picker) so add-item lands the cursor in the item box.
+      if (controls.length) {
+        const textTypes = ["text", "url", "number", "time", "date"];
+        const target = controls.find((cc) => {
+          const inp = cc.input;
+          return inp && inp.tagName === "INPUT" && textTypes.includes(inp.type);
+        }) || controls[0];
+        setTimeout(() => target.input.focus(), 0);
+      }
     } });
   }
 
