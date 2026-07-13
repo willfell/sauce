@@ -4,7 +4,7 @@
 
 **Goal:** Ship a single compact "at-a-glance" card at the top of every project note that replaces the ProjectStatusWidget + ProjectActivityPanel + ProjectOpenTasks + ProjectMeetingsPanel + ProjectLinksPanel stack with 5 clickable navigation tiles (Docs / Board / To-Do / Map / Meetings), a Recent-activity strip, and Links chips.
 
-**Architecture:** New `ProjectDashboard` customJS class in `platform/blueprints/project/helpers/project-dashboard.js`. Subsumes 4 retired panels; keeps `ProjectStatusWidget` (imports its `STATES` + `_writeStatus`). Template body simplifies from 6 dataviewjs blocks to 2 (ChromeBar + Dashboard). Install heal `applyProjectDashboardConformanceHeal` migrates existing project notes idempotently with `.bak` backups. No new mechanism — reuses `section-label`, `menu-popover`, `render-safe`, `cards`, and the icon set already vendored on `ProjectChromeBar.ICON`.
+**Architecture:** New `ProjectDashboard` customJS class in `platform/blueprints/project/helpers/project-dashboard.js`. Inlines the STATES + status-write logic (copied, not imported — the source helpers stay available for other callers). Template `Project.md` body simplifies from 6 dataviewjs blocks to 2 (ChromeBar + Dashboard). Install heal `applyProjectDashboardConformanceHeal` migrates existing project notes idempotently with `.bak` backups. **Rescope decision** — the retired-panel helper files (`project-status-widget.js`, `project-activity-panel.js`, `project-open-tasks.js`, `project-meetings-panel.js`, `project-links-panel.js`) STAY on disk and in `manifest.json` `customjs_classes` for backwards compat with the Links Hub template + existing test runners; only their DIRECT INVOCATION from `Template, Project.md` is swapped. Full retirement is a follow-up cycle. No new mechanism — reuses `section-label`, `menu-popover`, `render-safe`, `cards`, and the icon set already vendored on `ProjectChromeBar.ICON`.
 
 **Tech Stack:** JavaScript (customJS module pattern), Obsidian dataviewjs API, `app.metadataCache` / `app.vault.read` / `app.fileManager.processFrontMatter`, Node.js test harness (`run-project.js`), Playwright HTML visual harness.
 
@@ -140,11 +140,11 @@ Also drop: `ProjectActivityPanel` and `ProjectOpenTasks` — but these aren't in
 
 **Files:**
 - Create: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js` — add PROJDASH-* group
+- Modify: `platform/test/run-project-dashboard.js` — add PROJDASH-* group
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `platform/test/harness/run-project.js` (before the final `process.exit` line). First, find where other test groups are declared — the harness ends with `process.exit(fails === 0 ? 0 : 1)`. Insert BEFORE that line:
+Add to `platform/test/run-project-dashboard.js` (before the final `process.exit` line). First, find where other test groups are declared — the harness ends with `process.exit(fails === 0 ? 0 : 1)`. Insert BEFORE that line:
 
 ```javascript
 // ---- ProjectDashboard --------------------------------------------------------
@@ -165,7 +165,7 @@ require("../../blueprints/project/helpers/project-dashboard.js");
 
 - [ ] **Step 2: Verify test fails**
 
-Run: `node platform/test/harness/run-project.js`
+Run: `node platform/test/run-project-dashboard.js`
 Expected: FAIL with `ReferenceError: ProjectDashboard is not defined` or similar.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -192,13 +192,13 @@ Follow the exact export pattern used by neighboring helpers — grep any existin
 
 - [ ] **Step 4: Verify test passes**
 
-Run: `node platform/test/harness/run-project.js`
+Run: `node platform/test/run-project-dashboard.js`
 Expected: `PROJDASH-1 class instantiates without throwing … OK`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add platform/blueprints/project/helpers/project-dashboard.js platform/test/harness/run-project.js
+git add platform/blueprints/project/helpers/project-dashboard.js platform/test/run-project-dashboard.js
 git commit -m "feat(project): scaffold ProjectDashboard class with harness stub"
 ```
 
@@ -208,7 +208,7 @@ git commit -m "feat(project): scaffold ProjectDashboard class with harness stub"
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -230,7 +230,7 @@ Add to `run-project.js` PROJDASH block:
 
 - [ ] **Step 2: Verify failing**
 
-Run: `node platform/test/harness/run-project.js`
+Run: `node platform/test/run-project-dashboard.js`
 Expected: FAIL — `_projectMatches` undefined.
 
 - [ ] **Step 3: Implement**
@@ -265,7 +265,7 @@ git commit -am "feat(project): ProjectDashboard._projectMatches (extracted from 
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Add stub for `app.vault.read`**
 
@@ -340,7 +340,7 @@ function _stubList(n, type, extra = {}) {
 
 - [ ] **Step 3: Verify failing**
 
-Run: `node platform/test/harness/run-project.js`
+Run: `node platform/test/run-project-dashboard.js`
 Expected: `_counts is not a function`.
 
 - [ ] **Step 4: Implement**
@@ -412,7 +412,7 @@ git commit -am "feat(project): ProjectDashboard._counts — docs/board/todo/map/
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Write failing test**
 
@@ -489,7 +489,7 @@ git commit -am "feat(project): ProjectDashboard._recent — merged mtime-sorted 
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Add DOM stubs**
 
@@ -603,7 +603,7 @@ git commit -am "feat(project): ProjectDashboard._renderHeader — status pill + 
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Add ProjectChromeBar stub**
 
@@ -731,7 +731,7 @@ git commit -am "feat(project): ProjectDashboard._renderTiles — 5 clickable nav
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -835,7 +835,7 @@ git commit -am "feat(project): ProjectDashboard._renderRecent — mtime-sorted r
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -941,7 +941,7 @@ git commit -am "feat(project): ProjectDashboard._renderLinks — chips + parser 
 
 **Files:**
 - Modify: `platform/blueprints/project/helpers/project-dashboard.js`
-- Modify: `platform/test/harness/run-project.js`
+- Modify: `platform/test/run-project-dashboard.js`
 
 - [ ] **Step 1: Write failing test**
 
@@ -1045,16 +1045,17 @@ git commit -am "feat(project): ProjectDashboard.render — wire header/tiles/rec
 
 ---
 
-## Task 10: Template + manifest + retire helpers
+## Task 10: Template + manifest (helpers stay — backwards compat)
+
+**Rescope note:** Helper files stay on disk and in the manifest. Existing test runners
+(`run-project-activity-cards.js`, `run-project-activity-panels-heal.js`,
+`run-helper-cases.js`, `run-links.js`, `run-seed-migrations.js`,
+`run-v0127-project-hub-heal.js`) and the `Template, Links Hub.md` template that still
+reference the retired classes keep working. Full retirement follows in a later cycle.
 
 **Files:**
 - Modify: `platform/blueprints/project/templates/Template, Project.md`
 - Modify: `platform/blueprints/project/manifest.json`
-- Delete: `platform/blueprints/project/helpers/project-activity-panel.js`
-- Delete: `platform/blueprints/project/helpers/project-open-tasks.js`
-- Delete: `platform/blueprints/project/helpers/project-meetings-panel.js`
-- Delete: `platform/blueprints/project/helpers/project-links-panel.js`
-- Delete: `platform/blueprints/project/helpers/project-status-widget.js`
 
 - [ ] **Step 1: Read Template body first**
 
@@ -1074,45 +1075,26 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectDashboard" });
 
 Keep the ProjectChromeBar block above it as-is. Do not touch frontmatter.
 
-- [ ] **Step 3: Grep for external consumers of retired classes**
-
-```bash
-grep -rn "ProjectStatusWidget\|ProjectActivityPanel\|ProjectOpenTasks\|ProjectMeetingsPanel\|ProjectLinksPanel" \
-  --include="*.js" --include="*.json" --include="*.md" \
-  platform/ ranch/
-```
-
-If any hits outside `helpers/` or the templates/manifest, STOP and evaluate — that's a hidden consumer we need to migrate first.
-
-- [ ] **Step 4: Delete 5 helper files**
-
-```bash
-git rm platform/blueprints/project/helpers/project-activity-panel.js
-git rm platform/blueprints/project/helpers/project-open-tasks.js
-git rm platform/blueprints/project/helpers/project-meetings-panel.js
-git rm platform/blueprints/project/helpers/project-links-panel.js
-git rm platform/blueprints/project/helpers/project-status-widget.js
-```
-
-- [ ] **Step 5: Update manifest.json**
+- [ ] **Step 3: Update manifest.json**
 
 - Bump `version` from `1.49.1` to `1.50.0`.
-- In `customjs_classes` list, REMOVE any of these that appear: `ProjectActivityPanel`, `ProjectOpenTasks`, `ProjectMeetingsPanel`, `ProjectLinksPanel`, `ProjectStatusWidget`.
-- ADD `"ProjectDashboard"` alphabetically or at end (match existing conventions in the list).
+- ADD `"ProjectDashboard"` to `customjs_classes` (alphabetical or at end — match existing convention).
+- DO NOT remove any existing entries — Links Hub template + test runners still reference them.
 
-- [ ] **Step 6: Preflight — run harness against retired-classes check**
+- [ ] **Step 4: Preflight — run affected harnesses**
 
 ```bash
-node platform/test/harness/run-project.js
+node platform/test/run-project-dashboard.js
+node platform/test/run-project-chrome-bar.js   # sanity
 ```
 
-Expected: all PROJDASH-* tests pass. Any residual test referencing retired classes should also be scrubbed.
+Expected: PROJDASH-* green; sibling project runners still green.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add platform/blueprints/project/
-git commit -m "refactor(project): retire StatusWidget + 4 panels, wire ProjectDashboard template"
+git commit -m "feat(project): wire ProjectDashboard into Template Project.md + manifest"
 ```
 
 ---
@@ -1123,7 +1105,7 @@ git commit -m "refactor(project): retire StatusWidget + 4 panels, wire ProjectDa
 - Modify: `platform/install.js`
 - Create: `platform/test/seed-vault/spice/projects/dash-legacy/Dash Legacy.md` (legacy body fixture)
 - Create: `platform/test/seed-vault/spice/projects/dash-modern/Dash Modern.md` (already-migrated fixture)
-- Create: `platform/test/harness/run-project-dashboard-heal.js` (new heal-focused harness)
+- Create: `platform/test/run-project-dashboard-heal.js` (new heal-focused harness)
 - Modify: `package.json` — add `test:project-dashboard-heal` script
 
 - [ ] **Step 1: Read heal reference**
@@ -1192,7 +1174,7 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectDashboard" });
 
 - [ ] **Step 4: Write failing heal test**
 
-Create `platform/test/harness/run-project-dashboard-heal.js`:
+Create `platform/test/run-project-dashboard-heal.js`:
 
 ```javascript
 const fs = require("fs");
@@ -1279,12 +1261,12 @@ run().catch(e => { console.error(e); process.exit(1); });
 Add to `package.json` scripts:
 
 ```json
-"test:project-dashboard-heal": "node platform/test/harness/run-project-dashboard-heal.js"
+"test:project-dashboard-heal": "node platform/test/run-project-dashboard-heal.js"
 ```
 
 - [ ] **Step 5: Verify failing**
 
-Run: `node platform/test/harness/run-project-dashboard-heal.js`
+Run: `node platform/test/run-project-dashboard-heal.js`
 Expected: FAIL — `applyProjectDashboardConformanceHeal` not exported.
 
 - [ ] **Step 6: Implement heal**
@@ -1358,13 +1340,13 @@ Then WIRE it into the install sequence: find the block in `install.js` where oth
 
 - [ ] **Step 7: Verify heal test passes**
 
-Run: `node platform/test/harness/run-project-dashboard-heal.js`
+Run: `node platform/test/run-project-dashboard-heal.js`
 Expected: all 6 tests pass.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add platform/install.js platform/test/harness/run-project-dashboard-heal.js platform/test/seed-vault/spice/projects/dash-legacy platform/test/seed-vault/spice/projects/dash-modern package.json
+git add platform/install.js platform/test/run-project-dashboard-heal.js platform/test/seed-vault/spice/projects/dash-legacy platform/test/seed-vault/spice/projects/dash-modern package.json
 git commit -m "feat(project): install heal migrates legacy panel stack → ProjectDashboard"
 ```
 
@@ -1464,8 +1446,8 @@ git commit -m "test(project): Playwright visual harness for ProjectDashboard (mo
 ```bash
 npm run status
 npm run lint-schemas 2>&1 | tail -20
-node platform/test/harness/run-project.js
-node platform/test/harness/run-project-dashboard-heal.js
+node platform/test/run-project-dashboard.js
+node platform/test/run-project-dashboard-heal.js
 ```
 
 Expected: everything green. If any test fails, back up to the relevant task and fix.
@@ -1503,8 +1485,8 @@ Plan: `Docs/superpowers/plans/2026-07-13-project-dashboard.md`
 
 ## Test plan
 
-- [x] `node platform/test/harness/run-project.js` — PROJDASH-1…9 green
-- [x] `node platform/test/harness/run-project-dashboard-heal.js` — HEAL-1…6 green
+- [x] `node platform/test/run-project-dashboard.js` — PROJDASH-1…9 green
+- [x] `node platform/test/run-project-dashboard-heal.js` — HEAL-1…6 green
 - [x] Playwright visual harness at 390px + 720px viewports
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
