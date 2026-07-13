@@ -365,18 +365,18 @@ class TripEntryList {
       const nowMs = Date.now();
       const withIdx = items.map((entry, absIndex) => ({ entry, absIndex }));
       const groups = TripEntryList._groupByDirection(withIdx.map((w) => Object.assign({}, w.entry, { __i: w.absIndex })));
-      for (const g of groups) {
-        if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
-          customJS.SectionLabel.render(c, g.label);
-        } else {
-          const gh = c.createEl("div", { text: g.label });
-          if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
+      groups.forEach((g, gi) => {
+        if (gi > 0) {
+          const hr = c.createEl("div");
+          if (hr.style) hr.style.cssText = "border-top:1px solid var(--background-modifier-border); margin-top:14px; padding-top:2px;";
         }
+        const gh = c.createEl("div", { text: "✈ " + g.label });
+        if (gh.style) gh.style.cssText = "font-weight:700; font-size:0.95em; letter-spacing:0.06em; text-transform:uppercase; color:var(--interactive-accent); margin:16px 0 6px;";
         g.entries.forEach((e, i) => {
           if (i > 0) this._layoverChip(c, g.entries[i - 1], e);
           this._flightRow(c, dv, spec, items, e, e.__i, nowMs);
         });
-      }
+      });
     } else if (spec.group) {
       // Grouped: bucket entries by category, preserving each row's ABSOLUTE
       // index in `items` so Edit/Delete/toggle target the right element.
