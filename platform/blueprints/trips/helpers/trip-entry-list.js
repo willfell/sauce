@@ -137,6 +137,11 @@ class TripEntryList {
       { name: "link", label: "Link", type: "link", placeholder: "https://…" },
     ];
   }
+  // Preset form values for the per-category Add-item "+" button: pre-fills the
+  // Category field so the user lands directly in the item box (pure/testable).
+  static _addItemValuesForCategory(category) {
+    return { category: String(category || "") };
+  }
   // Packing add-item: a SINGLE category select (auto-first) + the item text —
   // no duplicate category field. `categories` = distinct existing categories.
   static _packingItemFields(categories) {
@@ -394,8 +399,13 @@ class TripEntryList {
       // index in `items` so Edit/Delete/toggle target the right element.
       // Item-less "Add category" placeholders seed a header but are not rows.
       for (const bucket of TripEntryList._packingBuckets(items)) {
-        const gh = c.createEl("div", { text: bucket.category });
-        if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
+        const gh = c.createEl("div");
+        if (gh.style) gh.style.cssText = "display:flex; align-items:center; gap:8px; margin:10px 0 4px;";
+        const lbl = gh.createEl("span", { text: bucket.category });
+        if (lbl.style) lbl.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em;";
+        const addBtn = gh.createEl("button", { text: "+" });
+        if (addBtn.style) addBtn.style.cssText = "margin-left:auto; padding:2px 9px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--interactive-accent); font-size:0.85em; font-weight:600; cursor:pointer;";
+        addBtn.onclick = () => this._onAddItem(dv, spec, TripEntryList._addItemValuesForCategory(bucket.category));
         for (const r of bucket.rows) this._row(c, dv, spec, items, r.entry, r.absIndex);
       }
     } else {
@@ -649,14 +659,17 @@ class TripEntryList {
     });
   }
 
-  _onAddItem(dv, spec) {
+  _onAddItem(dv, spec, presetValues) {
     // SINGLE category <select> (auto-first) + item text — no duplicate
     // category field. Do NOT concat spec.fields (the template's fields carry
-    // their own category, which is what doubled the control).
+    // their own category, which is what doubled the control). presetValues
+    // (e.g. {category} from a per-category "+") pre-fills the select so the
+    // cursor lands in the item box (the category select is never focused).
     const fields = TripEntryList._packingItemFields(this._categories(dv, spec));
     this._openForm({
       title: "Add item",
       fields,
+      values: presetValues || {},
       dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);

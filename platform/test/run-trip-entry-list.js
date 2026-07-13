@@ -249,6 +249,12 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('PB-6 absIndex preserved after sink (Underwear=1)', scl.rows.find(r => r.entry.item === "Underwear").absIndex === 1, JSON.stringify(scl.rows));
 }
 
+// ---------- _addItemValuesForCategory (FEATURE 2: per-category + button) ----------
+{
+    ok('AIV-1 preset category value', TripEntryList._addItemValuesForCategory("Clothing").category === "Clothing", JSON.stringify(TripEntryList._addItemValuesForCategory("Clothing")));
+    ok('AIV-2 empty/undefined -> ""', TripEntryList._addItemValuesForCategory("").category === "" && TripEntryList._addItemValuesForCategory().category === "", JSON.stringify(TripEntryList._addItemValuesForCategory()));
+}
+
 // ---------- _daysUntilDate (FIX 3) ----------
 {
     const now = Date.UTC(2026, 6, 12, 20, 0) / 1; // Jul 12
