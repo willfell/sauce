@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "kind": "blueprint",
   "module_directory": "journal",
   "skills_dir": ".claude/skills/journal",
