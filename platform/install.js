@@ -593,6 +593,12 @@ module.exports = async function (tp) {
     await applyProjectTodoTaskListHeal(tp, installedNow.history, git);
     await applyMeetingTaskListHeal(tp, installedNow.history, git);
 
+    // 6a8. task-entity — strip --- chrome separators from existing task notes.
+    await applyTaskNoteChromeHrHeal(tp, installedNow.history, git);
+
+    // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
+    await applyTodoDailyTripGroupsHeal(tp, installedNow.history, git);
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -12236,6 +12242,108 @@ async function applyMeetingTaskListHeal(tp, history, git) {
       attempted_at: new Date().toISOString() });
     return;
   }
+}
+
+// applyTaskNoteChromeHrHeal — strip redundant --- separators from task note
+// chrome body. Idempotent, backup-guarded, per-file try/catch.
+async function applyTaskNoteChromeHrHeal(tp, history, git) {
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = 'spice/tasks';
+    if (!(await adapter.exists(ROOT))) return;
+
+    const listing = await adapter.list(ROOT);
+    const files = (listing.files || []).filter(f =>
+      f.endsWith('.md') && !f.includes('/_trash/') && !f.includes('/_done/'));
+    if (!files.length) return;
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    let healed = 0;
+
+    for (const fp of files) {
+      try {
+        const before = await adapter.read(fp);
+        let after = before;
+        after = after.replace(/\n---\n\n```dataviewjs/g, '\n\n```dataviewjs');
+        after = after.replace(/```\n\n---\n\n<!-- TASK_NOTES -->/g, '```\n\n<!-- TASK_NOTES -->');
+        if (after === before) continue;
+
+        const backupDir = '.sauce-backup/tasks-chrome-hr/' + ts;
+        try { await adapter.mkdir(backupDir); } catch (_e) {}
+        const basename = fp.substring(fp.lastIndexOf('/') + 1);
+        try { await adapter.write(backupDir + '/' + basename, before); } catch (_e) {}
+
+        await adapter.write(fp, after);
+        healed++;
+        history?.push({
+          event: 'info', step: 'task_note_chrome_hr_heal', name: 'task-entity',
+          action: 'stripped_hr', target: fp,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString()
+        });
+      } catch (_e) { /* per-file, never throw */ }
+    }
+  } catch (_e) { /* top-level, never throw */ }
+}
+
+// applyTodoDailyTripGroupsHeal — inject ToDoDailyTripGroups block into
+// existing daily notes (after ToDoDailyProjectGroups). Idempotent, backup-guarded.
+async function applyTodoDailyTripGroupsHeal(tp, history, git) {
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+
+    const SENTINEL = 'ToDoDailyTripGroups';
+    const ANCHOR_BLOCK = '{ class: "ToDoDailyProjectGroups" });\n```';
+    const BLOCK = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ToDoDailyTripGroups" });\n```';
+
+    const TODO_ROOT = 'spice/to-do';
+    if (!(await adapter.exists(TODO_ROOT))) return;
+
+    const walk = async (dir) => {
+      const listing = await adapter.list(dir);
+      let mds = (listing.files || []).filter(f => f.endsWith('.md'));
+      for (const sub of (listing.folders || [])) {
+        mds = mds.concat(await walk(sub));
+      }
+      return mds;
+    };
+    const allMds = await walk(TODO_ROOT);
+    const dailies = allMds.filter(f => /ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f));
+    if (!dailies.length) return;
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    let healed = 0;
+
+    for (const fp of dailies) {
+      try {
+        const before = await adapter.read(fp);
+        if (before.includes(SENTINEL)) continue;
+        if (!before.includes('ToDoDailyProjectGroups')) continue;
+
+        const idx = before.indexOf(ANCHOR_BLOCK);
+        if (idx < 0) continue;
+
+        const insertAt = idx + ANCHOR_BLOCK.length;
+        const after = before.slice(0, insertAt) + BLOCK + before.slice(insertAt);
+
+        const backupDir = '.sauce-backup/daily-trip-groups/' + ts;
+        try { await adapter.mkdir(backupDir); } catch (_e) {}
+        const basename = fp.substring(fp.lastIndexOf('/') + 1);
+        try { await adapter.write(backupDir + '/' + basename, before); } catch (_e) {}
+
+        await adapter.write(fp, after);
+        healed++;
+        history?.push({
+          event: 'info', step: 'daily_trip_groups_heal', name: 'to-do',
+          action: 'injected_trip_groups', target: fp,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString()
+        });
+      } catch (_e) { /* per-file, never throw */ }
+    }
+  } catch (_e) { /* top-level, never throw */ }
 }
 
 // _localIsoNoMillis — local-offset ISO timestamp with NO milliseconds
