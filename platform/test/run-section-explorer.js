@@ -1706,17 +1706,31 @@ failures += !run("applyDocMove: project-like adapter applies the {section,sub_se
   delete global.app;
 });
 
-failures += !run("moveSection: renames folder to new parent + applies hub + child patches", () => {
+ASYNC_TESTS.push({ name: "moveSection: renames folder to new parent + applies hub + child patches (at remapped paths)", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const renames = [];
   const fmWrites = [];
+  const prevApp = global.app;
+  // Real-TFile behaviour: the folder rename remaps every path under it, and
+  // processFrontMatter only succeeds against a path present in the vault.
+  const known = new Set([
+    "spice/projects/foo/docs/ems",
+    "spice/projects/foo/docs/ems/EMS.md",
+    "spice/projects/foo/docs/ems/sub/Sub.md",
+  ]);
   global.app = {
     fileManager: {
-      renameFile: (f, p) => { renames.push({ f, p }); return Promise.resolve(); },
-      processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ path: f && f.path, fm }); return Promise.resolve(); },
+      renameFile: async (f, p) => {
+        renames.push({ f, p });
+        const from = f.path;
+        for (const k of [...known]) {
+          if (k === from || k.indexOf(from + "/") === 0) { known.delete(k); known.add(p + k.slice(from.length)); }
+        }
+      },
+      processFrontMatter: async (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ path: f && f.path, fm }); },
     },
-    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    vault: { getAbstractFileByPath: (p) => (known.has(p) ? { path: p } : null) },
   };
   const section = { title: "EMS", folder: "spice/projects/foo/docs/ems", hubPath: "spice/projects/foo/docs/ems/EMS.md" };
   const childHubPath = "spice/projects/foo/docs/ems/sub/Sub.md";
@@ -1728,17 +1742,19 @@ failures += !run("moveSection: renames folder to new parent + applies hub + chil
       }),
     },
   };
-  se.moveSection(null, section, "spice/projects/foo/docs/knowledge", projAdapter);
-  assert.strictEqual(renames.length, 1, "folder renamed once");
-  assert.strictEqual(renames[0].p, "spice/projects/foo/docs/knowledge/ems", "moved under new parent, slug of title");
-  // Hub patch + child patch applied.
-  const hubWrite = fmWrites.find((w) => w.fm.parent_section === "Knowledge" && w.fm.depth === 2);
-  assert.ok(hubWrite, "expected hub patch applied");
-  const childWrite = fmWrites.find((w) => w.path === childHubPath);
-  assert.ok(childWrite, "expected child patch applied to the child hub");
-  assert.strictEqual(childWrite.fm.parent_section, "EMS");
-  delete global.app;
-});
+  try {
+    await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", projAdapter);
+    assert.strictEqual(renames.length, 1, "folder renamed once");
+    assert.strictEqual(renames[0].p, "spice/projects/foo/docs/knowledge/ems", "moved under new parent, slug of title");
+    // Hub patch + child patch applied at the NEW remapped paths.
+    const hubWrite = fmWrites.find((w) => w.fm.parent_section === "Knowledge" && w.fm.depth === 2);
+    assert.ok(hubWrite, "expected hub patch applied");
+    assert.strictEqual(hubWrite.path, "spice/projects/foo/docs/knowledge/ems/EMS.md", "hub patched at remapped path");
+    const childWrite = fmWrites.find((w) => w.path === "spice/projects/foo/docs/knowledge/ems/sub/Sub.md");
+    assert.ok(childWrite, "expected child patch applied to the child hub at remapped path");
+    assert.strictEqual(childWrite.fm.parent_section, "EMS");
+  } finally { global.app = prevApp; }
+}});
 
 failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) renames folder only", () => {
   const SectionExplorer = loadClass();
@@ -2027,6 +2043,72 @@ failures += !run("enterSelectMode: finds the .se-page-pane in the note view even
   se.enterSelectMode({ container: chromeContainer });
   assert.strictEqual(entered, true, "enterSelectMode must locate the pane via the note view, not just dv.container");
 });
+
+ASYNC_TESTS.push({ name: "moveSection: awaits rename, remaps child paths, patches frontmatter only on real TFiles (no ENOENT)", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+
+  // Vault: an OLD section folder with a hub, a sub-folder, and a child doc.
+  const OLD = "spice/projects/p/docs/a";
+  const HUB = OLD + "/A.md";
+  const SUB = OLD + "/sub";
+  const CHILD = SUB + "/Sub.md";
+  const map = new Map([
+    [OLD, { path: OLD, __folder: true }],
+    [HUB, { path: HUB }],
+    [SUB, { path: SUB, __folder: true }],
+    [CHILD, { path: CHILD }],
+  ]);
+  const fmWrites = [];
+  const renameCalls = [];
+  const prevApp = global.app;
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => map.get(p) || null },
+    fileManager: {
+      renameFile: async (file, newPath) => {
+        renameCalls.push({ from: file && file.path, to: newPath });
+        const from = file.path;
+        for (const [k, v] of [...map.entries()]) {
+          if (k === from || k.indexOf(from + "/") === 0) {
+            const nk = newPath + k.slice(from.length);
+            map.delete(k); v.path = nk; map.set(nk, v);
+          }
+        }
+      },
+      processFrontMatter: async (file, fn) => {
+        // Reproduce Obsidian: a non-TFile (fabricated {path}) or a path no
+        // longer present in the vault raises ENOENT.
+        if (!file || !map.has(file.path) || map.get(file.path) !== file) {
+          throw new Error("ENOENT: " + (file && file.path));
+        }
+        const fm = {}; fn(fm); fmWrites.push({ path: file.path, fm });
+      },
+    },
+  };
+
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { depth: 2, parent_section: "B" },
+    childPatches: [{ path: CHILD, patch: { parent_section: "A" } }],
+  }) } };
+  const section = { folder: OLD, hubPath: HUB, title: "A" };
+
+  let threw = false;
+  try {
+    await se.moveSection({}, section, "spice/projects/p/docs/b", adapter);
+  } catch (_e) { threw = true; }
+
+  try {
+    assert.strictEqual(threw, false, "moveSection must never throw");
+    assert.strictEqual(renameCalls.length, 1, "folder renamed exactly once");
+    assert.strictEqual(renameCalls[0].to, "spice/projects/p/docs/b/a", "renamed to dest/<slug(title)>");
+    const paths = fmWrites.map((w) => w.path).sort();
+    assert.deepStrictEqual(paths, [
+      "spice/projects/p/docs/b/a/A.md",
+      "spice/projects/p/docs/b/a/sub/Sub.md",
+    ], "frontmatter patched at NEW remapped paths only");
+    assert.ok(fmWrites.every((w) => w.path.indexOf(OLD) !== 0), "no patch applied at an OLD path");
+  } finally { global.app = prevApp; }
+}});
 
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {

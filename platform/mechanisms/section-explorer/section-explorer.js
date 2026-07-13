@@ -804,36 +804,45 @@ class SectionExplorer {
   // Move a section folder under destParentFolder (Task E2). Renames the folder
   // to destParentFolder/<slug(title)>, then applies the adapter's section-move
   // cascade (hub patch + child patches) best-effort. Wiki → null (folder-only).
-  moveSection(dv, section, destParentFolder, adapter) {
+  // ASYNC: builds the patch plan BEFORE the rename (while child paths still
+  // point at the OLD folder), awaits the folder rename so the vault index
+  // reflects the new paths, remaps every old-folder path onto the new folder,
+  // and patches frontmatter only on real TFiles resolved from the vault at
+  // their NEW path — never on a fabricated { path } object (which would read
+  // an old/renamed path off disk → ENOENT). Wiki → null plan (folder-only).
+  async moveSection(dv, section, destParentFolder, adapter) {
     try {
       if (!section || !section.folder) return;
+      const oldFolder = String(section.folder).replace(/\/+$/, "");
       const newFolder = String(destParentFolder).replace(/\/+$/, "") + "/" + SectionExplorer._slugify(section.title);
       let folderFile = null;
-      try { folderFile = app.vault.getAbstractFileByPath(section.folder); } catch (_e) { folderFile = null; }
-      if (!folderFile) folderFile = { path: section.folder };
-      try { app.fileManager.renameFile(folderFile, newFolder); } catch (_e) { return; }
+      try { folderFile = app.vault.getAbstractFileByPath(oldFolder); } catch (_e) { folderFile = null; }
+      if (!folderFile) return; // can't move a folder we can't resolve to a real file
       const mv = adapter && adapter.move;
+      // Build the plan while child paths still point at the OLD folder.
+      let plan = null;
       if (mv && typeof mv.rewriteOnSectionMove === "function") {
-        let plan = null;
         try { plan = mv.rewriteOnSectionMove(section, destParentFolder); } catch (_e) { plan = null; }
-        if (plan) {
-          if (plan.hubPatch) {
-            try {
-              // The moved hub's basename is unchanged; only its folder moved.
-              const hubBase = String(section.hubPath || "").slice(String(section.hubPath || "").lastIndexOf("/") + 1);
-              const movedHubPath = hubBase ? (newFolder + "/" + hubBase) : null;
-              const hubFile = movedHubPath ? (app.vault.getAbstractFileByPath(movedHubPath) || { path: movedHubPath }) : null;
-              if (hubFile) app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
-            } catch (_e) { /* best-effort */ }
-          }
-          for (const cp of (plan.childPatches || [])) {
-            try {
-              if (!cp || !cp.path) continue;
-              const cf = app.vault.getAbstractFileByPath(cp.path) || { path: cp.path };
-              app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
-            } catch (_e) { /* best-effort */ }
-          }
-        }
+      }
+      await app.fileManager.renameFile(folderFile, newFolder);
+      if (!plan) return;
+      // Old-folder path → new-folder path.
+      const remap = (p) => {
+        const s = (p == null) ? "" : String(p);
+        return (s === oldFolder || s.indexOf(oldFolder + "/") === 0) ? newFolder + s.slice(oldFolder.length) : s;
+      };
+      if (plan.hubPatch && section.hubPath) {
+        try {
+          const hubFile = app.vault.getAbstractFileByPath(remap(section.hubPath));
+          if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
+        } catch (_e) { /* best-effort */ }
+      }
+      for (const cp of (plan.childPatches || [])) {
+        try {
+          if (!cp || !cp.path) continue;
+          const cf = app.vault.getAbstractFileByPath(remap(cp.path));
+          if (cf) await app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
+        } catch (_e) { /* best-effort */ }
       }
     } catch (_e) { /* never-throw */ }
   }
