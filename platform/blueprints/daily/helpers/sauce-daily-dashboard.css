@@ -66,6 +66,12 @@
 .space-daily-dashboard .sauce-section-counts + .sauce-section-chevron {
   margin-left: 0;
 }
+/* v0.13.4: Tasks section title is clickable (open/create today's To-Do note);
+ * underline-on-hover is the only affordance since the whole summary row is
+ * already clickable to toggle the disclosure. */
+.space-daily-dashboard .sauce-section-title-link:hover {
+  text-decoration: underline;
+}
 
 /* ── Framed group (v0.10.0 sauce v0.70.0, refined v0.10.2 sauce v0.70.2) ───
  * v0.10.2: accent moved from a 4px left stripe to a thin (1px) border
@@ -418,6 +424,12 @@
   .space-daily-dashboard .sauce-section-done-pill,
   .space-daily-dashboard .sauce-section-count-pill { padding: 1px 6px; font-size: 0.82em; }
   .space-daily-dashboard .sauce-section-counts { gap: 4px; }
+  /* v0.13.4: color+number only — the Tasks pills' text label overflowed the
+   * row on narrow viewports; drop it so each pill is a compact count badge. */
+  .space-daily-dashboard .sauce-section-pill-label { display: none; }
+  .space-daily-dashboard .sauce-section-open-pill,
+  .space-daily-dashboard .sauce-section-overdue-pill,
+  .space-daily-dashboard .sauce-section-done-pill { padding: 1px 7px; }
   .space-daily-dashboard { --sauce-section-gap: 8px; }
   .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
   /* v0.10.1 — on mobile, stack title above meta and let the title use the full

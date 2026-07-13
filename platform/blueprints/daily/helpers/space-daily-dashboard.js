@@ -124,18 +124,18 @@ class SpaceDailyDashboard {
    *             because buildBands drops project_slug/source==meeting tasks (they
    *             render in the TO-DO note's own sections) — the dashboard mirror wants
    *             ALL sources.
-   *   overdue — COUNT of open task-notes scheduled BEFORE today (all sources). These
-   *             are NOT listed; they surface only as a red count pill so the day's
-   *             list stays scoped to what was made for today.
+   *   overdue — open task-notes scheduled BEFORE today (all sources), as a LIST
+   *             (same shape as `open`). Rendered as a visually-distinguished tail
+   *             after the open tasks, so the red "N Overdue" pill has matching rows.
    *   done    — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
    *             only; all-done would grow unbounded with vault history).
    * Filtering is done in plain JS AFTER dv.pages() (not via DataArray .where) so a
    * plain-array dv-stub exercises the real path. No TE (cold load / mechanism not
-   * registered) → { open: [], overdue: 0, done: 0 }; the panel simply hides. Never throws.
+   * registered) → { open: [], overdue: [], done: 0 }; the panel simply hides. Never throws.
    */
   static selectTasks(dv, todayStr, TE) {
     if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
-      return { open: [], done: 0, overdue: 0 };
+      return { open: [], done: 0, overdue: [] };
     }
     const toArr = (q) => {
       try {
@@ -154,10 +154,12 @@ class SpaceDailyDashboard {
       if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
       openParsed.push(TE.parseNote(p));
     }
-    // LIST = today only (scheduled == today); overdue = COUNT only (red pill).
+    // LIST = today only (scheduled == today) + overdue (scheduled before today,
+    // rendered as its own visually-distinguished tail so the red "N Overdue"
+    // pill always has rows underneath it, not just a bare count).
     const bands = TE.queryToday(openParsed, todayStr);
     const open = Array.isArray(bands.today) ? bands.today : [];
-    const overdue = Array.isArray(bands.overdue) ? bands.overdue.length : 0;
+    const overdue = Array.isArray(bands.overdue) ? bands.overdue : [];
 
     // Done today — _done/ notes with completed_at date == today.
     let done = 0;
@@ -296,7 +298,7 @@ class SpaceDailyDashboard {
 
   /**
    * Home command center count API (DRY): roll up the day's counts for the glance
-   * line. Composes selectTasks (→ { open[], overdue, done }) with selectMeetings
+   * line. Composes selectTasks (→ { open[], overdue[], done }) with selectMeetings
    * (→ page[]) and returns integers only: { today, overdue, done, meetings }.
    * Cold-load safe — no TE → tasks zeroed (selectTasks returns empties) but
    * meetings are still counted. Never throws.
@@ -306,7 +308,7 @@ class SpaceDailyDashboard {
     const m = SpaceDailyDashboard.selectMeetings(dv, todayStr);
     return {
       today: Array.isArray(t.open) ? t.open.length : 0,
-      overdue: t.overdue || 0,
+      overdue: Array.isArray(t.overdue) ? t.overdue.length : (t.overdue || 0),
       done: t.done || 0,
       meetings: Array.isArray(m) ? m.length : 0,
     };
@@ -386,7 +388,8 @@ class SpaceDailyDashboard {
     };
 
     const meetings = getMeetings();
-    const { open: openTasks, overdue: overdueCount, done: doneCount } = getTasks();
+    const { open: openTasks, overdue: overdueTasks, done: doneCount } = getTasks();
+    const overdueCount = Array.isArray(overdueTasks) ? overdueTasks.length : 0;
 
     // 2→1 sweep reduction: the dashboard used to sweep the whole vault TWICE —
     // once in _getActivityCount (gate pre-count + segmented-accent byBlueprint)
@@ -460,41 +463,58 @@ class SpaceDailyDashboard {
       // v0.13.3 (sauce v0.84.3): pills move out of the title text and into a
       // right-aligned sauce-section-counts container. Up to three pills, each
       // shown only when its count > 0, in a fixed left→right order:
-      //   orange "N Open"   — tasks made for today (the LIST below)
-      //   red    "M Overdue" — open tasks scheduled before today (COUNT only, not listed)
+      //   orange "N Open"    — tasks made for today (the LIST below)
+      //   red    "M Overdue" — open tasks scheduled before today (also listed, as a
+      //                        visually-distinguished tail after the open tasks)
       //   green  "K Done"    — tasks completed today
       // Numeric counts interpolated directly into rightHtml are XSS-safe; we control
       // every arm. The outer guard guarantees at least one pill renders.
       let tasksRightHtml = "";
-      if (openTasks.length > 0) tasksRightHtml += `<span class="sauce-section-open-pill">${openTasks.length} Open</span>`;
-      if (overdueCount > 0)     tasksRightHtml += `<span class="sauce-section-overdue-pill">${overdueCount} Overdue</span>`;
-      if (doneCount > 0)        tasksRightHtml += `<span class="sauce-section-done-pill">${doneCount} Done</span>`;
+      if (openTasks.length > 0) tasksRightHtml += `<span class="sauce-section-open-pill"><span class="sauce-section-pill-n">${openTasks.length}</span><span class="sauce-section-pill-label"> Open</span></span>`;
+      if (overdueCount > 0)     tasksRightHtml += `<span class="sauce-section-overdue-pill"><span class="sauce-section-pill-n">${overdueCount}</span><span class="sauce-section-pill-label"> Overdue</span></span>`;
+      if (doneCount > 0)        tasksRightHtml += `<span class="sauce-section-done-pill"><span class="sauce-section-pill-n">${doneCount}</span><span class="sauce-section-pill-label"> Done</span></span>`;
 
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
-        title: "Tasks",
+        titleHtml: '<span class="sauce-section-title-link">Tasks</span>',
         rightHtml: tasksRightHtml,
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:tasks",
         sectionState,
       });
 
-      // v0.13.1: body iterates open tasks only. Done tasks are surfaced via the
-      // header count; their notes stay in spice/tasks/_done/.
-      if (openTasks.length > 0) {
-        const tasksList = tasksBody.createEl("ul");
-        tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+      // v0.13.4: title click opens/creates the viewed day's To-Do note.
+      // stopPropagation so it doesn't also toggle the <details> disclosure.
+      const tasksTitleLink = container.querySelector(".sauce-section-title-link");
+      if (tasksTitleLink) {
+        tasksTitleLink.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this._openTodayToDo(today);
+        });
+      }
 
+      // v0.13.1: body iterates open tasks, then overdue tasks (also open,
+      // scheduled before today) as a second visually-distinguished tail so
+      // the red "N Overdue" pill has matching rows instead of a bare count.
+      // Done tasks stay surfaced via header count only; their notes stay in
+      // spice/tasks/_done/.
+      if (openTasks.length > 0 || overdueCount > 0) {
         // Deterministic inline-link renderer from the task-entity mechanism — real
         // <a> for [[wl]] / [md](url) / bare URLs (task titles can carry links). NOT
         // MarkdownRenderer (absent in the customJS eval context → raw text). Falls
         // back to plain text if TaskTodayList isn't registered yet (cold load).
         const TTL = (typeof customJS !== "undefined" && customJS) ? customJS.TaskTodayList : null;
 
-        for (const task of openTasks) {
-          const li = tasksList.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
+        // Shared row renderer for both the open and overdue lists — row click
+        // opens the task NOTE (read-mostly mirror; the note carries its own edit
+        // affordance). Ignore clicks that land on an inner <a> so opening a title
+        // link doesn't ALSO navigate to the note. `dim` visually distinguishes
+        // overdue rows from today's open rows.
+        const renderTaskRow = (list, task, dim) => {
+          const li = list.createEl("li");
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;"
+            + (dim ? " opacity: 0.75;" : "");
 
           const titleSpan = li.createEl("span");
           const titleText = (task && task.title) || "(untitled)";
@@ -504,13 +524,23 @@ class SpaceDailyDashboard {
             titleSpan.textContent = titleText;
           }
 
-          // Row click → open the task NOTE (read-mostly mirror; the note carries its
-          // own edit affordance). Ignore clicks that land on an inner <a> so opening
-          // a title link doesn't ALSO navigate to the note.
           li.onclick = (e) => {
             if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
             if (task && task.path) app.workspace.openLinkText(task.path, "");
           };
+        };
+
+        if (openTasks.length > 0) {
+          const tasksList = tasksBody.createEl("ul");
+          tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+          for (const task of openTasks) renderTaskRow(tasksList, task, false);
+        }
+
+        if (overdueCount > 0) {
+          const overdueList = tasksBody.createEl("ul");
+          overdueList.className = "sauce-section-overdue-list";
+          overdueList.style.cssText = "margin: 8px 0 0 0; padding-left: 18px; list-style-type: disc; border-left: 2px solid var(--color-red);";
+          for (const task of overdueTasks) renderTaskRow(overdueList, task, true);
         }
       }
     }
@@ -761,7 +791,7 @@ class SpaceDailyDashboard {
     // v0.5.2/v0.5.3 comments above for precedent. Audited 2026-07-11: no
     // such gap exists today across any subscribed blueprint.
     return [
-      "sticky-note", "journal",
+      "sticky-note", "journal-entry",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice",
       "kanban", "board-card",
@@ -788,7 +818,7 @@ class SpaceDailyDashboard {
       product:   "var(--color-yellow)",
       wiki:      "var(--color-yellow)",
       trip:      "var(--color-cyan)",
-      journal:   "var(--color-red)",
+      "journal-entry": "var(--color-red)",
       budget:    "var(--color-green)",
       paycheck:  "var(--color-green)",
       invoice:   "var(--color-green)",
@@ -1282,6 +1312,61 @@ class SpaceDailyDashboard {
       if (cur && cur.file && cur.file.name) return String(cur.file.name);
     } catch (_) {}
     return "";
+  }
+
+  /**
+   * v0.13.4: Tasks section title → open (or Templater-create) the viewed
+   * day's To-Do note, mirroring cowork-timeframe-buttons.js's `_dispatch()`
+   * open-existing-or-create dispatch shape. `dateStr` is the dashboard's
+   * `today` (the day being VIEWED, not necessarily the real today — matches
+   * every other date computation in this file).
+   */
+  async _openTodayToDo(dateStr) {
+    const m = moment(dateStr, "YYYY-MM-DD");
+    const folder = `spice/to-do/${m.format("YYYY/MM-MMMM")}`;
+    const filenameNoExt = `ToDo-${m.format("YYYY-MM-DD")}`;
+    const path = `${folder}/${filenameNoExt}.md`;
+
+    const existing = app.vault.getAbstractFileByPath(path);
+    if (existing) {
+      app.workspace.openLinkText(path, "");
+      return;
+    }
+
+    const tpPlugin = app.plugins.plugins["templater-obsidian"];
+    if (!tpPlugin || !tpPlugin.templater) {
+      new Notice("SpaceDailyDashboard: Templater plugin not enabled", 8000);
+      return;
+    }
+
+    if (!app.vault.getAbstractFileByPath(folder)) {
+      try {
+        await app.vault.createFolder(folder);
+      } catch (folderErr) {
+        if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) {
+          new Notice(`SpaceDailyDashboard: cannot create folder ${folder} — ${folderErr.message}`, 8000);
+          return;
+        }
+      }
+    }
+
+    const templateSource = "ranch/templates/Today To-Do.md";
+    const templateFile = app.vault.getAbstractFileByPath(templateSource);
+    if (!templateFile) {
+      new Notice(`SpaceDailyDashboard: template not found at ${templateSource}`, 8000);
+      return;
+    }
+
+    try {
+      await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
+    } catch (err) {
+      const msg = (err && err.message) || "";
+      if (!/already exists|exists/i.test(msg)) {
+        new Notice(`SpaceDailyDashboard: Templater create failed for ${path} — ${msg}`, 8000);
+        return;
+      }
+      app.workspace.openLinkText(path, "");
+    }
   }
 
   /**
