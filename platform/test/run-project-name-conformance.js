@@ -38,7 +38,10 @@ async function run() {
     ok("PNC-3.idempotent", _injectProjectNameFrontmatter(inp, "Denali") === inp);
   }
   {
-    const inp = "---\ntype: doc-note\n---\nbody\n";
+    // v0.217.0 expanded the target-type whitelist to cover most
+    // project-scoped types (doc-note among them) — use a genuinely
+    // non-project type to exercise the no-op path.
+    const inp = "---\ntype: meeting\n---\nbody\n";
     ok("PNC-4.noop-nontarget", _injectProjectNameFrontmatter(inp, "Denali") === inp);
   }
   {

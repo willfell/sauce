@@ -289,6 +289,7 @@
       },
       "frontmatter_template": {
         "type": "project",
+        "project_name": "{{prompts.name}}",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "description": "",
         "status": "idea",
@@ -321,6 +322,7 @@
             "type": "section-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "section": "Knowledge",
             "section_slug": "knowledge",
             "parent_section": "",
@@ -339,6 +341,7 @@
             "type": "section-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "section": "Notes",
             "section_slug": "notes",
             "parent_section": "",
@@ -356,6 +359,7 @@
             "type": "project-todo",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "cssclasses": [
               "wide"
@@ -369,6 +373,7 @@
             "type": "links-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "links": [],
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "tags": [
@@ -432,6 +437,7 @@
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.section}}",
         "sub_section": "{{prompts.sub_section}}",
         "tags": [
@@ -471,6 +477,7 @@
         "type": "section-hub",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.name}}",
         "section_slug": "{{prompts.slug}}",
         "parent_section": "",
@@ -515,6 +522,7 @@
         "type": "section-hub",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.name}}",
         "section_slug": "{{prompts.slug}}",
         "parent_section": "[[{{current_file.frontmatter.section}}]]",
