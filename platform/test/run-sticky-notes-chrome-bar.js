@@ -30,9 +30,11 @@ const cfg = inst._config();
     h.primary && h.primary.id === 'today' && h.overflow.length === 0 && h.leaf === false);
   ok('SCB-SPEC-2 day: primary new-sticky-note + overflow hub + not leaf',
     d.primary && d.primary.id === 'new-sticky-note' && d.overflow.length === 1 && d.overflow[0].id === 'hub' && d.leaf === false);
-  ok('SCB-SPEC-3 note: no primary + overflow back-day,hub + leaf',
-    l.primary === null && l.overflow.length === 2
-    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub' && l.leaf === true);
+  ok('SCB-SPEC-3 note: no primary + overflow back-day,hub,rename,add-link,move-day,delete + leaf',
+    l.primary === null && l.overflow.length === 6
+    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub'
+    && l.overflow[2].id === 'rename' && l.overflow[3].id === 'add-link'
+    && l.overflow[4].id === 'move-day' && l.overflow[5].id === 'delete');
 }
 
 // SCB-DISPATCH — routes to correct handlers.
