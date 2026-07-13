@@ -79,6 +79,7 @@ global.customJS.SectionLabel = {
     render: (dv, opts) => {
         const c = dv.container || dv;
         const lbl = c.createEl('div');
+        lbl.__isSectionLabel = true;
         lbl.textContent = String(opts?.text || '');
     },
     divider: (dv) => (dv.container || dv).createEl('hr'),
@@ -93,6 +94,14 @@ global.customJS.ProjectChromeBar = {
         task: '<svg data-icon="task"/>',
         links: '<svg data-icon="links"/>',
     },
+    detectContext: (path) => ({ projectDir: 'spice/projects/foo', projectSlug: 'foo', context: 'project-hub' }),
+    navTarget: (dv, c, key) => ({
+        docs:  'spice/projects/foo/docs/Docs.md',
+        board: 'spice/projects/foo/foo-board.md',
+        todo:  'spice/projects/foo/Foo To-Do.md',
+        map:   'spice/projects/foo/Sauce - Map.md',
+        links: 'spice/projects/foo/Links Hub.md',
+    }[key] || null),
 };
 global.__opens = [];
 global.app = {
@@ -209,25 +218,27 @@ function makeApp(files) {
 })();
 
 // ============================================================================
-// PROJDASH-4 — _recent merged mtime-sorted list
+// PROJDASH-4 — _recentByKind grouped + capped mtime-sorted lists
 // ============================================================================
 {
     const dash = new ProjectDashboard();
     const currentPath = 'spice/projects/foo/Foo.md';
     const dv = {
         pages: (query) => {
-            if (query.includes('/docs')) return _stubListWithMtimes([{ ts: 3000, name: 'doc-mid' }], 'doc-note');
+            if (query.includes('/docs')) return _stubListWithMtimes([
+                { ts: 3000, name: 'doc-mid' }, { ts: 6000, name: 'doc-new' },
+                { ts: 1000, name: 'doc-old' }, { ts: 2000, name: 'doc-x' }, { ts: 500, name: 'doc-oldest' },
+            ], 'doc-note');
             if (query.includes('meetings/notes')) return _stubListWithMtimes([{ ts: 5000, name: 'mtg-newest', project: '[[Foo]]' }], 'meeting');
             if (query.includes('/tasks')) return _stubListWithMtimes([{ ts: 4000, name: 'task-old' }], 'task-note');
             return _stubList(0, null);
         },
     };
     const ctx = { folder: 'spice/projects/foo', projectName: 'Foo', currentPath };
-    const items = dash._recent(dv, ctx);
-    ok('PROJDASH-4a mtime-sorted DESC',
-        items.length === 3 && items[0].kind === 'meeting' && items[1].kind === 'task' && items[2].kind === 'doc',
-        JSON.stringify(items.map(i => i.kind)));
-    ok('PROJDASH-4b top 5 cap', items.length <= 5);
+    const groups = dash._recentByKind(dv, ctx);
+    ok('PROJDASH-4a docs capped at 4', groups.docs.length === 4, String(groups.docs.length));
+    ok('PROJDASH-4b docs newest-first', groups.docs[0].mtime === 6000 && groups.docs[3].mtime === 1000, JSON.stringify(groups.docs.map(r => r.mtime)));
+    ok('PROJDASH-4c meetings + tasks split', groups.meetings.length === 1 && groups.tasks.length === 1);
 }
 
 // ============================================================================
@@ -256,7 +267,7 @@ function makeApp(files) {
 }
 
 // ============================================================================
-// PROJDASH-6 — _renderTiles (5 tiles, click routing)
+// PROJDASH-6 — _renderTiles: 6 tiles, fallback targets (no ChromeBar ctx)
 // ============================================================================
 {
     const dash = new ProjectDashboard();
@@ -267,52 +278,137 @@ function makeApp(files) {
         slug: 'foo',
         projectName: 'Foo',
         currentPath: 'spice/projects/foo/Foo.md',
+        // no bar / barCtx → tiles use the hardcoded fallback path table
     };
     dash._renderTiles(container, ctx, counts);
 
     const tiles = container.__descendants().filter(el => el.__isTile);
-    ok('PROJDASH-6a tiles rendered=5', tiles.length === 5, String(tiles.length));
+    ok('PROJDASH-6a tiles rendered=6', tiles.length === 6, String(tiles.length));
     const labels = tiles.map(t => t.__label).join('|');
-    ok('PROJDASH-6b labels ordered', labels === 'Docs|Board|To-Do|Map|Meetings', labels);
+    ok('PROJDASH-6b labels ordered', labels === 'Docs|Board|To-Do|Map|Meetings|Helpful Links', labels);
+    // Links tile carries NO count chip; the five metric tiles do.
     const chipCounts = tiles.map(t => t.__count);
-    ok('PROJDASH-6c counts inline', JSON.stringify(chipCounts) === JSON.stringify([3, 2, 1, 2, 4]), JSON.stringify(chipCounts));
+    ok('PROJDASH-6c counts inline (Links=none)',
+        JSON.stringify(chipCounts) === JSON.stringify([3, 2, 1, 2, 4, undefined]), JSON.stringify(chipCounts));
 
     global.__opens = [];
     tiles[0].click();
-    ok('PROJDASH-6d Docs tile → Docs.md', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/Docs.md', JSON.stringify(global.__opens[0]));
+    ok('PROJDASH-6d Docs fallback → docs/Docs.md', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/docs/Docs.md', JSON.stringify(global.__opens[0]));
     tiles[1].click();
-    ok('PROJDASH-6e Board tile → foo-board.md', global.__opens[1] && global.__opens[1].target === 'spice/projects/foo/foo-board.md');
+    ok('PROJDASH-6e Board fallback → foo-board.md', global.__opens[1] && global.__opens[1].target === 'spice/projects/foo/foo-board.md');
     tiles[2].click();
-    ok('PROJDASH-6f To-Do tile → Foo To-Do.md', global.__opens[2] && global.__opens[2].target === 'spice/projects/foo/Foo To-Do.md');
+    ok('PROJDASH-6f To-Do fallback → Foo To-Do.md', global.__opens[2] && global.__opens[2].target === 'spice/projects/foo/Foo To-Do.md');
     tiles[3].click();
-    ok('PROJDASH-6g Map tile → Map.md', global.__opens[3] && global.__opens[3].target === 'spice/projects/foo/Map.md');
+    ok('PROJDASH-6g Map fallback → Project Map.md', global.__opens[3] && global.__opens[3].target === 'spice/projects/foo/Project Map.md');
     tiles[4].click();
     ok('PROJDASH-6h Meetings tile → Meetings.md', global.__opens[4] && global.__opens[4].target === 'spice/meetings/Meetings.md');
+    tiles[5].click();
+    ok('PROJDASH-6i Links fallback → Links Hub.md', global.__opens[5] && global.__opens[5].target === 'spice/projects/foo/Links Hub.md');
 }
 
 // ============================================================================
-// PROJDASH-7 — _renderRecent (labeled row list; empty hides)
+// PROJDASH-10 — _renderTiles delegates to ProjectChromeBar.navTarget
 // ============================================================================
 {
     const dash = new ProjectDashboard();
     const container = makeEl('div');
-    const items = [
-        { kind: 'meeting', page: { file: { path: 'm1.md', name: 'Meeting one', mtime: { ts: 5000 } } }, mtime: 5000 },
-        { kind: 'doc',     page: { file: { path: 'd1.md', name: 'Doc one',     mtime: { ts: 4000 } } }, mtime: 4000 },
-    ];
-    dash._renderRecent(container, { currentPath: 'cp.md' }, items);
-    const rows = container.__descendants().filter(el => el.__isRecentRow);
-    ok('PROJDASH-7a rows rendered=2', rows.length === 2, String(rows.length));
-    ok('PROJDASH-7b label rendered', container.__descendants().some(el => el.textContent === 'Recent'));
+    const counts = { docs: 3, board: 2, todo: 1, map: 2, meetings: 4 };
+    const ctx = {
+        folder: 'spice/projects/foo',
+        slug: 'foo',
+        projectName: 'Foo',
+        currentPath: 'spice/projects/foo/Foo.md',
+        dv: {},
+        bar: global.customJS.ProjectChromeBar,
+        barCtx: { projectDir: 'spice/projects/foo', projectSlug: 'foo' },
+    };
+    dash._renderTiles(container, ctx, counts);
+    const tiles = container.__descendants().filter(el => el.__isTile);
 
-    const empty = makeEl('div');
-    dash._renderRecent(empty, { currentPath: 'cp.md' }, []);
-    ok('PROJDASH-7c empty renders nothing', empty.__children.length === 0);
+    global.__opens = [];
+    tiles[0].click();
+    ok('PROJDASH-10a Docs → navTarget docs/Docs.md', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/docs/Docs.md', JSON.stringify(global.__opens[0]));
+    tiles[3].click();
+    ok('PROJDASH-10b Map → navTarget map path', global.__opens[1] && global.__opens[1].target === 'spice/projects/foo/Sauce - Map.md', JSON.stringify(global.__opens[1]));
+    tiles[5].click();
+    ok('PROJDASH-10c Links → navTarget Links Hub.md', global.__opens[2] && global.__opens[2].target === 'spice/projects/foo/Links Hub.md');
+}
+
+// ============================================================================
+// PROJDASH-7 — _renderRecentGroups (grouped cards; empty groups hide)
+// ============================================================================
+{
+    const dash = new ProjectDashboard();
+    const container = makeEl('div');
+    const groups = {
+        docs: [
+            { kind: 'doc', page: { file: { path: 'd1.md', name: 'Doc one', mtime: { ts: 4000 } } }, mtime: 4000 },
+            { kind: 'doc', page: { file: { path: 'd2.md', name: 'Doc two', mtime: { ts: 3000 } } }, mtime: 3000 },
+        ],
+        meetings: [
+            { kind: 'meeting', page: { file: { path: 'm1.md', name: 'Meeting one', mtime: { ts: 5000 } } }, mtime: 5000 },
+        ],
+        tasks: [],
+    };
+    dash._renderRecentGroups(container, { currentPath: 'cp.md' }, groups);
+    const rows = container.__descendants().filter(el => el.__isRecentRow);
+    ok('PROJDASH-7a rows rendered=3', rows.length === 3, String(rows.length));
+    const secLabels = container.__descendants().filter(el => el.__isSectionLabel).map(el => el.textContent).join('|');
+    ok('PROJDASH-7b two non-empty labels (no Recent Tasks)', secLabels === 'Recent Docs|Recent Meetings', secLabels);
 
     global.__opens = [];
     rows[0].click();
-    ok('PROJDASH-7d row click opens', global.__opens[0] && global.__opens[0].target === 'm1.md');
+    ok('PROJDASH-7c row click opens', global.__opens[0] && global.__opens[0].target === 'd1.md');
+
+    const empty = makeEl('div');
+    dash._renderRecentGroups(empty, { currentPath: 'cp.md' }, { docs: [], meetings: [], tasks: [] });
+    ok('PROJDASH-7d all-empty renders nothing', empty.__children.length === 0);
 }
+
+// ============================================================================
+// PROJDASH-11 — _openTasks + _renderOpenTasks (board + To-Do, cap 6, empty hides)
+// ============================================================================
+(async () => {
+    const dash = new ProjectDashboard();
+    const ctx = {
+        folder: 'spice/projects/foo',
+        slug: 'foo',
+        projectName: 'Foo',
+        currentPath: 'spice/projects/foo/Foo.md',
+        app: {
+            vault: {
+                read: async (f) => {
+                    if (String(f.path).endsWith('foo-board.md')) return '## Todo\n- [ ] a\n- [ ] b\n## Completed\n- [ ] done-hidden\n';
+                    if (String(f.path).endsWith('Foo To-Do.md')) return '- [ ] t1\n- [x] t2\n';
+                    return '';
+                },
+                getAbstractFileByPath: (p) => ({ path: p }),
+            },
+        },
+    };
+    const tasks = await dash._openTasks(ctx);
+    ok('PROJDASH-11a open tasks = 3 (Completed excluded)', tasks.length === 3, JSON.stringify(tasks.map(t => t.title)));
+    ok('PROJDASH-11b sources', tasks.map(t => t.source).join('|') === 'board|board|to-do', tasks.map(t => t.source).join('|'));
+
+    const container = makeEl('div');
+    dash._renderOpenTasks(container, ctx, tasks);
+    const rows = container.__descendants().filter(el => el.__isOpenTaskRow);
+    ok('PROJDASH-11c 3 rows rendered', rows.length === 3, String(rows.length));
+    ok('PROJDASH-11d Open Tasks label', container.__descendants().some(el => el.__isSectionLabel && el.textContent === 'Open Tasks'));
+
+    // Save/restore global.app synchronously (no await between) so concurrent
+    // async IIFEs can never observe the swapped app.
+    const savedApp = global.app;
+    global.__opens = [];
+    global.app = { workspace: { openLinkText: (target, src, nl) => global.__opens.push({ target, src, nl }) } };
+    rows[0].click();
+    ok('PROJDASH-11e row click opens board', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/foo-board.md');
+    global.app = savedApp;
+
+    const empty = makeEl('div');
+    dash._renderOpenTasks(empty, ctx, []);
+    ok('PROJDASH-11f empty renders nothing', empty.__children.length === 0);
+})();
 
 // ============================================================================
 // PROJDASH-8 — _renderLinks chips
@@ -378,7 +474,7 @@ function makeApp(files) {
     const chips = container.__descendants().filter(el => el.__isLinkChip);
 
     ok('PROJDASH-9a pill in-progress', !!pill && pill.textContent === 'in-progress');
-    ok('PROJDASH-9b 5 tiles', tiles.length === 5, String(tiles.length));
+    ok('PROJDASH-9b 6 tiles', tiles.length === 6, String(tiles.length));
     ok('PROJDASH-9c 2 recent rows (doc + meeting)', rows.length === 2, String(rows.length));
     ok('PROJDASH-9d 1 link chip', chips.length === 1, String(chips.length));
 
