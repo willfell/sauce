@@ -13968,10 +13968,10 @@ async function caseV01120HubsRepairFinanceSummary() {
   const lines = (bodyTemplatesDict || "").split("\n");
   const financeLine = lines.find(l => /["']spice\/finance\/Finance\.md["']/.test(l));
   if (financeLine) {
-    const navIdx = financeLine.indexOf("FinanceNav");
+    const cbIdx = financeLine.indexOf("FinanceChromeBar");
     const fhsIdx = financeLine.indexOf("FinanceHubSummary");
-    assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceNav in Finance.md dict entry",
-      navIdx >= 0 && fhsIdx > navIdx, `navIdx=${navIdx} fhsIdx=${fhsIdx}`);
+    assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceChromeBar in Finance.md dict entry",
+      cbIdx >= 0 && fhsIdx > cbIdx, `cbIdx=${cbIdx} fhsIdx=${fhsIdx}`);
   } else {
     assertTrue("V01120-FHR-FHS-2: Finance.md dict entry must be present in FINANCE_HUB_BODY_TEMPLATES", false,
       "Could not find Finance.md line in FINANCE_HUB_BODY_TEMPLATES dict");

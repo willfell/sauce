@@ -8,12 +8,7 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
-// entity-create:month — installer-managed; do not delete this comment
+await dv.view("ranch/views/customjs-guard", { class: "FinanceChromeBar" });
 ```
 
 ```dataviewjs
