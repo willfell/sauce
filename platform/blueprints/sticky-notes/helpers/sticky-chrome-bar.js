@@ -115,6 +115,102 @@ class StickyChromeBar {
     } catch (_e) { /* never throw */ }
   }
 
+  _openMoveDayDialog(dv, ctx) {
+    try {
+      const filePath = ctx && ctx.path;
+      if (!filePath || typeof app === "undefined" || !app.vault || !app.fileManager
+        || typeof app.vault.getAbstractFileByPath !== "function"
+        || typeof app.fileManager.renameFile !== "function"
+        || typeof app.fileManager.processFrontMatter !== "function") return;
+      if (typeof document === "undefined" || !document.body || typeof document.body.createEl !== "function") return;
+      const file = app.vault.getAbstractFileByPath(filePath);
+      if (!file) return;
+      const currentDay = this._resolveDay(dv, ctx) || window.moment().format("YYYY-MM-DD");
+
+      const overlay = document.body.createEl("div");
+      overlay.style.cssText = "position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;";
+      const box = overlay.createEl("div");
+      box.style.cssText = "background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 16px; width: min(360px, 90vw); display: flex; flex-direction: column; gap: 10px;";
+      box.createEl("div", { text: "Move to day" }).style.cssText = "font-weight: 600;";
+      const input = box.createEl("input", { type: "date", value: currentDay });
+      input.style.cssText = "padding: 6px 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
+      const row = box.createEl("div");
+      row.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+      const close = () => { try { overlay.remove(); } catch (_e) {} };
+      const save = async () => {
+        const newDay = (input.value || "").trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDay)) {
+          if (typeof Notice === "function") new Notice("StickyChromeBar: invalid date.", 6000);
+          return;
+        }
+        if (newDay === currentDay) { close(); return; }
+        const mo = window.moment(newDay, "YYYY-MM-DD", true);
+        if (!mo.isValid()) { if (typeof Notice === "function") new Notice("StickyChromeBar: invalid date.", 6000); return; }
+        const newFolder = `spice/sticky-notes/${mo.format("YYYY/MM-MMMM")}/${newDay}`;
+        try {
+          if (!app.vault.getAbstractFileByPath(newFolder)) {
+            try { await app.vault.createFolder(newFolder); }
+            catch (e) { if (!/already exists|exists/i.test((e && e.message) || "")) throw e; }
+          }
+          const dayHubPath = `${newFolder}/Sticky-Day-${newDay}.md`;
+          if (!app.vault.getAbstractFileByPath(dayHubPath)) {
+            try {
+              const tpPlugin = app.plugins && app.plugins.plugins && app.plugins.plugins["templater-obsidian"];
+              const templateFile = app.vault.getAbstractFileByPath("ranch/templates/Sticky Day Hub.md");
+              if (tpPlugin && tpPlugin.templater && templateFile) {
+                await tpPlugin.templater.create_new_note_from_template(templateFile, newFolder, `Sticky-Day-${newDay}`, false);
+              }
+            } catch (_e) { /* best-effort; sticky still moves */ }
+          }
+          await app.fileManager.processFrontMatter(file, (fm) => { fm.day = newDay; });
+          const newPath = `${newFolder}/${file.name}`;
+          await app.fileManager.renameFile(file, newPath);
+          try { app.workspace.openLinkText(newPath, ""); } catch (_e) {}
+          close();
+        } catch (e) {
+          if (typeof Notice === "function") new Notice("StickyChromeBar: move failed — " + ((e && e.message) || e), 8000);
+        }
+      };
+      const cancelBtn = row.createEl("button", { text: "Cancel" });
+      cancelBtn.addEventListener("click", close);
+      const saveBtn = row.createEl("button", { text: "Save" });
+      saveBtn.style.cssText = "background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;";
+      saveBtn.addEventListener("click", () => { save(); });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); save(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+      setTimeout(() => { try { input.focus(); } catch (_e) {} }, 0);
+    } catch (_e) { /* never throw */ }
+  }
+
+  _openDeleteDialog(file, hubPath, entityLabel) {
+    try {
+      if (!file || typeof app === "undefined" || !app.vault || typeof app.vault.delete !== "function") return;
+      if (typeof document === "undefined" || !document.body || typeof document.body.createEl !== "function") return;
+      const overlay = document.body.createEl("div");
+      overlay.style.cssText = "position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;";
+      const box = overlay.createEl("div");
+      box.style.cssText = "background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 16px; width: min(380px, 90vw); display: flex; flex-direction: column; gap: 10px;";
+      box.createEl("div", { text: `Delete this ${entityLabel}?` }).style.cssText = "font-weight: 600;";
+      box.createEl("div", { text: "This cannot be undone." }).style.cssText = "color: var(--text-muted); font-size: 0.9em;";
+      const row = box.createEl("div");
+      row.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+      const close = () => { try { overlay.remove(); } catch (_e) {} };
+      const cancelBtn = row.createEl("button", { text: "Cancel" });
+      cancelBtn.addEventListener("click", close);
+      const delBtn = row.createEl("button", { text: "Delete" });
+      delBtn.style.cssText = "background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;";
+      delBtn.addEventListener("click", async () => {
+        try { await app.vault.delete(file); } catch (_e) {}
+        try { if (hubPath) app.workspace.openLinkText(hubPath, ""); } catch (_e) {}
+        close();
+      });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    } catch (_e) { /* never throw */ }
+  }
+
   _config() {
     const ICON = this.ICON;
     const ROOT = "spice/sticky-notes";

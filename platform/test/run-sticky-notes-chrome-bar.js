@@ -190,5 +190,22 @@ const cfg = inst._config();
   global.customJS = prevCJS;
 }
 
+// SCB-DIALOG — new dialog methods present, honor guards
+{
+  ok('SCB-DIALOG-1 _openMoveDayDialog is a function', typeof inst._openMoveDayDialog === 'function');
+  ok('SCB-DIALOG-2 _openDeleteDialog is a function', typeof inst._openDeleteDialog === 'function');
+
+  // Guard: no throw when app/document missing.
+  const prevApp = global.app, prevDoc = global.document;
+  delete global.app; delete global.document;
+  let threw = false;
+  try {
+    inst._openMoveDayDialog({}, { context: 'sticky-note', path: 'x.md', day: '2026-07-06' });
+    inst._openDeleteDialog(null, 'spice/sticky-notes/Sticky.md', 'sticky note');
+  } catch (_e) { threw = true; }
+  ok('SCB-DIALOG-3 dialogs are never-throw when app/document missing', !threw);
+  global.app = prevApp; global.document = prevDoc;
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);
