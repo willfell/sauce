@@ -293,6 +293,16 @@ class TripEntryList {
     if (hr < 24) return hr + " hr";
     return Math.round(ms / 86400000) + " days";
   }
+  // Whole calendar-days from now's LOCAL date to a leg date (both mapped into
+  // the UTC-midnight scheme). Same-date legs at different times give the same
+  // count. null when the date is blank/malformed.
+  static _daysUntilDate(dateVal, nowMs) {
+    const dep = TripEntryList._dayMs(dateVal);
+    if (dep == null) return null;
+    const n = new Date(nowMs);
+    const today = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+    return Math.round((dep - today) / 86400000);
+  }
   static _flightStatus(leg, nowMs) {
     const d = TripEntryList._effDepartMs(leg);
     if (d == null) return null;
@@ -301,6 +311,10 @@ class TripEntryList {
     if (a != null && nowMs >= a) return { label: "Landed", tone: "muted" };
     if (nowMs >= d) return { label: a != null ? "In air" : "Departed", tone: "accent" };
     if (nowMs >= board) return { label: "Boarding", tone: "warn" };
+    // Countdown by calendar days so same-date legs read consistently; fall back
+    // to the fine-grained ms delta only inside the last day (< 1 day out).
+    const days = TripEntryList._daysUntilDate(leg.depart_date, nowMs);
+    if (days != null && days >= 1) return { label: "in " + days + (days === 1 ? " day" : " days"), tone: "accent" };
     return { label: "in " + TripEntryList._humanDelta(d - nowMs), tone: "accent" };
   }
   // Epoch ms (UTC) -> "MMM D, h:mm A". "" for null. Uses UTC getters so a
