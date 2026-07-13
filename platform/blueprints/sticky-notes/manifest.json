@@ -35,6 +35,10 @@
       "range": ">=0.1.0"
     },
     {
+      "name": "section-explorer",
+      "range": ">=0.5.4"
+    },
+    {
       "name": "render-safe",
       "range": ">=0.1.0"
     },

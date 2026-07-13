@@ -156,5 +156,37 @@ const cfg = inst._config();
     kids3.some((h) => /Untitled/i.test(h.textContent) && /italic/.test(h.style.cssText)));
 }
 
+// SCB-LINKS — pinned-links row called on leaf, not on hub/day
+{
+  const prevCJS = global.customJS;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: {
+      makeAdapter: (c) => c,
+      render: () => {},
+      openNavTarget: () => {},
+    },
+    RenderSafe: { page: (dv) => (dv && dv._page) || null },
+    SectionExplorer: { renderNoteLinks: (dv) => { calls.push({ links: (dv && dv._page && dv._page.type) || 'unknown' }); } },
+  };
+  const container = { createEl: () => ({ style: {}, addEventListener: () => {}, createEl: () => ({ style: {} }) }), querySelectorAll: () => [] };
+
+  const leafDv = { container, current: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' } }), _page: { type: 'sticky-note', file: { path: 'x.md', name: 'X' } } };
+  inst.render(leafDv);
+  ok('SCB-LINKS-1 renderNoteLinks called on sticky-note leaf', calls.some((c) => c.links === 'sticky-note'));
+
+  const hubDv = { container, current: () => ({ type: 'sticky-hub', file: { path: 'Sticky.md' } }), _page: { type: 'sticky-hub', file: { path: 'Sticky.md' } } };
+  calls.length = 0;
+  inst.render(hubDv);
+  ok('SCB-LINKS-2 renderNoteLinks NOT called on sticky-hub', calls.length === 0);
+
+  const dayDv = { container, current: () => ({ type: 'sticky-day', file: { path: 'D.md' }, day: '2026-07-13' }), _page: { type: 'sticky-day', file: { path: 'D.md' } } };
+  calls.length = 0;
+  inst.render(dayDv);
+  ok('SCB-LINKS-3 renderNoteLinks NOT called on sticky-day', calls.length === 0);
+
+  global.customJS = prevCJS;
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);

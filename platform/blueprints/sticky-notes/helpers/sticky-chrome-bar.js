@@ -14,7 +14,20 @@ class StickyChromeBar {
         || typeof customJS.ChromeBar.render !== "function") return;
       const out = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
       this._maybeRenderBanner(dv);
+      this._maybeRenderPinnedLinks(dv);
       return out;
+    } catch (_e) { /* never throw */ }
+  }
+
+  _maybeRenderPinnedLinks(dv) {
+    try {
+      const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+        ? customJS.RenderSafe.page(dv)
+        : (dv && dv.current ? dv.current() : null);
+      if (!page || page.type !== "sticky-note") return;
+      if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer.renderNoteLinks === "function") {
+        customJS.SectionExplorer.renderNoteLinks(dv);
+      }
     } catch (_e) { /* never throw */ }
   }
 
