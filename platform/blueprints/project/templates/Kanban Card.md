@@ -227,6 +227,22 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
                         await app.fileManager.processFrontMatter(atlasNote, fm => {
                             fm.workstreams = [...(fm.workstreams || []), { id: newSlug, name: trimmedName }];
                         });
+                        // v0.217.0: the atlas note's workstreams[] is not what
+                        // ProjectWorkstreams renders on the Map — that reads the
+                        // Map note's OWN frontmatter (see project-workstream-manager.js
+                        // updateWorkstreams, which writes both). Without this, a
+                        // workstream created inline from the Kanban card never
+                        // appears on the Map.
+                        const mapNote = app.vault.getFiles().find(f =>
+                            f.path.startsWith(projectDir + "/") &&
+                            !f.path.includes("/tasks/") &&
+                            app.metadataCache.getFileCache(f)?.frontmatter?.type === "map"
+                        );
+                        if (mapNote) {
+                            await app.fileManager.processFrontMatter(mapNote, fm => {
+                                fm.workstreams = [...(fm.workstreams || []), { id: newSlug, name: trimmedName }];
+                            });
+                        }
                         workstreamValue = newSlug;
                         new Notice(`Workstream added: ${trimmedName}`);
                     } else if (newSlug) {

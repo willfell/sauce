@@ -47,7 +47,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.13.0"
+      "version": "0.13.1"
     },
     {
       "name": "breadcrumb",
@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.21.0"
+      "version": "0.21.1"
     },
     {
       "name": "meetings",
@@ -129,7 +129,7 @@
     },
     {
       "name": "people",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "products",
@@ -137,7 +137,7 @@
     },
     {
       "name": "project",
-      "version": "1.48.0"
+      "version": "1.48.1"
     },
     {
       "name": "to-do",
@@ -145,11 +145,11 @@
     },
     {
       "name": "journal",
-      "version": "0.4.1"
+      "version": "0.4.2"
     },
     {
       "name": "trips",
-      "version": "0.9.0"
+      "version": "0.9.1"
     },
     {
       "name": "finance",
@@ -157,7 +157,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1"
+      "version": "0.10.2"
     },
     {
       "name": "teams",

@@ -1026,6 +1026,17 @@ withTempVault((vault) => {
     ok("HC-V01240-SEED-PNAME-1 map project_name backfilled", typeof mapFm.project_name === "string" && mapFm.project_name.length > 0);
     ok("HC-V01240-SEED-PNAME-2 map project_name is display name not slug", mapFm.project_name === "My Cool Project");
 
+    // HC-V01240-SEED-PNAME-3/4 — v0.217.0 expanded the backfill's type
+    // whitelist beyond map/kanban/task-note to also cover doc-note (and
+    // project/docs-hub/section-hub/links-hub/project-todo). A doc-note under
+    // a multi-word project with no project_name must now get it stamped —
+    // this is what makes the breadcrumb's fm:project_name|path:2 link
+    // resolve to the real hub note instead of the lowercase slug.
+    const docNote = helpers.readNote(vault, "spice/projects/my-cool-project/docs/Notes/Breadcrumb Fixture Note.md");
+    const { frontmatter: docNoteFm } = helpers.parseFrontmatter(docNote);
+    ok("HC-V01240-SEED-PNAME-3 doc-note project_name backfilled", typeof docNoteFm.project_name === "string" && docNoteFm.project_name.length > 0);
+    ok("HC-V01240-SEED-PNAME-4 doc-note project_name is display name not slug", docNoteFm.project_name === "My Cool Project");
+
     // ===== HC-V01325-SEED-AIMARKER-* — applyNoteChromeHeal relocates a
     // mis-placed ACTION_ITEMS_MARKER (and the task run that landed with it).
     // The seed carries a meeting note frozen at the v0.127.0 buggy shape: the

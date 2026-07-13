@@ -137,6 +137,11 @@ class TripEntryList {
       { name: "link", label: "Link", type: "link", placeholder: "https://…" },
     ];
   }
+  // Preset form values for the per-category Add-item "+" button: pre-fills the
+  // Category field so the user lands directly in the item box (pure/testable).
+  static _addItemValuesForCategory(category) {
+    return { category: String(category || "") };
+  }
   // Packing add-item: a SINGLE category select (auto-first) + the item text —
   // no duplicate category field. `categories` = distinct existing categories.
   static _packingItemFields(categories) {
@@ -144,6 +149,49 @@ class TripEntryList {
       { name: "category", label: "Category", type: "select", options: (categories && categories.length ? categories : []) },
       { name: "item", label: "Item", type: "text", placeholder: "Socks" },
     ];
+  }
+
+  // ── row title / subtitle + packing buckets (pure) ────────────────────────
+  // Title for a generic row. spec.title(fn) wins; stay -> name; else -> item||name.
+  static _rowTitle(spec, entry) {
+    if (spec && typeof spec.title === "function") return spec.title(entry) || "";
+    if (spec && spec.kind === "stay") return (entry && entry.name) || "";
+    return (entry && (entry.item || entry.name)) || "";
+  }
+  // Subtitle for a generic row. spec.subtitle(fn) wins; stay -> check-in → check-out
+  // date range; else "".
+  static _rowSubtitle(spec, entry) {
+    if (spec && typeof spec.subtitle === "function") return spec.subtitle(entry) || "";
+    if (spec && spec.kind === "stay") {
+      const ci = TripEntryList._fmtDate(entry && entry.check_in), co = TripEntryList._fmtDate(entry && entry.check_out);
+      return (ci || co) ? (ci + " → " + co) : "";
+    }
+    return "";
+  }
+  // Bucket packing entries by category (first-seen order). "Add category" stores
+  // {category} with no item — those seed the bucket header but are NOT rows.
+  // Only entries with an `item` become rows (carrying their ABSOLUTE index).
+  static _packingBuckets(items) {
+    const order = [];
+    const map = new Map();
+    (Array.isArray(items) ? items : []).forEach((entry, absIndex) => {
+      const cat = (entry && entry.category) || "Uncategorized";
+      if (!map.has(cat)) { map.set(cat, []); order.push(cat); }
+      if (entry && entry.item) map.get(cat).push({ entry, absIndex });
+    });
+    // Within each category, unchecked rows render first and checked-off rows
+    // sink to the bottom — stable within each group. absIndex is untouched
+    // (still points into the ORIGINAL items array); only display order changes.
+    return order.map((cat) => {
+      const rows = map.get(cat)
+        .map((r, i) => [r, i])
+        .sort((a, b) => {
+          const ca = !!a[0].entry.checked, cb = !!b[0].entry.checked;
+          return ca === cb ? a[1] - b[1] : (ca ? 1 : -1);
+        })
+        .map((x) => x[0]);
+      return { category: cat, rows };
+    });
   }
 
   // ── flight direction grouping ─────────────────────────────────────────────
@@ -262,6 +310,16 @@ class TripEntryList {
     if (hr < 24) return hr + " hr";
     return Math.round(ms / 86400000) + " days";
   }
+  // Whole calendar-days from now's LOCAL date to a leg date (both mapped into
+  // the UTC-midnight scheme). Same-date legs at different times give the same
+  // count. null when the date is blank/malformed.
+  static _daysUntilDate(dateVal, nowMs) {
+    const dep = TripEntryList._dayMs(dateVal);
+    if (dep == null) return null;
+    const n = new Date(nowMs);
+    const today = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+    return Math.round((dep - today) / 86400000);
+  }
   static _flightStatus(leg, nowMs) {
     const d = TripEntryList._effDepartMs(leg);
     if (d == null) return null;
@@ -270,6 +328,10 @@ class TripEntryList {
     if (a != null && nowMs >= a) return { label: "Landed", tone: "muted" };
     if (nowMs >= d) return { label: a != null ? "In air" : "Departed", tone: "accent" };
     if (nowMs >= board) return { label: "Boarding", tone: "warn" };
+    // Countdown by calendar days so same-date legs read consistently; fall back
+    // to the fine-grained ms delta only inside the last day (< 1 day out).
+    const days = TripEntryList._daysUntilDate(leg.depart_date, nowMs);
+    if (days != null && days >= 1) return { label: "in " + days + (days === 1 ? " day" : " days"), tone: "accent" };
     return { label: "in " + TripEntryList._humanDelta(d - nowMs), tone: "accent" };
   }
   // Epoch ms (UTC) -> "MMM D, h:mm A". "" for null. Uses UTC getters so a
@@ -320,31 +382,31 @@ class TripEntryList {
       const nowMs = Date.now();
       const withIdx = items.map((entry, absIndex) => ({ entry, absIndex }));
       const groups = TripEntryList._groupByDirection(withIdx.map((w) => Object.assign({}, w.entry, { __i: w.absIndex })));
-      for (const g of groups) {
-        if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
-          customJS.SectionLabel.render(c, g.label);
-        } else {
-          const gh = c.createEl("div", { text: g.label });
-          if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
+      groups.forEach((g, gi) => {
+        if (gi > 0) {
+          const hr = c.createEl("div");
+          if (hr.style) hr.style.cssText = "border-top:1px solid var(--background-modifier-border); margin-top:14px; padding-top:2px;";
         }
+        const gh = c.createEl("div", { text: "✈ " + g.label });
+        if (gh.style) gh.style.cssText = "font-weight:700; font-size:0.95em; letter-spacing:0.06em; text-transform:uppercase; color:var(--interactive-accent); margin:16px 0 6px;";
         g.entries.forEach((e, i) => {
           if (i > 0) this._layoverChip(c, g.entries[i - 1], e);
           this._flightRow(c, dv, spec, items, e, e.__i, nowMs);
         });
-      }
+      });
     } else if (spec.group) {
       // Grouped: bucket entries by category, preserving each row's ABSOLUTE
       // index in `items` so Edit/Delete/toggle target the right element.
-      const groups = new Map();
-      items.forEach((entry, absIndex) => {
-        const cat = (entry && entry.category) || "Uncategorized";
-        if (!groups.has(cat)) groups.set(cat, []);
-        groups.get(cat).push({ entry, absIndex });
-      });
-      for (const [cat, members] of groups) {
-        const gh = c.createEl("div", { text: cat });
-        if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
-        for (const m of members) this._row(c, dv, spec, items, m.entry, m.absIndex);
+      // Item-less "Add category" placeholders seed a header but are not rows.
+      for (const bucket of TripEntryList._packingBuckets(items)) {
+        const gh = c.createEl("div");
+        if (gh.style) gh.style.cssText = "display:flex; align-items:center; gap:8px; margin:10px 0 4px;";
+        const lbl = gh.createEl("span", { text: bucket.category });
+        if (lbl.style) lbl.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em;";
+        const addBtn = gh.createEl("button", { text: "+" });
+        if (addBtn.style) addBtn.style.cssText = "margin-left:auto; padding:2px 9px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--interactive-accent); font-size:0.85em; font-weight:600; cursor:pointer;";
+        addBtn.onclick = () => this._onAddItem(dv, spec, TripEntryList._addItemValuesForCategory(bucket.category));
+        for (const r of bucket.rows) this._row(c, dv, spec, items, r.entry, r.absIndex);
       }
     } else {
       items.forEach((entry, absIndex) => this._row(c, dv, spec, items, entry, absIndex));
@@ -484,9 +546,9 @@ class TripEntryList {
     }
     const label = rowEl.createEl("div");
     label.style.cssText = "flex:1; min-width:0;";
-    const title = label.createEl("div", { text: spec.title ? spec.title(entry) : "" });
+    const title = label.createEl("div", { text: TripEntryList._rowTitle(spec, entry) });
     title.style.cssText = "font-weight:600; font-size:0.9em; overflow:hidden; text-overflow:ellipsis;";
-    const subText = spec.subtitle ? spec.subtitle(entry) : "";
+    const subText = TripEntryList._rowSubtitle(spec, entry);
     if (subText) {
       const sub = label.createEl("div", { text: subText });
       sub.style.cssText = "font-size:0.76em; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;";
@@ -597,14 +659,17 @@ class TripEntryList {
     });
   }
 
-  _onAddItem(dv, spec) {
+  _onAddItem(dv, spec, presetValues) {
     // SINGLE category <select> (auto-first) + item text — no duplicate
     // category field. Do NOT concat spec.fields (the template's fields carry
-    // their own category, which is what doubled the control).
+    // their own category, which is what doubled the control). presetValues
+    // (e.g. {category} from a per-category "+") pre-fills the select so the
+    // cursor lands in the item box (the category select is never focused).
     const fields = TripEntryList._packingItemFields(this._categories(dv, spec));
     this._openForm({
       title: "Add item",
       fields,
+      values: presetValues || {},
       dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
@@ -678,7 +743,16 @@ class TripEntryList {
           }
         });
       });
-      if (controls.length) setTimeout(() => controls[0].input.focus(), 0);
+      // Focus the first TEXT-like control (skip a leading <select>, e.g. the
+      // packing category picker) so add-item lands the cursor in the item box.
+      if (controls.length) {
+        const textTypes = ["text", "url", "number", "time", "date"];
+        const target = controls.find((cc) => {
+          const inp = cc.input;
+          return inp && inp.tagName === "INPUT" && textTypes.includes(inp.type);
+        }) || controls[0];
+        setTimeout(() => target.input.focus(), 0);
+      }
     } });
   }
 
