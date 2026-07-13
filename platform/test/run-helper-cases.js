@@ -6910,16 +6910,19 @@ async function casePSW5ManifestRegistration() {
 }
 
 async function casePSW6TemplateBlock() {
-    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block (v0.109.0: no H2) ---");
+    console.log("\n--- Case PSW-6: Template, Project.md includes status surface (v0.220.4+: absorbed into ProjectDashboard) ---");
     const tplPath = path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md");
     const src = fs.readFileSync(tplPath, "utf8");
-    // v0.109.0 S6 SUPERSEDES v0.51.0: the ## Status H2 was dropped. The widget
-    // still renders (the at-a-glance chip is the signal); the H2 label was
-    // redundant. Assert the block presence only.
-    const hasBlock = /class:\s*"ProjectStatusWidget"/.test(src);
-    assertTrue("PSW-6: Template, Project.md has ProjectStatusWidget dataviewjs block",
-        hasBlock,
-        `block=${hasBlock}`);
+    // v0.220.4 (project blueprint 1.50.0) SUPERSEDES v0.109.0 S6: the standalone
+    // ProjectStatusWidget block was collapsed into the ProjectDashboard card's
+    // header pill. The status surface is now owned by ProjectDashboard; the
+    // widget class is preserved on disk + manifest for backwards compat with
+    // Links Hub template + legacy consumers.
+    const hasDashboard = /class:\s*"ProjectDashboard"/.test(src);
+    const hasLegacyWidget = /class:\s*"ProjectStatusWidget"/.test(src);
+    assertTrue("PSW-6: Template, Project.md has ProjectDashboard block (absorbs status pill)",
+        hasDashboard && !hasLegacyWidget,
+        `dashboard=${hasDashboard} legacyWidget=${hasLegacyWidget}`);
 }
 
 // -------------------------------------------------------------------------
@@ -11058,21 +11061,18 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
-  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template invokes ProjectMeetingsPanel (v0.109.0 superseded H2 + order) ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template surfaces meetings (v0.220.4: via ProjectDashboard) ---`);
   assertTrue("HC-V01020-PROJ-TPL-2: Project.md exists", fs.existsSync(_PROJ_TPL));
   const body = fs.readFileSync(_PROJ_TPL, "utf8");
-  // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
-  // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
-  // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
-  // is invoked.
-  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was REMOVED from
-  // the hub template — workstream management now lives exclusively on the Map
-  // note — so the hub no longer invokes it and the old Meetings→Workstreams
-  // ordering assertion is retired.
-  assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
-    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
-  const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
-  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Meetings panel present on hub", idxMeetings >= 0);
+  // v0.220.4 (project 1.50.0) SUPERSEDES v0.109.0 S6: the standalone
+  // ProjectMeetingsPanel block on the project hub was collapsed into the
+  // ProjectDashboard card's Meetings tile + Recent-activity strip. The panel
+  // class stays available for Links Hub and other templates; only the hub
+  // template stops invoking it directly.
+  assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectDashboard via customjs-guard view",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDashboard["']/.test(body));
+  const idxDashboard = body.indexOf('class: "ProjectDashboard"');
+  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Dashboard present on hub (absorbs meetings surface)", idxDashboard >= 0);
   assertTrue("HC-V01020-PROJ-TPL-2-NOWSM: ProjectWorkstreamManager NOT on hub (moved to Map)",
     body.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
@@ -14787,14 +14787,15 @@ async function caseV01090TplNoLegacyPanels() {
 }
 
 async function caseV01090TplSectionOrder() {
-  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings (Workstreams moved to Map) ---");
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md — ChromeBar → Dashboard order (v0.220.4 collapse) ---");
   const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
-  const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
-  const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
-  assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
-  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was removed from
-  // the hub template (workstream management now lives on the Map note), so the
-  // hub no longer invokes it. The old Meetings→Workstreams ordering is retired.
+  // v0.220.4 (project 1.50.0) SUPERSEDES: the Status→Meetings inter-block
+  // ordering assertion is retired because both surfaces are now inside the
+  // single ProjectDashboard card. Assert the surviving invariant: ChromeBar
+  // renders BEFORE ProjectDashboard (the dashboard hugs tight under chrome).
+  const idxChromeBar = tpl.indexOf('class: "ProjectChromeBar"');
+  const idxDashboard = tpl.indexOf('class: "ProjectDashboard"');
+  assertTrue("HC-V01090-TPL-SO: ChromeBar BEFORE Dashboard", idxChromeBar >= 0 && idxDashboard > idxChromeBar);
   assertTrue("HC-V01090-TPL-SO: ProjectWorkstreamManager NOT on hub (moved to Map)",
     tpl.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
