@@ -237,10 +237,6 @@ class SectionExplorer {
     this._renderLinksRow(adapter, ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: "Recently updated" });
     const cards = (Array.isArray(recent) ? recent : Array.from(recent || [])).map((p) => this._docCardModel(p));
-    try {
-      pane.__seCtx = { dv, adapter, ctx, section: null, cards };
-      pane.__seEnterSelectMode = () => this._enterSelectModeOnPane(pane);
-    } catch (_e) { /* never-throw */ }
     this._renderDocCards(pane, adapter, cards);
   }
 
@@ -267,12 +263,6 @@ class SectionExplorer {
     this._renderLinksRow(adapter, section || ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
     const cards = (Array.isArray(pages) ? pages : Array.from(pages || [])).map((p) => this._docCardModel(p));
-    // Stash the render context on the pane so enterSelectMode (Task F) can flip
-    // this already-rendered pane into bulk-select without re-querying anything.
-    try {
-      pane.__seCtx = { dv, adapter, ctx, section, cards };
-      pane.__seEnterSelectMode = () => this._enterSelectModeOnPane(pane);
-    } catch (_e) { /* never-throw */ }
     this._renderDocCards(pane, adapter, cards);
   }
 
@@ -804,36 +794,45 @@ class SectionExplorer {
   // Move a section folder under destParentFolder (Task E2). Renames the folder
   // to destParentFolder/<slug(title)>, then applies the adapter's section-move
   // cascade (hub patch + child patches) best-effort. Wiki → null (folder-only).
-  moveSection(dv, section, destParentFolder, adapter) {
+  // ASYNC: builds the patch plan BEFORE the rename (while child paths still
+  // point at the OLD folder), awaits the folder rename so the vault index
+  // reflects the new paths, remaps every old-folder path onto the new folder,
+  // and patches frontmatter only on real TFiles resolved from the vault at
+  // their NEW path — never on a fabricated { path } object (which would read
+  // an old/renamed path off disk → ENOENT). Wiki → null plan (folder-only).
+  async moveSection(dv, section, destParentFolder, adapter) {
     try {
       if (!section || !section.folder) return;
+      const oldFolder = String(section.folder).replace(/\/+$/, "");
       const newFolder = String(destParentFolder).replace(/\/+$/, "") + "/" + SectionExplorer._slugify(section.title);
       let folderFile = null;
-      try { folderFile = app.vault.getAbstractFileByPath(section.folder); } catch (_e) { folderFile = null; }
-      if (!folderFile) folderFile = { path: section.folder };
-      try { app.fileManager.renameFile(folderFile, newFolder); } catch (_e) { return; }
+      try { folderFile = app.vault.getAbstractFileByPath(oldFolder); } catch (_e) { folderFile = null; }
+      if (!folderFile) return; // can't move a folder we can't resolve to a real file
       const mv = adapter && adapter.move;
+      // Build the plan while child paths still point at the OLD folder.
+      let plan = null;
       if (mv && typeof mv.rewriteOnSectionMove === "function") {
-        let plan = null;
         try { plan = mv.rewriteOnSectionMove(section, destParentFolder); } catch (_e) { plan = null; }
-        if (plan) {
-          if (plan.hubPatch) {
-            try {
-              // The moved hub's basename is unchanged; only its folder moved.
-              const hubBase = String(section.hubPath || "").slice(String(section.hubPath || "").lastIndexOf("/") + 1);
-              const movedHubPath = hubBase ? (newFolder + "/" + hubBase) : null;
-              const hubFile = movedHubPath ? (app.vault.getAbstractFileByPath(movedHubPath) || { path: movedHubPath }) : null;
-              if (hubFile) app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
-            } catch (_e) { /* best-effort */ }
-          }
-          for (const cp of (plan.childPatches || [])) {
-            try {
-              if (!cp || !cp.path) continue;
-              const cf = app.vault.getAbstractFileByPath(cp.path) || { path: cp.path };
-              app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
-            } catch (_e) { /* best-effort */ }
-          }
-        }
+      }
+      await app.fileManager.renameFile(folderFile, newFolder);
+      if (!plan) return;
+      // Old-folder path → new-folder path.
+      const remap = (p) => {
+        const s = (p == null) ? "" : String(p);
+        return (s === oldFolder || s.indexOf(oldFolder + "/") === 0) ? newFolder + s.slice(oldFolder.length) : s;
+      };
+      if (plan.hubPatch && section.hubPath) {
+        try {
+          const hubFile = app.vault.getAbstractFileByPath(remap(section.hubPath));
+          if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
+        } catch (_e) { /* best-effort */ }
+      }
+      for (const cp of (plan.childPatches || [])) {
+        try {
+          if (!cp || !cp.path) continue;
+          const cf = app.vault.getAbstractFileByPath(remap(cp.path));
+          if (cf) await app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
+        } catch (_e) { /* best-effort */ }
       }
     } catch (_e) { /* never-throw */ }
   }
@@ -865,74 +864,93 @@ class SectionExplorer {
     } catch (_e) { /* never-throw */ }
   }
 
-  // ── In-place select mode (Task F) ─────────────────────────────────────────
-  // Flip an already-rendered page pane into bulk-select: re-render its doc cards
-  // with checkboxes + a sticky select bar whose "Move N →" button opens the
-  // shared picker and applies planBulkMove per move. Uses the render context
-  // stashed on the pane (pane.__seCtx) at render time.
-  enterSelectMode(dv) {
+  // ── Select docs (modal picker) ────────────────────────────────────────────
+  // Bulk-select the docs directly under a surface and move the checked set.
+  // Replaces the old in-place pane flip (Task F select mode), which mutated a
+  // pane owned by a DIFFERENT dataviewjs block than the chrome bar dispatching the
+  // click, and so silently no-op'd. Enumeration is dv-independent (pagesUnder →
+  // metadataCache), so it is mobile-safe at dispatch time.
+  openSelectDocsPicker(dv, adapter, section) {
     try {
-      const container = (dv && dv.container) ? dv.container : dv;
-      // The ChromeBar that dispatches this renders in its OWN dataviewjs block,
-      // separate from the WikiTree/SectionHub block that renders the page pane —
-      // so the pane is NOT under dv.container. Search the shared note view (or the
-      // whole document) first, then fall back to the container.
-      let scope = null;
-      if (container && typeof container.closest === "function") {
-        scope = container.closest(".view-content") || container.closest(".workspace-leaf-content");
-      }
-      if (!scope && typeof document !== "undefined") scope = document;
-      let pane = null;
-      if (scope && typeof scope.querySelector === "function") pane = scope.querySelector(".se-page-pane");
-      if (!pane && container && typeof container.querySelector === "function") pane = container.querySelector(".se-page-pane");
-      if (pane && typeof pane.__seEnterSelectMode === "function") pane.__seEnterSelectMode();
-    } catch (_e) { /* never-throw */ }
-  }
-
-  _enterSelectModeOnPane(pane) {
-    try {
-      const st = pane && pane.__seCtx;
-      if (!st) return;
-      const { dv, adapter, cards } = st;
-      // Rebuild the pane body: links row + label are kept by re-rendering fully.
-      pane.empty();
-      const selected = new Set();
-      // Select bar (sticky) with a live "Move N →" button.
-      const bar = pane.createEl("div", { cls: "se-select-bar" });
-      const moveBtn = bar.createEl("button", { cls: "se-select-move-btn" });
-      const refreshBtn = () => {
-        const n = selected.size;
-        moveBtn.textContent = n ? ("Move " + n + " doc" + (n === 1 ? "" : "s") + " →") : "Move docs →";
-        moveBtn.disabled = n === 0;
-        try { moveBtn.style.opacity = n ? "1" : "0.5"; } catch (_e) { /* stub */ }
-      };
-      moveBtn.onclick = () => {
-        if (moveBtn.disabled) return;
-        const mv = adapter && adapter.move;
-        let targets = [];
-        try { targets = (mv && typeof mv.enumerateSectionTargets === "function") ? (mv.enumerateSectionTargets(dv) || []) : []; } catch (_e) { targets = []; }
-        this.openMovePicker({
-          targets,
-          currentFolder: "",
-          title: "Move docs to section",
-          onPick: (folder) => {
-            const { moves, skipped } = SectionExplorer.planBulkMove([...selected], folder);
-            for (const m of moves) {
-              this.applyDocMove(dv, { path: m.from }, folder, adapter);
-            }
-            try {
-              const bits = ["Moved " + moves.length + " doc" + (moves.length === 1 ? "" : "s")];
-              if (skipped.length) bits.push(skipped.length + " skipped");
-              if (typeof Notice === "function") new Notice(bits.join("; "), 5000);
-            } catch (_e) { /* notice best-effort */ }
-          },
+      const mv = adapter && adapter.move;
+      if (!mv) return;
+      const folder = (section && section.folder) ? String(section.folder) : String(mv.root || "");
+      if (!folder) return;
+      const docType = mv.docType;
+      // Direct doc children of the folder only (matches the page pane's scope).
+      const norm = String(folder).replace(/\/+$/, "");
+      let docs = [];
+      try {
+        docs = SectionExplorer.pagesUnder(norm).filter((p) => {
+          if (!p || !p.file || p.file.folder !== norm) return false;
+          if (docType && p.type !== docType) return false;
+          return true;
         });
-      };
-      refreshBtn();
-      pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
-      this._renderDocCards(pane, adapter, cards, {
-        selected,
-        onToggle: (path, checked) => { if (checked) selected.add(path); else selected.delete(path); refreshBtn(); },
+      } catch (_e) { docs = []; }
+      const cards = docs.map((p) => this._docCardModel(p));
+      const selected = new Set();
+
+      this._openModal("se-select-modal-overlay", (panel, close, doc) => {
+        this._modalTitle(doc, panel, "Select docs to move");
+        const list = doc.createElement("div");
+        list.className = "se-select-list";
+        list.style.cssText = "max-height:55vh;overflow-y:auto;margin-bottom:12px;";
+        panel.appendChild(list);
+        if (cards.length === 0) {
+          const empty = doc.createElement("div");
+          empty.className = "se-select-empty";
+          empty.textContent = "No docs directly in this section.";
+          empty.style.cssText = "color:var(--text-muted);font-size:0.92em;padding:8px 2px;";
+          list.appendChild(empty);
+        }
+        let moveBtn = null;
+        const refresh = () => {
+          if (!moveBtn) return;
+          const n = selected.size;
+          moveBtn.textContent = n ? ("Move " + n + " doc" + (n === 1 ? "" : "s") + " →") : "Move docs →";
+          moveBtn.disabled = n === 0;
+          try { moveBtn.style.opacity = n ? "1" : "0.5"; } catch (_e) { /* stub */ }
+        };
+        for (const c of cards) {
+          const row = doc.createElement("label");
+          row.className = "se-select-row";
+          row.style.cssText = "display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;color:var(--text-normal);";
+          const cb = doc.createElement("input");
+          try { cb.type = "checkbox"; } catch (_e) { /* stub */ }
+          cb.className = "se-select-check";
+          cb.onchange = () => { if (cb.checked) selected.add(c.path); else selected.delete(c.path); refresh(); };
+          const name = doc.createElement("span");
+          name.className = "se-select-title";
+          name.textContent = c.title || c.path;
+          name.style.cssText = "flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+          row.appendChild(cb);
+          row.appendChild(name);
+          list.appendChild(row);
+        }
+        const btns = this._modalButtons(doc, panel, close, "Move docs →", () => {
+          if (selected.size === 0) return;
+          close();
+          let targets = [];
+          try { targets = (typeof mv.enumerateSectionTargets === "function") ? (mv.enumerateSectionTargets(dv) || []) : []; } catch (_e) { targets = []; }
+          this.openMovePicker({
+            targets,
+            currentFolder: norm,
+            title: "Move docs to section",
+            onPick: (dest) => {
+              try {
+                const { moves, skipped } = SectionExplorer.planBulkMove([...selected], dest);
+                for (const m of moves) this.applyDocMove(dv, { path: m.from }, dest, adapter);
+                try {
+                  const bits = ["Moved " + moves.length + " doc" + (moves.length === 1 ? "" : "s")];
+                  if (skipped.length) bits.push(skipped.length + " skipped");
+                  if (typeof Notice === "function") new Notice(bits.join("; "), 5000);
+                } catch (_e) { /* notice best-effort */ }
+              } catch (_e) { /* never-throw */ }
+            },
+          });
+        });
+        moveBtn = btns.primary;
+        refresh();
       });
     } catch (_e) { /* never-throw */ }
   }

@@ -96,7 +96,7 @@ const cfg = inst._config();
     WikiTree: { _buildConfig: () => stubConfig },
     SectionExplorer: {
       makeAdapter: (c) => ({ __fromConfig: c }),
-      enterSelectMode: (dv) => calls.push({ enterSelectMode: !!dv }),
+      openSelectDocsPicker: (dv, adapter, section) => calls.push({ selectDocs: !!dv, hasSection: !!section }),
       _openMovePickerForSection: (dv, a, sec) => calls.push({ moveSection: sec && sec.folder }),
       _openDeleteConfirm: (dv, a, sec) => calls.push({ deleteSection: sec && sec.folder }),
       openMovePicker: (o) => calls.push({ openMovePicker: o && o.title }),
@@ -120,8 +120,8 @@ const cfg = inst._config();
   global.customJS = prevCJS;
   global.app = prevApp;
 
-  ok('WCB-DISPATCH-4 select-docs → SectionExplorer.enterSelectMode(dv)',
-    calls.some((c) => c.enterSelectMode === true));
+  ok('WCB-DISPATCH-4 select-docs → SectionExplorer.openSelectDocsPicker(dv, adapter, section)',
+    calls.some((c) => c.selectDocs === true && c.hasSection === true));
   ok('WCB-DISPATCH-5 move-section → SectionExplorer._openMovePickerForSection(section=current folder)',
     calls.some((c) => c.moveSection === 'spice/wiki/cooking'));
   ok('WCB-DISPATCH-6 delete-section → SectionExplorer._openDeleteConfirm(section=current folder)',

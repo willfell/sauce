@@ -222,6 +222,7 @@ class WikiTree {
             move: {
                 root: "spice/wiki",
                 sectionType: "wiki-section",
+                docType: "wiki-page",
                 rootLabel: "Wiki (root)",
                 enumerateSectionTargets: () => {
                     // dv-independent: dispatch-time (⋯ Move section / leaf Move) query

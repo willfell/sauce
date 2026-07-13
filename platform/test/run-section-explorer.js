@@ -1706,17 +1706,31 @@ failures += !run("applyDocMove: project-like adapter applies the {section,sub_se
   delete global.app;
 });
 
-failures += !run("moveSection: renames folder to new parent + applies hub + child patches", () => {
+ASYNC_TESTS.push({ name: "moveSection: renames folder to new parent + applies hub + child patches (at remapped paths)", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const renames = [];
   const fmWrites = [];
+  const prevApp = global.app;
+  // Real-TFile behaviour: the folder rename remaps every path under it, and
+  // processFrontMatter only succeeds against a path present in the vault.
+  const known = new Set([
+    "spice/projects/foo/docs/ems",
+    "spice/projects/foo/docs/ems/EMS.md",
+    "spice/projects/foo/docs/ems/sub/Sub.md",
+  ]);
   global.app = {
     fileManager: {
-      renameFile: (f, p) => { renames.push({ f, p }); return Promise.resolve(); },
-      processFrontMatter: (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ path: f && f.path, fm }); return Promise.resolve(); },
+      renameFile: async (f, p) => {
+        renames.push({ f, p });
+        const from = f.path;
+        for (const k of [...known]) {
+          if (k === from || k.indexOf(from + "/") === 0) { known.delete(k); known.add(p + k.slice(from.length)); }
+        }
+      },
+      processFrontMatter: async (f, fn) => { const fm = {}; fn(fm); fmWrites.push({ path: f && f.path, fm }); },
     },
-    vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+    vault: { getAbstractFileByPath: (p) => (known.has(p) ? { path: p } : null) },
   };
   const section = { title: "EMS", folder: "spice/projects/foo/docs/ems", hubPath: "spice/projects/foo/docs/ems/EMS.md" };
   const childHubPath = "spice/projects/foo/docs/ems/sub/Sub.md";
@@ -1728,17 +1742,19 @@ failures += !run("moveSection: renames folder to new parent + applies hub + chil
       }),
     },
   };
-  se.moveSection(null, section, "spice/projects/foo/docs/knowledge", projAdapter);
-  assert.strictEqual(renames.length, 1, "folder renamed once");
-  assert.strictEqual(renames[0].p, "spice/projects/foo/docs/knowledge/ems", "moved under new parent, slug of title");
-  // Hub patch + child patch applied.
-  const hubWrite = fmWrites.find((w) => w.fm.parent_section === "Knowledge" && w.fm.depth === 2);
-  assert.ok(hubWrite, "expected hub patch applied");
-  const childWrite = fmWrites.find((w) => w.path === childHubPath);
-  assert.ok(childWrite, "expected child patch applied to the child hub");
-  assert.strictEqual(childWrite.fm.parent_section, "EMS");
-  delete global.app;
-});
+  try {
+    await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", projAdapter);
+    assert.strictEqual(renames.length, 1, "folder renamed once");
+    assert.strictEqual(renames[0].p, "spice/projects/foo/docs/knowledge/ems", "moved under new parent, slug of title");
+    // Hub patch + child patch applied at the NEW remapped paths.
+    const hubWrite = fmWrites.find((w) => w.fm.parent_section === "Knowledge" && w.fm.depth === 2);
+    assert.ok(hubWrite, "expected hub patch applied");
+    assert.strictEqual(hubWrite.path, "spice/projects/foo/docs/knowledge/ems/EMS.md", "hub patched at remapped path");
+    const childWrite = fmWrites.find((w) => w.path === "spice/projects/foo/docs/knowledge/ems/sub/Sub.md");
+    assert.ok(childWrite, "expected child patch applied to the child hub at remapped path");
+    assert.strictEqual(childWrite.fm.parent_section, "EMS");
+  } finally { global.app = prevApp; }
+}});
 
 failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) renames folder only", () => {
   const SectionExplorer = loadClass();
@@ -1839,194 +1855,138 @@ failures += !run("rail row ⋯ gains a Move entry (before Delete); _openMovePick
   delete global.customJS;
 });
 
-// ── Task F: in-place select mode ────────────────────────────────────────────
-
-// A container stub whose querySelector can locate the .se-page-pane by class.
-function makeQueryableDomStub() {
-  const { container, els } = makeDomStub();
-  container.querySelector = (sel) => {
-    const cls = String(sel).replace(/^\./, "");
-    return els.find((e) => e.className === cls) || null;
-  };
-  return { container, els };
-}
-
-failures += !run("enterSelectMode: doc cards gain checkboxes; checking 2 → 'Move 2 docs'; move applies planBulkMove via applyDocMove", () => {
+failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded), checked set moves through openMovePicker → applyDocMove", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  const movePickers = [];
-  const applied = [];
-  // Spy on the two collaborators without changing behavior we don't test here.
-  se.openMovePicker = (opts) => { movePickers.push(opts); return { __seVisibleFolders: () => [] }; };
-  se.applyDocMove = (dv, file, folder, adapter) => { applied.push({ path: file && file.path, folder }); };
+  const doc = makeDocStub();
 
-  global.customJS = {};
-  global.Notice = function () {};
-  const { container, els } = makeQueryableDomStub();
-  const dv = { container, current: () => ({ file: { path: "spice/wiki/ems/EMS.md" } }) };
-  const pages = [
-    { title: "A", file: { name: "A", path: "spice/wiki/ems/A.md", mtime: { ts: 1 } } },
-    { title: "B", file: { name: "B", path: "spice/wiki/ems/B.md", mtime: { ts: 2 } } },
-    { title: "C", file: { name: "C", path: "spice/wiki/ems/C.md", mtime: { ts: 3 } } },
-  ];
-  const adapter = se.makeAdapter({
-    resolveContext: () => ({ scopePath: "spice/wiki/ems" }),
-    listSections: () => [],
-    listPages: () => pages,
-    getLinks: () => [],
-    icons: { folder: "<svg/>", file: "<svg/>" },
-    rootClass: "se-root",
-  });
-  // Attach the move block the select bar needs for doc targets.
-  adapter.move = { enumerateSectionTargets: () => [{ folder: "spice/wiki/food", label: "Food", depth: 1 }] };
-  se.render(dv, adapter);
-
-  const pane = els.find((e) => e.className === "se-page-pane");
-  assert.ok(pane, "expected a page pane");
-  assert.strictEqual(typeof pane.__seEnterSelectMode, "function", "expected the pane seam");
-  pane.__seEnterSelectMode();
-
-  // Cards are now selectable, each with a checkbox.
-  const checks = els.filter((e) => e.tag === "input");
-  assert.strictEqual(checks.length, 3, "one checkbox per card");
-  const bar = els.find((e) => e.className === "se-select-bar");
-  assert.ok(bar, "expected the select bar");
-  const moveBtn = findDeepAll(bar, (e) => typeof e.textContent === "string" && /Move/.test(e.textContent))[0];
-  assert.ok(moveBtn, "expected a Move N button");
-
-  // Check two cards.
-  checks[0].checked = true; checks[0].onchange();
-  checks[1].checked = true; checks[1].onchange();
-  assert.ok(/Move 2 doc/.test(moveBtn.textContent), "bar reflects 2 selected: " + moveBtn.textContent);
-
-  // Invoke the move → picker opens; on pick, planBulkMove applied via applyDocMove.
-  moveBtn.onclick();
-  assert.strictEqual(movePickers.length, 1, "opened the shared picker");
-  movePickers[0].onPick("spice/wiki/food");
-  assert.strictEqual(applied.length, 2, "both selected docs moved");
-  assert.deepStrictEqual(applied.map((a) => a.folder), ["spice/wiki/food", "spice/wiki/food"]);
-  const movedPaths = applied.map((a) => a.path).sort();
-  assert.deepStrictEqual(movedPaths, ["spice/wiki/ems/A.md", "spice/wiki/ems/B.md"]);
-  delete global.customJS;
-  delete global.Notice;
-});
-
-failures += !run("enterSelectMode: recent-pane (0 docs, ≥1 section) stashes the seam so select-docs works", () => {
-  const SectionExplorer = loadClass();
-  const se = new SectionExplorer();
-  const movePickers = [];
-  const applied = [];
-  se.openMovePicker = (opts) => { movePickers.push(opts); return { __seVisibleFolders: () => [] }; };
-  se.applyDocMove = (dv, file, folder, adapter) => { applied.push({ path: file && file.path, folder }); };
-
-  global.customJS = {};
-  global.Notice = function () {};
-  const { container, els } = makeQueryableDomStub();
-  const dv = { container, current: () => ({ file: { path: "spice/wiki/hub/Hub.md" } }) };
-  const recentPages = [
-    { title: "R1", file: { name: "R1", path: "spice/wiki/sub/R1.md", mtime: { ts: 10 } } },
-    { title: "R2", file: { name: "R2", path: "spice/wiki/sub/R2.md", mtime: { ts: 20 } } },
-  ];
-  const adapter = se.makeAdapter({
-    resolveContext: () => ({ scopePath: "spice/wiki/hub" }),
-    listSections: () => [{ folder: "spice/wiki/hub/child", label: "Child", pageCount: 3, hubPath: "spice/wiki/hub/child/Child.md" }],
-    listPages: () => [],
-    listRecent: () => recentPages,
-    getLinks: () => [],
-    icons: { folder: "<svg/>", file: "<svg/>" },
-    rootClass: "se-root",
-  });
-  adapter.move = { enumerateSectionTargets: () => [{ folder: "spice/wiki/food", label: "Food", depth: 1 }] };
-  se.render(dv, adapter);
-
-  const pane = els.find((e) => e.className === "se-page-pane");
-  assert.ok(pane, "expected a page pane even in recent mode");
-  assert.strictEqual(typeof pane.__seEnterSelectMode, "function", "recent-pane must stash the select-mode seam");
-
-  pane.__seEnterSelectMode();
-  const checks = els.filter((e) => e.tag === "input");
-  assert.strictEqual(checks.length, 2, "one checkbox per recent card");
-  checks[0].checked = true; checks[0].onchange();
-  const bar = els.find((e) => e.className === "se-select-bar");
-  assert.ok(bar, "expected the select bar");
-
-  delete global.customJS;
-  delete global.Notice;
-});
-
-failures += !run("enterSelectMode: checkbox click stops propagation so it doesn't open the note", () => {
-  const SectionExplorer = loadClass();
-  const se = new SectionExplorer();
-  global.customJS = {};
-  const { container, els } = makeQueryableDomStub();
-  const dv = { container, current: () => ({ file: { path: "spice/wiki/ems/EMS.md" } }) };
-  const adapter = se.makeAdapter({
-    resolveContext: () => ({ scopePath: "spice/wiki/ems" }),
-    listSections: () => [],
-    listPages: () => [{ title: "A", file: { name: "A", path: "spice/wiki/ems/A.md", mtime: { ts: 1 } } }],
-    getLinks: () => [],
-    icons: { folder: "<svg/>", file: "<svg/>" },
-    rootClass: "se-root",
-  });
-  adapter.move = { enumerateSectionTargets: () => [] };
-  se.render(dv, adapter);
-  const pane = els.find((e) => e.className === "se-page-pane");
-  pane.__seEnterSelectMode();
-  const cb = els.find((e) => e.tag === "input");
-  assert.ok(cb, "expected a checkbox");
-  let stopped = false;
-  // A checkbox onclick must call stopPropagation on its event.
-  if (typeof cb.onclick === "function") cb.onclick({ stopPropagation: () => { stopped = true; } });
-  assert.ok(stopped, "checkbox click stops propagation (does not open the note)");
-  delete global.customJS;
-});
-
-// ── Mobile fix regressions (v0.220.x) ──────────────────────────────────────
-failures += !run("pagesUnder: metadataCache enumeration filters by folder prefix + carries frontmatter; absent app → [] (never throws)", () => {
-  const SectionExplorer = loadClass();
+  const FOLDER = "spice/projects/p/docs/a";
   const prevApp = global.app;
-  const files = [
-    { path: "spice/wiki/Wiki.md", name: "Wiki.md" },
-    { path: "spice/wiki/cooking/Cooking.md", name: "Cooking.md" },
-    { path: "spice/wiki/cooking/Recipe.md", name: "Recipe.md" },
-    { path: "spice/other/Thing.md", name: "Thing.md" },
-  ];
-  const fm = {
-    "spice/wiki/Wiki.md": { type: "wiki-hub", title: "Wiki" },
-    "spice/wiki/cooking/Cooking.md": { type: "wiki-section", title: "Cooking" },
-    "spice/wiki/cooking/Recipe.md": { type: "wiki-page", title: "Recipe" },
-    "spice/other/Thing.md": { type: "wiki-page", title: "Thing" },
-  };
   global.app = {
-    vault: { getMarkdownFiles: () => files },
-    metadataCache: { getFileCache: (f) => ({ frontmatter: fm[f.path] || {} }) },
+    vault: {
+      getMarkdownFiles: () => ([
+        { path: FOLDER + "/One.md", name: "One.md" },
+        { path: FOLDER + "/Two.md", name: "Two.md" },
+        { path: FOLDER + "/sub/Deep.md", name: "Deep.md" },
+      ]),
+    },
+    metadataCache: {
+      getFileCache: (f) => ({ frontmatter: { type: "doc-note", title: f.name.replace(/\.md$/, "") } }),
+    },
   };
-  try {
-    const paths = SectionExplorer.pagesUnder("spice/wiki").map((p) => p.file.path).sort();
-    assert.deepStrictEqual(paths, ["spice/wiki/Wiki.md", "spice/wiki/cooking/Cooking.md", "spice/wiki/cooking/Recipe.md"]);
-    const cooking = SectionExplorer.pagesUnder("spice/wiki").find((p) => p.file.path === "spice/wiki/cooking/Cooking.md");
-    assert.strictEqual(cooking.type, "wiki-section");
-    assert.strictEqual(cooking.title, "Cooking");
-    assert.strictEqual(cooking.file.folder, "spice/wiki/cooking");
-    global.app = undefined;
-    assert.deepStrictEqual(SectionExplorer.pagesUnder("spice/wiki"), []);
-  } finally { global.app = prevApp; }
+
+  // Spy the downstream move flow.
+  const moveCalls = [];
+  se.openMovePicker = (opts) => { se.__lastMoveOpts = opts; };
+  se.applyDocMove = (dv, file, dest) => { moveCalls.push({ from: file.path, dest }); };
+
+  const adapter = { move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
+  const section = { folder: FOLDER };
+
+  se.openSelectDocsPicker({}, adapter, section);
+
+  // Modal mounted with exactly two DIRECT doc checkbox rows.
+  const overlay = doc.body.children[0];
+  assert.ok(overlay, "modal overlay mounted");
+  const panel = overlay.children[0];
+  const list = panel.children.find((c) => c.className === "se-select-list");
+  assert.ok(list, "select list present");
+  const rows = list.children.filter((c) => c.className === "se-select-row");
+  assert.strictEqual(rows.length, 2, "only 2 direct docs listed (sub-folder doc excluded)");
+
+  // Check both boxes.
+  const checks = rows.map((r) => r.children.find((c) => c.className === "se-select-check"));
+  checks.forEach((cb) => { cb.checked = true; cb.onchange(); });
+
+  // Locate the primary "Move docs →" button (nested in the se-modal-btns row).
+  const findDeep = (el, pred) => {
+    if (!el || typeof el !== "object") return null;
+    if (pred(el)) return el;
+    for (const c of (el.children || [])) { const hit = findDeep(c, pred); if (hit) return hit; }
+    return null;
+  };
+  const primary = findDeep(panel, (c) => String(c.className || "").indexOf("se-modal-btn-primary") >= 0);
+  assert.ok(primary, "primary Move button present");
+  assert.strictEqual(primary.disabled, false, "primary enabled once docs are checked");
+  primary.onclick();
+
+  // Primary opens the move picker; onPick drives applyDocMove per doc.
+  assert.ok(se.__lastMoveOpts && typeof se.__lastMoveOpts.onPick === "function", "openMovePicker invoked with onPick");
+  se.__lastMoveOpts.onPick("spice/projects/p/docs/b");
+
+  const moved = moveCalls.map((m) => m.from).sort();
+  assert.deepStrictEqual(moved, [FOLDER + "/One.md", FOLDER + "/Two.md"], "both checked docs moved");
+  assert.ok(moveCalls.every((m) => m.dest === "spice/projects/p/docs/b"), "moved to the picked destination");
+
+  global.app = prevApp;
+  delete global.document;
 });
 
-failures += !run("enterSelectMode: finds the .se-page-pane in the note view even when it is OUTSIDE dv.container (chrome-bar block separation — the mobile 'Select docs does nothing' bug)", () => {
+ASYNC_TESTS.push({ name: "moveSection: awaits rename, remaps child paths, patches frontmatter only on real TFiles (no ENOENT)", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  let entered = false;
-  const pane = { className: "se-page-pane", __seEnterSelectMode: () => { entered = true; } };
-  // The pane lives under the note view, NOT under the chrome bar's dv.container.
-  const viewContent = { querySelector: (sel) => (sel === ".se-page-pane" ? pane : null) };
-  const chromeContainer = {
-    querySelector: () => null,                                   // pane NOT under the chrome block
-    closest: (sel) => (sel === ".view-content" ? viewContent : null),
+
+  // Vault: an OLD section folder with a hub, a sub-folder, and a child doc.
+  const OLD = "spice/projects/p/docs/a";
+  const HUB = OLD + "/A.md";
+  const SUB = OLD + "/sub";
+  const CHILD = SUB + "/Sub.md";
+  const map = new Map([
+    [OLD, { path: OLD, __folder: true }],
+    [HUB, { path: HUB }],
+    [SUB, { path: SUB, __folder: true }],
+    [CHILD, { path: CHILD }],
+  ]);
+  const fmWrites = [];
+  const renameCalls = [];
+  const prevApp = global.app;
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => map.get(p) || null },
+    fileManager: {
+      renameFile: async (file, newPath) => {
+        renameCalls.push({ from: file && file.path, to: newPath });
+        const from = file.path;
+        for (const [k, v] of [...map.entries()]) {
+          if (k === from || k.indexOf(from + "/") === 0) {
+            const nk = newPath + k.slice(from.length);
+            map.delete(k); v.path = nk; map.set(nk, v);
+          }
+        }
+      },
+      processFrontMatter: async (file, fn) => {
+        // Reproduce Obsidian: a non-TFile (fabricated {path}) or a path no
+        // longer present in the vault raises ENOENT.
+        if (!file || !map.has(file.path) || map.get(file.path) !== file) {
+          throw new Error("ENOENT: " + (file && file.path));
+        }
+        const fm = {}; fn(fm); fmWrites.push({ path: file.path, fm });
+      },
+    },
   };
-  se.enterSelectMode({ container: chromeContainer });
-  assert.strictEqual(entered, true, "enterSelectMode must locate the pane via the note view, not just dv.container");
-});
+
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { depth: 2, parent_section: "B" },
+    childPatches: [{ path: CHILD, patch: { parent_section: "A" } }],
+  }) } };
+  const section = { folder: OLD, hubPath: HUB, title: "A" };
+
+  let threw = false;
+  try {
+    await se.moveSection({}, section, "spice/projects/p/docs/b", adapter);
+  } catch (_e) { threw = true; }
+
+  try {
+    assert.strictEqual(threw, false, "moveSection must never throw");
+    assert.strictEqual(renameCalls.length, 1, "folder renamed exactly once");
+    assert.strictEqual(renameCalls[0].to, "spice/projects/p/docs/b/a", "renamed to dest/<slug(title)>");
+    const paths = fmWrites.map((w) => w.path).sort();
+    assert.deepStrictEqual(paths, [
+      "spice/projects/p/docs/b/a/A.md",
+      "spice/projects/p/docs/b/a/sub/Sub.md",
+    ], "frontmatter patched at NEW remapped paths only");
+    assert.ok(fmWrites.every((w) => w.path.indexOf(OLD) !== 0), "no patch applied at an OLD path");
+  } finally { global.app = prevApp; }
+}});
 
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
