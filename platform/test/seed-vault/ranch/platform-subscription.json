@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.21.0"
+      "version": "0.21.1"
     },
     {
       "name": "meetings",
@@ -129,7 +129,7 @@
     },
     {
       "name": "people",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "products",
@@ -145,7 +145,7 @@
     },
     {
       "name": "journal",
-      "version": "0.4.1"
+      "version": "0.4.2"
     },
     {
       "name": "trips",
@@ -157,7 +157,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1"
+      "version": "0.10.2"
     },
     {
       "name": "teams",
