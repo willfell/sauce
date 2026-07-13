@@ -21,6 +21,15 @@ const cfg = inst._config();
   ok('TCB-DETECT-1 trips-hub/trip/trip-section/trip-board-card classify',
     hub && hub.context === 'trips-hub' && atlas && atlas.context === 'trip' && section && section.context === 'trip-section' && card && card.context === 'trip-board-card');
   ok('TCB-DETECT-2 kanban board + non-trip → null', board === null && off === null);
+  // TCB-DETECT-3 — a trip SECTION note has no `name`; the trip name is derived
+  // from the `trip` wikilink so add-task can link the created task's trip_slug.
+  const todo = cfg.detect({}, { file: { path: 'spice/trips/destin-florida/Destin Florida — To-Do.md' }, type: 'trip-section', trip: '[[Destin Florida]]', trip_slug: 'destin-florida', section_kind: 'to-do' });
+  ok('TCB-DETECT-3 section without name derives tripName from the trip wikilink',
+    todo && todo.tripName === 'Destin Florida' && todo.tripSlug === 'destin-florida');
+  // Alias form + explicit name still resolve as expected.
+  const alias = cfg.detect({}, { file: { path: 'spice/trips/x/X — Flights.md' }, type: 'trip-section', trip: '[[Real Name|Shown]]', trip_slug: 'x', section_kind: 'flights' });
+  ok('TCB-DETECT-3a explicit name wins; alias wikilink strips to display text',
+    alias && alias.tripName === 'Real Name' && atlas.tripName === "Dave's Wedding");
 }
 // TCB-SPEC — hub: primary New Trip. trip atlas: primary Add link + overflow manage-links/new-section.
 // trip-section: primary keyed on section_kind. trip-board-card: bare leaf.
