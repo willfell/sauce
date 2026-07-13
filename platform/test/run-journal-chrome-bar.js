@@ -51,5 +51,85 @@ const cfg = inst._config();
   global.customJS = prevCJS;
   delete global.window;
 }
+// JCB-BANNER — mirrors STCB-BANNER: SectionLabel-style label, filename fallback, hairline below
+{
+  const inst = new JournalChromeBar();
+  ok('JCB-BANNER-1a title used', inst._bannerText({ title: 'Morning notes', file: { name: 'Journal-X' } }) === 'Morning notes');
+  ok('JCB-BANNER-1b whitespace → filename', inst._bannerText({ title: '   ', file: { name: 'Journal-Y' } }) === 'Journal-Y');
+  ok('JCB-BANNER-1c missing title → filename', inst._bannerText({ file: { name: 'Journal-Z' } }) === 'Journal-Z');
+  ok('JCB-BANNER-1d nothing → null', inst._bannerText({}) === null);
+
+  const makeNode = (tag, opts) => {
+    const node = {
+      tag, cls: (opts && opts.cls) || '', textContent: (opts && opts.text) || '',
+      title: '', style: { cssText: '' }, children: [], _removed: false,
+      createEl(t, o) { const c = makeNode(t, o); this.children.push(c); return c; },
+      addEventListener() {}, remove() { this._removed = true; },
+    };
+    return node;
+  };
+  const makeContainer = () => {
+    const container = makeNode('div', {});
+    container.querySelectorAll = (sel) => {
+      const cls = sel.replace(/^\./, '');
+      return container.children.filter((c) => !c._removed && c.cls === cls);
+    };
+    return container;
+  };
+
+  const c = makeContainer();
+  inst._renderTitleBanner(c, { title: 'Morning notes', file: { path: 'x.md', name: 'Journal-X' } }, { path: 'x.md' });
+  inst._renderTitleBanner(c, { title: 'Morning notes', file: { path: 'x.md', name: 'Journal-X' } }, { path: 'x.md' });
+  const live = c.children.filter((n) => !n._removed && n.cls === 'journal-title-banner');
+  ok('JCB-BANNER-2 dedupes to single banner', live.length === 1);
+  const kids = live[0].children;
+  const labelIdx = kids.findIndex((n) => n.tag === 'div' && n.textContent === 'Morning notes');
+  const hrIdx = kids.findIndex((n) => n.tag === 'hr');
+  ok('JCB-BANNER-3 SectionLabel-style label', labelIdx >= 0
+    && /text-transform:\s*uppercase/.test(kids[labelIdx].style.cssText)
+    && /0\.78em/.test(kids[labelIdx].style.cssText));
+  ok('JCB-BANNER-4 hairline BELOW label', hrIdx >= 0 && labelIdx >= 0 && hrIdx > labelIdx);
+}
+
+// JCB-SPEC — journal-entry overflow shape
+{
+  const inst = new JournalChromeBar();
+  const cfg = inst._config();
+  const l = cfg.surfaceSpec({ context: 'journal-entry' });
+  ok('JCB-SPEC-EXTRA-1 leaf overflow includes back-day,hub,rename,delete',
+    l.overflow.length === 4
+    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub'
+    && l.overflow[2].id === 'rename' && l.overflow[3].id === 'delete');
+}
+
+// JCB-DIALOG — _openDeleteDialog exists + never-throws under empty globals
+{
+  const inst = new JournalChromeBar();
+  ok('JCB-DIALOG-1 _openDeleteDialog function', typeof inst._openDeleteDialog === 'function');
+  const prevApp = global.app, prevDoc = global.document;
+  delete global.app; delete global.document;
+  let threw = false;
+  try { inst._openDeleteDialog(null, 'spice/journal/Journal.md', 'journal entry'); } catch (_e) { threw = true; }
+  ok('JCB-DIALOG-2 never-throws under missing app/document', !threw);
+  global.app = prevApp; global.document = prevDoc;
+}
+
+// JCB-DISPATCH — rename + delete route correctly
+{
+  const inst = new JournalChromeBar();
+  const cfg = inst._config();
+  let renameCalled = false, deleteCalled = false;
+  inst._openRenameDialog = () => { renameCalled = true; };
+  inst._openDeleteDialog = () => { deleteCalled = true; };
+  const prevApp = global.app, prevCJS = global.customJS;
+  global.app = { vault: { getAbstractFileByPath: () => ({ path: 'x.md' }) } };
+  global.customJS = { RenderSafe: { page: () => ({ file: { path: 'x.md' }, title: 'T' }) } };
+  cfg.dispatch({ current: () => ({}) }, { context: 'journal-entry', path: 'x.md' }, 'rename');
+  cfg.dispatch({ current: () => ({}) }, { context: 'journal-entry', path: 'x.md' }, 'delete');
+  ok('JCB-DISPATCH-RENAME rename opens rename dialog', renameCalled);
+  ok('JCB-DISPATCH-DELETE delete opens delete dialog', deleteCalled);
+  global.app = prevApp; global.customJS = prevCJS;
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);

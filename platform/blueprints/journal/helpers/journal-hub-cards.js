@@ -45,7 +45,7 @@ class JournalHubCards {
     }
 
     _mode(container) {
-        return container && container.__journalHubMode === "all" ? "all" : "days";
+        return container && container.__journalHubMode === "days" ? "days" : "all";
     }
 
     _matchesFilter(page, needle, body) {

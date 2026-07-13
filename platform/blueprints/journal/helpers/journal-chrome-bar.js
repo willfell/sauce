@@ -12,6 +12,7 @@ class JournalChromeBar {
       today: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/></svg>`,
       home: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
       back: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
+      trash: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`,
     };
   }
 
@@ -41,34 +42,34 @@ class JournalChromeBar {
 
   _bannerText(page) {
     const t = page && page.title != null ? String(page.title).trim() : "";
-    return t.length > 0 ? t : null;
-  }
-
-  _headingStyle(hasTitle) {
-    return hasTitle
-      ? "font-size: 1.35em; font-weight: 700; color: var(--text-normal); line-height: 1.3;"
-      : "font-size: 1.1em; font-weight: 500; color: var(--text-muted); font-style: italic;";
+    if (t.length > 0) return t;
+    const fn = page && page.file && page.file.name ? String(page.file.name).trim() : "";
+    return fn.length > 0 ? fn : null;
   }
 
   _renderTitleBanner(container, page, file) {
     if (!container || typeof container.createEl !== "function") return;
-    // Dedup across Dataview dual-fire re-renders.
     try {
       if (typeof container.querySelectorAll === "function") {
         (container.querySelectorAll(".journal-title-banner") || []).forEach((e) => { try { e.remove(); } catch (_e) {} });
       }
     } catch (_e) {}
     const banner = container.createEl("div", { cls: "journal-title-banner" });
-    banner.style.cssText = "cursor: pointer; max-width: 640px; margin: 6px auto 10px; padding: 4px 2px;";
+    banner.style.cssText = "margin: 6px 0 0 0;";
     const text = this._bannerText(page);
     const placeholder = "Untitled journal entry — click to name";
+    const labelBase = "font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin: 4px 0 6px 0; cursor: pointer;";
+    const labelWhenText = "text-transform: uppercase; letter-spacing: 0.05em;";
+    const labelWhenPlaceholder = "font-style: italic;";
     const h = banner.createEl("div", { text: text || placeholder });
-    h.style.cssText = this._headingStyle(!!text);
-    banner.title = "Click to rename";
-    banner.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
+    h.style.cssText = labelBase + " " + (text ? labelWhenText : labelWhenPlaceholder);
+    h.title = "Click to rename";
+    const hr = banner.createEl("hr");
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 0 0 12px 0;";
+    h.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
       const nt = newTitle && String(newTitle).trim();
       h.textContent = nt || placeholder;
-      h.style.cssText = this._headingStyle(!!nt);
+      h.style.cssText = labelBase + " " + (nt ? labelWhenText : labelWhenPlaceholder);
     }));
   }
 
@@ -107,6 +108,32 @@ class JournalChromeBar {
     } catch (_e) { /* never throw */ }
   }
 
+  _openDeleteDialog(file, hubPath, entityLabel) {
+    try {
+      if (!file || typeof app === "undefined" || !app.vault || typeof app.vault.delete !== "function") return;
+      if (typeof document === "undefined" || !document.body || typeof document.body.createEl !== "function") return;
+      const overlay = document.body.createEl("div");
+      overlay.style.cssText = "position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;";
+      const box = overlay.createEl("div");
+      box.style.cssText = "background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 16px; width: min(380px, 90vw); display: flex; flex-direction: column; gap: 10px;";
+      box.createEl("div", { text: `Delete this ${entityLabel}?` }).style.cssText = "font-weight: 600;";
+      box.createEl("div", { text: "This cannot be undone." }).style.cssText = "color: var(--text-muted); font-size: 0.9em;";
+      const row = box.createEl("div");
+      row.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+      const close = () => { try { overlay.remove(); } catch (_e) {} };
+      const cancelBtn = row.createEl("button", { text: "Cancel" });
+      cancelBtn.addEventListener("click", close);
+      const delBtn = row.createEl("button", { text: "Delete" });
+      delBtn.style.cssText = "background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;";
+      delBtn.addEventListener("click", async () => {
+        try { await app.vault.delete(file); } catch (_e) {}
+        try { if (hubPath) app.workspace.openLinkText(hubPath, ""); } catch (_e) {}
+        close();
+      });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    } catch (_e) { /* never throw */ }
+  }
+
   _config() {
     const ICON = this.ICON;
     return {
@@ -134,6 +161,8 @@ class JournalChromeBar {
             overflow: [
               { id: "back-day", label: "Back to Day", icon: ICON.back },
               { id: "hub", label: "Hub", icon: ICON.home },
+              { id: "rename", label: "Change title…", icon: ICON.pencilPlus },
+              { id: "delete", label: "Delete journal entry…", icon: ICON.trash },
             ],
             leaf: true,
           };
@@ -163,6 +192,22 @@ class JournalChromeBar {
           const folder = mo.format("YYYY/MM-MMMM");
           const dayHubPath = `spice/journal/${folder}/${day}/Journal-Day-${day}.md`;
           try { app.workspace.openLinkText(dayHubPath, ""); } catch (_e) {}
+          return;
+        }
+        if (id === "rename") {
+          const file = ctx && ctx.path && typeof app !== "undefined" && app.vault
+            ? app.vault.getAbstractFileByPath(ctx.path) : null;
+          if (!file) return;
+          const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+            ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
+          const current = page && page.title != null ? String(page.title).trim() : "";
+          this._openRenameDialog(file, current, () => {});
+          return;
+        }
+        if (id === "delete") {
+          const file = ctx && ctx.path && typeof app !== "undefined" && app.vault
+            ? app.vault.getAbstractFileByPath(ctx.path) : null;
+          this._openDeleteDialog(file, "spice/journal/Journal.md", "journal entry");
           return;
         }
       },

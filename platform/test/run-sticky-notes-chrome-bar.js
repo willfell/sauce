@@ -30,9 +30,11 @@ const cfg = inst._config();
     h.primary && h.primary.id === 'today' && h.overflow.length === 0 && h.leaf === false);
   ok('SCB-SPEC-2 day: primary new-sticky-note + overflow hub + not leaf',
     d.primary && d.primary.id === 'new-sticky-note' && d.overflow.length === 1 && d.overflow[0].id === 'hub' && d.leaf === false);
-  ok('SCB-SPEC-3 note: no primary + overflow back-day,hub + leaf',
-    l.primary === null && l.overflow.length === 2
-    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub' && l.leaf === true);
+  ok('SCB-SPEC-3 note: no primary + overflow back-day,hub,rename,add-link,move-day,delete + leaf',
+    l.primary === null && l.overflow.length === 6
+    && l.overflow[0].id === 'back-day' && l.overflow[1].id === 'hub'
+    && l.overflow[2].id === 'rename' && l.overflow[3].id === 'add-link'
+    && l.overflow[4].id === 'move-day' && l.overflow[5].id === 'delete');
 }
 
 // SCB-DISPATCH — routes to correct handlers.
@@ -67,6 +69,30 @@ const cfg = inst._config();
   ok('SCB-DISPATCH-2 hub → openLinkText(Sticky.md)', calls.some(c => c.openLink === 'spice/sticky-notes/Sticky.md'));
   ok('SCB-DISPATCH-3 back-day → openLinkText(Sticky-Day-*)', calls.some(c => c.openLink && c.openLink.includes('Sticky-Day-2026-07-06')));
 
+  // extend the stubs to catch the new dispatches
+  const calls2 = [];
+  global.customJS.SectionExplorer = {
+    _openAddLinkForm: (dv, adapter, target) => calls2.push({ addLink: target === null }),
+    _noteSelfAdapter: (p) => ({ getLinks: () => [], writeLinks: () => Promise.resolve() }),
+    renderNoteLinks: () => {},
+  };
+  global.customJS.RenderSafe = { page: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' }, title: 'T' }) };
+  global.app.vault.getAbstractFileByPath = () => ({ path: 'x.md', name: 'X' });
+  let renameCalled = false, moveCalled = false, deleteCalled = false;
+  inst._openRenameDialog = () => { renameCalled = true; };
+  inst._openMoveDayDialog = () => { moveCalled = true; };
+  inst._openDeleteDialog = () => { deleteCalled = true; };
+
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'rename');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'add-link');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md', day: '2026-07-06' }, 'move-day');
+  cfg.dispatch({ current: () => ({}) }, { context: 'sticky-note', path: 'x.md' }, 'delete');
+
+  ok('SCB-DISPATCH-4 rename → _openRenameDialog', renameCalled);
+  ok('SCB-DISPATCH-5 add-link → SectionExplorer._openAddLinkForm', calls2.some((c) => c.addLink === true));
+  ok('SCB-DISPATCH-6 move-day → _openMoveDayDialog', moveCalled);
+  ok('SCB-DISPATCH-7 delete → _openDeleteDialog', deleteCalled);
+
   global.customJS = prevCJS;
   delete global.window;
   delete global.app;
@@ -93,29 +119,22 @@ const cfg = inst._config();
     cfg.rootClass === 'sticky-chrome-root' && cfg.btnClass('go') === 'sticky-chrome-btn sticky-chrome-btn-go');
 }
 
-// STCB-BANNER-1 — _bannerText pure fallback.
+// STCB-BANNER-1 — _bannerText fallback: title → filename → null
 {
-  ok('STCB-BANNER-1a title used', inst._bannerText({ title: 'Grocery list' }) === 'Grocery list');
-  ok('STCB-BANNER-1b whitespace title → null', inst._bannerText({ title: '  ' }) === null);
-  ok('STCB-BANNER-1c missing title → null', inst._bannerText({}) === null);
+  ok('STCB-BANNER-1a title used', inst._bannerText({ title: 'Grocery list', file: { name: 'Sticky-2026-07-06-14-30' } }) === 'Grocery list');
+  ok('STCB-BANNER-1b whitespace title → filename', inst._bannerText({ title: '  ', file: { name: 'Sticky-X' } }) === 'Sticky-X');
+  ok('STCB-BANNER-1c missing title → filename', inst._bannerText({ file: { name: 'Sticky-Y' } }) === 'Sticky-Y');
+  ok('STCB-BANNER-1d nothing → null', inst._bannerText({}) === null);
 }
 
-// STCB-BANNER-2/3 — _renderTitleBanner appends one .sticky-title-banner, dedupes on re-render.
+// STCB-BANNER-2/3 — _renderTitleBanner: dedupes, label + hairline BELOW, correct order
 {
-  // Minimal faithful DOM stub: nodes record class + support createEl / style / addEventListener /
-  // querySelectorAll (returns prior banner nodes so the real dedup logic can .remove() them).
   const makeNode = (tag, opts) => {
     const node = {
-      tag,
-      cls: (opts && opts.cls) || '',
-      textContent: (opts && opts.text) || '',
-      title: '',
-      style: { cssText: '' },
-      children: [],
-      _removed: false,
+      tag, cls: (opts && opts.cls) || '', textContent: (opts && opts.text) || '',
+      title: '', style: { cssText: '' }, children: [], _removed: false,
       createEl(t, o) { const c = makeNode(t, o); this.children.push(c); return c; },
-      addEventListener() {},
-      remove() { this._removed = true; },
+      addEventListener() {}, remove() { this._removed = true; },
     };
     return node;
   };
@@ -123,33 +142,93 @@ const cfg = inst._config();
     const container = makeNode('div', {});
     container.querySelectorAll = (sel) => {
       const cls = sel.replace(/^\./, '');
-      // return only live (not-removed) matching direct children
       return container.children.filter((c) => !c._removed && c.cls === cls);
     };
     return container;
   };
 
-  const titledPage = { title: 'Grocery list', file: { path: 'spice/sticky-notes/x.md' } };
-  const emptyPage = { file: { path: 'spice/sticky-notes/y.md' } };
-  const fileStub = { path: 'spice/sticky-notes/x.md' };
+  const titledPage = { title: 'Grocery list', file: { path: 'x.md', name: 'Sticky-X' } };
+  const untitledPage = { file: { path: 'y.md', name: 'Sticky-Y' } };
+  const emptyPage = { file: { path: 'z.md' } };
+  const fileStub = { path: 'x.md' };
 
   const c1 = makeContainer();
   inst._renderTitleBanner(c1, titledPage, fileStub);
   inst._renderTitleBanner(c1, titledPage, fileStub);
   const live1 = c1.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
   ok('STCB-BANNER-2 exactly one banner after double render (dedup)', live1.length === 1);
+  const kids1 = live1[0].children;
   ok('STCB-BANNER-3a titled banner shows title text',
-    live1[0].children.some((h) => h.textContent === 'Grocery list'));
-  ok('STCB-BANNER-4 banner has a divider (hr) under the title',
-    live1[0].children.some((n) => n.tag === 'hr'));
-  ok('STCB-BANNER-5 banner is left-aligned (no max-width/auto-margin centering)',
-    !/max-width/.test(live1[0].style.cssText) && !/margin:[^;]*auto/.test(live1[0].style.cssText));
+    kids1.some((h) => h.textContent === 'Grocery list'));
+  ok('STCB-BANNER-3b banner has SectionLabel-style label (uppercase + 0.78em)',
+    kids1.some((h) => /text-transform:\s*uppercase/.test(h.style.cssText) && /font-size:\s*0\.78em/.test(h.style.cssText)));
+  const labelIdx1 = kids1.findIndex((n) => n.tag === 'div' && n.textContent === 'Grocery list');
+  const hrIdx1 = kids1.findIndex((n) => n.tag === 'hr');
+  ok('STCB-BANNER-4 hairline is BELOW label (hr appears after label in child order)',
+    labelIdx1 >= 0 && hrIdx1 > labelIdx1);
+  ok('STCB-BANNER-5 hairline uses border-hover var',
+    kids1[hrIdx1].style.cssText.includes('border-modifier-border-hover') || kids1[hrIdx1].style.cssText.includes('background-modifier-border-hover'));
 
   const c2 = makeContainer();
-  inst._renderTitleBanner(c2, emptyPage, { path: 'spice/sticky-notes/y.md' });
-  const live2 = c2.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner');
-  ok('STCB-BANNER-3b empty banner shows placeholder text',
-    live2[0].children.some((h) => /Untitled sticky note/.test(h.textContent)));
+  inst._renderTitleBanner(c2, untitledPage, { path: 'y.md' });
+  const kids2 = c2.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner')[0].children;
+  ok('STCB-BANNER-6 no-title falls back to filename stem',
+    kids2.some((h) => h.textContent === 'Sticky-Y'));
+
+  const c3 = makeContainer();
+  inst._renderTitleBanner(c3, emptyPage, { path: 'z.md' });
+  const kids3 = c3.children.filter((n) => !n._removed && n.cls === 'sticky-title-banner')[0].children;
+  ok('STCB-BANNER-7 no title AND no filename → placeholder',
+    kids3.some((h) => /Untitled/i.test(h.textContent) && /italic/.test(h.style.cssText)));
+}
+
+// SCB-LINKS — pinned-links row called on leaf, not on hub/day
+{
+  const prevCJS = global.customJS;
+  const calls = [];
+  global.customJS = {
+    ChromeBar: {
+      makeAdapter: (c) => c,
+      render: () => {},
+      openNavTarget: () => {},
+    },
+    RenderSafe: { page: (dv) => (dv && dv._page) || null },
+    SectionExplorer: { renderNoteLinks: (dv) => { calls.push({ links: (dv && dv._page && dv._page.type) || 'unknown' }); } },
+  };
+  const container = { createEl: () => ({ style: {}, addEventListener: () => {}, createEl: () => ({ style: {} }) }), querySelectorAll: () => [] };
+
+  const leafDv = { container, current: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' } }), _page: { type: 'sticky-note', file: { path: 'x.md', name: 'X' } } };
+  inst.render(leafDv);
+  ok('SCB-LINKS-1 renderNoteLinks called on sticky-note leaf', calls.some((c) => c.links === 'sticky-note'));
+
+  const hubDv = { container, current: () => ({ type: 'sticky-hub', file: { path: 'Sticky.md' } }), _page: { type: 'sticky-hub', file: { path: 'Sticky.md' } } };
+  calls.length = 0;
+  inst.render(hubDv);
+  ok('SCB-LINKS-2 renderNoteLinks NOT called on sticky-hub', calls.length === 0);
+
+  const dayDv = { container, current: () => ({ type: 'sticky-day', file: { path: 'D.md' }, day: '2026-07-13' }), _page: { type: 'sticky-day', file: { path: 'D.md' } } };
+  calls.length = 0;
+  inst.render(dayDv);
+  ok('SCB-LINKS-3 renderNoteLinks NOT called on sticky-day', calls.length === 0);
+
+  global.customJS = prevCJS;
+}
+
+// SCB-DIALOG — new dialog methods present, honor guards
+{
+  ok('SCB-DIALOG-1 _openMoveDayDialog is a function', typeof inst._openMoveDayDialog === 'function');
+  ok('SCB-DIALOG-2 _openDeleteDialog is a function', typeof inst._openDeleteDialog === 'function');
+
+  // Guard: no throw when app/document missing.
+  const prevApp = global.app, prevDoc = global.document;
+  delete global.app; delete global.document;
+  let threw = false;
+  try {
+    inst._openMoveDayDialog({}, { context: 'sticky-note', path: 'x.md', day: '2026-07-06' });
+    inst._openDeleteDialog(null, 'spice/sticky-notes/Sticky.md', 'sticky note');
+  } catch (_e) { threw = true; }
+  ok('SCB-DIALOG-3 dialogs are never-throw when app/document missing', !threw);
+  global.app = prevApp; global.document = prevDoc;
 }
 
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);

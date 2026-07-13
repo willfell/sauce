@@ -1,6 +1,6 @@
 {
   "name": "sticky-notes",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "kind": "blueprint",
   "module_directory": "sticky-notes",
   "skills_dir": ".claude/skills/sticky-notes",
@@ -33,6 +33,10 @@
     {
       "name": "breadcrumb",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "section-explorer",
+      "range": ">=0.5.4"
     },
     {
       "name": "render-safe",
