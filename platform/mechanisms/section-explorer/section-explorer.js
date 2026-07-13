@@ -291,8 +291,10 @@ class SectionExplorer {
 
   // Normalize a Dataview page into the doc-card model {title, path, mtime, where}.
   _docCardModel(p) {
+    const rawName = (p && p.file && p.file.name) || "";
     return {
-      title: (p && p.title) || (p && p.file && p.file.name) || "",
+      // title fallback: basename without .md (explicit title still wins)
+      title: (p && p.title) || String(rawName).replace(/\.md$/, "") || "",
       path: (p && p.file && p.file.path) || (p && p.path) || "",
       mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || (p && p.mtime) || 0,
       where: (p && p.where) || null,
@@ -944,7 +946,8 @@ class SectionExplorer {
           cb.onchange = () => { if (cb.checked) selected.add(c.path); else selected.delete(c.path); refresh(); };
           const name = doc.createElement("span");
           name.className = "se-select-title";
-          name.textContent = c.title || c.path;
+          const base = String(c.path || "").split("/").pop().replace(/\.md$/, "");
+          name.textContent = c.title || base;
           name.style.cssText = "flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
           row.appendChild(cb);
           row.appendChild(name);

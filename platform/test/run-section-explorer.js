@@ -229,6 +229,28 @@ failures += !run("page pane renders mechanism-owned doc cards (no BeaconCards)",
   delete global.customJS;
 });
 
+failures += !run("_docCardModel strips .md from the name fallback (no title)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const model = se._docCardModel({ file: { name: "Foo.md", path: "a/Foo.md" } });
+  assert.strictEqual(model.title, "Foo");
+});
+
+failures += !run("_docCardModel keeps explicit title over the name fallback", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const model = se._docCardModel({ title: "Real Title", file: { name: "Foo.md", path: "a/Foo.md" } });
+  assert.strictEqual(model.title, "Real Title");
+});
+
+failures += !run("select-docs row label derives basename without .md from a titleless path", () => {
+  // The row label uses `c.title || <basename-of-c.path without .md>`.
+  const c = { title: "", path: "a/Foo.md" };
+  const base = String(c.path || "").split("/").pop().replace(/\.md$/, "");
+  const label = c.title || base;
+  assert.strictEqual(label, "Foo");
+});
+
 failures += !run("pinned links render above the page grid, and render nothing when empty", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
