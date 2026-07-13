@@ -51,5 +51,45 @@ const cfg = inst._config();
   global.customJS = prevCJS;
   delete global.window;
 }
+// JCB-BANNER — mirrors STCB-BANNER: SectionLabel-style label, filename fallback, hairline below
+{
+  const inst = new JournalChromeBar();
+  ok('JCB-BANNER-1a title used', inst._bannerText({ title: 'Morning notes', file: { name: 'Journal-X' } }) === 'Morning notes');
+  ok('JCB-BANNER-1b whitespace → filename', inst._bannerText({ title: '   ', file: { name: 'Journal-Y' } }) === 'Journal-Y');
+  ok('JCB-BANNER-1c missing title → filename', inst._bannerText({ file: { name: 'Journal-Z' } }) === 'Journal-Z');
+  ok('JCB-BANNER-1d nothing → null', inst._bannerText({}) === null);
+
+  const makeNode = (tag, opts) => {
+    const node = {
+      tag, cls: (opts && opts.cls) || '', textContent: (opts && opts.text) || '',
+      title: '', style: { cssText: '' }, children: [], _removed: false,
+      createEl(t, o) { const c = makeNode(t, o); this.children.push(c); return c; },
+      addEventListener() {}, remove() { this._removed = true; },
+    };
+    return node;
+  };
+  const makeContainer = () => {
+    const container = makeNode('div', {});
+    container.querySelectorAll = (sel) => {
+      const cls = sel.replace(/^\./, '');
+      return container.children.filter((c) => !c._removed && c.cls === cls);
+    };
+    return container;
+  };
+
+  const c = makeContainer();
+  inst._renderTitleBanner(c, { title: 'Morning notes', file: { path: 'x.md', name: 'Journal-X' } }, { path: 'x.md' });
+  inst._renderTitleBanner(c, { title: 'Morning notes', file: { path: 'x.md', name: 'Journal-X' } }, { path: 'x.md' });
+  const live = c.children.filter((n) => !n._removed && n.cls === 'journal-title-banner');
+  ok('JCB-BANNER-2 dedupes to single banner', live.length === 1);
+  const kids = live[0].children;
+  const labelIdx = kids.findIndex((n) => n.tag === 'div' && n.textContent === 'Morning notes');
+  const hrIdx = kids.findIndex((n) => n.tag === 'hr');
+  ok('JCB-BANNER-3 SectionLabel-style label', labelIdx >= 0
+    && /text-transform:\s*uppercase/.test(kids[labelIdx].style.cssText)
+    && /0\.78em/.test(kids[labelIdx].style.cssText));
+  ok('JCB-BANNER-4 hairline BELOW label', hrIdx >= 0 && labelIdx >= 0 && hrIdx > labelIdx);
+}
+
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);

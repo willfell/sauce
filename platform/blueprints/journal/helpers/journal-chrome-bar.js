@@ -41,34 +41,34 @@ class JournalChromeBar {
 
   _bannerText(page) {
     const t = page && page.title != null ? String(page.title).trim() : "";
-    return t.length > 0 ? t : null;
-  }
-
-  _headingStyle(hasTitle) {
-    return hasTitle
-      ? "font-size: 1.35em; font-weight: 700; color: var(--text-normal); line-height: 1.3;"
-      : "font-size: 1.1em; font-weight: 500; color: var(--text-muted); font-style: italic;";
+    if (t.length > 0) return t;
+    const fn = page && page.file && page.file.name ? String(page.file.name).trim() : "";
+    return fn.length > 0 ? fn : null;
   }
 
   _renderTitleBanner(container, page, file) {
     if (!container || typeof container.createEl !== "function") return;
-    // Dedup across Dataview dual-fire re-renders.
     try {
       if (typeof container.querySelectorAll === "function") {
         (container.querySelectorAll(".journal-title-banner") || []).forEach((e) => { try { e.remove(); } catch (_e) {} });
       }
     } catch (_e) {}
     const banner = container.createEl("div", { cls: "journal-title-banner" });
-    banner.style.cssText = "cursor: pointer; max-width: 640px; margin: 6px auto 10px; padding: 4px 2px;";
+    banner.style.cssText = "margin: 6px 0 0 0;";
     const text = this._bannerText(page);
     const placeholder = "Untitled journal entry — click to name";
+    const labelBase = "font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin: 4px 0 6px 0; cursor: pointer;";
+    const labelWhenText = "text-transform: uppercase; letter-spacing: 0.05em;";
+    const labelWhenPlaceholder = "font-style: italic;";
     const h = banner.createEl("div", { text: text || placeholder });
-    h.style.cssText = this._headingStyle(!!text);
-    banner.title = "Click to rename";
-    banner.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
+    h.style.cssText = labelBase + " " + (text ? labelWhenText : labelWhenPlaceholder);
+    h.title = "Click to rename";
+    const hr = banner.createEl("hr");
+    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 0 0 12px 0;";
+    h.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
       const nt = newTitle && String(newTitle).trim();
       h.textContent = nt || placeholder;
-      h.style.cssText = this._headingStyle(!!nt);
+      h.style.cssText = labelBase + " " + (nt ? labelWhenText : labelWhenPlaceholder);
     }));
   }
 
