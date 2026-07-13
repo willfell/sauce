@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.222.0",
+  "workshop_version": "0.222.1",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -7,14 +7,14 @@
     "meetings": "0.18.0",
     "people": "0.8.1",
     "products": "0.4.0",
-    "project": "1.51.0",
+    "project": "1.51.1",
     "to-do": "0.26.0",
     "journal": "0.4.2",
     "trips": "0.10.1",
     "finance": "0.19.2",
     "sticky-notes": "0.10.2",
     "teams": "0.4.0",
-    "wiki": "0.8.1",
+    "wiki": "0.8.2",
     "home": "0.6.1",
     "reader": "0.4.1",
     "customjs-guard": "1.0.0",
@@ -45,6 +45,6 @@
     "task-entity": "0.15.2",
     "menu-popover": "0.3.0",
     "chrome-bar": "0.4.1",
-    "section-explorer": "0.5.2"
+    "section-explorer": "0.5.3"
   }
 }
