@@ -37,6 +37,7 @@ const AUX_TYPES = ['invoice-board-card', 'time-log'];
     'budgets-hub': 'New Budget', 'paychecks-hub': 'New Paycheck', 'invoices-hub': 'New Invoice',
     'debts-hub': 'New Debt', 'months-hub': 'New Month', 'savings-hub': 'New Savings',
   };
+  const HUBS_WITH_DEFAULTS = ['budgets-hub', 'paychecks-hub', 'debts-hub'];
   let hubsOk = true, entitiesOk = true, defaultsOk = true, auxOk = true;
   for (const t of HUB_TYPES) {
     const s = cfg.surfaceSpec({ context: t });
@@ -44,7 +45,8 @@ const AUX_TYPES = ['invoice-board-card', 'time-log'];
     const primaryOk = wantLabel
       ? (s.primary && s.primary.label === `+ ${wantLabel}` && typeof s.primary.id === 'string' && s.primary.id.startsWith('new-'))
       : s.primary === null;
-    if (!primaryOk || s.overflow.length !== 0 || s.leaf !== false) hubsOk = false;
+    const wantOverflow = HUBS_WITH_DEFAULTS.includes(t) ? 1 : 0;
+    if (!primaryOk || s.overflow.length !== wantOverflow || s.leaf !== false) hubsOk = false;
   }
   for (const t of ENTITY_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) entitiesOk = false; }
   for (const t of DEFAULTS_TYPES) { const s = cfg.surfaceSpec({ context: t }); if (s.primary !== null || s.overflow.length !== 0 || s.leaf !== true) defaultsOk = false; }

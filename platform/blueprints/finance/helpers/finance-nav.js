@@ -214,7 +214,7 @@ class FinanceNav {
         // compass) once migrated; only fall back to this inline render on an
         // unmigrated note (no .finance-chrome-root present).
         const showNewButton = !chromePresent;
-        const showDefaults = !!(cfg.defaultsPath && cfg.defaultsLabel);
+        const showDefaults = !chromePresent && !!(cfg.defaultsPath && cfg.defaultsLabel);
         if (!showNewButton && !showDefaults) return false;
 
         const row = root.createEl("div", { cls: "fnav-row fnav-context" });
@@ -273,8 +273,9 @@ class FinanceNav {
             });
         }
 
-        // Prev / Next sibling nav — not covered by the chrome bar, always render.
-        this._renderSiblingNav(row, page, cfg.sub, cfg.sortKey, cfg.dir);
+        if (!chromePresent) {
+            this._renderSiblingNav(row, page, cfg.sub, cfg.sortKey, cfg.dir);
+        }
     }
 
     _renderSiblingNav(row, page, subArea, sortKey, dir) {
