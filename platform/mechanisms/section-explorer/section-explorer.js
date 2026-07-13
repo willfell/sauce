@@ -19,11 +19,34 @@ class SectionExplorer {
   // javascript:) renders as plain non-clickable text, never silently dropped.
   static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
 
+  // customJS exposes the INSTANCE (`customJS.SectionExplorer`), not the class —
+  // so `static` methods (pagesUnder, sectionTargets, planBulkMove, …) are NOT
+  // reachable as `customJS.SectionExplorer.pagesUnder(...)` from blueprint move
+  // blocks; that call throws "not a function", the enumerator's try/catch
+  // swallows it, and every move picker (bulk / section / single-doc, both
+  // blueprints) opens with an EMPTY destination list. Mirror every static onto
+  // the instance here so external callers reach them. Instance (prototype)
+  // methods already resolve, so we never clobber them (the `undefined` guard).
+  constructor() {
+    try {
+      const Ctor = SectionExplorer;
+      for (const key of Object.getOwnPropertyNames(Ctor)) {
+        if (key === 'prototype' || key === 'length' || key === 'name') continue;
+        const val = Ctor[key];
+        if (this[key] === undefined) {
+          this[key] = (typeof val === 'function') ? val.bind(Ctor) : val;
+        }
+      }
+    } catch (_e) { /* never-throw: a cold-load instance still works for statics via class name */ }
+  }
+
   // ── Shared move/bulk/delete pure logic (Task C) ───────────────────────────
-  // These are STATIC (referenced by class name in tests + blueprint adapters)
-  // and unify the retired WikiMove / DocMove / DocMoveDialog / DocBulkMoveActions
-  // implementations into one Node-testable surface. Every one is total (never
-  // throws) so a cold-loading adapter can call them safely.
+  // These are STATIC (referenced by class name internally + mirrored onto the
+  // instance by the constructor above so blueprint adapters can reach them via
+  // customJS.SectionExplorer.X). They unify the retired WikiMove / DocMove /
+  // DocMoveDialog / DocBulkMoveActions implementations into one Node-testable
+  // surface. Every one is total (never throws) so a cold-loading adapter can
+  // call them safely.
 
   // Folder slug: lowercase, trim, non-alnum → single dash, no edge dashes.
   static _slugify(s) {
