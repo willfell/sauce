@@ -1283,6 +1283,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
   await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
+  await applyDepth2ParentSectionHeal(tp, mech, variables, history, git); // NEW (folder-is-truth part 2) — repairs drifted parent_section frontmatter on existing depth-2 section-hub notes: rewrites to the PARENT FOLDER's section-hub display name in wikilink form (matches the + New Sub-Section entity-create template). Idempotent (skip when already correct), .sauce-backup before write, per-note try/catch, never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
   await applyDailyHomeChromeBarHeal(tp, mech, variables, history, git); // NEW (Daily/Home chrome-bar adoption) — forward-migrates existing Daily (cowork-daily) + Home notes from the legacy SpaceNavButtons chrome to the new DailyChromeBar/HomeChromeBar block. MUST run AFTER applyHomeScaffoldHeal so a freshly-scaffolded Home.md is in scope. Doubly-guarded (idempotent per-bar + type-gated on cowork-daily for dailies); .sauce-backup before write; never throws.
@@ -13160,6 +13161,120 @@ async function applyTripsConformanceHeal(tp, history, git) {
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
+// applyDepth2ParentSectionHeal — folder-is-truth part 2. The project docs tree is a
+// nested section-hub hierarchy: a depth-2 section-hub lives in
+// spice/projects/<slug>/docs/<parent-slug>/<child-slug>/<Child>.md and its
+// parent_section frontmatter MUST name the enclosing (depth-1) section-hub's `section`
+// display name. Real vaults drifted: e.g. headspace's Misc-Subsection.md carried
+// `parent_section: Misc-Subsection` (== its OWN section) instead of `Misc` (the parent
+// folder's section). Part 1 (renderer folder-is-truth) already tolerates the drift for
+// navigation; this heal REPAIRS the data so it's also correct.
+//
+// For every `type: section-hub` note with `depth === 2`: compute its folder, then the
+// PARENT folder (folder minus last segment), find the section-hub note whose folder ===
+// that parent folder, read its `section` display name (strip any [[ ]]), and — when the
+// depth-2 note's current parent_section (also [[ ]]-stripped) differs — rewrite it to
+// `parent_section: "[[<parent section>]]"` (the same wikilink form the + New Sub-Section
+// entity-create template writes). Idempotent (no write when already correct or parent
+// not found), .sauce-backup snapshot before write, per-note try/catch, never throws.
+// Mirrors applyDocsHubModernizeHeal's posture; ungated.
+function _healSetFmKeyFn(body, key, valueLine) {
+  // Single-key replace-or-insert inside the leading frontmatter block. Uses a
+  // function replacer so `$&`/`$1`/`$$` inside valueLine (a section display name)
+  // are never interpreted (see the trips $$-corruption landmine).
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return body; // no frontmatter — refuse to guess
+  let fm = fmMatch[1];
+  const keyRe = new RegExp(`^${key}\\s*:.*$`, "m");
+  if (keyRe.test(fm)) fm = fm.replace(keyRe, () => valueLine);
+  else fm = fm + "\n" + valueLine;
+  return body.replace(/^---\n[\s\S]*?\n---/, () => `---\n${fm}\n---`);
+}
+function _healStripWikilink(v) {
+  if (typeof v !== "string") return "";
+  return v.trim().replace(/^["']|["']$/g, "").replace(/^\[\[|\]\]$/g, "").trim();
+}
+async function applyDepth2ParentSectionHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "depth2_parent_section_heal", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  // First pass: index every section-hub note by its containing folder so the
+  // depth-2 pass can resolve a parent folder → its section display name.
+  const hubByFolder = new Map(); // folder → { path, section, depth }
+  const bodyCache = new Map();
+  for (const fpath of files) {
+    try {
+      const body = await adapter.read(fpath);
+      bodyCache.set(fpath, body);
+      if (_noteChromeFrontmatterType(body) !== "section-hub") continue;
+      const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+      const fm = fmMatch ? fmMatch[1] : "";
+      const secM = fm.match(/^section\s*:\s*(.*)$/m);
+      const depthM = fm.match(/^depth\s*:\s*(.*)$/m);
+      const folder = fpath.substring(0, fpath.lastIndexOf("/"));
+      hubByFolder.set(folder, {
+        path: fpath,
+        section: secM ? _healStripWikilink(secM[1]) : "",
+        depth: depthM ? Number(_healStripWikilink(depthM[1])) : NaN,
+      });
+    } catch (_e) { /* unreadable — skip */ }
+  }
+
+  for (const [folder, hub] of hubByFolder) {
+    try {
+      if (Number(hub.depth) !== 2) continue;
+      const parentFolder = folder.substring(0, folder.lastIndexOf("/"));
+      const parentHub = hubByFolder.get(parentFolder);
+      if (!parentHub || !parentHub.section) {
+        // No parent section-hub found — leave the note untouched (folder-is-truth
+        // renderer already tolerates it); record a warning for visibility.
+        warned += 1;
+        history?.push({ event: "warning", step: "depth2_parent_section_heal", target: hub.path, action: "parent_not_found",
+          reason: `no depth-1 section-hub at parent folder ${parentFolder}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const before = bodyCache.get(hub.path);
+      if (typeof before !== "string") { skipped += 1; continue; }
+      const fmMatch = before.match(/^---\n([\s\S]*?)\n---/);
+      const fm = fmMatch ? fmMatch[1] : "";
+      const curM = fm.match(/^parent_section\s*:\s*(.*)$/m);
+      const cur = curM ? _healStripWikilink(curM[1]) : "";
+      if (cur === parentHub.section) { skipped += 1; continue; } // already correct
+      const after = _healSetFmKeyFn(before, "parent_section", `parent_section: "[[${parentHub.section}]]"`);
+      if (after === before) { skipped += 1; continue; }
+      const backupPath = `.sauce-backup/${ts}/${hub.path}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(hub.path, after);
+      healed += 1;
+      history?.push({ event: "info", step: "depth2_parent_section_heal", target: hub.path, action: "repaired",
+        reason: `parent_section "${cur}" → "[[${parentHub.section}]]" (parent folder ${parentFolder})`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "depth2_parent_section_heal", target: hub.path, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "depth2_parent_section_heal", name: "vault", summary: { healed, skipped, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
 // applyHomeScaffoldHeal — ungated scaffold + chrome heal for the singleton
 // spice/home/Home.md command-center note. Runs every install (NOT version-gated,
 // per the migration-lifecycle rule, because it materializes + heals a user-facing
@@ -21607,6 +21722,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // trips-conformance heal — rename + canonicalize + breadcrumb for existing
     // trips (for run-trips-heal.js TRIPHEAL-*). Pure additive.
     module.exports.applyTripsConformanceHeal = applyTripsConformanceHeal;
+    module.exports.applyDepth2ParentSectionHeal = applyDepth2ParentSectionHeal;
     module.exports._tripStripLegacyChrome = _tripStripLegacyChrome;
     module.exports._tripEnsureAtlasLinks = _tripEnsureAtlasLinks;
     module.exports._tripBoardCardChrome = _tripBoardCardChrome;
