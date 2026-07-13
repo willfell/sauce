@@ -203,8 +203,8 @@ class WikiTree {
             canDelete: (section) => {
                 if (!section || !section.hubPath) return false;
                 try {
-                    const raw = dv.pages('"' + section.folder + '"');
-                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                    // dv-independent: dispatch-time (⋯ Delete) query via metadataCache.
+                    const arr = customJS.SectionExplorer.pagesUnder(section.folder);
                     return customJS.SectionExplorer.subtreeDocCount(arr, section.folder, "wiki-page") === 0;
                 } catch (_e) { return false; }
             },
@@ -212,8 +212,7 @@ class WikiTree {
             // used by the delete-confirm wording ("and N empty sub-section(s)").
             emptySubsectionCount: (section) => {
                 try {
-                    const raw = dv.pages('"' + section.folder + '"');
-                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                    const arr = customJS.SectionExplorer.pagesUnder(section.folder);
                     return customJS.SectionExplorer.childSectionFolders(arr, section.folder, "wiki-section").length;
                 } catch (_e) { return 0; }
             },
@@ -224,9 +223,10 @@ class WikiTree {
                 root: "spice/wiki",
                 sectionType: "wiki-section",
                 rootLabel: "Wiki (root)",
-                enumerateSectionTargets: (dv2) => {
-                    const raw = dv2.pages('"spice/wiki"');
-                    const arr = raw && raw.array ? raw.array() : Array.from(raw || []);
+                enumerateSectionTargets: () => {
+                    // dv-independent: dispatch-time (⋯ Move section / leaf Move) query
+                    // via metadataCache so a torn-down mobile dv can't blank the list.
+                    const arr = customJS.SectionExplorer.pagesUnder("spice/wiki");
                     return customJS.SectionExplorer.sectionTargets(arr, {
                         root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)",
                         labelOf: (p) => (p.title && String(p.title).trim()) || "",

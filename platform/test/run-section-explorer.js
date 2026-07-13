@@ -1938,6 +1938,53 @@ failures += !run("enterSelectMode: checkbox click stops propagation so it doesn'
   delete global.customJS;
 });
 
+// ── Mobile fix regressions (v0.220.x) ──────────────────────────────────────
+failures += !run("pagesUnder: metadataCache enumeration filters by folder prefix + carries frontmatter; absent app → [] (never throws)", () => {
+  const SectionExplorer = loadClass();
+  const prevApp = global.app;
+  const files = [
+    { path: "spice/wiki/Wiki.md", name: "Wiki.md" },
+    { path: "spice/wiki/cooking/Cooking.md", name: "Cooking.md" },
+    { path: "spice/wiki/cooking/Recipe.md", name: "Recipe.md" },
+    { path: "spice/other/Thing.md", name: "Thing.md" },
+  ];
+  const fm = {
+    "spice/wiki/Wiki.md": { type: "wiki-hub", title: "Wiki" },
+    "spice/wiki/cooking/Cooking.md": { type: "wiki-section", title: "Cooking" },
+    "spice/wiki/cooking/Recipe.md": { type: "wiki-page", title: "Recipe" },
+    "spice/other/Thing.md": { type: "wiki-page", title: "Thing" },
+  };
+  global.app = {
+    vault: { getMarkdownFiles: () => files },
+    metadataCache: { getFileCache: (f) => ({ frontmatter: fm[f.path] || {} }) },
+  };
+  try {
+    const paths = SectionExplorer.pagesUnder("spice/wiki").map((p) => p.file.path).sort();
+    assert.deepStrictEqual(paths, ["spice/wiki/Wiki.md", "spice/wiki/cooking/Cooking.md", "spice/wiki/cooking/Recipe.md"]);
+    const cooking = SectionExplorer.pagesUnder("spice/wiki").find((p) => p.file.path === "spice/wiki/cooking/Cooking.md");
+    assert.strictEqual(cooking.type, "wiki-section");
+    assert.strictEqual(cooking.title, "Cooking");
+    assert.strictEqual(cooking.file.folder, "spice/wiki/cooking");
+    global.app = undefined;
+    assert.deepStrictEqual(SectionExplorer.pagesUnder("spice/wiki"), []);
+  } finally { global.app = prevApp; }
+});
+
+failures += !run("enterSelectMode: finds the .se-page-pane in the note view even when it is OUTSIDE dv.container (chrome-bar block separation — the mobile 'Select docs does nothing' bug)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let entered = false;
+  const pane = { className: "se-page-pane", __seEnterSelectMode: () => { entered = true; } };
+  // The pane lives under the note view, NOT under the chrome bar's dv.container.
+  const viewContent = { querySelector: (sel) => (sel === ".se-page-pane" ? pane : null) };
+  const chromeContainer = {
+    querySelector: () => null,                                   // pane NOT under the chrome block
+    closest: (sel) => (sel === ".view-content" ? viewContent : null),
+  };
+  se.enterSelectMode({ container: chromeContainer });
+  assert.strictEqual(entered, true, "enterSelectMode must locate the pane via the note view, not just dv.container");
+});
+
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
   for (const t of ASYNC_TESTS) {
