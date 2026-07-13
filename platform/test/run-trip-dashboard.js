@@ -95,5 +95,28 @@ const TripDashboard = loadClass('platform/blueprints/trips/helpers/trip-dashboar
     ok('FD-5 null', r === "", r);
 }
 
+// ---------- _itinerary + _staySummary (Task 5) ----------
+{
+    const flights = [
+        { direction: "Outbound", from: "DEN", to: "ATL", depart_date: "2026-07-16", depart_time: "09:39" },
+        { direction: "Outbound", from: "ATL", to: "VPS", depart_date: "2026-07-16", depart_time: "13:39" },
+        { direction: "Return", from: "VPS", to: "DEN", depart_date: "2026-07-20", depart_time: "07:00" },
+    ];
+    const it = TripDashboard._itinerary(flights);
+    ok('IT-1 two directions', it.length === 2, JSON.stringify(it));
+    ok('IT-2 outbound chain collapsed', it[0].direction === "Outbound" && it[0].route === "DEN → ATL → VPS", JSON.stringify(it[0]));
+    ok('IT-3 return chain', it[1].direction === "Return" && it[1].route === "VPS → DEN", JSON.stringify(it[1]));
+    ok('IT-4 departsMs is a number', typeof it[0].departsMs === "number", JSON.stringify(it[0]));
+}
+{
+    const stays = [{ name: "Beach House", check_in: "2026-07-16", check_out: "2026-07-20" }];
+    const ss = TripDashboard._staySummary(stays);
+    ok('SS-1 stay summary', ss.length === 1 && ss[0].name === "Beach House" && ss[0].check_in === "2026-07-16" && ss[0].check_out === "2026-07-20", JSON.stringify(ss));
+}
+{
+    ok('IT-5 empty flights → []', TripDashboard._itinerary([]).length === 0);
+    ok('SS-2 null stays → []', TripDashboard._staySummary(null).length === 0);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
