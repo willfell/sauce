@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.22.0"
+      "version": "0.22.1"
     },
     {
       "name": "meetings",
@@ -153,7 +153,7 @@
     },
     {
       "name": "finance",
-      "version": "0.19.0"
+      "version": "0.19.1"
     },
     {
       "name": "sticky-notes",
