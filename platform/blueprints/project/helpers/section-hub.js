@@ -51,12 +51,16 @@ class SectionHub {
     }
 
     // ── Tier 2: simple search strip (leading hairline + bare text input) ──────
-    const parentSlugForScope = depth === 2
-      ? this._slugify(this._stripLink(cur.parent_section))
-      : null;
-    const scopePath = depth === 1
-      ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
-      : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
+    // Folder-is-truth: the note already knows its own folder. Derive the scope
+    // from cur.file.folder — NOT reconstructed from parent_section frontmatter,
+    // which can be stale/wrong (live bug: parent_section:"Misc-Subsection" pointed
+    // at a folder that doesn't exist → 0 docs). Depth-1 is unaffected because the
+    // real folder equals the depth-1 reconstruction.
+    const scopePath = String(
+      (cur.file && cur.file.folder != null)
+        ? cur.file.folder
+        : cur.file.path.slice(0, cur.file.path.lastIndexOf("/"))
+    );
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
@@ -189,9 +193,13 @@ class SectionHub {
     // list of every matching doc-note, each tagged with the sub-section it lives
     // in. Empty query falls through to the normal browse (sub-sections + docs).
     if (filterCtx && filterCtx.hasActiveFilter) {
-      const scopePath = depth === 1
-        ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
-        : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
+      // Folder-is-truth (see render): derive the recursive scope from the note's
+      // real folder, not from parent_section frontmatter.
+      const scopePath = String(
+        (cur.file && cur.file.folder != null)
+          ? cur.file.folder
+          : cur.file.path.slice(0, cur.file.path.lastIndexOf("/"))
+      );
       this._renderSearchResults(dv, proxyDv, scopePath, filterCtx);
       return;
     }
@@ -225,10 +233,14 @@ class SectionHub {
   // every depth-2 child's parent_section (a display-name string, not derived
   // from the folder path) via _childHubsForRename.
   _buildConfig(dv, cur, depth, projectSlug, sectionSlug, sectionName) {
-    const parentSlugForScope = depth === 2 ? this._slugify(this._stripLink(cur.parent_section)) : null;
-    const sectionPath = depth === 1
-      ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
-      : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
+    // Folder-is-truth (see render): the hub's docs folder IS its own folder.
+    // Reconstructing from parent_section frontmatter breaks when that value is
+    // stale — the real folder is authoritative.
+    const sectionPath = String(
+      (cur.file && cur.file.folder != null)
+        ? cur.file.folder
+        : cur.file.path.slice(0, cur.file.path.lastIndexOf("/"))
+    );
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
     const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
