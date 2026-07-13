@@ -54,6 +54,8 @@
     "test:project-commands": "node platform/test/run-project-commands.js",
     "test:project-nav": "node platform/test/run-project-nav-buttons.js",
     "test:project-activity-cards": "node platform/test/run-project-activity-cards.js",
+    "test:project-dashboard": "node platform/test/run-project-dashboard.js",
+    "test:project-dashboard-heal": "node platform/test/run-project-dashboard-heal.js",
     "test:projects-hub": "node platform/test/run-projects-hub-cards.js",
     "test:chrome-bar": "node platform/test/run-chrome-bar.js",
     "status": "node scripts/workshop-status.js",

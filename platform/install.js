@@ -1251,6 +1251,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubModernizeHeal(tp, mech, variables, history, git);       // NEW (docs-hub modernize) — rewrites legacy docs-hub bodies to the renderActionRow chrome shape (removes standalone DocBulkMoveActions + doubled `---`, injects Breadcrumb + renderActionRow, idempotent, .sauce-backup before write). MUST run AFTER the neutered backfill above.
   await applyProjectLinksManagerBackfill(tp, mech, variables, history, git); // NEW (Project Links Wiring PR4) — injects the ProjectLinksManager Add/Manage-links block into existing type:links-hub notes lacking it (insert-only before the ProjectLinksPanel block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
+  await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocSectionBackfill(tp, mech, variables, history, git);   // PR1 project-doc-updating-wiring — backfill section/sub_section from sibling section-hub (authoritative display name), ungated + idempotent
@@ -4973,6 +4974,121 @@ async function applyProjectActivityPanelsHeal(tp, manifest, variables, history, 
   if (history) history.push({ event: "info", step: "project_activity_panels_heal", name: "vault",
     reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// applyProjectDashboardConformanceHeal — v0.221 ProjectDashboard cycle. Rewrites
+// existing type:project hub bodies from the 6-block legacy shape
+// (ChromeBar + StatusWidget + ActivityPanel + OpenTasks + MeetingsPanel +
+// LinksPanel) to the 2-block dashboard shape (ChromeBar + Dashboard).
+// Anchors on ProjectChromeBar (preserved verbatim); inserts Dashboard block
+// immediately after; strips every legacy panel block. Idempotent (skip when
+// ProjectDashboard already present); per-file .sauce-backup snapshot; never
+// throws. MUST run AFTER applyProjectActivityPanelsHeal so hubs that
+// just received the legacy panels get promoted in the same install.
+async function applyProjectDashboardConformanceHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const GIT = git || {};
+  let healed = 0, skipped = 0, warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) history.push({ event: "warning", step: "project_dashboard_conformance_heal",
+      reason: `list failed ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const DASHBOARD_BLOCK = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectDashboard" });\n```';
+  const LEGACY_CLASSES = [
+    "ProjectStatusWidget",
+    "ProjectActivityPanel",
+    "ProjectOpenTasks",
+    "ProjectMeetingsPanel",
+    "ProjectLinksPanel",
+  ];
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      if (before.includes('class: "ProjectDashboard"')) {
+        skipped += 1;
+        if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", target: hubPath,
+          action: "skipped_already_healed",
+          git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+
+      // Strip every legacy panel block. Match the whole fenced dataviewjs region
+      // whose body references the class name via `class: "…"`. Non-greedy on the
+      // inner body; anchored on the fence pair.
+      let newContent = before;
+      for (const cls of LEGACY_CLASSES) {
+        const rx = new RegExp(
+          "```dataviewjs[^`]*?class:\\s*\"" + cls + "\"[\\s\\S]*?```\\s*",
+          "g"
+        );
+        newContent = newContent.replace(rx, "");
+      }
+
+      // Collapse runs of 3+ blank lines that stripping might have left behind.
+      newContent = newContent.replace(/\n{3,}/g, "\n\n");
+
+      // Insert the dashboard block right after the ProjectChromeBar block.
+      const chromebarRx = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)\s*/;
+      if (chromebarRx.test(newContent)) {
+        newContent = newContent.replace(chromebarRx, (m, block) => block + "\n\n" + DASHBOARD_BLOCK + "\n\n");
+      } else {
+        // No ChromeBar anchor — prepend just after the frontmatter fence.
+        const fmEnd = newContent.match(/^---\n[\s\S]*?\n---\n/);
+        if (fmEnd) {
+          const idx = fmEnd[0].length;
+          newContent = newContent.slice(0, idx) + "\n" + DASHBOARD_BLOCK + "\n\n" + newContent.slice(idx);
+        } else {
+          newContent = DASHBOARD_BLOCK + "\n\n" + newContent;
+        }
+      }
+
+      // Trim trailing whitespace runs to keep bytes tidy.
+      newContent = newContent.replace(/\n{3,}/g, "\n\n");
+
+      if (newContent === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) {}
+      try { await adapter.write(backupPath, before); } catch (_e) {}
+
+      await adapter.write(hubPath, newContent);
+      healed += 1;
+      if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", target: hubPath,
+        action: "healed", git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      if (history) history.push({ event: "warning", step: "project_dashboard_conformance_heal",
+        reason: e && e.message ? e.message : String(e),
+        git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", name: "vault",
+    reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+    git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
 }
 
 // applyProjectSectionsMigration — v0.102.0 S4 (Task 6). Strategy A auto-migration
@@ -21278,6 +21394,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectLinksManagerBackfill = applyProjectLinksManagerBackfill;
     module.exports._injectProjectLinksManagerBody = _injectProjectLinksManagerBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
+    module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
     module.exports.applyProjectLinksHubBackfill = applyProjectLinksHubBackfill;

@@ -82,7 +82,8 @@
     "ProjectLinksManager",
     "WorkstreamSource",
     "ProjectChromeBar",
-    "ProjectCommandsInit"
+    "ProjectCommandsInit",
+    "ProjectDashboard"
   ],
   "pre_install": [
     {
@@ -238,6 +239,10 @@
     {
       "source": "helpers/project-commands-init.js",
       "dest": "{{scripts_path}}/project/project-commands-init.js"
+    },
+    {
+      "source": "helpers/project-dashboard.js",
+      "dest": "{{scripts_path}}/project/project-dashboard.js"
     }
   ],
   "customjs_startup_scripts": [
