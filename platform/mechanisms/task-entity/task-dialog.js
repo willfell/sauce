@@ -1284,10 +1284,16 @@ class TaskDialog {
 
     /**
      * L4: after a create, reconcile the surface WITHOUT waiting for Dataview's
-     * ~2.5s refresh tick. Gate a Dataview force-refresh on the metadataCache
-     * 'changed' event for the just-created file (so it never runs against a stale
-     * index and misses the new row), with a timeout fallback if the event is
-     * missed. Preserves scroll first. NEVER throws — degrades to the natural tick.
+     * ~2.5s refresh tick. The metadataCache 'changed' event only tells us
+     * Obsidian re-parsed the file's frontmatter — Dataview's OWN index update
+     * is a separate, later async step, so firing the force-refresh command
+     * right on 'changed' can still race Dataview and redraw the list from its
+     * stale (pre-create) index, permanently — nothing re-triggers afterward.
+     * So: on 'changed' (or the 1200ms fallback if it's missed), POLL
+     * `dv.page(path)` until Dataview itself reports the new page indexed
+     * (bounded retries), THEN force-refresh. If the Dataview API is
+     * unavailable, degrades immediately to the old fire-on-signal behavior.
+     * Preserves scroll first. NEVER throws — degrades to the natural tick.
      */
     _reconcileAfterCreate(app, path) {
         try { (typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe
@@ -1301,22 +1307,42 @@ class TaskDialog {
                     }
                 } catch (_e) { /* ignore */ }
             };
-            let done = false;
-            let ref = null;
-            const off = () => {
-                done = true;
-                try { if (ref && app.metadataCache && typeof app.metadataCache.offref === 'function') app.metadataCache.offref(ref); } catch (_e) {}
+            const dvHasPage = () => {
+                try {
+                    const dv = app.plugins && app.plugins.plugins && app.plugins.plugins.dataview
+                        ? app.plugins.plugins.dataview.api : null;
+                    if (!dv || typeof dv.page !== 'function') return true;
+                    return !!dv.page(path);
+                } catch (_e) { return true; }
             };
-            if (app.metadataCache && typeof app.metadataCache.on === 'function') {
-                ref = app.metadataCache.on('changed', (f) => {
-                    if (done) return;
-                    if (f && f.path === path) { fire(); off(); }
-                });
-            }
             const setT = app._setTimeout
                 || (typeof window !== 'undefined' && window.setTimeout)
                 || (typeof setTimeout !== 'undefined' ? setTimeout : null);
-            if (typeof setT === 'function') setT(() => { if (done) return; fire(); off(); }, 1200);
+            if (typeof setT !== 'function') return;
+
+            let fired = false;
+            let ref = null;
+            const detachMeta = () => {
+                try { if (ref && app.metadataCache && typeof app.metadataCache.offref === 'function') app.metadataCache.offref(ref); } catch (_e) {}
+            };
+            const finish = () => {
+                if (fired) return;
+                fired = true;
+                detachMeta();
+                fire();
+            };
+            const poll = (attemptsLeft) => {
+                if (fired) return;
+                if (dvHasPage() || attemptsLeft <= 0) { finish(); return; }
+                setT(() => poll(attemptsLeft - 1), 150);
+            };
+            if (app.metadataCache && typeof app.metadataCache.on === 'function') {
+                ref = app.metadataCache.on('changed', (f) => {
+                    if (fired) return;
+                    if (f && f.path === path) poll(20);
+                });
+            }
+            setT(() => poll(20), 1200);
         } catch (_e) { /* never throw */ }
     }
 
