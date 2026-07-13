@@ -1,9 +1,9 @@
 {
-  "workshop_version": "0.218.0",
+  "workshop_version": "0.218.1",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
-    "daily": "0.21.1",
+    "daily": "0.21.2",
     "meetings": "0.18.0",
     "people": "0.8.1",
     "products": "0.4.0",
@@ -15,7 +15,7 @@
     "sticky-notes": "0.10.2",
     "teams": "0.4.0",
     "wiki": "0.7.1",
-    "home": "0.6.0",
+    "home": "0.6.1",
     "reader": "0.4.1",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
