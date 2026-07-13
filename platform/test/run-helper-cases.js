@@ -7681,11 +7681,11 @@ async function caseHCV01174TodoManifest() {
   const expectedClasses = [
     "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskRecurringList", "TaskParser",
     "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
-    "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
-    "ToDoCreateTaskInit", "TodayCaptureEditableList", "TaskDoneArchive",
-    "ToDoChromeBar",
+    "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoDailyTripGroups",
+    "ToDoCreateTask", "ToDoCreateTaskInit", "TodayCaptureEditableList",
+    "TaskDoneArchive", "ToDoChromeBar",
   ];
-  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 15-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive, +ToDoChromeBar, +TaskRecurringList recurring-tasks cycle)",
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 16-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive, +ToDoChromeBar, +TaskRecurringList recurring-tasks cycle, +ToDoDailyTripGroups v0.25.0)",
     JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
     `got: ${JSON.stringify(m.customjs_classes)}`);
 

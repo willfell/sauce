@@ -164,7 +164,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.13.1",
+      "version": "0.14.0",
       "path": "mechanisms/task-entity"
     },
     {
@@ -221,7 +221,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.24.0",
+      "version": "0.25.0",
       "path": "blueprints/to-do"
     },
     {

@@ -8,7 +8,7 @@
     "people": "0.8.1",
     "products": "0.4.0",
     "project": "1.49.1",
-    "to-do": "0.24.0",
+    "to-do": "0.25.0",
     "journal": "0.4.2",
     "trips": "0.10.1",
     "finance": "0.19.2",
@@ -42,7 +42,7 @@
     "smart-connections-bridge": "0.2.0",
     "render-safe": "0.2.2",
     "sauce-plugin": "0.3.0",
-    "task-entity": "0.13.1",
+    "task-entity": "0.14.0",
     "menu-popover": "0.3.0",
     "chrome-bar": "0.4.1",
     "section-explorer": "0.5.1"
