@@ -12892,7 +12892,7 @@ async function caseV01070FinMan2NewClassesAndFiles() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   // v0.5.3 CF-3 added PaycheckSummary + FinanceHubActions (alongside the
   // three v0.5.0 classes).
-  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary", "FinanceHubActions"]) {
+  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary"]) {
     assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
       fin.customjs_classes.includes(cls));
   }
@@ -12900,8 +12900,7 @@ async function caseV01070FinMan2NewClassesAndFiles() {
     "helpers/budget-defaults-editor.js",
     "helpers/paycheck-defaults-editor.js",
     "helpers/budget-summary.js",
-    "helpers/paycheck-summary.js",
-    "helpers/finance-hub-actions.js"
+    "helpers/paycheck-summary.js"
   ]) {
     assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
       fin.files.some(f => f.source === src));
@@ -12967,23 +12966,6 @@ async function caseV01070PsThreeBands() {
     /paidCount/.test(src) && /totalCount/.test(src));
   assertTrue("HC-V01070-PS-2: Band 3 — per-category aggregation",
     /buckets|category|e\.category/.test(src));
-}
-
-// v0.5.3 CF-3 — FinanceHubActions widget shipped.
-
-async function caseV01070FhaClassDeclared() {
-  console.log("\n--- Case HC-V01070-FHA-1: FinanceHubActions class + cross-hub nav ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
-  assertTrue("HC-V01070-FHA-1: class FinanceHubActions declared",
-    /class\s+FinanceHubActions\s*\{/.test(src));
-  assertTrue("HC-V01070-FHA-1: render(dv, opts) accepts here/instance/defaultsPath",
-    /here\s*=\s*null/.test(src) && /instance\s*=\s*null/.test(src) && /defaultsPath\s*=\s*null/.test(src));
-  assertTrue("HC-V01070-FHA-1: lists all four finance hubs",
-    /finance/.test(src) && /budgets/.test(src) && /paychecks/.test(src) && /invoices/.test(src));
-  assertTrue("HC-V01070-FHA-1: hides current hub via `here` key",
-    /hub\.key\s*===\s*here|here\s*===\s*hub\.key/.test(src));
-  assertTrue("HC-V01070-FHA-1: delegates + New X to customJS.EntityCreate.render",
-    /customJS\.EntityCreate\.render/.test(src));
 }
 
 // v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
@@ -13071,7 +13053,6 @@ async function caseV01080FinanceNewHelpers() {
   console.log("\n--- Case V01080-FH-NEW: new finance helpers present ---");
   const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
   const expected = [
-    "finance-nav-row.js",
     "debt-summary.js",
     "debts-hub-summary.js",
     "debts-cards.js",
@@ -13090,23 +13071,6 @@ async function caseV01080FinanceOldNavButtonsDeleted() {
   for (const f of deleted) {
     assertTrue(`V01080-FH-DEL-${f}: deleted`, !fs.existsSync(path.join(helpersDir, f)));
   }
-}
-
-async function caseV01080FinanceNavRowClass() {
-  console.log("\n--- Case V01080-FNR-CLS: FinanceNavRow class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav-row.js"), "utf8");
-  assertTrue("V01080-FNR-CLS-class: class FinanceNavRow defined",
-    /class FinanceNavRow/.test(src));
-  assertTrue("V01080-FNR-CLS-render: async render(dv) method",
-    /async render\(dv\)/.test(src));
-  assertTrue("V01080-FNR-CLS-modes: detection covers all 9 modes",
-    /hub-finance/.test(src) && /hub-budgets/.test(src) && /hub-paychecks/.test(src) &&
-    /hub-invoices/.test(src) && /hub-debts/.test(src) &&
-    /entity-budget/.test(src) && /entity-paycheck/.test(src) &&
-    /entity-invoice/.test(src) && /entity-debt/.test(src));
-  assertTrue("V01080-FNR-CLS-css: fnr-root CSS class",
-    /fnr-root/.test(src));
 }
 
 async function caseV01080DebtSummaryWidget() {
@@ -13162,9 +13126,6 @@ async function caseV01080DebtsContentTemplate() {
   const src = fs.readFileSync(tpath, "utf8");
   assertTrue("V01080-DCT-type: type: debts-hub frontmatter",
     /type:\s*debts-hub/.test(src));
-  // v0.111.0: FinanceNavRow superseded by unified FinanceNav (context-aware).
-  assertTrue("V01080-DCT-fnr: FinanceNav (was FinanceNavRow pre-v0.111.0) invoked",
-    /class:\s*["']FinanceNav["']/.test(src));
   assertTrue("V01080-DCT-dhs: DebtsHubSummary view invoked",
     /class:\s*["']DebtsHubSummary["']/.test(src));
 }
@@ -13245,7 +13206,7 @@ async function caseV01080FinanceCustomJsClasses() {
     assertTrue(`V01080-CJS-removed-${removed}: ${removed} removed from customjs_classes`,
       !cls.includes(removed), `still present in customjs_classes`);
   }
-  for (const added of ["FinanceNavRow", "DebtSummary", "DebtsHubSummary", "DebtsCards", "DebtDefaultsEditor", "DebtConfigEditor"]) {
+  for (const added of ["DebtSummary", "DebtsHubSummary", "DebtsCards", "DebtDefaultsEditor", "DebtConfigEditor"]) {
     assertTrue(`V01080-CJS-added-${added}: ${added} present in customjs_classes`,
       cls.includes(added));
   }
@@ -13343,16 +13304,6 @@ async function caseV01101EntityCreateGuardMigration() {
     /module\.exports\.applyEntityCreateGuardMigration\s*=\s*applyEntityCreateGuardMigration/.test(src));
   assertTrue("V01101-ECG-4: rewrites direct customJS.EntityCreate.render(dv,...) calls to guard form",
     /customjs-guard/.test(src) && /class:\s*["']EntityCreate["']/.test(src));
-}
-
-async function caseV01101FinanceHubActionsRaceFix() {
-  console.log("\n--- Case V01101-FHA-POLL: FinanceHubActions polls for EntityCreate ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
-  assertTrue("V01101-FHA-POLL-1: polls window.customJS.EntityCreate",
-    /window\.customJS\?\.EntityCreate/.test(src));
-  assertTrue("V01101-FHA-POLL-2: muted unavailable fallback",
-    /EntityCreate unavailable/.test(src));
 }
 
 async function caseV01102CustomJsGuardMigration() {
@@ -14212,16 +14163,8 @@ async function caseV01150ContentMonthsExists() {
   const body = fs.readFileSync(contentPath, "utf8");
   assertTrue("V01150-CME-2: body contains MonthsCards block",
     /MonthsCards/.test(body));
-  assertTrue("V01150-CME-3: body contains FinanceNav block",
-    /FinanceNav/.test(body));
-  // The `// entity-create:month` marker must LEAD the FinanceNav block (byte-
-  // matching content/Budgets.md). A trailing marker comments out Dataview's
-  // injected closing brace → "Evaluation Error: eval@[native code]" on render.
-  const cmeMarkerIdx = body.indexOf("// entity-create:month");
-  const cmeNavIdx = body.indexOf('class: "FinanceNav"');
-  assertTrue("V01150-CME-4: entity-create:month marker present and LEADS the FinanceNav call",
-    cmeMarkerIdx !== -1 && cmeNavIdx !== -1 && cmeMarkerIdx < cmeNavIdx,
-    `markerIdx=${cmeMarkerIdx} navIdx=${cmeNavIdx}`);
+  assertTrue("V01150-CME-3: body contains FinanceChromeBar block",
+    /FinanceChromeBar/.test(body));
 }
 
 async function caseV01150ContentFinanceLanding() {
@@ -14663,9 +14606,12 @@ async function caseV0111FinanceContentTemplatesUseFinanceNav() {
   ];
   for (const rel of HUBS) {
     const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");
-    assertTrue(`V0111-TPL-FN-${rel}: invokes FinanceNav via guard`,
-      /customjs-guard["'\s,\n]+\{[\s\S]{0,60}class:\s*["']FinanceNav["']/.test(src),
-      `${rel} does not call FinanceNav via the guard`);
+    assertTrue(`V0111-TPL-FN-${rel}: invokes FinanceChromeBar via guard`,
+      /class:\s*["']FinanceChromeBar["']/.test(src),
+      `${rel} does not call FinanceChromeBar via the guard`);
+    assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceNav on hub (ChromeBar owns hub chrome)`,
+      !/class:\s*["']FinanceNav["']/.test(src),
+      `${rel} still has FinanceNav (should be removed from hubs)`);
     assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceHubActions invocation`,
       !/FinanceHubActions/.test(src),
       `${rel} still mentions FinanceHubActions`);
@@ -15878,7 +15824,6 @@ async function caseHCV0128FinancePlanning() {
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
   await caseV01070PsClassDeclared();
   await caseV01070PsThreeBands();
-  await caseV01070FhaClassDeclared();
   await caseV01070FpbmPaycheckBodyMigration();
 
   // v0.109.0 projects visual overhaul
@@ -15900,7 +15845,6 @@ async function caseHCV0128FinancePlanning() {
   // v0.108.0 S3 — 6 new widgets + delete 3 old nav-button classes
   await caseV01080FinanceNewHelpers();
   await caseV01080FinanceOldNavButtonsDeleted();
-  await caseV01080FinanceNavRowClass();
   await caseV01080DebtSummaryWidget();
   await caseV01080DebtsHubSummary();
   await caseV01080DebtDefaultsEditor();
@@ -15921,7 +15865,6 @@ async function caseHCV0128FinancePlanning() {
 
   // v0.110.1 — EntityCreate guard race-fix PATCH
   await caseV01101EntityCreateGuardMigration();
-  await caseV01101FinanceHubActionsRaceFix();
   await caseV01101SourceTemplatesUseGuard();
 
   // v0.110.2 — generalized direct-call → guard migration (mobile race fix)

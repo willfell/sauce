@@ -43,7 +43,6 @@
     "InvoicesCards",
     "DebtsCards",
     "FinanceFrontmatter",
-    "FinanceNavRow",
     "BudgetCategoriesEditor",
     "BudgetAllocationsEditor",
     "PaycheckExpensesEditor",
@@ -59,7 +58,6 @@
     "PaycheckDebtBand",
     "DebtSummary",
     "DebtsHubSummary",
-    "FinanceHubActions",
     "FinanceNav",
     "MonthlyOverview",
     "MonthsCards",
@@ -102,10 +100,6 @@
     {
       "source": "helpers/finance-frontmatter.js",
       "dest": "{{scripts_path}}/finance/finance-frontmatter.js"
-    },
-    {
-      "source": "helpers/finance-nav-row.js",
-      "dest": "{{scripts_path}}/finance/finance-nav-row.js"
     },
     {
       "source": "helpers/budget-categories-editor.js",
@@ -166,10 +160,6 @@
     {
       "source": "helpers/debts-hub-summary.js",
       "dest": "{{scripts_path}}/finance/debts-hub-summary.js"
-    },
-    {
-      "source": "helpers/finance-hub-actions.js",
-      "dest": "{{scripts_path}}/finance/finance-hub-actions.js"
     },
     {
       "source": "helpers/finance-math.js",

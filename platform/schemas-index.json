@@ -228,7 +228,7 @@
       "source": "platform/blueprints/finance/manifest.json",
       "validator": "platform/mechanisms/entity-create/entity-create.js",
       "consumers": [
-        "platform/blueprints/finance/helpers/finance-nav-row.js"
+        "platform/blueprints/finance/helpers/finance-nav.js"
       ],
       "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. The paycheck button prompts for a single `month` (type:month, like the invoice/budget buttons) and scaffolds Paycheck-{{month}}.md with `month`, `deposits: []`, `expenses: []` — deposits are materialized on first render from the Paycheck Defaults `deposit_schedule`; each seeded expense carries a 1-based `deposit` index. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
     },
