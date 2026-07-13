@@ -284,9 +284,14 @@ class ProjectChromeBar {
           overflow: [{ id: "new-section", label: "New Section", icon: ICON.docs },
             { id: "move-docs", label: "Move docs", icon: ICON.move }], leaf: false };
       case "section-hub":
+        // Converged on the shared SectionExplorer surface: Move section (the hub
+        // itself), Select docs (in-place bulk move), Delete section (recursive,
+        // confirmed). Replaces the old flat "Move docs" bulk entry.
         return { primary: { id: "new-doc", label: "New Doc", icon: ICON.plus },
           overflow: [{ id: "new-subsection", label: "New Sub-Section", icon: ICON.docs },
-            { id: "move-docs", label: "Move docs", icon: ICON.move }], leaf: false };
+            { id: "move-section", label: "Move section", icon: ICON.move },
+            { id: "select-docs", label: "Select docs", icon: ICON.move },
+            { id: "delete-section", label: "Delete section", icon: ICON.minus, danger: true }], leaf: false };
       case "project-map":
         return { primary: { id: "add-workstream", label: "Add workstream", icon: ICON.plus },
           overflow: [{ id: "remove-workstream", label: "Remove workstream", icon: ICON.minus, danger: true }], leaf: false };
@@ -532,6 +537,27 @@ class ProjectChromeBar {
           missing("DocBulkMoveActions");
           return;
         }
+        case "select-docs": {
+          // In-place bulk-select on the section hub's doc pane (shared mechanism).
+          const SE = (typeof customJS !== "undefined") && customJS.SectionExplorer;
+          if (SE && typeof SE.enterSelectMode === "function") { SE.enterSelectMode(dv); return; }
+          missing("SectionExplorer");
+          return;
+        }
+        case "move-section": {
+          const a = this._projAdapterAndSection(dv);
+          if (!a) { missing("SectionExplorer"); return; }
+          if (typeof a.SE._openMovePickerForSection === "function") { a.SE._openMovePickerForSection(dv, a.adapter, a.section); return; }
+          missing("SectionExplorer");
+          return;
+        }
+        case "delete-section": {
+          const a = this._projAdapterAndSection(dv);
+          if (!a) { missing("SectionExplorer"); return; }
+          if (typeof a.SE._openDeleteConfirm === "function") { a.SE._openDeleteConfirm(dv, a.adapter, a.section); return; }
+          missing("SectionExplorer");
+          return;
+        }
         case "add-link": {
           const PLM = (typeof customJS !== "undefined") && customJS.ProjectLinksManager;
           if (PLM && typeof PLM._onAdd === "function") { PLM._onAdd(dv); return; }
@@ -580,6 +606,32 @@ class ProjectChromeBar {
           return;
       }
     } catch (_e) { /* never throw */ }
+  }
+
+  // Build the shared SectionExplorer adapter + a section descriptor for the
+  // CURRENT section-hub note, so the move-section / delete-section overflow
+  // actions can drive the shared mechanism. Returns { SE, adapter, section } or
+  // null on a cold load / non-section-hub note. Never throws.
+  _projAdapterAndSection(dv) {
+    try {
+      let cur = null;
+      try { cur = dv && typeof dv.current === "function" ? dv.current() : null; } catch (_e) { cur = null; }
+      if (!cur || !cur.file || cur.type !== "section-hub") return null;
+      const SE = (typeof customJS !== "undefined") && customJS.SectionExplorer;
+      const SH = (typeof customJS !== "undefined") && customJS.SectionHub;
+      if (!SE || !SH || typeof SH._buildConfig !== "function" || typeof SE.makeAdapter !== "function") return null;
+      const depth = Number(cur.depth) || 1;
+      const projectSlug = cur.project_slug;
+      const sectionSlug = cur.section_slug;
+      const sectionName = cur.section || cur.file.name;
+      const config = SH._buildConfig(dv, cur, depth, projectSlug, sectionSlug, sectionName);
+      const adapter = SE.makeAdapter(config);
+      const folder = cur.file.path.slice(0, cur.file.path.lastIndexOf("/"));
+      const title = (typeof SH._stripLink === "function" ? SH._stripLink(cur.section) : cur.section)
+        || cur.file.name.replace(/\.md$/, "");
+      const section = { folder, hubPath: cur.file.path, title };
+      return { SE, adapter, section };
+    } catch (_e) { return null; }
   }
 
   // Delegate an entity-create id to the directly-callable EntityCreate.create()

@@ -107,10 +107,14 @@ function allDescendants(el) {
 }
 {
   const s = inst._surfaceSpec('section-hub');
-  ok('PCB-SPEC-4 section-hub primary=new-doc + overflow[new-subsection,move-docs]',
+  ok('PCB-SPEC-4 section-hub primary=new-doc + overflow[new-subsection, move-section, select-docs, delete-section]',
     s.primary && s.primary.id === 'new-doc' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-subsection')
-      && s.overflow.some((o) => o.id === 'move-docs'));
+      && s.overflow.some((o) => o.id === 'move-section')
+      && s.overflow.some((o) => o.id === 'select-docs')
+      && s.overflow.some((o) => o.id === 'delete-section'));
+  ok('PCB-SPEC-4b section-hub drops the legacy "move-docs" bulk entry (converged on select-docs)',
+    !s.overflow.some((o) => o.id === 'move-docs'));
 }
 {
   const s = inst._surfaceSpec('project-map');
@@ -445,6 +449,71 @@ function allDescendants(el) {
       runDispatch({}, {}, () => inst._dispatch(dv, { context: 'links-hub' }, 'add-link'));
     } catch (_e) { threw = true; }
     ok('PCB-DISPATCH-10 a missing helper (cold-load) does NOT throw', !threw);
+  }
+
+  // PCB-DISPATCH-11..13 — section-hub overflow routes to the shared SectionExplorer.
+  // The section-hub note supplies type/depth/section/section_slug/project_slug; the
+  // dispatch builds an adapter via SectionHub._buildConfig + SectionExplorer.makeAdapter
+  // and a section descriptor from the current file, then calls the shared entry point.
+  const sectionHubStub = () => ({
+    SectionHub: {
+      _buildConfig: (...args) => ({ __cfg: true, __args: args }),
+      _stripLink: (v) => (typeof v === 'string' ? v : ''),
+    },
+    SectionExplorer: {
+      makeAdapter: (cfg) => ({ __adapter: true, cfg }),
+    },
+  });
+  const sectionHubDv = () => ({
+    current: () => ({
+      type: 'section-hub',
+      depth: 1,
+      section: 'Knowledge',
+      section_slug: 'knowledge',
+      project_slug: 'connectors',
+      file: { path: 'spice/projects/connectors/docs/knowledge/Knowledge.md', name: 'Knowledge' },
+    }),
+  });
+
+  // PCB-DISPATCH-11 — select-docs → SectionExplorer.enterSelectMode(dv).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer.enterSelectMode = (d) => calls.push({ d });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'select-docs'));
+    ok('PCB-DISPATCH-11 select-docs calls SectionExplorer.enterSelectMode once with dv',
+      calls.length === 1 && calls[0].d === dv);
+  }
+
+  // PCB-DISPATCH-12 — move-section → SectionExplorer._openMovePickerForSection(dv, adapter, section).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer._openMovePickerForSection = (d, adapter, section) => calls.push({ d, adapter, section });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'move-section'));
+    ok('PCB-DISPATCH-12a move-section calls SectionExplorer._openMovePickerForSection once',
+      calls.length === 1 && calls[0].d === dv);
+    ok('PCB-DISPATCH-12b …with an adapter built from makeAdapter(_buildConfig(...))',
+      calls.length === 1 && calls[0].adapter && calls[0].adapter.__adapter === true && calls[0].adapter.cfg && calls[0].adapter.cfg.__cfg === true);
+    ok('PCB-DISPATCH-12c …and a section descriptor { folder, hubPath, title } from the current note',
+      calls.length === 1 && calls[0].section
+        && calls[0].section.folder === 'spice/projects/connectors/docs/knowledge'
+        && calls[0].section.hubPath === 'spice/projects/connectors/docs/knowledge/Knowledge.md'
+        && calls[0].section.title === 'Knowledge');
+  }
+
+  // PCB-DISPATCH-13 — delete-section → SectionExplorer._openDeleteConfirm(dv, adapter, section).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer._openDeleteConfirm = (d, adapter, section) => calls.push({ d, adapter, section });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'delete-section'));
+    ok('PCB-DISPATCH-13 delete-section calls SectionExplorer._openDeleteConfirm once with (dv, adapter, section)',
+      calls.length === 1 && calls[0].d === dv && calls[0].adapter && calls[0].adapter.__adapter === true
+        && calls[0].section && calls[0].section.hubPath === 'spice/projects/connectors/docs/knowledge/Knowledge.md');
   }
 }
 

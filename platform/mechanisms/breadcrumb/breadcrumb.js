@@ -215,7 +215,7 @@ class Breadcrumb {
       ? relFolder.split("/").slice(-1)[0]  // last segment of the relative folder path
       : null;
     const isSectionHub = immediateFolder !== null
-      && fileStem.toLowerCase() === immediateFolder.toLowerCase();
+      && this._slugify(fileStem) === immediateFolder.toLowerCase();
 
     if (relFolder) {
       const relSegs = relFolder.split("/");

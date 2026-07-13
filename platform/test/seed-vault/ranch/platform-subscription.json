@@ -51,7 +51,7 @@
     },
     {
       "name": "breadcrumb",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "open-helpers",
@@ -107,7 +107,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.4.1"
+      "version": "0.5.0"
     }
   ],
   "blueprints": [
@@ -137,7 +137,7 @@
     },
     {
       "name": "project",
-      "version": "1.48.1"
+      "version": "1.49.0"
     },
     {
       "name": "to-do",
@@ -149,11 +149,11 @@
     },
     {
       "name": "trips",
-      "version": "0.10.0"
+      "version": "0.10.1"
     },
     {
       "name": "finance",
-      "version": "0.19.0"
+      "version": "0.19.1"
     },
     {
       "name": "sticky-notes",
@@ -165,7 +165,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.7.1"
+      "version": "0.8.0"
     },
     {
       "name": "reader",
