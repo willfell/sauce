@@ -524,9 +524,9 @@ class SpaceDailyDashboard {
         });
       }
 
-      // v0.13.1: body iterates open tasks, then overdue tasks (also open,
-      // scheduled before today) as a second visually-distinguished tail so
-      // the red "N Overdue" pill has matching rows instead of a bare count.
+      // Body iterates open tasks, then overdue tasks (also open, scheduled
+      // before today) in the same list style — one continuous list with overdue
+      // at the bottom, each overdue row carrying its own red "Overdue" pill.
       // Done tasks stay surfaced via header count only; their notes stay in
       // spice/tasks/_done/.
       if (openTasks.length > 0 || overdueCount > 0) {
@@ -539,12 +539,12 @@ class SpaceDailyDashboard {
         // Shared row renderer for both the open and overdue lists — row click
         // opens the task NOTE (read-mostly mirror; the note carries its own edit
         // affordance). Ignore clicks that land on an inner <a> so opening a title
-        // link doesn't ALSO navigate to the note. `dim` visually distinguishes
-        // overdue rows from today's open rows.
-        const renderTaskRow = (list, task, dim) => {
+        // link doesn't ALSO navigate to the note. `overdue` rows look identical
+        // to today's rows (no left bar, no dimming) except for a small inline red
+        // "Overdue" pill after the title.
+        const renderTaskRow = (list, task, overdue) => {
           const li = list.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;"
-            + (dim ? " opacity: 0.75;" : "");
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
 
           const titleSpan = li.createEl("span");
           const titleText = (task && task.title) || "(untitled)";
@@ -552,6 +552,12 @@ class SpaceDailyDashboard {
             TTL.renderInlineLinks(titleSpan, titleText, task.path);
           } else {
             titleSpan.textContent = titleText;
+          }
+
+          if (overdue) {
+            const badge = li.createEl("span");
+            badge.textContent = "Overdue";
+            badge.style.cssText = "margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 0.72em; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; background: color-mix(in srgb, var(--color-red) 13%, transparent); color: var(--color-red); border: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);";
           }
 
           li.onclick = (e) => {
@@ -567,9 +573,12 @@ class SpaceDailyDashboard {
         }
 
         if (overdueCount > 0) {
+          // Same list style as the open list (no left bar) so open + overdue read
+          // as one continuous list, overdue at the bottom, each overdue row
+          // tagged with its own red "Overdue" pill.
           const overdueList = tasksBody.createEl("ul");
           overdueList.className = "sauce-section-overdue-list";
-          overdueList.style.cssText = "margin: 8px 0 0 0; padding-left: 18px; list-style-type: disc; border-left: 2px solid var(--color-red);";
+          overdueList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
           for (const task of overdueTasks) renderTaskRow(overdueList, task, true);
         }
       }
@@ -645,28 +654,32 @@ class SpaceDailyDashboard {
           sectionState,
         });
 
-        // Each trip renders as a card: a GREEN day pill + the trip name
-        // (no em dash) + a muted packing-progress line when packTotal > 0.
+        // Each trip renders as a quiet card matching the dashboard's other rows:
+        // the trip name on the left, and a right cluster with the packing ratio
+        // (subtle/muted) + the days-until. No filled background, no left pill —
+        // it reads like the section's group rows, not a heavy dark tile.
         for (const trip of trips) {
           const card = tripsBody.createEl("div");
-          card.style.cssText = "display:flex; align-items:center; gap:10px; padding:8px 12px; margin:6px 0; border:1px solid var(--background-modifier-border); border-radius:8px; background:var(--background-primary); cursor:pointer;";
+          card.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; margin:6px 0; border:1px solid var(--background-modifier-border); border-radius:8px; background:transparent; cursor:pointer;";
 
-          const pill = card.createEl("span");
-          pill.textContent = trip.daysAway === 0
+          const nameEl = card.createEl("div");
+          nameEl.textContent = trip.name || "Trip";
+          nameEl.style.cssText = "flex:1 1 auto; min-width:0; font-weight:600; font-size:0.92em; word-break:break-word; overflow-wrap:anywhere;";
+
+          const meta = card.createEl("div");
+          meta.style.cssText = "flex:0 0 auto; display:flex; align-items:center; gap:12px; white-space:nowrap; font-variant-numeric:tabular-nums;";
+
+          if (trip.packTotal > 0) {
+            const pk = meta.createEl("span");
+            pk.textContent = `${trip.packed}/${trip.packTotal} packed`;
+            pk.style.cssText = "font-size:0.76em; color:var(--text-muted);";
+          }
+
+          const days = meta.createEl("span");
+          days.textContent = trip.daysAway === 0
             ? "Today"
             : (trip.daysAway === 1 ? "1 day" : `${trip.daysAway} days`);
-          pill.style.cssText = "flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:3px 9px; border-radius:999px; background:color-mix(in srgb, var(--color-green) 22%, transparent); color:var(--color-green); font-weight:700; font-size:0.8em; white-space:nowrap;";
-
-          const col = card.createEl("div");
-          col.style.cssText = "flex:1; min-width:0;";
-          const nameEl = col.createEl("div");
-          nameEl.textContent = trip.name || "Trip";
-          nameEl.style.cssText = "font-weight:700; font-size:0.92em; word-break:break-word; overflow-wrap:anywhere;";
-          if (trip.packTotal > 0) {
-            const meta = col.createEl("div");
-            meta.textContent = `${trip.packed}/${trip.packTotal} packed`;
-            meta.style.cssText = "font-size:0.76em; color:var(--text-muted); margin-top:2px;";
-          }
+          days.style.cssText = "font-size:0.82em; font-weight:600; color:var(--text-normal);";
 
           card.onclick = () => { if (trip.path) app.workspace.openLinkText(trip.path, ""); };
         }
