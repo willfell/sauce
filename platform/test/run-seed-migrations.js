@@ -711,10 +711,11 @@ withTempVault((vault) => {
         ok("HC-V09-SEED-MIGRATE-STICKY-3 hub Sticky.md typed sticky-hub",
            /^type:\s*sticky-hub\s*$/m.test(hub));
         // The installer-fresh hub (files[] step) wins over the migrated old hub
-        // (skip-if-dest-exists guard), so the heading reads "# Sticky Notes",
-        // never a stale "# Scratch" carried over from the pre-rename Scratch.md.
-        ok("HC-V09-SEED-MIGRATE-STICKY-3b hub heading is fresh '# Sticky Notes' (no stale '# Scratch')",
-           /^#\s+Sticky Notes\s*$/m.test(hub) && !/^#\s+Scratch\s*$/m.test(hub));
+        // (skip-if-dest-exists guard). Since v0.11.0 the template no longer
+        // carries a literal `# H1` (Obsidian's inline title renders it), so this
+        // now only asserts the absence of the stale `# Scratch` H1.
+        ok("HC-V09-SEED-MIGRATE-STICKY-3b hub carries no stale '# Scratch' heading",
+           !/^#\s+Scratch\s*$/m.test(hub));
     }
     {
         // The scratch user note moved (folder-only rename; body retyped scratch → sticky-note)
