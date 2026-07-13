@@ -73,7 +73,7 @@
       "id": "people-hub",
       "label": "People",
       "icon": "people",
-      "order": 60,
+      "order": 150,
       "action": {
         "type": "openLink",
         "target": "{{module_directory}}/People.md"

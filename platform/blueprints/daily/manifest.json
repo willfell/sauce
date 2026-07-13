@@ -93,19 +93,6 @@
       }
     }
   ],
-  "nav_buttons": [
-    {
-      "id": "daily-today",
-      "label": "Daily",
-      "icon": "daily",
-      "order": 50,
-      "action": {
-        "type": "invoke_command",
-        "command_id": "daily-notes",
-        "read_mode_after": true
-      }
-    }
-  ],
   "post_install": [
     {
       "type": "notice",
