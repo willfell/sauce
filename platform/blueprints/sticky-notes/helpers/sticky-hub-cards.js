@@ -44,7 +44,7 @@ class StickyHubCards {
     }
 
     _mode(container) {
-        return container && container.__stickyHubMode === "all" ? "all" : "days";
+        return container && container.__stickyHubMode === "days" ? "days" : "all";
     }
 
     _matchesFilter(page, needle, body) {
