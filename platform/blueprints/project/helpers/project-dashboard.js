@@ -13,13 +13,24 @@
  *   • Recent    — mtime-sorted merge of recent docs, meetings, task-notes (top 5).
  *   • Links     — chips parsed from the frontmatter `links[]` array.
  *
- * Reuses ChromeBar icon set (customJS.ProjectChromeBar.ICON), MenuPopover,
- * RenderSafe. No new mechanism.
+ * Reuses MenuPopover + RenderSafe. Icons inlined as a static ICON map
+ * (mirrors ProjectChromeBar's icon set for the classes we use). No new mechanism.
  *
  * Usage in DataviewJS:
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectDashboard" });
  */
 class ProjectDashboard {
+    static get ICON() {
+        return {
+            project: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+            map: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
+            board: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
+            task: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
+            docs: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`,
+            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+        };
+    }
+
     async render(dv) {
         try {
             const RS = (typeof customJS !== "undefined" && customJS.RenderSafe) ? customJS.RenderSafe : null;
@@ -256,7 +267,7 @@ class ProjectDashboard {
 
     _renderTiles(container, ctx, counts) {
         const { folder, slug, projectName } = ctx;
-        const ICON = (typeof customJS !== "undefined" && customJS.ProjectChromeBar && customJS.ProjectChromeBar.ICON) || {};
+        const ICON = ProjectDashboard.ICON;
 
         const tiles = [
             { key: "docs",     label: "Docs",     icon: ICON.docs,    count: counts.docs,     target: `${folder}/Docs.md` },
@@ -308,7 +319,7 @@ class ProjectDashboard {
         if (!items || items.length === 0) return;
         const { currentPath } = ctx;
 
-        const ICON = (typeof customJS !== "undefined" && customJS.ProjectChromeBar && customJS.ProjectChromeBar.ICON) || {};
+        const ICON = ProjectDashboard.ICON;
         const iconFor = (k) => (k === "meeting" ? ICON.project : (k === "task" ? ICON.task : ICON.docs));
 
         const wrap = container.createEl("div");
