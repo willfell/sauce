@@ -125,6 +125,32 @@ failures += !run("makeAdapter forwards the move block + emptySubsectionCount (ra
   assert.strictEqual(bare.emptySubsectionCount, undefined);
 });
 
+// REGRESSION: customJS exposes the INSTANCE, so `static` helpers must be mirrored
+// onto it — else blueprint move blocks calling customJS.SectionExplorer.pagesUnder(...)
+// throw "not a function", the enumerator's try/catch returns [], and EVERY move
+// picker (bulk / section / single-doc, both blueprints) opens with an empty list.
+// The pre-existing tests only called statics via the class name, so they never
+// caught this. This test calls them on an INSTANCE, exactly like customJS does.
+failures += !run("instance exposes static helpers (empty move-picker bug): customJS.SectionExplorer.pagesUnder/sectionTargets/planBulkMove are callable ON THE INSTANCE", () => {
+  const SectionExplorer = loadClass();
+  const inst = new SectionExplorer(); // customJS stores the instance, not the class
+  for (const m of ["pagesUnder", "sectionTargets", "planBulkMove", "subtreeDocCount", "childSectionFolders", "isNoop", "targetPath", "_slugify"]) {
+    assert.strictEqual(typeof inst[m], "function", "instance." + m + " must be callable (static mirrored onto instance)");
+  }
+  // They must actually WORK through the instance, not merely exist.
+  const pages = [{ type: "wiki-section", title: "Cooking", file: { path: "spice/wiki/cooking/Cooking.md", folder: "spice/wiki/cooking" } }];
+  const tg = inst.sectionTargets(pages, { root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)", labelOf: (p) => p.title });
+  assert.strictEqual(tg.length, 2, "root + one section");
+  assert.strictEqual(tg[0].folder, "spice/wiki");
+  assert.strictEqual(tg[1].folder, "spice/wiki/cooking");
+  const { moves } = inst.planBulkMove(["spice/wiki/a/One.md"], "spice/wiki/b");
+  assert.strictEqual(moves.length, 1);
+  assert.strictEqual(moves[0].to, "spice/wiki/b/One.md");
+  // Static access must still work too (internal callers use the class name).
+  assert.strictEqual(typeof SectionExplorer.pagesUnder, "function");
+  assert.strictEqual(SectionExplorer._slugify("A B"), "a-b");
+});
+
 failures += !run("render() renders a rail row per section", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
