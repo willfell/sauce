@@ -1,19 +1,3 @@
-/**
- * FinanceChromeBar (CustomJS) — the finance blueprint's ChromeBar adapter
- * config. Breadcrumb + Go▾ launcher (7 hubs) as always, PLUS — on the 6
- * hub surfaces that scaffold an entity (budgets/paychecks/invoices/debts/
- * months/savings; finance-hub itself has no entity) — a primary "+ New <X>"
- * button to the right of the compass, dispatching straight to
- * EntityCreate.create (same call FinanceNav's old inline button used,
- * mirrors ReaderChromeBar's reader-hub "+ New article" precedent exactly).
- * FinanceNav's OWN "+ New X" render is now guarded behind chrome-bar
- * presence (see finance-nav.js) — its cross-hub row, defaults links, and
- * prev/next sibling nav are unaffected. Detects by page.type across all 19
- * finance frontmatter types (7 hubs, 6 entities, 3 defaults pages, the
- * finance-plan singleton, plus 2 auxiliary leaf types — invoice-board-card
- * kanban cards and per-invoice time-log notes). Instance methods;
- * never-throw; cold-load-safe.
- */
 class FinanceChromeBar {
   get ICON() {
     return {
@@ -25,6 +9,9 @@ class FinanceChromeBar {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
       piggyBank: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5c-1.5 0-2.8 1.4-3 2.5S17.5 10 19 10c.5 0 .9-.1 1.3-.3.4 1.1.7 2.3.7 3.3 0 4.4-3.6 8-8 8s-8-3.6-8-8 3.6-8 8-8c1.4 0 2.7.4 3.9 1"/><path d="M9 11h.01"/></svg>`,
       plus: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+      settings: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
+      chevronLeft: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
+      chevronRight: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`,
     };
   }
 
@@ -51,9 +38,6 @@ class FinanceChromeBar {
       { key: "months-hub", label: "Months", icon: ICON.calendar, path: "spice/finance/months/Months.md" },
       { key: "savings-hub", label: "Savings", icon: ICON.piggyBank, path: "spice/finance/savings/Savings.md" },
     ];
-    // Hub → the entity it scaffolds. finance-hub is deliberately absent —
-    // the top hub has no entity of its own to create (matches FinanceNav's
-    // pre-existing behavior, which never rendered a "+ New X" there either).
     const CREATE_FOR_HUB = {
       "budgets-hub": { instance: "budget", label: "New Budget" },
       "paychecks-hub": { instance: "paycheck", label: "New Paycheck" },
@@ -62,25 +46,90 @@ class FinanceChromeBar {
       "months-hub": { instance: "month", label: "New Month" },
       "savings-hub": { instance: "savings", label: "New Savings" },
     };
+    const DEFAULTS_FOR_HUB = {
+      "budgets-hub": { label: "Budget Defaults", path: "spice/finance/Budget Defaults.md" },
+      "paychecks-hub": { label: "Paycheck Defaults", path: "spice/finance/Paycheck Defaults.md" },
+      "debts-hub": { label: "Debt Defaults", path: "spice/finance/Debt Defaults.md" },
+    };
+    const ENTITY_SUB = {
+      "budget": { sub: "budgets", sortKey: "month", dir: "ASC" },
+      "paycheck": { sub: "paychecks", sortKey: "month", dir: "ASC" },
+      "invoice": { sub: "invoices", sortKey: "month", dir: "ASC" },
+      "debt": { sub: "debts", sortKey: "current_balance", dir: "DESC" },
+      "month": { sub: "months", sortKey: "month", dir: "DESC" },
+      "savings-account": { sub: "savings", sortKey: "current_balance", dir: "DESC" },
+    };
 
     return {
       detect: (dv, page) => {
         const t = page && page.type;
         if (!HUB_TYPES.includes(t) && !ENTITY_TYPES.includes(t) && !DEFAULTS_TYPES.includes(t) && !AUX_TYPES.includes(t)) return null;
-        return { context: t, path: (page.file && page.file.path) || "" };
+        const ctx = { context: t, path: (page.file && page.file.path) || "" };
+        if (ENTITY_TYPES.includes(t)) {
+          try {
+            const eSub = ENTITY_SUB[t];
+            if (eSub) {
+              const subAreaRoot = `spice/finance/${eSub.sub}/`;
+              const hubFileBase = eSub.sub.charAt(0).toUpperCase() + eSub.sub.slice(1) + ".md";
+              const allFiles = app.vault.getMarkdownFiles().filter((f) => {
+                if (!f.path.startsWith(subAreaRoot)) return false;
+                if (f.path === subAreaRoot + hubFileBase) return false;
+                return true;
+              });
+              const siblings = allFiles.map((f) => {
+                const fm = app.metadataCache.getFileCache(f)?.frontmatter || {};
+                let sortVal = fm[eSub.sortKey];
+                if ((sortVal === undefined || sortVal === null) && eSub.sortKey === "month") sortVal = fm.pay_period_start;
+                return { path: f.path, sortVal };
+              }).filter((s) => s.sortVal !== undefined && s.sortVal !== null);
+              siblings.sort((a, b) => {
+                const av = String(a.sortVal);
+                const bv = String(b.sortVal);
+                if (av === bv) return 0;
+                return eSub.dir === "DESC" ? (av > bv ? -1 : 1) : (av < bv ? -1 : 1);
+              });
+              const idx = siblings.findIndex((s) => s.path === ctx.path);
+              if (idx !== -1) {
+                ctx.prevSibling = siblings[idx - 1] || null;
+                ctx.nextSibling = siblings[idx + 1] || null;
+              }
+            }
+          } catch (_e) { /* never throw — sibling nav is best-effort */ }
+        }
+        return ctx;
       },
       surfaceSpec: (ctx) => {
         const create = CREATE_FOR_HUB[ctx.context];
-        const primary = create ? { id: `new-${create.instance}`, label: `+ ${create.label}`, icon: ICON.plus } : null;
-        return { primary, overflow: [], leaf: !HUB_TYPES.includes(ctx.context) };
+        const primary = create ? { id: `new-${create.instance}`, label: `+ ${create.label}` } : null;
+        const overflow = [];
+        const defaults = DEFAULTS_FOR_HUB[ctx.context];
+        if (defaults) {
+          overflow.push({ id: "open-defaults", label: defaults.label, icon: ICON.settings });
+        }
+        if (ctx.prevSibling) {
+          overflow.push({ id: "nav-prev", label: "Prev", icon: ICON.chevronLeft });
+        }
+        if (ctx.nextSibling) {
+          overflow.push({ id: "nav-next", label: "Next", icon: ICON.chevronRight });
+        }
+        return { primary, overflow, leaf: !HUB_TYPES.includes(ctx.context) };
       },
       dispatch: (dv, ctx, id) => {
-        if (typeof id !== "string" || !id.startsWith("new-")) return;
-        const instance = id.slice("new-".length);
+        if (typeof id !== "string") return;
         try {
-          if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
-            customJS.EntityCreate.create({ instance, dv });
-          } else if (typeof Notice === "function") { new Notice("FinanceChromeBar: EntityCreate unavailable — reinstall finance blueprint.", 6000); }
+          if (id.startsWith("new-")) {
+            const instance = id.slice("new-".length);
+            if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
+              customJS.EntityCreate.create({ instance, dv });
+            } else if (typeof Notice === "function") { new Notice("FinanceChromeBar: EntityCreate unavailable — reinstall finance blueprint.", 6000); }
+          } else if (id === "open-defaults") {
+            const defaults = DEFAULTS_FOR_HUB[ctx.context];
+            if (defaults) app.workspace.openLinkText(defaults.path, "");
+          } else if (id === "nav-prev" && ctx.prevSibling) {
+            app.workspace.openLinkText(ctx.prevSibling.path, "");
+          } else if (id === "nav-next" && ctx.nextSibling) {
+            app.workspace.openLinkText(ctx.nextSibling.path, "");
+          }
         } catch (_e) { /* never throw */ }
       },
       destinations: (dv, ctx) => {
