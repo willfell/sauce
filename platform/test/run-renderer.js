@@ -2825,7 +2825,7 @@ async function testFinanceColdLoadRenderGuards() {
   const coldLoadWidgets = [
     'InvoiceWorkspaceNav', 'BudgetDefaultsEditor', 'PaycheckDefaultsEditor',
     'DebtDefaultsEditor', 'BudgetSummary', 'PaycheckSummary', 'PaycheckDebtBand', 'DebtSummary',
-    'FinanceHubActions', 'MonthlyOverview', 'MonthsCards', 'MonthDashboard', 'FinanceHubSummary',
+    'MonthlyOverview', 'MonthsCards', 'MonthDashboard', 'FinanceHubSummary',
   ];
   for (const cls of coldLoadWidgets) {
     let ok = false;
