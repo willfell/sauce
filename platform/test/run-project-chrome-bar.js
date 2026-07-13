@@ -104,6 +104,10 @@ function allDescendants(el) {
     s.primary && s.primary.id === 'new-doc' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-section')
       && s.overflow.some((o) => o.id === 'move-docs'));
+  ok('PCB-SPEC-3b docs-hub overflow ALSO offers "Select docs" (root-level bulk move), keeping new-section + move-docs',
+    s.overflow.some((o) => o.id === 'select-docs' && o.label === 'Select docs')
+      && s.overflow.some((o) => o.id === 'new-section')
+      && s.overflow.some((o) => o.id === 'move-docs'));
 }
 {
   const s = inst._surfaceSpec('section-hub');
@@ -514,6 +518,38 @@ function allDescendants(el) {
     ok('PCB-DISPATCH-13 delete-section calls SectionExplorer._openDeleteConfirm once with (dv, adapter, section)',
       calls.length === 1 && calls[0].d === dv && calls[0].adapter && calls[0].adapter.__adapter === true
         && calls[0].section && calls[0].section.hubPath === 'spice/projects/connectors/docs/knowledge/Knowledge.md');
+  }
+
+  // PCB-DISPATCH-14 — select-docs on the Docs ATLAS ROOT (docs-hub) resolves a
+  // docs-root adapter (built from SectionHub._buildDocsRootConfig) and calls
+  // SectionExplorer.openSelectDocsPicker(dv, adapter, null). section === null so
+  // the picker enumerates docs directly under the docs root folder.
+  {
+    const calls = [];
+    const cjs = {
+      SectionHub: {
+        _buildDocsRootConfig: (dv2, projectSlug) => ({
+          rootClass: 'se-root',
+          icons: { folder: '', file: '' },
+          listSections: () => [],
+          listPages: () => [],
+          move: { root: `spice/projects/${projectSlug}/docs`, docType: 'doc-note', rewriteOnDocMove: () => ({ section: '', sub_section: '' }) },
+        }),
+      },
+      SectionExplorer: {
+        makeAdapter: (cfg) => ({ __adapter: true, move: cfg.move }),
+        openSelectDocsPicker: (d, adapter, section) => calls.push({ d, adapter, section }),
+      },
+    };
+    const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }) };
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub', projectSlug: 'connectors', projectDir: 'spice/projects/connectors' }, 'select-docs'));
+    ok('PCB-DISPATCH-14a select-docs on docs-hub calls SectionExplorer.openSelectDocsPicker once with dv',
+      calls.length === 1 && calls[0].d === dv);
+    ok('PCB-DISPATCH-14b …with section === null (root-level bulk move)',
+      calls.length === 1 && calls[0].section === null);
+    ok('PCB-DISPATCH-14c …and a docs-root adapter whose move.root ends in "/docs"',
+      calls.length === 1 && calls[0].adapter && calls[0].adapter.move
+        && /\/docs$/.test(String(calls[0].adapter.move.root)));
   }
 }
 
