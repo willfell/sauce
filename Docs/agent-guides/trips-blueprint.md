@@ -1,5 +1,5 @@
 ---
-purpose: Canonical reference for the `trips` blueprint — a per-trip folder-is-truth ecosystem under spice/trips/. Note types, collision-free naming, TripSectionKinds (5 default sections), the render helpers (TripsChromeBar chrome + hosted section Add actions, TripEntryList CRUD incl. multi-leg flights v2, TripLinks on the atlas, TripDashboard), the task-note↔trip link (TaskDialog + TaskTripList), upcoming-trips on the daily/home, and the conformance + chrome-strip + v2 heals. Read before any trips work.
+purpose: Canonical reference for the `trips` blueprint — a per-trip folder-is-truth ecosystem under spice/trips/. Note types, collision-free naming, TripSectionKinds (5 default sections), the render helpers (TripsChromeBar chrome + hosted section Add actions, TripEntryList CRUD incl. multi-leg flights v3 (computed boarding/duration/layover/live status), TripLinks on the atlas, TripDashboard), the task-note↔trip link (TaskDialog + TaskTripList), upcoming-trips on the daily/home, and the conformance + chrome-strip + v2 heals. Read before any trips work.
 load_when: Touching the trips blueprint (spice/trips/), its helpers, TripSectionKinds, TripsChromeBar, TripEntryList, TripLinks, TripDashboard, the task-entity TaskTripList, the headless TripNavButtons, TripsHubCards, TripSectionsCards, the conformance/chrome-strip/v2 heals, or debugging trips render/chrome/naming behavior.
 ---
 
@@ -102,7 +102,12 @@ The **Go-to launcher** is a `document.body` overlay — a **full-width bottom sh
 
 `platform/blueprints/trips/helpers/trip-entry-list.js` is a **shared CRUD helper** that powers the structured sections — **Packing List** (grouped: categories + checkable items), **Flights**, and **Stay**. `render(dv, spec)` reads a frontmatter array (e.g. `packing_items`, `flights`, `stays`), renders rows with per-row edit/delete plus a **typed** add/edit form (each field declares a `type` — `text` / `date` / `time` / `select` / `link`), and persists edits back to frontmatter. In grouped mode (packing) it renders "Add category" / "Add item" controls and tracks each row's absolute source index so edits/deletes target the right entry. Static ops (`addCategory`, entry filters) are class statics; `render` + handlers are instance methods. The section templates instantiate it with different specs — no per-section CRUD code is duplicated.
 
-**Flights v2 (multi-leg).** Each `flights` entry is one **leg** carrying a `direction` (`Outbound` / `Return`, a `select`), airline / flight #, from / to, typed **date + time** fields (`depart_date`, `depart_time`, `boarding_time`), gate, seat, confirmation, and a **per-leg booking `link`**. `TripEntryList` groups the rendered rows by direction so a multi-leg itinerary reads as Outbound-then-Return.
+**Flights v3 (multi-leg, computed).** Each `flights` entry is one **leg** carrying a `direction` (`Outbound` / `Return`, a `select`), airline / flight #, from / to, typed **date + time** fields (`depart_date`, `depart_time`, `arrival_date`, `arrival_time`), gate, seat, confirmation, a numeric `delay_minutes`, and a **per-leg booking `link`**. `TripEntryList` groups the rendered rows by direction so a multi-leg itinerary reads as Outbound-then-Return, and renders each leg as a **rich flight card**.
+
+- **No manual boarding field.** Boarding is **auto-derived** as effective depart − 40 min (`_boardingMin`) and shown on the card — there is no `boarding_time` frontmatter key or form field (v2's field was dropped).
+- **Delay cascade.** `delay_minutes` shifts *both* depart and arrival by that many minutes (`_effDepartMs` / `_effArriveMs`), so the displayed times, boarding, duration, layover, and live status are all the delayed-effective values. A positive delay also surfaces a "Delayed" pill.
+- **Computed fields (pure statics, unit-tested, all guard null/blank and never throw).** `_durationMin` (effective arrive − depart), `_layoverMin(prev, next)` — only connecting **same-direction** legs where `prev.to === next.from`, rendered as a between-legs layover chip — and `_flightStatus(leg, nowMs)` → a **live status** pill computed at render from `Date.now()`: `"in N min"` / `"in N hr"` / `"in N days"` before boarding, `"Boarding"` in the boarding window, `"In air"` (or `"Departed"` when no arrival known) after depart, and `"Landed"` after arrival. Human dates render via `_msToDisplay` (`MMM D, h:mm A`, UTC-safe so clean `YYYY-MM-DD`+`HH:MM` round-trips with no local-tz drift).
+- **Compute-at-render, no timers.** The card reads `nowMs = Date.now()` once per render; there is no interval/timer — status is re-evaluated only when the note re-renders (`Cmd+R`).
 
 ### `TripLinks` — helpful links on the atlas
 
@@ -112,9 +117,16 @@ The **Go-to launcher** is a `document.body` overlay — a **full-width bottom sh
 
 Renders a **BeaconCards `layout:"stacked"` grid** on the atlas, grouped **Default Sections** (known `section_kind`) / **Additional Sections** (`section_kind: custom`). Within Default Sections, cards sort by `TripSectionKinds.order()` with the Trip Board appended last. Additional Sections sort alphabetically. Reads siblings from the live vault folder (not a Dataview query) so newly created sections appear immediately after `Cmd+R`.
 
-### `TripDashboard` — atlas summary
+### `TripDashboard` — redesigned atlas summary
 
-`TripDashboard.render(dv)` renders a summary strip on the atlas: a **countdown** (`countdown(start, end, asOf)` → days-until / in-progress / past) with **human-readable dates** (e.g. `Aug 14 – Aug 17`, not raw ISO), **packing progress** (`packingCounts(items)` → checked/total, scanned from the sibling packing-list note's `packing_items`), and an **open-task count**. Pure statics (`countdown`, `packingCounts`) are unit-tested; `render` does the folder scan + task query.
+`TripDashboard.render(dv)` renders a redesigned, card-based summary on the atlas, built from a single sibling folder-scan (packing-list `packing_items`, flights `flights`, stay `stays`) plus one open-task query. Blocks omit themselves when their data is absent. **Compute-at-render, no timers** — the countdown and any live values are evaluated once per render (`Cmd+R`).
+
+- **Hero countdown** — a large `countdown(start, end, asOf)` headline (days-until / in-progress / past) with **human-readable dates** (`_fmtDate`, e.g. `Aug 14`, not raw ISO), plus a stat row (open-task count + packing summary).
+- **Itinerary** — built from the flights section's legs via `_itinerary(flights)`: grouped by direction (Outbound → Return → other), each group collapsed into a de-duped `From → … → To` route with the group's earliest departure (`_legMs`). Reads the flight data directly, so the atlas mirrors what the Flights section holds.
+- **Stay** — `_staySummary(stays)` lists each lodging (name + check-in/out); omitted entirely when there are no stays.
+- **Packing progress** — `packingCounts(items)` → checked/total scanned from the sibling packing-list note; rendered as a progress readout, omitted when empty.
+
+Pure statics (`countdown`, `packingCounts`, `_itinerary`, `_staySummary`, `_legMs`, `_fmtDate`) are unit-tested; `render` does the folder scan, itinerary/stay assembly, and the `_countOpenTasks` query.
 
 ## Task-note ↔ trip link (TaskDialog + TaskTripList)
 

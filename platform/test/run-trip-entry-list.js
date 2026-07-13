@@ -126,10 +126,95 @@ const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-li
     ok('FLD-5 stay fields carry check_in date + link', sf.some(f => f.name === "check_in" && f.type === "date") && sf.some(f => f.name === "link" && f.type === "link"), JSON.stringify(sf));
 }
 
+// ---------- _fieldsFor (fixes edit dialog) ----------
+{
+    ok('FF-1 _fieldsFor flights derives airline', TripEntryList._fieldsFor({ kind: "flights" }).some(f => f.name === "airline"));
+    ok('FF-2 _fieldsFor stay derives check_in', TripEntryList._fieldsFor({ kind: "stay" }).some(f => f.name === "check_in"));
+    ok('FF-3 _fieldsFor packing derives item', TripEntryList._fieldsFor({ kind: "packing", __cats: ["A"] }).some(f => f.name === "item"));
+    ok('FF-4 _fieldsFor explicit fields win', TripEntryList._fieldsFor({ fields: [{ name: "z" }] })[0].name === "z");
+}
+{
+    // Edit form: grouped (packing) → exactly ONE populated category select + item
+    // (no doubled category); flat sections → their kind's fields, no category.
+    const pe = TripEntryList._editFields({ group: true, kind: "packing" }, ["Clothing", "Toiletries"]);
+    ok('EF-1 packing edit has exactly one category field', pe.filter(f => f.name === "category").length === 1);
+    ok('EF-2 packing edit category select is populated', (pe.find(f => f.name === "category").options || [])[0] === "Clothing");
+    ok('EF-3 packing edit has item field', pe.some(f => f.name === "item"));
+    const fe = TripEntryList._editFields({ kind: "flights" }, []);
+    ok('EF-4 flight edit has fields, no stray category', fe.some(f => f.name === "airline") && fe.filter(f => f.name === "category").length === 0);
+}
+
+// ---------- flight schema: drop boarding, add arrival + delay ----------
+{
+    const ff = TripEntryList._flightFields();
+    const n = ff.map(f => f.name);
+    ok('FS-1 no boarding_time', !n.includes("boarding_time"), JSON.stringify(n));
+    ok('FS-2 arrival_date date', n.includes("arrival_date") && ff.find(f => f.name === "arrival_date").type === "date", JSON.stringify(n));
+    ok('FS-3 arrival_time time', n.includes("arrival_time") && ff.find(f => f.name === "arrival_time").type === "time", JSON.stringify(n));
+    ok('FS-4 delay_minutes number', n.includes("delay_minutes") && ff.find(f => f.name === "delay_minutes").type === "number", JSON.stringify(n));
+    ok('FS-5 keeps depart_date/time + direction', n.includes("depart_date") && n.includes("depart_time") && n.includes("direction"), JSON.stringify(n));
+}
+
 // ---------- _fmtDateTime ----------
 {
     ok('FMT-1 _fmtDateTime formats date + 12h time', TripEntryList._fmtDateTime("2026-08-01", "13:00") === "Aug 1, 1:00 PM", TripEntryList._fmtDateTime("2026-08-01", "13:00"));
     ok('FMT-2 _fmtDateTime empty date+time -> ""', TripEntryList._fmtDateTime("", "") === "");
+}
+
+// ---------- pure flight-time math ----------
+{
+    const leg = { depart_date: "2026-07-16", depart_time: "09:39", arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" };
+    ok('FM-1 _toMin parses HH:MM', TripEntryList._toMin("09:39") === 579, String(TripEntryList._toMin("09:39")));
+    ok('FM-2 _toMin blank -> null', TripEntryList._toMin("") === null, String(TripEntryList._toMin("")));
+    ok('FM-3 _boardingMin = depart - 40', TripEntryList._boardingMin(leg) === "08:59", TripEntryList._boardingMin(leg));
+    ok('FM-4 _durationMin', TripEntryList._durationMin(leg) === 96, String(TripEntryList._durationMin(leg)));
+    ok('FM-5 _fmtDur h+m', TripEntryList._fmtDur(96) === "1h 36m", TripEntryList._fmtDur(96));
+    ok('FM-6 _fmtDur m only', TripEntryList._fmtDur(45) === "45m", TripEntryList._fmtDur(45));
+
+    const del = Object.assign({}, leg, { delay_minutes: "30" });
+    ok('FM-7 _boardingMin cascades delay', TripEntryList._boardingMin(del) === "09:29", TripEntryList._boardingMin(del));
+    ok('FM-8 _delayMin parses / defaults 0', TripEntryList._delayMin(del) === 30 && TripEntryList._delayMin(leg) === 0,
+        TripEntryList._delayMin(del) + "/" + TripEntryList._delayMin(leg));
+
+    // layover only for connecting same-direction legs (prev.to === next.from)
+    const a = { direction: "Outbound", to: "ATL", arrival_date: "2026-07-16", arrival_time: "13:00" };
+    const b = { direction: "Outbound", from: "ATL", depart_date: "2026-07-16", depart_time: "13:45" };
+    ok('FM-9 _layoverMin connecting legs', TripEntryList._layoverMin(a, b) === 45, String(TripEntryList._layoverMin(a, b)));
+    ok('FM-10 _layoverMin null across directions',
+        TripEntryList._layoverMin(a, { direction: "Return", from: "ATL", depart_date: "2026-07-16", depart_time: "13:45" }) === null);
+    ok('FM-11 _layoverMin null different airport',
+        TripEntryList._layoverMin(a, { direction: "Outbound", from: "MCO", depart_date: "2026-07-16", depart_time: "13:45" }) === null);
+
+    // ISO date tolerance
+    ok('FM-12 _legDepartMs tolerates full ISO depart_date',
+        TripEntryList._legDepartMs({ depart_date: "2026-07-16T00:00:00.000-06:00", depart_time: "09:39" }) === TripEntryList._legDepartMs(leg));
+
+    // status at fixed now
+    const dep = TripEntryList._legDepartMs(leg);
+    ok('FM-13 status pre-boarding -> "in …"', TripEntryList._flightStatus(leg, dep - 90 * 60000).label.startsWith("in "),
+        JSON.stringify(TripEntryList._flightStatus(leg, dep - 90 * 60000)));
+    ok('FM-14 status Boarding within 40m window', TripEntryList._flightStatus(leg, dep - 20 * 60000).label === "Boarding",
+        JSON.stringify(TripEntryList._flightStatus(leg, dep - 20 * 60000)));
+    ok('FM-15 status In air after depart (arrival known)', TripEntryList._flightStatus(leg, dep + 5 * 60000).label === "In air",
+        JSON.stringify(TripEntryList._flightStatus(leg, dep + 5 * 60000)));
+    ok('FM-16 status Landed after arrival', TripEntryList._flightStatus(leg, TripEntryList._legArriveMs(leg) + 60000).label === "Landed",
+        JSON.stringify(TripEntryList._flightStatus(leg, TripEntryList._legArriveMs(leg) + 60000)));
+    ok('FM-17 status null when depart unknown', TripEntryList._flightStatus({ depart_time: "", depart_date: "" }, dep) === null);
+}
+
+// ---------- effective depart/arrival display (rich card) ----------
+{
+    ok('EFF-1 _effDepartDisplay no delay',
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "" }) === "Jul 16, 9:39 AM",
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "" }));
+    ok('EFF-2 _effDepartDisplay shifts by delay',
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "30" }) === "Jul 16, 10:09 AM",
+        TripEntryList._effDepartDisplay({ depart_date: "2026-07-16", depart_time: "09:39", delay_minutes: "30" }));
+    ok('EFF-3 _effDepartDisplay unknown -> ""', TripEntryList._effDepartDisplay({}) === "",
+        JSON.stringify(TripEntryList._effDepartDisplay({})));
+    ok('EFF-4 _effArriveDisplay no delay',
+        TripEntryList._effArriveDisplay({ arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" }) === "Jul 16, 11:15 AM",
+        TripEntryList._effArriveDisplay({ arrival_date: "2026-07-16", arrival_time: "11:15", delay_minutes: "" }));
 }
 
 console.log(`\n${passes} passed, ${fails} failed`);

@@ -85,6 +85,27 @@ class TripEntryList {
     return { list: l, changed: true };
   }
 
+  // Derive the form fields from a render spec. Explicit spec.fields win;
+  // otherwise map spec.kind -> the per-section SSOT field list. Lets rows
+  // mounted with only {key, kind} (no fields) still build a full edit form.
+  static _fieldsFor(spec) {
+    if (spec && Array.isArray(spec.fields) && spec.fields.length) return spec.fields;
+    switch (spec && spec.kind) {
+      case "flights": return TripEntryList._flightFields();
+      case "stay": return TripEntryList._stayFields();
+      case "packing": return TripEntryList._packingItemFields(spec.__cats || []);
+      default: return [];
+    }
+  }
+
+  // Fields for the Edit form. Grouped (packing) uses a SINGLE category <select>
+  // populated from existing categories + the item field — never doubled. Flat
+  // sections (flights/stay) present their kind's fields.
+  static _editFields(spec, categories) {
+    if (spec && spec.group) return TripEntryList._packingItemFields(categories || []);
+    return TripEntryList._fieldsFor(spec);
+  }
+
   // ── per-section field specs (SSOT — templates + chrome bar call these) ─────
   // Flights: direction select + typed schedule fields + a booking link.
   static _flightFields() {
@@ -96,11 +117,13 @@ class TripEntryList {
       { name: "to", label: "To", type: "text", placeholder: "DTW" },
       { name: "depart_date", label: "Depart date", type: "date" },
       { name: "depart_time", label: "Depart time", type: "time" },
-      { name: "boarding_time", label: "Boarding time", type: "time" },
+      { name: "arrival_date", label: "Arrival date", type: "date" },
+      { name: "arrival_time", label: "Arrival time", type: "time" },
       { name: "gate", label: "Gate", type: "text", placeholder: "A12" },
       { name: "seat", label: "Seat", type: "text", placeholder: "14C" },
       { name: "confirmation", label: "Confirmation", type: "text", placeholder: "ABC123" },
-      { name: "link", label: "Link", type: "link", placeholder: "https://…" },
+      { name: "delay_minutes", label: "Delay (min)", type: "number", placeholder: "0" },
+      { name: "link", label: "Link", type: "link" },
     ];
   }
   // Stays: lodging with check-in/out dates + a booking link.
@@ -169,6 +192,105 @@ class TripEntryList {
     return datePart || timePart || "";
   }
 
+  // ── pure flight-time math (unit-tested; all guard null/blank, never throw) ──
+  // depart_date may be clean "2026-07-16" OR full ISO — slice(0,10) normalizes.
+  static _dayMs(v) {
+    if (!v) return null;
+    const s = String(v).slice(0, 10);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    if (typeof v === "number") {
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return null;
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+    return null;
+  }
+  static _toMin(t) {
+    const m = String(t || "").match(/^(\d{1,2}):(\d{2})$/);
+    return m ? +m[1] * 60 + +m[2] : null;
+  }
+  static _delayMin(leg) {
+    const n = parseInt(leg && leg.delay_minutes, 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  static _legDepartMs(leg) {
+    const d = TripEntryList._dayMs(leg && leg.depart_date), t = TripEntryList._toMin(leg && leg.depart_time);
+    return (d == null || t == null) ? null : d + t * 60000;
+  }
+  static _legArriveMs(leg) {
+    const d = TripEntryList._dayMs(leg && leg.arrival_date), t = TripEntryList._toMin(leg && leg.arrival_time);
+    return (d == null || t == null) ? null : d + t * 60000;
+  }
+  static _effDepartMs(leg) {
+    const b = TripEntryList._legDepartMs(leg);
+    return b == null ? null : b + TripEntryList._delayMin(leg) * 60000;
+  }
+  static _effArriveMs(leg) {
+    const b = TripEntryList._legArriveMs(leg);
+    return b == null ? null : b + TripEntryList._delayMin(leg) * 60000;
+  }
+  // Boarding = effective-depart − 40 min (auto, no stored field). "HH:MM" UTC.
+  static _boardingMin(leg) {
+    const e = TripEntryList._effDepartMs(leg);
+    if (e == null) return null;
+    const bt = new Date(e - 40 * 60000);
+    const hh = String(bt.getUTCHours()).padStart(2, "0");
+    const mm = String(bt.getUTCMinutes()).padStart(2, "0");
+    return hh + ":" + mm;
+  }
+  static _durationMin(leg) {
+    const d = TripEntryList._effDepartMs(leg), a = TripEntryList._effArriveMs(leg);
+    return (d == null || a == null) ? null : Math.round((a - d) / 60000);
+  }
+  static _fmtDur(min) {
+    if (min == null || min <= 0) return "";
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h}h ${m}m` : `${m}m`;
+  }
+  // Layover only for connecting same-direction legs (prev.to === next.from).
+  static _layoverMin(prev, next) {
+    if (!(prev && next && prev.direction === next.direction && prev.to && next.from && prev.to === next.from)) return null;
+    const a = TripEntryList._effArriveMs(prev), d = TripEntryList._effDepartMs(next);
+    return (a == null || d == null) ? null : Math.round((d - a) / 60000);
+  }
+  // Positive ms delta -> "N min" / "N hr" / "N days".
+  static _humanDelta(ms) {
+    const min = Math.round(ms / 60000);
+    if (min < 60) return min + " min";
+    const hr = Math.round(ms / 3600000);
+    if (hr < 24) return hr + " hr";
+    return Math.round(ms / 86400000) + " days";
+  }
+  static _flightStatus(leg, nowMs) {
+    const d = TripEntryList._effDepartMs(leg);
+    if (d == null) return null;
+    const a = TripEntryList._effArriveMs(leg);
+    const board = d - 40 * 60000;
+    if (a != null && nowMs >= a) return { label: "Landed", tone: "muted" };
+    if (nowMs >= d) return { label: a != null ? "In air" : "Departed", tone: "accent" };
+    if (nowMs >= board) return { label: "Boarding", tone: "warn" };
+    return { label: "in " + TripEntryList._humanDelta(d - nowMs), tone: "accent" };
+  }
+  // Epoch ms (UTC) -> "MMM D, h:mm A". "" for null. Uses UTC getters so a
+  // clean YYYY-MM-DD + HH:MM renders back exactly (no local-tz drift).
+  static _msToDisplay(ms) {
+    if (ms == null) return null;
+    const dt = new Date(ms);
+    if (isNaN(dt.getTime())) return null;
+    const mon = TripEntryList._MONTHS()[dt.getUTCMonth()];
+    if (!mon) return null;
+    let h = dt.getUTCHours();
+    const min = String(dt.getUTCMinutes()).padStart(2, "0");
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return mon + " " + dt.getUTCDate() + ", " + h + ":" + min + " " + ampm;
+  }
+  // Human "MMM D, h:mm A" for the EFFECTIVE depart/arrive (shifted by delay);
+  // "" when unknown. Card render reads these.
+  static _effDepartDisplay(leg) { return TripEntryList._msToDisplay(TripEntryList._effDepartMs(leg)) || ""; }
+  static _effArriveDisplay(leg) { return TripEntryList._msToDisplay(TripEntryList._effArriveMs(leg)) || ""; }
+
   // ── render ────────────────────────────────────────────────────────────────
   async render(dv, spec = {}) {
     const page = customJS.RenderSafe.page(dv);
@@ -192,8 +314,10 @@ class TripEntryList {
     const isFlights = spec.kind === "flights" || spec.key === "flights";
     if (isFlights) {
       // Flights: group by direction (Outbound / Return / Other), each group
-      // under a guarded SectionLabel, each leg a rich detail card. Track each
-      // entry's ABSOLUTE index in `items` so Edit/Delete target the right leg.
+      // under a guarded SectionLabel, each leg a rich card. Track each entry's
+      // ABSOLUTE index in `items` so Edit/Delete target the right leg. Between
+      // consecutive legs of the same group, drop a layover / connection chip.
+      const nowMs = Date.now();
       const withIdx = items.map((entry, absIndex) => ({ entry, absIndex }));
       const groups = TripEntryList._groupByDirection(withIdx.map((w) => Object.assign({}, w.entry, { __i: w.absIndex })));
       for (const g of groups) {
@@ -203,7 +327,10 @@ class TripEntryList {
           const gh = c.createEl("div", { text: g.label });
           if (gh.style) gh.style.cssText = "font-size:0.72em; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin:10px 0 4px;";
         }
-        for (const e of g.entries) this._flightRow(c, dv, spec, items, e, e.__i);
+        g.entries.forEach((e, i) => {
+          if (i > 0) this._layoverChip(c, g.entries[i - 1], e);
+          this._flightRow(c, dv, spec, items, e, e.__i, nowMs);
+        });
       }
     } else if (spec.group) {
       // Grouped: bucket entries by category, preserving each row's ABSOLUTE
@@ -224,39 +351,84 @@ class TripEntryList {
     }
   }
 
-  // Rich flight leg: airline flight_no · direction / from → to / depart /
-  // board / gate / seat / confirmation / link, plus per-row Edit + Delete.
-  _flightRow(c, dv, spec, items, entry, absIndex) {
+  // Rich flight card, compute-at-render (nowMs read once by the caller):
+  //   Row 1: ✈ airline flight# (bold) + direction badge + live status pill.
+  //   Row 2: from → to (muted).
+  //   Row 3: Depart / Arrive (effective) · Board · duration.
+  //   Row 4: Gate / Seat / Conf / Delayed pill / Details link.
+  // Every field omitted when empty; every pure-call result guarded. Never throws.
+  _flightRow(c, dv, spec, items, entry, absIndex, nowMs) {
     const e = entry || {};
+    if (nowMs == null) nowMs = Date.now();
     const rowEl = c.createEl("div");
     rowEl.style.cssText = "display:flex; align-items:flex-start; gap:8px; padding:8px 10px; margin-top:6px; border:1px solid var(--background-modifier-border); border-radius:6px;";
     const body = rowEl.createEl("div");
-    body.style.cssText = "flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;";
+    body.style.cssText = "flex:1; min-width:0; display:flex; flex-direction:column; gap:3px;";
 
-    const head = ((e.airline || "") + " " + (e.flight_no || "")).trim();
-    const hline = body.createEl("div", { text: head + (e.direction ? "  ·  " + e.direction : "") });
-    hline.style.cssText = "font-weight:600; font-size:0.9em;";
+    // ── Row 1: ✈ airline flight# + direction badge + status pill ──
+    const r1 = body.createEl("div");
+    r1.style.cssText = "display:flex; align-items:center; gap:6px; flex-wrap:wrap;";
+    const head = ("✈ " + ((e.airline || "") + " " + (e.flight_no || "")).trim()).trim();
+    const hline = r1.createEl("span", { text: head });
+    hline.style.cssText = "font-weight:600; font-size:0.92em;";
+    if (e.direction) {
+      const badge = r1.createEl("span", { text: e.direction });
+      badge.style.cssText = "font-size:0.66em; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); border:1px solid var(--background-modifier-border); border-radius:10px; padding:1px 7px;";
+    }
+    const status = TripEntryList._flightStatus(e, nowMs);
+    if (status) {
+      const spacer = r1.createEl("span");
+      spacer.style.cssText = "flex:1;";
+      this._flightPill(r1, status.label, status.tone);
+    }
 
+    // ── Row 2: from → to ──
     const route = ((e.from || "") + (e.from || e.to ? " → " : "") + (e.to || "")).trim();
     if (route) {
       const r = body.createEl("div", { text: route });
-      r.style.cssText = "font-size:0.82em; color:var(--text-muted);";
+      r.style.cssText = "font-size:0.84em; color:var(--text-muted);";
     }
 
-    const depart = TripEntryList._fmtDateTime(e.depart_date, e.depart_time);
-    if (depart) this._flightDetail(body, "Depart", depart);
-    if (e.boarding_time) this._flightDetail(body, "Board", TripEntryList._fmtTime(e.boarding_time));
-    if (e.gate) this._flightDetail(body, "Gate", e.gate);
-    if (e.seat) this._flightDetail(body, "Seat", e.seat);
-    if (e.confirmation) this._flightDetail(body, "Conf", e.confirmation);
+    // ── Row 3: times (effective depart / arrive / board / duration) ──
+    const timeParts = [];
+    const dep = TripEntryList._effDepartDisplay(e);
+    if (dep) timeParts.push("Depart " + dep);
+    const arr = TripEntryList._effArriveDisplay(e);
+    if (arr) timeParts.push("Arrive " + arr);
+    const board = TripEntryList._boardingMin(e);
+    if (board) timeParts.push("Board " + TripEntryList._fmtTime(board));
+    const dur = TripEntryList._fmtDur(TripEntryList._durationMin(e));
+    if (dur) timeParts.push(dur);
+    if (timeParts.length) {
+      const t = body.createEl("div", { text: timeParts.join("  ·  ") });
+      t.style.cssText = "font-size:0.8em; color:var(--text-muted); display:flex; flex-wrap:wrap; gap:2px 6px;";
+    }
 
+    // ── Row 4: day-of fields + delay pill + details link ──
+    const r4 = body.createEl("div");
+    r4.style.cssText = "display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; font-size:0.8em; color:var(--text-muted); margin-top:1px;";
+    let r4has = false;
+    const addField = (label, val) => {
+      if (!val) return;
+      const s = r4.createEl("span", { text: label + " " + val });
+      r4has = true;
+    };
+    addField("Gate", e.gate);
+    addField("Seat", e.seat);
+    addField("Conf", e.confirmation);
+    if (TripEntryList._delayMin(e) > 0) {
+      this._flightPill(r4, "Delayed " + TripEntryList._delayMin(e) + " min", "warn");
+      r4has = true;
+    }
     if (e.link) {
       const isWeb = /^[a-z]+:\/\//i.test(String(e.link));
-      const a = body.createEl("a", { text: isWeb ? "Open link ↗" : String(e.link).replace(/^\[\[|\]\]$/g, "") });
-      a.style.cssText = "font-size:0.8em; color:var(--text-accent); cursor:pointer; margin-top:2px;";
+      const a = r4.createEl("a", { text: "Details ↗" });
+      a.style.cssText = "color:var(--text-accent); cursor:pointer;";
       if (isWeb) { a.href = e.link; a.target = "_blank"; a.rel = "noopener"; }
       else a.onclick = (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); app.workspace.openLinkText(String(e.link).replace(/^\[\[|\]\]$/g, ""), "", false); };
+      r4has = true;
     }
+    if (!r4has) r4.remove();
 
     const editBtn = rowEl.createEl("button", { text: "Edit" });
     editBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); font-size:0.8em;";
@@ -269,9 +441,30 @@ class TripEntryList {
     };
   }
 
-  _flightDetail(body, label, value) {
-    const d = body.createEl("div", { text: label + ": " + value });
-    d.style.cssText = "font-size:0.8em; color:var(--text-muted);";
+  // Small status/delay pill. tone → color: accent / warn / muted.
+  _flightPill(parent, label, tone) {
+    const color = tone === "warn" ? "var(--color-orange, #d68)"
+      : tone === "muted" ? "var(--text-muted)"
+      : "var(--interactive-accent)";
+    const pill = parent.createEl("span", { text: label });
+    pill.style.cssText = "font-size:0.7em; font-weight:600; color:" + color + "; border:1px solid " + color + "; border-radius:10px; padding:1px 8px; white-space:nowrap;";
+    return pill;
+  }
+
+  // Between two consecutive same-group legs: a subtle centered chip. Layover
+  // when the airports connect (prev.to === cur.from), else a neutral
+  // "Connection" chip when the airports differ. Nothing when unknown.
+  _layoverChip(c, prev, cur) {
+    let text = null;
+    const lo = TripEntryList._layoverMin(prev, cur);
+    if (lo != null) {
+      text = "⏱ Layover at " + (prev && prev.to ? prev.to : "") + " — " + TripEntryList._fmtDur(lo);
+    } else if (prev && cur && prev.to && cur.from && prev.to !== cur.from) {
+      text = "Connection";
+    }
+    if (!text) return;
+    const chip = c.createEl("div", { text });
+    chip.style.cssText = "text-align:center; font-size:0.72em; color:var(--text-muted); margin:4px 0;";
   }
 
   // Render one entry row (bold title + muted subtitle, optional leading
@@ -354,7 +547,7 @@ class TripEntryList {
   _onAdd(dv, spec) {
     this._openForm({
       title: "Add",
-      fields: spec.fields || [],
+      fields: TripEntryList._fieldsFor(spec),
       dv, spec,
       onSubmit: async (values) => {
         const res = TripEntryList.addEntry(this._items(dv, spec), values);
@@ -366,12 +559,11 @@ class TripEntryList {
   }
 
   _onEdit(dv, spec, index, entry) {
-    // Grouped entries keep their category via a category <select>; flat ones
-    // just re-present spec.fields. Pre-fill from the existing entry.
-    const catField = spec.group ? [{ name: "category", label: "Category", select: this._categories(dv, spec) }] : [];
+    // Grouped (packing) → one populated category <select> + item; flat sections
+    // (flights/stay) → their kind's fields. Pre-fill from the existing entry.
     this._openForm({
       title: "Edit",
-      fields: catField.concat(spec.fields || []),
+      fields: TripEntryList._editFields(spec, this._categories(dv, spec)),
       values: entry || {},
       dv, spec,
       onSubmit: async (values) => {

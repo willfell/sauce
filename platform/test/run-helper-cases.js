@@ -4596,6 +4596,35 @@ async function caseDDT1DailyTemplateShape() {
 }
 
 // -------------------------------------------------------------------------
+// JSD-T1: Journal Day Hub + Sticky Day Hub templates drop the redundant
+// `# <% tp.date.now("dddd, MMMM Do YYYY") %>` H1. Both hub types already
+// surface the day via their ChromeBar's breadcrumb (`path:4`/`path:3` in
+// the breadcrumb registry resolve to the YYYY-MM-DD folder segment), so the
+// in-body H1 duplicated chrome — same fix shape as DD-T1 for daily.
+// -------------------------------------------------------------------------
+async function caseJSDT1DayHubTemplatesDropDateHeading() {
+  console.log("\n--- Case JSD-T1: Journal/Sticky Day Hub templates drop the redundant date H1 ---");
+  const DATE_H1 = /^#\s+<%[-=]?\s*tp\.date\.now\("dddd, MMMM Do YYYY"\)\s*[-=]?%>\s*$/m;
+  const cases = [
+    { tpl: ["journal", "templates", "Journal Day Hub.md"], cls: "JournalChromeBar" },
+    { tpl: ["sticky-notes", "templates", "Sticky Day Hub.md"], cls: "StickyChromeBar" },
+  ];
+  for (const c of cases) {
+    const p = path.join(BLUEPRINTS_DIR, ...c.tpl);
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} source exists`, fs.existsSync(p));
+    const body = fs.readFileSync(p, "utf8");
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} drops the redundant date H1`, !DATE_H1.test(body));
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} still renders ${c.cls}`, body.includes(c.cls));
+  }
+  const dogfoodP = path.join(process.cwd(), "ranch", "templates", "Sticky Day Hub.md");
+  if (fs.existsSync(dogfoodP)) {
+    const dogfoodBody = fs.readFileSync(dogfoodP, "utf8");
+    assertTrue("JSD-T1: ranch/templates/Sticky Day Hub.md (dogfood) drops the redundant date H1",
+      !DATE_H1.test(dogfoodBody));
+  }
+}
+
+// -------------------------------------------------------------------------
 // LAT-1: the daily to-do / meeting action helpers now OWN their
 // chrome dividers. Each renders a top + bottom <hr> (12px breathing room) INSIDE
 // its own dataviewjs block (the wiki methodology), and the template drops the
@@ -15287,6 +15316,7 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
+  await caseJSDT1DayHubTemplatesDropDateHeading();
   await caseLAT1LeafActionsOwnDividers();
   await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
