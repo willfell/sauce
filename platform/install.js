@@ -11645,13 +11645,9 @@ function _taskNoteChromeBody() {
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskChromeBar\" });\n" +
     "```\n" +
     "\n" +
-    "---\n" +
-    "\n" +
     "```dataviewjs\n" +
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteView\" });\n" +
     "```\n" +
-    "\n" +
-    "---\n" +
     "\n" +
     "<!-- TASK_NOTES -->\n";
 }
@@ -11792,14 +11788,14 @@ async function applyTaskNoteHeal(tp, history, git) {
         // is a LEGACY chrome — either the v0.178 shape that still carries a
         // TaskNoteToDoNav block, or an older shape that lacks the second `---` HR
         // right before the marker. The NEW chrome has NEITHER a TaskNoteToDoNav
-        // block NOR a missing pre-marker HR, so both conditions being false ⇒
+        // block NOR a stale pre-marker HR, so both conditions being false ⇒
         // already-new ⇒ skip (idempotent). Only inspect the region ABOVE the
         // marker so a user who happens to mention the class / a `---` in their
         // notes below doesn't perturb the decision.
         const _aboveMarker = needsChrome ? "" : before.slice(0, before.indexOf(MARKER));
         const _hasToDoNav = /class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
-        const _endsWithHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
-        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || !_endsWithHr);
+        const _hasStaleHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
+        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || _hasStaleHr);
         if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
 
         // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
@@ -12265,7 +12261,7 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
       try {
         const before = await adapter.read(fp);
         let after = before;
-        after = after.replace(/\n---\n\n```dataviewjs/g, '\n\n```dataviewjs');
+        after = after.replace(/```\n\n---\n\n```dataviewjs/g, '```\n\n```dataviewjs');
         after = after.replace(/```\n\n---\n\n<!-- TASK_NOTES -->/g, '```\n\n<!-- TASK_NOTES -->');
         if (after === before) continue;
 

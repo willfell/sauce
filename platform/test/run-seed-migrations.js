@@ -3313,8 +3313,8 @@ async function runTaskEntitySurfacesFamily() {
         const upgraded = readVault(OLD_TASK);
         ok("HC-TE-SURF-3 v0.178-chrome task upgraded — TaskNoteToDoNav removed",
            !/class:\s*"TaskNoteToDoNav"/.test(upgraded));
-        ok("HC-TE-SURF-3a upgraded note gains the second `---` HR before the marker",
-           /```\r?\n\r?\n---\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
+        ok("HC-TE-SURF-3a upgraded note has no `---` HR before the marker",
+           /```\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
         ok("HC-TE-SURF-3b upgraded note keeps TaskChromeBar + TaskNoteView chrome",
            /class:\s*"TaskChromeBar"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
         ok("HC-TE-SURF-3c user notes below the marker preserved",
@@ -4229,9 +4229,9 @@ async function runTaskHealTitleCleanupFamily() {
         "project_slug:", "source: migrated-from-registry", "source_note:",
         "links: []", "created_at: 2026-07-08T23:47:39.078Z", 'completed_at: ""', "---", "",
         "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });', "```",
-        "", "---", "",
+        "",
         "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', "```",
-        "", "---", "", "<!-- TASK_NOTES -->", "",
+        "", "<!-- TASK_NOTES -->", "",
     ].join("\n");
 
     try {
