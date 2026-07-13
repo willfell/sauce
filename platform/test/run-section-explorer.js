@@ -91,6 +91,40 @@ failures += !run("makeAdapter returns an object exposing render-ready shape", ()
   assert.strictEqual(typeof adapter.listSections, "function");
 });
 
+failures += !run("makeAdapter forwards the move block + emptySubsectionCount (rail Move / section-⋯ depend on it)", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const moveBlock = {
+    root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)",
+    enumerateSectionTargets: () => [],
+    rewriteOnDocMove: () => null,
+    rewriteOnSectionMove: () => null,
+    canAcceptSection: () => true,
+  };
+  const adapter = se.makeAdapter({
+    resolveContext: () => ({ scopePath: "spice/wiki" }),
+    listSections: () => [],
+    listPages: () => [],
+    getLinks: () => [],
+    icons: { folder: "<svg/>", file: "<svg/>" },
+    rootClass: "se-root",
+    move: moveBlock,
+    emptySubsectionCount: (section) => 3,
+  });
+  assert.ok(adapter.move, "makeAdapter must forward config.move");
+  assert.strictEqual(typeof adapter.move.enumerateSectionTargets, "function");
+  assert.strictEqual(typeof adapter.move.canAcceptSection, "function");
+  assert.strictEqual(typeof adapter.emptySubsectionCount, "function");
+  assert.strictEqual(adapter.emptySubsectionCount({ folder: "x" }), 3);
+  // Absent config → null move + undefined helper (consumers no-op safely).
+  const bare = se.makeAdapter({
+    resolveContext: () => ({}), listSections: () => [], listPages: () => [],
+    getLinks: () => [], icons: { folder: "", file: "" }, rootClass: "se-root",
+  });
+  assert.strictEqual(bare.move, null);
+  assert.strictEqual(bare.emptySubsectionCount, undefined);
+});
+
 failures += !run("render() renders a rail row per section", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();

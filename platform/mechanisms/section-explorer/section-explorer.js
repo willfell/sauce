@@ -149,6 +149,15 @@ class SectionExplorer {
       rootClass: config.rootClass || "se-root",
       pageLabel: config.pageLabel || "Docs",
       listRecent: config.listRecent ? ((dv, ctx) => config.listRecent(dv, ctx) || []) : null,
+      // Forward the move block + delete-confirm helper so the rail-row Move and
+      // both blueprints' section-⋯ routes (_openMovePickerForSection /
+      // _openDeleteConfirm) read them straight off makeAdapter's output rather
+      // than needing an external overlay. Null-safe: absent config leaves them
+      // undefined and the consuming methods no-op.
+      move: config.move || null,
+      emptySubsectionCount: (typeof config.emptySubsectionCount === "function")
+        ? ((section) => config.emptySubsectionCount(section))
+        : undefined,
     };
   }
 
