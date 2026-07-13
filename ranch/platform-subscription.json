@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.217.0",
+  "workshop_version": "0.217.1",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -114,7 +114,7 @@
     },
     {
       "name": "daily",
-      "version": "0.21.0"
+      "version": "0.21.1"
     },
     {
       "name": "meetings",
@@ -122,11 +122,11 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1"
+      "version": "0.10.2"
     },
     {
       "name": "people",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "cowork",
