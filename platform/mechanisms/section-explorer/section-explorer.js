@@ -19,6 +19,10 @@ class SectionExplorer {
   // javascript:) renders as plain non-clickable text, never silently dropped.
   static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
 
+  // Inline 3-dot glyph — fallback for the per-doc ⋯ control when the adapter
+  // doesn't supply an icons.dots (the section rail is always handed one).
+  static _DOTS_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>';
+
   // customJS exposes the INSTANCE (`customJS.SectionExplorer`), not the class —
   // so `static` methods (pagesUnder, sectionTargets, planBulkMove, …) are NOT
   // reachable as `customJS.SectionExplorer.pagesUnder(...)` from blueprint move
@@ -215,6 +219,9 @@ class SectionExplorer {
   // rail. (Page pane + mobile drawer + animation land in later tasks.)
   render(dv, adapter) {
     if (!adapter || typeof adapter.resolveContext !== "function") return;
+    // Stash dv so the per-doc ⋯ dialogs (built inside _renderDocCards) can pass
+    // it to move/link ops without threading it through every render helper.
+    this._curDv = dv;
     const container0 = (dv && dv.container) ? dv.container : dv;
     if (!container0 || typeof container0.createEl !== "function") return;
     const ctx = adapter.resolveContext(dv);
@@ -334,6 +341,24 @@ class SectionExplorer {
       if (!select) {
         card.onclick = () => {
           if (c.path) { try { app.workspace.openLinkText(c.path, "", false); } catch (_e) { /* never-throw */ } }
+        };
+        // Per-doc ⋯ menu (Rename · Move · Add link · Delete) — generic file ops
+        // on the individual doc FILE, blueprint-agnostic. stopPropagation so the
+        // dots click never triggers the card's open-note handler above.
+        const dots = card.createEl("span", { cls: "se-doc-dots" });
+        dots.innerHTML = (adapter.icons && adapter.icons.dots) || SectionExplorer._DOTS_SVG;
+        dots.onclick = (ev) => {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          let file = null;
+          try { file = app.vault.getAbstractFileByPath(c.path); } catch (_e) { file = null; }
+          if (!file) return;
+          const entries = [
+            { label: "Rename", onSelect: () => this._openRenameDocDialog(this._curDv, adapter, file) },
+            { label: "Move", onSelect: () => this._openMovePickerForDoc(this._curDv, adapter, file) },
+            { label: "Add link", onSelect: () => this._openAddLinkForDoc(this._curDv, adapter, file) },
+            { label: "Delete", danger: true, onSelect: () => this._openDeleteDocConfirm(this._curDv, adapter, file) },
+          ];
+          try { customJS.MenuPopover.open(entries, { anchor: dots }); } catch (_e) { /* never-throw */ }
         };
       }
     }
@@ -627,6 +652,127 @@ class SectionExplorer {
         btns.primary.style.cssText = "padding:7px 14px;border-radius:8px;border:none;background:var(--color-red, #e5484d);color:#fff;cursor:pointer;font-weight:600;font-size:0.9em;";
       }
     });
+  }
+
+  // ── Per-doc ⋯ menu dialogs (feature a) ───────────────────────────────────
+  // Generic file operations on an individual doc FILE, shared by both wiki and
+  // project doc cards. Blueprint-agnostic (app.* + adapter.move); every helper
+  // never-throws and mirrors the section-level dialog idiom.
+
+  // Folder that a file lives in, derived from its path (parent.path fallback).
+  _fileFolder(file) {
+    if (file && file.parent && file.parent.path != null) return String(file.parent.path);
+    const p = (file && file.path) ? String(file.path) : "";
+    const i = p.lastIndexOf("/");
+    return i >= 0 ? p.slice(0, i) : "";
+  }
+
+  // Rename the doc FILE: text input defaulting to current basename (no .md);
+  // on confirm, sanitize to a safe filename and renameFile to sameFolder/<safe>.md.
+  _openRenameDocDialog(dv, adapter, file) {
+    try {
+      if (!file || !file.path) return;
+      const base = String(file.path).split("/").pop().replace(/\.md$/i, "");
+      const folder = this._fileFolder(file);
+      this._openModal("se-rename-modal-overlay", (panel, close, doc) => {
+        this._modalTitle(doc, panel, "Rename doc");
+        const submit = () => {
+          const raw = String(nameInput.value || "").trim();
+          // Strip path separators + control chars → keep a safe single filename.
+          const safe = raw.replace(/[\\/:*?"<>|]+/g, "").replace(/^\.+/, "").trim();
+          if (safe && safe !== base) {
+            const newPath = (folder ? folder + "/" : "") + safe + ".md";
+            try { app.fileManager.renameFile(file, newPath); } catch (_e) { /* never-throw */ }
+          }
+          close();
+        };
+        const nameInput = this._modalInput(doc, panel, { value: base, onEnter: () => submit() });
+        this._modalButtons(doc, panel, close, "Rename", submit);
+      });
+    } catch (_e) { /* never-throw */ }
+  }
+
+  // Move the doc via the SAME machinery as section-move: enumerate folder
+  // targets from the adapter's move block (fallback to move.root), open the
+  // collapsible picker, and on pick delegate to applyDocMove (project
+  // frontmatter-rewrite + wiki folder-only both flow through there).
+  _openMovePickerForDoc(dv, adapter, file) {
+    try {
+      if (!file || !file.path) return;
+      const mv = adapter && adapter.move;
+      let targets = [];
+      try {
+        if (mv && typeof mv.enumerateSectionTargets === "function") targets = mv.enumerateSectionTargets(dv) || [];
+      } catch (_e) { targets = []; }
+      if ((!targets || targets.length === 0) && mv && mv.root) {
+        targets = [{ folder: String(mv.root), label: "(root)", depth: 0 }];
+      }
+      const currentFolder = this._fileFolder(file);
+      this.openMovePicker({
+        targets,
+        currentFolder,
+        title: "Move doc",
+        onPick: (folder) => this.applyDocMove(dv, file, folder, adapter),
+      });
+    } catch (_e) { /* never-throw */ }
+  }
+
+  // Add a link to the DOC's OWN frontmatter (not a section). Reuses the
+  // add-link form shape + _addLinkPure normalization, then writes fm.links
+  // via processFrontMatter on the doc file itself.
+  _openAddLinkForDoc(dv, adapter, file) {
+    try {
+      if (!file || !file.path) return;
+      this._openModal("se-link-modal-overlay", (panel, close, doc) => {
+        this._modalTitle(doc, panel, "Add link");
+        const submit = () => {
+          let current = [];
+          try {
+            if (typeof app !== "undefined" && app.metadataCache && typeof app.metadataCache.getFileCache === "function") {
+              const c = app.metadataCache.getFileCache(file);
+              current = (c && c.frontmatter && Array.isArray(c.frontmatter.links)) ? c.frontmatter.links : [];
+            }
+          } catch (_e) { current = []; }
+          const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
+          if (result.changed) {
+            try {
+              app.fileManager.processFrontMatter(file, (fm) => {
+                const cur = Array.isArray(fm.links) ? fm.links : [];
+                fm.links = [...cur, result.links[result.links.length - 1]];
+              });
+            } catch (_e) { /* never-throw */ }
+          }
+          close();
+        };
+        const urlInput = this._modalInput(doc, panel, { placeholder: "https://…", onEnter: () => submit() });
+        const textInput = this._modalInput(doc, panel, { placeholder: "Label (optional)", onEnter: () => submit() });
+        this._modalButtons(doc, panel, close, "Add link", submit);
+      });
+    } catch (_e) { /* never-throw */ }
+  }
+
+  // Danger-styled confirm; on confirm trashFile (recoverable trash, never a
+  // hard delete). Mirrors _openDeleteConfirm's chrome.
+  _openDeleteDocConfirm(dv, adapter, file) {
+    try {
+      if (!file || !file.path) return;
+      const name = String(file.path).split("/").pop().replace(/\.md$/i, "");
+      this._openModal("se-delete-modal-overlay", (panel, close, doc) => {
+        this._modalTitle(doc, panel, "Delete doc");
+        const body = doc.createElement("div");
+        body.className = "se-modal-body";
+        body.textContent = "Delete '" + name + "'? It moves to trash and can be recovered.";
+        body.style.cssText = "margin-bottom:12px;color:var(--text-muted);font-size:0.92em;line-height:1.4;";
+        panel.appendChild(body);
+        const btns = this._modalButtons(doc, panel, close, "Delete", () => {
+          try { app.fileManager.trashFile(file); } catch (_e) { /* never-throw */ }
+          close();
+        });
+        if (btns && btns.primary) {
+          btns.primary.style.cssText = "padding:7px 14px;border-radius:8px;border:none;background:var(--color-red, #e5484d);color:#fff;cursor:pointer;font-weight:600;font-size:0.9em;";
+        }
+      });
+    } catch (_e) { /* never-throw */ }
   }
 
   // ── Collapsible move picker (Task D) ──────────────────────────────────────
