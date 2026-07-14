@@ -16578,6 +16578,12 @@ async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath,
 
   const fetched = [], skipped = [], failed = [];
 
+  const noEnable = new Set(
+    manifest.external_plugins
+      .filter((d) => d && d.auto_enable === false)
+      .map((d) => d.id)
+  );
+
   for (const dep of manifest.external_plugins) {
     if (!dep || typeof dep.id !== "string") continue;
     const id = dep.id;
@@ -16622,7 +16628,8 @@ async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath,
   // BOTH fetched AND skipped (skipped means dir already present; ensure the
   // id is enabled). Failed installs are NOT added — the warning helper still
   // surfaces them.
-  const installedIds = [...fetched.map(x => x.id), ...skipped.map(x => x.id)];
+  const installedIds = [...fetched.map(x => x.id), ...skipped.map(x => x.id)]
+    .filter((id) => !noEnable.has(id));
   if (installedIds.length > 0) {
     await mergeMod.mergeCommunityPlugins({ vaultPath, addIds: installedIds });
   }

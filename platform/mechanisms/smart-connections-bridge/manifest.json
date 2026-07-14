@@ -5,7 +5,7 @@
   "description": "Node CLI bridge (sc-bridge) for reading Smart Connections's local .smart-env/multi/*.ajson vector index. Provides three ops — index-status, semantic-search, find-related — using bge-micro-v2 cosine similarity via @xenova/transformers. v0.2.0 MINOR (v0.93.3): external_plugins[] declares smart-connections (brianpetro/obsidian-smart-connections) with required:true — bridge is non-functional without SC's vector index, so the manifest explicitly states the hard dependency. No community_plugin_settings[] entry: SC's own defaults are preserved (the plugin's first-run wizard handles model selection and embed paths). v0.1.0 SCAFFOLD: skeleton arg parser + stub op handlers; real implementation lands in S6.",
   "depends_on": [],
   "external_plugins": [
-    { "id": "smart-connections", "required": true }
+    { "id": "smart-connections", "required": false, "auto_enable": false }
   ],
   "files": [
     { "source": "sc-bridge.js", "dest": ".local/mechanisms/smart-connections-bridge/sc-bridge.js" }
