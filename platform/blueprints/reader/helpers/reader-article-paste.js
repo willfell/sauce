@@ -156,4 +156,103 @@ class ReaderArticlePaste {
       content: (parsed && typeof parsed.content === 'string') ? parsed.content : '',
     };
   }
+
+  // BROWSER-SIDE: open the paste dialog. Reaches other classes only via
+  // window.customJS?.X and never throws (cold-load safe). On Create it validates
+  // the title, then feeds the UNCHANGED entity-create mechanism via
+  // EC.create({instance:'reader-article', dv, presetPrompts}). Pasting into the
+  // textarea auto-fills empty Title/URL from the parsed frontmatter.
+  open(dv) {
+    const EC = window.customJS && window.customJS.EntityCreate;
+    if (!EC || typeof EC.create !== 'function') {
+      try { new Notice('ReaderArticlePaste: EntityCreate mechanism unavailable.', 8000); } catch (_e) {}
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 340px; max-width: 560px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);';
+
+    const heading = document.createElement('div');
+    heading.textContent = 'New article';
+    heading.style.cssText = 'font-size: 1.1em; font-weight: 600; margin-bottom: 4px;';
+    dialog.appendChild(heading);
+
+    const hint = document.createElement('div');
+    hint.textContent = 'Paste a Web Clipper "Copy" here — or leave it empty and just name it.';
+    hint.style.cssText = 'font-size: 0.8em; color: var(--text-muted); margin-bottom: 12px;';
+    dialog.appendChild(hint);
+
+    const paste = document.createElement('textarea');
+    paste.rows = 8;
+    paste.placeholder = 'Paste article frontmatter + body…';
+    paste.style.cssText = 'width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 0.9em; font-family: var(--font-monospace); resize: vertical; margin-bottom: 12px;';
+    dialog.appendChild(paste);
+
+    const mkField = (labelText, type) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px;';
+      const lab = document.createElement('label');
+      lab.textContent = labelText;
+      lab.style.cssText = 'font-size: 0.85em; color: var(--text-muted); flex: 0 0 48px;';
+      const input = document.createElement('input');
+      input.type = type;
+      input.style.cssText = 'flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 0.9em; box-sizing: border-box;';
+      wrap.appendChild(lab); wrap.appendChild(input);
+      dialog.appendChild(wrap);
+      return input;
+    };
+    const titleInput = mkField('Title', 'text');
+    const urlInput = mkField('URL', 'text');
+
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size: 0.8em; color: var(--text-error); min-height: 1em; margin: 4px 0 8px;';
+    dialog.appendChild(status);
+
+    // Auto-fill empty Title/URL from the parsed paste as the user types/pastes.
+    let lastParsed = ReaderArticlePaste.parse('');
+    const reparse = () => {
+      lastParsed = ReaderArticlePaste.parse(paste.value);
+      const fm = lastParsed.frontmatter || {};
+      if (fm.title && !titleInput.value) titleInput.value = fm.title;
+      if (fm.url && !urlInput.value) urlInput.value = fm.url;
+    };
+    paste.addEventListener('input', reparse);
+    paste.addEventListener('paste', () => setTimeout(reparse, 0));
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);';
+    const close = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
+    cancelBtn.onclick = () => close();
+
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Create';
+    okBtn.style.cssText = 'padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);';
+    okBtn.onclick = () => {
+      const err = ReaderArticlePaste.validateTitle(titleInput.value);
+      if (err) { status.textContent = err; return; }
+      const presetPrompts = ReaderArticlePaste.buildPresetPrompts(lastParsed, {
+        title: titleInput.value, url: urlInput.value,
+      });
+      close();
+      try { EC.create({ instance: 'reader-article', dv: dv, presetPrompts: presetPrompts }); }
+      catch (e) { try { new Notice('ReaderArticlePaste: could not create article — ' + e.message, 8000); } catch (_e) {} }
+    };
+
+    dialog.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); cancelBtn.click(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); okBtn.click(); }
+    });
+
+    btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+    dialog.appendChild(btnRow);
+    overlay.appendChild(dialog);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cancelBtn.click(); });
+    document.body.appendChild(overlay);
+    setTimeout(() => paste.focus(), 0);
+  }
 }

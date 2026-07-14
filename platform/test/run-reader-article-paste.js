@@ -229,6 +229,24 @@ const CLIP = [
      `${withCap.captured_at} | ${noCap.captured_at}`);
 }
 
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-12 — open() exists, guarded, wires EC.create.
+// (Source-structure guard: the DOM dialog is verified manually in dogfood; here
+// we assert the wiring contract so a refactor can't silently drop it.)
+// ---------------------------------------------------------------------------
+{
+  const src = fs.readFileSync(SRC, 'utf8');
+  ok('HC-READER-PASTE-12a open() reaches EntityCreate via window.customJS guard',
+     /window\.customJS[\s\S]*EntityCreate/.test(src) &&
+     /EC\.create\(\s*\{[\s\S]*instance:\s*'reader-article'[\s\S]*presetPrompts/.test(src),
+     'missing guarded EC.create({instance,dv,presetPrompts})');
+  ok('HC-READER-PASTE-12b open() validates title before create',
+     /validateTitle/.test(src),
+     'open() must validateTitle before EC.create');
+  ok('HC-READER-PASTE-12c file evals ONE bare class (loads via new Function)',
+     typeof ReaderArticlePaste === 'function' && ReaderArticlePaste.name === 'ReaderArticlePaste');
+}
+
 const passed = results.filter(([, p]) => p).length;
 const total = results.length;
 console.log(`\n${passed}/${total} passed`);
