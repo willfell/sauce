@@ -1,5 +1,6 @@
 ---
 purpose: Vault-wide note-chrome standard. Locks the breadcrumb / nav grammar, the no-`## H2` / SectionLabel rule and its outline/anchor tradeoff, the breadcrumb-declaration schema, open-mode + button rules, and migration posture established across the note-chrome arc (v0.121.0 → v0.124.0). Project-specific rendering detail (section ordering, proxyDv shim, card meta-lines) stays in [`project-blueprint-ui.md`](project-blueprint-ui.md).
+load_when: Adding or changing chrome (breadcrumb, nav buttons, dividers, action rows) in ANY blueprint's notes — new features in all blueprints follow this grammar.
 ---
 
 # Note-chrome standard — vault-wide
