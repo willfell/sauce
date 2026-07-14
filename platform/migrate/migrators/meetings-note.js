@@ -146,9 +146,10 @@ function _parseAttendeesFromFrontmatter(fmLines) {
 function _renderBody(rest, attendees) {
     const agenda = extractSection(rest, "## Agenda/Questions", { includeHeading: false });
     const notes = extractSection(rest, "## Notes", { includeHeading: false });
-    // Legacy "## Action Items" prose is intentionally NOT re-emitted (task-entity
-    // owns action items). We still reference the source heading here so the intent
-    // is documented; no output section is produced from it.
+    // Modern meetings blueprint emits NO "## Action Items" heading (task-entity
+    // owns action items). But we must NOT silently drop user-written content:
+    // any non-empty legacy Action Items prose is FOLDED into Notes (below).
+    const actions = extractSection(rest, "## Action Items", { includeHeading: false });
     // Spec review IMP: preserve **Clients** block when non-empty.
     // Source shape: `**Clients**` line, then `- <name>` bullets (or empty `- `).
     // We extract content via `extractSection` matching the bold-line marker;
@@ -187,17 +188,17 @@ function _renderBody(rest, attendees) {
         ? attendees.map(a => `- [[${a}]]`).join("\n")
         : "-";
 
-    // Modernized meetings blueprint: no separate Agenda / Action Items output
-    // sections. Legacy Action Items prose is dropped (task-entity owns action
-    // items; the task migration converts real task lines, and the meeting
-    // chrome install heal strips any legacy Action Items shape). Legacy Agenda
-    // content is FOLDED into the Notes section instead of a standalone heading.
+    // Modernized meetings blueprint: no standalone Agenda / Action Items output
+    // headings (task-entity owns action items). To avoid silently losing
+    // user-written content, non-empty legacy Agenda AND Action Items content are
+    // FOLDED into the Notes section (Notes body, then Agenda, then Action Items),
+    // each as plain lines. `-`-only / empty sections are dropped.
     const agendaContent = agenda.found ? trimEnds(agenda.content) : "";
+    const actionsContent = actions.found ? trimEnds(actions.content) : "";
     const notesRaw = notes.found ? trimEnds(notes.content) : "";
-    const foldedNotes = [notesRaw, agendaContent]
+    const notesContent = [notesRaw, agendaContent, actionsContent]
         .filter(s => s && s !== "-")
         .join("\n\n");
-    const notesContent = foldedNotes;
 
     const out = [
         navBlock,
