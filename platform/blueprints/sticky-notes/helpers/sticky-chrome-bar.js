@@ -71,8 +71,7 @@ class StickyChromeBar {
     const h = banner.createEl("div", { text: text || placeholder });
     h.style.cssText = labelBase + " " + (text ? labelWhenText : labelWhenPlaceholder);
     h.title = "Click to rename";
-    const hr = banner.createEl("hr");
-    hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 0 0 12px 0;";
+    h.style.cssText += " margin-bottom: 12px;";
     h.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
       const nt = newTitle && String(newTitle).trim();
       h.textContent = nt || placeholder;
