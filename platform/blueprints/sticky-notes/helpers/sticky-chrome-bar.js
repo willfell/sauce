@@ -15,8 +15,8 @@ class StickyChromeBar {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
         || typeof customJS.ChromeBar.render !== "function") return;
       const out = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
-      this._maybeRenderBanner(dv);
       this._maybeRenderPinnedLinks(dv);
+      this._maybeRenderBanner(dv);
       return out;
     } catch (_e) { /* never throw */ }
   }
