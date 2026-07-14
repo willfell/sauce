@@ -245,36 +245,30 @@ class ProjectDashboard {
     return counts;
   }
 
-  // Open board + To-Do items → [{ title, path, source }], cap 6.
+  // Open task-notes for THIS project → [{ title, path }], cap 6.
+  // Mirrors TaskProjectList's query EXACTLY: spice/tasks, type==='task',
+  // status==='open', project_slug matches, source!=='meeting', excluding
+  // _trash/ + _done/. Single source of truth with the To-Do note's
+  // "Project Tasks" section — no more raw board/To-Do checkbox parsing.
   async _openTasks(ctx) {
-    const { app: realApp, folder, projectName, slug } = ctx;
+    const { dv, currentPage, projectSlug, slug } = ctx;
+    const ourSlug = String(
+      (currentPage && currentPage.project_slug) || projectSlug || slug || ""
+    ).trim();
+    if (!ourSlug || !dv || typeof dv.pages !== "function") return [];
+
     const out = [];
-
     try {
-      const boardPath = `${folder}/${slug}-board.md`;
-      const boardFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
-        ? realApp.vault.getAbstractFileByPath(boardPath) : null;
-      if (boardFile) {
-        const content = await realApp.vault.read(boardFile);
-        let lane = "";
-        for (const line of String(content || "").split("\n")) {
-          if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; } // lint-display-markers:allow
-          const m = line.match(/^- \[ \] (.+)$/);
-          if (m && lane !== "Completed") out.push({ title: m[1].trim(), path: boardPath, source: "board" });
-        }
-      }
-    } catch (_e) {}
-
-    try {
-      const todoPath = `${folder}/${projectName} To-Do.md`;
-      const todoFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
-        ? realApp.vault.getAbstractFileByPath(todoPath) : null;
-      if (todoFile) {
-        const content = await realApp.vault.read(todoFile);
-        for (const line of String(content || "").split("\n")) {
-          const m = line.match(/^- \[ \] (.+)$/);
-          if (m) out.push({ title: m[1].trim(), path: todoPath, source: "to-do" });
-        }
+      const rows = dv.pages('"spice/tasks"').where(p =>
+        p && p.type === "task" && p.status === "open"
+        && p.file && p.file.path
+        && !p.file.path.includes("/_trash/")
+        && !p.file.path.includes("/_done/")
+        && String(p.project_slug == null ? "" : p.project_slug).trim() === ourSlug
+        && String(p.source == null ? "" : p.source).trim() !== "meeting");
+      for (const p of rows) {
+        const title = String((p.title && p.title) || (p.file && p.file.name) || "").trim();
+        out.push({ title, path: p.file.path });
       }
     } catch (_e) {}
 
@@ -436,10 +430,6 @@ class ProjectDashboard {
       const title = row.createEl("div");
       title.textContent = String(t.title || "");
       title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.9em;";
-
-      const src = row.createEl("div");
-      src.textContent = t.source;
-      src.style.cssText = "margin-left:auto; font-size:0.72em; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-muted);";
 
       row.addEventListener("click", () => {
         try {

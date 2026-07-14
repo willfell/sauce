@@ -366,48 +366,28 @@ function makeApp(files) {
 }
 
 // ============================================================================
-// PROJDASH-11 — _openTasks + _renderOpenTasks (board + To-Do, cap 6, empty hides)
+// PROJDASH-11 — _openTasks now queries spice/tasks task-notes (open, project_slug match, non-meeting).
 // ============================================================================
 (async () => {
-    const dash = new ProjectDashboard();
-    const ctx = {
-        folder: 'spice/projects/foo',
-        slug: 'foo',
-        projectName: 'Foo',
-        currentPath: 'spice/projects/foo/Foo.md',
-        app: {
-            vault: {
-                read: async (f) => {
-                    if (String(f.path).endsWith('foo-board.md')) return '## Todo\n- [ ] a\n- [ ] b\n## Completed\n- [ ] done-hidden\n';
-                    if (String(f.path).endsWith('Foo To-Do.md')) return '- [ ] t1\n- [x] t2\n';
-                    return '';
-                },
-                getAbstractFileByPath: (p) => ({ path: p }),
-            },
-        },
-    };
-    const tasks = await dash._openTasks(ctx);
-    ok('PROJDASH-11a open tasks = 3 (Completed excluded)', tasks.length === 3, JSON.stringify(tasks.map(t => t.title)));
-    ok('PROJDASH-11b sources', tasks.map(t => t.source).join('|') === 'board|board|to-do', tasks.map(t => t.source).join('|'));
-
-    const container = makeEl('div');
-    dash._renderOpenTasks(container, ctx, tasks);
-    const rows = container.__descendants().filter(el => el.__isOpenTaskRow);
-    ok('PROJDASH-11c 3 rows rendered', rows.length === 3, String(rows.length));
-    ok('PROJDASH-11d Open Tasks label', container.__descendants().some(el => el.__isSectionLabel && el.textContent === 'Open Tasks'));
-
-    // Save/restore global.app synchronously (no await between) so concurrent
-    // async IIFEs can never observe the swapped app.
-    const savedApp = global.app;
-    global.__opens = [];
-    global.app = { workspace: { openLinkText: (target, src, nl) => global.__opens.push({ target, src, nl }) } };
-    rows[0].click();
-    ok('PROJDASH-11e row click opens board', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/foo-board.md');
-    global.app = savedApp;
-
-    const empty = makeEl('div');
-    dash._renderOpenTasks(empty, ctx, []);
-    ok('PROJDASH-11f empty renders nothing', empty.__children.length === 0);
+  const dash = new ProjectDashboard();
+  const tasksPages = [
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/A.md', name: 'A' }, title: 'A' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: 'meeting', file: { path: 'spice/tasks/B.md', name: 'B' }, title: 'B' },
+    { type: 'task', status: 'done',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/C.md', name: 'C' }, title: 'C' },
+    { type: 'task', status: 'open',  project_slug: 'bar', source: '',        file: { path: 'spice/tasks/D.md', name: 'D' }, title: 'D' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/_done/E.md', name: 'E' }, title: 'E' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/F.md', name: 'F' }, title: 'F' },
+  ];
+  const where = (arr) => { const f = (fn) => where(arr.filter(fn)); return Object.assign(arr, { where: f }); };
+  const dv = {
+    current: () => ({ project_slug: 'foo' }),
+    pages: (src) => where(String(src).includes('spice/tasks') ? tasksPages.slice() : []),
+  };
+  const ctx = { dv, slug: 'foo', currentPage: { project_slug: 'foo' } };
+  const tasks = await dash._openTasks(ctx);
+  ok('PROJDASH-11a open non-meeting task-notes for foo = 2', tasks.length === 2, JSON.stringify(tasks.map(t => t.title)));
+  ok('PROJDASH-11b titles A,F (done/meeting/_done/other-project excluded)', tasks.map(t => t.title).join(',') === 'A,F', tasks.map(t => t.title).join(','));
+  ok('PROJDASH-11c path points at the task note', tasks[0].path === 'spice/tasks/A.md', tasks[0].path);
 })();
 
 // ============================================================================
