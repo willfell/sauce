@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.230.1",
+  "workshop_version": "0.230.2",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -15,7 +15,7 @@
     "sticky-notes": "0.11.3",
     "teams": "0.4.0",
     "wiki": "0.8.2",
-    "home": "0.8.1",
+    "home": "0.8.2",
     "reader": "0.6.0",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
