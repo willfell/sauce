@@ -1,10 +1,15 @@
 {
   "name": "agent-embed",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "mechanism",
   "description": "Manages the realclaudian community plugin (yishentu/claudian) — embeds Claude Code/Codex agents in the vault. Installs from the obsidian-releases index and enables it, standardizing the agent embed across vaults (supersedes the legacy 'claudian' plugin, retired by a one-time heal).",
   "depends_on": [],
-  "external_plugins": [{ "id": "realclaudian", "name": "Claudian" }],
+  "external_plugins": [
+    {
+      "id": "realclaudian",
+      "name": "Claudian"
+    }
+  ],
   "files": [],
   "claude_surface": [],
   "post_install": [],

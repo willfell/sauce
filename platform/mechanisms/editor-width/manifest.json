@@ -1,13 +1,17 @@
 {
   "name": "editor-width",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "mechanism",
   "description": "Ships a sauce-patched build of the editor-width-slider community plugin (null-deref guard on fileless leaves + debug logs stripped) and enables it, so the editor-width control is at parity across all vaults without the upstream 1.0.5 crash.",
   "depends_on": [],
   "bundled_plugin": {
     "id": "editor-width-slider",
     "source_dir": "plugin",
-    "files": ["main.js", "manifest.json", "styles.css"]
+    "files": [
+      "main.js",
+      "manifest.json",
+      "styles.css"
+    ]
   },
   "files": [],
   "claude_surface": [],
