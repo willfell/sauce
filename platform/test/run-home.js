@@ -666,7 +666,10 @@ function descendants(el) {
         _loadSpec: (instance) => { loadSpecCalls.push(instance); return Promise.resolve(null); },
       },
     };
-    global.app = { commands: { executeCommandById: () => {} } };
+    global.app = {
+      commands: { executeCommandById: () => {} },
+      vault: { adapter: { read: () => Promise.reject(new Error("ENOENT")) } },
+    };
     global.window.customJS = global.customJS;
     global.window.app = global.app;
 
@@ -702,30 +705,59 @@ function descendants(el) {
       items2.map((n) => n.dataset && n.dataset.captureKey).join(","),
       "meeting,sticky-note,article,journal");
 
-    // Case C: TripNavButtons present with both creation methods → trip item
-    // also renders, appended last (order: meeting, sticky-note, article, journal, trip).
+    // Case C: ranch/nav-buttons-registry.json has a non-empty contributions.trips
+    // array (trips blueprint actually subscribed) → trip item also renders,
+    // appended last (order: meeting, sticky-note, article, journal, trip).
     const dv3 = makeDv();
-    global.customJS.TripNavButtons = {
-      _promptForTripDetails: () => Promise.resolve(null),
-      _createTrip: () => Promise.resolve(null),
-    };
+    global.app.vault.adapter.read = () => Promise.resolve(JSON.stringify({
+      schema_version: 1,
+      contributions: { trips: [{ id: "trips-atlas", label: "Trip", icon: "map", order: 10, action: {} }] },
+    }));
     await home_.render(dv3, {});
     const home3 = dv3.container.querySelector(".sauce-home");
     const menu3 = home3 ? descendants(home3).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
     const items3 = menu3 ? descendants(menu3).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
-    assertEq("HOME-CAP-REG-6 TripNavButtons present → 5 items", items3.length, 5);
+    assertEq("HOME-CAP-REG-6 registry lists trips contribution → 5 items", items3.length, 5);
     assertEq("HOME-CAP-REG-7 order includes trip last",
       items3.map((n) => n.dataset && n.dataset.captureKey).join(","),
       "meeting,sticky-note,article,journal,trip");
 
-    // Case D: TripNavButtons present but missing _createTrip → trip stays gated out.
+    // Case D: regression test for the real Accuris bug — an orphaned
+    // trip-nav-buttons.js left over from a prior install still defines
+    // customJS.TripNavButtons in memory, but the vault's trips blueprint is
+    // NOT subscribed, so ranch/nav-buttons-registry.json has no (or an empty)
+    // contributions.trips. Gating must follow the registry, not class
+    // existence — trip stays gated out even though TripNavButtons "exists".
     const dv4 = makeDv();
-    global.customJS.TripNavButtons = { _promptForTripDetails: () => Promise.resolve(null) };
+    global.customJS.TripNavButtons = {
+      _promptForTripDetails: () => Promise.resolve(null),
+      _createTrip: () => Promise.resolve(null),
+    };
+    global.app.vault.adapter.read = () => Promise.resolve(JSON.stringify({
+      schema_version: 1,
+      contributions: {},
+    }));
     await home_.render(dv4, {});
     const home4 = dv4.container.querySelector(".sauce-home");
     const menu4 = home4 ? descendants(home4).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
     const items4 = menu4 ? descendants(menu4).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
-    assertEq("HOME-CAP-REG-8 incomplete TripNavButtons → trip stays gated out (4 items)", items4.length, 4);
+    assertEq("HOME-CAP-REG-8 orphaned TripNavButtons class but unsubscribed in registry → trip stays gated out (4 items)", items4.length, 4);
+
+    // Case E: registry read throws (missing file / malformed JSON) → trip
+    // gated out, same as "unavailable" (best-effort, never throws).
+    const dv5 = makeDv();
+    global.app.vault.adapter.read = () => Promise.reject(new Error("ENOENT"));
+    let threw5 = false;
+    try {
+      await home_.render(dv5, {});
+    } catch (_e) {
+      threw5 = true;
+    }
+    assertTrue("HOME-CAP-REG-9 registry read failure does not throw", !threw5, "render() threw on registry read failure");
+    const home5 = dv5.container.querySelector(".sauce-home");
+    const menu5 = home5 ? descendants(home5).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+    const items5 = menu5 ? descendants(menu5).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAP-REG-10 registry read failure → trip stays gated out (4 items)", items5.length, 4);
 
     delete global.customJS;
     delete global.app;
