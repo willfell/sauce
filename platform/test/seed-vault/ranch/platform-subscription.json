@@ -19,7 +19,7 @@
     },
     {
       "name": "code-fence-button",
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "name": "audit",
@@ -67,7 +67,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.9.0"
+      "version": "0.9.1"
     },
     {
       "name": "people-rendering",
@@ -129,7 +129,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.19.0"
+      "version": "0.19.1"
     },
     {
       "name": "people",
