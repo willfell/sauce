@@ -32,15 +32,25 @@ no-ops same-day).
 
 ## Approach
 
-**Fail-safe index-readiness gate + reattach memoization**, both in `SpaceHome.render`. Gate the
-first paint of a session until the index is warm (so the first paint already has real data and
-Dataview has no reason to re-execute), and memoize the built node so any residual same-signature
-re-execution reattaches cheaply instead of rebuilding. Every new mechanism is bounded and
-fail-safe: it can never leave Home blank or worse than today.
+**Fail-safe index-readiness gate + render token**, both in `SpaceHome.render`. Gate the first
+paint of a session until the metadata index is warm (so the first paint already has real data and
+Dataview has no reason to re-execute), and use a monotonic render token so a superseded execution
+that awaited the gate never paints stale content. Both are bounded and fail-safe: they can never
+leave Home blank or make it worse than today.
 
-Rejected: pure sig-memoization (the cold→warm signature legitimately differs, so it wouldn't
-catch the reported case); disabling Dataview auto-refresh (global, user-owned, wrong layer);
-restructuring the two blocks into one (larger blast radius, no better outcome).
+Rejected: pure sig-memoization / reattach-of-cached-node (the built DOM also depends on
+async-loaded capture registrations, not just day+counts, so a simple signature can't safely gate
+a reattach — implementing it introduced stale-node bleed between the harness's back-to-back
+renders; the index gate fixes the reported symptom without that risk); disabling Dataview
+auto-refresh (global, user-owned, wrong layer); restructuring the two blocks into one (larger
+blast radius, no better outcome).
+
+**Implementation note (revised during build):** the readiness signal is Obsidian's
+`metadataCache` **"resolved" event** (the real "index finished" signal Dataview builds from),
+not a counts-stability poll — "two equal cold reads" can false-positive on a slow-but-static
+partial index. `_awaitIndexResolved(appRef, maxMs)` resolves on that event, on an
+already-resolved fast path (`resolvedLinks` populated), or on a `maxMs` timeout, whichever comes
+first. The reattach-memoization from the first draft (§3 below) was dropped for the reason above.
 
 ## Design
 
