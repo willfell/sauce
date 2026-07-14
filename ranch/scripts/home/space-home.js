@@ -496,7 +496,7 @@ class SpaceHome {
       const td = cjsNow && cjsNow.TaskDialog;
       try {
         if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, today, source: "daily" });
+          await td.createQuick({ title: text, source: "daily" });
         }
       } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
       setMenu(false);

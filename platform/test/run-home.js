@@ -551,10 +551,10 @@ function descendants(el) {
       const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
       await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add → createQuick carries title + today + source",
+      assertTrue("HOME-CAP-19 Add → createQuick carries title + source, no today (no default due date)",
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
-          && calls.createQuick[0].today === "2026-07-02" && calls.createQuick[0].source === "daily",
-        `expected createQuick({title:'buy milk',today:'2026-07-02',source:'daily'}); got ${JSON.stringify(calls.createQuick[0])}`);
+          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily",
+        `expected createQuick({title:'buy milk',source:'daily'}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
