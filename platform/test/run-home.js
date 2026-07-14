@@ -260,7 +260,7 @@ function descendants(el) {
   const spec = SpaceHome._captureSpec();
   {
     const keys = spec.map((s) => s.key);
-    assertEq("HOME-CAP-1 capture keys meeting/sticky-note/article", JSON.stringify(keys), JSON.stringify(["meeting", "sticky-note", "article"]));
+    assertEq("HOME-CAP-1 capture keys meeting/sticky-note/article/journal", JSON.stringify(keys), JSON.stringify(["meeting", "sticky-note", "article", "journal"]));
     const art = spec.find((s) => s.key === "article");
     assertTrue("HOME-CAP-1b article entry has label + icon", !!art && /Article/.test(art.label) && typeof art.icon === "string" && art.icon.length > 0);
   }
@@ -370,7 +370,7 @@ function descendants(el) {
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
       const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
       assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
-      assertEq("HOME-RENDER-11 menu holds exactly 3 action items (meeting/sticky-note/article)", items.length, 3);
+      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/sticky-note; article/journal ungated)", items.length, 2);
       assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
@@ -501,7 +501,10 @@ function descendants(el) {
       },
       TaskEntity: {},
       TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
-      EntityCreate: { create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); } },
+      EntityCreate: {
+        create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); },
+        _loadSpec: () => Promise.resolve(null),
+      },
     };
     global.app = { commands: { executeCommandById: (id) => calls.commandIds.push(id) } };
     global.window.customJS = global.customJS;
@@ -517,7 +520,7 @@ function descendants(el) {
     const md = menu ? descendants(menu) : [];
     const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
     const inputs = md.filter((n) => n.tag === "input");
-    assertEq("HOME-CAP-7 render wired 3 action items", items.length, 3);
+    assertEq("HOME-CAP-7 wired 2 action items (article/journal ungated)", items.length, 2);
     assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
     assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
@@ -551,10 +554,10 @@ function descendants(el) {
       const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
       await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add → createQuick carries title + today + source",
+      assertTrue("HOME-CAP-19 Add → createQuick carries title + source, no today (no default due date)",
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
-          && calls.createQuick[0].today === "2026-07-02" && calls.createQuick[0].source === "daily",
-        `expected createQuick({title:'buy milk',today:'2026-07-02',source:'daily'}); got ${JSON.stringify(calls.createQuick[0])}`);
+          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily",
+        `expected createQuick({title:'buy milk',source:'daily'}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
@@ -589,6 +592,67 @@ function descendants(el) {
 
     delete global.customJS;
     delete global.app;
+  }
+
+  // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─
+  installMoment("2026-07-02", 6);
+  {
+    const dv = makeDv();
+    const loadSpecCalls = [];
+
+    // Case A: neither "reader-article" nor "journal-entry" registered → only
+    // meeting + sticky-note render (article/journal both gated out).
+    global.customJS = {
+      SpaceDailyDashboard: {
+        computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }),
+      },
+      TaskEntity: {},
+      TaskDialog: { createQuick: () => Promise.resolve() },
+      EntityCreate: {
+        create: () => Promise.resolve(),
+        _loadSpec: (instance) => { loadSpecCalls.push(instance); return Promise.resolve(null); },
+      },
+    };
+    global.app = { commands: { executeCommandById: () => {} } };
+    global.window.customJS = global.customJS;
+    global.window.app = global.app;
+
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const menu = home ? descendants(home).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAP-REG-1 neither registered → 2 items (meeting, sticky-note)", items.length, 2);
+    assertTrue("HOME-CAP-REG-2 _loadSpec checked reader-article", loadSpecCalls.indexOf("reader-article") >= 0,
+      `expected a _loadSpec('reader-article') call; got ${JSON.stringify(loadSpecCalls)}`);
+    assertTrue("HOME-CAP-REG-3 _loadSpec checked for journal-entry", loadSpecCalls.indexOf("journal-entry") >= 0,
+      `expected a _loadSpec('journal-entry') call; got ${JSON.stringify(loadSpecCalls)}`);
+
+    // Case B: both registered → all 4 buttons render, in order meeting, sticky-note, article, journal.
+    // Fresh dv (distinct container) so the render()'s no-op-if-unchanged signature
+    // guard (keyed on an existing ".sauce-home" in dv.container) can't short-circuit.
+    loadSpecCalls.length = 0;
+    const dv2 = makeDv();
+    global.customJS.EntityCreate._loadSpec = (instance) => {
+      loadSpecCalls.push(instance);
+      if (instance === "reader-article") return Promise.resolve({ id: "reader-article" });
+      if (instance === "journal-entry") return Promise.resolve({ id: "journal-entry" });
+      return Promise.resolve(null);
+    };
+
+    await home_.render(dv2, {});
+    const home2 = dv2.container.querySelector(".sauce-home");
+    const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+    const items2 = menu2 ? descendants(menu2).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAP-REG-4 both registered → 4 items", items2.length, 4);
+    assertEq("HOME-CAP-REG-5 order meeting, sticky-note, article, journal",
+      items2.map((n) => n.dataset && n.dataset.captureKey).join(","),
+      "meeting,sticky-note,article,journal");
+
+    delete global.customJS;
+    delete global.app;
+    delete global.window.app;
+    delete global.window.customJS;
   }
 
   // ── HOME-CAP: graceful degrade (missing APIs must not throw) ────────────────

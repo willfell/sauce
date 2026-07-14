@@ -166,7 +166,7 @@
   display: flex;
   align-items: stretch;
   gap: 6px;
-  padding: 2px 2px 6px 2px;
+  padding: 8px 11px 6px 11px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--background-modifier-border);
 }
