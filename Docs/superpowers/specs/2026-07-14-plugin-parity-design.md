@@ -130,6 +130,34 @@ patterns) so they run **once** and never override a later deliberate user action
   - `disableSmartConnectionsOnce` / `retireOldClaudianOnce` → id removed once; second run is a
     sentinel no-op; a user re-add after the sentinel is preserved.
 
+## Revision — 2026-07-14 (post-anchor discovery)
+
+Code-anchor research surfaced three facts that change the build without changing the goals:
+
+1. **Vendored slider uses existing machinery.** `applyBundledPlugin` (install.js:8529) already
+   copies a mechanism's `bundled_plugin.files` into `.obsidian/plugins/<id>/`, stamps the
+   mechanism version into the plugin manifest, and enables it — idempotent, never throws. The
+   `editor-width` mechanism therefore ships the patched build via a `bundled_plugin` block; **no
+   new `applyVendoredPluginInstall` function and no `external_plugins` fetch** (so upstream 1.0.5
+   is never pulled). The `1.0.5-sauce.1` version string is moot — the plugin manifest inherits
+   the mechanism version.
+2. **`realclaudian` needs no `version` pin.** ero (absent) fetches the index's latest (2.0.21),
+   accuris/headspace already have 2.0.21; a plain `external_plugins: [{id:"realclaudian"}]`
+   entry enables it everywhere. The only new schema field this cycle is **`auto_enable`**.
+3. **Foundational version enforcement is deferred (operational this cycle).** `sauce update`
+   never fetches/upgrades foundational plugins today — that path exists only in fresh bootstrap
+   (`bootstrap.js:phaseFetchPlugins`). Baking auto-force-upgrade into `install.js` would jump
+   ero's templater 2.4.1→2.20.0 (and tasks/admonition) unattended, risking existing
+   templates/queries. Per user decision, foundational versions are aligned **operationally
+   during deploy** (small-delta upgrades applied; large jumps like ero templater flagged for the
+   user), and the code-enforced auto-upgrade subsystem is a **carry-forward**. The `version`
+   field on `foundational_plugins[]` is NOT added this cycle.
+
+Net code scope this cycle: `auto_enable` field + `applyExternalPluginInstall` honoring it;
+`smart-connections-bridge` manifest → `auto_enable:false`; new `editor-width` mechanism
+(`bundled_plugin`, patched build); new `agent-embed` mechanism (`external_plugins` realclaudian);
+two sentinel heals (`disableSmartConnectionsOnce`, `retireOldClaudianOnce`); tests.
+
 ## Non-goals
 
 - Bringing manually-installed, sauce-unmanaged plugins (big-calendar, quickadd, tag-wrangler,
