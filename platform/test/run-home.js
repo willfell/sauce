@@ -501,7 +501,10 @@ function descendants(el) {
       },
       TaskEntity: {},
       TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
-      EntityCreate: { create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); } },
+      EntityCreate: {
+        create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); },
+        _loadSpec: () => Promise.resolve(null),
+      },
     };
     global.app = { commands: { executeCommandById: (id) => calls.commandIds.push(id) } };
     global.window.customJS = global.customJS;
@@ -517,7 +520,7 @@ function descendants(el) {
     const md = menu ? descendants(menu) : [];
     const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
     const inputs = md.filter((n) => n.tag === "input");
-    assertEq("HOME-CAP-7 render wired 3 action items", items.length, 3);
+    assertEq("HOME-CAP-7 wired 2 action items (article/journal ungated)", items.length, 2);
     assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
     assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
