@@ -21,6 +21,9 @@
  *                                             (handled by _renderFrontmatter)
  *   {{prompts.<key>|lowercase}}             — String.toLowerCase
  *   {{prompts.<key>|or-now:<fmt>}}          — prompt value, else ctx.now.format(<fmt>)
+ *   {{prompts.<key>|links}}                 — expand an ARRAY-valued prompt (e.g.
+ *                                             people-multi) into a YAML list of
+ *                                             "[[name]]" wikilinks; [] when empty
  *   {{now.<moment-format>}}                 — ctx.now.format(<moment-format>)
  *   {{current_file.frontmatter.<key>}}      — read frontmatter of the note
  *                                             whose dv container hosts the button
@@ -433,12 +436,14 @@ class EntityCreate {
 
     _prompt(p, ctx) {
         switch (p.type) {
-            case "string": return this._promptText(p, ctx, "text");
-            case "date":   return this._promptText(p, ctx, "date");
-            case "month":  return this._promptText(p, ctx, "month");
-            case "number": return this._promptText(p, ctx, "number");
-            case "select": return this._promptSelect(p, ctx);
-            default:       return Promise.resolve(null);
+            case "string":       return this._promptText(p, ctx, "text");
+            case "date":         return this._promptText(p, ctx, "date");
+            case "datetime":     return this._promptText(p, ctx, "datetime-local");
+            case "month":        return this._promptText(p, ctx, "month");
+            case "number":       return this._promptText(p, ctx, "number");
+            case "select":       return this._promptSelect(p, ctx);
+            case "people-multi": return this._promptPeopleMulti(p, ctx);
+            default:             return Promise.resolve(null);
         }
     }
 
@@ -597,6 +602,159 @@ class EntityCreate {
             overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
             document.body.appendChild(overlay);
             setTimeout(() => sel.focus(), 0);
+        });
+    }
+
+    // people-multi — pick any number of existing people (spice/people/*.md) via a
+    // searchable checklist, and/or type a NEW name and "+ Add" it (creating a
+    // spice/people/<name>.md stub on the fly, mirroring the Meeting.md Templater
+    // suggester loop). Resolves to an ARRAY of selected display names (feed a
+    // frontmatter array field via the {{prompts.<key>|links}} pipe). Cancel →
+    // null (aborts create, like every other prompt). Empty selection is allowed
+    // for an optional prompt → resolves []. Never throws out of the click paths.
+    _promptPeopleMulti(p, ctx) {
+        return new Promise((resolve) => {
+            // Enumerate existing people (basenames), excluding the "People" hub note.
+            let people = [];
+            try {
+                people = app.vault.getMarkdownFiles()
+                    .filter((f) => f.path.startsWith("spice/people/") && f.basename !== "People")
+                    .map((f) => f.basename)
+                    .sort((a, b) => a.localeCompare(b));
+            } catch (_e) { people = []; }
+
+            const selected = new Set();
+
+            const overlay = document.createElement("div");
+            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+            const dialog = document.createElement("div");
+            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 340px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 10px;";
+
+            const heading = document.createElement("div");
+            heading.textContent = p.label || "Attendees";
+            heading.style.cssText = "font-size: 1.1em; font-weight: 600;";
+            dialog.appendChild(heading);
+
+            // Selected-chips row.
+            const chips = document.createElement("div");
+            chips.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; min-height: 4px;";
+            dialog.appendChild(chips);
+
+            // Search / add-new input.
+            const search = document.createElement("input");
+            search.type = "text";
+            search.placeholder = "Search or add a person…";
+            search.style.cssText = "padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+            dialog.appendChild(search);
+
+            // Scrollable list of matching people.
+            const list = document.createElement("div");
+            list.style.cssText = "max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px;";
+            dialog.appendChild(list);
+
+            const renderChips = () => {
+                chips.innerHTML = "";
+                for (const name of selected) {
+                    const chip = document.createElement("span");
+                    chip.style.cssText = "display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--interactive-accent); color: var(--text-on-accent); font-size: 0.85em;";
+                    chip.textContent = name;
+                    const x = document.createElement("span");
+                    x.textContent = "×";
+                    x.style.cssText = "cursor: pointer; font-weight: 700;";
+                    x.onclick = () => { selected.delete(name); renderChips(); renderList(); };
+                    chip.appendChild(x);
+                    chips.appendChild(chip);
+                }
+            };
+
+            const addNewStub = async (rawName) => {
+                const name = String(rawName || "").trim();
+                if (!name) return;
+                if (!people.includes(name)) {
+                    const stubPath = `spice/people/${name}.md`;
+                    try {
+                        if (!app.vault.getAbstractFileByPath(stubPath)) {
+                            const iso = (ctx && ctx.now && typeof ctx.now.format === "function")
+                                ? ctx.now.format("YYYY-MM-DDTHH:mm:ssZ") : "";
+                            await app.vault.create(stubPath, `---\ntype: person\ncreated_at: "${iso}"\naliases: []\n---\n\n# [[${name}]]\n\n## Notes\n-\n`);
+                        }
+                        people.push(name);
+                        people.sort((a, b) => a.localeCompare(b));
+                    } catch (_e) {
+                        // Path-hostile name or create error — skip; user can retry.
+                        return;
+                    }
+                }
+                selected.add(name);
+                search.value = "";
+                renderChips();
+                renderList();
+            };
+
+            const renderList = () => {
+                const q = search.value.trim().toLowerCase();
+                list.innerHTML = "";
+                const matches = people.filter((n) => !q || n.toLowerCase().includes(q));
+                for (const name of matches) {
+                    const row = document.createElement("label");
+                    row.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 0.9em;";
+                    const cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.checked = selected.has(name);
+                    cb.onchange = () => { if (cb.checked) selected.add(name); else selected.delete(name); renderChips(); };
+                    row.appendChild(cb);
+                    const span = document.createElement("span");
+                    span.textContent = name;
+                    row.appendChild(span);
+                    list.appendChild(row);
+                }
+                // Offer "+ Add" when the typed name matches no existing person.
+                if (q && !people.some((n) => n.toLowerCase() === q)) {
+                    const add = document.createElement("div");
+                    add.style.cssText = "padding: 6px; color: var(--interactive-accent); cursor: pointer; font-size: 0.9em; font-weight: 600;";
+                    add.textContent = `+ Add "${search.value.trim()}"`;
+                    add.onclick = () => addNewStub(search.value);
+                    list.appendChild(add);
+                }
+            };
+
+            search.addEventListener("input", renderList);
+            search.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    const q = search.value.trim();
+                    if (q && !people.some((n) => n.toLowerCase() === q.toLowerCase())) addNewStub(q);
+                }
+                if (e.key === "Escape") { close(); resolve(null); }
+            });
+
+            const status = document.createElement("div");
+            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1em;";
+            dialog.appendChild(status);
+
+            const btnRow = document.createElement("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+            const close = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
+            cancelBtn.onclick = () => { close(); resolve(null); };
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "Done";
+            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
+            okBtn.onclick = () => { close(); resolve(Array.from(selected)); };
+
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            dialog.appendChild(btnRow);
+            overlay.appendChild(dialog);
+            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
+            document.body.appendChild(overlay);
+            renderChips();
+            renderList();
+            setTimeout(() => search.focus(), 0);
         });
     }
 
@@ -876,6 +1034,19 @@ class EntityCreate {
             return;
         }
         if (typeof val === "string") {
+            // {{prompts.<key>|links}} — expand an ARRAY-valued prompt into a YAML
+            // list of "[[name]]" wikilinks (e.g. attendees / people from a
+            // people-multi prompt). Empty / non-array → `key: []`.
+            const linksMatch = val.match(/^\{\{prompts\.([a-zA-Z0-9_]+)\|links\}\}$/);
+            if (linksMatch) {
+                const arr = (ctx && ctx.prompts && Array.isArray(ctx.prompts[linksMatch[1]]))
+                    ? ctx.prompts[linksMatch[1]] : [];
+                const names = arr.map((n) => String(n == null ? "" : n).trim()).filter(Boolean);
+                if (!names.length) { lines.push(`${key}: []`); return; }
+                lines.push(`${key}:`);
+                for (const n of names) lines.push(`  - ${this._yamlString(`[[${n}]]`)}`);
+                return;
+            }
             // Detect |number pipe in the source string before substitution —
             // if present, emit as unquoted numeric scalar.
             if (this._hasNumberPipe(val)) {
