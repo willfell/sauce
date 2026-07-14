@@ -185,20 +185,29 @@ const cfg = inst._config();
 {
   const prevCJS = global.customJS;
   const calls = [];
+  const order = [];
   global.customJS = {
     ChromeBar: {
       makeAdapter: (c) => c,
-      render: () => {},
+      render: () => { order.push('chrome'); },
       openNavTarget: () => {},
     },
     RenderSafe: { page: (dv) => (dv && dv._page) || null },
-    SectionExplorer: { renderNoteLinks: (dv) => { calls.push({ links: (dv && dv._page && dv._page.type) || 'unknown' }); } },
+    SectionExplorer: { renderNoteLinks: (dv) => {
+      calls.push({ links: (dv && dv._page && dv._page.type) || 'unknown' });
+      order.push('links');
+    } },
   };
   const container = { createEl: () => ({ style: {}, addEventListener: () => {}, createEl: () => ({ style: {} }) }), querySelectorAll: () => [] };
+  const prevBanner = inst._maybeRenderBanner;
+  inst._maybeRenderBanner = () => { order.push('banner'); };
 
   const leafDv = { container, current: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' } }), _page: { type: 'sticky-note', file: { path: 'x.md', name: 'X' } } };
   inst.render(leafDv);
   ok('SCB-LINKS-1 renderNoteLinks called on sticky-note leaf', calls.some((c) => c.links === 'sticky-note'));
+  ok('SCB-LINKS-1b pinned links render BEFORE title banner', order.indexOf('links') < order.indexOf('banner'));
+  inst._maybeRenderBanner = prevBanner;
+  order.length = 0;
 
   const hubDv = { container, current: () => ({ type: 'sticky-hub', file: { path: 'Sticky.md' } }), _page: { type: 'sticky-hub', file: { path: 'Sticky.md' } } };
   calls.length = 0;
