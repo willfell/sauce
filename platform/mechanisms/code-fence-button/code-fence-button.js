@@ -13,4 +13,15 @@ class CodeFenceButton {
     const n = Math.max(4, longest + 1);
     return "`".repeat(n);
   }
+
+  static wrapSelection(selection, opts) {
+    const sel = typeof selection === "string" ? selection : "";
+    if (sel.trim() === "") return null;
+    const o = opts || {};
+    const fence = CodeFenceButton.computeFence(sel);
+    const lead = o.atLineStart ? "" : "\n";
+    const tail = o.atLineEnd ? "" : "\n";
+    const text = lead + fence + "\n" + sel + "\n" + fence + tail;
+    return { text: text, cursor: text.length };
+  }
 }

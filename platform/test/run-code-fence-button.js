@@ -47,7 +47,24 @@ assertEq("CFB-2: contains 3 → 4", CFB.computeFence("a ``` b"), "````");
 assertEq("CFB-3: contains 4 → 5", CFB.computeFence("x ```` y"), "`````");
 assertEq("CFB-4: contains 5 → 6", CFB.computeFence("`````"), "``````");
 
-// Pass 3 (wrapSelection) — added in Task 3.
+console.log("\n--- Pass 3: wrapSelection ---");
+// Full-line selection: no extra leading/trailing newline; fence on its own line.
+assertEq("CFB-5: full-line wrap",
+  CFB.wrapSelection("x", { atLineStart: true, atLineEnd: true }),
+  { text: "````\nx\n````", cursor: "````\nx\n````".length });
+// Mid-line selection: leading + trailing newline guard.
+assertEq("CFB-6: mid-line wrap",
+  CFB.wrapSelection("x", { atLineStart: false, atLineEnd: false }),
+  { text: "\n````\nx\n````\n", cursor: "\n````\nx\n````\n".length });
+// Multiline inner text preserved verbatim.
+assertEq("CFB-7: multiline inner preserved",
+  CFB.wrapSelection("a\nb", { atLineStart: true, atLineEnd: true }).text,
+  "````\na\nb\n````");
+// Empty selection → null (caller no-ops).
+assertEq("CFB-8: empty → null", CFB.wrapSelection("   ", { atLineStart: true, atLineEnd: true }), null);
+// Cursor lands after the closing fence.
+const w9 = CFB.wrapSelection("hi", { atLineStart: true, atLineEnd: true });
+assertEq("CFB-9: cursor after block", w9.cursor, w9.text.length);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("\n" + failures.join("\n"));
