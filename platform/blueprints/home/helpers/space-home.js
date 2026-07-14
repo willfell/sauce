@@ -9,7 +9,7 @@
  *                            "Clear day — nothing scheduled"),
  *   3. a QUICK-CAPTURE band — an inline "Jot a task…" input + Add (one-gesture
  *                            task create, no modal), then one-tap buttons:
- *                            ＋ Meeting, ＋ Sticky Note, ＋ Article,
+ *                            ＋ Meeting, ＋ Sticky Note, ＋ Article, ＋ Journal,
  *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
@@ -201,7 +201,7 @@ class SpaceHome {
    * NOTE: the `todo` entry was REMOVED — task capture is now an inline
    * "Jot a task…" input + Add button (built in render, wired to
    * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
-   * remaining buttons: ＋ Meeting, ＋ Sticky Note, ＋ Article.
+   * remaining buttons: ＋ Meeting, ＋ Sticky Note, ＋ Article, ＋ Journal.
    */
   static _captureSpec() {
     const svg = (inner) =>
@@ -580,6 +580,7 @@ class SpaceHome {
    *   meeting   → customJS.EntityCreate.create({ instance:'meeting', dv })
    *   sticky-note → customJS.EntityCreate.create({ instance:'sticky-note', dv })
    *   article   → customJS.ReaderArticlePaste.open(dv)
+   *   journal   → customJS.EntityCreate.create({ instance:'journal-entry', dv })
    *   openDaily → app.commands.executeCommandById("daily-notes")
    * (The former `todo` button is gone — task capture is now the inline
    * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
