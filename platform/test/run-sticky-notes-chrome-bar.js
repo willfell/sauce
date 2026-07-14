@@ -205,7 +205,7 @@ const cfg = inst._config();
   const leafDv = { container, current: () => ({ type: 'sticky-note', file: { path: 'x.md', name: 'X' } }), _page: { type: 'sticky-note', file: { path: 'x.md', name: 'X' } } };
   inst.render(leafDv);
   ok('SCB-LINKS-1 renderNoteLinks called on sticky-note leaf', calls.some((c) => c.links === 'sticky-note'));
-  ok('SCB-LINKS-1b pinned links render BEFORE title banner', order.indexOf('links') < order.indexOf('banner'));
+  ok('SCB-LINKS-1b pinned links render AFTER title banner', order.indexOf('links') > order.indexOf('banner'));
   inst._maybeRenderBanner = prevBanner;
   order.length = 0;
 
