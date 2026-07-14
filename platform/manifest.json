@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.228.2",
+  "workshop_version": "0.229.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -59,7 +59,7 @@
     },
     {
       "name": "code-fence-button",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "path": "mechanisms/code-fence-button"
     },
     {
