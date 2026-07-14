@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.224.1",
+  "workshop_version": "0.225.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -261,7 +261,7 @@
     },
     {
       "name": "reader",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "path": "blueprints/reader"
     }
   ]
