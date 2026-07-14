@@ -264,6 +264,50 @@ ok("EC-ORNOW-4 {{now.YYYY-MM-DD}} + {{prompts.title|lowercase}} still work (rule
     inst._substitute("{{now.YYYY-MM-DD}}", baseCtx()) === "2026-05-14"
     && inst._substitute("{{prompts.title|lowercase}}", baseCtx({ prompts: { title: "HELLO" } })) === "hello");
 
+// 7g. {{prompts.<key>|links}} — expand an ARRAY-valued prompt (people-multi) into
+// a YAML list of "[[name]]" wikilinks (meetings attendees/people).
+ok("EC-LINKS-1 {{prompts.attendees|links}} emits a YAML list of [[name]] wikilinks",
+    inst._renderFrontmatter({ attendees: "{{prompts.attendees|links}}" },
+        baseCtx({ prompts: { attendees: ["Ada Lovelace", "Bob"] } }))
+        .includes('attendees:\n  - "[[Ada Lovelace]]"\n  - "[[Bob]]"'));
+ok("EC-LINKS-2 {{prompts.attendees|links}} with an EMPTY array emits `key: []`",
+    inst._renderFrontmatter({ attendees: "{{prompts.attendees|links}}" },
+        baseCtx({ prompts: { attendees: [] } })).includes("attendees: []"));
+ok("EC-LINKS-3 {{prompts.attendees|links}} with a MISSING/non-array prompt emits `key: []`",
+    inst._renderFrontmatter({ people: "{{prompts.attendees|links}}" }, baseCtx()).includes("people: []"));
+ok("EC-LINKS-4 blank/whitespace names are filtered out of the links list",
+    (() => {
+        const out = inst._renderFrontmatter({ attendees: "{{prompts.attendees|links}}" },
+            baseCtx({ prompts: { attendees: ["  ", "Real Person", ""] } }));
+        return out.includes('  - "[[Real Person]]"') && !out.includes('[[]]');
+    })());
+
+// 7h. meetings "+ New Meeting" dialog wiring: datetime picker + attendees
+// people-multi + attendees/people frontmatter via the |links pipe.
+{
+    const meetM = require(path.join(ROOT, "platform/blueprints/meetings/manifest.json"));
+    const me = (meetM.new_entity_buttons || []).find((b) => b.id === "meeting") || {};
+    const prompts = me.prompts || [];
+    const dt = prompts.find((p) => p.key === "datetime") || {};
+    const att = prompts.find((p) => p.key === "attendees") || {};
+    const fm = me.frontmatter_template || {};
+    ok("EC-MEET-DT datetime prompt is a datetime picker defaulting to now",
+        dt.type === "datetime" && dt.default === "{{now.YYYY-MM-DDTHH:mm}}",
+        `got type=${dt.type} default=${dt.default}`);
+    ok("EC-MEET-ATT attendees prompt is a people-multi picker",
+        att.type === "people-multi", `got type=${att.type}`);
+    ok("EC-MEET-FM attendees + people frontmatter both use the |links pipe",
+        fm.attendees === "{{prompts.attendees|links}}" && fm.people === "{{prompts.attendees|links}}",
+        `got attendees=${fm.attendees} people=${fm.people}`);
+}
+// EntityCreate dispatches the new prompt types (static source check — the modals
+// touch `document`, unavailable in Node).
+ok("EC-DT-DISPATCH _prompt handles type:datetime (datetime-local input)",
+    /case "datetime":\s*return this\._promptText\(p, ctx, "datetime-local"\)/.test(ENTITY_SRC));
+ok("EC-PM-DISPATCH _prompt handles type:people-multi via _promptPeopleMulti",
+    /case "people-multi":\s*return this\._promptPeopleMulti/.test(ENTITY_SRC)
+    && /_promptPeopleMulti\s*\(p, ctx\)\s*\{/.test(ENTITY_SRC));
+
 // 7e. The shipped instances are consistent + creatable from a dateless context
 // (Home + dropdown): sticky-note uses the |today fallback; meeting derives dates from
 // {{now...}}/date-patterns (no current_file dependency), so it already works.

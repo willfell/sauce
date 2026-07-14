@@ -8014,7 +8014,7 @@ function _resolveBodyTemplatePath(value, variables) {
 //     for nav-buttons: warn-and-skip on any shape failure, install proceeds.
 const _EC_ID_RE = /^[a-z][a-z0-9_-]*$/;
 const _EC_KEY_RE = /^[a-z][a-z0-9_]*$/;
-const _EC_PROMPT_TYPES = new Set(["string", "date", "month", "number", "select"]);
+const _EC_PROMPT_TYPES = new Set(["string", "date", "datetime", "month", "number", "select", "people-multi"]);
 
 function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
   const fail = (reason) => {
