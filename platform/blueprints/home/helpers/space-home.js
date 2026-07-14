@@ -289,6 +289,17 @@ class SpaceHome {
     // input/Add handlers await createQuick then call self.render to refresh).
     const self = this;
 
+    // Render token — kills a superseded execution. Dataview re-executes this
+    // block on the cold→warm index transition; if THIS render awaits (layout /
+    // index settle) and a NEWER exec starts meanwhile, the stale one must not
+    // paint. Every render bumps a window-scoped counter and remembers its value;
+    // after each await we compare and bail if a newer render has begun.
+    const _tokenW = (typeof window !== "undefined" && window) || null;
+    const _renderToken = _tokenW
+      ? (_tokenW.__sauceHomeRenderToken = (_tokenW.__sauceHomeRenderToken || 0) + 1)
+      : 0;
+    const _superseded = () => !!_tokenW && _tokenW.__sauceHomeRenderToken !== _renderToken;
+
     // Cold-start reflow guard: on the FIRST render of any app session, wait for
     // Obsidian's workspace layout (panes/sidebars) to finish restoring before
     // painting. Firing during layout restore is what produces the visible
@@ -353,12 +364,30 @@ class SpaceHome {
       || null;
     const SDD = cjs && cjs.SpaceDailyDashboard;
     const TE = cjs && cjs.TaskEntity;
-    let counts = { today: 0, overdue: 0, done: 0, meetings: 0 };
-    try {
-      if (SDD && typeof SDD.computeCounts === "function") {
-        counts = SDD.computeCounts(dv, today, TE) || counts;
-      }
-    } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+    const _readCounts = () => {
+      try {
+        if (SDD && typeof SDD.computeCounts === "function") {
+          return SDD.computeCounts(dv, today, TE) || { today: 0, overdue: 0, done: 0, meetings: 0 };
+        }
+      } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+      return { today: 0, overdue: 0, done: 0, meetings: 0 };
+    };
+    // Cold-load index-settle gate (FIRST session render only). Dataview can run
+    // this block before the metadata index is warm — computeCounts then returns
+    // partial/zero data, and Dataview re-executes the whole block once the index
+    // resolves, producing the "display, freeze, reload once, settle" the user
+    // reports. Waiting for the counts to STABILIZE (fail-safe: bounded by maxMs)
+    // means the first paint already has real data, so there is nothing for
+    // Dataview to re-render into. Gated on a real app (the Node harness has none
+    // → skips → tests stay fast) + a one-shot window flag (later opens in the
+    // same session skip it: the index is already warm).
+    const _appReady = (typeof app !== "undefined" && app && app.metadataCache) ? app : null;
+    if (_tokenW && !_tokenW.__sauceHomeSettledOnce && _appReady) {
+      await SpaceHome._awaitIndexResolved(_appReady, 1200);
+      _tokenW.__sauceHomeSettledOnce = true;
+      if (_superseded()) return;
+    }
+    const counts = _readCounts();
 
     // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
     // (the reported "reloading every time" feel) and is wasted work whenever
@@ -596,6 +625,44 @@ class SpaceHome {
     await dv.view("ranch/views/customjs-guard", {
       class: "SpaceDailyDashboard",
       args: [{ asOf: today, live: true }],
+    });
+  }
+
+  /**
+   * _awaitIndexResolved(appRef, maxMs) — fail-safe cold-load index gate.
+   *
+   * Resolves when Obsidian's metadata index finishes its initial resolve (the
+   * `metadataCache` "resolved" event — the real "index is warm" signal, which
+   * Dataview builds its own index from) OR after `maxMs` (default 1200),
+   * whichever comes first. If the index already looks resolved (resolvedLinks
+   * populated), resolves immediately to avoid a needless stall. ALWAYS resolves
+   * within maxMs; never hangs, never throws. `maxMs` is injectable for tests.
+   */
+  static _awaitIndexResolved(appRef, maxMs) {
+    const cap = typeof maxMs === "number" ? maxMs : 1200;
+    return new Promise((resolve) => {
+      let done = false;
+      let ref = null;
+      let handle = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        try { if (ref && handle && typeof ref.offref === "function") ref.offref(handle); } catch (_e) { /* ignore */ }
+        resolve();
+      };
+      try {
+        ref = appRef && appRef.metadataCache;
+        // Already-resolved fast path — don't stall a post-startup open.
+        if (ref && ref.resolvedLinks && typeof ref.resolvedLinks === "object"
+            && Object.keys(ref.resolvedLinks).length > 0) {
+          finish();
+          return;
+        }
+        if (ref && typeof ref.on === "function") {
+          handle = ref.on("resolved", finish);
+        }
+      } catch (_e) { /* fall through to the timeout */ }
+      setTimeout(finish, cap);
     });
   }
 
