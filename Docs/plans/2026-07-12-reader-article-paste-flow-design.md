@@ -154,7 +154,7 @@ clip-only fields.) The manifest's `title`/`url` prompt specs stay in place (unch
 | `author` | `parsed.frontmatter.author` \|\| `""` | new preset key |
 | `site` | `parsed.frontmatter.site` \|\| `""` | new preset key |
 | `published` | `parsed.frontmatter.published` \|\| `""` | new preset key |
-| `captured_at` | `parsed.frontmatter.captured_at` \|\| now-fallback | preset; if absent, fall back to the manifest's existing `{{now.YYYY-MM-DDTHH:mm:ssZ}}` behavior by omitting the key from `presetPrompts` entirely so the manifest's `frontmatter_template` default still fires |
+| `captured_at` | `parsed.frontmatter.captured_at` \|\| JS-generated ISO now (`new Date().toISOString()`) | always provided (never omitted — an omitted preset key whose template token is `{{prompts.captured_at}}` resolves to empty, not to `{{now}}`); the manifest's `frontmatter_template` changes `captured_at` from `{{now.YYYY-MM-DDTHH:mm:ssZ}}` to `{{prompts.captured_at}}` so the paste's own capture time survives when present |
 | `word_count` | `parsed.frontmatter.word_count` \|\| `0` | new preset key |
 | `status` | `parsed.frontmatter.status` \|\| `"unread"` | new preset key (manifest already defaults `status: unread` in `frontmatter_template`; only overridden if the paste sets a different one) |
 | `summary` | `parsed.frontmatter.summary` \|\| `""` | new preset key |
