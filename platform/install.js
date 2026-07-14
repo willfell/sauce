@@ -1294,6 +1294,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDepth2ParentSectionHeal(tp, mech, variables, history, git); // NEW (folder-is-truth part 2) — repairs drifted parent_section frontmatter on existing depth-2 section-hub notes: rewrites to the PARENT FOLDER's section-hub display name in wikilink form (matches the + New Sub-Section entity-create template). Idempotent (skip when already correct), .sauce-backup before write, per-note try/catch, never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
+  await disableSmartConnectionsOnce(tp, history, git); // NEW — sentinel-guarded one-time removal of the smart-connections plugin id from community-plugins.json; a later deliberate re-enable by the user is never fought.
   await applyDailyHomeChromeBarHeal(tp, mech, variables, history, git); // NEW (Daily/Home chrome-bar adoption) — forward-migrates existing Daily (cowork-daily) + Home notes from the legacy SpaceNavButtons chrome to the new DailyChromeBar/HomeChromeBar block. MUST run AFTER applyHomeScaffoldHeal so a freshly-scaffolded Home.md is in scope. Doubly-guarded (idempotent per-bar + type-gated on cowork-daily for dailies); .sauce-backup before write; never throws.
   await applyHomeHotkeyRemapHeal(tp, history, git); // NEW — retargets Cmd+[ from daily-notes to sauce-home:open on already-installed vaults
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
@@ -13727,6 +13728,46 @@ async function applyHomeHotkeyRemapHeal(tp, history, git) {
   }
 }
 
+// _removePluginOnce — sentinel-guarded one-time removal of a plugin id from
+// .obsidian/community-plugins.json. Runs exactly once per vault (marker under
+// .obsidian/.sauce-heals/<sentinel>), so a later deliberate re-enable by the
+// user is never fought. Backs up the prior file to a timestamped .sauce-backup/.
+// Never throws; malformed/absent community-plugins.json → writes sentinel + returns.
+async function _removePluginOnce(tp, history, git, pluginId, sentinelName, step) {
+  const adapter = tp.app.vault.adapter;
+  const sentinel = ".obsidian/.sauce-heals/" + sentinelName;
+  try { if (await adapter.exists(sentinel)) return; } catch (_e) {}
+  const writeSentinel = async () => {
+    try { await adapter.mkdir(".obsidian/.sauce-heals"); } catch (_e) {}
+    try { await adapter.write(sentinel, new Date().toISOString() + "\n"); } catch (_e) {}
+  };
+  const cp = ".obsidian/community-plugins.json";
+  let raw;
+  try { if (!(await adapter.exists(cp))) { await writeSentinel(); return; } raw = await adapter.read(cp); }
+  catch (_e) { return; }
+  let arr;
+  try { arr = JSON.parse(raw); } catch (_e) { return; } // malformed → leave untouched, retry next run
+  if (!Array.isArray(arr)) return;
+  if (arr.includes(pluginId)) {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    try { await adapter.mkdir(".sauce-backup/community-plugins"); } catch (_e) {}
+    try { await adapter.write(".sauce-backup/community-plugins/community-plugins.json." + ts, raw); } catch (_e) {}
+    const next = arr.filter((id) => id !== pluginId);
+    try { await adapter.write(cp, JSON.stringify(next, null, 2) + "\n"); }
+    catch (_e) { return; } // write failed → don't set sentinel, retry next run
+    if (history) history.push({
+      event: "info", step, removed: pluginId,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+  await writeSentinel();
+}
+
+async function disableSmartConnectionsOnce(tp, history, git) {
+  return _removePluginOnce(tp, history, git, "smart-connections", "sc-disabled-once", "sc_disabled_once");
+}
+
 // applyReaderScaffoldHeal — ungated scaffold + chrome heal for the singleton
 // spice/reader/Reader.md reading-queue hub note. Runs every install (NOT
 // version-gated, per the migration-lifecycle rule, because it materializes +
@@ -21887,6 +21928,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyRuleFragment = applyRuleFragment;
     module.exports.applyBundledPlugin = applyBundledPlugin;
     module.exports.resetSourceContributions = resetSourceContributions;
+    // sentinel-guarded one-time plugin-removal heals — expose for
+    // run-helper-cases.js (disableSmartConnectionsOnce / retireOldClaudianOnce).
+    // Pure additive; does not affect the function-as-default export.
+    module.exports.disableSmartConnectionsOnce = disableSmartConnectionsOnce;
     // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
     // run-helper-cases.js. Pure additive; does not affect the function-as-default export.
     module.exports.materializeSkills = materializeSkills;

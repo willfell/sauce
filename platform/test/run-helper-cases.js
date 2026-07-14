@@ -15107,6 +15107,27 @@ async function caseHCV0128FinancePlanning() {
     (man.rule_fragments || []).some(r => r && r.fragment && r.fragment.naming_pattern === "^Savings-.+\\.md$"));
 }
 
+async function caseDisableSmartConnectionsOnce() {
+  console.log("\n--- Case: disableSmartConnectionsOnce ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
+    const cp = path.join(dir, ".obsidian/community-plugins.json");
+    fs.writeFileSync(cp, JSON.stringify(["dataview", "smart-connections", "claudian"], null, 2));
+    const tp = makeTpStub(dir);
+    const platformInstall = require(CANONICAL_INSTALLER);
+    await platformInstall.disableSmartConnectionsOnce(tp, [], {});
+    let arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("sc removed", !arr.includes("smart-connections"), JSON.stringify(arr));
+    assertTrue("dataview preserved", arr.includes("dataview"), JSON.stringify(arr));
+    assertTrue("sentinel written", fs.existsSync(path.join(dir, ".obsidian/.sauce-heals/sc-disabled-once")), "no sentinel");
+    // idempotent + a later deliberate re-enable survives
+    fs.writeFileSync(cp, JSON.stringify(["dataview", "smart-connections"], null, 2));
+    await platformInstall.disableSmartConnectionsOnce(tp, [], {});
+    arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("re-enabled sc survives after sentinel", arr.includes("smart-connections"), JSON.stringify(arr));
+  });
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -24196,6 +24217,9 @@ type: cowork-microscope
   await caseV01154BackfillBlockFormStillWorks();
 
   await caseEditorWidthPatchedAssets();
+
+  // sentinel-guarded one-time plugin-removal heals
+  await caseDisableSmartConnectionsOnce();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
