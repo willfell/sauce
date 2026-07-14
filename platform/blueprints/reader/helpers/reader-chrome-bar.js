@@ -7,9 +7,9 @@
  * buttons) into the ⋯ overflow menu — reuses
  * ReaderArticleActions.statusTransitions(status) and ._setStatus(path, next)
  * directly, no new transition logic. The hub's
- * "+ New article" button dispatches to the same EntityCreate call
- * ReaderArticleActions.renderCreateRow already uses (which stays active,
- * unchanged, for ReaderQueue). Instance methods; never-throw; cold-load-safe.
+ * "+ New article" nav button now opens ReaderArticlePaste.open (the paste
+ * dialog), falling back to EntityCreate.create; renderCreateRow is removed.
+ * Instance methods; never-throw; cold-load-safe.
  */
 class ReaderChromeBar {
   get ICON() {
@@ -74,9 +74,12 @@ class ReaderChromeBar {
       },
       dispatch: (dv, ctx, id) => {
         if (id === "new-article") {
+          if (customJS && customJS.ReaderArticlePaste && typeof customJS.ReaderArticlePaste.open === "function") {
+            customJS.ReaderArticlePaste.open(dv); return;
+          }
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
             customJS.EntityCreate.create({ instance: "reader-article", dv });
-          } else if (typeof Notice === "function") { new Notice("ReaderChromeBar: EntityCreate unavailable — reinstall reader blueprint.", 6000); }
+          } else if (typeof Notice === "function") { new Notice("ReaderChromeBar: create unavailable — reinstall reader blueprint.", 6000); }
           return;
         }
         if (id === "open-article") {

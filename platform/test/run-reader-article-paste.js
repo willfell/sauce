@@ -147,20 +147,23 @@ const CLIP = [
 }
 
 // ---------------------------------------------------------------------------
-// HC-READER-PASTE-7 — validateTitle mirrors manifest safe-filename prompt.
+// HC-READER-PASTE-7 — validateTitle: required + non-empty-after-sanitize only.
 // ---------------------------------------------------------------------------
 {
-  ok('HC-READER-PASTE-7a empty/whitespace title → error',
+  ok('HC-READER-PASTE-7a empty/whitespace/null title → error',
      typeof ReaderArticlePaste.validateTitle('') === 'string' &&
      typeof ReaderArticlePaste.validateTitle('   ') === 'string' &&
      typeof ReaderArticlePaste.validateTitle(null) === 'string');
-  ok('HC-READER-PASTE-7b filesystem-unsafe chars → error',
-     typeof ReaderArticlePaste.validateTitle('a/b') === 'string' &&
-     typeof ReaderArticlePaste.validateTitle('bad:name') === 'string' &&
-     typeof ReaderArticlePaste.validateTitle('q?mark') === 'string');
+  ok('HC-READER-PASTE-7b filesystem chars are ALLOWED (valid) now',
+     ReaderArticlePaste.validateTitle('a/b') === null &&
+     ReaderArticlePaste.validateTitle('Race Condition in hyper HTTP/1 Implementation') === null &&
+     ReaderArticlePaste.validateTitle('bad:name') === null);
   ok('HC-READER-PASTE-7c ordinary title → null (valid)',
      ReaderArticlePaste.validateTitle('The Bitter Lesson') === null &&
-     ReaderArticlePaste.validateTitle('A note, punctuation!') === null);
+     ReaderArticlePaste.validateTitle('A note, with punctuation!') === null);
+  ok('HC-READER-PASTE-7d all-invalid title (sanitizes to empty) → error',
+     typeof ReaderArticlePaste.validateTitle('///') === 'string' &&
+     typeof ReaderArticlePaste.validateTitle(':*?') === 'string');
 }
 
 // ---------------------------------------------------------------------------
