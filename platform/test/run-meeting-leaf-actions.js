@@ -111,16 +111,22 @@ const meetTemplate = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/m
 ok('HC-V01330-MLA-DVGUARD-C Meeting.md template has no unguarded dv.current().file.path',
   !/dv\.current\(\)\.file\.path/.test(meetTemplate));
 
-// MTU-1 — the "Agenda" section was removed from the meeting template (card:
-// Meeting Template Update). New meetings go Attendees → Notes → Action Items →
-// Tasks with no Agenda SectionLabel. Template-only per the card — existing
-// meetings keep their Agenda (the H2->SectionLabel heal still recognizes it).
+// MTU-1 — the "Agenda" AND "Action Items" sections were removed from the meeting
+// template (meetings blueprint overhaul). Task-entity (TaskMeetingList) fully
+// supersedes Action Items — a live Action Items SectionLabel + dead
+// <!-- ACTION_ITEMS_MARKER --> caused tasks to appear twice. New meetings go
+// Attendees → Notes → Tasks with NO Agenda and NO Action Items SectionLabel.
+// The install heal (applyMeetingChromeModernizeHeal) removes both from existing
+// meeting notes (folding any Agenda content into Notes).
 ok('MTU-1 Meeting.md template no longer renders an "Agenda" SectionLabel',
   !/class:\s*"SectionLabel"[^`]*text:\s*"Agenda"/.test(meetTemplate));
-ok('MTU-1 Meeting.md template keeps Attendees / Notes / Action Items / Tasks SectionLabels',
+ok('MTU-1 Meeting.md template no longer renders an "Action Items" SectionLabel',
+  !/class:\s*"SectionLabel"[^`]*text:\s*"Action Items"/.test(meetTemplate));
+ok('MTU-1 Meeting.md template has no dead ACTION_ITEMS_MARKER',
+  !/ACTION_ITEMS_MARKER/.test(meetTemplate));
+ok('MTU-1 Meeting.md template keeps Attendees / Notes / Tasks SectionLabels',
   /class:\s*"SectionLabel"[^`]*text:\s*"Attendees"/.test(meetTemplate) &&
   /class:\s*"SectionLabel"[^`]*text:\s*"Notes"/.test(meetTemplate) &&
-  /class:\s*"SectionLabel"[^`]*text:\s*"Action Items"/.test(meetTemplate) &&
   /class:\s*"SectionLabel"[^`]*text:\s*"Tasks"/.test(meetTemplate));
 
 // MLA-DIV — MeetingLeafActions owns its own <hr> dividers (wiki methodology): a

@@ -450,7 +450,7 @@ async function caseMMH2HubFilenameAndFolder() {
     if (m.__error) { _failed++; console.log("    FAIL MMH2: unavailable"); return; }
     try {
         const entry = m.plan("Timestamps/MeetingHubs/2026-01-06-Meetings.md", "", {});
-        assertEqual(entry.tgt, "spice/meetings/hubs/2026/01-January/Meetings-2026-01-06.md", "MMH2 tgt path");
+        assertEqual(entry.tgt, "spice/meetings/hubs/_archive/2026/01-January/Meetings-2026-01-06.md", "MMH2 tgt path");
     } catch (e) { _failed++; console.log("    FAIL MMH2: " + e.message); }
 }
 

@@ -252,6 +252,18 @@ ok("EC-DAY-6 Sticky-{{...day|today}}- fills today when absent (no double-dash)",
 ok("EC-DAY-7 plain {{...day}} STILL === '' when absent (no regression to existing token)",
     inst._substitute("{{current_file.frontmatter.day}}", baseCtx()) === "");
 
+// 7f. {{prompts.<key>|or-now:<moment-format>}} — an OPTIONAL prompt that falls
+// back to ctx.now when the user leaves it blank (meetings "+ New Meeting" date).
+ok("EC-ORNOW-1 {{prompts.datetime|or-now:FMT}} returns the typed prompt value (trimmed passthrough)",
+    inst._substitute("{{prompts.datetime|or-now:YYYY-MM-DDTHH:mm:ssZ}}", baseCtx({ prompts: { datetime: "2026-07-13 14:30" } })) === "2026-07-13 14:30");
+ok("EC-ORNOW-2 {{prompts.datetime|or-now:FMT}} falls back to ctx.now.format(FMT) when blank",
+    inst._substitute("{{prompts.datetime|or-now:YYYY-MM-DD}}", baseCtx({ prompts: { datetime: "" } })) === "2026-05-14");
+ok("EC-ORNOW-3 {{prompts.datetime|or-now:FMT}} falls back to ctx.now when key undefined",
+    inst._substitute("{{prompts.datetime|or-now:YYYY-MM-DD}}", baseCtx()) === "2026-05-14");
+ok("EC-ORNOW-4 {{now.YYYY-MM-DD}} + {{prompts.title|lowercase}} still work (rule-order regression)",
+    inst._substitute("{{now.YYYY-MM-DD}}", baseCtx()) === "2026-05-14"
+    && inst._substitute("{{prompts.title|lowercase}}", baseCtx({ prompts: { title: "HELLO" } })) === "hello");
+
 // 7e. The shipped instances are consistent + creatable from a dateless context
 // (Home + dropdown): sticky-note uses the |today fallback; meeting derives dates from
 // {{now...}}/date-patterns (no current_file dependency), so it already works.
