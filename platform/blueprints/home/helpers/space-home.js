@@ -8,8 +8,8 @@
  *                            K meetings · J done"; zeros hidden; all-zero →
  *                            "Clear day — nothing scheduled"),
  *   3. a QUICK-CAPTURE band — an inline "Jot a task…" input + Add (one-gesture
- *                            task create, no modal), then 3 one-tap buttons:
- *                            ＋ Meeting, ＋ Sticky Note, Open today's daily,
+ *                            task create, no modal), then one-tap buttons:
+ *                            ＋ Meeting, ＋ Sticky Note, ＋ Article,
  *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
@@ -38,7 +38,7 @@
  * Static API (Node-testable, pure):
  *   SpaceHome._greeting(hour)          → "Good morning" | "Good afternoon" | "Good evening"
  *   SpaceHome._humanDate(iso, todayIso)→ "Thursday, Jul 2, 2026 · Today" (pure day-math)
- *   SpaceHome._captureSpec()           → [{ key, label, icon }, …] (the 3 capture buttons)
+ *   SpaceHome._captureSpec()           → [{ key, label, icon }, …] (the capture buttons)
  *   SpaceHome._glanceChips(counts)     → { empty, text } | { empty:false, chips:[{n,label,cls}] }
  */
 class SpaceHome {
@@ -193,7 +193,7 @@ class SpaceHome {
   }
 
   /**
-   * The 3 quick-capture BUTTONS, in fixed DOM order. Each entry:
+   * The quick-capture BUTTONS, in fixed DOM order. Each entry:
    *   { key, label, icon }  — icon is an inline lucide-style SVG string.
    * The dispatch per key is wired in render() (kept out of the spec so the spec
    * stays pure + Node-testable).
@@ -201,7 +201,7 @@ class SpaceHome {
    * NOTE: the `todo` entry was REMOVED — task capture is now an inline
    * "Jot a task…" input + Add button (built in render, wired to
    * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
-   * 3 remaining buttons: ＋ Meeting, ＋ Sticky Note, Open today's daily.
+   * remaining buttons: ＋ Meeting, ＋ Sticky Note, ＋ Article.
    */
   static _captureSpec() {
     const svg = (inner) =>
@@ -209,6 +209,7 @@ class SpaceHome {
     return [
       { key: "meeting", label: "＋ Meeting", icon: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`) },
       { key: "sticky-note", label: "＋ Sticky Note", icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
+      { key: "article", label: "＋ Article", icon: svg(`<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>`) },
     ];
   }
 
@@ -560,6 +561,7 @@ class SpaceHome {
    * of the click handler. Grep-verified entrypoints:
    *   meeting   → customJS.EntityCreate.create({ instance:'meeting', dv })
    *   sticky-note → customJS.EntityCreate.create({ instance:'sticky-note', dv })
+   *   article   → customJS.ReaderArticlePaste.open(dv)
    *   openDaily → app.commands.executeCommandById("daily-notes")
    * (The former `todo` button is gone — task capture is now the inline
    * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
@@ -587,6 +589,14 @@ class SpaceHome {
       if (key === "openDaily") {
         if (appRef && appRef.commands && typeof appRef.commands.executeCommandById === "function") {
           appRef.commands.executeCommandById("daily-notes");
+        }
+        return;
+      }
+      if (key === "article") {
+        if (cjs && cjs.ReaderArticlePaste && typeof cjs.ReaderArticlePaste.open === "function") {
+          cjs.ReaderArticlePaste.open(dv);
+        } else if (typeof Notice === "function") {
+          new Notice("Reader paste dialog unavailable — reinstall reader blueprint.", 6000);
         }
         return;
       }
