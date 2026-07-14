@@ -6,8 +6,9 @@
  * Renders on a `type: to-do` daily note (invoked via customjs-guard, so its
  * entry method is the instance `render(dv)`). It live-queries the task notes
  * under `spice/tasks/` (open only, excluding _done/ + _trash/), partitions them
- * into a "Today" band (rendered FIRST) and an "Overdue / Carryover" band, and
- * draws each task as a row with a functional done-checkbox + metadata chips.
+ * into a "Today" band (rendered FIRST), an "Overdue / Carryover" band, and an
+ * "Upcoming" band (future-due, rendered LAST), and draws each task as a row
+ * with a functional done-checkbox + metadata chips.
  * Task CREATION lives in ToDoLeafActions' single nav-button "New Task" (this
  * widget renders no create button of its own). Every mutation is DELEGATED to
  * TaskDialog — the widget only READS the task notes; it never writes one
@@ -31,7 +32,7 @@
  * the statics, load via `new Function(src + "\nreturn TaskTodayList;")()`.
  *
  * Static API (Node-testable, pure):
- *   TaskTodayList.buildBands(parsedTasks, todayStr) → { today, overdue }
+ *   TaskTodayList.buildBands(parsedTasks, todayStr) → { today, overdue, upcoming }
  *
  * Instance API (browser-side):
  *   TaskTodayList.render(dv)   ← the customjs-guard entry point
@@ -61,17 +62,17 @@ class TaskTodayList {
      * object with `{ due, status, project_slug, source }`) relative to
      * `todayStr` (YYYY-MM-DD). Open-only, and PERSONAL-daily-only — a task that
      * belongs to another daily section is EXCLUDED so it doesn't render twice:
-     *   today   — status "open", due === todayStr, NO project, NOT meeting
-     *   overdue — status "open", due < todayStr, NO project, NOT meeting
+     *   today    — status "open", due === todayStr, NO project, NOT meeting
+     *   overdue  — status "open", due < todayStr, NO project, NOT meeting
+     *   upcoming — status "open", due > todayStr, NO project, NOT meeting
      * (string compare of zero-padded ISO dates is chronologically correct.)
      * A task WITH a project_slug renders in its "Project Tasks" section
      * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
      * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
      * task-notes, so excluding them here loses nothing. A task WITH a
      * parent_task is a subtask and renders in its parent's "Subtasks" section
-     * instead, so it is excluded here too. Future-scheduled +
-     * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
-     * input (→ empty bands); never throws.
+     * instead, so it is excluded here too. Unscheduled open tasks land in
+     * Today. Tolerates a null/non-array input (→ empty bands); never throws.
      */
     static buildBands(parsedTasks, todayStr) {
         const PRIO_RANK = { highest: 4, high: 3, medium: 2, low: 1 };
@@ -79,6 +80,7 @@ class TaskTodayList {
 
         const today = [];
         const overdue = [];
+        const upcoming = [];
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
@@ -90,6 +92,7 @@ class TaskTodayList {
             if (!due) { today.push(t); continue; }
             if (due === todayStr) today.push(t);
             else if (due < todayStr) overdue.push(t);
+            else upcoming.push(t);
         }
         const sortBand = (arr) => {
             arr.sort((a, b) => {
@@ -106,14 +109,23 @@ class TaskTodayList {
         };
         sortBand(overdue);
         sortBand(today);
-        return { today: today, overdue: overdue };
+        // Upcoming is sorted purely soonest-first (chronological), not by
+        // priority — its whole purpose is "what's coming next," so date order
+        // is the useful order here (unlike Today/Overdue, which are same-day
+        // buckets where priority is the more useful tiebreak).
+        upcoming.sort((a, b) => {
+            const ad = a.due || '', bd = b.due || '';
+            if (ad !== bd) return ad < bd ? -1 : 1;
+            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
+        });
+        return { today: today, overdue: overdue, upcoming: upcoming };
     }
 
     // ---------- Instance / browser render ----------
 
     /**
      * Entry point invoked by customjs-guard: `render(dv)`. Live-queries the task
-     * notes, partitions them, and draws the two bands. Fully guarded — returns
+     * notes, partitions them, and draws the three bands. Fully guarded — returns
      * quietly on cold-load (no throw), and each row is wrapped in try/catch so
      * one bad task note can't break the whole list.
      */
@@ -193,6 +205,12 @@ class TaskTodayList {
         // Overdue / Carryover band below (only when non-empty).
         if (bands.overdue.length) {
             this._renderBand(wrap, 'Overdue / Carryover', bands.overdue, null);
+        }
+
+        // Upcoming band LAST — future-due personal tasks with no other home
+        // on this daily (only when non-empty).
+        if (bands.upcoming.length) {
+            this._renderBand(wrap, 'Upcoming', bands.upcoming, null);
         }
     }
 
