@@ -43,6 +43,11 @@
       "path": "mechanisms/editor-width"
     },
     {
+      "name": "agent-embed",
+      "version": "0.1.0",
+      "path": "mechanisms/agent-embed"
+    },
+    {
       "name": "customjs-guard",
       "version": "1.0.0",
       "path": "mechanisms/customjs-guard"
