@@ -163,6 +163,7 @@ class ReaderArticlePaste {
   // EC.create({instance:'reader-article', dv, presetPrompts}). Pasting into the
   // textarea auto-fills empty Title/URL from the parsed frontmatter.
   open(dv) {
+   try {
     const EC = window.customJS && window.customJS.EntityCreate;
     if (!EC || typeof EC.create !== 'function') {
       try { new Notice('ReaderArticlePaste: EntityCreate mechanism unavailable.', 8000); } catch (_e) {}
@@ -254,5 +255,8 @@ class ReaderArticlePaste {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) cancelBtn.click(); });
     document.body.appendChild(overlay);
     setTimeout(() => paste.focus(), 0);
+   } catch (_e) {
+     try { new Notice('ReaderArticlePaste: dialog error.', 6000); } catch (_e2) {}
+   }
   }
 }
