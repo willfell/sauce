@@ -70,10 +70,12 @@ const cfg = inst._config();
 // RCB-DISPATCH
 {
   const calls = [];
+  const paste = [];
   const prevCJS = global.customJS;
   const prevWindow = global.window;
   global.window = { open: (url) => calls.push({ openUrl: url }) };
   global.customJS = {
+    ReaderArticlePaste: { open: () => paste.push(true) },
     EntityCreate: { create: (o) => calls.push({ create: o.instance }) },
     ReaderArticleActions: { _setStatus: (p, next) => calls.push({ setStatus: p + ':' + next }) },
   };
@@ -83,9 +85,22 @@ const cfg = inst._config();
   cfg.dispatch(dv, { context: 'reader-article', path: 'spice/reader/Some Article.md' }, 'status-archived');
   global.customJS = prevCJS;
   global.window = prevWindow;
-  ok('RCB-DISPATCH-1 new-article → EntityCreate.create(instance:"reader-article")', calls.some(c => c.create === 'reader-article'));
+  ok('RCB-DISPATCH-1 new-article → ReaderArticlePaste.open (not EntityCreate)',
+    paste.length === 1 && !calls.some(c => c.create === 'reader-article'));
   ok('RCB-DISPATCH-2 open-article → window.open(url)', calls.some(c => c.openUrl === 'https://x.com/a'));
   ok('RCB-DISPATCH-3 status-archived → ReaderArticleActions._setStatus(path, "archived")', calls.some(c => c.setStatus === 'spice/reader/Some Article.md:archived'));
+}
+// RCB-DISPATCH-1b — no ReaderArticlePaste → falls back to EntityCreate.create.
+{
+  const calls = [];
+  const prevCJS = global.customJS;
+  global.customJS = {
+    EntityCreate: { create: (o) => calls.push({ create: o.instance }) },
+  };
+  cfg.dispatch({}, { context: 'reader-hub' }, 'new-article');
+  global.customJS = prevCJS;
+  ok('RCB-DISPATCH-1b new-article without paste → EntityCreate.create(instance:"reader-article")',
+    calls.some(c => c.create === 'reader-article'));
 }
 // RCB-DEST
 {
