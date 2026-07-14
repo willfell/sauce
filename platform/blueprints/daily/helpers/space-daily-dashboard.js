@@ -215,6 +215,27 @@ class SpaceDailyDashboard {
   }
 
   /**
+   * All reader-articles currently in the "reading" state, regardless of when
+   * last touched — the daily Activity panel always surfaces in-progress reading
+   * (unioned into the activity page set by render). Pure + Node-testable
+   * (DataArray .where().array() OR plain array). Never throws; missing folder → [].
+   */
+  static selectReadingArticles(dv) {
+    try {
+      if (!dv || typeof dv.pages !== "function") return [];
+      const src = dv.pages('"spice/reader"');
+      const isReading = (p) => p && p.type === "reader-article" &&
+        String(p.status == null ? "" : p.status).trim().toLowerCase() === "reading";
+      if (src && typeof src.where === "function") {
+        const out = src.where(isReading);
+        return (out && typeof out.array === "function") ? out.array() : Array.from(out || []);
+      }
+      const arr = Array.isArray(src) ? src : Array.from(src || []);
+      return arr.filter(isReading);
+    } catch (_e) { return []; }
+  }
+
+  /**
    * TASK 10: SELECT the trips atlas notes (type:"trip" under spice/trips) whose
    * start_date falls within [today, today + horizonDays] so the daily/home can
    * surface an "Upcoming trips" panel. Pure + Node-testable (dv-stub via the

@@ -310,6 +310,75 @@ function loadActivityFeed(windowShim) {
     assert(np && np.packTotal === 0, 'expected No Pack packTotal 0, got ' + (np && np.packTotal));
   });
 
+  // ── TASK 6/7: reader-article in Activity ─────────────────────────────
+  // DataArray-ish dv scoped to "spice/reader" (mirror tripsDv: .where(fn).array()).
+  function readerDv(items) {
+    function chain(arr) {
+      const c = {
+        _arr: arr.slice(),
+        where(fn) { return chain(this._arr.filter(fn)); },
+        array() { return this._arr.slice(); },
+      };
+      c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+      Object.defineProperty(c, 'length', { get() { return c._arr.length; } });
+      return c;
+    }
+    return { pages(q) { return chain(q === '"spice/reader"' ? items : []); } };
+  }
+
+  await ok('SDD-READER-1 selectReadingArticles keeps only reader-article status:reading (ci)', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dvStub = readerDv([
+      { type: 'reader-article', status: 'reading', file: { name: 'R1', path: 'spice/reader/R1.md' } },
+      { type: 'reader-article', status: 'unread', file: { name: 'U1', path: 'spice/reader/U1.md' } },
+      { type: 'reader-article', status: 'archived', file: { name: 'A1', path: 'spice/reader/A1.md' } },
+      { type: 'reader-article', status: 'READING', file: { name: 'R2', path: 'spice/reader/R2.md' } },
+      { type: 'wiki-page', status: 'reading', file: { name: 'NotReader', path: 'spice/reader/NotReader.md' } },
+    ]);
+    const rows = Dash.selectReadingArticles(dvStub);
+    const names = rows.map(p => p.file.name).sort();
+    assert(names.length === 2, 'expected 2 reading, got ' + names.length);
+    assert(names[0] === 'R1' && names[1] === 'R2', 'expected [R1,R2], got ' + JSON.stringify(names));
+  });
+
+  await ok('SDD-READER-2 selectReadingArticles safe on null / {} → []', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    assert(Dash.selectReadingArticles(null).length === 0, 'expected [] for null');
+    assert(Dash.selectReadingArticles({}).length === 0, 'expected [] for {}');
+  });
+
+  await ok('SDD-READER-3 reader-article wired into Activity opts + colors', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    assert(dash._DEFAULT_DASHBOARD_BLUEPRINTS.includes('reader-article'),
+      'expected _DEFAULT_DASHBOARD_BLUEPRINTS to include reader-article');
+    assert(typeof dash._BLUEPRINT_COLORS['reader-article'] === 'string' &&
+      dash._BLUEPRINT_COLORS['reader-article'].length > 0,
+      'expected _BLUEPRINT_COLORS[reader-article] non-empty string');
+    const opts = dash._buildActivityOpts(readerDv([]), '2026-07-13', { square: '', activity: '' });
+    assert(Array.isArray(opts.tsKeys) && opts.tsKeys.includes('captured_at'),
+      'expected tsKeys to include captured_at, got ' + JSON.stringify(opts.tsKeys));
+    assert(opts.groupLabels['reader-article'] === 'Reader',
+      'expected groupLabels[reader-article] === Reader, got ' + opts.groupLabels['reader-article']);
+  });
+
+  await ok('SDD-READER-4 _renderActivityMeta shows status word for reader-article', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    const metaText = (page) => {
+      const el = makeDashEl();
+      dash._renderActivityMeta(page, el, '', '');
+      return el.textContent;
+    };
+    assert(metaText({ type: 'reader-article', status: 'reading', file: { mtime: 0 } }).includes('Reading'),
+      'expected reading meta to contain Reading');
+    assert(metaText({ type: 'reader-article', status: 'archived', file: { mtime: 0 } }).includes('Read'),
+      'expected archived meta to contain Read');
+    const proj = metaText({ type: 'project', file: { mtime: 0 } });
+    assert(!proj.includes('Reading') && !proj.includes('Added'),
+      'expected non-reader meta to not inject reader words, got ' + proj);
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });
