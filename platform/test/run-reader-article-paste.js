@@ -146,6 +146,23 @@ const CLIP = [
   ok('HC-READER-PASTE-6 adversarial input never throws', threw === false);
 }
 
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-7 — validateTitle mirrors manifest safe-filename prompt.
+// ---------------------------------------------------------------------------
+{
+  ok('HC-READER-PASTE-7a empty/whitespace title → error',
+     typeof ReaderArticlePaste.validateTitle('') === 'string' &&
+     typeof ReaderArticlePaste.validateTitle('   ') === 'string' &&
+     typeof ReaderArticlePaste.validateTitle(null) === 'string');
+  ok('HC-READER-PASTE-7b filesystem-unsafe chars → error',
+     typeof ReaderArticlePaste.validateTitle('a/b') === 'string' &&
+     typeof ReaderArticlePaste.validateTitle('bad:name') === 'string' &&
+     typeof ReaderArticlePaste.validateTitle('q?mark') === 'string');
+  ok('HC-READER-PASTE-7c ordinary title → null (valid)',
+     ReaderArticlePaste.validateTitle('The Bitter Lesson') === null &&
+     ReaderArticlePaste.validateTitle('A note, punctuation!') === null);
+}
+
 const passed = results.filter(([, p]) => p).length;
 const total = results.length;
 console.log(`\n${passed}/${total} passed`);

@@ -113,4 +113,19 @@ class ReaderArticlePaste {
     }
     return { highlights: highlights.trim(), content: contentRaw.trim() };
   }
+
+  // Mirror the manifest's `title` prompt: required + safe-filename. Returns an
+  // error string when invalid, null when OK. (entity-create's presetPrompts
+  // short-circuit skips its own validation for preset keys, so the dialog must
+  // enforce this itself before EC.create.)
+  static validateTitle(title) {
+    if (typeof title !== 'string' || title.trim() === '') {
+      return 'Title is required.';
+    }
+    // Reject path/filesystem-hostile characters (safe-filename).
+    if (/[\\/:*?"<>|]/.test(title)) {
+      return 'Title cannot contain \\ / : * ? " < > |';
+    }
+    return null;
+  }
 }
