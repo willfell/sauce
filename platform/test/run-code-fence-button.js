@@ -22,10 +22,14 @@ function assertTrue(label, cond, detail) {
 
 // ── Load CodeFenceButton from source via new Function (customJS scope stubs).
 const src = fs.readFileSync(SRC_PATH, "utf8");
-let CFB;
+let CFB, cfb;
 try {
   CFB = new Function("app", "customJS", "Notice", "window", src + "\nreturn CodeFenceButton;")(
     undefined, undefined, function () {}, undefined);
+  // customJS exposes each class as an INSTANCE (customJS.CodeFenceButton === new
+  // CodeFenceButton()), so the runtime reaches methods via an instance — mirror
+  // that here. A static method would be undefined on the instance at runtime.
+  cfb = new CFB();
 } catch (e) { fail++; failures.push("CFB-P0: source loads via new Function\n  " + (e && e.message)); }
 
 // Pass 1 — manifest sanity
@@ -40,46 +44,55 @@ assertTrue("CFB-M5: init source parses", (() => {
   catch (_e) { return false; }
 })());
 
+// Pass 1b — instance-method contract. customJS hands consumers an INSTANCE, so
+// every public method MUST be an instance method; a `static` method would be
+// undefined on customJS.CodeFenceButton at runtime (the v0.2.1 "unavailable" bug).
+console.log("\n--- Pass 1b: instance-method contract ---");
+for (const meth of ["computeFence", "wrapSelection", "buttonState", "wrapActiveEditor"]) {
+  assertTrue(`CFB-INST-${meth}: reachable on instance`, cfb && typeof cfb[meth] === "function");
+  assertTrue(`CFB-INST-${meth}: NOT static (undefined on class)`, typeof CFB[meth] === "undefined");
+}
+
 // Pass 2 — computeFence
 console.log("\n--- Pass 2: computeFence ---");
-assertEq("CFB-1: no backticks → 4", CFB.computeFence("hello world"), "````");
-assertEq("CFB-2: contains 3 → 4", CFB.computeFence("a ``` b"), "````");
-assertEq("CFB-3: contains 4 → 5", CFB.computeFence("x ```` y"), "`````");
-assertEq("CFB-4: contains 5 → 6", CFB.computeFence("`````"), "``````");
+assertEq("CFB-1: no backticks → 4", cfb.computeFence("hello world"), "````");
+assertEq("CFB-2: contains 3 → 4", cfb.computeFence("a ``` b"), "````");
+assertEq("CFB-3: contains 4 → 5", cfb.computeFence("x ```` y"), "`````");
+assertEq("CFB-4: contains 5 → 6", cfb.computeFence("`````"), "``````");
 
 console.log("\n--- Pass 3: wrapSelection ---");
 // Full-line selection: no extra leading/trailing newline; fence on its own line.
 assertEq("CFB-5: full-line wrap",
-  CFB.wrapSelection("x", { atLineStart: true, atLineEnd: true }),
+  cfb.wrapSelection("x", { atLineStart: true, atLineEnd: true }),
   { text: "````\nx\n````", cursor: "````\nx\n````".length });
 // Mid-line selection: leading + trailing newline guard.
 assertEq("CFB-6: mid-line wrap",
-  CFB.wrapSelection("x", { atLineStart: false, atLineEnd: false }),
+  cfb.wrapSelection("x", { atLineStart: false, atLineEnd: false }),
   { text: "\n````\nx\n````\n", cursor: "\n````\nx\n````\n".length });
 // Multiline inner text preserved verbatim.
 assertEq("CFB-7: multiline inner preserved",
-  CFB.wrapSelection("a\nb", { atLineStart: true, atLineEnd: true }).text,
+  cfb.wrapSelection("a\nb", { atLineStart: true, atLineEnd: true }).text,
   "````\na\nb\n````");
 // Empty selection → null (caller no-ops).
-assertEq("CFB-8: empty → null", CFB.wrapSelection("   ", { atLineStart: true, atLineEnd: true }), null);
+assertEq("CFB-8: empty → null", cfb.wrapSelection("   ", { atLineStart: true, atLineEnd: true }), null);
 // Cursor lands after the closing fence.
-const w9 = CFB.wrapSelection("hi", { atLineStart: true, atLineEnd: true });
+const w9 = cfb.wrapSelection("hi", { atLineStart: true, atLineEnd: true });
 assertEq("CFB-9: cursor after block", w9.cursor, w9.text.length);
 
 // Pass 4 — buttonState (mode + selection → enabled/opacity/label). Drives the
 // view-header button's greyed/lit affordance + tooltip.
 console.log("\n--- Pass 4: buttonState ---");
 // Reading (preview) mode: never enabled, discoverable opacity, "switch to editing" hint.
-const bsPrev = CFB.buttonState("preview", true);
+const bsPrev = cfb.buttonState("preview", true);
 assertEq("CFB-10: preview never enabled", bsPrev.enabled, false);
 assertEq("CFB-11: preview label = switch-to-editing", bsPrev.label, "Switch to editing mode to wrap in a code fence");
 assertEq("CFB-12: disabled opacity is discoverable (>=0.5)", bsPrev.opacity >= 0.5, true);
 // Editable, no selection: greyed, "select text" hint.
-const bsNoSel = CFB.buttonState("source", false);
+const bsNoSel = cfb.buttonState("source", false);
 assertEq("CFB-13: editable no-selection disabled", bsNoSel.enabled, false);
 assertEq("CFB-14: editable no-selection label", bsNoSel.label, "Select text to wrap in a code fence");
 // Editable + selection: enabled, full opacity, action label.
-const bsOn = CFB.buttonState("source", true);
+const bsOn = cfb.buttonState("source", true);
 assertEq("CFB-15: editable + selection enabled", bsOn.enabled, true);
 assertEq("CFB-16: enabled opacity = 1", bsOn.opacity, 1);
 assertEq("CFB-17: enabled label = wrap", bsOn.label, "Wrap selection in code fence");
