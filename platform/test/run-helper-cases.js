@@ -15128,6 +15128,22 @@ async function caseDisableSmartConnectionsOnce() {
   });
 }
 
+async function caseRetireOldClaudianOnce() {
+  console.log("\n--- Case: retireOldClaudianOnce ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
+    const cp = path.join(dir, ".obsidian/community-plugins.json");
+    fs.writeFileSync(cp, JSON.stringify(["claudian", "realclaudian", "dataview"], null, 2));
+    const tp = makeTpStub(dir);
+    const platformInstall = require(CANONICAL_INSTALLER);
+    await platformInstall.retireOldClaudianOnce(tp, [], {});
+    const arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("old claudian removed", !arr.includes("claudian"), JSON.stringify(arr));
+    assertTrue("realclaudian preserved", arr.includes("realclaudian"), JSON.stringify(arr));
+    assertTrue("sentinel written", fs.existsSync(path.join(dir, ".obsidian/.sauce-heals/claudian-retired-once")), "no sentinel");
+  });
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -24220,6 +24236,7 @@ type: cowork-microscope
 
   // sentinel-guarded one-time plugin-removal heals
   await caseDisableSmartConnectionsOnce();
+  await caseRetireOldClaudianOnce();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

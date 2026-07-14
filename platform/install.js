@@ -1295,6 +1295,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
   await disableSmartConnectionsOnce(tp, history, git); // NEW — sentinel-guarded one-time removal of the smart-connections plugin id from community-plugins.json; a later deliberate re-enable by the user is never fought.
+  await retireOldClaudianOnce(tp, history, git); // NEW — sentinel-guarded one-time removal of the legacy "claudian" plugin id (migration to realclaudian); exact-id match never touches "realclaudian".
   await applyDailyHomeChromeBarHeal(tp, mech, variables, history, git); // NEW (Daily/Home chrome-bar adoption) — forward-migrates existing Daily (cowork-daily) + Home notes from the legacy SpaceNavButtons chrome to the new DailyChromeBar/HomeChromeBar block. MUST run AFTER applyHomeScaffoldHeal so a freshly-scaffolded Home.md is in scope. Doubly-guarded (idempotent per-bar + type-gated on cowork-daily for dailies); .sauce-backup before write; never throws.
   await applyHomeHotkeyRemapHeal(tp, history, git); // NEW — retargets Cmd+[ from daily-notes to sauce-home:open on already-installed vaults
   await applyReaderScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/reader/Reader.md reading-queue hub note (Breadcrumb/SpaceNavButtons/ReaderQueue chrome, user free-write below a READER_CONTENT marker preserved); backup-first, idempotent, never throws.
@@ -13768,6 +13769,10 @@ async function disableSmartConnectionsOnce(tp, history, git) {
   return _removePluginOnce(tp, history, git, "smart-connections", "sc-disabled-once", "sc_disabled_once");
 }
 
+async function retireOldClaudianOnce(tp, history, git) {
+  return _removePluginOnce(tp, history, git, "claudian", "claudian-retired-once", "claudian_retired_once");
+}
+
 // applyReaderScaffoldHeal — ungated scaffold + chrome heal for the singleton
 // spice/reader/Reader.md reading-queue hub note. Runs every install (NOT
 // version-gated, per the migration-lifecycle rule, because it materializes +
@@ -21932,6 +21937,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // run-helper-cases.js (disableSmartConnectionsOnce / retireOldClaudianOnce).
     // Pure additive; does not affect the function-as-default export.
     module.exports.disableSmartConnectionsOnce = disableSmartConnectionsOnce;
+    module.exports.retireOldClaudianOnce = retireOldClaudianOnce;
     // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
     // run-helper-cases.js. Pure additive; does not affect the function-as-default export.
     module.exports.materializeSkills = materializeSkills;
