@@ -40,6 +40,7 @@ const EXPECTED_IDS = [
   'sauce-project:move-doc',
   'sauce-project:add-workstream',
   'sauce-project:add-link',
+  'sauce-project:archive-toggle',
   'sauce-project:go-board',
   'sauce-project:go-docs',
   'sauce-project:go-map',
@@ -71,11 +72,11 @@ function withApp(overrides, fn) {
   const registered = withApp({}, (reg) => {
     new ProjectCommandsInit().invoke();
   });
-  ok('PCI-1a invoke() registers exactly 10 commands', registered.length === 10);
+  ok('PCI-1a invoke() registers exactly 11 commands', registered.length === 11);
   const ids = registered.map((c) => c.id).sort();
   const expected = EXPECTED_IDS.slice().sort();
   const idsMatch = ids.length === expected.length && ids.every((v, i) => v === expected[i]);
-  ok('PCI-1b the registered id set matches the ten expected ids', idsMatch);
+  ok('PCI-1b the registered id set matches the eleven expected ids', idsMatch);
   const allNamed = registered.every((c) => typeof c.name === 'string' && /^Sauce Project: /.test(c.name));
   ok('PCI-1c every command carries a "Sauce Project: …" name', allNamed);
   const allCallable = registered.every((c) => typeof c.callback === 'function');
@@ -89,7 +90,7 @@ function withApp(overrides, fn) {
     inst.invoke();
     inst.invoke(); // idempotent guard → no new commands
   });
-  ok('PCI-2 a second invoke() is a no-op (still exactly 10)', registered.length === 10);
+  ok('PCI-2 a second invoke() is a no-op (still exactly 11)', registered.length === 11);
 }
 
 // ── PCI-3 — app.commands absent → invoke() does not throw, registers nothing ──

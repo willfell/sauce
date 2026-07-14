@@ -56,7 +56,26 @@ class ProjectChromeBar {
       gear: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h2l.4 2.3a7 7 0 0 1 2 1.2l2.2-.9 1 1.7-1.7 1.5a7 7 0 0 1 0 2.4l1.7 1.5-1 1.7-2.2-.9a7 7 0 0 1-2 1.2L13 20h-2l-.4-2.3a7 7 0 0 1-2-1.2l-2.2.9-1-1.7 1.7-1.5a7 7 0 0 1 0-2.4L3.4 8.3l1-1.7 2.2.9a7 7 0 0 1 2-1.2z"/><circle cx="12" cy="12" r="3"/></svg>`,
       move: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 11 15 14"/></svg>`,
       sort: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>`,
+      archive: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>`,
     };
+  }
+
+  // Pure archive/unarchive frontmatter transform. If not archived: stash the
+  // current status into pre_archive_status and set status='archived'. If
+  // already archived: restore status from pre_archive_status (fallback 'idea')
+  // and clear the stash. Always stamps status_changed_at. Mutates + returns fm.
+  static _applyArchiveToggle(fm, todayStr) {
+    if (!fm || typeof fm !== "object") return fm;
+    if (String(fm.status || "").trim() === "archived") {
+      const prior = String(fm.pre_archive_status || "").trim() || "idea";
+      fm.status = prior;
+      delete fm.pre_archive_status;
+    } else {
+      fm.pre_archive_status = String(fm.status || "idea");
+      fm.status = "archived";
+    }
+    fm.status_changed_at = todayStr;
+    return fm;
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -275,10 +294,13 @@ class ProjectChromeBar {
       case "projects-hub":
         return { primary: { id: "new-project", label: "New Project", icon: ICON.plus },
           overflow: [{ id: "sort", label: "Sort A–Z / Recent", icon: ICON.sort }], leaf: false };
-      case "project-hub":
       case "project-todo":
         return { primary: { id: "new-task", label: "New Task", icon: ICON.plus },
           overflow: [{ id: "new-doc", label: "New Doc", icon: ICON.docs }], leaf: false };
+      case "project-hub":
+        return { primary: { id: "new-task", label: "New Task", icon: ICON.plus },
+          overflow: [{ id: "new-doc", label: "New Doc", icon: ICON.docs },
+            { id: "archive-toggle", label: "Archive / Unarchive project", icon: ICON.archive }], leaf: false };
       case "docs-hub":
         return { primary: { id: "new-doc", label: "New Doc", icon: ICON.plus },
           overflow: [{ id: "new-section", label: "New Section", icon: ICON.docs },
@@ -618,6 +640,25 @@ class ProjectChromeBar {
           // key + the render; toggling the persisted mode then forcing a Dataview
           // refresh reruns its render with the new order.
           this._toggleProjectsSort();
+          return;
+        }
+        case "archive-toggle": {
+          let file = null;
+          try {
+            const cur = dv && typeof dv.current === "function" ? dv.current() : null;
+            const p = (cur && cur.file && cur.file.path) || (ctx && ctx.projectHubPath) || null;
+            if (p && typeof app !== "undefined" && app.vault && app.vault.getAbstractFileByPath) {
+              file = app.vault.getAbstractFileByPath(p);
+            }
+          } catch (_e) {}
+          if (!file) { if (typeof Notice === "function") new Notice("Open the project hub note to archive it.", 5000); return; }
+          try {
+            if (typeof app !== "undefined" && app.fileManager && app.fileManager.processFrontMatter) {
+              const today = new Date().toISOString().split("T")[0];
+              app.fileManager.processFrontMatter(file, fm => ProjectChromeBar._applyArchiveToggle(fm, today));
+              if (typeof Notice === "function") new Notice("Project archive status updated.", 3000);
+            }
+          } catch (_e) {}
           return;
         }
         default:

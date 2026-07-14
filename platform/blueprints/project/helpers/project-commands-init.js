@@ -43,6 +43,7 @@ class ProjectCommandsInit {
       { id: "sauce-project:move-doc", name: "Sauce Project: Move doc", kind: "action", arg: "move-docs" },
       { id: "sauce-project:add-workstream", name: "Sauce Project: Add workstream", kind: "action", arg: "add-workstream" },
       { id: "sauce-project:add-link", name: "Sauce Project: Add link", kind: "action", arg: "add-link" },
+      { id: "sauce-project:archive-toggle", name: "Sauce Project: Archive / Unarchive project", kind: "action", arg: "archive-toggle" },
       { id: "sauce-project:go-board", name: "Sauce Project: Go to Board", kind: "nav", arg: "board" },
       { id: "sauce-project:go-docs", name: "Sauce Project: Go to Docs", kind: "nav", arg: "docs" },
       { id: "sauce-project:go-map", name: "Sauce Project: Go to Map", kind: "nav", arg: "map" },
