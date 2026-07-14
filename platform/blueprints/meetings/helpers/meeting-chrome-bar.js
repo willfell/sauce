@@ -4,6 +4,7 @@ class MeetingChromeBar {
       plus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
       folder: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
       users: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+      link: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
     };
   }
 
@@ -11,7 +12,23 @@ class MeetingChromeBar {
     try {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
         || typeof customJS.ChromeBar.render !== "function") return;
-      return customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      const res = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
+      this._maybeRenderPinnedLinks(dv);
+      return res;
+    } catch (_e) { /* never throw */ }
+  }
+
+  // Pinned-links strip below the bar — leaf meeting notes only. Same pattern as
+  // StickyChromeBar: resolve the page, guard on type, delegate to the generic
+  // SectionExplorer.renderNoteLinks (renders page.links[] + an "＋ Add link" pill).
+  _maybeRenderPinnedLinks(dv) {
+    try {
+      const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+        ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
+      if (!page || page.type !== "meeting") return;
+      if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer.renderNoteLinks === "function") {
+        customJS.SectionExplorer.renderNoteLinks(dv);
+      }
     } catch (_e) { /* never throw */ }
   }
 
@@ -44,6 +61,7 @@ class MeetingChromeBar {
           overflow: [
             { id: "add-project", label: "Add to Project", icon: ICON.folder },
             { id: "edit-attendees", label: "Edit Attendees", icon: ICON.users },
+            { id: "add-link", label: "Add link…", icon: ICON.link },
           ],
           leaf: true,
         };
@@ -71,6 +89,15 @@ class MeetingChromeBar {
           if (customJS && customJS.MeetingLeafActions && typeof customJS.MeetingLeafActions._onEditAttendees === "function") {
             customJS.MeetingLeafActions._onEditAttendees(dv);
           } else if (typeof Notice === "function") { new Notice("MeetingChromeBar: MeetingLeafActions unavailable — reinstall meetings blueprint.", 6000); }
+          return;
+        }
+        if (id === "add-link") {
+          const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
+            ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
+          if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer._openAddLinkForm === "function"
+            && typeof customJS.SectionExplorer._noteSelfAdapter === "function" && page) {
+            customJS.SectionExplorer._openAddLinkForm(dv, customJS.SectionExplorer._noteSelfAdapter(page), null);
+          } else if (typeof Notice === "function") { new Notice("MeetingChromeBar: SectionExplorer unavailable — reinstall meetings blueprint.", 6000); }
           return;
         }
       },
