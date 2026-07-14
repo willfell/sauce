@@ -1,6 +1,6 @@
 {
   "name": "code-fence-button",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "kind": "mechanism",
   "description": "Always-present view-header button (far-right, code icon) that greys out until text is selected, then wraps the selection in a fence long enough to survive inner backticks. Ships an equivalent 'Sauce: Wrap selection in code fence' command.",
   "depends_on": [
