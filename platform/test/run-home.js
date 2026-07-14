@@ -15,10 +15,12 @@
  *                 with args:[{ asOf:<today>, live:true }] and emits, in DOM order,
  *                 greeting → glance → capture band (1 input + 3 buttons) → dashboard
  *                 mount, under .sauce-home
- *   HOME-CAP    — SpaceHome._captureSpec() shape (3 buttons) + per-button dispatch
- *                 wiring (meeting/sticky-note → EntityCreate.create, openDaily →
- *                 app.commands.executeCommandById("daily-notes")) + the inline
- *                 "Jot a task…" capture wired to TaskDialog.createQuick
+ *   HOME-CAP    — SpaceHome._captureSpec() shape (meeting/sticky-note/article/
+ *                 journal/trip) + per-button dispatch wiring (meeting/sticky-note/
+ *                 journal → EntityCreate.create, article → ReaderArticlePaste.open,
+ *                 trip → TripNavButtons._promptForTripDetails/._createTrip, gated
+ *                 on TripNavButtons existing) + the inline "Jot a task…" capture
+ *                 wired to TaskDialog.createQuick
  *
  * Usage: node platform/test/run-home.js   (exit 0 = all pass, 1 = any fail)
  */
@@ -260,9 +262,11 @@ function descendants(el) {
   const spec = SpaceHome._captureSpec();
   {
     const keys = spec.map((s) => s.key);
-    assertEq("HOME-CAP-1 capture keys meeting/sticky-note/article/journal", JSON.stringify(keys), JSON.stringify(["meeting", "sticky-note", "article", "journal"]));
+    assertEq("HOME-CAP-1 capture keys meeting/sticky-note/article/journal/trip", JSON.stringify(keys), JSON.stringify(["meeting", "sticky-note", "article", "journal", "trip"]));
     const art = spec.find((s) => s.key === "article");
     assertTrue("HOME-CAP-1b article entry has label + icon", !!art && /Article/.test(art.label) && typeof art.icon === "string" && art.icon.length > 0);
+    const trip = spec.find((s) => s.key === "trip");
+    assertTrue("HOME-CAP-1c trip entry has label + icon", !!trip && /Trip/.test(trip.label) && typeof trip.icon === "string" && trip.icon.length > 0);
   }
   {
     const opened = [];
@@ -276,6 +280,55 @@ function descendants(el) {
     global.customJS = prev;
     assertTrue("HOME-CAP-ART dispatch(article) opens paste dialog + no-ops when absent",
        opened.length === 1 && !threw && !threw2);
+  }
+  {
+    // Trip dispatch: prompt → create → Notice + openLinkText, no-op on cancel,
+    // graceful Notice fallback when TripNavButtons is unavailable.
+    const prevCustomJS = global.customJS;
+    const prevApp = global.app;
+    const prevNotice = global.Notice;
+    const notices = [];
+    global.Notice = function (msg) { notices.push(msg); };
+    const opened = [];
+    global.app = { workspace: { openLinkText: (p) => opened.push(p) } };
+
+    const details = { name: "Yosemite" };
+    global.customJS = {
+      TripNavButtons: {
+        _promptForTripDetails: () => Promise.resolve(details),
+        _createTrip: (d) => { assertEq("HOME-CAP-TRIP-1 _createTrip receives prompt details", d, details); return Promise.resolve("spice/trips/yosemite/Yosemite.md"); },
+      },
+    };
+    let threw = false;
+    try { await SpaceHome._dispatch("trip", { container: {} }, "2026-07-13"); } catch (_e) { threw = true; }
+    assertTrue("HOME-CAP-TRIP-2 dispatch(trip) creates trip + opens atlas, never throws",
+      !threw && opened.length === 1 && opened[0] === "spice/trips/yosemite/Yosemite.md" && notices.length === 1);
+
+    // Cancel: _promptForTripDetails resolves falsy → no create, no Notice, no open.
+    notices.length = 0; opened.length = 0;
+    let createCalled = false;
+    global.customJS = {
+      TripNavButtons: {
+        _promptForTripDetails: () => Promise.resolve(null),
+        _createTrip: () => { createCalled = true; return Promise.resolve("x"); },
+      },
+    };
+    let threwCancel = false;
+    try { await SpaceHome._dispatch("trip", { container: {} }, "2026-07-13"); } catch (_e) { threwCancel = true; }
+    assertTrue("HOME-CAP-TRIP-3 dispatch(trip) no-ops on prompt cancel",
+      !threwCancel && !createCalled && notices.length === 0 && opened.length === 0);
+
+    // Unavailable: no TripNavButtons → Notice fallback, never throw.
+    notices.length = 0;
+    global.customJS = {};
+    let threwMissing = false;
+    try { await SpaceHome._dispatch("trip", { container: {} }, "2026-07-13"); } catch (_e) { threwMissing = true; }
+    assertTrue("HOME-CAP-TRIP-4 dispatch(trip) Notice fallback when TripNavButtons unavailable",
+      !threwMissing && notices.length === 1);
+
+    global.customJS = prevCustomJS;
+    global.app = prevApp;
+    global.Notice = prevNotice;
   }
   const keys = Array.isArray(spec) ? spec.map((s) => s && s.key) : [];
   assertEq("HOME-CAP-2 key[0] meeting", keys[0], "meeting");
@@ -648,6 +701,31 @@ function descendants(el) {
     assertEq("HOME-CAP-REG-5 order meeting, sticky-note, article, journal",
       items2.map((n) => n.dataset && n.dataset.captureKey).join(","),
       "meeting,sticky-note,article,journal");
+
+    // Case C: TripNavButtons present with both creation methods → trip item
+    // also renders, appended last (order: meeting, sticky-note, article, journal, trip).
+    const dv3 = makeDv();
+    global.customJS.TripNavButtons = {
+      _promptForTripDetails: () => Promise.resolve(null),
+      _createTrip: () => Promise.resolve(null),
+    };
+    await home_.render(dv3, {});
+    const home3 = dv3.container.querySelector(".sauce-home");
+    const menu3 = home3 ? descendants(home3).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+    const items3 = menu3 ? descendants(menu3).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAP-REG-6 TripNavButtons present → 5 items", items3.length, 5);
+    assertEq("HOME-CAP-REG-7 order includes trip last",
+      items3.map((n) => n.dataset && n.dataset.captureKey).join(","),
+      "meeting,sticky-note,article,journal,trip");
+
+    // Case D: TripNavButtons present but missing _createTrip → trip stays gated out.
+    const dv4 = makeDv();
+    global.customJS.TripNavButtons = { _promptForTripDetails: () => Promise.resolve(null) };
+    await home_.render(dv4, {});
+    const home4 = dv4.container.querySelector(".sauce-home");
+    const menu4 = home4 ? descendants(home4).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+    const items4 = menu4 ? descendants(menu4).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAP-REG-8 incomplete TripNavButtons → trip stays gated out (4 items)", items4.length, 4);
 
     delete global.customJS;
     delete global.app;

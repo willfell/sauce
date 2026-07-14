@@ -201,7 +201,7 @@ class SpaceHome {
    * NOTE: the `todo` entry was REMOVED — task capture is now an inline
    * "Jot a task…" input + Add button (built in render, wired to
    * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
-   * remaining buttons: ＋ Meeting, ＋ Sticky Note, ＋ Article, ＋ Journal.
+   * remaining buttons: ＋ Meeting, ＋ Sticky Note, ＋ Article, ＋ Journal, ＋ Trip.
    */
   static _captureSpec() {
     const svg = (inner) =>
@@ -211,6 +211,7 @@ class SpaceHome {
       { key: "sticky-note", label: "＋ Sticky Note", icon: svg(`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`) },
       { key: "article", label: "＋ Article", icon: svg(`<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>`) },
       { key: "journal", label: "＋ Journal", icon: svg(`<path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M16 2v20"/>`) },
+      { key: "trip", label: "＋ Trip", icon: svg(`<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>`) },
     ];
   }
 
@@ -513,23 +514,31 @@ class SpaceHome {
     });
 
     // Menu — the secondary capture actions: ＋ Meeting, ＋ Sticky Note, ＋ Article,
-    // ＋ Journal. Article and Journal are gated on their entity-create registry
-    // entry actually existing (reader-article / journal-entry) so the button
-    // never appears for a vault that hasn't installed that blueprint.
+    // ＋ Journal, ＋ Trip. Article and Journal are gated on their entity-create
+    // registry entry actually existing (reader-article / journal-entry) so the
+    // button never appears for a vault that hasn't installed that blueprint.
+    // Trip has no EntityCreate registration (bespoke TripNavButtons flow), so
+    // it's gated on the TripNavButtons class + its creation methods existing.
     const registryIdFor = { article: "reader-article", journal: "journal-entry" };
     const cjsForGate = (typeof customJS !== "undefined" && customJS)
       || (typeof window !== "undefined" && window.customJS)
       || null;
     for (const item of SpaceHome._captureSpec()) {
-      const registryId = registryIdFor[item.key];
-      if (registryId) {
-        let spec = null;
-        try {
-          if (cjsForGate && cjsForGate.EntityCreate && typeof cjsForGate.EntityCreate._loadSpec === "function") {
-            spec = await cjsForGate.EntityCreate._loadSpec(registryId);
-          }
-        } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
-        if (!spec) continue;
+      if (item.key === "trip") {
+        const TNB = cjsForGate && cjsForGate.TripNavButtons;
+        const available = !!(TNB && typeof TNB._promptForTripDetails === "function" && typeof TNB._createTrip === "function");
+        if (!available) continue;
+      } else {
+        const registryId = registryIdFor[item.key];
+        if (registryId) {
+          let spec = null;
+          try {
+            if (cjsForGate && cjsForGate.EntityCreate && typeof cjsForGate.EntityCreate._loadSpec === "function") {
+              spec = await cjsForGate.EntityCreate._loadSpec(registryId);
+            }
+          } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
+          if (!spec) continue;
+        }
       }
       const mi = menu.createEl("button", { cls: "sauce-home-add-item" });
       mi.setAttribute("type", "button");
@@ -581,6 +590,9 @@ class SpaceHome {
    *   sticky-note → customJS.EntityCreate.create({ instance:'sticky-note', dv })
    *   article   → customJS.ReaderArticlePaste.open(dv)
    *   journal   → customJS.EntityCreate.create({ instance:'journal-entry', dv })
+   *   trip      → customJS.TripNavButtons._promptForTripDetails() then ._createTrip()
+   *               — the exact same flow as the "New Trip" button on
+   *               spice/trips/Trips.md (TripsChromeBar's "new-trip" dispatch)
    *   openDaily → app.commands.executeCommandById("daily-notes")
    * (The former `todo` button is gone — task capture is now the inline
    * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
@@ -610,6 +622,22 @@ class SpaceHome {
           cjs.EntityCreate.create({ instance: "journal-entry", dv: dv });
         }
         return;
+      }
+      if (key === "trip") {
+        const TNB = cjs && cjs.TripNavButtons;
+        if (!TNB || typeof TNB._promptForTripDetails !== "function" || typeof TNB._createTrip !== "function") {
+          if (typeof Notice === "function") new Notice("TripNavButtons unavailable — reinstall trips blueprint.", 6000);
+          return;
+        }
+        return TNB._promptForTripDetails().then((details) => {
+          if (!details) return;
+          return TNB._createTrip(details).then((atlasPath) => {
+            if (atlasPath) {
+              if (typeof Notice === "function") new Notice(`Created trip: ${details.name}`);
+              try { appRef.workspace.openLinkText(atlasPath, ""); } catch (_e) { /* never throw */ }
+            }
+          });
+        });
       }
       if (key === "openDaily") {
         if (appRef && appRef.commands && typeof appRef.commands.executeCommandById === "function") {
