@@ -2999,3 +2999,608 @@ v0.75.1 (+11 HC-V0751-*), v0.76.0 (+16 HC-V0760-*), v0.77.0 (+11 HC-V0770-*), v0
 ### Landmines summary (as recorded pre-GA-D2, superseded by GA-D4)
 
 At v0.103.0 close the source file recorded **25 entries** (later reconciled against `Docs/landmines.md`'s canonical numbering during GA-D4 — see that card's commit for the authoritative count). Most recent additions at time of archival: #25 (v0.103.0, multi-shape doc-note `section:` frontmatter tolerance during migration window), #24 (v0.102.0, workshop manifest catalogue drift from per-mechanism manifests), #23 (v0.70.7, `file.mtime` unreliable on Obsidian Mobile), #22 (v0.32.0, `.local/` consumer override seam), #21 (v0.29.0, `sauce audit` read-only), #20 (v0.28.0, source vault read-only during `sauce migrate`), #19 (v0.26.0, platform-managed dir names lowercase). Landmine #12 allowlist at time of archival: 18 paths + CLAUDE.md marker regions.
+
+---
+
+## Landmines — full pre-GA-D4 archive (verbatim, archived 2026-07-14)
+
+GA-D4 trimmed `Docs/landmines.md` from 87,616 bytes / 31 numbered entries + 4 unnumbered
+"Operational gotchas" down to a terse index (statement/trigger/rule/rationale, ≤1.5K per
+entry). The full pre-trim text is preserved verbatim below for anyone who needs the original
+narrative detail, version-history call-outs, or extended rationale that was moved out of the
+live file.
+
+# Landmines — traps we already hit
+
+Read this before any new platform work. Every entry is a real failure we recovered from. Reintroducing one of these costs hours.
+
+## CustomJS / Dataview integration (5 landmines)
+
+### 1. Bare `customJS.X.Y(dv)` callsites cause cold-load `ReferenceError`
+
+On cold vault load, Dataview/Templater render dataviewjs blocks before the CustomJS plugin populates `window.customJS`. Every bare callsite throws a red error flash before resolving.
+
+**Fix:** never use the bare pattern. Always go through the customjs-guard view:
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+```
+
+### 2. `typeof customJS === 'undefined'` does NOT guard against the error
+
+CustomJS declares its global with `let customJS = …`, putting the name in the **temporal dead zone** until the plugin initializes. TDZ is the one case where `typeof` itself throws a `ReferenceError`.
+
+**Fix:** use `window.customJS?.X` — property access on `window` cannot hit TDZ.
+
+### 3. Helper view file MUST NOT live in the CustomJS scan folder
+
+The CustomJS plugin scans its `jsFolder` and tries to parse every `.js` file as a CustomJS class. A Dataview view file uses different syntax (top-level body, not a class). CustomJS hits a parse error and **aborts class registration entirely** — every customJS class in the vault goes dark.
+
+**Fix:** view files live OUTSIDE the CustomJS scan folder. Canonical: `ranch/views/`. ERO has a CLAUDE.md non-negotiable banning the legacy `Extras/Scripts/...` location for the same reason.
+
+### 4. Dataview view files are NOT CommonJS modules
+
+`dv.view` evaluates the script body inline with `dv` and `input` already in scope. A `module.exports = async (dv, input) => {…}` assignment runs without ever being invoked. Result: silent no-op, zero output, zero error.
+
+**Fix:** view scripts are plain top-level statements. NO `module.exports` wrapper.
+
+### 5. `dv.view` resolves a folder, not a single file
+
+In Dataview 0.5.x, the reliable resolution is `dv.view("path/to/folder")` → loads `path/to/folder/view.js`. Single-file resolution (`dv.view("path/to/file")` → `path/to/file.js`) is unreliable.
+
+**Fix:** every Dataview view ships as a folder containing `view.js` (and optional `view.css`).
+
+## Platform installer (3 landmines)
+
+### 6. Templater user scripts cannot reach Obsidian's `parseYaml`
+
+The `obsidian` virtual module is registered for plugin code only. `require("obsidian")` from a Templater user script returns undefined / throws. So `parseYaml` and `stringifyYaml` are unavailable.
+
+**Fix:** all platform metadata is JSON. `JSON.parse` is a built-in, no dependencies. Files affected: `platform-config.json`, `platform-subscription.json`, `platform-installed.json`, `platform/manifest.json`, each mechanism's `manifest.json`, `rules/_global.json`.
+
+### 7. Templater requires a manual reload to pick up new user scripts
+
+After the installer copies `validate.js` / `hook-validate.js` / `audit-walker.js` into the consumer's Templater scripts folder, Templater doesn't see them until "User Script Functions → reload" runs.
+
+**Fix:** every install ends with a Notice instructing the user to reload. Built into the validator's manifest as a `post_install: { type: notice }` step.
+
+### 8. Cross-vault filesystem reads need `require("fs")`, desktop only — `install.js` is filesystem-only; `bootstrap.js` (v0.21.0+) is the network gateway
+
+The installer reads the workshop's manifest from outside its own vault. We use `require("fs").promises.readFile(absPath, "utf8")` — Node API available in desktop Templater. Obsidian mobile sandboxes the renderer differently and `fs` is unavailable.
+
+**Fix:** the platform is desktop-first. Mobile is a future consideration; would require Obsidian Sync to deliver the workshop's files into each consumer's vault first (as a vendored copy), then the installer reads from `app.vault.adapter` instead of `fs`.
+
+**v0.21.0 amendment:** `install.js` is desktop-only AND filesystem-only — never makes network calls. `bootstrap.js` is the platform's network gateway and may make HTTPS calls to GitHub releases (community-plugins index + per-plugin manifest/main.js/styles.css). Bootstrap's network posture is governed by landmine #17.
+
+### 9. Installer substitution variables come ONLY from `platform-config.json:variables`
+
+`substituteStrict` (paths) and `substituteLenient` (body content) in `install.js` both read from `paths.variables`, populated solely from each consumer's `platform-config.json:variables` map. They do NOT consume `variants.json`, the top-level `vault_identity` config field, or any other source. Placeholders like `{{vault_identity_tag}}` declared in a blueprint's content files will land literal in the materialized output unless that exact key is also in `variables`.
+
+**Fix:** if a blueprint's content needs vault-specific tokenization (`vault_identity_tag`, etc.), either (a) drop the placeholder if location-scoping is sufficient (see project blueprint v0.2.0's kanban template — the file lives at `boards/To-Do-Board.md`, already vault-scoped), or (b) add the matching key to every consumer's `platform-config.json:variables` map. Future option (c): teach `install.js` to merge each blueprint's resolved variant from `variants.json` into the substitution variables — separate design pass.
+
+Surfaced during v0.1.1 S3 quality review of `kanban-board.md`. See `Docs/plans/execution-logs/2026-05-03-registry-driven-nav-buttons/T3.1-T3.4-project-blueprint-v0.2.0.md` for the post-mortem.
+
+### 11. Module-directory invariant under `spice/` namespace — every blueprint owns ONE directory at `spice/<module>/`
+
+Every blueprint declares ONE directory at `spice/<module_directory>/` in the consumer vault that it exclusively owns. All files the blueprint materializes (at install time via `files[]`, OR at runtime via templates / commands / nav-button actions creating notes) land under that directory. Cross-module data flows via wikilinks only — no module writes into another module's directory.
+
+The `spice/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers can keep any other top-level structure (e.g., accuris's `Timestamps/`, `Resources/`) without collision risk.
+
+Each blueprint manifest declares `module_directory: "<name>"` (required field, enforced by installer in v0.2.0+). Examples: `spice/boards/` for the boards blueprint, `spice/to-do/` for a future to-do blueprint, `spice/projects/` / `spice/trips/` / `spice/finance/` for future blueprints.
+
+**Why it exists:**
+1. Without the per-blueprint invariant, two blueprints could collide on directory names (e.g., the v0.1.1 project blueprint placed content under `boards/planning/<slug>/`, claiming a sub-tree of `boards/`, which conflicted with the future boards blueprint's territory).
+2. Without the `spice/` namespace, platform-managed content is interleaved with consumer-personal content at vault root — making install/update/uninstall surface harder to reason about, and risking accidental clobber of personal content.
+
+Install / update / uninstall a blueprint = touch one directory at `spice/<module>/`; predictable; cross-module collisions impossible by construction.
+
+**Fix:** every blueprint manifest must declare `module_directory`. Installer derives the materialization root as `<vault_root>/spice/<module_directory>/`. Refuses to install a blueprint manifest that lacks `module_directory` (failure-loud). Two blueprints declaring the same `module_directory` → installer Notice + skips the second (first-wins by install order); recorded as `warning, step: module_directory_collision`.
+
+**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `ranch/scripts/`, `ranch/views/`, `ranch/templater/`, etc. — not module-scoped, not under `spice/`.
+
+**Historical violations (resolved):**
+- project blueprint @ v0.2.0 placed content under `boards/planning/<slug>/` (top-level `boards/`), mis-located on TWO axes: wrong namespace (no `beacon/` prefix at the time) AND wrong module dir (under `boards/` instead of its own `projects/`). RESOLVED in v0.5.0 (project port to `beacon/projects/<slug>/`) and renamed to `spice/projects/<slug>/` in v0.25.0. Retained here for historical context.
+- v0.1.1's `boards/To-Do-Board.md` materialized at top-level `boards/`. v0.2.0's boards blueprint materialized the new Kanban-plugin board at `beacon/boards/To-Do-Board.md` (now `spice/boards/To-Do-Board.md` post-v0.25.0); legacy top-level file cleaned up via `pre_install` delete in v0.2.0 stage 4. RESOLVED.
+
+Surfaced during v0.1.1 S4 manual smokes (project's "Board" button being the wrong primitive); refined 2026-05-04 with the namespace decision (originally `beacon/<module>/`); namespace renamed to `spice/<module>/` in v0.25.0 as part of the Sauce rebrand sequence. The invariant itself was unchanged across the rename — each blueprint owns ONE directory under the namespace; cross-module data flows via wikilinks only. Only the namespace dir name changed (`beacon/` → `spice/`).
+
+Design + history: `Docs/plans/2026-05-03-boards-blueprint-design.md` (origin), `Docs/plans/2026-05-07-v0.25.0-tree2-namespace-rename-design.md` (rename cycle).
+
+> [!success] v0.25.0 — Tree 2 rename shipped
+> `beacon/<module>/` → `spice/<module>/` end-to-end across `install.js:250` (the single source-of-truth prefix line), all blueprint helpers, all templates, all docs. Final of three multi-cycle Sauce rebrand renames (Tree 1 = `Beacon/` → `pantry/` in v0.23.0; Tree 3 = `Docs/Meta/` → `ranch/` in v0.24.0). The `pantry/` + `ranch/` + `spice/` namespace tripod is now COMPLETE. Bundled `.beacon-backup` → `.sauce-backup` suffix rename under fresh-start posture (no legacy consumer state to preserve).
+
+### 10. Forcing the installer to re-process a manifest needs a triple version bump
+
+`install.js:223` short-circuits per-item install when `installedEntry.version === node.sub.version` (see landmine #16 for the literal call-site quote). Tests that need to exercise behavior INSIDE `installItem()` (e.g., `applyNavButtons`, `applyRuleFragment`, file-write paths) cannot just edit the workshop manifest in place — the installer skips it.
+
+**Fix (test mechanic):** to force re-processing of a single item under test, transiently bump THREE coordinated versions, run, then restore all three:
+1. The item's own manifest (`platform/<kind>/<name>/manifest.json:version`).
+2. The workshop manifest's entry for that item (`platform/manifest.json:<kind>[].<name>.version`).
+3. The consumer subscription's entry (`<consumer>/ranch/platform-subscription.json:<kind>[].<name>.version`).
+
+Restore-discipline is critical — partial restore leaves the workshop dogfood gate red. Verify each of the three is back to the canonical value AND re-run the workshop self-install harness AND re-run the consumer install harness before declaring the test complete. Surfaced in v0.1.1 S4 T4.8 (malformed nav_buttons entry negative test). See `Docs/plans/execution-logs/2026-05-03-registry-driven-nav-buttons/T4.0-T4.9-S4-harness-and-barebones-regression.md`.
+
+**Fix (long-term, deferred):** consider adding `--force-reinstall <name>` to `install.js` for v0.1.2+ so test mechanics can skip the version-skip guard for a named item without touching three files. Not blocking; not free.
+
+### 12. `.obsidian/plugin-data` ban-lift allowlist + `.claude/skills/` skill-materialization carve-out + `.claude/commands/` slash-command carve-out + `.claude/{commands,skills}.local/` override-shadow carve-outs + `ranch/claude-surface-registry.json` + `CLAUDE.md` marker-region carve-out — 17 paths + CLAUDE.md marker regions, only via the installer/bootstrap, only with the four safety mechanics
+
+The `.obsidian/` ask-before-acting gate is lifted for exactly thirteen paths, PLUS five peer top-level / out-of-`.obsidian/` zones (`.claude/skills/<subtree>` added in v0.30.0; `.claude/commands/<x>.md` added in v0.31.0 S6.8; `.claude/commands.local/<x>.md` + `.claude/skills.local/<bp>/<skill>/SKILL.md` + `ranch/claude-surface-registry.json` added in v0.32.0; see end of this entry), PLUS marker-region writes inside `CLAUDE.md` (v0.32.0; renderer rewrites only the spans between `<!-- @claude-surface:<table> BEGIN -->` ... `<!-- @claude-surface:<table> END -->` markers — outside-marker content preserved bit-for-bit):
+- `.obsidian/plugins/templater-obsidian/data.json`
+- `.obsidian/plugins/slash-commander/data.json`
+- `.obsidian/daily-notes.json` (added in v0.3.0)
+- `.obsidian/themes/<Name>/` (added in v0.19.0 — vendored theme dir; overwrite-with-backup posture, NOT additive merge)
+- `.obsidian/appearance.json` (added in v0.19.0 — `cssTheme` always overridden; `enabledCssSnippets[]` additive union)
+- `.obsidian/plugins/obsidian-style-settings/data.json` (added in v0.19.0 — additive per-key first-wins; user values preserved over canonical defaults)
+- `.obsidian/plugins/<id>/main.js` (added in v0.21.0 — bootstrap-fetched plugin entry-point; overwrite-with-backup `.sauce-backup` only when force-redownload selected)
+- `.obsidian/plugins/<id>/manifest.json` (added in v0.21.0 — bootstrap-fetched plugin manifest; same posture)
+- `.obsidian/plugins/<id>/styles.css` (added in v0.21.0 — bootstrap-fetched plugin styles; same posture; 404-tolerated)
+- `.obsidian/plugins/dataview/data.json` (added in v0.21.1 — Dataview JS enable; additive shallow merge per `applyCommunityPluginData`; broadened prereq gate via `external_plugins[{id:"dataview"}]`)
+- `.obsidian/hotkeys.json` (added in v0.21.1 — global Obsidian hotkeys; additive per-`command_id` first-wins; never modifies pre-existing user binding)
+- `.obsidian/plugins/customjs/data.json` (added in v0.24.0 CF-3 — CustomJS `jsFolder` setting must match consumer's `scripts_path`; surgical migration of legacy `Docs/Meta/Scripts` value to current `scripts_path`; preserves user-customized `jsFolder` if set to anything else)
+- `.obsidian/app.json` (added in v0.26.1 — core Obsidian app settings; **additive shallow merge with platform-as-overrider posture for declared keys**; non-declared keys preserved verbatim. Diverges from `applyHotkeys` first-wins because platform DECLARES `alwaysOpenInNewTab: true` as a vault baseline, not as a user-override-protectable hint.)
+
+All thirteen touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyTemplaterFolderTemplates` / `applyCorePluginSettings` / `applyVendoredThemes` / `applyAppearance` / `applyStyleSettings` / `applyCommunityPluginData` / `applyHotkeys` / `applyCustomJsSettings` / `applyAppSettings`, and only under all four of:
+
+1. **Additive merge.** Never strip, modify, or reorder pre-existing entries; only append new entries the manifest declares. **Exception (v0.19.0 vendored themes only):** `.obsidian/themes/<Name>/` files use sha256-compare overwrite-with-backup (`.bak` suffix; non-empty prior content backed up before write). Theme files are platform-canonical content; consumers customize via Style Settings JSON or `.obsidian/snippets/`.
+2. **Backup on edit.** Write `<target>.sauce-backup` (or `<file>.bak` for the vendored-themes path) before any modification (one-deep, overwrite-on-edit, single backup per target).
+3. **Malformed-JSON guard (C4 parity).** If the file is unreadable, unparseable, or has unexpected top-level shape (e.g., `enabled_templates_hotkeys` not an array, `bindings` not an array, parsed-but-not-an-object), the installer logs an error history entry + surfaces a Notice + returns. NEVER overwrites a malformed file.
+4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys`, `step: slash_commander_bindings`, `step: core_plugin_settings`, `step: theme_overwrite`, `step: appearance`, `step: style_settings`, `step: community_plugin_data`, `step: hotkeys`, `step: customjs_settings`, or `step: app_settings` with full context (manifest name, binding name / plugin id / command_id, template path / settings keys, theme name / dest, message, attempted_at).
+
+**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` / `autorun` from `.obsidian/daily-notes.json`; the Baseline community theme is canonical platform content materialized at `.obsidian/themes/Baseline/`; the active theme + enabled CSS snippets are persisted in `.obsidian/appearance.json`; the canonical Style Settings JSON (rose-pine-light + melange-dark + 38 keys) is persisted in `.obsidian/plugins/obsidian-style-settings/data.json`; Dataview's `enableDataviewJs` / `enableInlineDataviewJs` toggles live in `.obsidian/plugins/dataview/data.json`; global Obsidian hotkeys live in `.obsidian/hotkeys.json`. All eleven must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The eleven paths are the entire surface needed to deliver `/validate /audit /new-project` automatically + ship the daily blueprint with its path convention pre-wired + ship the canonical Sauce look-and-feel out of the box + auto-enable Dataview JS + bind the consumer-convenience hotkeys (Cmd+- / Cmd+= / Cmd+[).
+
+**Why nothing else.** Editing other `.obsidian/` files (workspace.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a fourteenth path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval. (`.obsidian/app.json` joined the allowlist in v0.26.1 — see history below.)
+
+**Recovery.** If a `.sauce-backup` (additive-merge paths) or `.bak` (vendored-themes path) file diverges from the live target in a way the user wants to revert, copy the backup over the live file + reload Obsidian. Backups are not auto-rotated; manual cleanup is the consumer's call.
+
+Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint. Allowlist UNCHANGED in v0.4.0 (still 3 paths); helper count grew 3 → 4 with `applyTemplaterFolderTemplates` (writes to the same templater data.json as `applyTemplaterHotkeys`, just to a new top-level field `folder_templates[]`). Allowlist expanded from 3 → 6 paths in v0.19.0 to add `.obsidian/themes/<Name>/`, `.obsidian/appearance.json`, and `.obsidian/plugins/obsidian-style-settings/data.json` for the styling mechanism; helper count grew 4 → 7 with `applyVendoredThemes` (sha256-compare overwrite-with-backup; new `.bak` suffix exception to mechanic #1) + `applyAppearance` (cssTheme always overridden; enabledCssSnippets additive union) + `applyStyleSettings` (per-key first-wins merge — user values preserved over canonical defaults). All three v0.19.0 helpers gate on `manifest.external_plugins[].required` IDs being present in `.obsidian/community-plugins.json`; absent prereq → `info/{theme_overwrite,appearance,style_settings}` + `action: "skipped_missing_prereq"` + zero writes. Allowlist expanded from 6 → 9 paths in v0.21.0 to add `.obsidian/plugins/<id>/{main.js,manifest.json,styles.css}` for the bootstrap-fetched plugin entry-point/manifest/styles; bootstrap is the platform's only network gateway, install.js stays filesystem-only (landmine #17). Allowlist expanded from 11 → 12 paths in v0.24.0 (CF-3 of Tree 3 rename) to add `.obsidian/plugins/customjs/data.json` for the new `applyCustomJsSettings` helper (helper count 9 → 10) — runs ONCE per install run (not per-item) since CustomJS jsFolder is platform-wide, not per-mechanism. Surgical migration: writes `jsFolder = variables.scripts_path` ONLY when current value is absent OR the legacy v0.23.x string `"Docs/Meta/Scripts"`; any other user-customized value is preserved + skipped via `info/skipped_user_customized` history. Backup-on-edit `.sauce-backup` per mechanic #2. Plugin-dir-absent → `info/skipped_missing_prereq`. Allowlist expanded from 9 → 11 paths in v0.21.1 to add `.obsidian/plugins/dataview/data.json` and `.obsidian/hotkeys.json` for the convenience@0.1.0 mechanism; helper count grew 7 → 9 with `applyCommunityPluginData` (additive shallow merge; substituteLenient round-trip; path-traversal validator on `id`; plugin-dir-absent skip; broadened prereq gate that short-circuits on ANY declared `external_plugins[]` id absent from `.obsidian/community-plugins.json` regardless of `required:true` flag — divergent from the v0.19.0 styling helpers' interpretation, justified because materializing settings into a missing plugin's data.json would be a wasted write and risks silent drift on next consumer reload) + `applyHotkeys` (additive per-`command_id` first-wins; FIRST-WINS protects pre-existing user bindings — never modifies any binding the consumer has already set). Allowlist UNCHANGED at 12 in v0.25.0; backup-suffix renamed `.beacon-backup` → `.sauce-backup` as part of the Sauce rebrand (Tree 2 cycle). v0.23.0 + v0.24.0's "preserve `.beacon-backup` across rename" lessons retired under fresh-start posture (no legacy consumer state to preserve). Allowlist expanded from 12 → 13 paths in v0.26.1 to add `.obsidian/app.json` for the new `applyAppSettings` helper (helper count 11 → 12) — workshop-level helper (NOT per-item; mirrors v0.24.0 `applyCustomJsSettings` posture). Schema field is workshop-manifest-level `app_settings: { alwaysOpenInNewTab: true }` (NOT per-blueprint). Posture diverges from the additive-merge first-wins helpers: declared keys are platform-as-overrider (always overwritten by the manifest value); non-declared keys preserved verbatim. Justified because `alwaysOpenInNewTab` is a vault baseline the platform commits to, not a user-override-protectable hint. Backup-on-edit `.sauce-backup` per mechanic #2; atomic tmp+rename write; malformed-JSON guard surfaces Notice + zero writes; backup-failure aborts modification. Allowlist UNCHANGED at 13 paths in v0.27.0 — purely additive cycle (NEW `people-rendering@0.1.0` mechanism + NEW `people@0.1.0` blueprint + cards@0.2.4 subtitle-callback PATCH + nav-buttons@2.5.3 people-icon PATCH + meetings@0.3.0 chip-rendering pilot — none touch `.obsidian/`); helper count UNCHANGED at 12; mechanism count 8 → 9; blueprint count 8 → 9; landmines list UNCHANGED at 19 entries.
+
+**v0.31.0 S6.8 — fifteenth sanctioned write zone: `.claude/commands/<name>.md`.** The cowork blueprint adds a `commands/` source subtree + a files[] entry shipping `commands/cowork.md` → `.claude/commands/cowork.md` so Claude Code's slash-command surface auto-includes `/cowork` after install (no hand-copy). Scope: per-blueprint, dest path `.claude/commands/<name>.md` (vault-root-relative). The materialization uses the existing files[] loop in `installItem` — NO new helper (zero helper-count change). Safety mechanics inherit the files[] posture: Option B overwrite + `.bak` on edit, identical-content idempotent skip, failure-loud history (`step: file_overwrite`). The carve-out is conceptual cohesion with the v0.30.0 `.claude/skills/<subtree>` carve-out — both write outside the user's authored content into the Claude Code surface. Future blueprints can ship slash commands the same way without re-litigating the allowlist. cowork@0.2.0 → 0.2.1 PATCH (additive). Allowlist 14 → 15 sanctioned write zones; helper count UNCHANGED at 13.
+
+**v0.32.0 — four new sanctioned write zones + CLAUDE.md marker carve-out (sauce claude cohesion cycle).** Allowlist expands `15 → 17 paths + CLAUDE.md marker regions` with FOUR additions plus the marker-write carve-out:
+
+1. `.claude/commands.local/**` — consumer override shadow for slash commands. Files placed here OVERWRITE the canonical `.claude/commands/<x>.md` after each install (post-install step 6f scans `.commands.local/` and copies each entry over the canonical). Preserved across installs indefinitely.
+2. `.claude/skills.local/**` — consumer override shadow for SKILL.md bodies. Same posture as `.commands.local/` (post-install step 6f copies each `.skills.local/<bp>/<skill>/SKILL.md` over the canonical `.claude/skills/<bp>/<skill>/SKILL.md`).
+3. `ranch/claude-surface-registry.json` — generated registry written by install.js step 6g; lists every materialized command + skill with its blueprint + dest path + checksum. Read by `/audit` (and by external surfaces that need to discover the materialized claude_surface). Failure-loud + atomic-write per the existing registry-write convention.
+4. `.claude/commands/**` and `.claude/skills/**` (BOTH already in the allowlist via v0.31.0 S6.8 + v0.30.0 respectively) — clarified here as the canonical write zones materialized by `claude_surface[]` (the v0.32.0 platform-claude mechanism) from blueprint source.
+
+**CLAUDE.md marker-write carve-out.** The claude_surface renderer rewrites only the spans BETWEEN marker pairs in CLAUDE.md (vault root). Three tables: `directory-map`, `resolvers`, `skills-index`. Markers are `<!-- @claude-surface:<table> BEGIN -->` ... `<!-- @claude-surface:<table> END -->`. **Outside-marker content is preserved bit-for-bit** — the renderer reads the file, replaces ONLY the region between matched markers, writes the file back. Missing markers → renderer logs `step: claude_surface_marker_missing` + skips that table (never invents a marker pair from nothing; consumer adds the marker pair manually if they want the table). Malformed marker (BEGIN without END or vice versa) → same `marker_missing` history + zero-write. The marker carve-out is a SEVENTH variant of the safety mechanics (different from JSON additive merge, different from theme overwrite-with-backup, different from `.bak` markdown overwrite, different from registry atomic-write): regex-bounded inner-region rewrite, leaves the host file otherwise untouched.
+
+**Override seam contract (cross-reference to NEW landmine #22).** `.claude/commands.local/` and `.claude/skills.local/` are the ONLY supported consumer-customization paths for slash-command + skill content. Direct edits to the canonical `.claude/commands/<x>.md` / `.claude/skills/<bp>/**/SKILL.md` paths are REVERTED on next install. `/audit` surfaces direct-canonical edits as severity `consumer_edit_at_risk`. See landmine #22 for the full seam-design rationale + recovery flow.
+
+Helper count UNCHANGED at 13 in v0.32.0 — the new writes are handled by extensions of existing helpers (the claude_surface renderer + post-install step 6f) rather than new helpers. Allowlist 15 → 17 paths + CLAUDE.md marker regions.
+
+**v0.30.0 — fourteenth sanctioned write zone: `.claude/skills/<subtree>`.** The cowork blueprint introduces `manifest.skills[]` + `skills_dir` + a new `materializeSkills` helper (helper count 12 → 13) that writes native Claude Code skill bodies to `<vault>/.claude/skills/<subtree>/<id>/SKILL.md`. The dest is a **peer top-level dir to `.obsidian/`**, not nested under it — so the carve-out is conceptual cohesion (installer writes outside the user's authored content) rather than a literal expansion of the `.obsidian/` block-list. Scope is **broad** (`.claude/skills/<subtree>`, any blueprint, any future blueprint) by deliberate choice: matches the per-id wildcard precedent set by `.obsidian/plugins/<id>/{main.js,manifest.json,styles.css}` and avoids re-litigating the allowlist for every future skills-shipping blueprint (threads@0.1.0 forecast in v0.31.0, etc.). `materializeSkills` applies an analog of safety mechanics #1-#4: **Option B overwrite + `.bak` on edit** (matches the files[] loop in installItem; skill bodies are markdown, not JSON, so JSON-merge mechanics #1 + #3 don't apply directly; the `.bak` body is the equivalent recovery affordance), identical-content idempotent skip, failure-loud history (`step: materialize_skill_overwrite` / `materialize_skill_invalid_entry` / `materialize_skill_source_missing` / `materialize_skill_substitution`). Invalid entries (missing `source` or `dest`) record a warning + skip rather than abort the whole blueprint, because skills arrays grow to 30+ rows and one bad entry shouldn't block the rest (divergence from files[] loop posture, which aborts on bad rows because the list is hand-curated and small). **No code-level path validator was added in v0.30.0** — the entire allowlist (originally 13, now 14 sanctioned write zones) has always been enforced by helper-target hardcoding + code review, not by a runtime guard. Future cycles MAY add a runtime guard if a regression motivates it; until then, the policy boundary stays at the review surface. Allowlist 13 → 14 sanctioned write zones. Helper count 12 → 13.
+
+**v0.41.0 — eighteenth sanctioned write zone: `.obsidian/snippets/sauce-*.css`.** The convenience@0.2.0 mechanism ships `sauce-tasks-icons.css` (Tasks plugin emoji → Lucide icons; vendored under `platform/mechanisms/convenience/assets/snippets/`) via the NEW `applySnippets` installer helper (helper count 13 → 14). Mirrors `applyVendoredThemes` posture: sha256-compare overwrite-with-backup with `.sauce-backup` suffix on overwrite of non-empty prior content; failure-loud history (`step: snippets`, actions `applied` / `overwrote` / `skipped_identical`); never-throws on per-entry failure. `entry.name` validated against `/^sauce-[A-Za-z0-9._-]+$/` regex — the `sauce-` prefix narrows mechanic point #2 of landmine #12 so user-authored snippets at every other filename remain user-owned + never touched by the installer. Registration in `.obsidian/appearance.json`'s `enabledCssSnippets[]` piggybacks on the existing `applyAppearance` helper (since v0.19.0, additive union) — no separate registration helper needed. Allowlist 17 → 18 sanctioned write zones; helper count 13 → 14.
+
+**v0.93.3 observation (applyExternalPlugins is inspection-only).** The function comment at `platform/install.js:2693` is explicit: *"the installer cannot install Obsidian community plugins itself, so this is a detection-and-surface-up helper, not a remediation step."* Adding entries to a mechanism's `external_plugins[]` does NOT cause the install pass to fetch + install the plugin; it only causes a warning Notice + history entry when the declared id is absent from `.obsidian/community-plugins.json`. Actual plugin install lives only in `platform/bootstrap.js`'s `phaseFetchPlugins` (network-gateway per landmine #17), invoked on fresh-vault bootstrap. v0.93.3 baked `new-tab-default-page` + `smart-connections` into convenience + smart-connections-bridge `external_plugins[]` — fresh bootstraps get auto-install, existing consumers get the warning + manual-install workflow. v0.94.0 candidate: extend `platform/install.js` with a new `applyExternalPluginInstall` helper running BEFORE `applyExternalPlugins` to close the existing-consumer gap. No allowlist or helper-count change for v0.93.3.
+
+**v0.102.0 — NEW installer step `applyVaultDefaultPaths` writes to existing `.obsidian/app.json`.** Allowlist UNCHANGED at 18 paths + CLAUDE.md marker regions; helper count UNCHANGED at 14. The v0.102.0 cycle (project workspace — sections + meetings link + vault-defaults install fix) adds a NEW installer step at the vault-init prelude that reads `.obsidian/app.json`, writes `newFileFolderPath: "spice/resources/notes"` + `attachmentFolderPath: "spice/resources/attachments"` when EACH key is currently unset, and creates `spice/resources/{notes,attachments}/` folders if absent. `.obsidian/app.json` is already in the allowlist (v0.26.1 added it for `applyAppSettings`); the v0.102.0 step adds a SECOND helper that writes to the same target file with a divergent posture from `applyAppSettings`: **per-key user-customization-preserved** (writes ONLY when the key is unset; preserves any user value verbatim) — closer to the v0.21.1 `applyHotkeys` per-binding first-wins posture than to v0.26.1 `applyAppSettings`'s platform-as-overrider posture. Backup-on-edit `.sauce-backup` per mechanic #2. Justified because `newFileFolderPath` + `attachmentFolderPath` are user-overridable defaults (legitimate consumer customization), unlike `alwaysOpenInNewTab` which the platform declares as a vault baseline. Two helpers writing the same JSON file is a NEW pattern in the allowlist; both go through Read-Modify-Write so they compose cleanly. Allowlist UNCHANGED at 18 paths; helper count `14 → 15` (new `applyVaultDefaultPaths`). Cycle close history block updated.
+
+- v0.102.0 (2026-06-13): project workspace cycle — sections + meetings link + vault-defaults; lessons captured in result doc.
+- v0.103.0 (2026-06-13): section hubs cycle — hierarchical navigation tree replaces v0.102.0's single-page Confluence; user-observed post-dogfood that single-page sections didn't communicate hierarchy.
+- v0.104.0 (2026-06-13): search & filter cycle — pure additive, no migration required; closes the original v0.102.0 ask.
+- v0.106.0 (2026-06-14): install posture + filter persistence + debounce + dashboard widgets — 4-item bundled MINOR. S1 helper-script content-overwrite posture closes the 3-cycle `cp` workaround (allowlist UNCHANGED; helper-count UNCHANGED at 15; this is a posture extension inside the existing per-item install loop, NOT a new sanctioned write zone).
+- v0.106.0.1 (2026-06-14): section hub UX cleanup — empty-state removal, label rename, sub-sections/docs separator. Pure visual / nav-label PATCH; no allowlist touch.
+
+### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
+
+Each consumer's `ranch/templater/platformInstall.js` is a ~12-line dispatcher first set during v0.1.2 S2. It MUST be byte-identical across all consumers at any given platform version (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`.
+
+**Stub body history.** The stub body has changed exactly ONCE in its history:
+- **v0.1.2 → v0.23.0:** historical md5 invariant `a39257da1dd49ae4481e5cd0a42bdac4`. Stub read `Docs/Meta/platform-config.json` at runtime.
+- **v0.24.0+ (current):** new md5 invariant `ea23aa812503bfca66359d3b2b239ba8`. Tree 3 rename moved the runtime plumbing dir; stub line 11 now reads `ranch/platform-config.json`.
+
+Going forward, the stub body changes ONLY on Tree N rename cycles (rare — these are the multi-cycle rebrand renames that move the runtime plumbing tree, e.g., `Docs/Meta/` → `ranch/`). Any other proposed stub change requires a distribution-model bump documented in CLAUDE.md.
+
+**Per-consumer drift is still forbidden.** Within a given platform version, the stub MUST be byte-identical across every consumer. The "changed once at v0.24.0" exception is a global lockstep transition — every consumer flips to the new md5 in the same release window — not a per-consumer customization knob.
+
+**Why:** the stub IS the distribution mechanism. Drift in the stub breaks consumers silently — they'd dispatch to a different install.js path, or skip the require-cache clear, or read a different config. The stub's content-static invariant is the load-bearing replacement for the old md5-verified bootstrap-copy ritual.
+
+**Canonical source:** `platform/installer-stub.js` — single source of truth for the stub body. Every consumer's bootstrap copy must match it byte-for-byte at the current platform version's md5 invariant.
+
+**Recovery from drift:** copy `platform/installer-stub.js` over the divergent consumer's bootstrap path; re-run harness; commit only the canonical source if its body changed. v0.24.0 install runs auto-overwrite any stub still at the old `a39257da...` md5 with the new canonical body (`ea23aa81...`).
+
+Codified in v0.1.2; amended in v0.24.0 (Tree 3 rename — first stub-body change).
+
+### 14. `gitState()` is best-effort; must never throw
+
+The `gitState()` helper at the top of `platform/install.js` records workshop git revision into installed.json history. It wraps every `execSync` in try/catch and returns `{commit:null, tag:null, dirty:null}` on any failure. Install proceeds regardless of git state — even on a non-git workshop, even on a missing `git` binary.
+
+**Why:** install correctness must NOT depend on git correctness. The lean v0.1.2 model is "stub dispatches; install runs; we record what we can about workshop state." Coupling install success to git availability would block desktop-no-git scenarios and break workshop dogfood if anyone wiped `.git/`.
+
+**What this means for callers:** code that READS `installed.history[].git_commit` etc. must tolerate `null` for entries written before v0.5.0 OR by a non-git install. Drift-detection (future cycle) treats `null` as "unknown," not "in sync" or "out of sync."
+
+Codified in v0.1.2.
+
+### 15. Vendored theme is mechanism-owned; never hand-edit `.obsidian/themes/<Name>/` in any vault
+
+The styling mechanism (`platform/mechanisms/styling/`) vendors the Baseline theme as canonical platform content. The installer's `applyVendoredThemes` helper (v0.19.0) treats the consumer's `.obsidian/themes/<Name>/` as REPLACEABLE — every install run sha256-compares each file against the workshop source; mismatches get the consumer's prior content backed up to `<file>.bak` (single-deep, overwrite-on-edit) and overwritten.
+
+**Symptom.** A user manually edits `.obsidian/themes/Baseline/theme.css` to tweak a color or font; on the next install the edit is silently clobbered (recoverable from `theme.css.bak` but not signaled visually). Multiple successive edits without intervening installs would lose the prior `.bak` at the next overwrite (`.bak` is single-deep — no rotation).
+
+**Why this matters.** `.obsidian/themes/<Name>/` is the only `.obsidian/` allowlist path with overwrite-with-backup posture (the other five are additive-merge under various rules). All theme-level customization MUST route through:
+1. **Style Settings JSON** (the whole point of the plugin — UI toggles for color schemes, fonts, sizes, blockquote style, etc.) — landed at `.obsidian/plugins/obsidian-style-settings/data.json`, additive-per-key first-wins so user values win over canonical defaults on every install.
+2. **User-owned snippets** at `.obsidian/snippets/<x>.css` EXCEPT files matching `sauce-*.css` (user-managed; never touched by the installer; surfaces in Obsidian's Settings → Appearance → CSS snippets UI). Platform-vendored `.obsidian/snippets/sauce-*.css` files ARE allowlisted (v0.41.0; mechanic mirrors `.obsidian/themes/<Name>/` vendored-theme posture: sha256-compare overwrite-with-backup, `.sauce-backup` suffix on overwrite, failure-loud history). The `sauce-` prefix carve-out preserves user authorship of every non-sauce snippet filename.
+
+**Rule.** No vault edits to `.obsidian/themes/<Name>/` ever. If you need a custom rule that Style Settings doesn't expose, either (a) add a snippet, or (b) extend the canonical Style Settings JSON in the workshop and ship a styling@0.1.x bump (mechanism is additive-per-key, so new canonical keys reach existing consumers without clobbering their overrides).
+
+**Recovery.** If the installer overwrites a theme file you wanted to keep, copy `<file>.bak` over the live file. If `.bak` was already overwritten by a prior install cycle, the change is lost — reconstruct from the workshop source + your snippet file, OR fork the theme upstream.
+
+Codified in v0.19.0.
+
+### 16. In-cycle re-process bump rule — when reusing in-cycle staged work, in-cycle revisions MUST bump the version
+
+The installer's per-item install loop short-circuits when `installedEntry.version === node.sub.version`. Any in-cycle CF that revises content WITHOUT bumping the item's version reaches barebones (or any other consumer) as the *previous* content because the version-equal short-circuit fires before the new content is read.
+
+**Quoted call site (`platform/install.js:223`):**
+```javascript
+      if (installedEntry && installedEntry.version === node.sub.version) continue;
+```
+
+**Five-data-point precedent:**
+- **v0.6.0** trips 0.1.0 → 0.1.1 → 0.1.2 → 0.1.3 → 0.1.4 (4 in-cycle bumps for hub/atlas/sections/Trip Board CFs).
+- **v0.17.0** finance 0.1.4 → 0.2.0 → 0.2.1 → 0.2.2 → 0.2.3 → 0.2.4 → 0.2.5 → 0.2.6 (6 in-cycle bumps across CF-1..CF-5).
+- **v0.18.0** finance 0.2.6 → 0.2.7 → 0.2.8 → 0.2.9 (3-bump stack for CF-1 InvoiceControls Save fix).
+- **v0.18.1** to-do 0.1.2 → 0.1.3 → 0.1.4 (CF-1 trailing-space trim forced re-process).
+- **v0.19.0** styling 0.1.0 → 0.1.1 (CF-1 prereq gate). Mechanism cycles extend lockstep to **4 files** (workshop manifest + mechanism manifest + workshop subscription + barebones subscription) per v0.19.0 CF-1 reinforcement.
+
+**Rule.** Any in-cycle revision after first install MUST bump the item version (PATCH for fixes, MINOR for additive). Lockstep edits to:
+1. blueprint or mechanism manifest (`platform/<kind>/<name>/manifest.json:version`)
+2. workshop catalogue line (`platform/manifest.json:<kind>[].<name>.version`)
+3. workshop subscription (mechanisms only — workshop self-subscription dogfoods mechanisms)
+4. barebones subscription (`../barebones-beacon-poc/ranch/platform-subscription.json:<kind>[].<name>.version`)
+
+**Recovery if a CF lands without a version bump.** Bump the item version + re-run install. The barebones drift is silent — `installed.json` still records the prior content's SHA in history.
+
+**Long-term fix candidate (deferred).** A `--force-reinstall <name>` flag for `install.js` so test mechanics + in-cycle CFs can skip the version-equal short-circuit without touching files. Same fix candidate as landmine #10. Not blocking; not free.
+
+Codified in v0.20.0.
+
+**v0.80.0 + v0.80.1 observation:** the global `materializeClaudeSurface` step (run on every install regardless of the per-item version short-circuit) keeps `.claude/skills/<blueprint>/<skill>/SKILL.md` dests current per-install for surfaces it processes. The mid-cycle "deferred catch-up" concern that prior cycles documented is largely moot for SKILL.md surfaces — they refresh as a side effect of every install run. The per-item short-circuit is still load-bearing for `files[]` entries (the materialize_once + skip-if-version-matches contract on data files), but the SKILL.md drift fear is overstated. Future plans can skip the "this will catch up at the version-bump stage" warning for SKILL.md edits.
+
+**v0.83.0 observation:** cycle naturally exercised FLN-v821-2 — new install surface (3 engagement-types JSONs in cowork's `files[]`) required cowork to bump from 0.21.1 → 0.22.0 (MINOR; new install surface) for the dogfood install to actually materialize them. v0.82.1's `resetSourceContributions` wiring + per-item-loop reset fired correctly under the new MINOR bump. No bookkeeping issue surfaced.
+
+**v0.84.0 observation (FLN-v821-2 pattern + S5/S6 exact-pin surfacing).** S5 repeated the FLN-v821-2 internal-loop-edit pattern in a different form: the engagement-type schema was bumped mid-cycle (0.3.1 → 0.4.0 on all three JSONs), but the cowork blueprint pin stayed at 0.23.0 (same in-cycle version), so the install loop's per-item version-skip guard fired and the updated JSONs did NOT materialize into `spice/cowork/context/engagement-types/` via the normal install path. Workaround: direct `cp` of the updated JSONs to the dogfood materialized path. On consumer vaults the pin difference (0.22.0 → 0.23.0) ensures the install loop fires correctly; the gap is workshop-dogfood-specific when in-cycle edits don't co-occur with a version bump. Additionally, S7.1 closed two pre-existing exact-version pin failures (HC-V0740-1 asserting engagement-type schema `0.3.1`; HC-V0710-1c asserting a cowork-memory `discriminator_tags` entry) that S5/S6 surfaced at preflight time. These were fixture drift, not S5/S6 bugs. **Rule reinforcement:** any cycle that bumps an engagement-type schema version or adds canonical engagement types should grep for exact-version string literals across the test suite at S0 plan time — not at S7 preflight failure time.
+
+**v0.85.0 observation:** cowork bumped 0.23.0 → 0.24.0 (MINOR; new install surface — 1 new sub-skill `cowork:read-memory` + 1 new orchestrator `cowork:synthesize-week` + cowork-weekly-synthesis rule_fragment + 2 new pure helpers in files[]). Dogfood install fired cowork's loop body cleanly under the new MINOR; no version-skip surprise. The FLN-v821-2 pattern (mandate co-occurring blueprint bump for install-loop-internal changes) was naturally satisfied. FLN-v841-1 pin pattern applied: HC-V0740-1 exact-pin surfaced + updated at S5 in lockstep with S9 schema-value change at engagement-types 0.4.0 → 0.5.0 (synthesize_week additive). FLN-v821-1 reaffirmed: V0750-VERSION exact-pin bumped 0.23.0 → 0.24.0 at S6 polish (b18d3eb) — same in-cycle bump pattern as v0.84.0 S2.4. NEW observation (FLN-v85-3): smoke assertion regexes for JSON-stored naming_patterns must accept both escaped + unescaped forms; S10 polish (bd10160) hardened.
+
+**v0.85.1 observation:** cowork bumped 0.24.0 → 0.24.1 (PATCH; SKILL.md prose change in synthesize-week + onboard-scheduled-jobs cadence walk). Dogfood install fired cowork's loop body cleanly under the new PATCH (SKILL.md surface change naturally satisfies the in-cycle bump rule). FLN-v821-1 reaffirmed: V0750-VERSION pin bumped 0.24.0 → 0.24.1 at S2 in lockstep. NEW v0.85.1 observation (FLN-v85-1 surfacing): the active-pantry layout doesn't have a libexec/ ancestor — _resolveWorkshopPath's libexec-only heuristic was insufficient. Generalized helper now walks for any ancestor with a valid sauce manifest + workshop_version field; this also means future tests that don't pin --workshop-path or inject _callerFile will resolve to the running test runner's ambient workshop root. 4 pre-existing fixtures patched at S1 collateral.
+
+**v0.86.0 observation:** cowork bumped 0.24.1 → 0.25.0 (MINOR; new install surface — 4 new helper files in files[] + 4 orchestrator SKILL.md modifications). Dogfood install fired cowork's loop body cleanly under the new MINOR. FLN-v821-2 pattern (mandate co-occurring blueprint bump for install-loop-internal changes) naturally satisfied. FLN-v821-1 reaffirmed: V0750-VERSION pin bumped 0.24.1 → 0.25.0 at S1 in lockstep with manifest changes. NEW v0.86.0 observation (FLN-v86-2): git stash + dogfood install collide because install writes to CLAUDE.md + ranch/claude-surface-registry.json + ranch/platform-installed.json that aren't idempotent with stash semantics. Future cycles: avoid stashing across install boundaries; use git checkout HEAD -- <files> for selective drift management. NEW v0.86.0 pattern: helper-extract per orchestrator + golden-fixture byte-identical now canonical for ALL wire-through cycles (v0.85.0 MB precedent × 4 in v0.86.0).
+
+**v0.87.0 observation:** cowork bumped 0.25.0 → 0.26.0 (MINOR; new install surface — sub-skill `cowork:gather-semantic-memory` + pure helper `compose-semantic-echoes-callout.js` in files[] + MB SKILL.md modification). Dogfood install fired cowork's loop body cleanly under the new MINOR. FLN-v821-1 reaffirmed: V0750-VERSION pin bumped 0.25.0 → 0.26.0 at S1 in lockstep. NEW v0.87.0 observation (sub-skill template stability): v0.85.0 read-memory + v0.87.0 gather-semantic-memory follow identical SKILL.md section structure (`## Inputs` / `## Pre-flight` / `## Gather` / `## Decide` / `## Done` / `## Harness testing`) + structured-output declaration posture (output shape declared inline in prose so HC prose-lints can assert substrings) + graceful-failure-clause pattern (declared error tokens; never-throws). Two cycles is a pattern; a third would canonize it into code-conventions.md as the standard sub-skill SKILL.md shape. Future sub-skill cycles should mirror this template. NEW v0.87.0 observation (step-numbering side-effect): inserting MB step 3b shifted existing 3b/3c → 3c/3d; 3 cross-references inside the same SKILL.md needed updating. HC suite caught the new step-3b invocation reference but did NOT catch the stale cross-references — required a manual grep at S1 dogfood time. Future cycles inserting pre-flight steps into an orchestrator SKILL.md should grep for `step <N>` and `Step <N>` cross-refs across the same file as part of the edit, before committing.
+
+**v0.93.3 observation (per-cycle HC-V0*-VERSION-* pin sweep):** the workshop_version + package.json bump at S1.4 surfaced 10 hardcoded `=== "0.93.2"` assertion failures across HC-V0891/V0900/V0920/V0930/V0931-VERSION-* blocks (plus 1 cross-file parity case HC-V0890-VERSION-C that auto-fixed after S2 dogfood regen'd `ranch/platform-subscription.json`). The v0.93.3 plan didn't explicitly list this sweep as part of S1.4 — it was discovered post-bump at S1.5 preflight time. Bundled into a small S1.4b commit. **Rule reinforcement:** any cycle bumping `package.json` or `platform/manifest.json:workshop_version` MUST also sweep `platform/test/run-helper-cases.js` for HC-V0*-VERSION-* hardcoded assertion values + bump them as part of the same stage. Add an explicit Step in S1.4 plans for the sweep. The legacy *label* mismatches (e.g., a v0.93.3 cycle still calling a case "HC-V0920-VERSION-A1: workshop_version === 0.93.0" in its label string) are acceptable archaeological noise — what matters is the assertion VALUE matches current state.
+
+**v0.95.1 observation (contract_version 0.32.0 → 0.33.0 lockstep + HC sub-assert additions).** cowork 0.32.0 → 0.33.0 MINOR (anti-echo bundle: 3 knobs, NEW sub-skill `capture-frame-drift`, NEW CustomJS class `CoworkLensShiftCards`, NEW atomic-note type `cowork-morning-briefing-cold`, NEW `lens_shift` cadence). scheduled-job-contract.json `contract_version` 0.32.0 → **0.33.0** mirror per landmine #20 (anti-echo expands the contract surface — adds `lens_shift` cadence entry with new `default_cron: "0 7 * * 6"` + prompt template). Per-cycle pin sweep at S5: 24 hardcoded `"0.95.0"`/`"0.32.0"` assertions in `run-helper-cases.js` + 12 hardcoded `workshop_version: "0.95.0"` in `run-bootstrap.js` + 1 cowork manifest.version assertion in `run-cowork-smoke.js` (HC-V0750-VERSION) bumped in lockstep. ranch/platform-subscription.json workshop_version + cowork pin bumped (v0.93.3 lesson 5.4). The NEW HC-V0951-* assertion sub-asserts that pin v0.95.1-specific values (`excluded_themes` 13th contract key, capture-frame-drift sub-skill claude_surface presence, lens_shift cadence in supported_cadences) are themselves landmine-#16 candidates for future cycles — any v0.96.0+ cycle bumping cowork past 0.33.0 will need to grep these new V0951-VERSION pins and update accordingly. Final preflight 2076/0 (helper-cases) + 927/0 (cowork-smoke) + 211/0 (claude-surface); ALL 22 harnesses GREEN.
+
+**v0.127.0 observation:** cycle bumped 4 items in lockstep (meetings 0.11.1 → 0.12.0; project 1.25.1 → 1.26.0; to-do 0.11.0 → 0.12.0; NEW mechanism task-interactions 0.1.0). Workshop 0.126.1 → 0.127.0. In-cycle PATCH bump to-do 0.12.0 → 0.12.1 surfaced via `run-customjs-contract` at S9 preflight time: `ToDoCreateTask.serializePayloadToLine` was declared static; `task-interactions.js` consumed it as `customJS.ToDoCreateTask.serializePayloadToLine(...)` — the customjs static-on-instance trap (third recurrence after v0.118.0's `RecurrenceParser`/`TaskParser` fix). Fix: added instance delegator on `serializePayloadToLine` ABOVE the static (source order matters — the contract checker's `.find()` returns first match). NEW HC-V0127-VERSION-A..E sub-asserts pin the v0.127.0 catalogue state with PATCH-tolerant regex (`/^0\.12\.\d+$/`) to accommodate the in-cycle 0.12.1. RULE reinforcement: any class consumed via `customJS.X.method` MUST expose that method as an instance method (statics for in-file callers + Node harnesses only). Per-cycle HC-V0*-VERSION-* sweep at S9 worked as designed (23 workshop alternations + 5 project alternations + to-do range widened + meetings exact pins + mechanism count 20 → 21 + customjs_classes 11 → 12).
+
+**v0.127.1 observation:** cycle bumped workshop_version 0.127.0 → 0.127.1 ONLY (no blueprint or mechanism bumps; install.js change only — see Docs/cycle-history.md v0.127.1 entry). HC-V0127-VERSION-A1..A3 (the workshop_version pins) widened from exact `=== "0.127.0"` to PATCH-tolerant regex `/^0\.127\.\d+$/` per the same lesson v0.127.0 captured for the to-do blueprint pin — write PATCH-tolerant regexes at the time of the first cycle bump, not when the next PATCH hits the wall at preflight time. The v0.127.0 cycle did this for the to-do range but NOT for the workshop pin (because we didn't yet know a same-day PATCH was coming); v0.127.1's sweep retroactively widens the workshop pin too. Per-cycle HC sweep cost: 1 file, 3 assertion changes. RULE for future cycles: every NEW HC-V0*-VERSION-* assertion authored at S9 SHOULD use PATCH-tolerant regex `/^X\.Y\.\d+$/` by default unless the cycle has a specific reason to pin an exact PATCH (e.g., asserting that a regression fix is at exact `0.12.1` and not `0.12.0`). Exact-pin cases are the exception, not the norm.
+
+**v0.129.0 update — the manual HC-V0*-VERSION-* pin sweep is RETIRED (Phase 0b).** The recurring per-cycle cost described in the observations above (widening regex ranges, bumping exact version literals across `run-helper-cases.js`) no longer applies. Those assertions now read `platform/test/fixtures/component-versions.snapshot.json`, which `scripts/release/compute-release.js` regenerates on `--write`. The tripwire is preserved (each assertion still cross-checks the real mirror file against the snapshot), but Claude must NOT hand-edit version literals or regex ranges in tests — that is the bumper's job. Landmine #16's CORE rule (an in-cycle revision of staged work must bump the version, because `install.js` short-circuits when `installedEntry.version === node.sub.version`) is UNCHANGED. See `Docs/agent-guides/build-test-verify.md` § Release workflow.
+
+### 17. Bootstrap network posture — failure-loud + idempotent + skip-if-present + GitHub-only
+
+The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer that makes network calls. Its posture:
+
+1. **Single network host:** `raw.githubusercontent.com` (for the upstream community-plugins index) and `github.com` (for plugin release-asset redirects → CDN). No other domains. No telemetry. No analytics.
+2. **Failure-loud:** every fetch failure throws with a descriptive message ("Cannot reach raw.githubusercontent.com…", "HTTPS … returned 404", "GitHub rate-limited"). Per-plugin failures are caught at the orchestrator level + recorded as `failed: [{id, reason}]` in the run report. Network-down at index-fetch is fatal (no plugins can be processed without id → repo lookup).
+3. **Idempotent skip-if-present:** `fetchPlugin` returns `{status: "skipped"}` when `<vault>/.obsidian/plugins/<id>/manifest.json` exists and force-redownload was not requested. Subsequent bootstrap runs are zero-network for fully-installed vaults (modulo the index fetch which is cached for the run's lifetime).
+4. **No mid-fetch cleanup:** if a plugin fetch throws partway through writing files, the partial state remains on disk. Skip-if-present resumes correctly on retry (manifest.json may or may not have been written; if not, next run re-fetches the whole plugin).
+5. **`.sauce-backup` on overwrite:** force-redownload writes `<file>.sauce-backup` for each overwritten asset BEFORE writing the new content. Backup-copy failure is fatal (mirrors `applyTemplaterHotkeys` posture from v0.1.3+).
+6. **Path traversal validator:** plugin id must match `/^[a-z0-9][a-z0-9._-]*$/i` AND `path.relative(pluginsRoot, pluginDir)` must not escape with `..`. Defense against hostile upstream entries or attacker-controlled `--reinstall` arguments.
+7. **`process.env.GITHUB_TOKEN` honored:** if set, every HTTPS GET sends `Authorization: Bearer <token>`. Token never appears in logs or thrown error messages.
+8. **Redirect-following:** `_https.getText` follows up to 5 redirect hops. GitHub release-asset URLs respond 302 to a CDN URL — without redirect-following, every plugin fetch fails with "returned 302".
+
+**Why this is its own landmine.** Bootstrap is an installer-adjacent layer that intentionally crosses landmine #8 (desktop-only-filesystem). The network exposure is small + well-bounded but adds new failure modes the in-vault installer doesn't have. Future cycles that touch bootstrap or add new helpers that fetch from the network must preserve all eight postures. New network hosts (e.g., a plugin's mirror, a CDN other than GitHub's) require explicit user approval + a #17 update.
+
+Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first real GitHub fetch.
+
+#### v0.94.0 amendment — install.js becomes second network gateway
+
+**Two network gateways, two postures, one shared fetch layer.**
+
+- `bootstrap.js:phaseFetchPlugins` is **fail-loud** (BS5 posture; per-plugin failures get caught into a `failed[]` but the bootstrap caller surfaces them).
+- `install.js:applyExternalPluginInstall` (NEW v0.94.0) is **warn-and-continue** (per-plugin failures are caught + Noticed + history-logged; the install proceeds; downstream `applyExternalPlugins` retains `required:true` warning teeth for any failed install).
+- Both share `bootstrap-lib/fetch-plugin.js`'s defense-in-depth: plugin-id allowlist regex, path-traversal guard, atomic writes with backup-on-edit, BS5 per-plugin failure handling, optional `process.env.GITHUB_TOKEN` honored.
+
+Why the asymmetry: bootstrap runs on a fresh, empty vault — a fetch failure means the consumer never got a working install, so failing loud is the only honest signal. Update runs on an existing, working vault — a fetch failure means one new plugin couldn't be auto-installed, which is annoying but not catastrophic; we surface the failure (Notice + history + downstream required:true warning) and let the rest of the install proceed.
+
+### 18. Inside-vault `pantry/` is git-managed — never hand-edit
+
+Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/pantry/` (lowercase, post-v0.23.0; renamed from the v0.22.x `Beacon/` to resolve the macOS APFS case-collision with the lowercase `spice/<module>/` namespace — see install.md "Upgrading from v0.22.x"). That directory is git-managed — `sauce update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
+
+- Mechanism / blueprint subscriptions: `sauce wizard` (writes `ranch/platform-subscription.json`)
+- Config: `sauce wizard` → "Edit config" (writes `ranch/platform-config.json`)
+- Plugin behavior: edit `.obsidian/` per landmine #12 mechanics
+
+**Symptom.** A user opens `<vault>/pantry/platform/install.js` in their editor to "tweak something" and saves it. On the next `sauce update` the edit is silently discarded by `git reset --hard origin/main`. With `--force` the working tree is reset even when dirty — surfacing as "my fix to install.js disappeared."
+
+**Why this matters.** `pantry/` is the only git-managed top-level platform dir in any consumer vault. It is the v0.22.0 analogue of v0.19.0's vendored theme (landmine #15) — canonical platform content vended into the consumer vault, replaceable on every update, never hand-modified. Customizations route through:
+
+1. **`sauce wizard`** for subscription / config edits (writes `ranch/platform-*.json`, NOT inside `pantry/`).
+2. **Mechanism / blueprint manifests upstream** for behavior changes (open a PR or fork; `git pull` + `sauce update`).
+3. **`.obsidian/` allowlist paths** for plugin-data tweaks per landmine #12 mechanics.
+
+**Recovery.** If you hand-edited a file inside `pantry/` and want to keep your change while still updating:
+1. Copy the edit out of `pantry/` (e.g., to `~/scratch/my-edit.js`).
+2. `sauce update --force` to discard the dirty state and pull origin/main.
+3. Re-apply the edit upstream (via PR or local fork) so the change survives future updates.
+
+If you DIDN'T mean to hand-edit and just want a clean state: `sauce update --force` is the canonical reset.
+
+Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 with v0.22.0; clone dir renamed `Beacon/` → `pantry/` in v0.23.0 to resolve the macOS APFS case-collision.
+
+### 19. Platform-managed directory names are lowercase
+
+All directories materialized by sauce installer logic under `pantry/`, `ranch/`, `spice/` MUST be lowercase. Mixed-case or TitleCase directory names cause macOS APFS case-collision risk + path-canonicalization drift across case-sensitive / case-insensitive filesystems.
+
+**EXCEPTIONS (do not "fix" these):**
+
+- **`MM-MMMM/`** date-routed folders (e.g., `05-May/`) — moment.format default; user-facing date display, NOT a directory-naming choice.
+- **`assets/themes/<ThemeName>/`** — vendored theme directory (currently `Baseline/`); preserve the vendor's chosen case verbatim.
+- **User-facing NOTE FILENAMES** — `Projects.md`, `Trips.md`, `Finance.md`, `Meetings-<date>.md`, `Thursday-<date>.md`, `Journal-<date>.md`, etc. — file naming, not directory naming.
+- **Historical doc paths** in `Docs/plans/` and `Docs/prompts/` — preserve cycle-time accuracy (path-migration-2026-05-05 precedent).
+- **`pantry/`** — already correctly cased per v0.23.0.
+- **`spice/`** — already lowercase per v0.25.0.
+- **`.claude/skills/`** — sanctioned platform-managed top-level zone (added in v0.30.0); installer materializes native Claude Code skill bodies here via `materializeSkills`. Already lowercase. Sibling to `.obsidian/`, not nested. Same posture as `spice/` (lowercase-only; per-blueprint subtree under `.claude/skills/<blueprint>/`); see landmine #12 for the safety mechanics around writes.
+
+**Recovery from violation.** Rename via the macOS APFS case-insensitive workaround:
+
+```bash
+git mv ranch/Templater ranch/templater_tmp && git mv ranch/templater_tmp ranch/templater
+# ... repeat per uppercase dir
+```
+
+Then sed-sweep across all source files (template bodies, CustomJS class string literals, manifest path strings, harness-setup paths, current-state docs) + harness baseline updates. Single atomic commit per the v0.24.0 / v0.25.0 / v0.26.0 mass-rename pattern.
+
+**Codified in v0.26.0** — the cycle that did the canonical lowercase sweep of `ranch/Templater|Scripts|Templates|Views`. Future blueprints / mechanisms authoring under `pantry/`, `ranch/`, or `spice/` MUST use lowercase directory names from the start. **Extended in v0.30.0** to add `.claude/skills/` as a fourth sanctioned platform-managed top-level zone for skill body materialization; same lowercase-only posture; per-blueprint subtree pattern `.claude/skills/<blueprint>/`.
+
+### 20. Source vault is read-only during `sauce migrate`
+
+`sauce migrate` (v0.28.0) reads its `--from <source>` argument; it MUST NEVER write to that path. The migration tool's contract is "transform source → target", with target = the sauce-managed cwd vault. If a future migrator's `migrate(planEntry, srcAbsPath, tgtRoot, ctx)` ever calls `fs.writeFileSync(srcAbsPath, ...)` or otherwise mutates a path under `fromAbs`, that's a critical bug — the user has no way to recover the original source content if migration corrupts it.
+
+**Codified in v0.28.0 design Section 4 + commit.js phase 0/1/2/3/4 contracts.** The `_carryVerbatim` and `_rewriteBlueprints` loops both pass `srcAbsPath` only to `fs.readFileSync` / `fs.copyFileSync(src, dst)`; never as a destination argument. The `_assertTargetWithinRoot(vaultPath, entry.tgt)` belt-and-suspenders check at the orchestrator level catches any planEntry tgt that escapes the vault root, but doesn't catch source mutations. **Any new migrator code must ALWAYS pair `srcAbsPath` with read-only fs calls.** Code review must reject any PR that uses `srcAbsPath` as a write destination.
+
+**Why this matters.** The user expects to be able to roll back a migration by deleting the target + restoring the sibling backup. If the source is also corrupted, that recovery is impossible — the source IS the user's only intact copy of the content (the prior backup is the pre-migration dest snapshot, NOT the source). A bug here is permanent data loss.
+
+**Surface this every time.** When reviewing any migrator code change (boards.js, project.js, trips.js, etc.), grep the diff for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` and verify every call uses a `tgtRoot`-rooted path, never a `srcAbsPath`-rooted path.
+
+### 21. `sauce audit` is read-only against the audited vault
+
+`sauce audit` (v0.29.0) walks `<vault>/spice/<bp>/**/*.md`, reads `<vault>/ranch/rules/<bp>.json`, applies rule_fragments[], and emits a markdown report — but MUST NEVER write to anywhere under `<vault>`. The audit pipeline (`platform/cli/cmd-audit.js` + `platform/audit/{walker,rule-runner,report,sanctioned-dirs}.js`) is read-only by contract. The single carve-out is `--output-file <path>`: when that path falls inside the audited vault, the user has explicitly requested the write. That's the ONLY exception.
+
+**Codified in v0.29.0 design Section 4 + cmd-audit.js:54 (single fs.writeFileSync call, gated by `--output-file` flag).** Walker, rule-runner, report, sanctioned-dirs all do reads only — no `fs.writeFileSync` / `fs.appendFileSync` / `fs.mkdirSync` / `fs.rmSync` / `fs.unlinkSync` / `fs.renameSync` against the audited vault path. The S2.10 quality reviewer verified this via grep at S2 close.
+
+**Why this matters.** Audit is meant for inspection. Mutating the audited vault from inside the audit pipeline would couple detection to fix logic and create surprise side effects (e.g., a bug in rule-runner could inadvertently rewrite a violating file's frontmatter). v0.29.0 is detection-only by design; auto-fix tooling is a separate feature surface that gets its own design + cycle once we know what real-world violations actually surface. Mirrors landmine #20 posture for `sauce migrate` source vaults — generalized here.
+
+**Surface this every time.** When reviewing any code change under `platform/audit/`, grep the diff for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` / `mkdirSync` and verify the only hit (if any) is `cmd-audit.js`'s `--output-file` write at line 54-ish. Reject PRs that introduce other writes against the audited vault.
+
+### 22. `.local/` is the only consumer override seam
+
+`.claude/commands.local/<x>.md` and `.claude/skills.local/<bp>/<skill>/SKILL.md` are the ONLY supported consumer-customization paths.
+
+**Direct edits to canonical files** (`.claude/commands/<x>.md` or `.claude/skills/<bp>/<skill>/SKILL.md`) are REVERTED on next install. The installer materializes canonical content from blueprint source in step 6c, then post-install step 6f scans `.commands.local/` + `.skills.local/` and copies each file OVERWRITING the canonical. Removing a `.local/` file restores the canonical on next install.
+
+`/audit` surfaces direct-canonical edits as severity `consumer_edit_at_risk` BEFORE the user loses work. The path forward when an edit is flagged:
+1. Move the customization to `.claude/commands.local/<same path>.md` (or `.claude/skills.local/<same path>/SKILL.md`).
+2. Re-run `/install` to apply the shadow.
+3. Future installs preserve the .local/ shadow indefinitely.
+
+This is the seam by design — blueprint authors own the canonical body, consumers own .local/ shadows, drift between them is visible at audit time.
+
+**Reason:** lockstep upgrades require the canonical source to be authoritative. Hand-tuned canonicals cause silent install regressions; an explicit override seam (with audit visibility) keeps both concerns clean.
+
+**How to apply:** never edit `.claude/commands/<x>.md` or `.claude/skills/<bp>/**/SKILL.md` directly in a consumer vault. Always use `.claude/commands.local/` or `.claude/skills.local/`. If the canonical needs a permanent change, edit the blueprint source at `platform/blueprints/<bp>/{commands,skills}/...` in the workshop and re-deploy via `/upgrade`.
+
+Codified in v0.32.0 alongside the landmine #12 allowlist expansion for `.claude/commands.local/**` + `.claude/skills.local/**`.
+
+### 23. `file.mtime` is unreliable on Obsidian Mobile — `created_at` is the only authoritative "created today" signal
+
+Obsidian Mobile rewrites file mtimes when sync pulls a file onto the device. The mobile-side `p.file.mtime` reflects the **sync time**, not the original write time. A scratch created on Wednesday will, on the user's phone, have an mtime equal to whenever Mobile last synced — even though `created_at:` in the frontmatter still says Wednesday. Desktop preserves mtimes from the original write, so the difference is invisible there.
+
+**Symptom that exposed this.** v0.70.6 had both `ActivityFeed._query.inWindow` and `SpaceDailyDashboard._getActivityCount.inWindow` accept a page if EITHER `created_at` OR `file.mtime` fell in the time window (via `includeMtime: true`). On the headspace mobile vault, Thursday's daily rendered Wednesday's 4 scratches + 3 cowork run-notes because their mobile mtime was Thursday's sync time. Friday's daily worked because Wednesday's files still had a Thursday mtime, which is out of Friday's window. Desktop was unaffected throughout.
+
+**Fix shipped in v0.70.7.** When `created_at` (or whichever `tsKey` is being filtered on) is present on the page, it is **authoritative**. Do NOT fall through to `file.mtime` when the canonical timestamp is set-but-out-of-window. The mtime fallback is reserved exclusively for LEGACY pages that lack the canonical timestamp field.
+
+**How to apply.** Any new time-windowed filter over Dataview pages must follow this shape:
+
+```js
+const inWindow = (p) => {
+  if (!p) return false;
+  const tsRaw = p[tsKey];           // created_at, status_changed_at, etc.
+  if (tsRaw) {                       // present? it wins, period
+    const ts = String(tsRaw);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) return ts >= startISODate && ts <= endISODate;
+    return ts >= startISO && ts <= endISO;
+  }
+  // mtime fallback ONLY for legacy pages without the canonical timestamp
+  if (!p.file || !p.file.mtime) return false;
+  const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
+  return mIso >= startISO && mIso <= endISO;
+};
+```
+
+The shape is: if `tsRaw` is set, return its in-window check directly. Never OR with mtime when `tsRaw` is present.
+
+**Reason this is non-negotiable.** Every entity-shape and timeline-shape note shipped by the sauce blueprints sets `created_at:` (per the canonical-vocab rule). Mobile sync mtime is a noisy, environment-dependent signal that must NOT be allowed to override the durable `created_at`. Any "OR-on-mtime" predicate will reintroduce the v0.70.x mobile regression — and the test harness can't catch it because Node-side mtimes are honest.
+
+**Surfaces touched today (gates the regression):**
+- `platform/mechanisms/activity-feed/activity-feed.js` — `_query.inWindow` (v0.4.1)
+- `platform/blueprints/daily/helpers/space-daily-dashboard.js` — `_getActivityCount.inWindow` (v0.10.7)
+- Tests: `AF-V071-1/2/3` in `run-activity-feed.js` lock the strict semantics + legacy fallback contract. Any future in-window predicate should add a parallel test set.
+
+When you write a third time-window predicate (weekly/monthly hub renderer, future ranking surfaces, etc.), copy the shape above. Mobile smoke is mandatory before close on any cycle that touches this path — Node-side preflight cannot reproduce the failure mode.
+
+### 24. Workshop manifest catalogue drifts from per-mechanism manifests
+
+`platform/manifest.json` carries a `mechanisms[]` + `blueprints[]` catalogue with names + versions. This catalogue is INDEPENDENT of the per-mechanism + per-blueprint `manifest.json` files. Bumping a mechanism's own `manifest.json` (and the corresponding pin in `ranch/platform-subscription.json`) does NOT automatically update the catalogue entry in the workshop manifest. Workshop self-install catches this (it cross-references the consumer subscription against the workshop catalogue and rejects the install with skip notices when any pin disagrees); `npm run release:preflight` + `check-version-sync.js` do NOT catch this — they verify `workshop_version` lockstep only, not the catalogue rows.
+
+**Watch when:** bumping ANY mechanism or blueprint version. The S5 version-bump checklist MUST update BOTH (a) the per-mechanism/per-blueprint `manifest.json`'s own `version`, (b) the matching `ranch/platform-subscription.json` pin, AND (c) the corresponding row in `platform/manifest.json`'s `mechanisms[]` / `blueprints[]` catalogue. All three are independent edit sites.
+
+**Symptom.** Workshop self-install bombs out with skip notices: `"subscription pins X@A.B.C but workshop has D.E.F"` for every drifted entry; entire install rejected.
+
+**Fix when surfaced.** Sweep the catalogue rows in `platform/manifest.json` to match the freshly-bumped per-mechanism/per-blueprint versions; re-run workshop self-install; verify all skip notices clear.
+
+**Surfaced:** v0.102.0 S6 (commit `ed48e93`). S5 bumped entity-create 0.5.0 / project 1.16.0 / meetings 0.8.0 / platform-claude 0.1.3 in per-mechanism manifests + `ranch/platform-subscription.json` pins, but the workshop catalogue in `platform/manifest.json` still listed the pre-bump versions. S6 self-install rejected the whole install with skip notices ("subscription pins entity-create@0.5.0 but workshop has 0.4.0", etc.).
+
+**Future hardening candidate:** extend `check-version-sync.js` to assert that for every `subscription.mechanisms[]` / `subscription.blueprints[]` entry, the matching `workshop_manifest.mechanisms[]` / `workshop_manifest.blueprints[]` row exists at the same pin AND equals the per-item `manifest.json` `version`. PATCH-sized hygiene; would shift this failure mode from S6 dogfood to preflight.
+
+### 25. Multi-shape doc-note `section:` frontmatter during the v0.102.0 → v0.103.0 consumer-vault migration window
+
+v0.102.0 shipped doc-note `section:` frontmatter as a STRING (`section: "Knowledge"`). v0.103.0's `applyProjectSectionsHubMigration` rewrites that to a WIKILINK (`section: "[[Knowledge]]"`) — but the migration only fires on `sauce install` against an updated workshop. Until BOTH consumer vaults (accuris + headspace) are migrated, the platform is in a mixed state: some doc-notes have string `section:`, others have wikilink `section:`. Any code that reads `frontmatter.section` MUST tolerate BOTH shapes. The `Breadcrumb` / `ProjectDocsIndex` / `SectionHub` helpers all handle this via a `_stripLinkBrackets`-style normalization at read time (strip leading `[[` / trailing `]]` before comparison). The `rule_fragment` for doc-note `section:` similarly accepts both shapes during the migration window.
+
+**Watch when:** writing new code that reads `frontmatter.section` (or `frontmatter.sub_section` introduced in v0.103.0) — assume the value can be EITHER `"Knowledge"` OR `"[[Knowledge]]"` until the migration window closes.
+
+**Symptom.** A helper compares `frontmatter.section === "Knowledge"` and silently drops doc-notes whose section was already migrated to `"[[Knowledge]]"` — half the project's docs disappear from a hub, with no error.
+
+**Fix when surfaced.** Normalize at read time: `const sectionLabel = String(p.section || "").replace(/^\[\[|\]\]$/g, "")`. Compare on `sectionLabel`, never on the raw value.
+
+**Window closes when:** both consumer vaults (accuris + headspace) have completed `sauce install` against v0.103.0 AND no new vault is bootstrapped at v0.102.0 (fresh installs at v0.103.0 emit wikilink form from the entity-create entry directly). Once the window closes, the `rule_fragment` can tighten to wikilink-only (v0.103.x carry-forward).
+
+**Surfaced:** v0.103.0 design (proactive — never observed in production because the migration is mandatory and the readers were authored to tolerate both shapes from day one).
+
+**Future hardening candidate:** an `applyProjectSectionsHubMigration` post-pass that asserts every doc-note's `section:` is in wikilink form before declaring the project migrated; OR a `/audit` rule that flags any string-form `section:` after the migration window closes.
+
+### 26. Manual edits to `platform/test/seed-vault/` bypass the rebaseline loop
+
+The seed vault under `platform/test/seed-vault/` is the canonical input to the migration-regression harness (`platform/test/run-seed-migrations.js`). Hand-editing files inside it without going through `scripts/rebaseline-seed.js` bakes in drift that doesn't reflect what `sauce install` actually produces. The harness will keep passing locally on the drifted seed but stop catching the failure modes the seed was built to surface.
+
+**Rule:** the ONLY hand-edits sanctioned in `seed-vault/` are:
+- Adding a new note at a *pre-migration schema* to anchor a new `HC-V0XYZ-SEED-MIGRATE-*` assert family (intentional setup for an in-flight cycle).
+- Adding a hand-authored user note to anchor a `SEED-PRESERVE-*` assert (extends the "install never touches user content" coverage).
+- Updating the CLAUDE.md outside-marker prose to keep the SEED-CLAUDE assertions meaningful.
+
+For anything else (schema changes, post-install state updates, registry refreshes), run at cycle close:
+
+```
+npm run seed:prev
+npm run seed:rebaseline
+```
+
+This archives the current seed to `seed-vault-prev/` and forward-ratchets `seed-vault/` to current install output.
+
+**Watch when:** about to edit anything under `platform/test/seed-vault/` other than the three sanctioned hand-edit targets above. If you're tempted to change a hub note, a registry, or a frontmatter shape directly — stop, re-run install on a tmp copy, and use rebaseline.
+
+**Symptom.** Seed drifts away from install output. Local harness keeps passing because it asserts against the drifted seed. CI keeps passing for the same reason. A consumer vault hits the actual install path and breaks in a way the harness was supposed to catch.
+
+**Fix when surfaced.** `rm -rf platform/test/seed-vault/<drifted-path>`; re-run install on a tmp copy; copy the relevant subtree back; verify the harness still passes against the fresh state.
+
+**Surfaced:** v0.110.0 — codified at the moment the seed-vault was introduced. The rebaseline loop is the mechanism; the rule keeps the loop intact.
+
+### 29. Managed adopted-blueprint templates MUST conform to the note-chrome grammar — heal existing notes, never hand-edit
+
+Every template in an **adopted** blueprint (one declaring a `breadcrumb` block in its `manifest.json` — currently `project`, `meetings`, `sticky-notes`, `to-do`) MUST conform to the note-chrome grammar: breadcrumb view FIRST, no `---` between breadcrumb and the nav bar, and **no `## H2` content headings** — content sections use `SectionLabel` (a dataviewjs view) instead. The `scripts/lint-note-chrome.js` preflight gate enforces this on any blueprint with a `breadcrumb` manifest block (kanban-board templates with `kanban-plugin:` frontmatter are exempt — their `## Column` headings are plugin structure, not content headings).
+
+**Existing notes are healed at install** by `applyNoteChromeHeal` (`platform/install.js`): per-vault, idempotent, `.sauce-backup` snapshot before any write, fence-aware H2 rewrite, fails loud but never throws. It keys on the dataviewjs invocation substring + frontmatter `type`, never on display markers.
+
+**Rule.** Never hand-edit a note body to make it conform — the heal owns existing notes, the template owns new ones. Hand-edits drift from what the heal produces and confuse idempotency.
+
+**Accepted regression.** The heal targets notes by `type` ∈ {`meeting`, `sticky-note`, `sticky-day`, `sticky-hub`, `scratch`, `scratch-day`, `scratch-hub`, `to-do`} (the legacy `scratch` trio is kept alongside the sticky types for vaults mid-migration). Tag-based hubs with no `type` field (e.g. Meeting Hub, `tags: meetings-hub`) are NOT reached — their template is fixed for new notes, but existing hubs keep their incidental `## H2`. This is an accepted cosmetic regression (the cards list below the heading is unaffected), not a bug.
+
+**SectionLabel tradeoff (documented cost).** `SectionLabel` renders a `<div>`, not a markdown heading — so converted sections leave the Obsidian outline pane and any `[[note#Heading]]` anchor link breaks. Deliberate; `.sauce-backup`-reversible. Full rationale: [`agent-guides/note-chrome.md`](agent-guides/note-chrome.md).
+
+**Surfaced:** v0.124.0 (note-chrome wave 1 — `meetings` / `scratch` / `to-do` adoption + the lint gate + `applyNoteChromeHeal`).
+
+### 30. `.gitignore /Scripts/` + `core.ignorecase=true` silently ignores everything under `scripts/`
+
+This repo's `.gitignore` carries `/Scripts/` (line 30 — for the workshop self-bootstrap activation dir written by `phaseWriteActivation`). On macOS, git defaults to `core.ignorecase=true`, so git treats the lowercase `scripts/` path as matching the `/Scripts/` rule. **Files under `scripts/` are therefore ignored** — and because the rule matches, even MODIFYING an already-tracked file under `scripts/` is rejected by a plain `git add` (git reports the path as ignored).
+
+**Symptom.** `git add scripts/lint-note-chrome.js` exits with `The following paths are ignored by one of your .gitignore files: scripts/lint-note-chrome.js` even though the file is real and you want it staged.
+
+**Fix.** Use `git add -f scripts/<file>` to force-stage anything under `scripts/`. (Files already tracked still show diffs in `git status`; it's the `add` that needs `-f`.)
+
+**Why not just narrow the `.gitignore`.** `/Scripts/` is anchored to the repo root and intentionally scoped (the comment block at lines 26–29 explains it's the bootstrap activation dir). Loosening it risks accidentally tracking the activation artifacts. The `-f` flag is the surgical workaround for the case-fold collision.
+
+**Surfaced:** v0.124.0 — discovered adding `scripts/lint-note-chrome.js`.
+
+## Operational gotchas
+
+### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
+
+When canonically migrating a consumer to `ranch/scripts/`, also update CustomJS's `jsFolder` setting. Editing that file is a `.obsidian/` change and needs explicit user approval (per each vault's CLAUDE.md "ask before acting" rule).
+
+### Approval gates use Templater's `tp.system.suggester`
+
+The suggester's "Esc" key returns null, which the installer treats as a skip (not an error). Files declined by the user are silently skipped; the mechanism continues with whatever else it can do. The `platform-installed.json` entry records the version even on partial installs — that's a known limitation. Resolution: treat partial installs as "good enough" for now; a future installer version can track per-file install state.
+
+### Workshop content vault plugins emit warnings on workshop boot
+
+Workshop has no daily notes, no kanban boards, no projects. If you leave Calendar / Big Calendar / Kanban / Daily Notes core plugin enabled, they fire warnings every time you open the workshop. Disable them in the workshop specifically (community plugins are per-vault, not synced via Obsidian Sync).
+
+### Don't carry a bug across vaults
+
+Every mechanism update goes through the workshop first, dogfoods on the workshop's own self-install, THEN promotes to consumers. If the workshop self-test fails, do not push the update into consumers. The workshop's "production" status validates the mechanism end-to-end.
+
+### Landmine #27 — Cycle scope discipline: smaller is faster
+
+v0.116.0 → v0.118.1 thrashed 8 cycles to ship a working to-do dialog because v0.116.0 bit
+off 8 new customJS classes + a recurrence engine + a +New Task dialog all at once. The bigger
+the bundle, the more failure modes hide inside each other. When a feature exceeds 3 distinct
+surfaces (class, schema, template, dialog, widget, migration), split into smaller cycles where
+each is verified end-to-end before the next.
+
+Counter-examples that shipped clean first try: v0.94.0 (single demo-driving blueprint),
+v0.113.0 (single index + linter).
+
+Source: v0.118.1 cycle postmortem item #6.
+
+### Landmine #28 — Verify dispatcher / loader contracts before designing against them
+
+"Verify helpers before design asserts them" (existing rule) extends to runtime dispatchers
+and loaders:
+
+- **customJS** stores classes as instances (`new Class()`) → methods called via
+  `customJS.X.method` must be on the prototype (non-static). Static methods are NOT visible to
+  the dispatcher. Caught at preflight by `platform/test/run-customjs-contract.js`.
+- **Templater** copies executing in source file context, not vault context. `tp.file.creation_date`
+  resolves against the SOURCE file, not the destination.
+- **installer `runInstall`** is subprocess-spawning, not in-process. Cannot share in-process
+  state with the caller; errors propagate via exit codes + stdout.
+
+Before designing a new consumer of a dispatcher: grep the dispatcher's loader code AND read one
+working consumer to confirm the contract.
+
+Catalog: `Docs/agent-guides/code-conventions.md` § Dispatcher contracts.
+
+Source: v0.118.1 postmortem item #10; reinforced by v0.93.3 + v0.94.0 + v0.118.0.
+
+### Landmine #31 — Guard `dv.current()` before reading `.file` in dataviewjs blocks
+
+A `dataviewjs` block that dereferences `dv.current().file...` eagerly throws on COLD LOAD.
+Dataview runs the block once before the note's query context is ready, so `dv.current()` is
+`undefined` and reading `.file` raises `TypeError: Cannot read properties of undefined (reading
+'file')`. The block re-renders correctly a beat later, so the error *flashes in the note and
+clears* — but it logs to the console on every open and reads as broken.
+
+**Symptom.**
+```
+Evaluation Error: TypeError: Cannot read properties of undefined (reading 'file')
+    at eval (eval at <anonymous> (plugin:dataview), <anonymous>:4:61)
+    ...
+    at DataviewJSRenderer.render (plugin:dataview:...)
+```
+
+**Fix.** Never dereference `dv.current()` unguarded. Use optional chaining with an active-file
+fallback — which resolves on the FIRST render (the active file is known even when `dv.current()`
+isn't), so there is no flash and no "loading" placeholder is needed:
+```js
+const notePath = dv.current()?.file?.path || app.workspace.getActiveFile()?.path;
+```
+Use the fuller form when the block must NOT run without a path (avoids a downstream
+"requires notePath"-style Notice in embeds/previews with no active file):
+```js
+const cur = dv.current();
+const notePath = (cur && cur.file && cur.file.path) || app.workspace.getActiveFile()?.path;
+if (notePath) { /* render */ }
+```
+
+**Where it bit.** The meetings button-created `inline_body` PeopleRendering block shipped
+`notePath: dv.current().file.path` (unguarded) while the Templater `Meeting.md` template used
+the guarded form — so button-created meeting notes flashed the error on open, template-created
+ones did not. The manifest `inline_body` is fixed at source; `install.js` `_healNoteChromeBody`
+step 4b rewrites the unguarded form in existing notes (idempotent — the optional-chained result
+no longer matches).
+
+**Surfaced:** v0.133.0 (real-user repro on new meeting notes).
