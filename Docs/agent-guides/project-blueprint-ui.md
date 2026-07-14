@@ -1,5 +1,6 @@
 ---
 purpose: UI / Nav conventions for the project blueprint. Locks the shared rendering primitives + section ordering + spacing rules established in v0.109.0 so future helpers stay cohesive instead of accreting.
+load_when: Writing or changing a helper that renders into a project-related note (project hub, Docs.md, section hubs, doc-notes, Project Map, Project Board, Task notes).
 ---
 
 # Project blueprint — UI / Nav conventions
