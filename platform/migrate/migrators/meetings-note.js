@@ -146,7 +146,9 @@ function _parseAttendeesFromFrontmatter(fmLines) {
 function _renderBody(rest, attendees) {
     const agenda = extractSection(rest, "## Agenda/Questions", { includeHeading: false });
     const notes = extractSection(rest, "## Notes", { includeHeading: false });
-    const actions = extractSection(rest, "## Action Items", { includeHeading: false });
+    // Legacy "## Action Items" prose is intentionally NOT re-emitted (task-entity
+    // owns action items). We still reference the source heading here so the intent
+    // is documented; no output section is produced from it.
     // Spec review IMP: preserve **Clients** block when non-empty.
     // Source shape: `**Clients**` line, then `- <name>` bullets (or empty `- `).
     // We extract content via `extractSection` matching the bold-line marker;
@@ -185,9 +187,17 @@ function _renderBody(rest, attendees) {
         ? attendees.map(a => `- [[${a}]]`).join("\n")
         : "-";
 
-    const agendaContent = agenda.found ? trimEnds(agenda.content) : "-";
-    const notesContent = notes.found ? trimEnds(notes.content) : "";
-    const actionsContent = actions.found ? trimEnds(actions.content) : "";
+    // Modernized meetings blueprint: no separate Agenda / Action Items output
+    // sections. Legacy Action Items prose is dropped (task-entity owns action
+    // items; the task migration converts real task lines, and the meeting
+    // chrome install heal strips any legacy Action Items shape). Legacy Agenda
+    // content is FOLDED into the Notes section instead of a standalone heading.
+    const agendaContent = agenda.found ? trimEnds(agenda.content) : "";
+    const notesRaw = notes.found ? trimEnds(notes.content) : "";
+    const foldedNotes = [notesRaw, agendaContent]
+        .filter(s => s && s !== "-")
+        .join("\n\n");
+    const notesContent = foldedNotes;
 
     const out = [
         navBlock,
@@ -207,21 +217,9 @@ function _renderBody(rest, attendees) {
     out.push(
         "---",
         "",
-        "## Agenda",
-        "",
-        agendaContent,
-        "",
-        "---",
-        "",
         "## Notes",
         "",
         notesContent,
-        "",
-        "---",
-        "",
-        "## Action Items",
-        "",
-        actionsContent,
         ""
     );
 
