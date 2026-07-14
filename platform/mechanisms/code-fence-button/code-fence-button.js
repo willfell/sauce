@@ -14,6 +14,22 @@ class CodeFenceButton {
     return "`".repeat(n);
   }
 
+  // Pure affordance decision for the view-header button, given the active view's
+  // mode ("preview" = reading, "source" = editable) and whether the editor has a
+  // selection. Reading mode can never wrap (no editable selection), so it stays
+  // greyed with a hint to switch modes; editable-without-selection is greyed with
+  // a "select text" hint; editable-with-selection is lit. Disabled opacity is
+  // 0.55 (not 0.35) so the greyed button is still discoverable in the header.
+  static buttonState(mode, hasSelection) {
+    if (mode === "preview") {
+      return { enabled: false, opacity: 0.55, label: "Switch to editing mode to wrap in a code fence" };
+    }
+    if (!hasSelection) {
+      return { enabled: false, opacity: 0.55, label: "Select text to wrap in a code fence" };
+    }
+    return { enabled: true, opacity: 1, label: "Wrap selection in code fence" };
+  }
+
   static wrapSelection(selection, opts) {
     const sel = typeof selection === "string" ? selection : "";
     if (sel.trim() === "") return null;

@@ -19,9 +19,12 @@ class CodeFenceButtonInit {
       const syncButtons = () => { try { self._syncButtons(); } catch (_e) {} };
       const refreshEnabled = () => { try { self._refreshEnabled(); } catch (_e) {} };
 
-      // Inject on startup + when panes/layout change.
+      // Inject on startup + when panes/layout change + when a note opens in an
+      // existing tab (file-open — active-leaf-change does NOT fire for same-tab
+      // navigation, so without this a note opened in place could miss the button).
       state.refs.push(app.workspace.on("active-leaf-change", () => { syncButtons(); refreshEnabled(); }));
-      state.refs.push(app.workspace.on("layout-change", () => { syncButtons(); }));
+      state.refs.push(app.workspace.on("layout-change", () => { syncButtons(); refreshEnabled(); }));
+      try { state.refs.push(app.workspace.on("file-open", () => { syncButtons(); refreshEnabled(); })); } catch (_e) {}
 
       // Live greying: one debounced document selectionchange listener.
       if (typeof document !== "undefined" && document.addEventListener) {
@@ -97,29 +100,41 @@ class CodeFenceButtonInit {
     }
   }
 
-  // Grey every button; enable only the active view's when it has a selection.
+  // Per-view greying: lit only for the active EDITABLE view with a selection.
+  // Reading-mode views stay greyed (can't wrap rendered content) with a
+  // switch-to-editing tooltip; editable-without-selection is greyed with a
+  // select-text tooltip. Delegates the decision to the pure
+  // CodeFenceButton.buttonState so the affordance is unit-tested.
   _refreshEnabled() {
+    const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
     let active = null;
     try {
       // Active markdown view = the one whose editor currently has selection focus.
       const leaf = app.workspace.activeLeaf;
       if (leaf && this._isMarkdownView(leaf.view)) active = leaf.view;
     } catch (_e) {}
-    let enabled = false;
+    let activeHasSel = false;
     try {
-      enabled = !!(active && active.editor && typeof active.editor.somethingSelected === "function"
+      activeHasSel = !!(active && active.editor && typeof active.editor.somethingSelected === "function"
         && active.editor.somethingSelected());
-    } catch (_e) { enabled = false; }
+    } catch (_e) { activeHasSel = false; }
     for (const view of this._markdownViews()) {
       try {
         const root = view.containerEl;
         const el = root && root.querySelector(".sauce-code-fence-action");
         if (!el) continue;
-        const on = (view === active) && enabled;
-        el.classList.toggle("is-disabled", !on);
-        el.style.opacity = on ? "" : "0.35";
-        el.style.cursor = on ? "" : "default";
-        el.setAttribute("aria-disabled", on ? "false" : "true");
+        let mode = "source";
+        try { if (typeof view.getMode === "function") mode = view.getMode(); } catch (_e) {}
+        const hasSel = (view === active) && activeHasSel;
+        const st = (CFB && typeof CFB.buttonState === "function")
+          ? CFB.buttonState(mode, hasSel)
+          : { enabled: hasSel, opacity: hasSel ? 1 : 0.55, label: "Wrap selection in code fence" };
+        el.classList.toggle("is-disabled", !st.enabled);
+        el.style.opacity = String(st.opacity);
+        el.style.color = st.enabled ? "var(--text-accent)" : "";
+        el.style.cursor = st.enabled ? "" : "default";
+        el.setAttribute("aria-disabled", st.enabled ? "false" : "true");
+        el.setAttribute("aria-label", st.label);
       } catch (_e) {}
     }
   }
