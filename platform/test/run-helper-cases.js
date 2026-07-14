@@ -21619,16 +21619,18 @@ type: cowork-microscope
   console.log(`\n--- Case HC-V0962-DASH-1: tsKeys arg includes "day" as FIRST element ---`);
   try {
     const src = fs.readFileSync(DASHBOARD_SRC, "utf8");
-    // Match the tsKeys assignment line; first element of the array must be "day"
-    const m = src.match(/tsKeys:\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]/);
+    // Match the tsKeys assignment line; the FIRST three elements must be
+    // day / created_at / status_changed_at (day FIRST). Trailing keys are
+    // allowed (reader adds "captured_at" so a captured-today article surfaces).
+    const m = src.match(/tsKeys:\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*(?:,\s*"[^"]+"\s*)*\]/);
     const first = m && m[1];
     const second = m && m[2];
     const third = m && m[3];
-    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg passed to ActivityFeed is exactly [\"day\", \"created_at\", \"status_changed_at\"] (day FIRST so activity-feed prefers semantic frontmatter day-of-action over wall-clock timestamps)",
+    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg passed to ActivityFeed begins [\"day\", \"created_at\", \"status_changed_at\"] (day FIRST so activity-feed prefers semantic frontmatter day-of-action over wall-clock timestamps; reader appends captured_at)",
       first === "day" && second === "created_at" && third === "status_changed_at",
       `matched=${!!m} first=${first} second=${second} third=${third}`);
   } catch (e) {
-    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg passed to ActivityFeed is exactly [\"day\", \"created_at\", \"status_changed_at\"]", false, e && e.message);
+    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg begins [\"day\", \"created_at\", \"status_changed_at\"]", false, e && e.message);
   }
 
   // 2→1 sweep reduction: the dashboard no longer owns its own inWindow
