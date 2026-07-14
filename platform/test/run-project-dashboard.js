@@ -390,6 +390,32 @@ function makeApp(files) {
   ok('PROJDASH-11c path points at the task note', tasks[0].path === 'spice/tasks/A.md', tasks[0].path);
 })();
 
+// PROJDASH-12 — _boardStats parses all 4 kanban lanes.
+(async () => {
+  const dash = new ProjectDashboard();
+  const board = [
+    "## In Planning", "- [ ] p1", "- [ ] p2",
+    "## In Progress", "- [ ] ip1",
+    "## Blocked", "- [x] b1",
+    "## Completed", "- [x] c1", "- [x] c2", "- [x] c3",
+  ].join("\n");
+  const realApp = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === 'spice/projects/foo/foo-board.md' ? { path: p } : null),
+      read: async () => board,
+    },
+  };
+  const ctx = { app: realApp, folder: 'spice/projects/foo', slug: 'foo' };
+  const stats = await dash._boardStats(ctx);
+  ok('PROJDASH-12a planning=2', stats.planning === 2, JSON.stringify(stats));
+  ok('PROJDASH-12b inProgress=1', stats.inProgress === 1, JSON.stringify(stats));
+  ok('PROJDASH-12c blocked=1', stats.blocked === 1, JSON.stringify(stats));
+  ok('PROJDASH-12d completed=3', stats.completed === 3, JSON.stringify(stats));
+  const ctx2 = { app: { vault: { getAbstractFileByPath: () => null, read: async () => '' } }, folder: 'x', slug: 'x' };
+  const stats2 = await dash._boardStats(ctx2);
+  ok('PROJDASH-12e missing board = all zero', stats2.planning === 0 && stats2.inProgress === 0 && stats2.blocked === 0 && stats2.completed === 0, JSON.stringify(stats2));
+})();
+
 // ============================================================================
 // PROJDASH-8 — _renderLinks chips
 // ============================================================================
