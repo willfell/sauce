@@ -594,6 +594,11 @@ module.exports = async function (tp) {
     // Ungated, idempotent (skip if the block is already present), .sauce-backup.
     await applyProjectTodoTaskListHeal(tp, installedNow.history, git);
     await applyMeetingTaskListHeal(tp, installedNow.history, git);
+    // 6a7b. meetings — modernize existing meeting-note chrome: fold Agenda into
+    //   Notes, strip the legacy Agenda + Action Items SectionLabel fences + the
+    //   dead ACTION_ITEMS_MARKER, ensure links: [] frontmatter. Runs AFTER the
+    //   task-list heal so action lines are already converted to task notes.
+    await applyMeetingChromeModernizeHeal(tp, installedNow.history, git);
 
     // 6a8. task-entity — strip --- chrome separators from existing task notes.
     await applyTaskNoteChromeHrHeal(tp, installedNow.history, git);
@@ -11544,6 +11549,115 @@ async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, existingNa
   return { created, createdTitles };
 }
 
+// _modernizeMeetingBody — pure, idempotent. Removes the legacy "Agenda" and
+// "Action Items" SectionLabel fences + the dead <!-- ACTION_ITEMS_MARKER -->,
+// folding any non-empty Agenda seed content into the Notes section. Leaves the
+// Tasks/TaskMeetingList block (and everything else) intact. Returns input
+// unchanged when neither legacy section is present.
+function _modernizeMeetingBody(body) {
+  if (typeof body !== "string") return body;
+  const hadAgenda = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"/.test(body);
+  const hadAI = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"/.test(body) || /<!--\s*ACTION_ITEMS_MARKER\s*-->/.test(body);
+  if (!hadAgenda && !hadAI) return body;
+  let out = body;
+  // 1. Capture Agenda seed content (between the Agenda fence and the next fence/marker/heading).
+  let agendaContent = "";
+  const agendaRe = /```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"[\s\S]*?```\n?([\s\S]*?)(?=```dataviewjs|<!--\s*ACTION_ITEMS_MARKER\s*-->|$)/;
+  const am = out.match(agendaRe);
+  if (am && am[1] != null) {
+    agendaContent = am[1].split("\n").map(l => l.replace(/\s+$/, "")).filter(l => l.trim() && l.trim() !== "-").join("\n").trim();
+    out = out.replace(agendaRe, "");
+  }
+  // 2. Remove the Action Items SectionLabel fence + dead marker.
+  out = out.replace(/```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"[\s\S]*?```\n?/g, "");
+  out = out.replace(/<!--\s*ACTION_ITEMS_MARKER\s*-->\n?/g, "");
+  // 3. Fold captured Agenda content into the Notes section (after the Notes fence).
+  if (agendaContent) {
+    const notesRe = /(```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Notes"[\s\S]*?```\n)/;
+    if (notesRe.test(out)) out = out.replace(notesRe, `$1\n${agendaContent}\n`);
+  }
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
+}
+
+// applyMeetingChromeModernizeHeal — backup-first, idempotent, never-throw
+// install heal. Rewrites EVERY existing meeting note under spice/meetings/notes:
+// folds non-empty Agenda seed content into Notes, strips the legacy Agenda +
+// Action Items SectionLabel fences + the dead <!-- ACTION_ITEMS_MARKER -->, and
+// ensures `links: []` frontmatter exists. Stamped with the
+// <!-- meeting-chrome-modernized --> sentinel for idempotent skip.
+async function applyMeetingChromeModernizeHeal(tp, history, git) {
+  const STEP = "meeting_chrome_modernize_heal";
+  const SENTINEL = "<!-- meeting-chrome-modernized -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/meetings/notes";
+    if (!(await adapter.exists(ROOT).catch(() => false))) {
+      history?.push({ event: "info", step: STEP, name: "meetings",
+        summary: { touched: 0, skipped_reason: "spice/meetings/notes not present" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const meetings = await _walk(ROOT);
+    if (!meetings.length) return;
+
+    let touched = 0;
+    for (const fp of meetings) {
+      try {
+        const before = await adapter.read(fp);
+        if (before.includes(SENTINEL)) continue; // idempotent skip
+
+        let after = _modernizeMeetingBody(before);
+
+        // Ensure `links: []` frontmatter exists (touch only the block between
+        // the first two --- fences).
+        const fmMatch = after.match(/^(---\n)([\s\S]*?)(\n---\n)/);
+        if (fmMatch && !/^links:/m.test(fmMatch[2])) {
+          let fmBody = fmMatch[2];
+          if (/^summary:.*$/m.test(fmBody)) {
+            fmBody = fmBody.replace(/^(summary:.*)$/m, "$1\nlinks: []");
+          } else {
+            fmBody = fmBody + "\nlinks: []";
+          }
+          after = fmMatch[1] + fmBody + fmMatch[3] + after.slice(fmMatch[0].length);
+        }
+
+        after = after.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+
+        if (after === before) continue;
+        await _backupAndWrite(adapter, fp, before, after);
+        touched += 1;
+      } catch (e) {
+        history?.push({ event: "warning", step: STEP, name: "meetings",
+          target: fp, reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "meetings",
+      summary: { scanned: meetings.length, notes_touched: touched },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "meetings",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+}
+
 // applyMeetingTasksToEntityMigration — task-entity. Ungated, backup-first,
 // idempotent, NON-DESTRUCTIVE conversion of EVERY meeting note's OPEN Action
 // Items lines into note-per-task files under spice/tasks/. Unlike the daily
@@ -21820,6 +21934,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyTaskNoteProjectSlugHeal = applyTaskNoteProjectSlugHeal;
     module.exports.applyProjectTodoTaskListHeal = applyProjectTodoTaskListHeal;
     module.exports.applyMeetingTaskListHeal = applyMeetingTaskListHeal;
+    module.exports.applyMeetingChromeModernizeHeal = applyMeetingChromeModernizeHeal;
+    module.exports._modernizeMeetingBody = _modernizeMeetingBody;
     module.exports._cleanProjectLinkName = _cleanProjectLinkName;
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
