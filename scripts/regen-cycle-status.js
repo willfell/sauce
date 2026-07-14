@@ -27,6 +27,10 @@ const CYCLE_STATUS = path.join(WORKSHOP, "Docs/agent-guides/cycle-status.md");
 const PLANS_DIR = path.join(WORKSHOP, "Docs/plans");
 const MANIFEST = path.join(WORKSHOP, "platform/manifest.json");
 
+// GA-D2: cycle-status.md is a live-state pointer file, not an archive. Anything
+// that would push it past this cap belongs in Docs/cycle-history.md instead.
+const MAX_BYTES = 15360;
+
 const ARGS = new Set(process.argv.slice(2));
 const CHECK = ARGS.has("--check");
 const CURRENT_ONLY = ARGS.has("--current-only");
@@ -205,8 +209,16 @@ function main() {
     process.exit(1);
   }
 
+  const newBytes = Buffer.byteLength(newBody, "utf8");
+  if (newBytes > MAX_BYTES) {
+    fatal(
+      `refusing to write ${path.relative(WORKSHOP, CYCLE_STATUS)}: rewrite would be ${newBytes} bytes, over the ${MAX_BYTES}-byte cap. ` +
+      `Trim '## Current' prose or move detail into Docs/cycle-history.md, then re-run.`
+    );
+  }
+
   fs.writeFileSync(CYCLE_STATUS, newBody);
-  process.stdout.write(`regen-cycle-status: rewrote ${path.relative(WORKSHOP, CYCLE_STATUS)} → ${manifest.workshop_version} (latest cycle ${latest.version || latest.file})\n`);
+  process.stdout.write(`regen-cycle-status: rewrote ${path.relative(WORKSHOP, CYCLE_STATUS)} (${newBytes} bytes) → ${manifest.workshop_version} (latest cycle ${latest.version || latest.file})\n`);
   process.exit(0);
 }
 
