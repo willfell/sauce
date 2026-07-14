@@ -96,4 +96,65 @@ class CodeFenceButtonInit {
       } catch (_e) { /* never throw */ }
     }
   }
+
+  // Grey every button; enable only the active view's when it has a selection.
+  _refreshEnabled() {
+    let active = null;
+    try {
+      // Active markdown view = the one whose editor currently has selection focus.
+      const leaf = app.workspace.activeLeaf;
+      if (leaf && this._isMarkdownView(leaf.view)) active = leaf.view;
+    } catch (_e) {}
+    let enabled = false;
+    try {
+      enabled = !!(active && active.editor && typeof active.editor.somethingSelected === "function"
+        && active.editor.somethingSelected());
+    } catch (_e) { enabled = false; }
+    for (const view of this._markdownViews()) {
+      try {
+        const root = view.containerEl;
+        const el = root && root.querySelector(".sauce-code-fence-action");
+        if (!el) continue;
+        const on = (view === active) && enabled;
+        el.classList.toggle("is-disabled", !on);
+        el.style.opacity = on ? "" : "0.35";
+        el.style.cursor = on ? "" : "default";
+        el.setAttribute("aria-disabled", on ? "false" : "true");
+      } catch (_e) {}
+    }
+  }
+
+  _onClick(view) {
+    try {
+      if (!view || !view.editor) return;
+      if (!view.editor.somethingSelected || !view.editor.somethingSelected()) return; // greyed → no-op
+      const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
+      if (!CFB || typeof CFB.wrapActiveEditor !== "function") {
+        if (typeof Notice === "function") new Notice("CodeFenceButton unavailable — reinstall the mechanism.", 6000);
+        return;
+      }
+      CFB.wrapActiveEditor(view);
+    } catch (_e) {}
+  }
+
+  _registerCommand() {
+    if (this._commandRegistered) return;
+    if (typeof app === "undefined" || !app.commands || typeof app.commands.addCommand !== "function") return;
+    app.commands.addCommand({
+      id: "code-fence-button:wrap-selection",
+      name: "Sauce: Wrap selection in code fence",
+      callback: () => {
+        try {
+          const leaf = app.workspace && app.workspace.activeLeaf;
+          const view = leaf && this._isMarkdownView(leaf.view) ? leaf.view : null;
+          if (!view) { if (typeof Notice === "function") new Notice("Select text in a note first.", 4000); return; }
+          const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
+          if (!CFB) { if (typeof Notice === "function") new Notice("CodeFenceButton unavailable.", 6000); return; }
+          const did = CFB.wrapActiveEditor(view);
+          if (!did && typeof Notice === "function") new Notice("Select text in a note first.", 4000);
+        } catch (_e) {}
+      },
+    });
+    this._commandRegistered = true;
+  }
 }
