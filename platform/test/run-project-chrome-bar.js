@@ -98,6 +98,37 @@ function allDescendants(el) {
     s.primary && s.primary.id === 'new-task' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-doc'));
 }
+// ── ARCHTOG-1..4 — Archive/Unarchive project (chrome-bar overflow + pure transform)
+{
+  const s = inst._surfaceSpec('project-hub');
+  ok('ARCHTOG-1 project-hub overflow has archive-toggle',
+    s.overflow.some((o) => o.id === 'archive-toggle'));
+}
+{
+  const s = inst._surfaceSpec('project-todo');
+  ok('ARCHTOG-1b project-todo overflow does NOT have archive-toggle',
+    !s.overflow.some((o) => o.id === 'archive-toggle'));
+}
+{
+  const fm = { status: 'in-progress' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-13');
+  ok('ARCHTOG-2a status→archived', fm.status === 'archived');
+  ok('ARCHTOG-2b pre_archive_status stashed', fm.pre_archive_status === 'in-progress');
+  ok('ARCHTOG-2c status_changed_at set', fm.status_changed_at === '2026-07-13');
+}
+{
+  const fm = { status: 'archived', pre_archive_status: 'planning' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-14');
+  ok('ARCHTOG-3a status restored', fm.status === 'planning');
+  ok('ARCHTOG-3b stash cleared', fm.pre_archive_status === undefined || fm.pre_archive_status === null);
+  ok('ARCHTOG-3c status_changed_at set', fm.status_changed_at === '2026-07-14');
+}
+{
+  const fm = { status: 'archived' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-15');
+  ok('ARCHTOG-4 fallback to idea', fm.status === 'idea');
+}
+
 {
   const s = inst._surfaceSpec('docs-hub');
   ok('PCB-SPEC-3 docs-hub primary=new-doc + overflow[new-section,move-docs] + not leaf',

@@ -47,6 +47,30 @@ class ProjectsHubCards {
         } catch (_e) { /* private-mode / disabled storage — non-fatal */ }
     }
 
+    // Archived projects (status: archived) are HIDDEN by default. Toggle
+    // persists to localStorage under this key; default OFF (false).
+    _ARCH_KEY = "sauce.projects-hub.show-archived";
+
+    _readShowArchived() {
+        try {
+            if (typeof localStorage === "undefined") return false;
+            return localStorage.getItem(this._ARCH_KEY) === "true";
+        } catch (_e) { return false; }
+    }
+
+    _writeShowArchived(on) {
+        try {
+            if (typeof localStorage !== "undefined") localStorage.setItem(this._ARCH_KEY, on ? "true" : "false");
+        } catch (_e) { /* private-mode — non-fatal */ }
+    }
+
+    // Pure: drop status==='archived' projects unless showArchived. New array.
+    _filterArchived(pages, showArchived) {
+        const list = [...(pages || [])];
+        if (showArchived) return list;
+        return list.filter(p => String(p && p.status || "").trim() !== "archived");
+    }
+
     // Pure, no DOM. Reads latestMtime from this._lookup (the SAME accessor the
     // render path + per-card meta use) so sort order matches the displayed
     // "last activity" timestamp. Returns a NEW array; never mutates the input.
@@ -73,20 +97,36 @@ class ProjectsHubCards {
         });
     }
 
-    // Sort toggle — ONE control that flips "Last edited" ↔ "A–Z". Toggling
-    // re-sorts + rebuilds ONLY the grid container (kept as this._gridEl), not
-    // the whole view.
+    // Control row above the grid: [ Sort: … ]  [ Archived: … ] — two pills.
+    // Sort flips mtime↔alpha; archived flips hide↔show. Both persist + rebuild
+    // ONLY the grid (this._gridEl), not the whole view.
     _renderSortToggle(dv) {
         const row = dv.container.createEl("div");
-        row.style.cssText = "display:flex;justify-content:flex-end;margin:0 0 6px 0;";
-        const btn = row.createEl("button");
-        btn.style.cssText = "cursor:pointer;font-size:0.8em;padding:3px 10px;border-radius:12px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-muted);";
-        const label = () => this._sortMode === "alpha" ? "Sort: A–Z" : "Sort: Last edited";
-        btn.textContent = label();
-        btn.addEventListener("click", async () => {
+        row.style.cssText = "display:flex;justify-content:flex-end;gap:6px;margin:0 0 6px 0;";
+        const pill = () => {
+            const b = row.createEl("button");
+            b.style.cssText = "cursor:pointer;font-size:0.8em;padding:3px 10px;border-radius:12px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-muted);";
+            return b;
+        };
+
+        const sortBtn = pill();
+        const sortLabel = () => this._sortMode === "alpha" ? "Sort: A–Z" : "Sort: Last edited";
+        sortBtn.textContent = sortLabel();
+        sortBtn.addEventListener("click", async () => {
             this._sortMode = this._sortMode === "alpha" ? "mtime" : "alpha";
             this._writeSortMode(this._sortMode);
-            btn.textContent = label();
+            sortBtn.textContent = sortLabel();
+            await this._rebuildGrid();
+        });
+
+        const archBtn = pill();
+        const archLabel = () => this._showArchived ? "Archived: shown" : "Archived: hidden";
+        archBtn.textContent = archLabel();
+        archBtn.addEventListener("click", async () => {
+            this._showArchived = !this._showArchived;
+            this._writeShowArchived(this._showArchived);
+            archBtn.textContent = archLabel();
+            this._pages = this._filterArchived(this._allPages || [], this._showArchived);
             await this._rebuildGrid();
         });
     }
@@ -133,6 +173,7 @@ class ProjectsHubCards {
         // WS1 chrome overhaul: no status/team/product scope filters. Every project
         // is shown; ordering is the only knob (sort mode, persisted).
         this._sortMode = this._readSortMode();
+        this._showArchived = this._readShowArchived();
 
         // DocSearch stays as the filter strip above the grid. Wiki parity
         // (2026-07-02): hideNativeSearch dropped so the scoped "Search" button
@@ -227,7 +268,8 @@ class ProjectsHubCards {
         }
 
         this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
-        this._pages = enriched.map(e => e.project);
+        this._allPages = enriched.map(e => e.project);
+        this._pages = this._filterArchived(this._allPages, this._showArchived);
 
         // WS1: a single sort toggle ("Last edited" ↔ "A–Z") above the grid.
         this._renderSortToggle(dv);

@@ -366,48 +366,72 @@ function makeApp(files) {
 }
 
 // ============================================================================
-// PROJDASH-11 — _openTasks + _renderOpenTasks (board + To-Do, cap 6, empty hides)
+// PROJDASH-11 — _openTasks now queries spice/tasks task-notes (open, project_slug match, non-meeting).
 // ============================================================================
 (async () => {
-    const dash = new ProjectDashboard();
-    const ctx = {
-        folder: 'spice/projects/foo',
-        slug: 'foo',
-        projectName: 'Foo',
-        currentPath: 'spice/projects/foo/Foo.md',
-        app: {
-            vault: {
-                read: async (f) => {
-                    if (String(f.path).endsWith('foo-board.md')) return '## Todo\n- [ ] a\n- [ ] b\n## Completed\n- [ ] done-hidden\n';
-                    if (String(f.path).endsWith('Foo To-Do.md')) return '- [ ] t1\n- [x] t2\n';
-                    return '';
-                },
-                getAbstractFileByPath: (p) => ({ path: p }),
-            },
-        },
-    };
-    const tasks = await dash._openTasks(ctx);
-    ok('PROJDASH-11a open tasks = 3 (Completed excluded)', tasks.length === 3, JSON.stringify(tasks.map(t => t.title)));
-    ok('PROJDASH-11b sources', tasks.map(t => t.source).join('|') === 'board|board|to-do', tasks.map(t => t.source).join('|'));
+  const dash = new ProjectDashboard();
+  const tasksPages = [
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/A.md', name: 'A' }, title: 'A' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: 'meeting', file: { path: 'spice/tasks/B.md', name: 'B' }, title: 'B' },
+    { type: 'task', status: 'done',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/C.md', name: 'C' }, title: 'C' },
+    { type: 'task', status: 'open',  project_slug: 'bar', source: '',        file: { path: 'spice/tasks/D.md', name: 'D' }, title: 'D' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/_done/E.md', name: 'E' }, title: 'E' },
+    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/F.md', name: 'F' }, title: 'F' },
+  ];
+  const where = (arr) => { const f = (fn) => where(arr.filter(fn)); return Object.assign(arr, { where: f }); };
+  const dv = {
+    current: () => ({ project_slug: 'foo' }),
+    pages: (src) => where(String(src).includes('spice/tasks') ? tasksPages.slice() : []),
+  };
+  const ctx = { dv, slug: 'foo', currentPage: { project_slug: 'foo' } };
+  const tasks = await dash._openTasks(ctx);
+  ok('PROJDASH-11a open non-meeting task-notes for foo = 2', tasks.length === 2, JSON.stringify(tasks.map(t => t.title)));
+  ok('PROJDASH-11b titles A,F (done/meeting/_done/other-project excluded)', tasks.map(t => t.title).join(',') === 'A,F', tasks.map(t => t.title).join(','));
+  ok('PROJDASH-11c path points at the task note', tasks[0].path === 'spice/tasks/A.md', tasks[0].path);
+})();
 
-    const container = makeEl('div');
-    dash._renderOpenTasks(container, ctx, tasks);
-    const rows = container.__descendants().filter(el => el.__isOpenTaskRow);
-    ok('PROJDASH-11c 3 rows rendered', rows.length === 3, String(rows.length));
-    ok('PROJDASH-11d Open Tasks label', container.__descendants().some(el => el.__isSectionLabel && el.textContent === 'Open Tasks'));
+// PROJDASH-12 — _boardStats parses all 4 kanban lanes.
+(async () => {
+  const dash = new ProjectDashboard();
+  const board = [
+    "## In Planning", "- [ ] p1", "- [ ] p2",
+    "## In Progress", "- [ ] ip1",
+    "## Blocked", "- [x] b1",
+    "## Completed", "- [x] c1", "- [x] c2", "- [x] c3",
+  ].join("\n");
+  const realApp = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === 'spice/projects/foo/foo-board.md' ? { path: p } : null),
+      read: async () => board,
+    },
+  };
+  const ctx = { app: realApp, folder: 'spice/projects/foo', slug: 'foo' };
+  const stats = await dash._boardStats(ctx);
+  ok('PROJDASH-12a planning=2', stats.planning === 2, JSON.stringify(stats));
+  ok('PROJDASH-12b inProgress=1', stats.inProgress === 1, JSON.stringify(stats));
+  ok('PROJDASH-12c blocked=1', stats.blocked === 1, JSON.stringify(stats));
+  ok('PROJDASH-12d completed=3', stats.completed === 3, JSON.stringify(stats));
+  const ctx2 = { app: { vault: { getAbstractFileByPath: () => null, read: async () => '' } }, folder: 'x', slug: 'x' };
+  const stats2 = await dash._boardStats(ctx2);
+  ok('PROJDASH-12e missing board = all zero', stats2.planning === 0 && stats2.inProgress === 0 && stats2.blocked === 0 && stats2.completed === 0, JSON.stringify(stats2));
+})();
 
-    // Save/restore global.app synchronously (no await between) so concurrent
-    // async IIFEs can never observe the swapped app.
-    const savedApp = global.app;
-    global.__opens = [];
-    global.app = { workspace: { openLinkText: (target, src, nl) => global.__opens.push({ target, src, nl }) } };
-    rows[0].click();
-    ok('PROJDASH-11e row click opens board', global.__opens[0] && global.__opens[0].target === 'spice/projects/foo/foo-board.md');
-    global.app = savedApp;
+// PROJDASH-13 — meeting enrichment: attendees + hasNotes + openTasks.
+(async () => {
+  const dash = new ProjectDashboard();
+  ok('PROJDASH-13a _bodyHasNotes true on real prose', ProjectDashboard._bodyHasNotes('---\ntype: meeting\n---\n\nWe discussed the roadmap in detail today.') === true);
+  // Note: matches SpaceDailyDashboard._bodyHasNotes verbatim behavior — a wikilink
+  // bullet like "- [[Bob]]" carries >5 non-whitespace chars, so it counts as
+  // real content even though it's scaffold-shaped. Use a pure scaffold body
+  // (task lines + empty bullet + heading only) to exercise the false case.
+  ok('PROJDASH-13b _bodyHasNotes false on scaffold-only', ProjectDashboard._bodyHasNotes('---\ntype: meeting\n---\n\n## Attendees\n-\n\n## Tasks\n- [ ] do it') === false);
 
-    const empty = makeEl('div');
-    dash._renderOpenTasks(empty, ctx, []);
-    ok('PROJDASH-11f empty renders nothing', empty.__children.length === 0);
+  const content = "---\ntype: meeting\nattendees: [Bob, Carol]\n---\n\nGreat discussion about the plan and next quarter.\n\n## Tasks\n- [ ] follow up\n- [x] done one\n";
+  const realApp = { vault: { getAbstractFileByPath: (p) => ({ path: p }), read: async () => content } };
+  const enriched = await dash._enrichMeeting(realApp, { attendees: ['Bob', 'Carol'], file: { path: 'spice/meetings/notes/M.md', name: 'M' } });
+  ok('PROJDASH-13c attendees parsed', enriched.attendees.join(',') === 'Bob,Carol', JSON.stringify(enriched.attendees));
+  ok('PROJDASH-13d hasNotes true', enriched.hasNotes === true);
+  ok('PROJDASH-13e openTasks = 1', enriched.openTasks === 1, String(enriched.openTasks));
 })();
 
 // ============================================================================

@@ -130,6 +130,33 @@ function makePage(name, mtimeTs) {
     ok("PHC-MODE-5 invalid value falls back to mtime", hub._readSortMode() === "mtime");
   }
 
+  // -------------------------------------------------------------------------
+  // IV. Archived filter + show-archived localStorage round-trip.
+  // -------------------------------------------------------------------------
+  {
+    console.log("\n=== PHC-ARCH: _filterArchived / _readShowArchived / _writeShowArchived ===");
+    const ls2 = makeLocalStorage();
+    const Cls2 = loadClass({ localStorage: ls2, window: { localStorage: ls2 } });
+    const inst = new Cls2();
+
+    ok("PHC-ARCH-1 default show-archived is false", inst._readShowArchived() === false);
+    inst._writeShowArchived(true);
+    ok("PHC-ARCH-2 write true round-trips", inst._readShowArchived() === true);
+    ok("PHC-ARCH-3 localStorage key correct", ls2._store.get("sauce.projects-hub.show-archived") === "true");
+    inst._writeShowArchived(false);
+    ok("PHC-ARCH-4 write false round-trips", inst._readShowArchived() === false);
+
+    const pages = [
+      { status: "in-progress", file: { path: "a", name: "A" } },
+      { status: "archived",    file: { path: "b", name: "B" } },
+      { status: "done",        file: { path: "c", name: "C" } },
+    ];
+    const hidden = inst._filterArchived(pages, false);
+    ok("PHC-ARCH-5 archived hidden by default = 2 shown", hidden.length === 2 && !hidden.some((p) => p.status === "archived"), JSON.stringify(hidden.map((p) => p.status)));
+    const shown = inst._filterArchived(pages, true);
+    ok("PHC-ARCH-6 show-archived on = all 3", shown.length === 3, String(shown.length));
+  }
+
   console.log("");
   if (fail === 0) {
     console.log(`PASS ${pass}/${pass + fail}`);
