@@ -135,16 +135,23 @@
   pointer-events: none;
   transform: scale(0.9) translateY(-10px);
   transform-origin: top right;
+  /* Collapse the box when closed so it can't extend a sparse Home note's
+   * scroll container and force a stray scrollbar (position:absolute still
+   * contributes to scrollHeight if it overflows the nearest scroll ancestor). */
+  max-height: 0;
+  overflow: hidden;
   transition: opacity 0.14s var(--sh-ease), transform 0.16s var(--sh-ease),
-    visibility 0s linear 0.16s;
+    visibility 0s linear 0.16s, max-height 0s linear 0.16s;
 }
 .sauce-home .sauce-home-add-menu.is-open {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
   transform: scale(1) translateY(0);
+  max-height: 80vh;
+  overflow: visible;
   transition: opacity 0.16s var(--sh-ease), transform 0.34s var(--sh-spring),
-    visibility 0s linear 0s;
+    visibility 0s linear 0s, max-height 0s linear 0s;
 }
 /* Each row cascades in when the menu opens — the input, then the actions. Uses an
  * animation keyed on .is-open so it re-fires every open; the natural (no-anim)
@@ -253,7 +260,9 @@
 .sauce-home .sauce-home-capture-icon {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 20px;
   color: var(--text-muted);
 }
 .sauce-home .sauce-home-capture-icon svg { display: block; }
@@ -345,6 +354,11 @@
   .sauce-home .sauce-home-add-item { min-height: 44px; }
   .sauce-home .sauce-home-capture-input,
   .sauce-home .sauce-home-capture-add { min-height: 42px; }
+  /* v0.13.4: color+number only — drop the text label so chips read as compact
+   * count badges instead of overflowing the row. */
+  .sauce-home .sauce-home-glance-label { display: none; }
+  .sauce-home .sauce-home-glance-sep { display: none; }
+  .sauce-home .sauce-home-glance { gap: 10px; }
 }
 
 /* ── Reduced-motion off-switch ─────────────────────────────────────────── *
