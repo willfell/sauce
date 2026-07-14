@@ -45,13 +45,24 @@ while (true) {
   if (attendees.indexOf(picked) === -1) attendees.push(picked);
 }
 -%>
+<%*
+// Optional explicit meeting date/time. Blank → creation time (prior behavior).
+let _dtInput = await tp.system.prompt("Meeting date & time (optional, e.g. 2026-07-13 14:30) — blank = now:", "");
+let _dt = null;
+if (_dtInput && _dtInput.trim()) {
+  const _m = window.moment(_dtInput.trim(), ["YYYY-MM-DD HH:mm", "YYYY-MM-DDTHH:mm", "YYYY-MM-DD"], true);
+  if (_m.isValid()) _dt = _m;
+}
+const _dateIso = _dt ? _dt.format("YYYY-MM-DDTHH:mm:ssZ") : tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ");
+-%>
 ---
-date: <% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>
+date: <% _dateIso %>
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 type: meeting
 tags:
   - "{{vault_identity_tag}}"
 summary: ""
+links: []
 attendees:
 <%* for (const attendee of attendees) {
   tR += `  - "[[${attendee}]]"\n`;
@@ -89,12 +100,6 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 ```
 
 -
-
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });
-```
-
-<!-- ACTION_ITEMS_MARKER -->
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Tasks" }] });
