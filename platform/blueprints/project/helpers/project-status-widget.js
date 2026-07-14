@@ -7,9 +7,11 @@
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
  */
 class ProjectStatusWidget {
-    async render(dv) {
-        const STATUSES = ["idea", "planning", "in-progress", "blocked", "superseded", "cancelled", "done"];
-        const COLORS = {
+    static get STATUSES() {
+        return ["idea", "planning", "in-progress", "blocked", "superseded", "cancelled", "done", "archived"];
+    }
+    static get COLORS() {
+        return {
             idea:        "var(--text-muted)",
             planning:    "var(--color-blue)",
             "in-progress": "var(--color-green)",
@@ -17,7 +19,13 @@ class ProjectStatusWidget {
             superseded:  "var(--color-orange)",
             cancelled:   "var(--text-faint)",
             done:        "var(--color-purple)",
+            archived:    "var(--text-faint)",
         };
+    }
+
+    async render(dv) {
+        const STATUSES = ProjectStatusWidget.STATUSES;
+        const COLORS = ProjectStatusWidget.COLORS;
 
         const current = dv.current();
         if (!current || !current.file) return;
@@ -134,12 +142,27 @@ class ProjectStatusWidget {
         document.body.appendChild(overlay);
     }
 
+    // Pure: apply a status change to a frontmatter object, maintaining the
+    // pre_archive_status stash. Moving INTO archived stashes the prior status;
+    // moving OUT of archived (to any live status) clears the stash. Mutates + returns fm.
+    static _applyStatusChange(fm, newStatus, todayStr) {
+        if (!fm || typeof fm !== "object") return fm;
+        const prior = String(fm.status == null ? "" : fm.status).trim();
+        if (newStatus === "archived") {
+            if (prior && prior !== "archived") fm.pre_archive_status = prior;
+        } else if ("pre_archive_status" in fm) {
+            delete fm.pre_archive_status;
+        }
+        fm.status = newStatus;
+        fm.status_changed_at = todayStr;
+        return fm;
+    }
+
     async _writeStatus(file, newStatus) {
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
         try {
             await app.fileManager.processFrontMatter(file, fm => {
-                fm.status = newStatus;
-                fm.status_changed_at = today;
+                ProjectStatusWidget._applyStatusChange(fm, newStatus, today);
             });
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
