@@ -158,7 +158,7 @@ clip-only fields.) The manifest's `title`/`url` prompt specs stay in place (unch
 | `word_count` | `parsed.frontmatter.word_count` \|\| `0` | new preset key |
 | `status` | `parsed.frontmatter.status` \|\| `"unread"` | new preset key (manifest already defaults `status: unread` in `frontmatter_template`; only overridden if the paste sets a different one) |
 | `summary` | `parsed.frontmatter.summary` \|\| `""` | new preset key |
-| `tags` | `parsed.frontmatter.tags` \|\| `["reader-article"]` | new preset key; array, matches manifest's existing default shape |
+| `tags` | `parsed.frontmatter.tags` \|\| `["reader-article"]` | **implementation constraint (discovered during build):** `entity-create`'s frontmatter renderer decides list-vs-scalar from the *template value's* JS type, and there is no token/pipe that expands a dynamic prompt array into a YAML list. A string token `{{prompts.tags}}` would coerce the array to a single bad tag (`"ai,rl"`). So `frontmatter_template.tags` stays the literal `["reader-article"]` list (always a valid YAML list) and `tags` is **not** a preset key — clipped tags are not carried into frontmatter. `buildPresetPrompts` still returns a `tags` array (Node-tested), but with no matching prompt spec the short-circuit never assigns it, so the static default holds. Carrying clip tags would require a post-`create` `processFrontMatter` pass; deferred as out-of-scope for this cycle. |
 | `highlights` | `parsed.highlights` \|\| `""` | new preset key, consumed by the new `{{prompts.highlights}}` token in `Reader Article.md` |
 | `content` | `parsed.content` \|\| `""` | new preset key, consumed by the new `{{prompts.content}}` token; on the malformed path this is the entire raw paste |
 
