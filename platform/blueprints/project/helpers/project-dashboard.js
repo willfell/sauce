@@ -108,6 +108,13 @@ class ProjectDashboard {
       this._renderOpenTasks(root, ctx, tasks);
 
       const groups = this._recentByKind(dv, ctx);
+      // Enrich recent meetings with attendees + badges (SpaceDailyDashboard parity).
+      try {
+        const realAppRef = ctx.app;
+        for (const m of (groups.meetings || [])) {
+          m.enriched = await this._enrichMeeting(realAppRef, m.page || {});
+        }
+      } catch (_e) {}
       this._renderRecentGroups(root, ctx, groups);
     } catch (_e) {
       // Never throw — cold-load / stub environments.
@@ -155,6 +162,27 @@ class ProjectDashboard {
     const weeks = Math.floor(days / 7);
     if (weeks < 4) return `${weeks}w ago`;
     return new Date(Number(ts)).toISOString().split("T")[0];
+  }
+
+  // Scaffold-aware notes detector — strips frontmatter, fenced blocks, HTML
+  // comments, horizontal rules, task lines, lone bullets, headings; true iff
+  // real prose remains. Ported verbatim from SpaceDailyDashboard so meeting
+  // "Notes" badges agree across dashboards.
+  static _bodyHasNotes(content) {
+    if (typeof content !== "string" || !content) return false;
+    let body = content;
+    const fmEnd = body.indexOf("\n---", 4);
+    if (body.indexOf("---") === 0 && fmEnd >= 0) body = body.slice(fmEnd + 4);
+    body = body.replace(/```[\s\S]*?```/g, "");
+    body = body.replace(/<!--[\s\S]*?-->/g, "");
+    body = body
+      .split("\n")
+      .filter((l) => !/^\s*---+\s*$/.test(l))
+      .filter((l) => !/^\s*[-*+]\s*\[[ xX]\]/.test(l))
+      .filter((l) => !/^\s*[-*+]\s*$/.test(l))
+      .filter((l) => !/^#+\s/.test(l))
+      .join("\n");
+    return body.replace(/\s/g, "").length > 5;
   }
 
   static _parseLinks(links) {
@@ -339,6 +367,45 @@ class ProjectDashboard {
     } catch (_e) {}
 
     return groups;
+  }
+
+  // Enrich a meeting page → { file, attendees[], hasNotes, openTasks }.
+  // Attendees: frontmatter `attendees` first, else `## Attendees` body bullets.
+  // Never throws; on read failure returns empty attendees / false / 0.
+  async _enrichMeeting(realApp, p) {
+    let content = "";
+    try {
+      if (realApp && realApp.vault && p && p.file && p.file.path) {
+        const f = realApp.vault.getAbstractFileByPath(p.file.path);
+        if (f && typeof realApp.vault.read === "function") content = await realApp.vault.read(f);
+      }
+    } catch (_e) {}
+
+    const stripWikilink = (s) => {
+      const m = String(s).match(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
+      return m ? (m[2] || m[1]) : String(s);
+    };
+
+    let attendees = [];
+    if (p && p.attendees && typeof p.attendees.length === "number" && p.attendees.length > 0) {
+      for (let i = 0; i < p.attendees.length; i++) {
+        const name = stripWikilink(p.attendees[i]).trim();
+        if (name) attendees.push(name);
+      }
+    } else if (content) {
+      const m = content.match(/## Attendees\s*([\s\S]*?)(?=\n---|\n##|$)/); // lint-display-markers:allow
+      if (m) {
+        const lines = m[1].match(/- \[\[[^\]]+\]\]|- [^\n]+/g) || [];
+        for (const l of lines) {
+          const name = stripWikilink(l.replace(/^- /, "")).trim();
+          if (name) attendees.push(name);
+        }
+      }
+    }
+
+    const openTasks = (content.match(/^\s*[-*+]\s*\[ \]/gm) || []).length;
+    const hasNotes = ProjectDashboard._bodyHasNotes(content);
+    return { file: p.file, attendees, hasNotes, openTasks };
   }
 
   // ── rendering ─────────────────────────────────────────────────────
@@ -546,6 +613,25 @@ class ProjectDashboard {
         const title = row.createEl("div");
         title.textContent = String((item.page && item.page.file && item.page.file.name) || "");
         title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.9em;";
+
+        // Meeting parity: attendees subtitle + Notes / N-open badges.
+        if (item.kind === "meeting" && item.enriched) {
+          const en = item.enriched;
+          const att = Array.isArray(en.attendees) ? en.attendees : [];
+          if (att.length > 0) {
+            const sub = row.createEl("div");
+            const max = 3;
+            sub.textContent = att.length <= max ? att.join(", ") : `${att.slice(0, max - 1).join(", ")}, +${att.length - (max - 1)}`;
+            sub.style.cssText = "font-size:0.72em; color:var(--text-muted); margin-left:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:40%;";
+          }
+          const badge = (label, color) => {
+            const b = row.createEl("span");
+            b.textContent = label;
+            b.style.cssText = `margin-left:6px; padding:0 7px; border-radius:999px; font-size:0.68em; font-weight:600; white-space:nowrap; color:${color}; background:color-mix(in srgb, ${color} 13%, transparent); border:1px solid color-mix(in srgb, ${color} 45%, transparent);`;
+          };
+          if (en.hasNotes) badge("Notes", "var(--interactive-accent)");
+          if (en.openTasks > 0) badge(`${en.openTasks} open`, "var(--color-orange)");
+        }
 
         const time = row.createEl("div");
         time.textContent = ProjectDashboard._relTime(item.mtime);

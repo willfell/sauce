@@ -416,6 +416,24 @@ function makeApp(files) {
   ok('PROJDASH-12e missing board = all zero', stats2.planning === 0 && stats2.inProgress === 0 && stats2.blocked === 0 && stats2.completed === 0, JSON.stringify(stats2));
 })();
 
+// PROJDASH-13 — meeting enrichment: attendees + hasNotes + openTasks.
+(async () => {
+  const dash = new ProjectDashboard();
+  ok('PROJDASH-13a _bodyHasNotes true on real prose', ProjectDashboard._bodyHasNotes('---\ntype: meeting\n---\n\nWe discussed the roadmap in detail today.') === true);
+  // Note: matches SpaceDailyDashboard._bodyHasNotes verbatim behavior — a wikilink
+  // bullet like "- [[Bob]]" carries >5 non-whitespace chars, so it counts as
+  // real content even though it's scaffold-shaped. Use a pure scaffold body
+  // (task lines + empty bullet + heading only) to exercise the false case.
+  ok('PROJDASH-13b _bodyHasNotes false on scaffold-only', ProjectDashboard._bodyHasNotes('---\ntype: meeting\n---\n\n## Attendees\n-\n\n## Tasks\n- [ ] do it') === false);
+
+  const content = "---\ntype: meeting\nattendees: [Bob, Carol]\n---\n\nGreat discussion about the plan and next quarter.\n\n## Tasks\n- [ ] follow up\n- [x] done one\n";
+  const realApp = { vault: { getAbstractFileByPath: (p) => ({ path: p }), read: async () => content } };
+  const enriched = await dash._enrichMeeting(realApp, { attendees: ['Bob', 'Carol'], file: { path: 'spice/meetings/notes/M.md', name: 'M' } });
+  ok('PROJDASH-13c attendees parsed', enriched.attendees.join(',') === 'Bob,Carol', JSON.stringify(enriched.attendees));
+  ok('PROJDASH-13d hasNotes true', enriched.hasNotes === true);
+  ok('PROJDASH-13e openTasks = 1', enriched.openTasks === 1, String(enriched.openTasks));
+})();
+
 // ============================================================================
 // PROJDASH-8 — _renderLinks chips
 // ============================================================================
