@@ -74,42 +74,66 @@ class CodeFenceButtonInit {
     return out;
   }
 
-  // Ensure every markdown view carries exactly one far-right code-fence action.
+  // The two view-header buttons this mechanism injects. `method` is the
+  // CodeFenceButton instance method the click delegates to; `kind` feeds
+  // buttonState for the correct tooltip; `cmdId`/`cmdName` register the mirror
+  // command.
+  _buttonSpecs() {
+    return [
+      { cls: "sauce-code-fence-action", icon: "code-2", kind: "fence",
+        method: "wrapActiveEditor",
+        cmdId: "code-fence-button:wrap-selection", cmdName: "Sauce: Wrap selection in code fence" },
+      { cls: "sauce-inline-code-action", icon: "braces", kind: "inline",
+        method: "wrapActiveEditorInline",
+        cmdId: "code-fence-button:wrap-inline-code", cmdName: "Sauce: Wrap selection in inline code" },
+    ];
+  }
+
+  // On mobile, DON'T reorder the native view-header action row — forcing our
+  // button to be the last child there displaced/promoted Obsidian's own
+  // read/edit toggle. Desktop keeps the far-right placement.
+  _isMobile() {
+    try { return !!(typeof app !== "undefined" && app.isMobile); } catch (_e) { return false; }
+  }
+
+  // Ensure every markdown view carries the code-fence + inline-code actions.
   _syncButtons() {
+    const mobile = this._isMobile();
     for (const view of this._markdownViews()) {
       try {
         const root = view.containerEl;
         if (!root) continue;
         const actions = root.querySelector(".view-header .view-actions") || root.querySelector(".view-actions");
         if (!actions) continue;
-        if (actions.querySelector(".sauce-code-fence-action")) {
-          // already present — just make sure it's still far-right
-          const existing = actions.querySelector(".sauce-code-fence-action");
-          if (existing && existing.parentElement === actions && existing !== actions.lastElementChild) {
-            actions.appendChild(existing);
-          }
-          continue;
-        }
         if (typeof view.addAction !== "function") continue;
-        const el = view.addAction("code-2", "Wrap selection in code fence", () => this._onClick(view));
-        if (!el) continue;
-        el.classList.add("sauce-code-fence-action");
-        // Far right: last child of the actions row.
-        if (el.parentElement === actions) actions.appendChild(el);
+        for (const spec of this._buttonSpecs()) {
+          const existing = actions.querySelector("." + spec.cls);
+          if (existing) {
+            // Desktop only: keep it far-right. Never reorder on mobile.
+            if (!mobile && existing.parentElement === actions && existing !== actions.lastElementChild) {
+              actions.appendChild(existing);
+            }
+            continue;
+          }
+          const el = view.addAction(spec.icon, "", () => this._onClick(view, spec));
+          if (!el) continue;
+          el.classList.add(spec.cls);
+          // Desktop: far right (last child). Mobile: leave addAction's placement.
+          if (!mobile && el.parentElement === actions) actions.appendChild(el);
+        }
       } catch (_e) { /* never throw */ }
     }
   }
 
-  // Per-view greying: lit only for the active EDITABLE view with a selection.
-  // Reading-mode views stay greyed (can't wrap rendered content) with a
-  // switch-to-editing tooltip; editable-without-selection is greyed with a
-  // select-text tooltip. Delegates the decision to the pure
+  // Per-view greying for BOTH buttons: lit only for the active EDITABLE view
+  // with a selection. Reading-mode views stay greyed (can't wrap rendered
+  // content) with a switch-to-editing tooltip; editable-without-selection is
+  // greyed with a select-text tooltip. Delegates the decision to the pure
   // CodeFenceButton.buttonState so the affordance is unit-tested.
   _refreshEnabled() {
     const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
     let active = null;
     try {
-      // Active markdown view = the one whose editor currently has selection focus.
       const leaf = app.workspace.activeLeaf;
       if (leaf && this._isMarkdownView(leaf.view)) active = leaf.view;
     } catch (_e) {}
@@ -121,55 +145,60 @@ class CodeFenceButtonInit {
     for (const view of this._markdownViews()) {
       try {
         const root = view.containerEl;
-        const el = root && root.querySelector(".sauce-code-fence-action");
-        if (!el) continue;
+        if (!root) continue;
         let mode = "source";
         try { if (typeof view.getMode === "function") mode = view.getMode(); } catch (_e) {}
         const hasSel = (view === active) && activeHasSel;
-        const st = (CFB && typeof CFB.buttonState === "function")
-          ? CFB.buttonState(mode, hasSel)
-          : { enabled: hasSel, opacity: hasSel ? 1 : 0.55, label: "Wrap selection in code fence" };
-        el.classList.toggle("is-disabled", !st.enabled);
-        el.style.opacity = String(st.opacity);
-        el.style.color = st.enabled ? "var(--text-accent)" : "";
-        el.style.cursor = st.enabled ? "" : "default";
-        el.setAttribute("aria-disabled", st.enabled ? "false" : "true");
-        el.setAttribute("aria-label", st.label);
+        for (const spec of this._buttonSpecs()) {
+          const el = root.querySelector("." + spec.cls);
+          if (!el) continue;
+          const st = (CFB && typeof CFB.buttonState === "function")
+            ? CFB.buttonState(mode, hasSel, spec.kind)
+            : { enabled: hasSel, opacity: hasSel ? 1 : 0.55, label: spec.cmdName.replace("Sauce: ", "") };
+          el.classList.toggle("is-disabled", !st.enabled);
+          el.style.opacity = String(st.opacity);
+          el.style.color = st.enabled ? "var(--text-accent)" : "";
+          el.style.cursor = st.enabled ? "" : "default";
+          el.setAttribute("aria-disabled", st.enabled ? "false" : "true");
+          el.setAttribute("aria-label", st.label);
+        }
       } catch (_e) {}
     }
   }
 
-  _onClick(view) {
+  _onClick(view, spec) {
     try {
       if (!view || !view.editor) return;
       if (!view.editor.somethingSelected || !view.editor.somethingSelected()) return; // greyed → no-op
       const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
-      if (!CFB || typeof CFB.wrapActiveEditor !== "function") {
+      if (!CFB || typeof CFB[spec.method] !== "function") {
         if (typeof Notice === "function") new Notice("CodeFenceButton unavailable — reinstall the mechanism.", 6000);
         return;
       }
-      CFB.wrapActiveEditor(view);
+      CFB[spec.method](view);
     } catch (_e) {}
   }
 
   _registerCommand() {
     if (this._commandRegistered) return;
     if (typeof app === "undefined" || !app.commands || typeof app.commands.addCommand !== "function") return;
-    app.commands.addCommand({
-      id: "code-fence-button:wrap-selection",
-      name: "Sauce: Wrap selection in code fence",
-      callback: () => {
-        try {
-          const leaf = app.workspace && app.workspace.activeLeaf;
-          const view = leaf && this._isMarkdownView(leaf.view) ? leaf.view : null;
-          if (!view) { if (typeof Notice === "function") new Notice("Select text in a note first.", 4000); return; }
-          const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
-          if (!CFB) { if (typeof Notice === "function") new Notice("CodeFenceButton unavailable.", 6000); return; }
-          const did = CFB.wrapActiveEditor(view);
-          if (!did && typeof Notice === "function") new Notice("Select text in a note first.", 4000);
-        } catch (_e) {}
-      },
-    });
+    for (const spec of this._buttonSpecs()) {
+      app.commands.addCommand({
+        id: spec.cmdId,
+        name: spec.cmdName,
+        callback: () => {
+          try {
+            const leaf = app.workspace && app.workspace.activeLeaf;
+            const view = leaf && this._isMarkdownView(leaf.view) ? leaf.view : null;
+            if (!view) { if (typeof Notice === "function") new Notice("Select text in a note first.", 4000); return; }
+            const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
+            if (!CFB || typeof CFB[spec.method] !== "function") { if (typeof Notice === "function") new Notice("CodeFenceButton unavailable.", 6000); return; }
+            const did = CFB[spec.method](view);
+            if (!did && typeof Notice === "function") new Notice("Select text in a note first.", 4000);
+          } catch (_e) {}
+        },
+      });
+    }
     this._commandRegistered = true;
   }
 }

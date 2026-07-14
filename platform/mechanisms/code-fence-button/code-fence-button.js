@@ -20,20 +20,24 @@ class CodeFenceButton {
     return "`".repeat(n);
   }
 
-  // Pure affordance decision for the view-header button, given the active view's
-  // mode ("preview" = reading, "source" = editable) and whether the editor has a
-  // selection. Reading mode can never wrap (no editable selection), so it stays
-  // greyed with a hint to switch modes; editable-without-selection is greyed with
-  // a "select text" hint; editable-with-selection is lit. Disabled opacity is
-  // 0.55 (not 0.35) so the greyed button is still discoverable in the header.
-  buttonState(mode, hasSelection) {
+  // Pure affordance decision for a view-header button, given the active view's
+  // mode ("preview" = reading, "source" = editable), whether the editor has a
+  // selection, and which button (`kind`: "fence" for the ``` block button,
+  // "inline" for the single-backtick button). Reading mode can never wrap (no
+  // editable selection), so it stays greyed with a hint to switch modes;
+  // editable-without-selection is greyed with a "select text" hint;
+  // editable-with-selection is lit. Disabled opacity is 0.55 (not 0.35) so the
+  // greyed button is still discoverable in the header.
+  buttonState(mode, hasSelection, kind) {
+    const phrase = kind === "inline" ? "wrap in inline code" : "wrap in a code fence";
+    const litLabel = kind === "inline" ? "Wrap selection in inline code" : "Wrap selection in code fence";
     if (mode === "preview") {
-      return { enabled: false, opacity: 0.55, label: "Switch to editing mode to wrap in a code fence" };
+      return { enabled: false, opacity: 0.55, label: "Switch to editing mode to " + phrase };
     }
     if (!hasSelection) {
-      return { enabled: false, opacity: 0.55, label: "Select text to wrap in a code fence" };
+      return { enabled: false, opacity: 0.55, label: "Select text to " + phrase };
     }
-    return { enabled: true, opacity: 1, label: "Wrap selection in code fence" };
+    return { enabled: true, opacity: 1, label: litLabel };
   }
 
   wrapSelection(selection, opts) {
@@ -70,6 +74,51 @@ class CodeFenceButton {
       return true;
     } catch (e) {
       if (typeof console !== "undefined") console.error("[CodeFenceButton.wrapActiveEditor]", e);
+      return false;
+    }
+  }
+
+  // Inline-code delimiter length: a run of max(1, longest-inner-backtick-run + 1)
+  // backticks. One backtick for plain text; more only if the selection itself
+  // contains backticks (CommonMark: a code span's delimiter run must exceed any
+  // backtick run inside it).
+  computeInlineTicks(selection) {
+    const s = typeof selection === "string" ? selection : "";
+    let longest = 0;
+    const runs = s.match(/`+/g);
+    if (runs) for (const r of runs) if (r.length > longest) longest = r.length;
+    return "`".repeat(Math.max(1, longest + 1));
+  }
+
+  // Wrap `selection` in inline code: a backtick delimiter before and after, on
+  // the same line (no newlines). Pads a single space inside the delimiters when
+  // the delimiter is multi-backtick or the content touches a backtick at an edge
+  // (CommonMark requires this so the span parses). Returns { text, cursor } or
+  // null for an empty/whitespace selection.
+  wrapInline(selection) {
+    const sel = typeof selection === "string" ? selection : "";
+    if (sel.trim() === "") return null;
+    const ticks = this.computeInlineTicks(sel);
+    const needsPad = ticks.length > 1 || sel.startsWith("`") || sel.endsWith("`");
+    const pad = needsPad ? " " : "";
+    const text = ticks + pad + sel + pad + ticks;
+    return { text: text, cursor: text.length };
+  }
+
+  // App-facing: wrap the active editor's selection in inline code in place.
+  // Never-throw. Returns true if a wrap happened, false otherwise.
+  wrapActiveEditorInline(view) {
+    try {
+      const editor = view && view.editor;
+      if (!editor || typeof editor.getSelection !== "function") return false;
+      const sel = editor.getSelection();
+      if (!sel || sel.trim() === "") return false;
+      const wrapped = this.wrapInline(sel);
+      if (!wrapped) return false;
+      editor.replaceSelection(wrapped.text);
+      return true;
+    } catch (e) {
+      if (typeof console !== "undefined") console.error("[CodeFenceButton.wrapActiveEditorInline]", e);
       return false;
     }
   }
