@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.225.0",
+  "workshop_version": "0.226.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -119,7 +119,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.8.3",
+      "version": "0.9.0",
       "path": "mechanisms/entity-create"
     },
     {
@@ -201,7 +201,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.18.0",
+      "version": "0.19.0",
       "path": "blueprints/meetings"
     },
     {
