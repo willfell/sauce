@@ -142,7 +142,11 @@ function plan(srcRelPath, srcAbsPath, ctx) {
     const [, year, month, day] = m;
     const monthIdx = parseInt(month, 10) - 1;
     const monthDir = `${month}-${MONTH_NAMES[monthIdx]}`;
-    const tgt = `spice/meetings/hubs/${year}/${monthDir}/Meetings-${year}-${month}-${day}.md`;
+    // Per-day hubs are retired in favor of a single persistent
+    // spice/meetings/Meetings.md (scaffolded at install). Land legacy hub notes
+    // PRE-ARCHIVED under hubs/_archive/** so a fresh migrate never creates live
+    // per-day hubs that would conflict with the persistent hub.
+    const tgt = `spice/meetings/hubs/_archive/${year}/${monthDir}/Meetings-${year}-${month}-${day}.md`;
     return {
         action: "rewrite_blueprint",
         src: srcRelPath,

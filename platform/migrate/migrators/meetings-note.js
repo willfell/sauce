@@ -146,6 +146,9 @@ function _parseAttendeesFromFrontmatter(fmLines) {
 function _renderBody(rest, attendees) {
     const agenda = extractSection(rest, "## Agenda/Questions", { includeHeading: false });
     const notes = extractSection(rest, "## Notes", { includeHeading: false });
+    // Modern meetings blueprint emits NO "## Action Items" heading (task-entity
+    // owns action items). But we must NOT silently drop user-written content:
+    // any non-empty legacy Action Items prose is FOLDED into Notes (below).
     const actions = extractSection(rest, "## Action Items", { includeHeading: false });
     // Spec review IMP: preserve **Clients** block when non-empty.
     // Source shape: `**Clients**` line, then `- <name>` bullets (or empty `- `).
@@ -185,9 +188,17 @@ function _renderBody(rest, attendees) {
         ? attendees.map(a => `- [[${a}]]`).join("\n")
         : "-";
 
-    const agendaContent = agenda.found ? trimEnds(agenda.content) : "-";
-    const notesContent = notes.found ? trimEnds(notes.content) : "";
+    // Modernized meetings blueprint: no standalone Agenda / Action Items output
+    // headings (task-entity owns action items). To avoid silently losing
+    // user-written content, non-empty legacy Agenda AND Action Items content are
+    // FOLDED into the Notes section (Notes body, then Agenda, then Action Items),
+    // each as plain lines. `-`-only / empty sections are dropped.
+    const agendaContent = agenda.found ? trimEnds(agenda.content) : "";
     const actionsContent = actions.found ? trimEnds(actions.content) : "";
+    const notesRaw = notes.found ? trimEnds(notes.content) : "";
+    const notesContent = [notesRaw, agendaContent, actionsContent]
+        .filter(s => s && s !== "-")
+        .join("\n\n");
 
     const out = [
         navBlock,
@@ -207,21 +218,9 @@ function _renderBody(rest, attendees) {
     out.push(
         "---",
         "",
-        "## Agenda",
-        "",
-        agendaContent,
-        "",
-        "---",
-        "",
         "## Notes",
         "",
         notesContent,
-        "",
-        "---",
-        "",
-        "## Action Items",
-        "",
-        actionsContent,
         ""
     );
 

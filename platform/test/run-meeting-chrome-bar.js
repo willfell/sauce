@@ -33,15 +33,23 @@ const cfg = inst._config();
   ok('MCB-DETECT-HUB-4 no type + no meetings-hub tag → null', noHubTag === null);
 }
 
-// MCB-SPEC — primary New Task + 2 overflow + leaf on the meeting leaf surface.
+// MCB-SPEC — primary New Task + overflow (add-project, edit-attendees, add-link) + leaf on the meeting leaf surface.
 {
   const s = cfg.surfaceSpec({ context: 'meeting' });
   ok('MCB-SPEC-1 primary new-task + overflow add-project,edit-attendees + leaf',
     s.primary && s.primary.id === 'new-task'
-    && s.overflow.length === 2
     && s.overflow[0].id === 'add-project'
     && s.overflow[1].id === 'edit-attendees'
     && s.leaf === true);
+  ok('MCB-SPEC-LINK-1 leaf overflow contains an add-link item (after edit-attendees)',
+    Array.isArray(s.overflow) && s.overflow.some((o) => o && o.id === 'add-link'));
+}
+
+// MCB-SPEC-HUB-LINK — the hub overflow must NOT contain add-link (leaf-only feature).
+{
+  const s = cfg.surfaceSpec({ context: 'meetings-hub' });
+  ok('MCB-SPEC-HUB-LINK-1 hub overflow does not contain add-link',
+    Array.isArray(s.overflow) && !s.overflow.some((o) => o && o.id === 'add-link'));
 }
 
 // MCB-SPEC-HUB — "+ New Meeting" primary (right of the compass) on the hub;
@@ -77,6 +85,30 @@ const cfg = inst._config();
   ok('MCB-DISPATCH-3 edit-attendees → MeetingLeafActions._onEditAttendees', calls[2] === 'edit-attendees');
   ok('MCB-DISPATCH-4 new-meeting → EntityCreate.create({instance:"meeting"})',
     entityCreateCalls.length === 1 && entityCreateCalls[0].instance === 'meeting');
+}
+
+// MCB-DISPATCH-LINK — add-link → SectionExplorer._openAddLinkForm(dv, _noteSelfAdapter(page), null).
+{
+  const addLinkCalls = [];
+  const adapterCalls = [];
+  const prevCJS = global.customJS;
+  const meetingPage = { file: { path: 'spice/meetings/notes/2026/07-July/Standup-2026-07-06.md' }, type: 'meeting' };
+  global.customJS = {
+    RenderSafe: { page: () => meetingPage },
+    SectionExplorer: {
+      _noteSelfAdapter: (p) => { adapterCalls.push(p); return { __adapterFor: p }; },
+      _openAddLinkForm: (dv, adapter, section) => addLinkCalls.push({ dv, adapter, section }),
+    },
+  };
+  cfg.dispatch({}, { context: 'meeting', path: meetingPage.file.path }, 'add-link');
+  global.customJS = prevCJS;
+
+  ok('MCB-DISPATCH-LINK-1 add-link → SectionExplorer._openAddLinkForm invoked once',
+    addLinkCalls.length === 1);
+  ok('MCB-DISPATCH-LINK-2 _openAddLinkForm called with _noteSelfAdapter(page) and null section',
+    adapterCalls.length === 1 && adapterCalls[0] === meetingPage
+    && addLinkCalls[0] && addLinkCalls[0].adapter && addLinkCalls[0].adapter.__adapterFor === meetingPage
+    && addLinkCalls[0].section === null);
 }
 
 // MCB-DEST — "This meeting" section on the leaf; nothing extra on the hub
