@@ -57,6 +57,7 @@
   ],
   "customjs_classes": [
     "MeetingsHubCards",
+    "MeetingsBrowseList",
     "MeetingLeafActions",
     "MeetingChromeBar"
   ],
@@ -89,6 +90,10 @@
     {
       "source": "helpers/meetings-hub-cards.js",
       "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js"
+    },
+    {
+      "source": "helpers/meetings-browse-list.js",
+      "dest": "{{scripts_path}}/meetings/meetings-browse-list.js"
     },
     {
       "source": "helpers/meeting-leaf-actions.js",
@@ -133,18 +138,25 @@
           "required": true
         },
         {
+          "key": "attendees",
+          "label": "Attendees",
+          "type": "people-multi",
+          "required": false
+        },
+        {
+          "key": "datetime",
+          "label": "Date & time",
+          "type": "datetime",
+          "required": false,
+          "default": "{{now.YYYY-MM-DDTHH:mm}}"
+        },
+        {
           "key": "project",
           "label": "Project (optional)",
           "type": "select",
           "required": false,
           "options_source": "all_projects",
           "default": "(none)"
-        },
-        {
-          "key": "datetime",
-          "label": "Date & time (optional, blank = now)",
-          "type": "string",
-          "required": false
         }
       ],
       "destination": {
@@ -159,9 +171,9 @@
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "type": "meeting",
         "summary": "",
-        "attendees": [],
+        "attendees": "{{prompts.attendees|links}}",
         "project": "{{prompts.project}}",
-        "people": [],
+        "people": "{{prompts.attendees|links}}",
         "tags": [],
         "cssclasses": [
           "wide"
