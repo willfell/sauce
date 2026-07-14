@@ -88,7 +88,7 @@ const cfg = inst._config();
   ok('JCB-BANNER-3 SectionLabel-style label', labelIdx >= 0
     && /text-transform:\s*uppercase/.test(kids[labelIdx].style.cssText)
     && /0\.78em/.test(kids[labelIdx].style.cssText));
-  ok('JCB-BANNER-4 hairline BELOW label', hrIdx >= 0 && labelIdx >= 0 && hrIdx > labelIdx);
+  ok('JCB-BANNER-4 NO hairline under title', hrIdx === -1 && labelIdx >= 0);
 }
 
 // JCB-SPEC — journal-entry overflow shape

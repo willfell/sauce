@@ -164,10 +164,9 @@ const cfg = inst._config();
     kids1.some((h) => /text-transform:\s*uppercase/.test(h.style.cssText) && /font-size:\s*0\.78em/.test(h.style.cssText)));
   const labelIdx1 = kids1.findIndex((n) => n.tag === 'div' && n.textContent === 'Grocery list');
   const hrIdx1 = kids1.findIndex((n) => n.tag === 'hr');
-  ok('STCB-BANNER-4 hairline is BELOW label (hr appears after label in child order)',
-    labelIdx1 >= 0 && hrIdx1 > labelIdx1);
-  ok('STCB-BANNER-5 hairline uses border-hover var',
-    kids1[hrIdx1].style.cssText.includes('border-modifier-border-hover') || kids1[hrIdx1].style.cssText.includes('background-modifier-border-hover'));
+  ok('STCB-BANNER-4 NO hairline under title (killed the vibe)', hrIdx1 === -1);
+  ok('STCB-BANNER-5 label carries own bottom margin instead',
+    labelIdx1 >= 0 && /margin-bottom:\s*12px/.test(kids1[labelIdx1].style.cssText));
 
   const c2 = makeContainer();
   inst._renderTitleBanner(c2, untitledPage, { path: 'y.md' });
