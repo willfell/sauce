@@ -20,6 +20,7 @@
  *   {{prompts.<key>|number}}                — emit unquoted numeric YAML scalar
  *                                             (handled by _renderFrontmatter)
  *   {{prompts.<key>|lowercase}}             — String.toLowerCase
+ *   {{prompts.<key>|or-now:<fmt>}}          — prompt value, else ctx.now.format(<fmt>)
  *   {{now.<moment-format>}}                 — ctx.now.format(<moment-format>)
  *   {{current_file.frontmatter.<key>}}      — read frontmatter of the note
  *                                             whose dv container hosts the button
@@ -708,6 +709,16 @@ class EntityCreate {
             const p = file.path != null ? String(file.path) : "";
             const i = p.lastIndexOf("/");
             return i >= 0 ? p.slice(0, i) : "";
+        });
+
+        // 3d. {{prompts.<key>|or-now:<moment-format>}} — the prompt value when the user
+        // entered one, else ctx.now formatted. Lets an OPTIONAL date/time prompt fall
+        // back to creation time (e.g. meetings "+ New Meeting"). Must precede the
+        // generic |<pipe> rule so "or-now:FMT" isn't parsed as a bare pipe name.
+        out = out.replace(/\{\{prompts\.([a-zA-Z0-9_]+)\|or-now:([^}]+)\}\}/g, (_, key, fmt) => {
+            const v = ctx.prompts ? ctx.prompts[key] : undefined;
+            if (v != null && String(v).trim() !== "") return String(v).trim();
+            try { return ctx.now ? ctx.now.format(fmt) : ""; } catch (_e) { return ""; }
         });
 
         // 4. {{prompts.<key>|<pipe>}}

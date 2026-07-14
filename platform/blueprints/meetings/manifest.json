@@ -49,6 +49,10 @@
     {
       "name": "section-explorer",
       "range": ">=0.6.0"
+    },
+    {
+      "name": "entity-create",
+      "range": ">=0.9.0"
     }
   ],
   "customjs_classes": [
@@ -151,7 +155,7 @@
         "filename_suffix": ""
       },
       "frontmatter_template": {
-        "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "date": "{{prompts.datetime|or-now:YYYY-MM-DDTHH:mm:ssZ}}",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "type": "meeting",
         "summary": "",
