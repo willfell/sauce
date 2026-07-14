@@ -181,7 +181,10 @@ class ReaderArticleActions {
                 ? appRef.vault.getAbstractFileByPath(String(path))
                 : null;
             if (!appRef || !file || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') return;
-            await appRef.fileManager.processFrontMatter(file, (fm) => { fm.status = next; });
+            await appRef.fileManager.processFrontMatter(file, (fm) => {
+                fm.status = next;
+                try { fm.status_changed_at = new Date().toISOString(); } catch (_e) {}
+            });
             try { new Notice('Status: ' + next); } catch (_e) {}
         } catch (e) {
             try { new Notice('Could not update status: ' + (e && (e.message || e)), 6000); } catch (_e) {}

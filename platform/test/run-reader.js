@@ -186,6 +186,15 @@ ok('HC-READER-NOCREATEROW ReaderArticleActions no longer exposes renderCreateRow
    typeof (new ReaderArticleActions()).renderCreateRow === 'undefined');
 
 // ---------------------------------------------------------------------------
+// HC-READER-STATUSTS — _setStatus stamps status_changed_at alongside status.
+// ---------------------------------------------------------------------------
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'blueprints', 'reader', 'helpers', 'reader-article-actions.js'), 'utf8');
+  ok('HC-READER-STATUSTS _setStatus stamps status_changed_at alongside status',
+     /fm\.status\s*=\s*next/.test(src) && /status_changed_at/.test(src));
+}
+
+// ---------------------------------------------------------------------------
 // HC-READER-8 — ReaderArticleView._humanDate: short date + full ISO both →
 // "Thu, Jul 2, 2026"; blank/null/garbage → { text: '' }.
 // ---------------------------------------------------------------------------
