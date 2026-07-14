@@ -163,6 +163,72 @@ const CLIP = [
      ReaderArticlePaste.validateTitle('A note, punctuation!') === null);
 }
 
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-8 — buildPresetPrompts maps full parsed clip → all keys.
+// ---------------------------------------------------------------------------
+{
+  const parsed = ReaderArticlePaste.parse(CLIP);
+  const pp = ReaderArticlePaste.buildPresetPrompts(parsed, { title: 'The Bitter Lesson', url: 'http://x.test' });
+  ok('HC-READER-PASTE-8 full mapping populates every preset key from parsed clip',
+     pp.title === 'The Bitter Lesson' &&
+     pp.url === 'http://x.test' &&
+     pp.author === 'Rich Sutton' &&
+     pp.site === 'incompleteideas.net' &&
+     pp.published === '2019-03-13' &&
+     pp.captured_at === '2026-07-12T10:00:00Z' &&
+     pp.word_count === '1200' &&
+     pp.status === 'unread' &&
+     /Compute beats cleverness/.test(pp.summary) &&
+     eq(pp.tags, ['ai', 'rl']) &&
+     /A highlighted sentence\./.test(pp.highlights) &&
+     /full article body/.test(pp.content),
+     JSON.stringify(pp));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-9 — empty/malformed parsed → manifest-equivalent defaults.
+// ---------------------------------------------------------------------------
+{
+  const parsed = ReaderArticlePaste.parse(''); // malformed, empty content
+  const pp = ReaderArticlePaste.buildPresetPrompts(parsed, { title: 'Manual Only', url: '' });
+  ok('HC-READER-PASTE-9 malformed/empty parse → manifest-equivalent defaults',
+     pp.title === 'Manual Only' &&
+     pp.url === '' &&
+     pp.author === '' && pp.site === '' && pp.published === '' &&
+     pp.summary === '' && pp.highlights === '' && pp.content === '' &&
+     pp.word_count === 0 &&
+     pp.status === 'unread' &&
+     eq(pp.tags, ['reader-article']) &&
+     typeof pp.captured_at === 'string' && pp.captured_at.length > 0,
+     JSON.stringify(pp));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-10 — malformed paste → whole input surfaces as content.
+// ---------------------------------------------------------------------------
+{
+  const raw = 'just some pasted prose, no frontmatter';
+  const parsed = ReaderArticlePaste.parse(raw);
+  const pp = ReaderArticlePaste.buildPresetPrompts(parsed, { title: 'My Title', url: '' });
+  ok('HC-READER-PASTE-10 malformed paste → content = whole input, manual title kept',
+     pp.content === raw && pp.title === 'My Title',
+     JSON.stringify(pp));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-11 — captured_at: parsed wins, else ISO-now fallback.
+// ---------------------------------------------------------------------------
+{
+  const withCap = ReaderArticlePaste.buildPresetPrompts(
+    ReaderArticlePaste.parse(CLIP), { title: 'x', url: '' });
+  const noCap = ReaderArticlePaste.buildPresetPrompts(
+    ReaderArticlePaste.parse('---\ntitle: "N"\n---\nbody'), { title: 'N', url: '' });
+  ok('HC-READER-PASTE-11 captured_at: parsed wins, else ISO-now fallback',
+     withCap.captured_at === '2026-07-12T10:00:00Z' &&
+     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(noCap.captured_at),
+     `${withCap.captured_at} | ${noCap.captured_at}`);
+}
+
 const passed = results.filter(([, p]) => p).length;
 const total = results.length;
 console.log(`\n${passed}/${total} passed`);

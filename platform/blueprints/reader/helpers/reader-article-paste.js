@@ -128,4 +128,32 @@ class ReaderArticlePaste {
     }
     return null;
   }
+
+  // Map parse() result + the dialog's (possibly edited) title/url inputs into
+  // the presetPrompts object EC.create consumes. Every key here MUST also exist
+  // in the manifest's new_entity_buttons[0].prompts[] so {{prompts.<key>}} can
+  // resolve. Defaults mirror today's manifest frontmatter_template so an empty
+  // paste yields a note byte-equivalent to the old title+url-only path.
+  static buildPresetPrompts(parsed, manual) {
+    const p = (parsed && parsed.frontmatter) ? parsed.frontmatter : {};
+    const m = manual || {};
+    const str = (v, d) => (typeof v === 'string' && v !== '') ? v : d;
+    let tags = ['reader-article'];
+    if (Array.isArray(p.tags) && p.tags.length > 0) tags = p.tags;
+    const capturedAt = str(p.captured_at, '') || new Date().toISOString();
+    return {
+      title: str(m.title, ''),
+      url: str(m.url, ''),
+      author: str(p.author, ''),
+      site: str(p.site, ''),
+      published: str(p.published, ''),
+      captured_at: capturedAt,
+      word_count: (p.word_count !== undefined && p.word_count !== '') ? p.word_count : 0,
+      status: str(p.status, 'unread'),
+      summary: str(p.summary, ''),
+      tags: tags,
+      highlights: (parsed && typeof parsed.highlights === 'string') ? parsed.highlights : '',
+      content: (parsed && typeof parsed.content === 'string') ? parsed.content : '',
+    };
+  }
 }
