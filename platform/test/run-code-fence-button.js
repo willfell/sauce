@@ -66,6 +66,24 @@ assertEq("CFB-8: empty → null", CFB.wrapSelection("   ", { atLineStart: true, 
 const w9 = CFB.wrapSelection("hi", { atLineStart: true, atLineEnd: true });
 assertEq("CFB-9: cursor after block", w9.cursor, w9.text.length);
 
+// Pass 4 — buttonState (mode + selection → enabled/opacity/label). Drives the
+// view-header button's greyed/lit affordance + tooltip.
+console.log("\n--- Pass 4: buttonState ---");
+// Reading (preview) mode: never enabled, discoverable opacity, "switch to editing" hint.
+const bsPrev = CFB.buttonState("preview", true);
+assertEq("CFB-10: preview never enabled", bsPrev.enabled, false);
+assertEq("CFB-11: preview label = switch-to-editing", bsPrev.label, "Switch to editing mode to wrap in a code fence");
+assertEq("CFB-12: disabled opacity is discoverable (>=0.5)", bsPrev.opacity >= 0.5, true);
+// Editable, no selection: greyed, "select text" hint.
+const bsNoSel = CFB.buttonState("source", false);
+assertEq("CFB-13: editable no-selection disabled", bsNoSel.enabled, false);
+assertEq("CFB-14: editable no-selection label", bsNoSel.label, "Select text to wrap in a code fence");
+// Editable + selection: enabled, full opacity, action label.
+const bsOn = CFB.buttonState("source", true);
+assertEq("CFB-15: editable + selection enabled", bsOn.enabled, true);
+assertEq("CFB-16: enabled opacity = 1", bsOn.opacity, 1);
+assertEq("CFB-17: enabled label = wrap", bsOn.label, "Wrap selection in code fence");
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("\n" + failures.join("\n"));
 process.exit(fail ? 1 : 0);
