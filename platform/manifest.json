@@ -38,6 +38,11 @@
   },
   "mechanisms": [
     {
+      "name": "editor-width",
+      "version": "0.1.0",
+      "path": "mechanisms/editor-width"
+    },
+    {
       "name": "customjs-guard",
       "version": "1.0.0",
       "path": "mechanisms/customjs-guard"

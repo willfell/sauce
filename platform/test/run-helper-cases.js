@@ -8078,7 +8078,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 30, "HC-V0890-VERSION-D: mechanism count = 30 (+code-fence-button mechanism)");
+  assertEqual(mechCount, 31, "HC-V0890-VERSION-D: mechanism count = 31 (+code-fence-button +editor-width mechanisms)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8631,7 +8631,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 30, "HC-V0891-VERSION-D: mechanism count = 30 (+code-fence-button mechanism)");
+  assertEqual(mechs.length, 31, "HC-V0891-VERSION-D: mechanism count = 31 (+code-fence-button +editor-width mechanisms)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
@@ -14532,6 +14532,21 @@ async function caseV01154BackfillBlockFormStillWorks() {
   const r2 = backfill(r.body, debtList);
   assertTrue("V01154-BF-BLOCK-4: second pass on backfilled body is no-op (idempotent)",
     r2.touched === false && r2.body === r.body);
+}
+
+async function caseEditorWidthPatchedAssets() {
+  console.log("\n--- Case: editor-width patched slider assets ---");
+  const dir = path.join(__dirname, "..", "mechanisms", "editor-width", "plugin");
+  const main = fs.readFileSync(path.join(dir, "main.js"), "utf8");
+  assertTrue("editor-width: null guard present", main.includes("file?.name"), "missing file?.name");
+  assertTrue("editor-width: no unguarded file.name", !main.includes("if (file.name)"), "found unguarded read");
+  assertTrue("editor-width: debug log 1.1 stripped", !main.includes('console.log("1.1")'), "1.1 present");
+  assertTrue("editor-width: debug log 1.2 stripped", !main.includes('console.log("1.2")'), "1.2 present");
+  const mf = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+  assertEq("editor-width: plugin id", mf.id, "editor-width-slider");
+  const mech = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "mechanisms", "editor-width", "manifest.json"), "utf8"));
+  assertEq("editor-width: bundled_plugin id", mech.bundled_plugin && mech.bundled_plugin.id, "editor-width-slider");
+  assertEq("editor-width: bundled files count", (mech.bundled_plugin.files || []).length, 3);
 }
 
 async function caseV01103InjectMonthlyBandIdempotent() {
@@ -24179,6 +24194,8 @@ type: cowork-microscope
   await caseV01154BackfillInlineWithDebtUntouched();
   await caseV01154BackfillInlineWithoutDebtUntouched();
   await caseV01154BackfillBlockFormStillWorks();
+
+  await caseEditorWidthPatchedAssets();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
