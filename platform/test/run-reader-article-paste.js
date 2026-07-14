@@ -77,6 +77,75 @@ const CLIP = [
      `hl=${JSON.stringify(r && r.highlights)} content=${JSON.stringify(r && r.content)}`);
 }
 
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-2 — well-formed frontmatter but NO markers → content only.
+// ---------------------------------------------------------------------------
+{
+  const noMarkers = [
+    '---',
+    'title: "Plain"',
+    'url: "http://x.test"',
+    '---',
+    '',
+    'Body text with no markers.',
+  ].join('\n');
+  const r = ReaderArticlePaste.parse(noMarkers);
+  ok('HC-READER-PASTE-2 fm, no markers → not malformed, empty highlights, body=content',
+     r.malformed === false && r.highlights === '' &&
+     /no markers\./.test(r.content) && r.frontmatter.title === 'Plain',
+     JSON.stringify(r));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-3 — no frontmatter at all → malformed, whole input = content.
+// ---------------------------------------------------------------------------
+{
+  const raw = 'This is just pasted text with no YAML frontmatter.';
+  const r = ReaderArticlePaste.parse(raw);
+  ok('HC-READER-PASTE-3 no frontmatter → malformed, whole input = content',
+     r.malformed === true && eq(r.frontmatter, {}) && r.content === raw && r.highlights === '',
+     JSON.stringify(r));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-4 — empty / whitespace / non-string → malformed, empty content.
+// ---------------------------------------------------------------------------
+{
+  const a = ReaderArticlePaste.parse('');
+  const b = ReaderArticlePaste.parse(null);
+  const c = ReaderArticlePaste.parse(undefined);
+  ok('HC-READER-PASTE-4 empty/null/undefined → malformed, no throw',
+     a.malformed === true && a.content === '' &&
+     b.malformed === true && b.content === '' &&
+     c.malformed === true && c.content === '',
+     `${JSON.stringify(a)} ${JSON.stringify(b)}`);
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-5 — frontmatter block present but no title key → malformed.
+// ---------------------------------------------------------------------------
+{
+  const noTitle = ['---', 'url: "http://x.test"', 'status: unread', '---', '', 'body'].join('\n');
+  const r = ReaderArticlePaste.parse(noTitle);
+  ok('HC-READER-PASTE-5 fm without title → malformed, whole input = content',
+     r.malformed === true && r.content === noTitle,
+     JSON.stringify(r));
+}
+
+// ---------------------------------------------------------------------------
+// HC-READER-PASTE-6 — never throws on adversarial input.
+// ---------------------------------------------------------------------------
+{
+  let threw = false;
+  try {
+    ReaderArticlePaste.parse('---\n:::not yaml:::\n[[[\n---\nbody');
+    ReaderArticlePaste.parse('---\n---');
+    ReaderArticlePaste.parse(12345);
+    ReaderArticlePaste.parse({});
+  } catch (_e) { threw = true; }
+  ok('HC-READER-PASTE-6 adversarial input never throws', threw === false);
+}
+
 const passed = results.filter(([, p]) => p).length;
 const total = results.length;
 console.log(`\n${passed}/${total} passed`);
