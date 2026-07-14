@@ -116,9 +116,12 @@ class ReaderArticleActions {
 
             const AB = window.customJS && window.customJS.AccentButton;
             const go = () => {
+                const RAP = window.customJS && window.customJS.ReaderArticlePaste;
+                if (RAP && typeof RAP.open === 'function') { RAP.open(dv); return; }
+                // Fallback (paste helper unavailable): the plain entity-create flow.
                 const EC = window.customJS && window.customJS.EntityCreate;
                 if (!EC || typeof EC.create !== 'function') {
-                    try { new Notice('ReaderArticleActions: EntityCreate mechanism unavailable.', 8000); } catch (_e) {}
+                    try { new Notice('ReaderArticleActions: create mechanism unavailable.', 8000); } catch (_e) {}
                     return;
                 }
                 EC.create({ instance: 'reader-article', dv: dv });

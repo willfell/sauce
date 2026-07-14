@@ -80,7 +80,8 @@
     "ReaderQueue",
     "ReaderArticleActions",
     "ReaderArticleView",
-    "ReaderChromeBar"
+    "ReaderChromeBar",
+    "ReaderArticlePaste"
   ],
   "files": [
     {
@@ -110,6 +111,10 @@
     {
       "source": "helpers/reader-chrome-bar.js",
       "dest": "{{scripts_path}}/reader/reader-chrome-bar.js"
+    },
+    {
+      "source": "helpers/reader-article-paste.js",
+      "dest": "{{scripts_path}}/reader/reader-article-paste.js"
     },
     {
       "source": "assets/reader-clip.json",
@@ -167,6 +172,60 @@
           "label": "Article URL (optional)",
           "type": "string",
           "required": false
+        },
+        {
+          "key": "author",
+          "label": "Author",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "site",
+          "label": "Site",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "published",
+          "label": "Published",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "captured_at",
+          "label": "Captured at",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "word_count",
+          "label": "Word count",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "summary",
+          "label": "Summary",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "highlights",
+          "label": "Highlights",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "content",
+          "label": "Content",
+          "type": "string",
+          "required": false
         }
       ],
       "destination": {
@@ -176,10 +235,14 @@
       "frontmatter_template": {
         "type": "reader-article",
         "title": "{{prompts.title}}",
-        "status": "unread",
+        "status": "{{prompts.status}}",
         "url": "{{prompts.url}}",
-        "summary": "",
-        "captured_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "author": "{{prompts.author}}",
+        "site": "{{prompts.site}}",
+        "published": "{{prompts.published}}",
+        "word_count": "{{prompts.word_count|number}}",
+        "summary": "{{prompts.summary}}",
+        "captured_at": "{{prompts.captured_at}}",
         "tags": [
           "reader-article"
         ]
