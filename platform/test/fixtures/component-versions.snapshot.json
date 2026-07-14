@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.223.1",
+  "workshop_version": "0.223.3",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -12,7 +12,7 @@
     "journal": "0.5.1",
     "trips": "0.10.1",
     "finance": "0.19.2",
-    "sticky-notes": "0.11.2",
+    "sticky-notes": "0.11.3",
     "teams": "0.4.0",
     "wiki": "0.8.2",
     "home": "0.6.1",
