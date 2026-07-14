@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.230.2",
+  "workshop_version": "0.231.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -39,12 +39,12 @@
   "mechanisms": [
     {
       "name": "editor-width",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "mechanisms/editor-width"
     },
     {
       "name": "agent-embed",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "mechanisms/agent-embed"
     },
     {
@@ -164,7 +164,7 @@
     },
     {
       "name": "smart-connections-bridge",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "mechanisms/smart-connections-bridge"
     },
     {
