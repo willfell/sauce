@@ -1,3 +1,8 @@
+---
+purpose: Enumerates which files in a consumer vault are STOCK (overwritten on every `sauce update`) vs USER (preserved across `sauce update`) for the cowork blueprint. Single source of truth for v0.76.0+ user-owned content.
+load_when: Adding a new user-owned cowork file, or deciding whether a cowork file `sauce update` touches is safe to overwrite.
+---
+
 # Cowork customization contract
 
 This guide enumerates which files in a consumer vault are STOCK (overwritten
