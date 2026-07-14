@@ -520,12 +520,21 @@ git commit -m "feat(code-fence-button): live greying + click + Cmd+P command"
 
 ---
 
-## Task 7: Wire subscriptions + CI harness + full preflight
+## Task 7: Register component + wire subscriptions + CI harness + full preflight
 
 **Files:**
+- Modify: `platform/manifest.json` (workshop component registry — REQUIRED for install to resolve the mechanism)
 - Modify: `ranch/platform-subscription.json`
 - Modify: `platform/test/seed-vault/ranch/platform-subscription.json`
 - Modify: `package.json` (the `release:preflight` script)
+
+**Why the manifest entry is mandatory:** `platform/install.js` (resolveDependencies, ~line 1425) resolves every subscribed mechanism against `manifest.mechanisms[]`; a subscribed-but-unlisted mechanism is silently **skipped** ("workshop has no item named …"). The release bumper (`scripts/release/compute-release.js`) only ever bumps components **already** in the manifest — it never registers a new directory. So the initial `0.1.0` registration is authoring work (this is NOT the prohibited "version pin sweeping" — that's the pipeline bumping existing components). The pipeline will bump/sweep this entry and all subscription pins consistently on release.
+
+- [ ] **Step 0: Register the mechanism in the workshop manifest.** In `platform/manifest.json`, add to the `mechanisms` array (keep valid JSON; match the shape of sibling entries exactly — `kanban-status-sync` is `{"name":"kanban-status-sync","version":"0.2.0","path":"mechanisms/kanban-status-sync"}`):
+```json
+{ "name": "code-fence-button", "version": "0.1.0", "path": "mechanisms/code-fence-button" }
+```
+Place it in the array in the same position sibling mechanisms follow (alphabetical if the array is sorted; otherwise append). Verify: `node -e "const m=require('./platform/manifest.json'); console.log(m.mechanisms.find(x=>x.name==='code-fence-button'))"` prints the entry.
 
 - [ ] **Step 1: Subscribe the workshop.** In `ranch/platform-subscription.json`, add to the `mechanisms` array (keep valid JSON — add a comma after the prior entry):
 ```json
@@ -560,8 +569,8 @@ Expected: PASS (exit 0). Fix any failure before committing. Common culprits: `ch
 - [ ] **Step 7: Commit**
 
 ```bash
-git add ranch/platform-subscription.json platform/test/seed-vault/ranch/platform-subscription.json package.json
-git commit -m "chore(code-fence-button): subscribe workshop + seed vault; wire preflight harness"
+git add platform/manifest.json ranch/platform-subscription.json platform/test/seed-vault/ranch/platform-subscription.json package.json
+git commit -m "chore(code-fence-button): register in workshop manifest; subscribe workshop + seed vault; wire preflight harness"
 ```
 
 ---
