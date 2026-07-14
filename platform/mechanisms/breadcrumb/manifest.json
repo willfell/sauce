@@ -1,6 +1,6 @@
 {
   "name": "breadcrumb",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Shared breadcrumb primitive. customJS.Breadcrumb.render(dv) renders the clickable trail at the top of a note based on per-blueprint type-dispatch declared in ranch/breadcrumb-registry.json (aggregated at install time from per-blueprint manifest `breadcrumb` blocks). Class name unchanged (Breadcrumb) — existing dv.view callers across project + to-do blueprints keep working. Promoted from the project blueprint helper at sauce v0.123.0; second plan of the note-chrome standard arc. Resolver grammar: fm:/path:/file:/lit: atoms + slug: transform + |-fallback chains + {atom} link templates + optional when: ancestor gates.",
   "depends_on": [
     {

@@ -110,6 +110,32 @@ ok('TE-2 composeNote emits schema-exact frontmatter', () => {
   assert(out.body.includes('class: "TaskNoteView"'), 'body renders TaskNoteView card');
 });
 
+// 2t. composeNote — trip/trip_slug linkage mirrors project (additive).
+ok('TE-2t composeNote emits trip + trip_slug (parallel to project)', () => {
+  const out = TaskEntity.composeNote({ title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(out.frontmatter.trip === '[[Bussin]]', 'trip wikilink: ' + out.frontmatter.trip);
+  assert(out.frontmatter.trip_slug === 'bussin', 'trip_slug: ' + out.frontmatter.trip_slug);
+  // trip empty when only project given; project still works.
+  const fp = TaskEntity.composeNote({ title: 'X', project: { name: 'Acme', slug: 'acme' } }).frontmatter;
+  assert(fp.trip === '', 'trip empty when only project: ' + JSON.stringify(fp.trip));
+  assert(fp.trip_slug === '', 'trip_slug empty when only project: ' + JSON.stringify(fp.trip_slug));
+  assert(fp.project_slug === 'acme', 'project still works: ' + fp.project_slug);
+  // trip_slug sits immediately after project_slug in canonical order.
+  const keys = Object.keys(out.frontmatter);
+  assert(keys.indexOf('project_slug') === keys.indexOf('trip') - 1, 'trip follows project_slug: ' + keys.join(','));
+  assert(keys.indexOf('trip') === keys.indexOf('trip_slug') - 1, 'trip_slug follows trip: ' + keys.join(','));
+});
+
+// 2u. parseNote — trip_slug plain string preserved; trip coerced via _linkText.
+ok('TE-2u parseNote preserves trip_slug + coerces trip basename', () => {
+  const parsed = TaskEntity.parseNote({ type: 'task', trip: '[[Bussin]]', trip_slug: 'bussin', file: { path: 'spice/tasks/x.md' } });
+  assert(parsed.trip_slug === 'bussin', 'plain string preserved: ' + JSON.stringify(parsed.trip_slug));
+  assert(parsed.trip === 'Bussin', 'trip coerced to basename: ' + parsed.trip);
+  const bare = TaskEntity.parseNote({ type: 'task', file: { path: 'spice/tasks/y.md' } });
+  assert(bare.trip === '', 'absent trip -> empty string: ' + JSON.stringify(bare.trip));
+  assert(bare.trip_slug === '', 'absent trip_slug -> empty string: ' + JSON.stringify(bare.trip_slug));
+});
+
 // 3. composeNote — minimal payload → blank due, still valid.
 ok('TE-3 composeNote minimal payload → blank due + valid', () => {
   const out = TaskEntity.composeNote({ title: 'x' });
@@ -437,6 +463,33 @@ ok('TD-15 _payloadFromState includes state.links', () => {
   // Missing state.links → an empty array on the payload (never undefined).
   const p2 = TaskDialog._payloadFromState({ title: 't' });
   assert(Array.isArray(p2.links) && p2.links.length === 0, 'missing links → []');
+});
+
+// TD-15t. _payloadFromState carries a trip linkage onto the payload (parallel
+// to the project plumbing). state.tripName present → payload.trip = {name, slug}
+// (slug from state.tripSlug, or slugified from the name when absent). No
+// state.tripName → no payload.trip. Project flow is unaffected.
+ok('TD-15t _payloadFromState includes trip linkage (parallel project)', () => {
+  const p = TaskDialog._payloadFromState({ title: 't', tripName: 'Bussin', tripSlug: 'bussin' });
+  assert(deepEq(p.trip, { name: 'Bussin', slug: 'bussin' }), 'trip on payload: ' + JSON.stringify(p.trip));
+  // slug derived from name when tripSlug omitted.
+  const p2 = TaskDialog._payloadFromState({ title: 't', tripName: 'Road Trip' });
+  assert(deepEq(p2.trip, { name: 'Road Trip', slug: 'road-trip' }), 'trip slug derived: ' + JSON.stringify(p2.trip));
+  // Slug-only (a SECTION note has no `name`) → still links; name falls back to the slug.
+  const p4 = TaskDialog._payloadFromState({ title: 't', tripSlug: 'destin-florida' });
+  assert(deepEq(p4.trip, { name: 'destin-florida', slug: 'destin-florida' }), 'trip from slug only: ' + JSON.stringify(p4.trip));
+  // No trip name AND no trip slug → no payload.trip; project still works independently.
+  const p3 = TaskDialog._payloadFromState({ title: 't', projectName: 'Sauce' });
+  assert(p3.trip === undefined, 'no trip when name+slug absent: ' + JSON.stringify(p3.trip));
+  assert(deepEq(p3.project, { name: 'Sauce', slug: 'sauce' }), 'project unaffected: ' + JSON.stringify(p3.project));
+});
+
+// TD-2t. defaultsForSurface threads a `trip` through for the trip surface,
+// parallel to how project is threaded (source 'trip').
+ok('TD-2t defaultsForSurface trip seeds trip + source', () => {
+  const d = TaskDialog.defaultsForSurface({ surface: 'trip', trip: { name: 'Bussin', slug: 'bussin' } });
+  assert(deepEq(d.trip, { name: 'Bussin', slug: 'bussin' }), 'trip: ' + JSON.stringify(d.trip));
+  assert(d.source === 'trip', 'source trip: ' + d.source);
 });
 
 ok('TD-recur-1 _payloadFromState carries recurrence through', () => {
@@ -977,14 +1030,14 @@ ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   assert(res.overdue.length === 1, 'overdue = the open 06-29: got ' + res.overdue.length);
 });
 
-// TTL-2. buildBands excludes future-due + unscheduled open tasks.
-ok('TTL-2 buildBands excludes future + unscheduled open tasks', () => {
+// TTL-2. buildBands excludes future-due; undated tasks enter Today.
+ok('TTL-2 buildBands excludes future, undated enter today', () => {
   const res = TaskTodayList.buildBands([
     { due: '2026-07-02', status: 'open' },  // future → neither
-    { due: '', status: 'open' },            // unscheduled → neither
-    { due: null, status: 'open' },          // unscheduled → neither
+    { due: '', status: 'open' },            // undated → today
+    { due: null, status: 'open' },          // undated → today
   ], '2026-07-01');
-  assert(res.today.length === 0, 'no today: got ' + res.today.length);
+  assert(res.today.length === 2, 'undated in today: got ' + res.today.length);
   assert(res.overdue.length === 0, 'no overdue: got ' + res.overdue.length);
 });
 
@@ -1120,6 +1173,78 @@ ok('TBB-SORT-3 buildBands ties break by title case-insensitively', () => {
   const order = bands.today.map((t) => t.title);
   assert(JSON.stringify(order) === JSON.stringify(['Alpha', 'beta', 'zeta']),
     'expected case-insensitive alpha order, got ' + JSON.stringify(order));
+});
+
+// ---------- buildBands: priority ordering + undated tasks + trip_slug ----------
+
+ok('BB-PRIO-1 undated open tasks enter Today band', () => {
+  const tasks = [
+    { status: 'open', due: '', title: 'No date task', priority: 'medium' },
+    { status: 'open', due: '2026-07-13', title: 'Today task', priority: 'low' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-13');
+  assert(bands.today.length === 2, 'both tasks in today: ' + bands.today.length);
+  assert(bands.overdue.length === 0, 'no overdue');
+});
+
+ok('BB-PRIO-2 today band sorted by priority descending then due then title', () => {
+  const tasks = [
+    { status: 'open', due: '2026-07-13', title: 'Low A', priority: 'low' },
+    { status: 'open', due: '2026-07-13', title: 'Highest B', priority: 'highest' },
+    { status: 'open', due: '2026-07-13', title: 'High C', priority: 'high' },
+    { status: 'open', due: '', title: 'Medium no-date', priority: 'medium' },
+    { status: 'open', due: '2026-07-13', title: 'No prio', priority: '' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-13');
+  const titles = bands.today.map(t => t.title);
+  assert(titles[0] === 'Highest B', 'highest first: ' + JSON.stringify(titles));
+  assert(titles[1] === 'High C', 'high second: ' + JSON.stringify(titles));
+  assert(titles[2] === 'Medium no-date', 'medium third (undated): ' + JSON.stringify(titles));
+  assert(titles[3] === 'Low A', 'low fourth: ' + JSON.stringify(titles));
+  assert(titles[4] === 'No prio', 'unset last: ' + JSON.stringify(titles));
+});
+
+ok('BB-PRIO-3 overdue band sorted by priority descending then due ascending', () => {
+  const tasks = [
+    { status: 'open', due: '2026-07-11', title: 'Old low', priority: 'low' },
+    { status: 'open', due: '2026-07-12', title: 'Recent high', priority: 'high' },
+    { status: 'open', due: '2026-07-10', title: 'Oldest high', priority: 'high' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-13');
+  const titles = bands.overdue.map(t => t.title);
+  assert(titles[0] === 'Oldest high', 'high+oldest first: ' + JSON.stringify(titles));
+  assert(titles[1] === 'Recent high', 'high+recent second: ' + JSON.stringify(titles));
+  assert(titles[2] === 'Old low', 'low last: ' + JSON.stringify(titles));
+});
+
+ok('BB-PRIO-4 trip_slug tasks excluded from buildBands', () => {
+  const tasks = [
+    { status: 'open', due: '2026-07-13', title: 'Personal', priority: 'medium' },
+    { status: 'open', due: '2026-07-13', title: 'Trip task', priority: 'high', trip_slug: 'destin-florida' },
+    { status: 'open', due: '', title: 'Trip no date', priority: 'low', trip_slug: 'nyc' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-13');
+  assert(bands.today.length === 1, 'only personal task: ' + bands.today.length);
+  assert(bands.today[0].title === 'Personal', 'personal kept');
+});
+
+// ---------- _chromeBody: no --- separators ----------
+
+ok('CB-1 TaskEntity._chromeBody has no --- separators', () => {
+  const body = TaskEntity._chromeBody();
+  const lines = body.split('\n');
+  const hrLines = lines.filter(l => l.trim() === '---');
+  assert(hrLines.length === 0, 'should have 0 --- lines, got ' + hrLines.length);
+  assert(body.includes('TaskChromeBar'), 'has TaskChromeBar');
+  assert(body.includes('TaskNoteView'), 'has TaskNoteView');
+  assert(body.includes('<!-- TASK_NOTES -->'), 'has TASK_NOTES marker');
+});
+
+ok('CB-2 TaskDialog._chromeBody has no --- separators', () => {
+  const body = TaskDialog._chromeBody();
+  const lines = body.split('\n');
+  const hrLines = lines.filter(l => l.trim() === '---');
+  assert(hrLines.length === 0, 'should have 0 --- lines, got ' + hrLines.length);
 });
 
 // ---------- renderTaskRow CSS structure (checkbox/title never split across lines) ----------
@@ -1401,18 +1526,14 @@ ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent
   assert(!findByClsAttr(row2, 'sauce-task-today-subtask-chip'), 'no chip when total is 0');
 });
 
-// RTR-DIV-1. Row separator: renderTaskRow's row element carries a real
-// (non-transparent) border-bottom hairline, so tasks read as visually
-// distinct rows on narrow (mobile) viewports instead of a dense undifferentiated
-// block. Uses var(--background-modifier-border-hover), NOT the plain
-// --background-modifier-border, which this project has already found reads as
-// near-invisible on dark themes (see the project-blueprint divider precedent).
-ok('RTR-DIV-1 renderTaskRow row has a real border-bottom divider color (not transparent)', () => {
+// RTR-DIV-1. Row has border-bottom for inter-row separation; last-child
+// rule (injected in the browser) strips it at section boundaries.
+ok('RTR-DIV-1 renderTaskRow row has border-bottom divider', () => {
   const container = makeRowStubEl('div');
   const task = { title: 'Task', path: 'spice/tasks/Task.md' };
   const row = TaskTodayList.renderTaskRow(container, task, null);
-  assert(/border-bottom:\s*1px solid var\(--background-modifier-border-hover\)/.test(row.style.cssText || ''),
-    'row must have a real border-bottom divider, got: ' + row.style.cssText);
+  assert(/border-bottom/.test(row.style.cssText || ''),
+    'row must have border-bottom, got: ' + row.style.cssText);
 });
 
 // RTR-3. Title click OPENS THE TASK NOTE (app.workspace.openLinkText(path)), NOT the
@@ -1963,6 +2084,21 @@ async function runMarkDoneDeletedTests() {
     assert(app._createdFolders.includes('spice/tasks/_done'), '_done folder ensured: ' + JSON.stringify(app._createdFolders));
   });
 
+  await okAsync('TD-SE-trip _saveEdit persists trip / trip_slug (parallel project), clears when absent', async () => {
+    const app = makeDialogApp('spice/tasks/task-t.md', { title: 'x', status: 'open' });
+    global.window = { app, moment: momentStub };
+    global.app = null;
+    const dialog = new TaskDialogClass();
+    // Edit a task with a trip linkage → trip / trip_slug written to the note fm.
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel', trip: { name: 'Bussin', slug: 'bussin' } }, '');
+    assert(app._file._fm.trip === '[[Bussin]]', 'trip wikilink written: ' + app._file._fm.trip);
+    assert(app._file._fm.trip_slug === 'bussin', 'trip_slug survives edit: ' + app._file._fm.trip_slug);
+    // A subsequent edit clearing the trip → both fields blanked (never left stale).
+    await dialog._saveEdit(app, app._file, { title: 'Book hotel' }, '');
+    assert(app._file._fm.trip === '' && app._file._fm.trip_slug === '',
+      'trip cleared when absent: ' + JSON.stringify([app._file._fm.trip, app._file._fm.trip_slug]));
+  });
+
   await okAsync('TD-MD-2 markDone with no app (cold load) → {ok:false, app unavailable}, never throws', async () => {
     global.window = { app: null };
     global.app = null;
@@ -2249,93 +2385,53 @@ async function runRowActionTests() {
   global.Notice = prevNotice;
 }
 
-// ---------- Per-row single `⋯` menu (RTR-DOTS-1..4) ----------
-// When customJS.MenuPopover is available renderTaskRow collapses the row's edit +
-// delete icons into ONE `⋯` control that opens an anchored MenuPopover (Open note /
-// Edit / Delete). When MenuPopover is ABSENT (cold load) it falls back to the two
-// legacy inline icons. Drives the REAL renderTaskRow against the faithful tree stub
-// + a MenuPopover spy (same discipline as RACT-* / RTR-3).
+// ---------- Per-row inline wrench + trash icons (RTR-ICONS-1..2) ----------
+// renderTaskRow always renders two inline icons: wrench (edit) + trash (delete).
+// No more MenuPopover branching — these are always visible.
 async function runDotsMenuTests() {
   const prevWindow = global.window;
   const prevNotice = global.Notice;
   global.Notice = function () {};
 
-  await okAsync('RTR-DOTS-1 with MenuPopover present, renders ONE `⋯` control (not two icons)', async () => {
-    const calls = [];
-    global.window = {
-      app: { workspace: { openLinkText() {} } },
-      customJS: { MenuPopover: { open: (entries, opts) => { calls.push({ entries, opts }); } } },
-    };
+  await okAsync('RTR-ICONS-1 renders wrench + trash icons (no dots menu)', async () => {
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: {} };
     const container = makeTreeNode('div');
     const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'spice/tasks/x.md' }, TD);
     const actions = findByCls(row, 'sauce-task-today-actions');
     assert(actions, 'actions group rendered');
-    const buttons = actions.children.filter((c) => c && c.tagName === 'BUTTON');
-    assert(buttons.length === 1, 'exactly ONE trailing action control: got ' + buttons.length);
-    const dots = findByCls(actions, 'sauce-task-action-more');
-    assert(dots, 'the single control is the `⋯` (sauce-task-action-more)');
-    assert(!findByCls(actions, 'sauce-task-action-edit'), 'no legacy edit icon when popover present');
-    assert(!findByCls(actions, 'sauce-task-action-delete'), 'no legacy delete icon when popover present');
-    assert(dots.attributes['aria-label'] === 'More actions', 'aria-label: ' + dots.attributes['aria-label']);
-    assert(calls.length === 0, 'popover NOT opened until clicked');
+    const edit = findByCls(actions, 'sauce-task-action-edit');
+    const del = findByCls(actions, 'sauce-task-action-delete');
+    assert(edit, 'wrench edit icon present');
+    assert(del, 'trash delete icon present');
+    assert(!findByCls(actions, 'sauce-task-action-more'), 'no dots menu');
+    assert(edit.attributes['aria-label'] === 'Edit task', 'edit aria-label');
+    assert(del.attributes['aria-label'] === 'Delete task', 'delete aria-label');
+    assert(childIndex(actions, edit) < childIndex(actions, del), 'edit is LEFT of delete');
   });
 
-  await okAsync('RTR-DOTS-2 clicking `⋯` opens MenuPopover once; entries = [Open note, Edit, Delete], Delete danger', async () => {
-    const calls = [];
+  await okAsync('RTR-ICONS-2 wrench click calls doEdit, trash click calls doDelete', async () => {
+    const editPaths = [];
+    const deletePaths = [];
     global.window = {
       app: { workspace: { openLinkText() {} } },
-      customJS: { MenuPopover: { open: (entries, opts) => { calls.push({ entries, opts }); } } },
-    };
-    const container = makeTreeNode('div');
-    const path = 'spice/tasks/go through mail.md';
-    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
-    const row = TaskTodayList.renderTaskRow(container, { title: 'go through mail', path }, TD);
-    const dots = findByCls(row, 'sauce-task-action-more');
-    await fireClick(dots);
-    assert(calls.length === 1, 'MenuPopover.open called exactly once: ' + calls.length);
-    const entries = calls[0].entries;
-    const labels = entries.map((e) => e.label);
-    assert(JSON.stringify(labels) === JSON.stringify(['Open note', 'Edit', 'Delete']),
-      'entry labels in order: ' + JSON.stringify(labels));
-    const del = entries.find((e) => e.label === 'Delete');
-    assert(del && del.danger === true, 'Delete entry has danger:true');
-    assert(calls[0].opts && calls[0].opts.anchor === dots, 'popover anchored to the `⋯` button');
-  });
-
-  await okAsync('RTR-DOTS-3 the Delete entry onSelect calls TD.confirmDelete(path)', async () => {
-    const calls = [];
-    const confirmed = [];
-    global.window = {
-      app: { workspace: { openLinkText() {} } },
-      customJS: { RenderSafe: { captureScroll: () => {} }, MenuPopover: { open: (entries) => { calls.push(entries); } } },
+      customJS: { RenderSafe: { captureScroll: () => {} } },
     };
     const container = makeTreeNode('div');
     const path = 'spice/tasks/x.md';
-    const TD = { open() {}, confirmDelete: async (p) => { confirmed.push(p); return { ok: true }; } };
+    const TD = {
+      open: (opts) => { editPaths.push(opts && opts.edit); },
+      confirmDelete: async (p) => { deletePaths.push(p); return { ok: true }; },
+    };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path }, TD);
-    await fireClick(findByCls(row, 'sauce-task-action-more'));
-    const del = calls[0].find((e) => e.label === 'Delete');
-    await del.onSelect();
-    assert(confirmed.length === 1 && confirmed[0] === path,
-      'Delete onSelect → confirmDelete(path): ' + JSON.stringify(confirmed));
-  });
-
-  await okAsync('RTR-DOTS-4 cold load (no MenuPopover) falls back to the TWO legacy icons, no throw', async () => {
-    global.window = { app: { workspace: { openLinkText() {} } }, customJS: {} };
-    const container = makeTreeNode('div');
-    const TD = { open() {}, confirmDelete: async () => ({ ok: false }) };
-    let threw = false;
-    let row = null;
-    try { row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD); }
-    catch (_e) { threw = true; }
-    assert(!threw, 'no throw when MenuPopover is absent');
-    const actions = findByCls(row, 'sauce-task-today-actions');
-    const edit = findByCls(actions, 'sauce-task-action-edit');
-    const del = findByCls(actions, 'sauce-task-action-delete');
-    assert(edit && del, 'both legacy edit + delete icons present on cold load');
-    assert(!findByCls(actions, 'sauce-task-action-more'), 'no `⋯` control on cold load');
-    assert(childIndex(actions, edit) < childIndex(actions, del), 'edit is LEFT of delete');
+    const edit = findByCls(row, 'sauce-task-action-edit');
+    const del = findByCls(row, 'sauce-task-action-delete');
+    await fireClick(edit);
+    assert(editPaths.length === 1 && editPaths[0] === path,
+      'wrench click → TaskDialog.open({edit:path}): ' + JSON.stringify(editPaths));
+    await fireClick(del);
+    assert(deletePaths.length === 1 && deletePaths[0] === path,
+      'trash click → confirmDelete(path): ' + JSON.stringify(deletePaths));
   });
 
   global.window = prevWindow;
@@ -2419,11 +2515,15 @@ async function runConfirmDeleteTests() {
   global.Notice = prevNotice;
 }
 
-// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..3) ----------
+// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..4) ----------
 // _reconcileAfterCreate registers a one-shot metadataCache 'changed' listener for
-// the new file's path → fires the Dataview force-refresh command → detaches. A
-// timeout fallback fires anyway. Never throws (absent APIs degrade to the natural
-// ~2.5s tick). No live spike: gating on the index event avoids the stale-index race.
+// the new file's path (or a 1200ms fallback if it's missed), then POLLS Dataview's
+// own `dv.page(path)` until Dataview itself reports the new page indexed before
+// firing the force-refresh command — metadataCache 'changed' only means Obsidian
+// re-parsed frontmatter, not that Dataview's separate async index caught up, so
+// firing on 'changed' alone can redraw from a stale index and never retrigger
+// (TD-REC-4 guards this). Absent Dataview API degrades to fire-on-signal. Never
+// throws (absent APIs degrade to the natural ~2.5s tick).
 function runReconcileTests() {
   ok('TD-REC-1 reconcile force-refreshes when the new file is indexed, then detaches', () => {
     const calls = { cmd: [], on: 0, off: 0 };
@@ -2458,6 +2558,35 @@ function runReconcileTests() {
     new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');   // must not throw
     new TaskDialogClass()._reconcileAfterCreate(null, 'p.md');  // null app → no throw
     assert(true, 'no throw');
+  });
+
+  ok('TD-REC-4 waits for Dataview to actually index the page before force-refreshing (root-cause regression)', () => {
+    const calls = { cmd: [] };
+    let handler = null;
+    const timers = [];
+    let pollCount = 0;
+    const indexedAfter = 2; // dv.page reports the new page only from the 3rd poll onward
+    const app = {
+      metadataCache: { on: (ev, fn) => { handler = { ev, fn }; return { ev }; }, offref: () => {} },
+      commands: { executeCommandById: (id) => calls.cmd.push(id) },
+      plugins: { plugins: { dataview: { api: { page: (p) => {
+        pollCount++;
+        return pollCount > indexedAfter ? { file: { path: p } } : null;
+      } } } } },
+      _setTimeout: (fn) => { timers.push(fn); return timers.length; },  // queued, drained manually below
+    };
+    new TaskDialogClass()._reconcileAfterCreate(app, 'spice/tasks/x.md');
+    handler.fn({ path: 'spice/tasks/x.md' }); // metadataCache fires — starts polling
+    assert(calls.cmd.length === 0, 'must NOT force-refresh before dv.page reports the new page indexed');
+    let guard = 0;
+    while (calls.cmd.length === 0 && guard < 30) {
+      const t = timers.shift();
+      assert(t, 'a retry timer should be queued while waiting for the index');
+      t();
+      guard++;
+    }
+    assert(calls.cmd.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh eventually fired once dv.page reported the new page');
+    assert(pollCount === indexedAfter + 1, 'polled dv.page exactly until it succeeded: ' + pollCount);
   });
 }
 

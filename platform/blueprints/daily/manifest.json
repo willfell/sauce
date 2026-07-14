@@ -1,6 +1,6 @@
 {
   "name": "daily",
-  "version": "0.20.1",
+  "version": "0.22.1",
   "kind": "blueprint",
   "module_directory": "daily",
   "skills_dir": ".claude/skills/daily",
@@ -90,19 +90,6 @@
         "topic": "Daily",
         "path": "{{module_directory}}",
         "command": "/daily"
-      }
-    }
-  ],
-  "nav_buttons": [
-    {
-      "id": "daily-today",
-      "label": "Daily",
-      "icon": "daily",
-      "order": 50,
-      "action": {
-        "type": "invoke_command",
-        "command_id": "daily-notes",
-        "read_mode_after": true
       }
     }
   ],

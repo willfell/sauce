@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.215.1",
+  "workshop_version": "0.224.1",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -36,11 +36,11 @@
     },
     {
       "name": "task-entity",
-      "version": "0.12.1"
+      "version": "0.15.3"
     },
     {
       "name": "breadcrumb",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "open-helpers",
@@ -110,11 +110,11 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.48.0"
+      "version": "1.53.1"
     },
     {
       "name": "daily",
-      "version": "0.20.1"
+      "version": "0.22.1"
     },
     {
       "name": "meetings",
@@ -122,11 +122,11 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1"
+      "version": "0.11.3"
     },
     {
       "name": "people",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "cowork",
@@ -134,15 +134,15 @@
     },
     {
       "name": "to-do",
-      "version": "0.23.0"
+      "version": "0.26.0"
     },
     {
       "name": "wiki",
-      "version": "0.7.1"
+      "version": "0.8.2"
     },
     {
       "name": "home",
-      "version": "0.6.0"
+      "version": "0.6.1"
     },
     {
       "name": "reader",

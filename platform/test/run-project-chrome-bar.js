@@ -98,19 +98,58 @@ function allDescendants(el) {
     s.primary && s.primary.id === 'new-task' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-doc'));
 }
+// ── ARCHTOG-1..4 — Archive/Unarchive project (chrome-bar overflow + pure transform)
+{
+  const s = inst._surfaceSpec('project-hub');
+  ok('ARCHTOG-1 project-hub overflow has archive-toggle',
+    s.overflow.some((o) => o.id === 'archive-toggle'));
+}
+{
+  const s = inst._surfaceSpec('project-todo');
+  ok('ARCHTOG-1b project-todo overflow does NOT have archive-toggle',
+    !s.overflow.some((o) => o.id === 'archive-toggle'));
+}
+{
+  const fm = { status: 'in-progress' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-13');
+  ok('ARCHTOG-2a status→archived', fm.status === 'archived');
+  ok('ARCHTOG-2b pre_archive_status stashed', fm.pre_archive_status === 'in-progress');
+  ok('ARCHTOG-2c status_changed_at set', fm.status_changed_at === '2026-07-13');
+}
+{
+  const fm = { status: 'archived', pre_archive_status: 'planning' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-14');
+  ok('ARCHTOG-3a status restored', fm.status === 'planning');
+  ok('ARCHTOG-3b stash cleared', fm.pre_archive_status === undefined || fm.pre_archive_status === null);
+  ok('ARCHTOG-3c status_changed_at set', fm.status_changed_at === '2026-07-14');
+}
+{
+  const fm = { status: 'archived' };
+  ProjectChromeBar._applyArchiveToggle(fm, '2026-07-15');
+  ok('ARCHTOG-4 fallback to idea', fm.status === 'idea');
+}
+
 {
   const s = inst._surfaceSpec('docs-hub');
   ok('PCB-SPEC-3 docs-hub primary=new-doc + overflow[new-section,move-docs] + not leaf',
     s.primary && s.primary.id === 'new-doc' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-section')
       && s.overflow.some((o) => o.id === 'move-docs'));
+  ok('PCB-SPEC-3b docs-hub overflow ALSO offers "Select docs" (root-level bulk move), keeping new-section + move-docs',
+    s.overflow.some((o) => o.id === 'select-docs' && o.label === 'Select docs')
+      && s.overflow.some((o) => o.id === 'new-section')
+      && s.overflow.some((o) => o.id === 'move-docs'));
 }
 {
   const s = inst._surfaceSpec('section-hub');
-  ok('PCB-SPEC-4 section-hub primary=new-doc + overflow[new-subsection,move-docs]',
+  ok('PCB-SPEC-4 section-hub primary=new-doc + overflow[new-subsection, move-section, select-docs, delete-section]',
     s.primary && s.primary.id === 'new-doc' && s.leaf === false
       && s.overflow.some((o) => o.id === 'new-subsection')
-      && s.overflow.some((o) => o.id === 'move-docs'));
+      && s.overflow.some((o) => o.id === 'move-section')
+      && s.overflow.some((o) => o.id === 'select-docs')
+      && s.overflow.some((o) => o.id === 'delete-section'));
+  ok('PCB-SPEC-4b section-hub drops the legacy "move-docs" bulk entry (converged on select-docs)',
+    !s.overflow.some((o) => o.id === 'move-docs'));
 }
 {
   const s = inst._surfaceSpec('project-map');
@@ -445,6 +484,103 @@ function allDescendants(el) {
       runDispatch({}, {}, () => inst._dispatch(dv, { context: 'links-hub' }, 'add-link'));
     } catch (_e) { threw = true; }
     ok('PCB-DISPATCH-10 a missing helper (cold-load) does NOT throw', !threw);
+  }
+
+  // PCB-DISPATCH-11..13 — section-hub overflow routes to the shared SectionExplorer.
+  // The section-hub note supplies type/depth/section/section_slug/project_slug; the
+  // dispatch builds an adapter via SectionHub._buildConfig + SectionExplorer.makeAdapter
+  // and a section descriptor from the current file, then calls the shared entry point.
+  const sectionHubStub = () => ({
+    SectionHub: {
+      _buildConfig: (...args) => ({ __cfg: true, __args: args }),
+      _stripLink: (v) => (typeof v === 'string' ? v : ''),
+    },
+    SectionExplorer: {
+      makeAdapter: (cfg) => ({ __adapter: true, cfg }),
+    },
+  });
+  const sectionHubDv = () => ({
+    current: () => ({
+      type: 'section-hub',
+      depth: 1,
+      section: 'Knowledge',
+      section_slug: 'knowledge',
+      project_slug: 'connectors',
+      file: { path: 'spice/projects/connectors/docs/knowledge/Knowledge.md', name: 'Knowledge' },
+    }),
+  });
+
+  // PCB-DISPATCH-11 — select-docs → SectionExplorer.openSelectDocsPicker(dv, adapter, section).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer.openSelectDocsPicker = (d, adapter, section) => calls.push({ d: d === undefined ? false : !!d, section: !!section });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'select-docs'));
+    ok('PCB-DISPATCH-11 select-docs calls SectionExplorer.openSelectDocsPicker once with dv+section',
+      calls.length === 1 && calls[0].d === true && calls[0].section === true);
+  }
+
+  // PCB-DISPATCH-12 — move-section → SectionExplorer._openMovePickerForSection(dv, adapter, section).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer._openMovePickerForSection = (d, adapter, section) => calls.push({ d, adapter, section });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'move-section'));
+    ok('PCB-DISPATCH-12a move-section calls SectionExplorer._openMovePickerForSection once',
+      calls.length === 1 && calls[0].d === dv);
+    ok('PCB-DISPATCH-12b …with an adapter built from makeAdapter(_buildConfig(...))',
+      calls.length === 1 && calls[0].adapter && calls[0].adapter.__adapter === true && calls[0].adapter.cfg && calls[0].adapter.cfg.__cfg === true);
+    ok('PCB-DISPATCH-12c …and a section descriptor { folder, hubPath, title } from the current note',
+      calls.length === 1 && calls[0].section
+        && calls[0].section.folder === 'spice/projects/connectors/docs/knowledge'
+        && calls[0].section.hubPath === 'spice/projects/connectors/docs/knowledge/Knowledge.md'
+        && calls[0].section.title === 'Knowledge');
+  }
+
+  // PCB-DISPATCH-13 — delete-section → SectionExplorer._openDeleteConfirm(dv, adapter, section).
+  {
+    const calls = [];
+    const cjs = sectionHubStub();
+    cjs.SectionExplorer._openDeleteConfirm = (d, adapter, section) => calls.push({ d, adapter, section });
+    const dv = sectionHubDv();
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'section-hub' }, 'delete-section'));
+    ok('PCB-DISPATCH-13 delete-section calls SectionExplorer._openDeleteConfirm once with (dv, adapter, section)',
+      calls.length === 1 && calls[0].d === dv && calls[0].adapter && calls[0].adapter.__adapter === true
+        && calls[0].section && calls[0].section.hubPath === 'spice/projects/connectors/docs/knowledge/Knowledge.md');
+  }
+
+  // PCB-DISPATCH-14 — select-docs on the Docs ATLAS ROOT (docs-hub) resolves a
+  // docs-root adapter (built from SectionHub._buildDocsRootConfig) and calls
+  // SectionExplorer.openSelectDocsPicker(dv, adapter, null). section === null so
+  // the picker enumerates docs directly under the docs root folder.
+  {
+    const calls = [];
+    const cjs = {
+      SectionHub: {
+        _buildDocsRootConfig: (dv2, projectSlug) => ({
+          rootClass: 'se-root',
+          icons: { folder: '', file: '' },
+          listSections: () => [],
+          listPages: () => [],
+          move: { root: `spice/projects/${projectSlug}/docs`, docType: 'doc-note', rewriteOnDocMove: () => ({ section: '', sub_section: '' }) },
+        }),
+      },
+      SectionExplorer: {
+        makeAdapter: (cfg) => ({ __adapter: true, move: cfg.move }),
+        openSelectDocsPicker: (d, adapter, section) => calls.push({ d, adapter, section }),
+      },
+    };
+    const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md', name: 'Docs' }, type: 'docs-hub' }) };
+    runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub', projectSlug: 'connectors', projectDir: 'spice/projects/connectors' }, 'select-docs'));
+    ok('PCB-DISPATCH-14a select-docs on docs-hub calls SectionExplorer.openSelectDocsPicker once with dv',
+      calls.length === 1 && calls[0].d === dv);
+    ok('PCB-DISPATCH-14b …with section === null (root-level bulk move)',
+      calls.length === 1 && calls[0].section === null);
+    ok('PCB-DISPATCH-14c …and a docs-root adapter whose move.root ends in "/docs"',
+      calls.length === 1 && calls[0].adapter && calls[0].adapter.move
+        && /\/docs$/.test(String(calls[0].adapter.move.root)));
   }
 }
 

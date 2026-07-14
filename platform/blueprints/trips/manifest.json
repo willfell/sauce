@@ -1,6 +1,6 @@
 {
   "name": "trips",
-  "version": "0.7.0",
+  "version": "0.10.1",
   "kind": "blueprint",
   "module_directory": "trips",
   "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment workstream. Trip Atlas + Trip Board Card templates emit canonical created_at: (ISO+TZ; replaces legacy created:). Trip Atlas attending: renamed to canonical people: (plural wikilink list per canonical narrowing — entity-people is the cross-blueprint canonical key; trips' attending was the legacy semantic narrowing). Discriminator tag trip stripped from Trip Atlas template (functional kanban-card / trip-card / trips-hub tags retained). Trip Board Card temporal date tag stripped. TripNavButtons helper emits ISO+TZ created_at via NEW _isoWithTz method (replaces legacy YYYY-MM-DD HH:mm dateStr). 2 existing rule_fragments declare extends: _canonical-vocab; Trip Atlas rule drops attending requirement + adds optional people requirement + drops trip required_tag. v0.3.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Trip Atlas template grows ## Mentions H2 below TripSectionsCards block — universal cross-blueprint backlink panel via canonical trips: cross-ref reverse query. This cycle: breadcrumb adoption (hub→trip→section ancestors-mode trail with lit:/fm: atoms), collision-free note naming (atlas → <Trip Name>.md, sections → <Trip Name> — <Section>.md), NEW TripSectionKinds registry + section_kind/section/trip/trip_slug section frontmatter, TripNavButtons rewritten on the primary+Go-to launcher grammar, TripSectionsCards now keys on frontmatter, and an applyTripsConformanceHeal install heal.",
@@ -42,9 +42,7 @@
     "TripDashboard",
     "TripsChromeBar",
     "TripEntryList",
-    "TripLinksPanel",
-    "TripLinksManager",
-    "TripToDoActions"
+    "TripLinks"
   ],
   "files": [
     {
@@ -70,10 +68,6 @@
     {
       "source": "templates/Trip Notes.md",
       "dest": "{{templates_path}}/Template, Trip Notes.md"
-    },
-    {
-      "source": "templates/Trip Links.md",
-      "dest": "{{templates_path}}/Template, Trip Links.md"
     },
     {
       "source": "templates/Trip Board.md",
@@ -112,16 +106,8 @@
       "dest": "{{scripts_path}}/trips/trip-entry-list.js"
     },
     {
-      "source": "helpers/trip-links-panel.js",
-      "dest": "{{scripts_path}}/trips/trip-links-panel.js"
-    },
-    {
-      "source": "helpers/trip-links-manager.js",
-      "dest": "{{scripts_path}}/trips/trip-links-manager.js"
-    },
-    {
-      "source": "helpers/trip-todo-actions.js",
-      "dest": "{{scripts_path}}/trips/trip-todo-actions.js"
+      "source": "helpers/trip-links.js",
+      "dest": "{{scripts_path}}/trips/trip-links.js"
     },
     {
       "source": "content/Trips.md",
@@ -179,6 +165,21 @@
         "current": {
           "label": "fm:section|file:basename"
         }
+      },
+      "trip-board-card": {
+        "ancestors": [
+          {
+            "label": "lit:Trips",
+            "link": "spice/trips/Trips.md"
+          },
+          {
+            "label": "fm:trip",
+            "link": "spice/trips/{fm:trip_slug}/{fm:trip}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
       }
     }
   },
@@ -228,7 +229,7 @@
               "section_kind": {
                 "required": true,
                 "type": "string",
-                "matches": "^(flights|stay|packing-list|to-do|notes|links|custom)$"
+                "matches": "^(flights|stay|packing-list|to-do|notes|custom)$"
               },
               "section": {
                 "required": true,

@@ -579,23 +579,21 @@ async function testProjectDocsIndexSort() {
 async function testTemplateIntegrity() {
   console.log("\n=== S6 Template integrity behavioral ===");
 
-  // TPL-B-1: Project.md section order (strict) — ProjectChromeBar →
-  // ProjectStatusWidget → ProjectMeetingsPanel → ProjectLinksPanel. Other
-  // orderings would surface the regression.
-  // button-nav refactor: the stacked chrome tiers (Breadcrumb + SpaceNavButtons
-  // + ProjectNavButtons) are replaced by the single ProjectChromeBar block that
-  // leads the note. Workstreams (WS2.1) already moved to the Map, so the trailing
-  // assertion targets ProjectLinksPanel (the last block).
+  // TPL-B-1: Project.md section order (strict) — ProjectChromeBar → ProjectDashboard.
+  // v0.220.4 (project 1.50.0) SUPERSEDES: StatusWidget + MeetingsPanel + LinksPanel
+  // were collapsed into the single ProjectDashboard card at the top of the hub.
+  // The panel classes stay callable for Links Hub template + backwards compat;
+  // only the hub template stops invoking them directly. The strict-ordering
+  // assertion now spans just the two surviving hub blocks.
   {
-    console.log("\n--- Case TPL-B-1: Project.md strict section order ---");
+    console.log("\n--- Case TPL-B-1: Project.md strict section order (ChromeBar → Dashboard) ---");
     const tpl = fs.readFileSync(path.join(TPLDIR, "Project.md"), "utf8");
-    const expectedOrder = ["ProjectChromeBar", "ProjectStatusWidget", "ProjectMeetingsPanel", "ProjectLinksPanel"];
+    const expectedOrder = ["ProjectChromeBar", "ProjectDashboard"];
     const positions = expectedOrder.map((cls) => ({ cls, idx: tpl.indexOf(`class: "${cls}"`) }));
     for (let i = 0; i < positions.length; i++) {
       ok(`TPL-B-1.${i + 1} ${positions[i].cls} present`, positions[i].idx >= 0,
         `expected class invocation for "${positions[i].cls}"`);
     }
-    // Strict ascending order check.
     for (let i = 1; i < positions.length; i++) {
       ok(`TPL-B-1.${i + positions.length + 1} ${positions[i].cls} after ${positions[i - 1].cls}`,
         positions[i].idx > positions[i - 1].idx,

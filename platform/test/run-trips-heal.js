@@ -20,6 +20,8 @@ const os = require('os');
 const install = require('../install.js');
 const applyTripsConformanceHeal = install.applyTripsConformanceHeal;
 const _tripStripLegacyChrome = install._tripStripLegacyChrome;
+const _tripEnsureAtlasLinks = install._tripEnsureAtlasLinks;
+const _tripBoardCardChrome = install._tripBoardCardChrome;
 
 let passed = 0;
 let failed = 0;
@@ -235,6 +237,9 @@ async function run() {
     await runFrontmatterEdgeCases();
     await runDollarAndCollisionCases();
     runStripLegacyChromeUnit();
+    runEnsureAtlasLinksUnit();
+    runBoardCardChromeUnit();
+    await runLinksSectionRetirement();
 
     console.log(`\nrun-trips-heal.js: ${passed} passed, ${failed} failed`);
     process.exit(failed === 0 ? 0 : 1);
@@ -378,6 +383,85 @@ function runStripLegacyChromeUnit() {
     const twice = _tripStripLegacyChrome(once);
     ok('TRIPHEAL-10c idempotent', twice === once, `once=${JSON.stringify(once)} twice=${JSON.stringify(twice)}`);
   }
+}
+
+// TRIPHEAL-11 — pure _tripEnsureAtlasLinks(body): atlas frontmatter gains
+// `links: []` iff absent; idempotent when present; key lands INSIDE the fm block.
+function runEnsureAtlasLinksUnit() {
+  const noLinks = '---\ntype: trip\nname: "X"\nlocation: "Denver"\n---\n\nBody prose.\n';
+  const out = _tripEnsureAtlasLinks(noLinks);
+  const fm = out.match(/^---\n([\s\S]*?)\n---/);
+  ok('TRIPHEAL-11.1 links: [] inserted', /^links:\s*\[\]\s*$/m.test(out), out);
+  ok('TRIPHEAL-11.2 links key is INSIDE frontmatter block', !!fm && /^links:\s*\[\]\s*$/m.test(fm[1]), out);
+  ok('TRIPHEAL-11.3 body prose preserved', out.includes('Body prose.'));
+
+  const has = '---\ntype: trip\nname: "X"\nlinks: []\n---\n\nBody.\n';
+  ok('TRIPHEAL-11.4 idempotent when links: present', _tripEnsureAtlasLinks(has) === has);
+
+  const twice = _tripEnsureAtlasLinks(out);
+  ok('TRIPHEAL-11.5 second pass = no-op', twice === out);
+
+  ok('TRIPHEAL-11.6 no frontmatter → unchanged (never throws)',
+    _tripEnsureAtlasLinks('no fm here') === 'no fm here');
+}
+
+// TRIPHEAL-12 — pure _tripBoardCardChrome(body): a `type: trip-board-card` note
+// with no TripsChromeBar block gets exactly one injected; idempotent.
+function runBoardCardChromeUnit() {
+  const card = '---\ntype: trip-board-card\ntitle: "Idea"\n---\n\nCard prose.\n';
+  const out = _tripBoardCardChrome(card);
+  const count = (s) => (s.match(/class:\s*"TripsChromeBar"/g) || []).length;
+  ok('TRIPHEAL-12.1 exactly one TripsChromeBar injected', count(out) === 1, out);
+  ok('TRIPHEAL-12.2 injected after frontmatter', /^---\n[\s\S]*?\n---\n[\s\S]*class:\s*"TripsChromeBar"/.test(out));
+  ok('TRIPHEAL-12.3 card prose preserved', out.includes('Card prose.'));
+  ok('TRIPHEAL-12.4 idempotent', _tripBoardCardChrome(out) === out);
+}
+
+// TRIPHEAL-13 — Links-section retirement via applyTripsConformanceHeal: a trip
+// folder containing a v1 `<Trip> — Links.md` (section_kind: links) is removed from
+// its original path and a `.sauce-backup` copy is written.
+async function runLinksSectionRetirement() {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trips-heal-links-'));
+  try {
+    const adapter = makeAdapter(tmpRoot);
+    const dir = 'spice/trips/paris';
+    await adapter.write(`${dir}/Paris.md`,
+      '---\ntype: trip\nname: "Paris"\nstart_date: "2026-05-01"\nend_date: "2026-05-03"\nlocation: "Paris"\n---\nx');
+    await adapter.write(`${dir}/Paris — Links.md`,
+      '---\ntype: trip-section\nsection_kind: links\nsection: "Links"\ntrip: "[[Paris]]"\ntrip_slug: paris\n---\n\n- https://example.com\n');
+    const tp = { app: { vault: { adapter } } };
+    await applyTripsConformanceHeal(tp, [], { commit: 'x', tag: 'y', dirty: false });
+
+    ok('TRIPHEAL-13.1 Links section note removed from original path',
+      !(await adapter.exists(`${dir}/Paris — Links.md`)));
+
+    // A .sauce-backup copy of the Links note exists somewhere under trips/paris.
+    const backupRoot = path.join(tmpRoot, '.sauce-backup/trips/paris');
+    let backupFound = false;
+    if (fs.existsSync(backupRoot)) {
+      const walk = (d) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const abs = path.join(d, e.name);
+          if (e.isDirectory()) walk(abs);
+          else if (/Links\.md$/.test(e.name)) backupFound = true;
+        }
+      };
+      walk(backupRoot);
+    }
+    ok('TRIPHEAL-13.2 .sauce-backup copy of the Links note written', backupFound);
+
+    // The atlas gained links: [] frontmatter.
+    const atlas = await adapter.read(`${dir}/Paris.md`);
+    ok('TRIPHEAL-13.3 atlas gained links: []', /^links:\s*\[\]\s*$/m.test(atlas), atlas);
+
+    // Idempotent: a 2nd pass leaves the file set unchanged.
+    const before = snapshot(tmpRoot);
+    await applyTripsConformanceHeal(tp, [], { commit: 'x', tag: 'y', dirty: false });
+    const after = snapshot(tmpRoot);
+    ok('TRIPHEAL-13.4 idempotent (same file set 2nd pass)',
+      JSON.stringify(Object.keys(before).sort()) === JSON.stringify(Object.keys(after).sort()) &&
+      Object.keys(before).every((k) => before[k] === after[k]));
+  } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
 }
 
 run();

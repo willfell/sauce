@@ -305,6 +305,250 @@ const D = Cls ? new Cls() : null;
     dm && dm.isNoop('spice/projects/p/docs/a', 'spice/projects/p/docs/b/Doc.md') === false);
 }
 
+// ---- SectionHub `move` adapter block (Task H1 — shared SectionExplorer wiring) ----
+// SectionHub._buildConfig now returns a `move` block the shared SectionExplorer
+// mechanism reads (rewriteOnDocMove / rewriteOnSectionMove / canAcceptSection /
+// enumerateSectionTargets) plus emptySubsectionCount + a recursive canDelete.
+// We load SectionHub + the REAL SectionExplorer statics from source (the block
+// delegates to customJS.SectionExplorer.sectionTargets / childSectionFolders /
+// subtreeDocCount), install a minimal dv + customJS, and drive the block's pure
+// hooks directly. Reverting section-hub.js fails SH0 (Gate B L1 red).
+{
+  const SH_SRCFILE = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'section-hub.js');
+  const SH_SRC = fs.existsSync(SH_SRCFILE) ? fs.readFileSync(SH_SRCFILE, 'utf8') : '';
+  const SHCls = SH_SRC ? new Function(`${SH_SRC}\nreturn SectionHub;`)() : null;
+  ok('SH0 SectionHub class loads', !!SHCls);
+
+  const SE_SRCFILE = path.join(ROOT, 'platform', 'mechanisms', 'section-explorer', 'section-explorer.js');
+  const SE_SRC = fs.existsSync(SE_SRCFILE) ? fs.readFileSync(SE_SRCFILE, 'utf8') : '';
+  const SECls = SE_SRC ? new Function(`${SE_SRC}\nreturn SectionExplorer;`)() : null;
+  ok('SH0b SectionExplorer class loads', !!SECls);
+
+  // A tiny dv whose pages('"<folder>"') returns the pages under that folder from a
+  // fixed corpus (prefix match, like Dataview's folder source). Supplies .array().
+  const makeDv = (pages) => ({
+    pages: (src) => {
+      const m = String(src).match(/^"(.*)"$/);
+      const folder = m ? m[1] : String(src);
+      const arr = pages.filter((p) => {
+        const pf = p && p.file && p.file.path ? String(p.file.path) : '';
+        return pf.indexOf(folder + '/') === 0;
+      });
+      arr.array = () => arr;
+      arr.where = (fn) => { const w = arr.filter(fn); w.array = () => w; w.where = arr.where; return w; };
+      return arr;
+    },
+  });
+
+  // Install the real SectionExplorer statics on customJS for the duration of fn
+  // (the move block reads customJS.SectionExplorer.* + this._childHubsForRename
+  // uses dv.where at call time).
+  const withSE = (fn) => {
+    const prevCJS = global.customJS;
+    const se = SECls ? new SECls() : {};
+    se.childSectionFolders = SECls.childSectionFolders;
+    se.subtreeDocCount = SECls.subtreeDocCount;
+    se.sectionTargets = SECls.sectionTargets;
+    se.pagesUnder = SECls.pagesUnder;   // dispatch-time enumeration (metadataCache)
+    global.customJS = { SectionExplorer: se };
+    try { return fn(); } finally { global.customJS = prevCJS; }
+  };
+
+  // Build the `move` block + emptySubsectionCount + canDelete for a depth-1 hub
+  // in project "p". customJS.SectionExplorer is the real static class instance.
+  const buildBlock = (corpus) => {
+    const prevCJS = global.customJS;
+    global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
+    // statics are referenced by class name inside the block, so expose the class.
+    global.customJS.SectionExplorer.childSectionFolders = SECls.childSectionFolders;
+    global.customJS.SectionExplorer.subtreeDocCount = SECls.subtreeDocCount;
+    global.customJS.SectionExplorer.sectionTargets = SECls.sectionTargets;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
+    const sh = SHCls ? new SHCls() : null;
+    const dv = makeDv(corpus);
+    const cur = { file: { path: 'spice/projects/p/docs/knowledge/Knowledge.md', name: 'Knowledge' }, section: 'Knowledge', section_slug: 'knowledge', depth: 1 };
+    const cfg = sh ? sh._buildConfig(dv, cur, 1, 'p', 'knowledge', 'Knowledge') : null;
+    global.customJS = prevCJS;
+    return { cfg, dv, sh };
+  };
+
+  const DOCS = 'spice/projects/p/docs';
+  // Corpus: Knowledge (depth-1, HAS a child sub-section Advanced) + Notes (depth-1,
+  // childless) + a doc-note inside Advanced.
+  const corpus = [
+    { type: 'section-hub', depth: 1, section: 'Knowledge', file: { path: `${DOCS}/knowledge/Knowledge.md`, folder: `${DOCS}/knowledge` } },
+    { type: 'section-hub', depth: 2, section: 'Advanced', file: { path: `${DOCS}/knowledge/advanced/Advanced.md`, folder: `${DOCS}/knowledge/advanced` } },
+    { type: 'section-hub', depth: 1, section: 'Notes', file: { path: `${DOCS}/notes/Notes.md`, folder: `${DOCS}/notes` } },
+    { type: 'doc-note', file: { path: `${DOCS}/knowledge/advanced/Deep.md`, folder: `${DOCS}/knowledge/advanced` } },
+  ];
+
+  // Dispatch-time enumeration/gates read the metadataCache (mobile-safe), not
+  // dv.pages — install a matching global.app built from the corpus.
+  const _prevApp = global.app;
+  global.app = {
+    vault: { getMarkdownFiles: () => corpus.map((p) => ({ path: p.file.path, name: p.file.path.slice(p.file.path.lastIndexOf('/') + 1) })) },
+    metadataCache: {
+      getFileCache: (f) => {
+        const p = corpus.find((pp) => pp.file.path === (f && f.path));
+        return p ? { frontmatter: { type: p.type, title: p.title, section: p.section, sub_section: p.sub_section, depth: p.depth, links: p.links } } : { frontmatter: {} };
+      },
+    },
+  };
+
+  const { cfg } = buildBlock(corpus);
+  ok('SH1 _buildConfig returns a move block', !!(cfg && cfg.move));
+
+  // rewriteOnDocMove — depth-1 dest → {section:<seg>, sub_section:""};
+  // depth-2 dest → {section:parent, sub_section:leaf}; root → both "".
+  {
+    const mv = cfg && cfg.move;
+    const d1 = mv && mv.rewriteOnDocMove(`${DOCS}/knowledge`);
+    ok('SH2 rewriteOnDocMove depth-1 dest → {section, sub_section:""}',
+      d1 && d1.section === 'knowledge' && d1.sub_section === '');
+    const d2 = mv && mv.rewriteOnDocMove(`${DOCS}/knowledge/advanced`);
+    ok('SH3 rewriteOnDocMove depth-2 dest → {section:parent, sub_section:leaf}',
+      d2 && d2.section === 'knowledge' && d2.sub_section === 'advanced');
+    const dr = mv && mv.rewriteOnDocMove(DOCS);
+    ok('SH4 rewriteOnDocMove docs root → both ""',
+      dr && dr.section === '' && dr.sub_section === '');
+    const dtrail = mv && mv.rewriteOnDocMove(`${DOCS}/knowledge/`);
+    ok('SH5 rewriteOnDocMove tolerates a trailing slash',
+      dtrail && dtrail.section === 'knowledge' && dtrail.sub_section === '');
+  }
+
+  // canAcceptSection — 2-level cap. resultDepth = destDepth+1; a section WITH
+  // children pushes its deepest child to resultDepth+1. Needs the real
+  // SectionExplorer statics at call time (childSectionFolders).
+  withSE(() => {
+    const mv = cfg && cfg.move;
+    const kSection = { folder: `${DOCS}/knowledge`, hubPath: `${DOCS}/knowledge/Knowledge.md`, title: 'Knowledge' }; // HAS children
+    const nSection = { folder: `${DOCS}/notes`, hubPath: `${DOCS}/notes/Notes.md`, title: 'Notes' };               // childless
+
+    // childless → dest depth-1 (`knowledge`) → resultDepth 2 → OK.
+    ok('SH6 canAcceptSection childless may nest one level (dest depth 1 → depth-2)',
+      mv && mv.canAcceptSection(nSection, `${DOCS}/knowledge`) === true);
+    // section WITH children → dest depth-1 → child would be depth-3 → BLOCKED.
+    ok('SH7 canAcceptSection parent-with-children BLOCKED from dest depth 1 (would be depth-3)',
+      mv && mv.canAcceptSection(kSection, `${DOCS}/notes`) === false);
+    // section WITH children → docs root (dest depth 0) → child at depth-2 → OK.
+    ok('SH8 canAcceptSection parent-with-children OK at docs root (dest depth 0 → child depth-2)',
+      mv && mv.canAcceptSection(kSection, DOCS) === true);
+    // childless → docs root → resultDepth 1 → OK.
+    ok('SH9 canAcceptSection childless OK at docs root',
+      mv && mv.canAcceptSection(nSection, DOCS) === true);
+  });
+
+  // rewriteOnSectionMove — hubPatch depth/parent_section + child parent_section patches.
+  withSE(() => {
+    const mv = cfg && cfg.move;
+    const kSection = { folder: `${DOCS}/knowledge`, hubPath: `${DOCS}/knowledge/Knowledge.md`, title: 'Knowledge' };
+    // Move Knowledge under Notes (dest parent = notes, depth-1) → new depth 2,
+    // parent_section "notes"; child Advanced's parent_section → "Knowledge".
+    const plan = mv && mv.rewriteOnSectionMove(kSection, `${DOCS}/notes`);
+    ok('SH10 rewriteOnSectionMove returns { hubPatch, childPatches }',
+      plan && plan.hubPatch && Array.isArray(plan.childPatches));
+    ok('SH11 hubPatch depth/parent_section from dest parent (one level in → depth 2)',
+      plan && plan.hubPatch.depth === 2 && plan.hubPatch.parent_section === 'notes');
+    ok('SH12 child patch retargets parent_section to the moved section title',
+      plan && plan.childPatches.length === 1
+        && plan.childPatches[0].path === `${DOCS}/knowledge/advanced/Advanced.md`
+        && plan.childPatches[0].patch.parent_section === 'Knowledge');
+    // Move to docs root → depth 1, parent_section "".
+    const planRoot = mv && mv.rewriteOnSectionMove(kSection, DOCS);
+    ok('SH13 rewriteOnSectionMove to docs root → depth 1, parent_section ""',
+      planRoot && planRoot.hubPatch.depth === 1 && planRoot.hubPatch.parent_section === '');
+    // Out of docs tree → null (no-op).
+    const planOut = mv && mv.rewriteOnSectionMove(kSection, 'spice/projects/other/docs');
+    ok('SH14 rewriteOnSectionMove out of docs tree → null', planOut === null);
+  });
+
+  // enumerateSectionTargets — root first, then the two depth-1 hubs + the depth-2.
+  {
+    const mv = cfg && cfg.move;
+    const prevCJS = global.customJS;
+    global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
+    global.customJS.SectionExplorer.sectionTargets = SECls.sectionTargets;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
+    const t = mv && mv.enumerateSectionTargets(makeDv(corpus));
+    global.customJS = prevCJS;
+    ok('SH15 enumerateSectionTargets returns root + 3 section hubs',
+      t && t.length === 4 && t[0].folder === DOCS && t[0].depth === 0);
+    ok('SH16 enumerateSectionTargets labels via _stripLink(section)',
+      t && t.some((x) => x.label === 'Knowledge') && t.some((x) => x.label === 'Advanced'));
+  }
+
+  // emptySubsectionCount — counts child section-hubs under a section.
+  {
+    const prevCJS = global.customJS;
+    global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
+    global.customJS.SectionExplorer.childSectionFolders = SECls.childSectionFolders;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
+    const kSection = { folder: `${DOCS}/knowledge` };
+    const nSection = { folder: `${DOCS}/notes` };
+    ok('SH17 emptySubsectionCount counts child section-hubs (Knowledge → 1)',
+      cfg && cfg.emptySubsectionCount(kSection) === 1);
+    ok('SH18 emptySubsectionCount 0 for a childless section (Notes → 0)',
+      cfg && cfg.emptySubsectionCount(nSection) === 0);
+    global.customJS = prevCJS;
+  }
+
+  // canDelete — recursive doc-note subtree count. Knowledge has a doc-note in
+  // Advanced → NOT deletable; Notes is empty → deletable.
+  {
+    const prevCJS = global.customJS;
+    global.customJS = { SectionExplorer: SECls ? new SECls() : {} };
+    global.customJS.SectionExplorer.subtreeDocCount = SECls.subtreeDocCount;
+    global.customJS.SectionExplorer.pagesUnder = SECls.pagesUnder;
+    const kSection = { folder: `${DOCS}/knowledge`, hubPath: `${DOCS}/knowledge/Knowledge.md` };
+    const nSection = { folder: `${DOCS}/notes`, hubPath: `${DOCS}/notes/Notes.md` };
+    ok('SH19 canDelete false when a doc-note exists in the subtree', cfg && cfg.canDelete(kSection) === false);
+    ok('SH20 canDelete true when the subtree has no doc-notes', cfg && cfg.canDelete(nSection) === true);
+    ok('SH21 canDelete false without a hubPath', cfg && cfg.canDelete({ folder: `${DOCS}/notes` }) === false);
+    global.customJS = prevCJS;
+  }
+
+  // sectionPath is folder-is-truth — derived from the note's real cur.file.folder,
+  // NOT reconstructed from parent_section frontmatter (which can be stale). Live
+  // bug: a depth-2 hub with parent_section:"Misc-Subsection" (should be "Misc")
+  // reconstructed docs/misc-subsection/misc-subsection — a folder that doesn't
+  // exist — so listPages returned 0 and the hub showed "Nothing here yet.".
+  {
+    const sh = SHCls ? new SHCls() : null;
+    // Minimal dv: _buildConfig closes over its args; only sectionPath (via
+    // resolveContext) is under test, so pages/page can return empties.
+    const dvStub = { pages: () => { const a = []; a.array = () => a; a.where = () => a; return a; }, page: () => null };
+
+    // SH22 — depth-2 with the EXACT live bug: parent_section stale
+    // ("Misc-Subsection" not "Misc"); folder-is-truth must ignore it.
+    const curBug = {
+      type: 'section-hub', depth: 2, project_slug: 'sauce',
+      section: 'Misc-Subsection', section_slug: 'misc-subsection', parent_section: 'Misc-Subsection',
+      file: {
+        name: 'Misc-Subsection.md',
+        folder: 'spice/projects/sauce/docs/misc/misc-subsection',
+        path: 'spice/projects/sauce/docs/misc/misc-subsection/Misc-Subsection.md',
+      },
+    };
+    const cfgBug = sh ? sh._buildConfig(dvStub, curBug, 2, 'sauce', 'misc-subsection', 'Misc-Subsection') : null;
+    ok('SH22 _buildConfig sectionPath = real folder (folder-is-truth, ignores stale parent_section)',
+      cfgBug && cfgBug.resolveContext().sectionPath === 'spice/projects/sauce/docs/misc/misc-subsection');
+
+    // SH23 — depth-1 non-regression: folder-is-truth still equals the depth-1 path.
+    const cur1 = {
+      type: 'section-hub', depth: 1, project_slug: 'sauce',
+      section: 'Misc', section_slug: 'misc',
+      file: {
+        name: 'Misc.md',
+        folder: 'spice/projects/sauce/docs/misc',
+        path: 'spice/projects/sauce/docs/misc/Misc.md',
+      },
+    };
+    const cfg1 = sh ? sh._buildConfig(dvStub, cur1, 1, 'sauce', 'misc', 'Misc') : null;
+    ok('SH23 _buildConfig sectionPath depth-1 non-regression',
+      cfg1 && cfg1.resolveContext().sectionPath === 'spice/projects/sauce/docs/misc');
+  }
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

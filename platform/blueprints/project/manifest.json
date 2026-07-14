@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.48.0",
+  "version": "1.53.1",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -82,7 +82,8 @@
     "ProjectLinksManager",
     "WorkstreamSource",
     "ProjectChromeBar",
-    "ProjectCommandsInit"
+    "ProjectCommandsInit",
+    "ProjectDashboard"
   ],
   "pre_install": [
     {
@@ -238,6 +239,10 @@
     {
       "source": "helpers/project-commands-init.js",
       "dest": "{{scripts_path}}/project/project-commands-init.js"
+    },
+    {
+      "source": "helpers/project-dashboard.js",
+      "dest": "{{scripts_path}}/project/project-dashboard.js"
     }
   ],
   "customjs_startup_scripts": [
@@ -289,6 +294,7 @@
       },
       "frontmatter_template": {
         "type": "project",
+        "project_name": "{{prompts.name}}",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "description": "",
         "status": "idea",
@@ -321,6 +327,7 @@
             "type": "section-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "section": "Knowledge",
             "section_slug": "knowledge",
             "parent_section": "",
@@ -339,6 +346,7 @@
             "type": "section-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "section": "Notes",
             "section_slug": "notes",
             "parent_section": "",
@@ -356,6 +364,7 @@
             "type": "project-todo",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "cssclasses": [
               "wide"
@@ -369,6 +378,7 @@
             "type": "links-hub",
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
+            "project_name": "{{prompts.name}}",
             "links": [],
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "tags": [
@@ -432,6 +442,7 @@
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.section}}",
         "sub_section": "{{prompts.sub_section}}",
         "tags": [
@@ -471,6 +482,7 @@
         "type": "section-hub",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.name}}",
         "section_slug": "{{prompts.slug}}",
         "parent_section": "",
@@ -515,6 +527,7 @@
         "type": "section-hub",
         "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
         "section": "{{prompts.name}}",
         "section_slug": "{{prompts.slug}}",
         "parent_section": "[[{{current_file.frontmatter.section}}]]",
@@ -745,12 +758,17 @@
               "status": {
                 "required": true,
                 "type": "string",
-                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done|archived)$"
               },
               "status_changed_at": {
                 "required": true,
                 "type": "string",
                 "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "pre_archive_status": {
+                "required": false,
+                "type": "string",
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
               },
               "teams": {
                 "required": false,

@@ -18,7 +18,7 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 ```
 
 <!-- debt-summary-v0.6.0 -->

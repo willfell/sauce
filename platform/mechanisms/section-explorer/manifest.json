@@ -1,6 +1,6 @@
 {
   "name": "section-explorer",
-  "version": "0.4.1",
+  "version": "0.6.0",
   "kind": "mechanism",
   "description": "Shared blueprint-agnostic two-pane section/page navigator. customJS.SectionExplorer.render(dv, adapter) draws a rail-of-sections + page-pane explorer with inline section rename/delete/add-link, parameterized by a per-blueprint adapter built via SectionExplorer.makeAdapter(config) (mirrors ChromeBar.makeAdapter). Reuses BeaconCards for the page grid, MenuPopover for the rail-row ⋯ menu, SectionLabel, and DocSearch untouched.",
   "depends_on": [

@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.215.1",
+  "workshop_version": "0.224.1",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -69,7 +69,7 @@
     },
     {
       "name": "breadcrumb",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "path": "mechanisms/breadcrumb"
     },
     {
@@ -164,7 +164,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.12.1",
+      "version": "0.15.3",
       "path": "mechanisms/task-entity"
     },
     {
@@ -179,7 +179,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.4.1",
+      "version": "0.6.0",
       "path": "mechanisms/section-explorer"
     }
   ],
@@ -196,7 +196,7 @@
     },
     {
       "name": "daily",
-      "version": "0.20.1",
+      "version": "0.22.1",
       "path": "blueprints/daily"
     },
     {
@@ -206,7 +206,7 @@
     },
     {
       "name": "people",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "path": "blueprints/people"
     },
     {
@@ -216,32 +216,32 @@
     },
     {
       "name": "project",
-      "version": "1.48.0",
+      "version": "1.53.1",
       "path": "blueprints/project"
     },
     {
       "name": "to-do",
-      "version": "0.23.0",
+      "version": "0.26.0",
       "path": "blueprints/to-do"
     },
     {
       "name": "journal",
-      "version": "0.4.1",
+      "version": "0.5.1",
       "path": "blueprints/journal"
     },
     {
       "name": "trips",
-      "version": "0.7.0",
+      "version": "0.10.1",
       "path": "blueprints/trips"
     },
     {
       "name": "finance",
-      "version": "0.19.0",
+      "version": "0.19.2",
       "path": "blueprints/finance"
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1",
+      "version": "0.11.3",
       "path": "blueprints/sticky-notes"
     },
     {
@@ -251,12 +251,12 @@
     },
     {
       "name": "wiki",
-      "version": "0.7.1",
+      "version": "0.8.2",
       "path": "blueprints/wiki"
     },
     {
       "name": "home",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "path": "blueprints/home"
     },
     {

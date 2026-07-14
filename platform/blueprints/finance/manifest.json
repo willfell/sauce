@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.19.0",
+  "version": "0.19.2",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices + Debts under spice/finance/. Top hub Finance.md aggregates pending items from all sub-areas. Budgets/Paychecks/Debts are flat dated/named entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. v0.3.0 MINOR (v0.46.0 S8+S9+S10): three New*Button classes deleted; manifest declares new_entity_buttons[] entries via entity-create@0.1.0 mechanism. v0.5.0 MINOR (v0.107.0): per-vault defaults (Budget Defaults.md + Paycheck Defaults.md) scaffolded create-if-absent at install time; new BudgetDefaultsEditor + PaycheckDefaultsEditor widgets manage the seed lists via dialogue (groups + categories + expenses). Budget categories grow `group` field — BudgetCategoriesEditor renders grouped <details> sections with per-group subtotals. New BudgetSummary widget at top of every Budget note renders a three-band rollup. + New Budget/Paycheck consume entity-create's seed_from_defaults schema field to auto-populate from defaults. Existing budgets append-only migrated (group: \"Unassigned\" backfill + .sauce-backup snapshot). v0.6.0 MINOR (v0.108.0): NEW debts sub-area under spice/finance/debts/ — flat per-debt entities Debt-<Name>.md + Debts.md hub + per-vault Debt Defaults.md. NEW widgets: DebtsHubSummary (hub-level three-band rollup with weighted-avg APR + projected zero-debt date), DebtSummary (per-debt three-band with sparkline + payoff projection), DebtsCards (mini-card grid sorted by balance), DebtDefaultsEditor (per-vault seed list), DebtConfigEditor (per-debt modal with auto-snapshot to balance_history[] on save). NEW FinanceNavRow — single context-aware nav class replacing BudgetNavButtons + PaycheckNavButtons + InvoiceNavButtons (deleted); detects current file by path + type frontmatter and renders 9 modes (hub-finance/hub-budgets/hub-paychecks/hub-invoices/hub-debts + entity-budget/entity-paycheck/entity-invoice/entity-debt). Renders hub modes directly with cross-hub nav + + New X delegation to EntityCreate + Defaults link (no FinanceHubActions delegation — class did not ship on this lineage). Paycheck expenses[*] gain optional debt:[[Debt-X]] wikilink; PaycheckExpensesEditor color-codes debt-linked rows with a paydown-progress chip + locks amount/url cells (debt entity canonical). entity-create 0.7.1 PATCH adds opt-in seed_from_defaults.resolve_wikilinks — paycheck scaffolding now pulls planned_monthly_payment + url from linked debt entity at scaffold time. 4 NEW installer migrations: applyFinanceDebtScaffolding (creates spice/finance/debts/ + Debts.md + Debt Defaults.md), applyFinanceBudgetGroupSeed (CF-3 polish #6+#7 — seeds groups[] on existing budgets from Defaults + name-matches Unassigned categories), applyFinancePaycheckDefaultsDebtLinking (links CC payment rows to debt entities), applyFinanceNavRowMigration (vault-wide regex sweep rewriting old NavButtons calls to FinanceNavRow). All headless-safe, marker-guarded for idempotency, with .sauce-backup/<timestamp>/ snapshots. balance_history[] source enum reserves `skill` slot for v0.109.x cowork integration. v0.6.3 PATCH (v0.110.3): NEW MonthlyOverview widget at the top of every Budget-YYYY-MM.md, ABOVE BudgetSummary. Three-band rollup answering 'where did the money go and how much did I move on debt' for the month — Band 1 headline: Income (Σ paychecks dated this month) · Spending (Σ Budget categories[].actual) · Debt paydown (Σ paid:true debt-linked paycheck expenses[].amount) · Net cashflow (income − spending − debt; green if positive, amber if loss ≤ 10% of income, red otherwise). Band 2: total debt balance + month-over-month delta sourced from balance_history[] snapshots (first-of-month / last-of-month per debt; falls back to 'No MoM signal yet' pill). Band 3: tiny audit footer (paycheck count + debt entity count). Read-only; embed-deduped; no schema changes. Budget Template body extended with the dataviewjs block + `<!-- monthly-overview-v0.6.3 -->` marker comment between FinanceStatus.renderBadge and BudgetSummary. NEW applyFinanceBudgetMonthlyBandInjection installer migration heals existing Budget-YYYY-MM.md notes append-only (anchor priority: budget-summary marker → BudgetSummary block → FinanceStatus.renderBadge block → frontmatter close); marker-guarded for idempotency; per-file failure-loud. v0.9.0 MINOR (workshop v0.115.0): NEW spice/finance/months/ sub-area + 4 new widgets (FinanceMath shared math + MonthsCards hub grid + MonthDashboard three-section reconciliation + FinanceHubSummary debt-forward Finance.md landing) + new_entity_buttons[].month + months rule_fragment + Paycheck Template lockstep fix (template body re-aligned with manifest paycheck inline_body block-for-block). Carries forward: convergence of shipped MonthlyOverview + DebtsHubSummary onto FinanceMath. v0.10.0 MINOR: NEW planning/lever/allocation layer — finance-plan singleton (Finance Plan.md) holding income_floor + fixed_living_monthly + attack_above_minimums + savings_glide tiers + roll_freed_savings_to_attack + overflow + attack_target_override; NEW savings-account sub-area (spice/finance/savings/ + Savings.md hub + Savings-Emergency-Fund seed + SavingsSummary/SavingsConfigEditor/SavingsCards mirroring debts); FinanceMath.computePlanState engine (income-bound envelope, glide tier, avalanche allocation with automatic roll + attack_target_override, month-by-month payoff simulation, overflow 80/20, one-month-skip what-if, prior-month overage carry); FinancePlanDashboard cockpit (compute-live, one-click Apply writes debt planned_monthly_payment + Paycheck Defaults Savings row); PlanBand over-envelope flag injected atop every Budget; Finance.md Plan tile. 3 new migrations (applyFinancePlanScaffolding + applyFinanceSavingsScaffolding + applyFinancePlanBandInjection) + 2 new rule_fragments (finance-plan + savings-accounts) + savings new_entity_button.",
@@ -43,7 +43,6 @@
     "InvoicesCards",
     "DebtsCards",
     "FinanceFrontmatter",
-    "FinanceNavRow",
     "BudgetCategoriesEditor",
     "BudgetAllocationsEditor",
     "PaycheckExpensesEditor",
@@ -59,7 +58,6 @@
     "PaycheckDebtBand",
     "DebtSummary",
     "DebtsHubSummary",
-    "FinanceHubActions",
     "FinanceNav",
     "MonthlyOverview",
     "MonthsCards",
@@ -102,10 +100,6 @@
     {
       "source": "helpers/finance-frontmatter.js",
       "dest": "{{scripts_path}}/finance/finance-frontmatter.js"
-    },
-    {
-      "source": "helpers/finance-nav-row.js",
-      "dest": "{{scripts_path}}/finance/finance-nav-row.js"
     },
     {
       "source": "helpers/budget-categories-editor.js",
@@ -166,10 +160,6 @@
     {
       "source": "helpers/debts-hub-summary.js",
       "dest": "{{scripts_path}}/finance/debts-hub-summary.js"
-    },
-    {
-      "source": "helpers/finance-hub-actions.js",
-      "dest": "{{scripts_path}}/finance/finance-hub-actions.js"
     },
     {
       "source": "helpers/finance-math.js",

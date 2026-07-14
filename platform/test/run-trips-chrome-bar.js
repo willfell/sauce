@@ -21,18 +21,40 @@ const cfg = inst._config();
   ok('TCB-DETECT-1 trips-hub/trip/trip-section/trip-board-card classify',
     hub && hub.context === 'trips-hub' && atlas && atlas.context === 'trip' && section && section.context === 'trip-section' && card && card.context === 'trip-board-card');
   ok('TCB-DETECT-2 kanban board + non-trip → null', board === null && off === null);
+  // TCB-DETECT-3 — a trip SECTION note has no `name`; the trip name is derived
+  // from the `trip` wikilink so add-task can link the created task's trip_slug.
+  const todo = cfg.detect({}, { file: { path: 'spice/trips/destin-florida/Destin Florida — To-Do.md' }, type: 'trip-section', trip: '[[Destin Florida]]', trip_slug: 'destin-florida', section_kind: 'to-do' });
+  ok('TCB-DETECT-3 section without name derives tripName from the trip wikilink',
+    todo && todo.tripName === 'Destin Florida' && todo.tripSlug === 'destin-florida');
+  // Alias form + explicit name still resolve as expected.
+  const alias = cfg.detect({}, { file: { path: 'spice/trips/x/X — Flights.md' }, type: 'trip-section', trip: '[[Real Name|Shown]]', trip_slug: 'x', section_kind: 'flights' });
+  ok('TCB-DETECT-3a explicit name wins; alias wikilink strips to display text',
+    alias && alias.tripName === 'Real Name' && atlas.tripName === "Dave's Wedding");
 }
-// TCB-SPEC — hub: primary New Trip, not leaf. trip/trip-section/trip-board-card: overflow New Section.
+// TCB-SPEC — hub: primary New Trip. trip atlas: primary Add link + overflow manage-links/new-section.
+// trip-section: primary keyed on section_kind. trip-board-card: bare leaf.
 {
-  const h = cfg.surfaceSpec({ context: 'trips-hub' });
-  const a = cfg.surfaceSpec({ context: 'trip' });
-  const s = cfg.surfaceSpec({ context: 'trip-section' });
-  const c = cfg.surfaceSpec({ context: 'trip-board-card' });
+  const spec = cfg.surfaceSpec;
+  const h = spec({ context: 'trips-hub' });
+  const a = spec({ context: 'trip' });
+  const bc = spec({ context: 'trip-board-card' });
   ok('TCB-SPEC-1 hub: primary new-trip + not leaf', h.primary.id === 'new-trip' && h.leaf === false);
-  ok('TCB-SPEC-2 trip atlas: primary null + overflow new-section + not leaf', a.primary === null && a.overflow.some(o => o.id === 'new-section') && a.leaf === false);
-  ok('TCB-SPEC-3 trip-section: leaf + overflow empty (New Section is atlas-only)', s.leaf === true && Array.isArray(s.overflow) && s.overflow.length === 0);
-  ok('TCB-SPEC-4 trip-board-card: leaf + overflow empty (New Section is atlas-only)', c.leaf === true && Array.isArray(c.overflow) && c.overflow.length === 0);
-  ok('TCB-SPEC-5 trip atlas still offers new-section in overflow', a.overflow.some(o => o.id === 'new-section'));
+  ok('TCB-SPEC-2 trip atlas: primary add-link + not leaf', a.primary.id === 'add-link' && a.leaf === false);
+  ok('TCB-SPEC-3 trip atlas: overflow manage-links + new-section',
+    a.overflow.some(o => o.id === 'manage-links') && a.overflow.some(o => o.id === 'new-section'));
+  ok('TCB-SPEC-4 flights section: primary add-flight',
+    spec({ context: 'trip-section', sectionKind: 'flights' }).primary.id === 'add-flight');
+  ok('TCB-SPEC-5 stay section: primary add-stay',
+    spec({ context: 'trip-section', sectionKind: 'stay' }).primary.id === 'add-stay');
+  ok('TCB-SPEC-6 packing-list section: primary add-packing-item',
+    spec({ context: 'trip-section', sectionKind: 'packing-list' }).primary.id === 'add-packing-item');
+  ok('TCB-SPEC-7 packing-list section: overflow add-packing-category',
+    spec({ context: 'trip-section', sectionKind: 'packing-list' }).overflow.some(o => o.id === 'add-packing-category'));
+  ok('TCB-SPEC-8 to-do section: primary add-task',
+    spec({ context: 'trip-section', sectionKind: 'to-do' }).primary.id === 'add-task');
+  ok('TCB-SPEC-9 notes section: primary null + leaf',
+    spec({ context: 'trip-section', sectionKind: 'notes' }).primary === null && spec({ context: 'trip-section', sectionKind: 'notes' }).leaf === true);
+  ok('TCB-SPEC-10 trip-board-card: bare leaf', bc.leaf === true && bc.primary === null);
 }
 // TCB-DISPATCH — new-trip → prompt+_createTrip; new-section → prompt+_createTripSection.
 async function main() {
@@ -68,6 +90,54 @@ async function main() {
   await cfg.dispatch({}, { context: 'trip', tripSlug: null, tripName: 'Test Trip' }, 'new-section');
   global.customJS = prevCJS2;
   ok('TCB-DISPATCH-3 new-section with no tripSlug declines gracefully', calls2.length === 0);
+}
+{
+  // TCB-DISPATCH-4 — per-section actions route to the right helpers via customJS instances.
+  const calls = [];
+  const prevCJS = global.customJS;
+  class TEL {
+    static _flightFields() { return [{ name: 'airline' }]; }
+    static _stayFields() { return [{ name: 'name' }]; }
+    static _packingItemFields(cats) { calls.push({ packFields: cats }); return [{ name: 'item' }]; }
+    openAdd(dv, spec) { calls.push({ add: spec.kind, key: spec.key, fields: spec.fields }); }
+    openAddCategory(dv, spec) { calls.push({ addCat: spec.key }); }
+  }
+  global.customJS = {
+    TripEntryList: new TEL(),
+    TripLinks: { openAdd() { calls.push('link-add'); }, openManage() { calls.push('link-manage'); } },
+    TaskDialog: { open(o) { calls.push({ task: o.surface, slug: o.trip && o.trip.slug }); } },
+  };
+  const dv = { current: () => ({ packing_items: [{ category: 'Clothing' }, { category: 'Toiletries' }, { category: 'Clothing' }] }) };
+  const sec = { context: 'trip-section', tripSlug: 'test-trip', tripName: 'Test Trip' };
+  cfg.dispatch(dv, sec, 'add-flight');
+  cfg.dispatch(dv, sec, 'add-stay');
+  cfg.dispatch(dv, sec, 'add-packing-item');
+  cfg.dispatch(dv, sec, 'add-packing-category');
+  cfg.dispatch(dv, { context: 'trip' }, 'add-link');
+  cfg.dispatch(dv, { context: 'trip' }, 'manage-links');
+  cfg.dispatch(dv, sec, 'add-task');
+  global.customJS = prevCJS;
+  ok('TCB-DISPATCH-4 add-flight → TripEntryList.openAdd(flights)', calls.some(c => c.add === 'flights' && c.key === 'flights' && Array.isArray(c.fields)));
+  ok('TCB-DISPATCH-5 add-stay → TripEntryList.openAdd(stay)', calls.some(c => c.add === 'stay' && c.key === 'stays'));
+  ok('TCB-DISPATCH-6 add-packing-item → openAdd(packing) with derived categories',
+    calls.some(c => c.add === 'packing' && c.key === 'packing_items') &&
+    calls.some(c => c.packFields && c.packFields.length === 2 && c.packFields.includes('Clothing') && c.packFields.includes('Toiletries')));
+  ok('TCB-DISPATCH-7 add-packing-category → openAddCategory(packing_items)', calls.some(c => c.addCat === 'packing_items'));
+  ok('TCB-DISPATCH-8 add-link/manage-links → TripLinks', calls.includes('link-add') && calls.includes('link-manage'));
+  ok('TCB-DISPATCH-9 add-task → TaskDialog.open(trip)', calls.some(c => c.task === 'trip' && c.slug === 'test-trip'));
+}
+{
+  // TCB-DISPATCH-10 — every per-section case is guarded: missing helpers never throw.
+  const prevCJS = global.customJS;
+  global.customJS = {};
+  let threw = false;
+  const dv = { current: () => ({}) };
+  const sec = { context: 'trip-section', tripSlug: 't', tripName: 'T' };
+  for (const id of ['add-flight', 'add-stay', 'add-packing-item', 'add-packing-category', 'add-link', 'manage-links', 'add-task']) {
+    try { cfg.dispatch(dv, sec, id); } catch (_e) { threw = true; }
+  }
+  global.customJS = prevCJS;
+  ok('TCB-DISPATCH-10 missing helpers never throw', threw === false);
 }
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);
 process.exit(results.every(([, c]) => c) ? 0 : 1);

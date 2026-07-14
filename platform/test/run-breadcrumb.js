@@ -545,6 +545,60 @@ async function runAsync(fn) { return await fn(); }
     if (!fallbackCrumb || !hasCurrent) console.log(`    BC-WIKI-1b HTML: ${html}`);
   }
 
+  // ── BC-WIKI-MULTIWORD-1: multi-word section hub — self-crumb skipped, no dup ──
+  // Folders are slugified ("ingredient-list") but the hub note is Display-Case
+  // ("Ingredient List.md"). The section must appear EXACTLY ONCE (as the current,
+  // unlinked crumb) — a stem-vs-folder comparison that ignores slugging renders it
+  // twice (once as a resolved intermediate crumb, once as the current crumb).
+  {
+    const sectionHubs = [
+      { type: 'wiki-section', title: 'Cooking',        file: { folder: 'spice/wiki/cooking',                  path: 'spice/wiki/cooking/Cooking.md',                        name: 'Cooking.md' } },
+      { type: 'wiki-section', title: 'Ingredient List', file: { folder: 'spice/wiki/cooking/ingredient-list', path: 'spice/wiki/cooking/ingredient-list/Ingredient List.md', name: 'Ingredient List.md' } },
+    ];
+    const dv = makeDv({
+      type: 'wiki-section',
+      title: 'Ingredient List',
+      file: { path: 'spice/wiki/cooking/ingredient-list/Ingredient List.md', name: 'Ingredient List.md' }
+    }, sectionHubs);
+    const inst = new NewBreadcrumb();
+    const segs = await inst.buildSegments(dv);
+    const labels = segs.map((s) => s.label);
+    const expected = ['Wiki', 'Cooking', 'Ingredient List'];
+    const labelsMatch = labels.length === expected.length && labels.every((l, i) => l === expected[i]);
+    // Last crumb is the current (unlinked) page.
+    const lastIsCurrent = segs.length > 0 && (segs[segs.length - 1].link || null) === null;
+    // No duplicate "Ingredient List".
+    const noDup = labels.filter((l) => l === 'Ingredient List').length === 1;
+    ok('BC-WIKI-MULTIWORD-1 multi-word section hub: [Wiki, Cooking, Ingredient List], self once, current unlinked',
+       labelsMatch && lastIsCurrent && noDup);
+    if (!labelsMatch || !lastIsCurrent || !noDup) console.log('    BC-WIKI-MULTIWORD-1 got: ' + JSON.stringify(segs));
+  }
+
+  // ── BC-WIKI-MULTIWORD-2: doc inside a multi-word section folder ──
+  // A leaf page under ingredient-list/ — the section crumb resolves once (as an
+  // intermediate, linked to the hub) and the doc is the current crumb.
+  {
+    const sectionHubs = [
+      { type: 'wiki-section', title: 'Cooking',        file: { folder: 'spice/wiki/cooking',                  path: 'spice/wiki/cooking/Cooking.md',                        name: 'Cooking.md' } },
+      { type: 'wiki-section', title: 'Ingredient List', file: { folder: 'spice/wiki/cooking/ingredient-list', path: 'spice/wiki/cooking/ingredient-list/Ingredient List.md', name: 'Ingredient List.md' } },
+    ];
+    const dv = makeDv({
+      type: 'wiki-page',
+      title: 'Some Doc',
+      file: { path: 'spice/wiki/cooking/ingredient-list/Some Doc.md', name: 'Some Doc.md' }
+    }, sectionHubs);
+    const inst = new NewBreadcrumb();
+    const segs = await inst.buildSegments(dv);
+    const labels = segs.map((s) => s.label);
+    const expected = ['Wiki', 'Cooking', 'Ingredient List', 'Some Doc'];
+    const labelsMatch = labels.length === expected.length && labels.every((l, i) => l === expected[i]);
+    const lastIsCurrent = segs.length > 0 && (segs[segs.length - 1].link || null) === null;
+    const sectionOnce = labels.filter((l) => l === 'Ingredient List').length === 1;
+    ok('BC-WIKI-MULTIWORD-2 doc under multi-word section: [Wiki, Cooking, Ingredient List, Some Doc], section once',
+       labelsMatch && lastIsCurrent && sectionOnce);
+    if (!labelsMatch || !lastIsCurrent || !sectionOnce) console.log('    BC-WIKI-MULTIWORD-2 got: ' + JSON.stringify(segs));
+  }
+
   // ── BC-WIKI-2: section hub (root + current, no self-crumb for folder) ───
   {
     const dv = makeDv({

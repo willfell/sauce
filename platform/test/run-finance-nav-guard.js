@@ -7,7 +7,7 @@
 // (v0.204.0+), its Go▾ launcher already lists all 7 hubs — FinanceNav's
 // Section 1 cross-hub button row, and the single "<X> Hub" back-buttons in
 // entity/defaults context, become redundant and must be SKIPPED. Prev/Next
-// sibling nav (not covered by the chrome bar) must still render regardless.
+// sibling nav + hub Defaults links are now in the chrome bar overflow menu.
 // "+ New X" is now ALSO guarded (v0.205.0+ — FinanceChromeBar's own primary
 // button, to the right of the compass, owns it once migrated); the
 // defaults-page link (Budget/Paycheck/Debt Defaults) is untouched either way.
@@ -119,16 +119,15 @@ async function run() {
         accentButtonCalls.includes('Budgets Hub'), 'calls=' + JSON.stringify(accentButtonCalls));
     }
 
-    // FNG-7/8 — hub-budgets: "+ New Budget" is now FinanceChromeBar's own
-    // primary button (right of the compass) once migrated — the inline
-    // EntityCreate.render call must be SKIPPED, but the "Budget Defaults"
-    // link (not covered by the chrome bar) still renders either way.
+    // FNG-7/8 — hub-budgets: "+ New Budget" AND "Budget Defaults" are now
+    // owned by FinanceChromeBar (primary + overflow) once migrated — both
+    // inline renders must be SKIPPED when chrome is present.
     {
       const { dv } = makeDv(true, { file: { path: 'spice/finance/budgets/Budgets.md' }, type: 'budgets-hub' });
       accentButtonCalls.length = 0; entityCreateCalls.length = 0;
       await new FinanceNav().render(dv);
-      ok('FNG-7 hub-budgets + chromePresent: EntityCreate not invoked, Budget Defaults link still renders',
-        entityCreateCalls.length === 0 && accentButtonCalls.includes('Budget Defaults'),
+      ok('FNG-7 hub-budgets + chromePresent: EntityCreate not invoked, Budget Defaults not rendered',
+        entityCreateCalls.length === 0 && !accentButtonCalls.includes('Budget Defaults'),
         'entityCreateCalls=' + JSON.stringify(entityCreateCalls) + ' accentButtonCalls=' + JSON.stringify(accentButtonCalls));
     }
     {

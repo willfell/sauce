@@ -47,11 +47,11 @@
     },
     {
       "name": "task-entity",
-      "version": "0.12.1"
+      "version": "0.15.3"
     },
     {
       "name": "breadcrumb",
-      "version": "0.3.1"
+      "version": "0.4.0"
     },
     {
       "name": "open-helpers",
@@ -107,7 +107,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.4.1"
+      "version": "0.6.0"
     }
   ],
   "blueprints": [
@@ -121,7 +121,7 @@
     },
     {
       "name": "daily",
-      "version": "0.20.1"
+      "version": "0.22.1"
     },
     {
       "name": "meetings",
@@ -129,7 +129,7 @@
     },
     {
       "name": "people",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "products",
@@ -137,27 +137,27 @@
     },
     {
       "name": "project",
-      "version": "1.48.0"
+      "version": "1.53.1"
     },
     {
       "name": "to-do",
-      "version": "0.23.0"
+      "version": "0.26.0"
     },
     {
       "name": "journal",
-      "version": "0.4.1"
+      "version": "0.5.1"
     },
     {
       "name": "trips",
-      "version": "0.7.0"
+      "version": "0.10.1"
     },
     {
       "name": "finance",
-      "version": "0.19.0"
+      "version": "0.19.2"
     },
     {
       "name": "sticky-notes",
-      "version": "0.10.1"
+      "version": "0.11.3"
     },
     {
       "name": "teams",
@@ -165,7 +165,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.7.1"
+      "version": "0.8.2"
     },
     {
       "name": "reader",

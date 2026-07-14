@@ -28,6 +28,10 @@ await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyProjectGroups"
 ```
 
 ```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyTripGroups" });
+```
+
+```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "ToDoDailyUnassignedMeetings" });
 ```
 

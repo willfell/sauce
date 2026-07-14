@@ -4596,6 +4596,35 @@ async function caseDDT1DailyTemplateShape() {
 }
 
 // -------------------------------------------------------------------------
+// JSD-T1: Journal Day Hub + Sticky Day Hub templates drop the redundant
+// `# <% tp.date.now("dddd, MMMM Do YYYY") %>` H1. Both hub types already
+// surface the day via their ChromeBar's breadcrumb (`path:4`/`path:3` in
+// the breadcrumb registry resolve to the YYYY-MM-DD folder segment), so the
+// in-body H1 duplicated chrome — same fix shape as DD-T1 for daily.
+// -------------------------------------------------------------------------
+async function caseJSDT1DayHubTemplatesDropDateHeading() {
+  console.log("\n--- Case JSD-T1: Journal/Sticky Day Hub templates drop the redundant date H1 ---");
+  const DATE_H1 = /^#\s+<%[-=]?\s*tp\.date\.now\("dddd, MMMM Do YYYY"\)\s*[-=]?%>\s*$/m;
+  const cases = [
+    { tpl: ["journal", "templates", "Journal Day Hub.md"], cls: "JournalChromeBar" },
+    { tpl: ["sticky-notes", "templates", "Sticky Day Hub.md"], cls: "StickyChromeBar" },
+  ];
+  for (const c of cases) {
+    const p = path.join(BLUEPRINTS_DIR, ...c.tpl);
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} source exists`, fs.existsSync(p));
+    const body = fs.readFileSync(p, "utf8");
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} drops the redundant date H1`, !DATE_H1.test(body));
+    assertTrue(`JSD-T1: ${c.tpl.join("/")} still renders ${c.cls}`, body.includes(c.cls));
+  }
+  const dogfoodP = path.join(process.cwd(), "ranch", "templates", "Sticky Day Hub.md");
+  if (fs.existsSync(dogfoodP)) {
+    const dogfoodBody = fs.readFileSync(dogfoodP, "utf8");
+    assertTrue("JSD-T1: ranch/templates/Sticky Day Hub.md (dogfood) drops the redundant date H1",
+      !DATE_H1.test(dogfoodBody));
+  }
+}
+
+// -------------------------------------------------------------------------
 // LAT-1: the daily to-do / meeting action helpers now OWN their
 // chrome dividers. Each renders a top + bottom <hr> (12px breathing room) INSIDE
 // its own dataviewjs block (the wiki methodology), and the template drops the
@@ -6881,16 +6910,19 @@ async function casePSW5ManifestRegistration() {
 }
 
 async function casePSW6TemplateBlock() {
-    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block (v0.109.0: no H2) ---");
+    console.log("\n--- Case PSW-6: Template, Project.md includes status surface (v0.220.4+: absorbed into ProjectDashboard) ---");
     const tplPath = path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md");
     const src = fs.readFileSync(tplPath, "utf8");
-    // v0.109.0 S6 SUPERSEDES v0.51.0: the ## Status H2 was dropped. The widget
-    // still renders (the at-a-glance chip is the signal); the H2 label was
-    // redundant. Assert the block presence only.
-    const hasBlock = /class:\s*"ProjectStatusWidget"/.test(src);
-    assertTrue("PSW-6: Template, Project.md has ProjectStatusWidget dataviewjs block",
-        hasBlock,
-        `block=${hasBlock}`);
+    // v0.220.4 (project blueprint 1.50.0) SUPERSEDES v0.109.0 S6: the standalone
+    // ProjectStatusWidget block was collapsed into the ProjectDashboard card's
+    // header pill. The status surface is now owned by ProjectDashboard; the
+    // widget class is preserved on disk + manifest for backwards compat with
+    // Links Hub template + legacy consumers.
+    const hasDashboard = /class:\s*"ProjectDashboard"/.test(src);
+    const hasLegacyWidget = /class:\s*"ProjectStatusWidget"/.test(src);
+    assertTrue("PSW-6: Template, Project.md has ProjectDashboard block (absorbs status pill)",
+        hasDashboard && !hasLegacyWidget,
+        `dashboard=${hasDashboard} legacyWidget=${hasLegacyWidget}`);
 }
 
 // -------------------------------------------------------------------------
@@ -7652,11 +7684,11 @@ async function caseHCV01174TodoManifest() {
   const expectedClasses = [
     "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskRecurringList", "TaskParser",
     "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
-    "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
-    "ToDoCreateTaskInit", "TodayCaptureEditableList", "TaskDoneArchive",
-    "ToDoChromeBar",
+    "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoDailyTripGroups",
+    "ToDoCreateTask", "ToDoCreateTaskInit", "TodayCaptureEditableList",
+    "TaskDoneArchive", "ToDoChromeBar",
   ];
-  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 15-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive, +ToDoChromeBar, +TaskRecurringList recurring-tasks cycle)",
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 16-element array (order; +TodayCaptureEditableList v0.127.0, +TaskDoneArchive, +ToDoChromeBar, +TaskRecurringList recurring-tasks cycle, +ToDoDailyTripGroups v0.25.0)",
     JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
     `got: ${JSON.stringify(m.customjs_classes)}`);
 
@@ -11029,21 +11061,18 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
-  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template invokes ProjectMeetingsPanel (v0.109.0 superseded H2 + order) ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template surfaces meetings (v0.220.4: via ProjectDashboard) ---`);
   assertTrue("HC-V01020-PROJ-TPL-2: Project.md exists", fs.existsSync(_PROJ_TPL));
   const body = fs.readFileSync(_PROJ_TPL, "utf8");
-  // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
-  // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
-  // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
-  // is invoked.
-  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was REMOVED from
-  // the hub template — workstream management now lives exclusively on the Map
-  // note — so the hub no longer invokes it and the old Meetings→Workstreams
-  // ordering assertion is retired.
-  assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
-    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
-  const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
-  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Meetings panel present on hub", idxMeetings >= 0);
+  // v0.220.4 (project 1.50.0) SUPERSEDES v0.109.0 S6: the standalone
+  // ProjectMeetingsPanel block on the project hub was collapsed into the
+  // ProjectDashboard card's Meetings tile + Recent-activity strip. The panel
+  // class stays available for Links Hub and other templates; only the hub
+  // template stops invoking it directly.
+  assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectDashboard via customjs-guard view",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDashboard["']/.test(body));
+  const idxDashboard = body.indexOf('class: "ProjectDashboard"');
+  assertTrue("HC-V01020-PROJ-TPL-2-MEETINGS: Dashboard present on hub (absorbs meetings surface)", idxDashboard >= 0);
   assertTrue("HC-V01020-PROJ-TPL-2-NOWSM: ProjectWorkstreamManager NOT on hub (moved to Map)",
     body.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
@@ -12863,7 +12892,7 @@ async function caseV01070FinMan2NewClassesAndFiles() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   // v0.5.3 CF-3 added PaycheckSummary + FinanceHubActions (alongside the
   // three v0.5.0 classes).
-  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary", "FinanceHubActions"]) {
+  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary"]) {
     assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
       fin.customjs_classes.includes(cls));
   }
@@ -12871,8 +12900,7 @@ async function caseV01070FinMan2NewClassesAndFiles() {
     "helpers/budget-defaults-editor.js",
     "helpers/paycheck-defaults-editor.js",
     "helpers/budget-summary.js",
-    "helpers/paycheck-summary.js",
-    "helpers/finance-hub-actions.js"
+    "helpers/paycheck-summary.js"
   ]) {
     assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
       fin.files.some(f => f.source === src));
@@ -12938,23 +12966,6 @@ async function caseV01070PsThreeBands() {
     /paidCount/.test(src) && /totalCount/.test(src));
   assertTrue("HC-V01070-PS-2: Band 3 — per-category aggregation",
     /buckets|category|e\.category/.test(src));
-}
-
-// v0.5.3 CF-3 — FinanceHubActions widget shipped.
-
-async function caseV01070FhaClassDeclared() {
-  console.log("\n--- Case HC-V01070-FHA-1: FinanceHubActions class + cross-hub nav ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
-  assertTrue("HC-V01070-FHA-1: class FinanceHubActions declared",
-    /class\s+FinanceHubActions\s*\{/.test(src));
-  assertTrue("HC-V01070-FHA-1: render(dv, opts) accepts here/instance/defaultsPath",
-    /here\s*=\s*null/.test(src) && /instance\s*=\s*null/.test(src) && /defaultsPath\s*=\s*null/.test(src));
-  assertTrue("HC-V01070-FHA-1: lists all four finance hubs",
-    /finance/.test(src) && /budgets/.test(src) && /paychecks/.test(src) && /invoices/.test(src));
-  assertTrue("HC-V01070-FHA-1: hides current hub via `here` key",
-    /hub\.key\s*===\s*here|here\s*===\s*hub\.key/.test(src));
-  assertTrue("HC-V01070-FHA-1: delegates + New X to customJS.EntityCreate.render",
-    /customJS\.EntityCreate\.render/.test(src));
 }
 
 // v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
@@ -13042,7 +13053,6 @@ async function caseV01080FinanceNewHelpers() {
   console.log("\n--- Case V01080-FH-NEW: new finance helpers present ---");
   const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
   const expected = [
-    "finance-nav-row.js",
     "debt-summary.js",
     "debts-hub-summary.js",
     "debts-cards.js",
@@ -13061,23 +13071,6 @@ async function caseV01080FinanceOldNavButtonsDeleted() {
   for (const f of deleted) {
     assertTrue(`V01080-FH-DEL-${f}: deleted`, !fs.existsSync(path.join(helpersDir, f)));
   }
-}
-
-async function caseV01080FinanceNavRowClass() {
-  console.log("\n--- Case V01080-FNR-CLS: FinanceNavRow class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav-row.js"), "utf8");
-  assertTrue("V01080-FNR-CLS-class: class FinanceNavRow defined",
-    /class FinanceNavRow/.test(src));
-  assertTrue("V01080-FNR-CLS-render: async render(dv) method",
-    /async render\(dv\)/.test(src));
-  assertTrue("V01080-FNR-CLS-modes: detection covers all 9 modes",
-    /hub-finance/.test(src) && /hub-budgets/.test(src) && /hub-paychecks/.test(src) &&
-    /hub-invoices/.test(src) && /hub-debts/.test(src) &&
-    /entity-budget/.test(src) && /entity-paycheck/.test(src) &&
-    /entity-invoice/.test(src) && /entity-debt/.test(src));
-  assertTrue("V01080-FNR-CLS-css: fnr-root CSS class",
-    /fnr-root/.test(src));
 }
 
 async function caseV01080DebtSummaryWidget() {
@@ -13133,9 +13126,6 @@ async function caseV01080DebtsContentTemplate() {
   const src = fs.readFileSync(tpath, "utf8");
   assertTrue("V01080-DCT-type: type: debts-hub frontmatter",
     /type:\s*debts-hub/.test(src));
-  // v0.111.0: FinanceNavRow superseded by unified FinanceNav (context-aware).
-  assertTrue("V01080-DCT-fnr: FinanceNav (was FinanceNavRow pre-v0.111.0) invoked",
-    /class:\s*["']FinanceNav["']/.test(src));
   assertTrue("V01080-DCT-dhs: DebtsHubSummary view invoked",
     /class:\s*["']DebtsHubSummary["']/.test(src));
 }
@@ -13216,7 +13206,7 @@ async function caseV01080FinanceCustomJsClasses() {
     assertTrue(`V01080-CJS-removed-${removed}: ${removed} removed from customjs_classes`,
       !cls.includes(removed), `still present in customjs_classes`);
   }
-  for (const added of ["FinanceNavRow", "DebtSummary", "DebtsHubSummary", "DebtsCards", "DebtDefaultsEditor", "DebtConfigEditor"]) {
+  for (const added of ["DebtSummary", "DebtsHubSummary", "DebtsCards", "DebtDefaultsEditor", "DebtConfigEditor"]) {
     assertTrue(`V01080-CJS-added-${added}: ${added} present in customjs_classes`,
       cls.includes(added));
   }
@@ -13314,16 +13304,6 @@ async function caseV01101EntityCreateGuardMigration() {
     /module\.exports\.applyEntityCreateGuardMigration\s*=\s*applyEntityCreateGuardMigration/.test(src));
   assertTrue("V01101-ECG-4: rewrites direct customJS.EntityCreate.render(dv,...) calls to guard form",
     /customjs-guard/.test(src) && /class:\s*["']EntityCreate["']/.test(src));
-}
-
-async function caseV01101FinanceHubActionsRaceFix() {
-  console.log("\n--- Case V01101-FHA-POLL: FinanceHubActions polls for EntityCreate ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
-  assertTrue("V01101-FHA-POLL-1: polls window.customJS.EntityCreate",
-    /window\.customJS\?\.EntityCreate/.test(src));
-  assertTrue("V01101-FHA-POLL-2: muted unavailable fallback",
-    /EntityCreate unavailable/.test(src));
 }
 
 async function caseV01102CustomJsGuardMigration() {
@@ -13988,10 +13968,10 @@ async function caseV01120HubsRepairFinanceSummary() {
   const lines = (bodyTemplatesDict || "").split("\n");
   const financeLine = lines.find(l => /["']spice\/finance\/Finance\.md["']/.test(l));
   if (financeLine) {
-    const navIdx = financeLine.indexOf("FinanceNav");
+    const cbIdx = financeLine.indexOf("FinanceChromeBar");
     const fhsIdx = financeLine.indexOf("FinanceHubSummary");
-    assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceNav in Finance.md dict entry",
-      navIdx >= 0 && fhsIdx > navIdx, `navIdx=${navIdx} fhsIdx=${fhsIdx}`);
+    assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceChromeBar in Finance.md dict entry",
+      cbIdx >= 0 && fhsIdx > cbIdx, `cbIdx=${cbIdx} fhsIdx=${fhsIdx}`);
   } else {
     assertTrue("V01120-FHR-FHS-2: Finance.md dict entry must be present in FINANCE_HUB_BODY_TEMPLATES", false,
       "Could not find Finance.md line in FINANCE_HUB_BODY_TEMPLATES dict");
@@ -14183,16 +14163,8 @@ async function caseV01150ContentMonthsExists() {
   const body = fs.readFileSync(contentPath, "utf8");
   assertTrue("V01150-CME-2: body contains MonthsCards block",
     /MonthsCards/.test(body));
-  assertTrue("V01150-CME-3: body contains FinanceNav block",
-    /FinanceNav/.test(body));
-  // The `// entity-create:month` marker must LEAD the FinanceNav block (byte-
-  // matching content/Budgets.md). A trailing marker comments out Dataview's
-  // injected closing brace → "Evaluation Error: eval@[native code]" on render.
-  const cmeMarkerIdx = body.indexOf("// entity-create:month");
-  const cmeNavIdx = body.indexOf('class: "FinanceNav"');
-  assertTrue("V01150-CME-4: entity-create:month marker present and LEADS the FinanceNav call",
-    cmeMarkerIdx !== -1 && cmeNavIdx !== -1 && cmeMarkerIdx < cmeNavIdx,
-    `markerIdx=${cmeMarkerIdx} navIdx=${cmeNavIdx}`);
+  assertTrue("V01150-CME-3: body contains FinanceChromeBar block",
+    /FinanceChromeBar/.test(body));
 }
 
 async function caseV01150ContentFinanceLanding() {
@@ -14634,9 +14606,12 @@ async function caseV0111FinanceContentTemplatesUseFinanceNav() {
   ];
   for (const rel of HUBS) {
     const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");
-    assertTrue(`V0111-TPL-FN-${rel}: invokes FinanceNav via guard`,
-      /customjs-guard["'\s,\n]+\{[\s\S]{0,60}class:\s*["']FinanceNav["']/.test(src),
-      `${rel} does not call FinanceNav via the guard`);
+    assertTrue(`V0111-TPL-FN-${rel}: invokes FinanceChromeBar via guard`,
+      /class:\s*["']FinanceChromeBar["']/.test(src),
+      `${rel} does not call FinanceChromeBar via the guard`);
+    assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceNav on hub (ChromeBar owns hub chrome)`,
+      !/class:\s*["']FinanceNav["']/.test(src),
+      `${rel} still has FinanceNav (should be removed from hubs)`);
     assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceHubActions invocation`,
       !/FinanceHubActions/.test(src),
       `${rel} still mentions FinanceHubActions`);
@@ -14812,14 +14787,15 @@ async function caseV01090TplNoLegacyPanels() {
 }
 
 async function caseV01090TplSectionOrder() {
-  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings (Workstreams moved to Map) ---");
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md — ChromeBar → Dashboard order (v0.220.4 collapse) ---");
   const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
-  const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
-  const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
-  assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
-  // Chrome overhaul WS-Workstreams: ProjectWorkstreamManager was removed from
-  // the hub template (workstream management now lives on the Map note), so the
-  // hub no longer invokes it. The old Meetings→Workstreams ordering is retired.
+  // v0.220.4 (project 1.50.0) SUPERSEDES: the Status→Meetings inter-block
+  // ordering assertion is retired because both surfaces are now inside the
+  // single ProjectDashboard card. Assert the surviving invariant: ChromeBar
+  // renders BEFORE ProjectDashboard (the dashboard hugs tight under chrome).
+  const idxChromeBar = tpl.indexOf('class: "ProjectChromeBar"');
+  const idxDashboard = tpl.indexOf('class: "ProjectDashboard"');
+  assertTrue("HC-V01090-TPL-SO: ChromeBar BEFORE Dashboard", idxChromeBar >= 0 && idxDashboard > idxChromeBar);
   assertTrue("HC-V01090-TPL-SO: ProjectWorkstreamManager NOT on hub (moved to Map)",
     tpl.indexOf('class: "ProjectWorkstreamManager"') === -1);
 }
@@ -15287,6 +15263,7 @@ async function caseHCV0128FinancePlanning() {
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
+  await caseJSDT1DayHubTemplatesDropDateHeading();
   await caseLAT1LeafActionsOwnDividers();
   await caseDNT1DocNoteTightSeparator();
   await caseDDA1DashboardActivityPanel();
@@ -15848,7 +15825,6 @@ async function caseHCV0128FinancePlanning() {
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
   await caseV01070PsClassDeclared();
   await caseV01070PsThreeBands();
-  await caseV01070FhaClassDeclared();
   await caseV01070FpbmPaycheckBodyMigration();
 
   // v0.109.0 projects visual overhaul
@@ -15870,7 +15846,6 @@ async function caseHCV0128FinancePlanning() {
   // v0.108.0 S3 — 6 new widgets + delete 3 old nav-button classes
   await caseV01080FinanceNewHelpers();
   await caseV01080FinanceOldNavButtonsDeleted();
-  await caseV01080FinanceNavRowClass();
   await caseV01080DebtSummaryWidget();
   await caseV01080DebtsHubSummary();
   await caseV01080DebtDefaultsEditor();
@@ -15891,7 +15866,6 @@ async function caseHCV0128FinancePlanning() {
 
   // v0.110.1 — EntityCreate guard race-fix PATCH
   await caseV01101EntityCreateGuardMigration();
-  await caseV01101FinanceHubActionsRaceFix();
   await caseV01101SourceTemplatesUseGuard();
 
   // v0.110.2 — generalized direct-call → guard migration (mobile race fix)

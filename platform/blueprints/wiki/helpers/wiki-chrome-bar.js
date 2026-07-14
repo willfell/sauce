@@ -40,6 +40,47 @@ class WikiChromeBar {
     } catch (_e) { /* never throw */ }
   }
 
+  // Build the shared SectionExplorer adapter + a minimal section descriptor for
+  // the CURRENT wiki-section note, so the ⋯ Move/Delete routes can drive the
+  // shared move picker / delete confirm. Returns null (never-throw) when the
+  // required helpers or an active section note are unavailable.
+  //
+  // NOTE: SectionExplorer.makeAdapter intentionally does NOT forward the config's
+  // `move` / `emptySubsectionCount` blocks (they're not part of the render
+  // adapter it produces), but _openMovePickerForSection/_openDeleteConfirm read
+  // them off `adapter.*`. We overlay them from the config here so the section
+  // routes behave identically to the rail ⋯ menu.
+  _wikiAdapterAndSection(dv) {
+    try {
+      let cur = null;
+      try {
+        cur = (customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function")
+          ? customJS.RenderSafe.page(dv)
+          : (dv && dv.current ? dv.current() : null);
+      } catch (_e) { cur = null; }
+      if (!cur || !cur.file) return null;
+      if (!customJS || !customJS.WikiTree || !customJS.SectionExplorer) return null;
+      if (typeof customJS.WikiTree._buildConfig !== "function" || typeof customJS.SectionExplorer.makeAdapter !== "function") return null;
+      const config = customJS.WikiTree._buildConfig(dv, cur);
+      const adapter = customJS.SectionExplorer.makeAdapter(config);
+      // Overlay the move + empty-sub-section-count hooks the shared section
+      // routes read directly off the adapter (makeAdapter drops them).
+      if (adapter && config) {
+        if (config.move && adapter.move == null) adapter.move = config.move;
+        if (typeof config.emptySubsectionCount === "function" && typeof adapter.emptySubsectionCount !== "function") {
+          adapter.emptySubsectionCount = config.emptySubsectionCount;
+        }
+      }
+      const folder = cur.file.path.slice(0, cur.file.path.lastIndexOf("/"));
+      const section = {
+        folder,
+        hubPath: cur.file.path,
+        title: (cur.title && String(cur.title).trim()) || cur.file.name.replace(/\.md$/, ""),
+      };
+      return { adapter, section };
+    } catch (_e) { return null; }
+  }
+
   _config() {
     const ICON = this.ICON;
     const ROOT = "spice/wiki";
@@ -54,10 +95,17 @@ class WikiChromeBar {
         if (ctx.context === "wiki-page") {
           return { primary: null, overflow: [{ id: "move", label: "Move", icon: ICON.move }], leaf: true };
         }
-        // wiki-hub / wiki-section
+        // wiki-hub / wiki-section — New Page primary, then the shared
+        // section-management overflow: New Section, (section only) Move section,
+        // Select docs, (section only) Delete section.
+        const isSection = ctx.context === "wiki-section";
+        const overflow = [{ id: "new-section", label: "New Section", icon: ICON.folderPlus }];
+        if (isSection) overflow.push({ id: "move-section", label: "Move section", icon: ICON.move });
+        overflow.push({ id: "select-docs", label: "Select docs", icon: ICON.filePlus });
+        if (isSection) overflow.push({ id: "delete-section", label: "Delete section", icon: ICON.folderPlus });
         return {
           primary: { id: "new-page", label: "New Page", icon: ICON.filePlus },
-          overflow: [{ id: "new-section", label: "New Section", icon: ICON.folderPlus }],
+          overflow,
           leaf: false,
         };
       },
@@ -69,12 +117,58 @@ class WikiChromeBar {
           } else if (typeof Notice === "function") { new Notice("WikiChromeBar: EntityCreate unavailable — reinstall wiki blueprint.", 6000); }
           return;
         }
+        // Leaf-note Move → the shared collapsible move picker (folder-is-truth:
+        // a pure folder rename, no frontmatter rewrite).
         if (id === "move") {
-          let cur = null; try { cur = dv && dv.current ? dv.current() : null; } catch (_e) { cur = null; }
-          const p = (cur && cur.file && cur.file.path) || (ctx && ctx.path) || "";
-          if (customJS && customJS.WikiLeafActions && typeof customJS.WikiLeafActions._openMoveDialog === "function") {
-            customJS.WikiLeafActions._openMoveDialog(dv, p);
-          } else if (typeof Notice === "function") { new Notice("WikiChromeBar: WikiLeafActions unavailable — reinstall wiki blueprint.", 6000); }
+          try {
+            if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.openMovePicker !== "function") return;
+            const file = (typeof app !== "undefined") ? app.workspace.getActiveFile() : null;
+            if (!file || !file.path) return;
+            // dv-independent enumeration (mobile: the captured dv is torn down by
+            // click time, so dv.pages() throws / returns empty).
+            const arr = customJS.SectionExplorer.pagesUnder("spice/wiki");
+            const targets = customJS.SectionExplorer.sectionTargets(arr, {
+              root: "spice/wiki", sectionType: "wiki-section", rootLabel: "Wiki (root)",
+              labelOf: (p) => (p.title && String(p.title).trim()) || "",
+            });
+            const currentFolder = file.path.slice(0, file.path.lastIndexOf("/"));
+            const adapter = { move: { rewriteOnDocMove: () => null } };
+            customJS.SectionExplorer.openMovePicker({
+              targets, currentFolder, title: "Move to section",
+              onPick: (folder) => customJS.SectionExplorer.applyDocMove(dv, file, folder, adapter),
+            });
+          } catch (_e) { /* never-throw */ }
+          return;
+        }
+        // Bulk-select docs to move (modal picker; enumeration is
+        // mechanism-owned + mobile-safe). Hub + section surfaces.
+        if (id === "select-docs") {
+          try {
+            const a = this._wikiAdapterAndSection(dv);
+            if (a && customJS.SectionExplorer && typeof customJS.SectionExplorer.openSelectDocsPicker === "function") {
+              customJS.SectionExplorer.openSelectDocsPicker(dv, a.adapter, a.section);
+            }
+          } catch (_e) { /* never-throw */ }
+          return;
+        }
+        // Move THIS section under another section (section surface only).
+        if (id === "move-section") {
+          try {
+            const a = this._wikiAdapterAndSection(dv);
+            if (a && customJS.SectionExplorer && typeof customJS.SectionExplorer._openMovePickerForSection === "function") {
+              customJS.SectionExplorer._openMovePickerForSection(dv, a.adapter, a.section);
+            }
+          } catch (_e) { /* never-throw */ }
+          return;
+        }
+        // Delete THIS section (recursive-confirm; gated on an empty doc subtree).
+        if (id === "delete-section") {
+          try {
+            const a = this._wikiAdapterAndSection(dv);
+            if (a && customJS.SectionExplorer && typeof customJS.SectionExplorer._openDeleteConfirm === "function") {
+              customJS.SectionExplorer._openDeleteConfirm(dv, a.adapter, a.section);
+            }
+          } catch (_e) { /* never-throw */ }
           return;
         }
       },

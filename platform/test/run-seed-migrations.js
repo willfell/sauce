@@ -410,52 +410,20 @@ withTempVault((vault) => {
         );
     }
 
-    // ===== HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-* — applyFinanceMonthsEntityCreateSentinel =====
-    // The seed's months/Months.md is committed in the MALFORMED pre-heal shape
-    // (the `// entity-create:month` marker is the LAST line of the FinanceNav
-    // dataviewjs block, AFTER the dv.view call — which comments out Dataview's
-    // injected closing brace and throws "Evaluation Error: eval@[native code]"
-    // on render). applyFinanceMonthsEntityCreateSentinel must strip that trailing
-    // marker and re-insert it as the LEADING line of the block (byte-matching the
-    // working content/Budgets.md format). (The V0151 prefix is a cosmetic label —
-    // the release pipeline computes the real shipping version; this is not a
-    // version gate.)
+    // ===== HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-* — hub Months.md uses FinanceChromeBar =====
+    // Hub templates no longer carry a FinanceNav block or inline entity-create
+    // marker — FinanceChromeBar handles entity-create for all finance hubs.
     {
         let monthsBody = "";
         try { monthsBody = helpers.readNote(vault, "spice/finance/months/Months.md"); } catch (e) {}
-        const MARKER = "// entity-create:month";
-        // The FinanceNav dv.view call line (materialized views_path == ranch/views).
-        const navIdx = monthsBody.indexOf('class: "FinanceNav"');
-        const markerIdx = monthsBody.indexOf(MARKER);
         ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-1 months/Months.md still has the FinanceNav dv.view block",
-            navIdx !== -1
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-1 months/Months.md has FinanceChromeBar",
+            monthsBody.includes('class: "FinanceChromeBar"')
         );
         ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-2 entity-create:month marker present",
-            markerIdx !== -1
+            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-2 months/Months.md has NO FinanceNav block (hubs use ChromeBar)",
+            !monthsBody.includes('class: "FinanceNav"')
         );
-        ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-3 marker LEADS the FinanceNav call (marker index < FinanceNav index)",
-            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx,
-            `markerIdx=${markerIdx} navIdx=${navIdx}`
-        );
-        // Everything AFTER the FinanceNav call line must contain NO entity-create:month
-        // line (i.e. the malformed trailing marker was removed).
-        const afterNav = navIdx !== -1
-            ? monthsBody.slice(monthsBody.indexOf("\n", navIdx) + 1)
-            : monthsBody;
-        ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-4 no entity-create:month line trails the FinanceNav call",
-            !afterNav.includes(MARKER),
-            `afterNav still contains marker`
-        );
-        // NOTE: SENTINEL-1..4 assert the END-TO-END post-install contract. The
-        // full-install path re-materializes months/Months.md from content/Months.md
-        // (this dest is not materialize_once), so it cannot ISOLATE the heal on
-        // its own — the direct-invocation family runMonthsSentinelHealFamily()
-        // below proves applyFinanceMonthsEntityCreateSentinel itself repairs a
-        // malformed (trailing-marker) existing hub.
     }
 
     // ===== HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-* — applyFinancePaycheckArchiveLegacy =====
@@ -743,10 +711,11 @@ withTempVault((vault) => {
         ok("HC-V09-SEED-MIGRATE-STICKY-3 hub Sticky.md typed sticky-hub",
            /^type:\s*sticky-hub\s*$/m.test(hub));
         // The installer-fresh hub (files[] step) wins over the migrated old hub
-        // (skip-if-dest-exists guard), so the heading reads "# Sticky Notes",
-        // never a stale "# Scratch" carried over from the pre-rename Scratch.md.
-        ok("HC-V09-SEED-MIGRATE-STICKY-3b hub heading is fresh '# Sticky Notes' (no stale '# Scratch')",
-           /^#\s+Sticky Notes\s*$/m.test(hub) && !/^#\s+Scratch\s*$/m.test(hub));
+        // (skip-if-dest-exists guard). Since v0.11.0 the template no longer
+        // carries a literal `# H1` (Obsidian's inline title renders it), so this
+        // now only asserts the absence of the stale `# Scratch` H1.
+        ok("HC-V09-SEED-MIGRATE-STICKY-3b hub carries no stale '# Scratch' heading",
+           !/^#\s+Scratch\s*$/m.test(hub));
     }
     {
         // The scratch user note moved (folder-only rename; body retyped scratch → sticky-note)
@@ -818,6 +787,32 @@ withTempVault((vault) => {
             && led.blueprints.some((b) => b && b.name === "scratch");
         ok("HC-V09-SEED-MIGRATE-STICKY-14 platform-installed ledger scratch blueprint pruned",
            led !== null && !hasScratchBp);
+    }
+
+    // ===== HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-* — applyDepth2ParentSectionHeal =====
+    // A depth-2 section-hub (docsec-project/docs/misc/misc-subsection/Misc-Subsection.md)
+    // ships with a DRIFTED parent_section (== its own section name, "Misc-Subsection")
+    // instead of its real parent folder's section ("Misc"). The heal rewrites it to the
+    // parent-folder hub's section display name in wikilink form ("[[Misc]]"), matching
+    // the + New Sub-Section entity-create template. A correct sibling depth-2 hub
+    // (knowledge/advanced/Advanced.md, parent_section "[[Knowledge]]") proves the heal
+    // leaves already-correct notes untouched. Second-run no-op is covered by IDEMP-3.
+    {
+        const brokenRel = "spice/projects/docsec-project/docs/misc/misc-subsection/Misc-Subsection.md";
+        const correctRel = "spice/projects/docsec-project/docs/knowledge/advanced/Advanced.md";
+        let brokenFm = {}, correctFm = {};
+        try { brokenFm = helpers.parseFrontmatter(helpers.readNote(vault, brokenRel)).frontmatter; } catch (e) {}
+        try { correctFm = helpers.parseFrontmatter(helpers.readNote(vault, correctRel)).frontmatter; } catch (e) {}
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-1 drifted parent_section healed to parent folder section (wikilink)",
+           brokenFm.parent_section === "[[Misc]]",
+           `parent_section=${JSON.stringify(brokenFm.parent_section)}`);
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-2 correct depth-2 hub left untouched",
+           correctFm.parent_section === "[[Knowledge]]",
+           `parent_section=${JSON.stringify(correctFm.parent_section)}`);
+        let bkCount = 0;
+        try { bkCount = fs.readdirSync(path.join(vault, ".sauce-backup")).length; } catch (e) {}
+        ok("HC-V0CSE-SEED-MIGRATE-DEPTH2-PARENT-3 .sauce-backup snapshot exists",
+           bkCount > 0);
     }
 
     // ===== Idempotency phase: snapshot, second install, compare =====
@@ -1026,6 +1021,17 @@ withTempVault((vault) => {
     ok("HC-V01240-SEED-PNAME-1 map project_name backfilled", typeof mapFm.project_name === "string" && mapFm.project_name.length > 0);
     ok("HC-V01240-SEED-PNAME-2 map project_name is display name not slug", mapFm.project_name === "My Cool Project");
 
+    // HC-V01240-SEED-PNAME-3/4 — v0.217.0 expanded the backfill's type
+    // whitelist beyond map/kanban/task-note to also cover doc-note (and
+    // project/docs-hub/section-hub/links-hub/project-todo). A doc-note under
+    // a multi-word project with no project_name must now get it stamped —
+    // this is what makes the breadcrumb's fm:project_name|path:2 link
+    // resolve to the real hub note instead of the lowercase slug.
+    const docNote = helpers.readNote(vault, "spice/projects/my-cool-project/docs/Notes/Breadcrumb Fixture Note.md");
+    const { frontmatter: docNoteFm } = helpers.parseFrontmatter(docNote);
+    ok("HC-V01240-SEED-PNAME-3 doc-note project_name backfilled", typeof docNoteFm.project_name === "string" && docNoteFm.project_name.length > 0);
+    ok("HC-V01240-SEED-PNAME-4 doc-note project_name is display name not slug", docNoteFm.project_name === "My Cool Project");
+
     // ===== HC-V01325-SEED-AIMARKER-* — applyNoteChromeHeal relocates a
     // mis-placed ACTION_ITEMS_MARKER (and the task run that landed with it).
     // The seed carries a meeting note frozen at the v0.127.0 buggy shape: the
@@ -1227,6 +1233,18 @@ withTempVault((vault) => {
             "HC-TRIPS-SEED-1b spice/trips/summer-trip/Trip Atlas.md no longer exists",
             !helpers.fileExists(vault, "spice/trips/summer-trip/Trip Atlas.md")
         );
+        {
+            let atlasFm = {};
+            try {
+                const atlasNote = helpers.readNote(vault, "spice/trips/summer-trip/Summer Trip.md");
+                atlasFm = helpers.parseFrontmatter(atlasNote).frontmatter;
+            } catch (e) {}
+            ok(
+                "HC-TRIPS-SEED-1c atlas trip_slug: summer-trip",
+                atlasFm.trip_slug === "summer-trip",
+                `actual trip_slug=${atlasFm.trip_slug}`
+            );
+        }
 
         // HC-TRIPS-SEED-2: Flights section renamed + canonical frontmatter.
         ok(
@@ -2441,23 +2459,23 @@ async function runFinanceMigrateFamily() {
             !a1FinBody.includes("FinanceHubActions")
         );
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A3 Finance.md body has FinanceNav reference (hubs-repair canonical)",
-            /class:\s*"FinanceNav"/.test(a1FinBody)
+            "HC-V01190-FIN-SEED-MIGRATE-A3 Finance.md body has FinanceChromeBar reference (hubs use ChromeBar)",
+            /class:\s*"FinanceChromeBar"/.test(a1FinBody)
         );
         const a4BudgetsBody = readFin("budgets/Budgets.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A4 Budgets.md body has FinanceNav reference (hubs-repair)",
-            /class:\s*"FinanceNav"/.test(a4BudgetsBody)
+            "HC-V01190-FIN-SEED-MIGRATE-A4 Budgets.md body has FinanceChromeBar reference (hubs use ChromeBar)",
+            /class:\s*"FinanceChromeBar"/.test(a4BudgetsBody)
         );
         const a5DebtsBody = readFin("debts/Debts.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A5 Debts.md body has FinanceNav reference (hubs-repair)",
-            /class:\s*"FinanceNav"/.test(a5DebtsBody)
+            "HC-V01190-FIN-SEED-MIGRATE-A5 Debts.md body has FinanceChromeBar reference (hubs use ChromeBar)",
+            /class:\s*"FinanceChromeBar"/.test(a5DebtsBody)
         );
         const a6PaychecksBody = readFin("paychecks/Paychecks.md");
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A6 Paychecks.md body has FinanceNav reference (hubs-repair)",
-            /class:\s*"FinanceNav"/.test(a6PaychecksBody)
+            "HC-V01190-FIN-SEED-MIGRATE-A6 Paychecks.md body has FinanceChromeBar reference (hubs use ChromeBar)",
+            /class:\s*"FinanceChromeBar"/.test(a6PaychecksBody)
         );
 
         // ===== B: debt (#2 + #10 + #11) =====
@@ -2635,8 +2653,8 @@ async function runFinanceMigrateFamily() {
             !a1FinBody.includes("FinanceHubActions")
         );
         ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F9 Finance.md body has FinanceNav reference (#15 + #17 canonical)",
-            /class:\s*"FinanceNav"/.test(a1FinBody)
+            "HC-V01190-FIN-SEED-MIGRATE-F9 Finance.md body has FinanceChromeBar reference (hubs use ChromeBar)",
+            /class:\s*"FinanceChromeBar"/.test(a1FinBody)
         );
         // F10: no file vault-wide contains any of the deleted NavButtons class
         // names in either form (customJS.<X>NavButtons.render OR class: "<X>NavButtons").
@@ -3087,16 +3105,9 @@ async function runSectionHubCleanupFamily() {
 
 // ===== HC-V0151-MONTHS-SENTINEL-HEAL-* — applyFinanceMonthsEntityCreateSentinel =====
 //
-// Direct-invocation isolation of the heal. The committed seed
-// spice/finance/months/Months.md is in the MALFORMED pre-heal shape (the
-// `// entity-create:month` marker TRAILS the FinanceNav dv.view call — which
-// comments out Dataview's injected closing brace and throws
-// "Evaluation Error: eval@[native code]" on render). The full-install family
-// above re-materializes this hub from content/Months.md (dest is not
-// materialize_once), so it cannot isolate the heal. Here we copy the malformed
-// seed fixture into a scratch vault and run ONLY the heal, proving it converts
-// a trailing marker to a leading one — the path that repairs existing consumer
-// hubs — and that it is idempotent.
+// Hub Months.md now uses FinanceChromeBar (no FinanceNav block). The heal
+// early-returns when no FinanceNav is present, so it's a no-op on modern hubs.
+// We also test the legacy repair path with an inline malformed fixture.
 async function runMonthsSentinelHealFamily() {
     const install = require("../install.js");
     const MARKER = "// entity-create:month";
@@ -3104,78 +3115,54 @@ async function runMonthsSentinelHealFamily() {
 
     const healRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-months-sentinel-"));
     try {
-        const seedMalformed = fs.readFileSync(path.join(SEED_DIR, HUB), "utf8");
-        // Sanity: the committed seed fixture really starts from the bug shape
-        // (trailing marker after the FinanceNav call).
-        const sNavIdx = seedMalformed.indexOf('class: "FinanceNav"');
-        const sAfterNav = sNavIdx !== -1
-            ? seedMalformed.slice(seedMalformed.indexOf("\n", sNavIdx) + 1) : "";
+        // --- Case 1: ChromeBar-only hub (current shape) → heal is a no-op ---
+        const seedBody = fs.readFileSync(path.join(SEED_DIR, HUB), "utf8");
         ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-1 seed fixture starts MALFORMED (marker trails the FinanceNav call)",
-            sNavIdx !== -1 && sAfterNav.includes(MARKER),
-            `navIdx=${sNavIdx} trailingMarker=${sAfterNav.includes(MARKER)}`
+            "HC-V0151-MONTHS-SENTINEL-HEAL-1 seed fixture has FinanceChromeBar (no FinanceNav)",
+            seedBody.includes('class: "FinanceChromeBar"') && !seedBody.includes('class: "FinanceNav"')
         );
 
         const adapter = makeFsAdapter(healRoot);
-        await adapter.write(HUB, seedMalformed);
+        await adapter.write(HUB, seedBody);
         const tp = { app: { vault: { adapter } } };
         const git = { commit: "test", tag: "test", dirty: false };
         const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
         const manifest = { name: "finance" };
         const history = [];
 
-        // Pass 1: run ONLY the heal.
+        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
+        const afterHeal = await adapter.read(HUB);
+        ok(
+            "HC-V0151-MONTHS-SENTINEL-HEAL-2 heal is a no-op on ChromeBar-only hub (byte-identical)",
+            afterHeal === seedBody
+        );
+
+        // --- Case 2: legacy malformed fixture (trailing marker) → healed ---
+        const malformed = [
+            "---", "type: months-hub", "---", "",
+            "```dataviewjs",
+            'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
+            "// entity-create:month — installer-managed; do not delete this comment",
+            "```", "",
+            "```dataviewjs",
+            'await dv.view("ranch/views/customjs-guard", { class: "MonthsCards" });',
+            "```", ""
+        ].join("\n");
+        await adapter.write(HUB, malformed);
         await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
         const healed = await adapter.read(HUB);
         const navIdx = healed.indexOf('class: "FinanceNav"');
         const markerIdx = healed.indexOf(MARKER);
-        const afterNav = navIdx !== -1
-            ? healed.slice(healed.indexOf("\n", navIdx) + 1) : "";
         ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-2 heal moves the marker to LEAD the FinanceNav call (and none trails)",
-            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx && !afterNav.includes(MARKER),
-            `markerIdx=${markerIdx} navIdx=${navIdx} trailing=${afterNav.includes(MARKER)}`
-        );
-        const markerCount = (healed.match(/^[ \t]*\/\/[ \t]*entity-create:month\b/gm) || []).length;
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-3 heal leaves exactly one entity-create:month marker line (no dup)",
-            markerCount === 1,
-            `count=${markerCount}`
-        );
-        // The healed marker line byte-matches the working content/Budgets.md format.
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-4 healed marker byte-matches the canonical format",
-            healed.includes("// entity-create:month — installer-managed; do not delete this comment")
-        );
-        // .sauce-backup snapshot of the malformed original was written.
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-5 .sauce-backup snapshot of the malformed original written",
-            (() => {
-                const root = path.join(healRoot, ".sauce-backup");
-                if (!fs.existsSync(root)) return false;
-                const stack = [root];
-                while (stack.length) {
-                    const cur = stack.pop();
-                    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
-                        const child = path.join(cur, ent.name);
-                        if (ent.isDirectory()) stack.push(child);
-                        else if (ent.name === "Months.md") {
-                            const backed = fs.readFileSync(child, "utf8");
-                            const bNav = backed.indexOf('class: "FinanceNav"');
-                            const bAfter = bNav !== -1 ? backed.slice(backed.indexOf("\n", bNav) + 1) : "";
-                            if (bAfter.includes(MARKER)) return true; // trailing marker preserved in snapshot
-                        }
-                    }
-                }
-                return false;
-            })()
+            "HC-V0151-MONTHS-SENTINEL-HEAL-3 heal moves trailing marker to LEAD the FinanceNav call",
+            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx
         );
 
-        // Pass 2: idempotency — already-canonical file is a no-op (byte-identical, no re-write).
+        // --- Case 3: idempotency ---
         await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
         const healedTwice = await adapter.read(HUB);
         ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-6 heal is idempotent (second pass byte-identical)",
+            "HC-V0151-MONTHS-SENTINEL-HEAL-4 heal is idempotent (second pass byte-identical)",
             healedTwice === healed
         );
     } finally {
@@ -3353,8 +3340,8 @@ async function runTaskEntitySurfacesFamily() {
         const upgraded = readVault(OLD_TASK);
         ok("HC-TE-SURF-3 v0.178-chrome task upgraded — TaskNoteToDoNav removed",
            !/class:\s*"TaskNoteToDoNav"/.test(upgraded));
-        ok("HC-TE-SURF-3a upgraded note gains the second `---` HR before the marker",
-           /```\r?\n\r?\n---\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
+        ok("HC-TE-SURF-3a upgraded note has no `---` HR before the marker",
+           /```\r?\n\r?\n<!-- TASK_NOTES -->/.test(upgraded));
         ok("HC-TE-SURF-3b upgraded note keeps TaskChromeBar + TaskNoteView chrome",
            /class:\s*"TaskChromeBar"/.test(upgraded) && /class:\s*"TaskNoteView"/.test(upgraded));
         ok("HC-TE-SURF-3c user notes below the marker preserved",
@@ -4269,9 +4256,9 @@ async function runTaskHealTitleCleanupFamily() {
         "project_slug:", "source: migrated-from-registry", "source_note:",
         "links: []", "created_at: 2026-07-08T23:47:39.078Z", 'completed_at: ""', "---", "",
         "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });', "```",
-        "", "---", "",
+        "",
         "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });', "```",
-        "", "---", "", "<!-- TASK_NOTES -->", "",
+        "", "<!-- TASK_NOTES -->", "",
     ].join("\n");
 
     try {

@@ -260,7 +260,7 @@ withTempHomeAndVault(({ home, vault }) => {
     // meaningful for finance/sticky-notes, which still ship markers (finance's
     // marker sits on FinanceNav's own call, not a standalone EntityCreate
     // block — see finance-nav.js's chromePresent guard).
-    const ecChromeBarClassFor = { project: "ProjectChromeBar", person: "PeopleChromeBar", meeting: "MeetingChromeBar" };
+    const ecChromeBarClassFor = { project: "ProjectChromeBar", person: "PeopleChromeBar", meeting: "MeetingChromeBar", budget: "FinanceChromeBar", paycheck: "FinanceChromeBar", invoice: "FinanceChromeBar", debt: "FinanceChromeBar", month: "FinanceChromeBar", savings: "FinanceChromeBar" };
     const ecChromeBarHubs = new Set(Object.keys(ecChromeBarClassFor));
     const hasChromeBarBlock = (body, barClass) =>
         (body.match(new RegExp('```dataviewjs[\\s\\S]*?class:\\s*"' + barClass + '"[\\s\\S]*?\\n```', 'g')) || []).length;

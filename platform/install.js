@@ -545,6 +545,8 @@ module.exports = async function (tp) {
     // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
     // reaches them (see note-chrome.md §6). Separate heal for that surface.
     await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+    await applyStickyHubTitleHeal(tp, installedNow.history, git);
+    await applyJournalHubTitleHeal(tp, installedNow.history, git);
 
     // 6a4. task-entity — convert the MOST-RECENT daily's open `- [ ]` lines into
     // note-per-task files under spice/tasks/ and swap the legacy capture/carryover
@@ -592,6 +594,12 @@ module.exports = async function (tp) {
     // Ungated, idempotent (skip if the block is already present), .sauce-backup.
     await applyProjectTodoTaskListHeal(tp, installedNow.history, git);
     await applyMeetingTaskListHeal(tp, installedNow.history, git);
+
+    // 6a8. task-entity — strip --- chrome separators from existing task notes.
+    await applyTaskNoteChromeHrHeal(tp, installedNow.history, git);
+
+    // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
+    await applyTodoDailyTripGroupsHeal(tp, installedNow.history, git);
 
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
@@ -1251,6 +1259,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubModernizeHeal(tp, mech, variables, history, git);       // NEW (docs-hub modernize) — rewrites legacy docs-hub bodies to the renderActionRow chrome shape (removes standalone DocBulkMoveActions + doubled `---`, injects Breadcrumb + renderActionRow, idempotent, .sauce-backup before write). MUST run AFTER the neutered backfill above.
   await applyProjectLinksManagerBackfill(tp, mech, variables, history, git); // NEW (Project Links Wiring PR4) — injects the ProjectLinksManager Add/Manage-links block into existing type:links-hub notes lacking it (insert-only before the ProjectLinksPanel block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
+  await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocSectionBackfill(tp, mech, variables, history, git);   // PR1 project-doc-updating-wiring — backfill section/sub_section from sibling section-hub (authoritative display name), ungated + idempotent
@@ -1276,6 +1285,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyProjectTodoSectionReorderHeal(tp, history, git);                  // NEW v0.179 UI polish — reorders existing project-todo sections to Project Tasks → From Meetings → Owned Tasks (moves the whole Owned Tasks block below From Meetings); ungated, idempotent, .sauce-backup before write. MUST run after applyProjectTodoOwnedTasksHeal.
   await applyProjectChromeBarHeal(tp, mech, variables, history, git);          // NEW (button/nav refactor Pass 9b) — forward-migrates existing project-surface notes from any old/partial stacked chrome to the canonical single ProjectChromeBar shape (SectionHub/WorkstreamManager → contentOnly; drops nav + action-row blocks + chrome `---`). MUST run LAST in the project heal chain so it normalizes whatever earlier heals produced. Doubly-guarded (idempotent on ProjectChromeBar + conservative no-op when no legacy nav marker); .sauce-backup before write; never throws.
+  await applyDepth2ParentSectionHeal(tp, mech, variables, history, git); // NEW (folder-is-truth part 2) — repairs drifted parent_section frontmatter on existing depth-2 section-hub notes: rewrites to the PARENT FOLDER's section-hub display name in wikilink form (matches the + New Sub-Section entity-create template). Idempotent (skip when already correct), .sauce-backup before write, per-note try/catch, never throws.
   await applyTripsConformanceHeal(tp, history, git); // NEW — collision-free trip note names (atlas → <name>.md, sections → <name> — <section>.md) + canonical section frontmatter + Breadcrumb/SectionLabel chrome for existing trips; per-trip .sauce-backup, idempotent, never throws.
   await applyHomeScaffoldHeal(tp, history, git); // NEW — scaffolds + heals the singleton spice/home/Home.md command-center note (chrome above HOME_CHROME_END, user free-write below preserved); backup-first, idempotent, never throws.
   await applyDailyHomeChromeBarHeal(tp, mech, variables, history, git); // NEW (Daily/Home chrome-bar adoption) — forward-migrates existing Daily (cowork-daily) + Home notes from the legacy SpaceNavButtons chrome to the new DailyChromeBar/HomeChromeBar block. MUST run AFTER applyHomeScaffoldHeal so a freshly-scaffolded Home.md is in scope. Doubly-guarded (idempotent per-bar + type-gated on cowork-daily for dailies); .sauce-backup before write; never throws.
@@ -1285,6 +1295,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
   await applyFinanceUnifiedNavMigration(tp, mech, variables, history, git);    // NEW v0.111.0 — collapses FinanceHubActions + FinanceNavRow invocations to single-line FinanceNav
+  await applyFinanceHubNavBlockRemoval(tp, mech, variables, history, git);    // NEW — strips the now-redundant FinanceNav dataviewjs block from finance hub notes (FinanceChromeBar owns all hub chrome)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await applyBundledPlugin(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW — vendor + enable a first-party bundled plugin (sauce-plugin mechanism); gated on mech.bundled_plugin
@@ -4974,6 +4985,130 @@ async function applyProjectActivityPanelsHeal(tp, manifest, variables, history, 
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
+// applyProjectDashboardConformanceHeal — v0.221 ProjectDashboard cycle. Rewrites
+// existing type:project hub bodies from the 6-block legacy shape
+// (ChromeBar + StatusWidget + ActivityPanel + OpenTasks + MeetingsPanel +
+// LinksPanel) to the 2-block dashboard shape (ChromeBar + Dashboard).
+// Anchors on ProjectChromeBar (preserved verbatim); inserts Dashboard block
+// immediately after; strips every legacy panel block. Idempotent (skip when
+// ProjectDashboard already present); per-file .sauce-backup snapshot; never
+// throws. MUST run AFTER applyProjectActivityPanelsHeal so hubs that
+// just received the legacy panels get promoted in the same install.
+async function applyProjectDashboardConformanceHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const GIT = git || {};
+  let healed = 0, skipped = 0, warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) history.push({ event: "warning", step: "project_dashboard_conformance_heal",
+      reason: `list failed ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const DASHBOARD_BLOCK = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectDashboard" });\n```';
+  const LEGACY_CLASSES = [
+    "ProjectStatusWidget",
+    "ProjectActivityPanel",
+    "ProjectOpenTasks",
+    "ProjectMeetingsPanel",
+    "ProjectLinksPanel",
+  ];
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      const hasDash = before.includes('class: "ProjectDashboard"');
+      const hasLegacy = LEGACY_CLASSES.some((cls) => before.includes(`class: "${cls}"`));
+      // Skip ONLY when fully conformant: a Dashboard block present AND no legacy
+      // panel blocks lingering. A partially-migrated note (Dashboard present but
+      // a stray legacy block left behind) still needs the legacy block swept.
+      if (hasDash && !hasLegacy) {
+        skipped += 1;
+        if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", target: hubPath,
+          action: "skipped_already_healed",
+          git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+
+      // Strip every legacy panel block. Match the whole fenced dataviewjs region
+      // whose body references the class name via `class: "…"`. Non-greedy on the
+      // inner body; anchored on the fence pair.
+      let newContent = before;
+      for (const cls of LEGACY_CLASSES) {
+        const rx = new RegExp(
+          "```dataviewjs[^`]*?class:\\s*\"" + cls + "\"[\\s\\S]*?```\\s*",
+          "g"
+        );
+        newContent = newContent.replace(rx, "");
+      }
+
+      // Collapse runs of 3+ blank lines that stripping might have left behind.
+      newContent = newContent.replace(/\n{3,}/g, "\n\n");
+
+      // Insert the dashboard block right after the ProjectChromeBar block — but
+      // ONLY when one isn't already present, so a partial-migration note keeps
+      // its single existing Dashboard block (dedupe; never add a second).
+      if (!hasDash) {
+        const chromebarRx = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)\s*/;
+        if (chromebarRx.test(newContent)) {
+          newContent = newContent.replace(chromebarRx, (m, block) => block + "\n\n" + DASHBOARD_BLOCK + "\n\n");
+        } else {
+          // No ChromeBar anchor — prepend just after the frontmatter fence.
+          const fmEnd = newContent.match(/^---\n[\s\S]*?\n---\n/);
+          if (fmEnd) {
+            const idx = fmEnd[0].length;
+            newContent = newContent.slice(0, idx) + "\n" + DASHBOARD_BLOCK + "\n\n" + newContent.slice(idx);
+          } else {
+            newContent = DASHBOARD_BLOCK + "\n\n" + newContent;
+          }
+        }
+      }
+
+      // Trim trailing whitespace runs to keep bytes tidy.
+      newContent = newContent.replace(/\n{3,}/g, "\n\n");
+
+      if (newContent === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) {}
+      try { await adapter.write(backupPath, before); } catch (_e) {}
+
+      await adapter.write(hubPath, newContent);
+      healed += 1;
+      if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", target: hubPath,
+        action: "healed", git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      if (history) history.push({ event: "warning", step: "project_dashboard_conformance_heal",
+        reason: e && e.message ? e.message : String(e),
+        git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", name: "vault",
+    reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+    git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+}
+
 // applyProjectSectionsMigration — v0.102.0 S4 (Task 6). Strategy A auto-migration
 // of existing flat docs/*.md files into docs/knowledge/ with section: "Knowledge"
 // frontmatter, preserving any existing custom subfolders that contain doc-notes
@@ -7246,6 +7381,70 @@ async function applyMeetingsHubChromeBarHeal(tp, history, git) {
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
+// _stripHubH1 — pure helper: given a hub note body and its display label
+// (e.g. "Sticky Notes"), remove a single leading `# <label>` line and collapse
+// resulting triple-plus newlines to double. Returns the input unchanged when
+// no such line is present. Idempotent.
+function _stripHubH1(body, label) {
+  if (typeof body !== "string" || typeof label !== "string" || label.length === 0) return body;
+  const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^# ${esc}\\s*\\n?`, "m");
+  let out = body.replace(re, "");
+  if (out === body) return body;
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
+}
+
+async function applyStickyHubTitleHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const fpath = "spice/sticky-notes/Sticky.md";
+  if (!(await adapter.exists(fpath))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    const before = await adapter.read(fpath);
+    if (!/^type:\s*sticky-hub\s*$/m.test(before)) return;
+    const after = _stripHubH1(before, "Sticky Notes");
+    if (after === before) return;
+    const backupPath = `.sauce-backup/${ts}/${fpath}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) {}
+    try { await adapter.write(backupPath, before); } catch (_e) {}
+    await adapter.write(fpath, after);
+    history?.push({ event: "info", step: "sticky_hub_title_heal", target: fpath, action: "healed",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "sticky_hub_title_heal",
+      reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+async function applyJournalHubTitleHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const fpath = "spice/journal/Journal.md";
+  if (!(await adapter.exists(fpath))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    const before = await adapter.read(fpath);
+    if (!/^type:\s*journal-hub\s*$/m.test(before)) return;
+    const after = _stripHubH1(before, "Journal");
+    if (after === before) return;
+    const backupPath = `.sauce-backup/${ts}/${fpath}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) {}
+    try { await adapter.write(backupPath, before); } catch (_e) {}
+    await adapter.write(fpath, after);
+    history?.push({ event: "info", step: "journal_hub_title_heal", target: fpath, action: "healed",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "journal_hub_title_heal",
+      reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
 // _resolveProjectDisplayName — given a project dir's markdown files (paths) +
 // an adapter, returns the basename (sans .md) of the note that lives DIRECTLY
 // under projectDir and carries frontmatter type:project. This is the project's
@@ -7289,7 +7488,7 @@ function _injectProjectNameFrontmatter(body, name) {
   const fmText = fmMatch[1];
   const typeMatch = fmText.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
   if (!typeMatch) return body;
-  if (!["map", "kanban", "task-note"].includes(typeMatch[1])) return body;
+  if (!["map", "kanban", "task-note", "project", "docs-hub", "section-hub", "doc-note", "links-hub", "project-todo"].includes(typeMatch[1])) return body;
   const escaped = String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
   const existing = fmText.match(/^project_name:\s*(.*)\s*$/m);
@@ -7364,7 +7563,7 @@ async function applyProjectNameBackfill(tp, manifest, variables, history, git) {
       try {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
-        if (!["map", "kanban", "task-note"].includes(type)) continue;
+        if (!["map", "kanban", "task-note", "project", "docs-hub", "section-hub", "doc-note", "links-hub", "project-todo"].includes(type)) continue;
         const after = _injectProjectNameFrontmatter(before, displayName);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyNoteChromeHeal).
@@ -9221,12 +9420,12 @@ async function applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, 
 }
 
 const FINANCE_HUB_BODY_TEMPLATES = {
-  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
-  "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
-  "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
-  "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
-  "spice/finance/debts/Debts.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:debt — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsCards\" });\n```\n",
-  "spice/finance/months/Months.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthsCards\" });\n```\n",
+  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
+  "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
+  "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
+  "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
+  "spice/finance/debts/Debts.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsCards\" });\n```\n",
+  "spice/finance/months/Months.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceChromeBar\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthsCards\" });\n```\n",
 };
 
 async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
@@ -9244,11 +9443,8 @@ async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
     try {
       if (!(await adapter.exists(hubPath))) { absent++; continue; }
       const existing = await adapter.read(hubPath);
-      // v0.111.0: detection updated — file is canonical when it invokes
-      // FinanceNav via the customjs-guard. Old FinanceHubActions or
-      // FinanceNavRow invocations get rewritten via applyFinanceUnifiedNav
-      // Migration; this repair only HEALS files that have neither.
-      if (/class:\s*["']FinanceNav["']/.test(existing)) {
+      // v0.221.0: hubs now use FinanceChromeBar (entities still use FinanceNav).
+      if (/class:\s*["'](?:FinanceNav|FinanceChromeBar)["']/.test(existing)) {
         alreadyCanonical++;
         continue;
       }
@@ -11641,13 +11837,9 @@ function _taskNoteChromeBody() {
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskChromeBar\" });\n" +
     "```\n" +
     "\n" +
-    "---\n" +
-    "\n" +
     "```dataviewjs\n" +
     "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskNoteView\" });\n" +
     "```\n" +
-    "\n" +
-    "---\n" +
     "\n" +
     "<!-- TASK_NOTES -->\n";
 }
@@ -11788,14 +11980,14 @@ async function applyTaskNoteHeal(tp, history, git) {
         // is a LEGACY chrome — either the v0.178 shape that still carries a
         // TaskNoteToDoNav block, or an older shape that lacks the second `---` HR
         // right before the marker. The NEW chrome has NEITHER a TaskNoteToDoNav
-        // block NOR a missing pre-marker HR, so both conditions being false ⇒
+        // block NOR a stale pre-marker HR, so both conditions being false ⇒
         // already-new ⇒ skip (idempotent). Only inspect the region ABOVE the
         // marker so a user who happens to mention the class / a `---` in their
         // notes below doesn't perturb the decision.
         const _aboveMarker = needsChrome ? "" : before.slice(0, before.indexOf(MARKER));
         const _hasToDoNav = /class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
-        const _endsWithHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
-        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || !_endsWithHr);
+        const _hasStaleHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
+        const needsChromeUpgrade = !needsChrome && (_hasToDoNav || _hasStaleHr);
         if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
 
         // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
@@ -12240,6 +12432,108 @@ async function applyMeetingTaskListHeal(tp, history, git) {
   }
 }
 
+// applyTaskNoteChromeHrHeal — strip redundant --- separators from task note
+// chrome body. Idempotent, backup-guarded, per-file try/catch.
+async function applyTaskNoteChromeHrHeal(tp, history, git) {
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = 'spice/tasks';
+    if (!(await adapter.exists(ROOT))) return;
+
+    const listing = await adapter.list(ROOT);
+    const files = (listing.files || []).filter(f =>
+      f.endsWith('.md') && !f.includes('/_trash/') && !f.includes('/_done/'));
+    if (!files.length) return;
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    let healed = 0;
+
+    for (const fp of files) {
+      try {
+        const before = await adapter.read(fp);
+        let after = before;
+        after = after.replace(/```\n\n---\n\n```dataviewjs/g, '```\n\n```dataviewjs');
+        after = after.replace(/```\n\n---\n\n<!-- TASK_NOTES -->/g, '```\n\n<!-- TASK_NOTES -->');
+        if (after === before) continue;
+
+        const backupDir = '.sauce-backup/tasks-chrome-hr/' + ts;
+        try { await adapter.mkdir(backupDir); } catch (_e) {}
+        const basename = fp.substring(fp.lastIndexOf('/') + 1);
+        try { await adapter.write(backupDir + '/' + basename, before); } catch (_e) {}
+
+        await adapter.write(fp, after);
+        healed++;
+        history?.push({
+          event: 'info', step: 'task_note_chrome_hr_heal', name: 'task-entity',
+          action: 'stripped_hr', target: fp,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString()
+        });
+      } catch (_e) { /* per-file, never throw */ }
+    }
+  } catch (_e) { /* top-level, never throw */ }
+}
+
+// applyTodoDailyTripGroupsHeal — inject ToDoDailyTripGroups block into
+// existing daily notes (after ToDoDailyProjectGroups). Idempotent, backup-guarded.
+async function applyTodoDailyTripGroupsHeal(tp, history, git) {
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+
+    const SENTINEL = 'ToDoDailyTripGroups';
+    const ANCHOR_BLOCK = '{ class: "ToDoDailyProjectGroups" });\n```';
+    const BLOCK = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ToDoDailyTripGroups" });\n```';
+
+    const TODO_ROOT = 'spice/to-do';
+    if (!(await adapter.exists(TODO_ROOT))) return;
+
+    const walk = async (dir) => {
+      const listing = await adapter.list(dir);
+      let mds = (listing.files || []).filter(f => f.endsWith('.md'));
+      for (const sub of (listing.folders || [])) {
+        mds = mds.concat(await walk(sub));
+      }
+      return mds;
+    };
+    const allMds = await walk(TODO_ROOT);
+    const dailies = allMds.filter(f => /ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f));
+    if (!dailies.length) return;
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    let healed = 0;
+
+    for (const fp of dailies) {
+      try {
+        const before = await adapter.read(fp);
+        if (before.includes(SENTINEL)) continue;
+        if (!before.includes('ToDoDailyProjectGroups')) continue;
+
+        const idx = before.indexOf(ANCHOR_BLOCK);
+        if (idx < 0) continue;
+
+        const insertAt = idx + ANCHOR_BLOCK.length;
+        const after = before.slice(0, insertAt) + BLOCK + before.slice(insertAt);
+
+        const backupDir = '.sauce-backup/daily-trip-groups/' + ts;
+        try { await adapter.mkdir(backupDir); } catch (_e) {}
+        const basename = fp.substring(fp.lastIndexOf('/') + 1);
+        try { await adapter.write(backupDir + '/' + basename, before); } catch (_e) {}
+
+        await adapter.write(fp, after);
+        healed++;
+        history?.push({
+          event: 'info', step: 'daily_trip_groups_heal', name: 'to-do',
+          action: 'injected_trip_groups', target: fp,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString()
+        });
+      } catch (_e) { /* per-file, never throw */ }
+    }
+  } catch (_e) { /* top-level, never throw */ }
+}
+
 // _localIsoNoMillis — local-offset ISO timestamp with NO milliseconds
 // (YYYY-MM-DDTHH:mm:ss±HH:mm), matching the canonical created_at vocab the
 // schema validator + seed harness expect (new Date().toISOString() emits `.SSSZ`
@@ -12535,7 +12829,6 @@ const TRIP_SECTION_KINDS = [
   { kind: "packing-list", label: "Packing List", legacy: "Trip Packing List" },
   { kind: "to-do",        label: "To Do",        legacy: "Trip To Do" },
   { kind: "notes",        label: "Notes",        legacy: "Trip Notes" },
-  { kind: "links",        label: "Links",        legacy: "Trip Links" },
 ];
 
 // Mirrors TripNavButtons._sanitizeFilename / TripSectionKinds helpers.
@@ -12692,6 +12985,31 @@ function _tripStripLegacyChrome(body) {
   return out;
 }
 
+// _tripEnsureAtlasLinks(body) — ensure the trip atlas frontmatter carries a
+// `links: []` key (v2 introduces per-trip links[]). If a `links:` key already
+// exists it's left untouched (idempotent). No frontmatter → return unchanged.
+// Pure, never throws. The key is appended inside the leading `---` block via the
+// same replace-or-insert helper the section heal uses, so it always lands INSIDE
+// the frontmatter.
+function _tripEnsureAtlasLinks(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  if (/^links\s*:/m.test(parts.fm)) return body; // already present
+  return _tripSetFmKey(body, "links", "links: []");
+}
+
+// _tripBoardCardChrome(body) — ensure a `type: trip-board-card` note carries
+// exactly one TripsChromeBar chrome block (v1 bare board cards had none). Reuses
+// _tripStripLegacyChrome's inject-if-missing + de-dupe logic. Only acts on notes
+// whose leading frontmatter type is trip-board-card; anything else is returned
+// unchanged. Pure, idempotent, never throws.
+function _tripBoardCardChrome(body) {
+  const parts = _tripSplitFrontmatter(body);
+  if (parts.fm === null) return body;
+  if (!/^type:\s*["']?trip-board-card["']?\s*$/m.test(parts.fm)) return body;
+  return _tripStripLegacyChrome(body);
+}
+
 async function applyTripsConformanceHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -12749,22 +13067,39 @@ async function applyTripsConformanceHeal(tp, history, git) {
 
       // Atlas transforms.
       let newAtlasBody = atlasBody;
+      newAtlasBody = _tripSetFmKey(newAtlasBody, "trip_slug", `trip_slug: ${slug}`);
       newAtlasBody = _tripStripLegacyChrome(newAtlasBody);
       // Only convert `## Mentions` when BOTH the heading and a BacklinkPanel exist.
       if (/^##\s+Mentions\s*$/m.test(newAtlasBody) && /BacklinkPanel/.test(newAtlasBody)) {
         newAtlasBody = _tripHeadingToSectionLabel(newAtlasBody, "Mentions");
       }
       newAtlasBody = _tripRepairAtlasLinks(newAtlasBody, atlasBase);
+      newAtlasBody = _tripEnsureAtlasLinks(newAtlasBody); // v2: per-trip links[]
       const atlasNewPath = `${tripDir}/${atlasBase}.md`;
       if (atlasNewPath !== atlasPath || newAtlasBody !== atlasBody) {
         plan.push({ path: atlasPath, newPath: atlasNewPath, newBody: newAtlasBody });
       }
 
       // Section transforms (every OTHER top-level .md).
+      const retire = []; // v2: orphan `section_kind: links` notes → backup + remove
       for (const f of mdFiles) {
         if (f === atlasPath) continue;
         let body;
         try { body = await adapter.read(f); } catch (_e) { continue; }
+        // v2 retires the orphan v1 Links section note entirely (links now live in
+        // the atlas frontmatter). Detect via `section_kind: links` and skip its
+        // rename/rewrite — it's queued for backup + removal instead.
+        const fmR = body.match(/^---\n([\s\S]*?)\n---/);
+        if (fmR && /^section_kind\s*:\s*["']?links["']?\s*$/m.test(fmR[1])) {
+          retire.push(f);
+          continue;
+        }
+        // v2 board cards (bare `type: trip-board-card`) get the chrome bar.
+        if (fmR && /^type:\s*["']?trip-board-card["']?\s*$/m.test(fmR[1])) {
+          const nbCard = _tripBoardCardChrome(body);
+          if (nbCard !== body) plan.push({ path: f, newPath: f, newBody: nbCard });
+          continue;
+        }
         const legacy = f.split("/").pop().replace(/\.md$/, "");
         // Prefer the note's OWN canonical frontmatter (section_kind + section) when
         // present — this is what makes a re-run idempotent: once the file is renamed
@@ -12809,7 +13144,7 @@ async function applyTripsConformanceHeal(tp, history, git) {
         }
       }
 
-      if (plan.length === 0) { skipped += 1; continue; }
+      if (plan.length === 0 && retire.length === 0) { skipped += 1; continue; }
 
       // --- Collision guard: two sources (e.g. a legacy `Trip Flights.md` + a
       // hand-authored note already carrying section_kind: flights) can compute the
@@ -12843,9 +13178,15 @@ async function applyTripsConformanceHeal(tp, history, git) {
         }
       }
 
+      // --- Retire orphan v1 Links section notes (already backed up above via the
+      // whole-folder .sauce-backup copy). Remove from the live tree. ---
+      for (const f of retire) {
+        try { await adapter.remove(f); } catch (_e) { /* best-effort */ }
+      }
+
       healed += 1;
       history?.push({ event: "info", step: "trips_conformance_heal", name: slug,
-        reason: `healed ${slug}: atlas → ${atlasBase}.md + ${plan.length - 1} section(s); backup at .sauce-backup/trips/${slug}/${ts}`,
+        reason: `healed ${slug}: atlas → ${atlasBase}.md + ${plan.length - 1} section(s); retired ${retire.length} Links section(s); backup at .sauce-backup/trips/${slug}/${ts}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
     } catch (e) {
       warned += 1;
@@ -12883,6 +13224,120 @@ async function applyTripsConformanceHeal(tp, history, git) {
 
   history?.push({ event: "info", step: "trips_conformance_heal", name: "vault",
     summary: { healed, warned, skipped },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
+}
+
+// applyDepth2ParentSectionHeal — folder-is-truth part 2. The project docs tree is a
+// nested section-hub hierarchy: a depth-2 section-hub lives in
+// spice/projects/<slug>/docs/<parent-slug>/<child-slug>/<Child>.md and its
+// parent_section frontmatter MUST name the enclosing (depth-1) section-hub's `section`
+// display name. Real vaults drifted: e.g. headspace's Misc-Subsection.md carried
+// `parent_section: Misc-Subsection` (== its OWN section) instead of `Misc` (the parent
+// folder's section). Part 1 (renderer folder-is-truth) already tolerates the drift for
+// navigation; this heal REPAIRS the data so it's also correct.
+//
+// For every `type: section-hub` note with `depth === 2`: compute its folder, then the
+// PARENT folder (folder minus last segment), find the section-hub note whose folder ===
+// that parent folder, read its `section` display name (strip any [[ ]]), and — when the
+// depth-2 note's current parent_section (also [[ ]]-stripped) differs — rewrite it to
+// `parent_section: "[[<parent section>]]"` (the same wikilink form the + New Sub-Section
+// entity-create template writes). Idempotent (no write when already correct or parent
+// not found), .sauce-backup snapshot before write, per-note try/catch, never throws.
+// Mirrors applyDocsHubModernizeHeal's posture; ungated.
+function _healSetFmKeyFn(body, key, valueLine) {
+  // Single-key replace-or-insert inside the leading frontmatter block. Uses a
+  // function replacer so `$&`/`$1`/`$$` inside valueLine (a section display name)
+  // are never interpreted (see the trips $$-corruption landmine).
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return body; // no frontmatter — refuse to guess
+  let fm = fmMatch[1];
+  const keyRe = new RegExp(`^${key}\\s*:.*$`, "m");
+  if (keyRe.test(fm)) fm = fm.replace(keyRe, () => valueLine);
+  else fm = fm + "\n" + valueLine;
+  return body.replace(/^---\n[\s\S]*?\n---/, () => `---\n${fm}\n---`);
+}
+function _healStripWikilink(v) {
+  if (typeof v !== "string") return "";
+  return v.trim().replace(/^["']|["']$/g, "").replace(/^\[\[|\]\]$/g, "").trim();
+}
+async function applyDepth2ParentSectionHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let files;
+  try { files = await _listAllMarkdownRecursive(adapter, root); }
+  catch (e) {
+    history?.push({ event: "warning", step: "depth2_parent_section_heal", reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  // First pass: index every section-hub note by its containing folder so the
+  // depth-2 pass can resolve a parent folder → its section display name.
+  const hubByFolder = new Map(); // folder → { path, section, depth }
+  const bodyCache = new Map();
+  for (const fpath of files) {
+    try {
+      const body = await adapter.read(fpath);
+      bodyCache.set(fpath, body);
+      if (_noteChromeFrontmatterType(body) !== "section-hub") continue;
+      const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+      const fm = fmMatch ? fmMatch[1] : "";
+      const secM = fm.match(/^section\s*:\s*(.*)$/m);
+      const depthM = fm.match(/^depth\s*:\s*(.*)$/m);
+      const folder = fpath.substring(0, fpath.lastIndexOf("/"));
+      hubByFolder.set(folder, {
+        path: fpath,
+        section: secM ? _healStripWikilink(secM[1]) : "",
+        depth: depthM ? Number(_healStripWikilink(depthM[1])) : NaN,
+      });
+    } catch (_e) { /* unreadable — skip */ }
+  }
+
+  for (const [folder, hub] of hubByFolder) {
+    try {
+      if (Number(hub.depth) !== 2) continue;
+      const parentFolder = folder.substring(0, folder.lastIndexOf("/"));
+      const parentHub = hubByFolder.get(parentFolder);
+      if (!parentHub || !parentHub.section) {
+        // No parent section-hub found — leave the note untouched (folder-is-truth
+        // renderer already tolerates it); record a warning for visibility.
+        warned += 1;
+        history?.push({ event: "warning", step: "depth2_parent_section_heal", target: hub.path, action: "parent_not_found",
+          reason: `no depth-1 section-hub at parent folder ${parentFolder}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const before = bodyCache.get(hub.path);
+      if (typeof before !== "string") { skipped += 1; continue; }
+      const fmMatch = before.match(/^---\n([\s\S]*?)\n---/);
+      const fm = fmMatch ? fmMatch[1] : "";
+      const curM = fm.match(/^parent_section\s*:\s*(.*)$/m);
+      const cur = curM ? _healStripWikilink(curM[1]) : "";
+      if (cur === parentHub.section) { skipped += 1; continue; } // already correct
+      const after = _healSetFmKeyFn(before, "parent_section", `parent_section: "[[${parentHub.section}]]"`);
+      if (after === before) { skipped += 1; continue; }
+      const backupPath = `.sauce-backup/${ts}/${hub.path}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      await adapter.write(hub.path, after);
+      healed += 1;
+      history?.push({ event: "info", step: "depth2_parent_section_heal", target: hub.path, action: "repaired",
+        reason: `parent_section "${cur}" → "[[${parentHub.section}]]" (parent folder ${parentFolder})`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "depth2_parent_section_heal", target: hub.path, reason: e && e.message ? e.message : String(e),
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "depth2_parent_section_heal", name: "vault", summary: { healed, skipped, warned },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
@@ -13432,6 +13887,40 @@ async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git
 
   history?.push({ event: "info", step: "finance_unified_nav_migration", name: "finance",
     summary: { scanned, rewritten, callsReplaced },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyFinanceHubNavBlockRemoval — strips the now-redundant FinanceNav
+// dataviewjs block (and its entity-create sentinel comment) from finance hub
+// notes. FinanceChromeBar owns all hub chrome (primary + overflow + nav);
+// FinanceNav on hubs was fully guarded by chromePresent but still created an
+// empty div and consumed a customjs-guard poll cycle for nothing. Idempotent.
+async function applyFinanceHubNavBlockRemoval(tp, mech, variables, history, git) {
+  const finDir = variables.spice_dir + "/finance";
+  const hubs = [
+    { path: finDir + "/Finance.md" },
+    { path: finDir + "/budgets/Budgets.md" },
+    { path: finDir + "/paychecks/Paychecks.md" },
+    { path: finDir + "/invoices/Invoices.md" },
+    { path: finDir + "/debts/Debts.md" },
+    { path: finDir + "/months/Months.md" },
+    { path: finDir + "/savings/Savings.md" },
+  ];
+  const BLOCK_RE = /\n```dataviewjs\n(?:\/\/ entity-create:\S+[^\n]*\n)?await dv\.view\([^)]*\{[^}]*class:\s*"FinanceNav"[^}]*\}\s*\);\n```/g;
+  let stripped = 0;
+  for (const { path: rel } of hubs) {
+    const file = tp.app.vault.getAbstractFileByPath(rel);
+    if (!file) continue;
+    const before = await tp.app.vault.read(file);
+    const after = before.replace(BLOCK_RE, "");
+    if (after !== before) {
+      await tp.app.vault.modify(file, after);
+      stripped++;
+    }
+  }
+  history?.push({ event: "info", step: "finance_hub_nav_block_removal", name: "finance",
+    summary: { stripped, total: hubs.length },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -21199,6 +21688,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectLinksManagerBackfill = applyProjectLinksManagerBackfill;
     module.exports._injectProjectLinksManagerBody = _injectProjectLinksManagerBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
+    module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
     module.exports.applyProjectLinksHubBackfill = applyProjectLinksHubBackfill;
@@ -21241,6 +21731,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
     module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
+    module.exports.applyStickyHubTitleHeal = applyStickyHubTitleHeal;
+    module.exports.applyJournalHubTitleHeal = applyJournalHubTitleHeal;
+    module.exports._stripHubH1 = _stripHubH1;
     module.exports._stripMeetingsHubEntityCreateBlock = _stripMeetingsHubEntityCreateBlock;
     module.exports._stripEntityCreateMarkerBlock = _stripEntityCreateMarkerBlock;
     module.exports._stripDividersAroundActionBlock = _stripDividersAroundActionBlock;
@@ -21281,6 +21774,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
     module.exports.applyFinanceUnifiedNavMigration = applyFinanceUnifiedNavMigration;
+    module.exports.applyFinanceHubNavBlockRemoval = applyFinanceHubNavBlockRemoval;
     // v0.112.0 S2 — months scaffolding + paycheck-debt-band injection.
     module.exports.applyFinanceMonthsScaffolding = applyFinanceMonthsScaffolding;
     // entity-create:month marker normalization (leading, not trailing) on the months hub.
@@ -21297,7 +21791,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // trips-conformance heal — rename + canonicalize + breadcrumb for existing
     // trips (for run-trips-heal.js TRIPHEAL-*). Pure additive.
     module.exports.applyTripsConformanceHeal = applyTripsConformanceHeal;
+    module.exports.applyDepth2ParentSectionHeal = applyDepth2ParentSectionHeal;
     module.exports._tripStripLegacyChrome = _tripStripLegacyChrome;
+    module.exports._tripEnsureAtlasLinks = _tripEnsureAtlasLinks;
+    module.exports._tripBoardCardChrome = _tripBoardCardChrome;
     // home-scaffold heal — materialize + chrome-heal the singleton
     // spice/home/Home.md (for run-home.js HOME-HEAL-*). The pure body transform
     // is also extracted by regex in the harness; expose it explicitly too.

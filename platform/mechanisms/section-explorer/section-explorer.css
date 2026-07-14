@@ -248,6 +248,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Per-doc ⋯ control — mirrors .se-rail-dots. Trailing edge of the card
+ * (body is flex:1 1 auto, so the dots naturally sit at the end). */
+.se-doc-dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 0.15s var(--se-ease), color 0.15s var(--se-ease);
+}
+.se-doc-dots:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
 .se-doc-empty {
   padding: 16px;
   text-align: center;
@@ -334,6 +351,54 @@
 .se-note-link-add:hover {
   color: var(--text-normal);
   border-color: var(--interactive-accent);
+}
+
+/* ── Move picker (collapsible section tree) + in-place select mode ─────────
+ * The move modal + select bar live OUTSIDE .se-root (the modal is body-mounted;
+ * the select bar re-renders the page pane), so these are intentionally not
+ * nested under .se-root. Native Obsidian tokens throughout. */
+.se-move-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.se-move-headbtn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.se-move-list { max-height: 62vh; overflow-y: auto; margin-bottom: 12px; }
+.se-move-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+  transition: background 0.12s ease;
+}
+.se-move-row:not(.is-current):hover { background: var(--background-modifier-hover); }
+.se-move-row.is-current { color: var(--text-faint); cursor: default; }
+.se-move-toggle {
+  flex: 0 0 auto;
+  width: 1em;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Selectable doc cards gain a leading checkbox; keep the badge + body aligned. */
+.se-doc-card.is-selectable { cursor: default; }
+.se-doc-card.is-selectable:hover { transform: none; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04); }
+.se-doc-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 2px 2px 0 0;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
 }
 
 @keyframes sectionExplorerRailIn {

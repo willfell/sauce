@@ -215,10 +215,10 @@ assertTrue("STHC-ALL-1d miss",
 assertTrue("STHC-ALL-1e empty needle matches",
   hc._matchesFilter({ file: { name: "b.md" } }, "", "") === true);
 
-// STHC-ALL-2: _mode defaults "days", survives via container property.
-assertEq("STHC-ALL-2a _mode({}) → days", hc._mode({}), "days");
-assertEq("STHC-ALL-2b _mode({__stickyHubMode:'all'}) → all",
-  hc._mode({ __stickyHubMode: "all" }), "all");
+// STHC-ALL-2: _mode defaults "all", survives via container property.
+assertEq("STHC-ALL-2a _mode({}) → all", hc._mode({}), "all");
+assertEq("STHC-ALL-2b _mode({__stickyHubMode:'days'}) → days",
+  hc._mode({ __stickyHubMode: "days" }), "days");
 
 // STHC-ALL-3: _extractPreviewFromBody skips frontmatter + fences, returns first
 // content line (≤80 chars).

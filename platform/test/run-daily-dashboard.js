@@ -236,6 +236,80 @@ function loadActivityFeed(windowShim) {
       'expected _BLUEPRINT_COLORS.wiki to be a non-empty string');
   });
 
+  // ── Upcoming-trips selector (TASK 10) ──────────────────────────────
+  // A minimal Dataview-DataArray-ish dv stub scoped to "spice/trips": the
+  // .where(...).array() chain mirrors selectMeetings' DataArray path so the
+  // real selector exercises its production branch. tripsFor(pages) builds a dv
+  // whose pages('"spice/trips"') returns those pages (any other query → []).
+  function tripsDv(tripPages) {
+    function chain(items) {
+      const c = {
+        _arr: items.slice(),
+        where(fn) { return chain(this._arr.filter(fn)); },
+        array() { return this._arr.slice(); },
+      };
+      c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+      Object.defineProperty(c, 'length', { get() { return c._arr.length; } });
+      return c;
+    }
+    return { pages(q) { return chain(q === '"spice/trips"' ? tripPages : []); } };
+  }
+
+  await ok('SDD-TRIPS-1 selectUpcomingTrips keeps in-window trips, drops far ones', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    // Fixed today 2026-07-12: +6 → 2026-07-18 (in window), +40 → 2026-08-21 (out).
+    const dvStub = tripsDv([
+      { type: 'trip', name: 'Denver', start_date: '2026-07-18', file: { name: 'Denver', path: 'spice/trips/Denver/Denver.md' } },
+      { type: 'trip', name: 'Tokyo',  start_date: '2026-08-21', file: { name: 'Tokyo',  path: 'spice/trips/Tokyo/Tokyo.md' } },
+    ]);
+    const rows = Dash.selectUpcomingTrips(dvStub, '2026-07-12', 14);
+    assert(rows.length === 1, 'expected 1 in-window trip, got ' + rows.length);
+    assert(rows[0].daysAway === 6, 'expected daysAway 6, got ' + rows[0].daysAway);
+    assert(typeof rows[0].name === 'string' && rows[0].name === 'Denver', 'expected name "Denver", got ' + rows[0].name);
+    assert(typeof rows[0].path === 'string' && rows[0].path === 'spice/trips/Denver/Denver.md', 'expected path, got ' + rows[0].path);
+  });
+
+  await ok('SDD-TRIPS-2 empty / no-trips is safe (accuris-ero → [])', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    assert(Dash.selectUpcomingTrips(tripsDv([]), '2026-07-12', 14).length === 0, 'expected [] for no trips');
+    // A dv with no trips folder at all (pages() throws) → still []
+    const throwDv = { pages() { throw new Error('no such folder'); } };
+    assert(Dash.selectUpcomingTrips(throwDv, '2026-07-12', 14).length === 0, 'expected [] when pages() throws');
+  });
+
+  await ok('SDD-TRIPS-3 today counts as 0 days (within window), sorted ascending', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dvStub = tripsDv([
+      { type: 'trip', name: 'Later', start_date: '2026-07-18', file: { name: 'Later', path: 'spice/trips/Later/Later.md' } },
+      { type: 'trip', name: 'Today', start_date: '2026-07-12', file: { name: 'Today', path: 'spice/trips/Today/Today.md' } },
+    ]);
+    const rows = Dash.selectUpcomingTrips(dvStub, '2026-07-12', 14);
+    assert(rows.length === 2, 'expected both in window, got ' + rows.length);
+    assert(rows[0].daysAway === 0 && rows[0].name === 'Today', 'expected today (0 days) first, got ' + JSON.stringify(rows[0]));
+    assert(rows[1].daysAway === 6, 'expected second daysAway 6, got ' + rows[1].daysAway);
+  });
+
+  await ok('SDD-TRIPS-4 selectUpcomingTrips computes per-trip packing progress', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dvStub = tripsDv([
+      { type: 'trip', name: 'Destin Florida', start_date: '2026-07-16',
+        file: { name: 'Destin Florida', path: 'spice/trips/destin-florida/Destin Florida.md' } },
+      { type: 'trip-section', section_kind: 'packing-list', trip_slug: 'destin-florida',
+        packing_items: [ { item: 'Socks', checked: true }, { item: 'Underwear', checked: false }, { category: 'Clothing' } ],
+        file: { name: 'Destin Florida — Packing', path: 'spice/trips/destin-florida/Destin Florida — Packing.md' } },
+      { type: 'trip', name: 'No Pack', start_date: '2026-07-14',
+        file: { name: 'No Pack', path: 'spice/trips/no-pack/No Pack.md' } },
+    ]);
+    const rows = Dash.selectUpcomingTrips(dvStub, '2026-07-12', 14);
+    const r = rows.find(x => x.name === 'Destin Florida');
+    assert(r, 'expected Destin Florida row');
+    assert(r.daysAway === 4, 'expected daysAway 4, got ' + r.daysAway);
+    assert(r.packTotal === 2 && r.packed === 1, 'expected packTotal 2/packed 1, got ' + r.packTotal + '/' + r.packed);
+    assert(typeof r.slug === 'string' && r.slug === 'destin-florida', 'expected slug destin-florida, got ' + r.slug);
+    const np = rows.find(x => x.name === 'No Pack');
+    assert(np && np.packTotal === 0, 'expected No Pack packTotal 0, got ' + (np && np.packTotal));
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });
