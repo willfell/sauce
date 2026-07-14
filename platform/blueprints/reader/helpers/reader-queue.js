@@ -6,16 +6,16 @@
  * folder).
  *
  * Renders on a `type: reader-hub` note (invoked via customjs-guard, so its entry
- * method is the instance `render(dv)`). In ONE container it draws, top to bottom:
- *   1. a best-effort "＋ New article" entity-create button row (delegates to
- *      ReaderArticleActions.renderCreateRow → EntityCreate; if that class is cold
- *      the search + queue below still render).
- *   2. a DocSearch strip (scoped to spice/reader, non-recursive, entityType
- *      reader-article, persist:false) whose onChange re-renders the results.
- *   3. glance pills (Unread N · Reading N · Archived N — any zero hidden).
- *   4. BROWSE mode (empty search): three bands — Reading, Unread, Archived (the
+ * method is the instance `render(dv)`). Article creation lives on the nav
+ * chrome-bar ("+ New article" → ReaderArticlePaste.open); this hub no longer
+ * draws its own create button. In ONE container it draws, top to bottom:
+ *   1. a DocSearch strip (scoped to spice/reader, non-recursive, entityType
+ *      reader-article, persist:false, hideTags:true) whose onChange re-renders
+ *      the results.
+ *   2. glance pills (Unread N · Reading N · Archived N — any zero hidden).
+ *   3. BROWSE mode (empty search): three bands — Reading, Unread, Archived (the
  *      Archived band shows a count caption + the most-recent handful).
- *   5. SEARCH mode (active filter): a flat newest-first results list.
+ *   4. SEARCH mode (active filter): a flat newest-first results list.
  * Each article renders via the shared `_renderArticleRow` — a title link that
  * OPENS the note (same openLinkText pattern the to-do TaskTodayList row uses) +
  * a source-meta subtitle + a status-cycle control (unread→reading→archived→unread)
