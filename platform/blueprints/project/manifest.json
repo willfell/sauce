@@ -758,12 +758,17 @@
               "status": {
                 "required": true,
                 "type": "string",
-                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done|archived)$"
               },
               "status_changed_at": {
                 "required": true,
                 "type": "string",
                 "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "pre_archive_status": {
+                "required": false,
+                "type": "string",
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
               },
               "teams": {
                 "required": false,
