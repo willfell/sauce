@@ -131,18 +131,7 @@ class ReaderQueue {
         if (!cur || !cur.file) return;
         if (cur.type !== 'reader-hub') return;
 
-        // 1. Best-effort "＋ New article" create-button row. It used to live in a
-        // separate ReaderArticleActions dataviewjs block; keeping it in THIS block
-        // (like WikiTree hosts WikiHubActions) makes the button↔search gap tight.
-        // If ReaderArticleActions is cold, the search + queue below still render.
-        try {
-            const RAA = window.customJS && window.customJS.ReaderArticleActions;
-            if (RAA && typeof RAA.renderCreateRow === 'function') {
-                RAA.renderCreateRow(dv);
-            }
-        } catch (_e) { /* create button is best-effort */ }
-
-        // 2. DocSearch strip — scoped to spice/reader, NON-recursive (flat leaves),
+        // DocSearch strip — scoped to spice/reader, NON-recursive (flat leaves),
         // entityType reader-article, persist:false (search always starts empty).
         // onChange clears ONLY the results container + re-renders the queue.
         const DocSearch = window.customJS && window.customJS.DocSearch;
@@ -158,6 +147,7 @@ class ReaderQueue {
             recursive: false,
             entityType: 'reader-article',
             persist: false,
+            hideTags: true,
             onChange: (c) => {
                 c.resultsContainer.empty();
                 this._renderResults(dv, c.resultsContainer, c);

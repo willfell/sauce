@@ -179,6 +179,13 @@ function art(title, status, capturedAt, extra) {
 }
 
 // ---------------------------------------------------------------------------
+// HC-READER-NOCREATEROW — legacy create-button row is gone (nav owns creation).
+// ---------------------------------------------------------------------------
+ok('HC-READER-NOCREATEROW ReaderArticleActions no longer exposes renderCreateRow',
+   typeof ReaderArticleActions.renderCreateRow === 'undefined' &&
+   typeof (new ReaderArticleActions()).renderCreateRow === 'undefined');
+
+// ---------------------------------------------------------------------------
 // HC-READER-8 — ReaderArticleView._humanDate: short date + full ISO both →
 // "Thu, Jul 2, 2026"; blank/null/garbage → { text: '' }.
 // ---------------------------------------------------------------------------

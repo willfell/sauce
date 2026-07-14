@@ -9,10 +9,9 @@
  * mirrors the to-do markDone write). An owned top+bottom hairline gives the row
  * breathing room so the template needs no literal `---`.
  *
- * Also exposes a STATIC `renderCreateRow(dv)` — the reader-hub's "＋ New article"
- * entity-create button row (delegates to customJS.EntityCreate.create({ instance,
- * dv }), the same dispatch WikiHubActions uses) — so ReaderQueue can host the
- * create button inside its own block (button↔search gap stays tight).
+ * Article creation is owned by the nav chrome-bar's "+ New article" button
+ * (ReaderChromeBar → ReaderArticlePaste.open); this class no longer renders a
+ * create-button row.
  *
  * COLD-LOAD SAFETY (landmines #1-2): guarded `dv.current()`; every other customJS
  * class reached via `window.customJS?.X`. The pure status-transition helpers
@@ -29,7 +28,6 @@
  *
  * Instance API (browser-side):
  *   ReaderArticleActions.render(dv)          ← the customjs-guard entry point
- *   ReaderArticleActions.renderCreateRow(dv) ← hosted by ReaderQueue on the hub
  */
 class ReaderArticleActions {
 
@@ -37,7 +35,6 @@ class ReaderArticleActions {
 
     _nextStatusForward(status) { return ReaderArticleActions._nextStatusForward(status); }
     statusTransitions(status) { return ReaderArticleActions.statusTransitions(status); }
-    renderCreateRow(dv) { return ReaderArticleActions.renderCreateRow(dv); }
 
     // ---------- Static pure helpers ----------
 
@@ -82,68 +79,6 @@ class ReaderArticleActions {
             { label: 'Mark reading', next: 'reading' },
             { label: 'Mark read', next: 'archived' },
         ];
-    }
-
-    // ---------- Static create-button row (hosted by ReaderQueue on the hub) ----------
-
-    /**
-     * Render the reader-hub's "＋ New article" entity-create button row into
-     * `dv.container` — delegates to customJS.EntityCreate.create({ instance, dv })
-     * (the same dispatch WikiHubActions uses; the button id in the manifest's
-     * new_entity_buttons is "reader-article"). Wrapped in owned top+bottom hairlines
-     * for breathing room, with `_mobilize` so a phone gives it a full-width tap
-     * target. Guarded for the reader-hub only; a no-op elsewhere. Never throws.
-     */
-    static renderCreateRow(dv) {
-        try {
-            if (!dv || !dv.container) return;
-            if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
-            const cur = dv.current && dv.current();
-            if (!cur || !cur.file || cur.type !== 'reader-hub') return;
-
-            // Dual-fire guard: replace (not append) the row on Dataview re-render.
-            const existing = dv.container.querySelector('.reader-hub-actions');
-            if (existing) existing.remove();
-
-            const filePlus = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M12 18v-6"/></svg>`;
-
-            const wrap = dv.container.createEl('div', { cls: 'reader-hub-actions' });
-            wrap.style.cssText = 'margin: 0;';
-            const hr = wrap.createEl('hr');
-            hr.style.cssText = 'border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;';
-            const row = wrap.createEl('div');
-            row.style.cssText = 'display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;';
-
-            const AB = window.customJS && window.customJS.AccentButton;
-            const go = () => {
-                const RAP = window.customJS && window.customJS.ReaderArticlePaste;
-                if (RAP && typeof RAP.open === 'function') { RAP.open(dv); return; }
-                // Fallback (paste helper unavailable): the plain entity-create flow.
-                const EC = window.customJS && window.customJS.EntityCreate;
-                if (!EC || typeof EC.create !== 'function') {
-                    try { new Notice('ReaderArticleActions: create mechanism unavailable.', 8000); } catch (_e) {}
-                    return;
-                }
-                EC.create({ instance: 'reader-article', dv: dv });
-            };
-            if (AB && typeof AB.render === 'function') {
-                ReaderArticleActions._mobilize(AB.render(row, { label: '+ New article', icon: filePlus, onClick: go, flex: true }));
-            }
-
-            const hrBottom = wrap.createEl('hr');
-            hrBottom.style.cssText = 'border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0 0 0;';
-        } catch (_e) { /* create row is best-effort */ }
-    }
-
-    // Mobile-legible sizing (mirrors WikiHubActions._mobilize) — a full-width tap
-    // target on a phone. Layered on AccentButton's flex:1 base.
-    static _mobilize(btn) {
-        if (!btn || !btn.style) return btn;
-        btn.style.flex = '1 1 calc(50% - 6px)';
-        btn.style.minWidth = '128px';
-        btn.style.fontSize = '0.92em';
-        btn.style.padding = '9px 14px';
-        return btn;
     }
 
     // ---------- Instance / browser render ----------
