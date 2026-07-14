@@ -1,0 +1,31 @@
+{
+  "name": "code-fence-button",
+  "version": "0.2.0",
+  "kind": "mechanism",
+  "description": "Always-present view-header button (far-right, code icon) that greys out until text is selected, then wraps the selection in a fence long enough to survive inner backticks. Ships an equivalent 'Sauce: Wrap selection in code fence' command.",
+  "depends_on": [
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    }
+  ],
+  "customjs_classes": [
+    "CodeFenceButton",
+    "CodeFenceButtonInit"
+  ],
+  "customjs_startup_scripts": [
+    "CodeFenceButtonInit"
+  ],
+  "files": [
+    {
+      "source": "code-fence-button.js",
+      "dest": "{{scripts_path}}/code-fence-button/code-fence-button.js"
+    },
+    {
+      "source": "code-fence-button-init.js",
+      "dest": "{{scripts_path}}/code-fence-button/code-fence-button-init.js"
+    }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}

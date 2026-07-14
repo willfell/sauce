@@ -968,11 +968,16 @@ withTempVault((vault) => {
     };
     ok("HC-V01241-SEED-DBLDIV-1 no markdown --- precedes a SectionLabel block",
        !dividerBeforeSectionLabel(mtg));
-    ok("HC-V01241-SEED-DBLDIV-2 the four SectionLabels survive the cleanup",
+    // NOTE: applyMeetingChromeModernizeHeal (HC-V0224-SEED-MIGRATE-MEETING-CHROME-*
+    // below) now STRIPS the Agenda + Action Items SectionLabel fences from every
+    // meeting note. So post-install only the Attendees + Notes labels survive the
+    // combined divider-cleanup + modernize passes; the Agenda/Action-Items labels
+    // are intentionally gone.
+    ok("HC-V01241-SEED-DBLDIV-2 surviving SectionLabels (Attendees+Notes) intact; Agenda/Action-Items stripped by modernize",
        /SectionLabel[\s\S]*?Attendees/.test(mtg) &&
-       /SectionLabel[\s\S]*?Agenda/.test(mtg) &&
        /SectionLabel[\s\S]*?Notes/.test(mtg) &&
-       /SectionLabel[\s\S]*?Action Items/.test(mtg));
+       !/class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"/.test(mtg) &&
+       !/class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"/.test(mtg));
     ok("HC-V01241-SEED-DBLDIV-3 idempotent: one ChromeBar + no leftover divider after two installs",
        (mtg.match(/class:\s*"MeetingChromeBar"/g) || []).length === 1 &&
        !dividerBeforeSectionLabel(mtg));
@@ -1032,32 +1037,96 @@ withTempVault((vault) => {
     ok("HC-V01240-SEED-PNAME-3 doc-note project_name backfilled", typeof docNoteFm.project_name === "string" && docNoteFm.project_name.length > 0);
     ok("HC-V01240-SEED-PNAME-4 doc-note project_name is display name not slug", docNoteFm.project_name === "My Cool Project");
 
-    // ===== HC-V01325-SEED-AIMARKER-* — applyNoteChromeHeal relocates a
-    // mis-placed ACTION_ITEMS_MARKER (and the task run that landed with it).
-    // The seed carries a meeting note frozen at the v0.127.0 buggy shape: the
-    // marker sits ABOVE the "Action Items" SectionLabel and two button-created
-    // action items are parked under Notes (directly above the marker, exactly
-    // where appendTask deposited them). The per-vault note-chrome heal
-    // (_relocateActionItemsMarker, _healNoteChromeBody step 5) moves the marker
-    // BELOW the label and drags both tasks down into the Action Items section.
+    // ===== HC-V01325-SEED-AIMARKER-* — applyMeetingChromeModernizeHeal now
+    // SUPERSEDES the old ACTION_ITEMS_MARKER relocation (see the
+    // HC-V0224-SEED-MIGRATE-MEETING-CHROME-* family below). The seed still
+    // carries the v0.127.0 buggy shape (marker ABOVE the "Action Items"
+    // SectionLabel, two done action items parked under Notes), but the meetings
+    // blueprint moved from an Action-Items section to a Tasks/TaskMeetingList
+    // block. applyMeetingChromeModernizeHeal STRIPS the Agenda + Action Items
+    // SectionLabel fences AND the dead marker, stamping the
+    // <!-- meeting-chrome-modernized --> sentinel. So the correct post-install
+    // end-state is: NO marker, NO "Action Items" label, both done tasks
+    // preserved in document order below the TaskMeetingList block.
     const aim = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Action-Items-Misplaced-2026-06-18.md");
     const aimLines = aim.split("\n");
-    const aimNotesIdx = aimLines.findIndex((l) => l.includes('class: "SectionLabel", args: [{ text: "Notes" }]'));
-    const aimLabelIdx = aimLines.findIndex((l) => l.includes('class: "SectionLabel", args: [{ text: "Action Items" }]'));
-    const aimMarkerIdx = aimLines.findIndex((l) => l.includes("<!-- ACTION_ITEMS_MARKER -->"));
     const aimTask1Idx = aimLines.findIndex((l) => l.includes("Wire up the Planner Agent"));
     const aimTask2Idx = aimLines.findIndex((l) => l.includes("Draft the CR board mapping doc"));
-    ok("HC-V01325-SEED-AIMARKER-1 marker present exactly once",
-       (aim.match(/<!-- ACTION_ITEMS_MARKER -->/g) || []).length === 1);
-    ok("HC-V01325-SEED-AIMARKER-2 marker now sits BELOW the Action Items label",
-       aimLabelIdx !== -1 && aimMarkerIdx !== -1 && aimLabelIdx < aimMarkerIdx);
-    ok("HC-V01325-SEED-AIMARKER-3 both tasks relocated BELOW the marker (into Action Items)",
-       aimTask1Idx > aimMarkerIdx && aimTask2Idx > aimMarkerIdx);
-    ok("HC-V01325-SEED-AIMARKER-4 tasks kept in document order",
+    ok("HC-V01325-SEED-AIMARKER-1 dead ACTION_ITEMS_MARKER stripped by modernize heal",
+       !/<!-- ACTION_ITEMS_MARKER -->/.test(aim));
+    ok("HC-V01325-SEED-AIMARKER-2 legacy 'Action Items' SectionLabel stripped",
+       !/class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"/.test(aim));
+    ok("HC-V01325-SEED-AIMARKER-3 modernize sentinel present exactly once",
+       (aim.match(/<!-- meeting-chrome-modernized -->/g) || []).length === 1);
+    ok("HC-V01325-SEED-AIMARKER-4 both done tasks preserved in document order",
        aimTask1Idx !== -1 && aimTask2Idx !== -1 && aimTask1Idx < aimTask2Idx);
-    ok("HC-V01325-SEED-AIMARKER-5 no task lines remain between Notes and the Action Items label",
-       (aimNotesIdx !== -1 && aimLabelIdx !== -1 && aimNotesIdx < aimLabelIdx &&
-        !aimLines.slice(aimNotesIdx + 1, aimLabelIdx).some((l) => /^[-*+] \[[ xX]\] /.test(l))));
+    ok("HC-V01325-SEED-AIMARKER-5 TaskMeetingList block replaces the Action Items section",
+       /class:\s*"TaskMeetingList"/.test(aim));
+
+    // ===== HC-V0224-SEED-MIGRATE-MEETING-CHROME-* — applyMeetingChromeModernizeHeal =====
+    // The seed carries a LEAF meeting note frozen at the pre-modernize shape:
+    // a non-empty Agenda SectionLabel fence (- Discuss roadmap) + a Notes fence +
+    // an Action Items SectionLabel fence + the dead <!-- ACTION_ITEMS_MARKER -->
+    // + a DONE action line. applyMeetingChromeModernizeHeal folds the Agenda seed
+    // into Notes, strips the Agenda + Action Items fences + the marker, ensures
+    // `links: []` frontmatter, and stamps the <!-- meeting-chrome-modernized -->
+    // sentinel. (Version prefix is a cosmetic label; the release pipeline computes
+    // the real shipping version — this is not a version gate.)
+    const mchrome = helpers.readNote(vault, "spice/meetings/notes/2026/07-July/Chrome-Legacy-2026-07-13.md");
+    const mchromeLines = mchrome.split("\n");
+    const mcNotesIdx = mchromeLines.findIndex((l) => l.includes('class: "SectionLabel", args: [{ text: "Notes" }]'));
+    const mcRoadmapIdx = mchromeLines.findIndex((l) => l.trim() === "- Discuss roadmap");
+    const { frontmatter: mchromeFm } = helpers.parseFrontmatter(mchrome);
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-1 Agenda SectionLabel fence stripped",
+       !/class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"/.test(mchrome));
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-2 Action Items SectionLabel fence stripped",
+       !/class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"/.test(mchrome));
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-3 dead ACTION_ITEMS_MARKER stripped",
+       !/<!-- ACTION_ITEMS_MARKER -->/.test(mchrome));
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-4 Agenda seed 'Discuss roadmap' folded UNDER Notes",
+       mcNotesIdx !== -1 && mcRoadmapIdx !== -1 && mcRoadmapIdx > mcNotesIdx,
+       `notesIdx=${mcNotesIdx} roadmapIdx=${mcRoadmapIdx}`);
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-5 links: [] frontmatter present",
+       Array.isArray(mchromeFm.links) && mchromeFm.links.length === 0);
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-6 meeting-chrome-modernized sentinel present exactly once",
+       (mchrome.match(/<!-- meeting-chrome-modernized -->/g) || []).length === 1);
+    ok("HC-V0224-SEED-MIGRATE-MEETING-CHROME-7 done action line preserved (not dropped)",
+       /- \[x\] Send recap email/.test(mchrome));
+
+    // ===== HC-V0224-SEED-MIGRATE-MEETING-HUB-* — applyMeetingsHubScaffoldArchiveHeal =====
+    // The seed carries a legacy per-day hub note under spice/meetings/hubs/**
+    // (tags: [..., meetings-hub]). The meetings blueprint moved from
+    // one-hub-per-day to a single persistent spice/meetings/Meetings.md hub. The
+    // heal (1) scaffolds Meetings.md when missing, and (2) relocates every legacy
+    // per-day hub under spice/meetings/hubs/** into spice/meetings/hubs/_archive/**
+    // preserving the relative path (copy + remove — nothing deleted). Asserts run
+    // after the idempotency phase (two installs), so a clean end-state also proves
+    // the move happens once + a second install is a no-op.
+    ok("HC-V0224-SEED-MIGRATE-MEETING-HUB-1 persistent spice/meetings/Meetings.md scaffolded",
+       helpers.fileExists(vault, "spice/meetings/Meetings.md"));
+    {
+        let hubFm = {};
+        try { hubFm = helpers.parseFrontmatter(helpers.readNote(vault, "spice/meetings/Meetings.md")).frontmatter; } catch (e) {}
+        const hubTags = Array.isArray(hubFm.tags) ? hubFm.tags : [];
+        ok("HC-V0224-SEED-MIGRATE-MEETING-HUB-2 scaffolded Meetings.md carries meetings-hub tag",
+           hubTags.some((t) => String(t).trim() === "meetings-hub"));
+    }
+    ok("HC-V0224-SEED-MIGRATE-MEETING-HUB-3 legacy per-day hub GONE from its original path",
+       !helpers.fileExists(vault, "spice/meetings/hubs/2026/07-July/Meetings-2026-07-13.md"));
+    ok("HC-V0224-SEED-MIGRATE-MEETING-HUB-4 legacy per-day hub PRESENT under hubs/_archive/ (path preserved)",
+       helpers.fileExists(vault, "spice/meetings/hubs/_archive/2026/07-July/Meetings-2026-07-13.md"));
+    {
+        // The archive step is a plain move (copy + remove), but the EARLIER
+        // applyMeetingsHubChromeBarHeal rewrites the hub's SpaceNavButtons block
+        // to a MeetingChromeBar before the move — so the archived copy is the
+        // chrome-healed body, not byte-equal to the raw seed. What must be
+        // preserved through the move is the user prose + the meetings-hub tag.
+        let archived = "";
+        try { archived = helpers.readNote(vault, "spice/meetings/hubs/_archive/2026/07-July/Meetings-2026-07-13.md"); } catch (e) {}
+        ok("HC-V0224-SEED-MIGRATE-MEETING-HUB-5 archived hub preserves user prose + meetings-hub tag",
+           archived.includes("- legacy per-day hub body preserved verbatim") &&
+           /^\s*-\s*meetings-hub\s*$/m.test(archived));
+    }
 
     // ===== HC-V01330-SEED-DVGUARD-* — applyNoteChromeHeal step 4b guards the
     // eager dv.current().file.path in the PeopleRendering inline_body. The same

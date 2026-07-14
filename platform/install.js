@@ -545,6 +545,7 @@ module.exports = async function (tp) {
     // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
     // reaches them (see note-chrome.md §6). Separate heal for that surface.
     await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+    await applyMeetingsHubScaffoldArchiveHeal(tp, variables, installedNow.history, git); // NEW — scaffolds the persistent spice/meetings/Meetings.md hub + archives legacy per-day hubs under spice/meetings/hubs/ into _archive/; backup-first, idempotent, never throws.
     await applyStickyHubTitleHeal(tp, installedNow.history, git);
     await applyJournalHubTitleHeal(tp, installedNow.history, git);
 
@@ -594,6 +595,11 @@ module.exports = async function (tp) {
     // Ungated, idempotent (skip if the block is already present), .sauce-backup.
     await applyProjectTodoTaskListHeal(tp, installedNow.history, git);
     await applyMeetingTaskListHeal(tp, installedNow.history, git);
+    // 6a7b. meetings — modernize existing meeting-note chrome: fold Agenda into
+    //   Notes, strip the legacy Agenda + Action Items SectionLabel fences + the
+    //   dead ACTION_ITEMS_MARKER, ensure links: [] frontmatter. Runs AFTER the
+    //   task-list heal so action lines are already converted to task notes.
+    await applyMeetingChromeModernizeHeal(tp, installedNow.history, git);
 
     // 6a8. task-entity — strip --- chrome separators from existing task notes.
     await applyTaskNoteChromeHrHeal(tp, installedNow.history, git);
@@ -7338,6 +7344,130 @@ function _stripMeetingsHubEntityCreateBlock(body) {
   return _stripEntityCreateMarkerBlock(body, "meeting");
 }
 
+// _archivedHubPath — pure. Maps a per-day hub note under spice/meetings/hubs/
+// into the _archive/ subtree, preserving the relative path. Idempotent: a path
+// already under _archive/ (or outside the hubs root) is returned unchanged.
+function _archivedHubPath(fpath) {
+  if (typeof fpath !== "string") return fpath;
+  const ROOT = "spice/meetings/hubs/";
+  if (!fpath.startsWith(ROOT)) return fpath;
+  const rel = fpath.slice(ROOT.length);
+  if (rel.startsWith("_archive/")) return fpath;
+  return ROOT + "_archive/" + rel;
+}
+
+// applyMeetingsHubScaffoldArchiveHeal — the meetings blueprint moved from
+// one-hub-per-day to a single persistent hub spice/meetings/Meetings.md. This
+// heal (1) scaffolds Meetings.md when it's missing (mirrors the installed hub
+// template body, identity tag + views path resolved from variables like other
+// installed notes), and (2) relocates every legacy per-day hub note under
+// spice/meetings/hubs/** into spice/meetings/hubs/_archive/** preserving the
+// relative path. Backup-first, idempotent, per-file try/catch, NEVER throws.
+// The archive step only touches spice/meetings/hubs/, so the scaffolded
+// Meetings.md (which lives at spice/meetings/Meetings.md) is never swept in.
+async function applyMeetingsHubScaffoldArchiveHeal(tp, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const MEETINGS_DIR = "spice/meetings";
+  const MEETINGS_PATH = "spice/meetings/Meetings.md";
+  const vaultTag = (variables && variables.vault_identity_tag) || "";
+  const viewsPath = (variables && variables.views_path) || "ranch/views";
+
+  // 1. Scaffold the persistent hub if missing (never overwrite an existing one).
+  try {
+    if (!(await adapter.exists(MEETINGS_DIR))) {
+      try { await adapter.mkdir(MEETINGS_DIR); } catch (_e) { /* already exists */ }
+    }
+    if (!(await adapter.exists(MEETINGS_PATH))) {
+      const body = [
+        "---",
+        "created_at: \"" + new Date().toISOString().replace(/\.\d{3}Z$/, "Z") + "\"",
+        "tags:",
+        "  - \"" + vaultTag + "\"",
+        "  - meetings-hub",
+        "cssclasses:",
+        "  - wide",
+        "  - cards",
+        "  - cards-cols-2",
+        "---",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "MeetingChromeBar" });`,
+        "```",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Meetings", top: true }] });`,
+        "```",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "MeetingsBrowseList" });`,
+        "```",
+        "",
+      ].join("\n");
+      await adapter.write(MEETINGS_PATH, body);
+      history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md", action: "scaffolded",
+        reason: `scaffolded ${MEETINGS_PATH}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md",
+      reason: `scaffold failed: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+
+  // 2. Archive legacy per-day hub notes under spice/meetings/hubs/ (excluding
+  // anything already under _archive/) into the _archive/ subtree.
+  const hubsRoot = "spice/meetings/hubs";
+  if (!(await adapter.exists(hubsRoot))) return;
+  let files;
+  try {
+    files = await _listAllMarkdownRecursive(adapter, hubsRoot);
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal",
+      reason: `list failed for ${hubsRoot}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  let archived = 0, warned = 0;
+  for (const fp of files) {
+    try {
+      const dest = _archivedHubPath(fp);
+      if (dest === fp) continue; // already archived or outside root — skip
+      // Snapshot the original before moving.
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      const before = await adapter.read(fp);
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      // Ensure the destination's parent dir exists (best-effort mkdir -p).
+      const destParent = dest.substring(0, dest.lastIndexOf("/"));
+      const parts = destParent.split("/");
+      let acc = "";
+      for (const seg of parts) {
+        acc = acc ? acc + "/" + seg : seg;
+        if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* already exists */ } }
+      }
+      // Move: read → write(dest) → remove(fp). Skip if dest already occupied.
+      if (await adapter.exists(dest)) { continue; }
+      await adapter.write(dest, before);
+      await adapter.remove(fp);
+      archived += 1;
+      history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", target: fp, action: "archived",
+        reason: `archived ${fp} -> ${dest}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal",
+        reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", name: "vault",
+    reason: `archived ${archived}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
 async function applyMeetingsHubChromeBarHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -11542,6 +11672,115 @@ async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, existingNa
     }
   }
   return { created, createdTitles };
+}
+
+// _modernizeMeetingBody — pure, idempotent. Removes the legacy "Agenda" and
+// "Action Items" SectionLabel fences + the dead <!-- ACTION_ITEMS_MARKER -->,
+// folding any non-empty Agenda seed content into the Notes section. Leaves the
+// Tasks/TaskMeetingList block (and everything else) intact. Returns input
+// unchanged when neither legacy section is present.
+function _modernizeMeetingBody(body) {
+  if (typeof body !== "string") return body;
+  const hadAgenda = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"/.test(body);
+  const hadAI = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"/.test(body) || /<!--\s*ACTION_ITEMS_MARKER\s*-->/.test(body);
+  if (!hadAgenda && !hadAI) return body;
+  let out = body;
+  // 1. Capture Agenda seed content (between the Agenda fence and the next fence/marker/heading).
+  let agendaContent = "";
+  const agendaRe = /```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Agenda"[\s\S]*?```\n?([\s\S]*?)(?=```dataviewjs|<!--\s*ACTION_ITEMS_MARKER\s*-->|$)/;
+  const am = out.match(agendaRe);
+  if (am && am[1] != null) {
+    agendaContent = am[1].split("\n").map(l => l.replace(/\s+$/, "")).filter(l => l.trim() && l.trim() !== "-").join("\n").trim();
+    out = out.replace(agendaRe, "");
+  }
+  // 2. Remove the Action Items SectionLabel fence + dead marker.
+  out = out.replace(/```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Action Items"[\s\S]*?```\n?/g, "");
+  out = out.replace(/<!--\s*ACTION_ITEMS_MARKER\s*-->\n?/g, "");
+  // 3. Fold captured Agenda content into the Notes section (after the Notes fence).
+  if (agendaContent) {
+    const notesRe = /(```dataviewjs\n[^`]*?class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Notes"[\s\S]*?```\n)/;
+    if (notesRe.test(out)) out = out.replace(notesRe, `$1\n${agendaContent}\n`);
+  }
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
+}
+
+// applyMeetingChromeModernizeHeal — backup-first, idempotent, never-throw
+// install heal. Rewrites EVERY existing meeting note under spice/meetings/notes:
+// folds non-empty Agenda seed content into Notes, strips the legacy Agenda +
+// Action Items SectionLabel fences + the dead <!-- ACTION_ITEMS_MARKER -->, and
+// ensures `links: []` frontmatter exists. Stamped with the
+// <!-- meeting-chrome-modernized --> sentinel for idempotent skip.
+async function applyMeetingChromeModernizeHeal(tp, history, git) {
+  const STEP = "meeting_chrome_modernize_heal";
+  const SENTINEL = "<!-- meeting-chrome-modernized -->";
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const ROOT = "spice/meetings/notes";
+    if (!(await adapter.exists(ROOT).catch(() => false))) {
+      history?.push({ event: "info", step: STEP, name: "meetings",
+        summary: { touched: 0, skipped_reason: "spice/meetings/notes not present" },
+        git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+        completed_at: new Date().toISOString() });
+      return;
+    }
+
+    async function _walk(dir, out = []) {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const f of (listing.files || [])) { if (f.endsWith(".md")) out.push(f); }
+      for (const sub of (listing.folders || [])) { await _walk(sub, out); }
+      return out;
+    }
+    const meetings = await _walk(ROOT);
+    if (!meetings.length) return;
+
+    let touched = 0;
+    for (const fp of meetings) {
+      try {
+        const before = await adapter.read(fp);
+        if (before.includes(SENTINEL)) continue; // idempotent skip
+
+        let after = _modernizeMeetingBody(before);
+
+        // Ensure `links: []` frontmatter exists (touch only the block between
+        // the first two --- fences).
+        const fmMatch = after.match(/^(---\n)([\s\S]*?)(\n---\n)/);
+        if (fmMatch && !/^links:/m.test(fmMatch[2])) {
+          let fmBody = fmMatch[2];
+          if (/^summary:.*$/m.test(fmBody)) {
+            fmBody = fmBody.replace(/^(summary:.*)$/m, "$1\nlinks: []");
+          } else {
+            fmBody = fmBody + "\nlinks: []";
+          }
+          after = fmMatch[1] + fmBody + fmMatch[3] + after.slice(fmMatch[0].length);
+        }
+
+        after = after.replace(/\s*$/, "") + "\n\n" + SENTINEL + "\n";
+
+        if (after === before) continue;
+        await _backupAndWrite(adapter, fp, before, after);
+        touched += 1;
+      } catch (e) {
+        history?.push({ event: "warning", step: STEP, name: "meetings",
+          target: fp, reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+
+    history?.push({ event: "info", step: STEP, name: "meetings",
+      summary: { scanned: meetings.length, notes_touched: touched },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: STEP, name: "meetings",
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
 }
 
 // applyMeetingTasksToEntityMigration — task-entity. Ungated, backup-first,
@@ -21820,6 +22059,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyTaskNoteProjectSlugHeal = applyTaskNoteProjectSlugHeal;
     module.exports.applyProjectTodoTaskListHeal = applyProjectTodoTaskListHeal;
     module.exports.applyMeetingTaskListHeal = applyMeetingTaskListHeal;
+    module.exports.applyMeetingChromeModernizeHeal = applyMeetingChromeModernizeHeal;
+    module.exports._modernizeMeetingBody = _modernizeMeetingBody;
+    module.exports._archivedHubPath = _archivedHubPath;
     module.exports._cleanProjectLinkName = _cleanProjectLinkName;
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
