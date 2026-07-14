@@ -15,8 +15,8 @@ class StickyChromeBar {
       if (!customJS || !customJS.ChromeBar || typeof customJS.ChromeBar.makeAdapter !== "function"
         || typeof customJS.ChromeBar.render !== "function") return;
       const out = customJS.ChromeBar.render(dv, customJS.ChromeBar.makeAdapter(this._config()));
-      this._maybeRenderPinnedLinks(dv);
       this._maybeRenderBanner(dv);
+      this._maybeRenderPinnedLinks(dv);
       return out;
     } catch (_e) { /* never throw */ }
   }
@@ -29,6 +29,16 @@ class StickyChromeBar {
       if (!page || page.type !== "sticky-note") return;
       if (customJS && customJS.SectionExplorer && typeof customJS.SectionExplorer.renderNoteLinks === "function") {
         customJS.SectionExplorer.renderNoteLinks(dv);
+        const container = (dv && dv.container) ? dv.container : dv;
+        if (container && typeof container.createEl === "function") {
+          try {
+            if (typeof container.querySelectorAll === "function") {
+              (container.querySelectorAll(".sticky-links-divider") || []).forEach((e) => { try { e.remove(); } catch (_e) {} });
+            }
+          } catch (_e) {}
+          const hr = container.createEl("hr", { cls: "sticky-links-divider" });
+          hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border-hover); margin: 8px 0 12px 0;";
+        }
       }
     } catch (_e) { /* never throw */ }
   }
