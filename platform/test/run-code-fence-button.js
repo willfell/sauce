@@ -48,7 +48,7 @@ assertTrue("CFB-M5: init source parses", (() => {
 // every public method MUST be an instance method; a `static` method would be
 // undefined on customJS.CodeFenceButton at runtime (the v0.2.1 "unavailable" bug).
 console.log("\n--- Pass 1b: instance-method contract ---");
-for (const meth of ["computeFence", "wrapSelection", "buttonState", "wrapActiveEditor"]) {
+for (const meth of ["computeFence", "wrapSelection", "buttonState", "wrapActiveEditor", "computeInlineTicks", "wrapInline", "wrapActiveEditorInline"]) {
   assertTrue(`CFB-INST-${meth}: reachable on instance`, cfb && typeof cfb[meth] === "function");
   assertTrue(`CFB-INST-${meth}: NOT static (undefined on class)`, typeof CFB[meth] === "undefined");
 }
@@ -96,6 +96,22 @@ const bsOn = cfb.buttonState("source", true);
 assertEq("CFB-15: editable + selection enabled", bsOn.enabled, true);
 assertEq("CFB-16: enabled opacity = 1", bsOn.opacity, 1);
 assertEq("CFB-17: enabled label = wrap", bsOn.label, "Wrap selection in code fence");
+// Inline kind → inline-code phrasing in the tooltips.
+assertEq("CFB-18: inline preview label", cfb.buttonState("preview", true, "inline").label, "Switch to editing mode to wrap in inline code");
+assertEq("CFB-19: inline no-selection label", cfb.buttonState("source", false, "inline").label, "Select text to wrap in inline code");
+assertEq("CFB-20: inline enabled label", cfb.buttonState("source", true, "inline").label, "Wrap selection in inline code");
+
+// Pass 5 — inline code (single-backtick) wrapping.
+console.log("\n--- Pass 5: inline code ---");
+assertEq("CFB-21: plain text → 1 tick", cfb.computeInlineTicks("hello"), "`");
+assertEq("CFB-22: contains 1 tick → 2 ticks", cfb.computeInlineTicks("a ` b"), "``");
+assertEq("CFB-23: plain wrap = single backticks", cfb.wrapInline("hello").text, "`hello`");
+assertEq("CFB-24: cursor after closing tick", (() => { const w = cfb.wrapInline("hi"); return w.cursor === w.text.length; })(), true);
+assertEq("CFB-25: empty → null", cfb.wrapInline("   "), null);
+// Content containing a backtick → 2-tick delimiter + space padding (CommonMark).
+assertEq("CFB-26: backtick content padded", cfb.wrapInline("a ` b").text, "`` a ` b ``");
+// Content touching a backtick at an edge → padded even at 1-tick-longest.
+assertEq("CFB-27: edge backtick padded", cfb.wrapInline("`x").text, "`` `x ``");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (failures.length) console.log("\n" + failures.join("\n"));
