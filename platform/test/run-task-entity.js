@@ -1030,15 +1030,30 @@ ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
   assert(res.overdue.length === 1, 'overdue = the open 06-29: got ' + res.overdue.length);
 });
 
-// TTL-2. buildBands excludes future-due; undated tasks enter Today.
-ok('TTL-2 buildBands excludes future, undated enter today', () => {
+// TTL-2. buildBands routes future-due into Upcoming; undated tasks enter Today.
+ok('TTL-2 buildBands routes future to upcoming, undated enter today', () => {
   const res = TaskTodayList.buildBands([
-    { due: '2026-07-02', status: 'open' },  // future → neither
+    { due: '2026-07-02', status: 'open' },  // future → upcoming
     { due: '', status: 'open' },            // undated → today
     { due: null, status: 'open' },          // undated → today
   ], '2026-07-01');
   assert(res.today.length === 2, 'undated in today: got ' + res.today.length);
   assert(res.overdue.length === 0, 'no overdue: got ' + res.overdue.length);
+  assert(res.upcoming.length === 1, 'future-due in upcoming: got ' + res.upcoming.length);
+  assert(res.upcoming[0].due === '2026-07-02', 'upcoming holds the future task');
+});
+
+// TTL-5. buildBands sorts upcoming soonest-first (independent of priority).
+ok('TTL-5 buildBands sorts upcoming ascending by due (soonest first)', () => {
+  const tasks = [
+    { status: 'open', due: '2026-07-15', title: 'C' },
+    { status: 'open', due: '2026-07-09', title: 'A' },
+    { status: 'open', due: '2026-07-12', title: 'B' },
+  ];
+  const bands = TaskTodayList.buildBands(tasks, '2026-07-08');
+  const order = bands.upcoming.map((t) => t.title);
+  assert(JSON.stringify(order) === JSON.stringify(['A', 'B', 'C']),
+    'expected A,B,C (soonest first), got ' + JSON.stringify(order));
 });
 
 // TTL-3. buildBands tolerates a null/undefined list (never throws).
