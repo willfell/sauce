@@ -466,6 +466,19 @@ class SpaceDailyDashboard {
         if (q && Array.isArray(q.pages)) activityPages = q.pages;
       } catch (_) { activityPages = []; }
     }
+    // Always-show in-progress reading: union reader-articles with status:reading
+    // that the today-scoped query didn't include (dedup by file.path).
+    try {
+      const reading = SpaceDailyDashboard.selectReadingArticles(dv);
+      if (reading.length) {
+        const seen = new Set(activityPages.map((p) => (p && p.file && p.file.path) || ""));
+        for (const r of reading) {
+          const key = (r && r.file && r.file.path) || "";
+          if (key && !seen.has(key)) { activityPages.push(r); seen.add(key); }
+        }
+      }
+    } catch (_e) { /* reading union is best-effort */ }
+
     const activityCount = activityPages.length;
 
     // TASK 10: count upcoming trips (<=14 days) so a day whose ONLY signal is an
@@ -781,7 +794,7 @@ class SpaceDailyDashboard {
         { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
         { bucketKey: "wiki", match: (t) => t === "wiki-page" || t === "wiki-section" },
       ],
-      groupOrder: ["cowork", "project", "wiki", "kanban", "trip"],
+      groupOrder: ["cowork", "project", "wiki", "reader-article", "kanban", "trip"],
       groupOrderBottom: ["sticky-note"],
       // Sticky-note renders oldest-first so the day's sticky notes read in
       // the order they were taken. Open/closed-by-default now follows the
@@ -792,7 +805,7 @@ class SpaceDailyDashboard {
       ascendingGroups: ["sticky-note"],
       // Render the sticky-note group header as "Sticky Notes" instead of the
       // raw type id "sticky-note" (activity-feed groupLabels opt).
-      groupLabels: { "sticky-note": "Sticky Notes", "wiki": "Wiki" },
+      groupLabels: { "sticky-note": "Sticky Notes", "wiki": "Wiki", "reader-article": "Reader" },
       colorByType: this._BLUEPRINT_COLORS,
       rollUpRoots: this._buildRollupRules(dv),
       metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
@@ -807,7 +820,7 @@ class SpaceDailyDashboard {
       // wrong calendar day. Activity-feed iterates tsKeys in order and
       // OR-passes on the first in-window match, so `day` first gives the
       // semantic value precedence without breaking kanban OR semantics.
-      tsKeys: ["day", "created_at", "status_changed_at"],
+      tsKeys: ["day", "created_at", "status_changed_at", "captured_at"],
       // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
       // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
       // semantics give metaBuilder precedence over getSubtitle (only one
@@ -868,7 +881,7 @@ class SpaceDailyDashboard {
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice",
       "kanban", "board-card",
-      "wiki-page", "wiki-section", "doc-note",
+      "wiki-page", "wiki-section", "doc-note", "reader-article",
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
       "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
     ];
@@ -885,6 +898,7 @@ class SpaceDailyDashboard {
       cowork:    "var(--color-blue)",   // v0.10.0 — synthetic bucket from bucketRules; sub-type pills stay neutral
       meeting:   "var(--color-blue)",
       "sticky-note": "var(--color-orange)",
+      "reader-article": "var(--color-cyan)",
       project:   "var(--color-green)",
       person:    "var(--color-purple)",
       team:      "var(--color-pink)",
@@ -1176,7 +1190,9 @@ class SpaceDailyDashboard {
     parentEl.innerHTML = "";
 
     // Time stamp (created_at preferred, file.mtime fallback)
-    const tsRaw = p && (p.created_at || (p.file && p.file.mtime));
+    const tsRaw = (p && p.type === "reader-article")
+      ? (p.status_changed_at || p.captured_at || p.created_at || (p.file && p.file.mtime))
+      : (p && (p.created_at || (p.file && p.file.mtime)));
     const formatted = this._formatTime(tsRaw);
     if (formatted) {
       const t = parentEl.createEl("time");
@@ -1191,9 +1207,17 @@ class SpaceDailyDashboard {
       const dot = pill.createEl("span");
       dot.className = "sauce-pill-dot";
       const colorMap = this._BLUEPRINT_PILL_COLORS;
-      dot.style.background = (colorMap && colorMap[type]) || "var(--color-base-50)";
+      let pillText = type;
+      let dotColor = (colorMap && colorMap[type]) || "var(--color-base-50)";
+      if (type === "reader-article") {
+        const st = String(p.status == null ? "unread" : p.status).trim().toLowerCase();
+        if (st === "reading") { pillText = "Reading"; dotColor = "var(--interactive-accent)"; }
+        else if (st === "archived") { pillText = "Read"; dotColor = "var(--color-green)"; }
+        else { pillText = "Added"; dotColor = "var(--color-orange)"; }
+      }
+      dot.style.background = dotColor;
       const label = pill.createEl("span");
-      label.textContent = type;
+      label.textContent = pillText;
     }
 
     // Open-todo badge (v0.8.0 — universal across Meetings + Activity)
