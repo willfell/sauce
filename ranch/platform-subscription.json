@@ -3,6 +3,14 @@
   "workshop_version": "0.230.2",
   "mechanisms": [
     {
+      "name": "editor-width",
+      "version": "0.1.0"
+    },
+    {
+      "name": "agent-embed",
+      "version": "0.1.0"
+    },
+    {
       "name": "customjs-guard",
       "version": "1.0.0"
     },

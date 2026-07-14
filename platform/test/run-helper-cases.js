@@ -8078,7 +8078,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 30, "HC-V0890-VERSION-D: mechanism count = 30 (+code-fence-button mechanism)");
+  assertEqual(mechCount, 32, "HC-V0890-VERSION-D: mechanism count = 32 (+code-fence-button +editor-width +agent-embed mechanisms)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8631,7 +8631,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 30, "HC-V0891-VERSION-D: mechanism count = 30 (+code-fence-button mechanism)");
+  assertEqual(mechs.length, 32, "HC-V0891-VERSION-D: mechanism count = 32 (+code-fence-button +editor-width +agent-embed mechanisms)");
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
@@ -14534,6 +14534,21 @@ async function caseV01154BackfillBlockFormStillWorks() {
     r2.touched === false && r2.body === r.body);
 }
 
+async function caseEditorWidthPatchedAssets() {
+  console.log("\n--- Case: editor-width patched slider assets ---");
+  const dir = path.join(__dirname, "..", "mechanisms", "editor-width", "plugin");
+  const main = fs.readFileSync(path.join(dir, "main.js"), "utf8");
+  assertTrue("editor-width: null guard present", main.includes("file?.name"), "missing file?.name");
+  assertTrue("editor-width: no unguarded file.name", !main.includes("if (file.name)"), "found unguarded read");
+  assertTrue("editor-width: debug log 1.1 stripped", !main.includes('console.log("1.1")'), "1.1 present");
+  assertTrue("editor-width: debug log 1.2 stripped", !main.includes('console.log("1.2")'), "1.2 present");
+  const mf = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+  assertEq("editor-width: plugin id", mf.id, "editor-width-slider");
+  const mech = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "mechanisms", "editor-width", "manifest.json"), "utf8"));
+  assertEq("editor-width: bundled_plugin id", mech.bundled_plugin && mech.bundled_plugin.id, "editor-width-slider");
+  assertEq("editor-width: bundled files count", (mech.bundled_plugin.files || []).length, 3);
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -15090,6 +15105,47 @@ async function caseHCV0128FinancePlanning() {
   assertTrue("HC-V0128-FIN-PLAN-RF: rule_fragments has finance-plan + savings-accounts",
     (man.rule_fragments || []).some(r => r && r.fragment && r.fragment.naming_pattern === "^Finance Plan\\.md$") &&
     (man.rule_fragments || []).some(r => r && r.fragment && r.fragment.naming_pattern === "^Savings-.+\\.md$"));
+}
+
+async function caseDisableSmartConnectionsOnce() {
+  console.log("\n--- Case: disableSmartConnectionsOnce ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
+    const cp = path.join(dir, ".obsidian/community-plugins.json");
+    fs.writeFileSync(cp, JSON.stringify(["dataview", "smart-connections", "claudian"], null, 2));
+    const tp = makeTpStub(dir);
+    const platformInstall = require(CANONICAL_INSTALLER);
+    await platformInstall.disableSmartConnectionsOnce(tp, [], {});
+    let arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("sc removed", !arr.includes("smart-connections"), JSON.stringify(arr));
+    assertTrue("dataview preserved", arr.includes("dataview"), JSON.stringify(arr));
+    assertTrue("sentinel written", fs.existsSync(path.join(dir, ".obsidian/.sauce-heals/sc-disabled-once")), "no sentinel");
+    // backup lives under the sauce-audit-sanctioned .obsidian/, NOT a top-level .sauce-backup/
+    const bdir = path.join(dir, ".obsidian/.sauce-heals/backups");
+    assertTrue("backup under .obsidian/.sauce-heals/backups", fs.existsSync(bdir) && fs.readdirSync(bdir).length >= 1, "no sanctioned backup");
+    assertTrue("no top-level .sauce-backup dir", !fs.existsSync(path.join(dir, ".sauce-backup")), "unsanctioned top-level backup dir created");
+    // idempotent + a later deliberate re-enable survives
+    fs.writeFileSync(cp, JSON.stringify(["dataview", "smart-connections"], null, 2));
+    await platformInstall.disableSmartConnectionsOnce(tp, [], {});
+    arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("re-enabled sc survives after sentinel", arr.includes("smart-connections"), JSON.stringify(arr));
+  });
+}
+
+async function caseRetireOldClaudianOnce() {
+  console.log("\n--- Case: retireOldClaudianOnce ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
+    const cp = path.join(dir, ".obsidian/community-plugins.json");
+    fs.writeFileSync(cp, JSON.stringify(["claudian", "realclaudian", "dataview"], null, 2));
+    const tp = makeTpStub(dir);
+    const platformInstall = require(CANONICAL_INSTALLER);
+    await platformInstall.retireOldClaudianOnce(tp, [], {});
+    const arr = JSON.parse(fs.readFileSync(cp, "utf8"));
+    assertTrue("old claudian removed", !arr.includes("claudian"), JSON.stringify(arr));
+    assertTrue("realclaudian preserved", arr.includes("realclaudian"), JSON.stringify(arr));
+    assertTrue("sentinel written", fs.existsSync(path.join(dir, ".obsidian/.sauce-heals/claudian-retired-once")), "no sentinel");
+  });
 }
 
 (async function main() {
@@ -24179,6 +24235,12 @@ type: cowork-microscope
   await caseV01154BackfillInlineWithDebtUntouched();
   await caseV01154BackfillInlineWithoutDebtUntouched();
   await caseV01154BackfillBlockFormStillWorks();
+
+  await caseEditorWidthPatchedAssets();
+
+  // sentinel-guarded one-time plugin-removal heals
+  await caseDisableSmartConnectionsOnce();
+  await caseRetireOldClaudianOnce();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

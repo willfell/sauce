@@ -1193,6 +1193,61 @@ async function caseHC_EPI_6_EndToEndChain() {
     });
 }
 
+async function caseHC_EPI_7_AutoEnableFalseNotEnabled() {
+    const label = "HC-EPI-7 external_plugins[auto_enable:false] fetches the dir but does NOT add id to community-plugins.json";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi7-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.97.2",
+                    foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "smart-connections", required: false, auto_enable: false }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.97.2",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }],
+                    blueprints: []
+                }
+            });
+            // community-plugins.json must EXIST (else applyExternalPlugins short-circuits and aborts).
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            const indexBody = JSON.stringify([
+                { id: "smart-connections", name: "Smart Connections", repo: "brianpetro/obsidian-smart-connections" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("smart-connections", "brianpetro/obsidian-smart-connections", { skipStyles: true })
+            );
+
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);
+            });
+
+            const dir = path.join(vaultPath, ".obsidian/plugins/smart-connections");
+            assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": manifest.json present (dir still fetched)");
+            assertTrue(fs.existsSync(path.join(dir, "main.js")), label + ": main.js present (dir still fetched)");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(!cp.includes("smart-connections"), label + ": community-plugins.json does NOT contain id (not enabled)");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
 // BS13: phaseWriteActivation atomic write + backup-on-overwrite
 async function caseBS13ActivationAtomicAndBackup() {
     const label = "BS13 phaseWriteActivation atomic write + backup-on-overwrite";
@@ -1246,7 +1301,9 @@ const cases = {
         caseHC_EPI_3_FetchFails,
         caseHC_EPI_4_IndexFetchFails,
         caseHC_EPI_5_IdNotInIndex,
-        caseHC_EPI_6_EndToEndChain
+        caseHC_EPI_6_EndToEndChain,
+        // v0.94.x — auto_enable:false installs the dir without enabling
+        caseHC_EPI_7_AutoEnableFalseNotEnabled
     ]
 };
 
