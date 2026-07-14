@@ -545,6 +545,7 @@ module.exports = async function (tp) {
     // `type:` field) — applyNoteChromeHeal's type-keyed dispatch above never
     // reaches them (see note-chrome.md §6). Separate heal for that surface.
     await applyMeetingsHubChromeBarHeal(tp, installedNow.history, git);
+    await applyMeetingsHubScaffoldArchiveHeal(tp, variables, installedNow.history, git); // NEW — scaffolds the persistent spice/meetings/Meetings.md hub + archives legacy per-day hubs under spice/meetings/hubs/ into _archive/; backup-first, idempotent, never throws.
     await applyStickyHubTitleHeal(tp, installedNow.history, git);
     await applyJournalHubTitleHeal(tp, installedNow.history, git);
 
@@ -7341,6 +7342,130 @@ function _stripEntityCreateMarkerBlock(body, instanceId) {
 // instance specifically.
 function _stripMeetingsHubEntityCreateBlock(body) {
   return _stripEntityCreateMarkerBlock(body, "meeting");
+}
+
+// _archivedHubPath — pure. Maps a per-day hub note under spice/meetings/hubs/
+// into the _archive/ subtree, preserving the relative path. Idempotent: a path
+// already under _archive/ (or outside the hubs root) is returned unchanged.
+function _archivedHubPath(fpath) {
+  if (typeof fpath !== "string") return fpath;
+  const ROOT = "spice/meetings/hubs/";
+  if (!fpath.startsWith(ROOT)) return fpath;
+  const rel = fpath.slice(ROOT.length);
+  if (rel.startsWith("_archive/")) return fpath;
+  return ROOT + "_archive/" + rel;
+}
+
+// applyMeetingsHubScaffoldArchiveHeal — the meetings blueprint moved from
+// one-hub-per-day to a single persistent hub spice/meetings/Meetings.md. This
+// heal (1) scaffolds Meetings.md when it's missing (mirrors the installed hub
+// template body, identity tag + views path resolved from variables like other
+// installed notes), and (2) relocates every legacy per-day hub note under
+// spice/meetings/hubs/** into spice/meetings/hubs/_archive/** preserving the
+// relative path. Backup-first, idempotent, per-file try/catch, NEVER throws.
+// The archive step only touches spice/meetings/hubs/, so the scaffolded
+// Meetings.md (which lives at spice/meetings/Meetings.md) is never swept in.
+async function applyMeetingsHubScaffoldArchiveHeal(tp, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const MEETINGS_DIR = "spice/meetings";
+  const MEETINGS_PATH = "spice/meetings/Meetings.md";
+  const vaultTag = (variables && variables.vault_identity_tag) || "";
+  const viewsPath = (variables && variables.views_path) || "ranch/views";
+
+  // 1. Scaffold the persistent hub if missing (never overwrite an existing one).
+  try {
+    if (!(await adapter.exists(MEETINGS_DIR))) {
+      try { await adapter.mkdir(MEETINGS_DIR); } catch (_e) { /* already exists */ }
+    }
+    if (!(await adapter.exists(MEETINGS_PATH))) {
+      const body = [
+        "---",
+        "created_at: \"" + new Date().toISOString().replace(/\.\d{3}Z$/, "Z") + "\"",
+        "tags:",
+        "  - \"" + vaultTag + "\"",
+        "  - meetings-hub",
+        "cssclasses:",
+        "  - wide",
+        "  - cards",
+        "  - cards-cols-2",
+        "---",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "MeetingChromeBar" });`,
+        "```",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Meetings", top: true }] });`,
+        "```",
+        "",
+        "```dataviewjs",
+        `await dv.view("${viewsPath}/customjs-guard", { class: "MeetingsBrowseList" });`,
+        "```",
+        "",
+      ].join("\n");
+      await adapter.write(MEETINGS_PATH, body);
+      history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md", action: "scaffolded",
+        reason: `scaffolded ${MEETINGS_PATH}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md",
+      reason: `scaffold failed: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+
+  // 2. Archive legacy per-day hub notes under spice/meetings/hubs/ (excluding
+  // anything already under _archive/) into the _archive/ subtree.
+  const hubsRoot = "spice/meetings/hubs";
+  if (!(await adapter.exists(hubsRoot))) return;
+  let files;
+  try {
+    files = await _listAllMarkdownRecursive(adapter, hubsRoot);
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal",
+      reason: `list failed for ${hubsRoot}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+  let archived = 0, warned = 0;
+  for (const fp of files) {
+    try {
+      const dest = _archivedHubPath(fp);
+      if (dest === fp) continue; // already archived or outside root — skip
+      // Snapshot the original before moving.
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      const before = await adapter.read(fp);
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+      // Ensure the destination's parent dir exists (best-effort mkdir -p).
+      const destParent = dest.substring(0, dest.lastIndexOf("/"));
+      const parts = destParent.split("/");
+      let acc = "";
+      for (const seg of parts) {
+        acc = acc ? acc + "/" + seg : seg;
+        if (!(await adapter.exists(acc))) { try { await adapter.mkdir(acc); } catch (_e) { /* already exists */ } }
+      }
+      // Move: read → write(dest) → remove(fp). Skip if dest already occupied.
+      if (await adapter.exists(dest)) { continue; }
+      await adapter.write(dest, before);
+      await adapter.remove(fp);
+      archived += 1;
+      history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", target: fp, action: "archived",
+        reason: `archived ${fp} -> ${dest}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal",
+        reason: `${fp}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+  history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", name: "vault",
+    reason: `archived ${archived}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
 async function applyMeetingsHubChromeBarHeal(tp, history, git) {
@@ -21936,6 +22061,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyMeetingTaskListHeal = applyMeetingTaskListHeal;
     module.exports.applyMeetingChromeModernizeHeal = applyMeetingChromeModernizeHeal;
     module.exports._modernizeMeetingBody = _modernizeMeetingBody;
+    module.exports._archivedHubPath = _archivedHubPath;
     module.exports._cleanProjectLinkName = _cleanProjectLinkName;
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
