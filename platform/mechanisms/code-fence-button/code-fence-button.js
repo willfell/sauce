@@ -24,4 +24,31 @@ class CodeFenceButton {
     const text = lead + fence + "\n" + sel + "\n" + fence + tail;
     return { text: text, cursor: text.length };
   }
+
+  // App-facing: wrap the active editor's selection in place. Never-throw.
+  // Returns true if a wrap happened, false otherwise (no selection / no editor).
+  static wrapActiveEditor(view) {
+    try {
+      const editor = view && view.editor;
+      if (!editor || typeof editor.getSelection !== "function") return false;
+      const sel = editor.getSelection();
+      if (!sel || sel.trim() === "") return false;
+      // Determine whether the selection starts at column 0 and ends at line end.
+      let atLineStart = true, atLineEnd = true;
+      try {
+        const from = editor.getCursor("from");
+        const to = editor.getCursor("to");
+        atLineStart = from.ch === 0;
+        const toLine = editor.getLine(to.line) || "";
+        atLineEnd = to.ch >= toLine.length;
+      } catch (_e) { /* default to guarded (both false-safe) */ atLineStart = false; atLineEnd = false; }
+      const wrapped = CodeFenceButton.wrapSelection(sel, { atLineStart: atLineStart, atLineEnd: atLineEnd });
+      if (!wrapped) return false;
+      editor.replaceSelection(wrapped.text);
+      return true;
+    } catch (e) {
+      if (typeof console !== "undefined") console.error("[CodeFenceButton.wrapActiveEditor]", e);
+      return false;
+    }
+  }
 }
