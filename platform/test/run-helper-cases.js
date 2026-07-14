@@ -15120,6 +15120,10 @@ async function caseDisableSmartConnectionsOnce() {
     assertTrue("sc removed", !arr.includes("smart-connections"), JSON.stringify(arr));
     assertTrue("dataview preserved", arr.includes("dataview"), JSON.stringify(arr));
     assertTrue("sentinel written", fs.existsSync(path.join(dir, ".obsidian/.sauce-heals/sc-disabled-once")), "no sentinel");
+    // backup lives under the sauce-audit-sanctioned .obsidian/, NOT a top-level .sauce-backup/
+    const bdir = path.join(dir, ".obsidian/.sauce-heals/backups");
+    assertTrue("backup under .obsidian/.sauce-heals/backups", fs.existsSync(bdir) && fs.readdirSync(bdir).length >= 1, "no sanctioned backup");
+    assertTrue("no top-level .sauce-backup dir", !fs.existsSync(path.join(dir, ".sauce-backup")), "unsanctioned top-level backup dir created");
     // idempotent + a later deliberate re-enable survives
     fs.writeFileSync(cp, JSON.stringify(["dataview", "smart-connections"], null, 2));
     await platformInstall.disableSmartConnectionsOnce(tp, [], {});

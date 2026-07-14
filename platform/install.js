@@ -13751,8 +13751,13 @@ async function _removePluginOnce(tp, history, git, pluginId, sentinelName, step)
   if (!Array.isArray(arr)) return;
   if (arr.includes(pluginId)) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    try { await adapter.mkdir(".sauce-backup/community-plugins"); } catch (_e) {}
-    try { await adapter.write(".sauce-backup/community-plugins/community-plugins.json." + ts, raw); } catch (_e) {}
+    // Backup under .obsidian/ (a sauce-audit sanctioned top-level dir) rather
+    // than a top-level .sauce-backup/ — the latter is flagged as an untracked
+    // top-level dir by `sauce audit` (integration-smoke smoke-5). Sits beside
+    // the sentinel under .obsidian/.sauce-heals/.
+    try { await adapter.mkdir(".obsidian/.sauce-heals"); } catch (_e) {}
+    try { await adapter.mkdir(".obsidian/.sauce-heals/backups"); } catch (_e) {}
+    try { await adapter.write(".obsidian/.sauce-heals/backups/community-plugins.json." + ts, raw); } catch (_e) {}
     const next = arr.filter((id) => id !== pluginId);
     try { await adapter.write(cp, JSON.stringify(next, null, 2) + "\n"); }
     catch (_e) { return; } // write failed → don't set sentinel, retry next run
