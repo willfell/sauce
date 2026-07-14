@@ -118,16 +118,15 @@ class ReaderArticlePaste {
   // error string when invalid, null when OK. (entity-create's presetPrompts
   // short-circuit skips its own validation for preset keys, so the dialog must
   // enforce this itself before EC.create.)
-  static validateTitle(title) {
-    if (typeof title !== 'string' || title.trim() === '') {
-      return 'Title is required.';
+    static validateTitle(title) {
+        if (typeof title !== 'string' || title.trim() === '') return 'Article title is required.';
+        // Filesystem-hostile chars are allowed: the manifest filename_prefix uses
+        // |sanitize-filename (strips them) and the frontmatter keeps the original
+        // title. Only reject a title that sanitizes to nothing.
+        const sanitized = title.replace(/[\\/:*?"<>|]/g, '').trim();
+        if (sanitized === '') return 'Article title needs at least one letter or number.';
+        return null;
     }
-    // Reject path/filesystem-hostile characters (safe-filename).
-    if (/[\\/:*?"<>|]/.test(title)) {
-      return 'Title cannot contain \\ / : * ? " < > |';
-    }
-    return null;
-  }
 
   // Map parse() result + the dialog's (possibly edited) title/url inputs into
   // the presetPrompts object EC.create consumes. Every key here MUST also exist

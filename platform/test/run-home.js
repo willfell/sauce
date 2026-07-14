@@ -258,8 +258,25 @@ function descendants(el) {
 
   // ── HOME-CAP: _captureSpec() shape ─────────────────────────────────────────
   const spec = SpaceHome._captureSpec();
-  assertTrue("HOME-CAP-1 _captureSpec returns an array of 2", Array.isArray(spec) && spec.length === 2,
-    `_captureSpec should return exactly 2 entries (todo is inline; openDaily removed); got ${JSON.stringify(spec)}`);
+  {
+    const keys = spec.map((s) => s.key);
+    assertEq("HOME-CAP-1 capture keys meeting/sticky-note/article", JSON.stringify(keys), JSON.stringify(["meeting", "sticky-note", "article"]));
+    const art = spec.find((s) => s.key === "article");
+    assertTrue("HOME-CAP-1b article entry has label + icon", !!art && /Article/.test(art.label) && typeof art.icon === "string" && art.icon.length > 0);
+  }
+  {
+    const opened = [];
+    const prev = global.customJS;
+    global.customJS = { ReaderArticlePaste: { open: () => opened.push(true) } };
+    let threw = false;
+    try { SpaceHome._dispatch("article", { container: {} }, "2026-07-13"); } catch (_e) { threw = true; }
+    global.customJS = {};
+    let threw2 = false;
+    try { SpaceHome._dispatch("article", { container: {} }, "2026-07-13"); } catch (_e) { threw2 = true; }
+    global.customJS = prev;
+    assertTrue("HOME-CAP-ART dispatch(article) opens paste dialog + no-ops when absent",
+       opened.length === 1 && !threw && !threw2);
+  }
   const keys = Array.isArray(spec) ? spec.map((s) => s && s.key) : [];
   assertEq("HOME-CAP-2 key[0] meeting", keys[0], "meeting");
   assertEq("HOME-CAP-3 key[1] sticky-note", keys[1], "sticky-note");
@@ -353,7 +370,7 @@ function descendants(el) {
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
       const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
       assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
-      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/sticky-note)", items.length, 2);
+      assertEq("HOME-RENDER-11 menu holds exactly 3 action items (meeting/sticky-note/article)", items.length, 3);
       assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
@@ -500,7 +517,7 @@ function descendants(el) {
     const md = menu ? descendants(menu) : [];
     const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
     const inputs = md.filter((n) => n.tag === "input");
-    assertEq("HOME-CAP-7 render wired 2 action items", items.length, 2);
+    assertEq("HOME-CAP-7 render wired 3 action items", items.length, 3);
     assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
     assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
