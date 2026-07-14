@@ -2932,3 +2932,70 @@ journal 0.3.0 → 0.4.0. New `run-journal-multi-entry.js` harness (20 asserts: `
 **Deploy:** `brew upgrade sauce` → 0.213.0 (a concurrent unrelated cycle's v0.213.0 release landed moments after this cycle's own v0.212.0, before deploy — brew/consumer deploy targeted the cumulative version, which includes journal 0.4.0). `sauce update --bump-pins` on all 3 consumer vaults, drift:none on accuris (correctly skipped, not subscribed) and ero (no-op, no entries), migration verified on headspace. User must Cmd+R per vault.
 
 PR #407 → auto-released v0.212.0 (PR #408) → tag `v0.212.0` → tap PR #370 — all auto-merged. See `Docs/plans/2026-07-11-journal-multi-entry-{design,plan,result}.md`.
+
+## cycle-status.md archival (GA-D2, 2026-07-14) — displaced prose
+
+The following sections were cut from `Docs/agent-guides/cycle-status.md` during the GA-D2 byte-cap rewrite (98,891 → ≤15,360 bytes). Nothing below was rewritten from the source file — it is the verbatim prior content, archived here so no history is lost.
+
+### Previous-version paragraphs (from `## Current`)
+
+- **v0.208.0** — daily-blueprint dashboard task panel + note-per-task work (see task-entity project history above for the full arc).
+- **v0.204.x–0.207.x** — section-explorer consistency + mobile-dispatch fixes (see `project_v02200_section_management_consistency` era above).
+- **v0.196.x–0.203.x** — chrome-bar factory rollout across wiki/to-do/meetings/scratch, breadcrumb collision fix, nav-launcher icon uniqueness.
+- **v0.192.0–0.195.x** — reader blueprint (new), mobile-nav ghost-click + cold-load breadcrumb fixes.
+- **v0.185.x–0.191.x** — Home command center (new blueprint), glance-count + inline capture, project chrome overhaul WS0–WS10.
+- **v0.181.x–0.184.x** — task-entity note-per-task arc (daily dashboard, project panel, meeting panel, per-row edit/delete icons, trips conformance refactor).
+- **v0.170.x–0.180.x** — (narrative not captured verbatim in a dedicated result doc at time of GA-D2 archival; see `Docs/plans/*-result.md` directory listing for this range).
+- **v0.150.x–0.169.x** — recurrence-picker, subtasks, recurring-tasks engine work on the to-do blueprint.
+- **v0.130.x–0.149.x** — finance blueprint FinanceMath engine + lever protocol.
+- **v0.120.x–0.129.x** — task-interactions mechanism extraction, note-picker helper, live-render-recurring fixes.
+- Full per-version detail for all of the above ranges: `git log` on `Docs/plans/*-result.md` and `Docs/plans/*-design.md` filenames sorted by date prefix, cross-referenced against `platform/manifest.json` version history via git blame.
+
+### Cycle order (chronological)
+
+Full chain as recorded at time of archival: v0.1.0 → v0.2.0 → ... → v0.119.0 was marked "(current)" in the source file at time of archival, which was itself known-stale (true current at archival time was v0.229.0; see MEMORY.md-tracked cycle history for v0.120.0 onward, reconstructable from `Docs/plans/*-result.md` filename dates + `platform/manifest.json`).
+
+**Gap note (preserved verbatim):** the v0.50.0–v0.62.0 range has no surviving per-cycle narrative docs; only the version-number chain is known, not the shipped content.
+
+### In-flight / next-candidate queue (FLN-numbered backlog, archived verbatim)
+
+This is the full FLN candidate/deferred/closed backlog as it stood at time of archival (source lines ~96–139 of the pre-GA-D2 `cycle-status.md`):
+
+- **FLN-v84-1** (v0.85.0 MINOR candidate, later CLOSED v0.85.0): Tier 2 (weekly synthesis) + Tier 3 (monthly synthesis) deferred from v0.84.0's Tier 0/1 capture-tick + synthesize-day ship.
+- **FLN-v84-2** (later CLOSED v0.86.0): wire-through midday-tripwire/eod-review/weekly-review/monthly-review to read recent memory, mirroring morning-briefing's step 3a.
+- **FLN-v84-3** (design candidate, open at archival): memory retention/compression policy — memory files accumulate indefinitely (~73k lines/year at 1-2 ticks/day), rolling summarization or date-based archival eventually needed.
+- **FLN-v841-1** (v0.85.0+ candidate, open at archival): test-pin equality helper — extend `semver-helper.js` with a `versionEquals()` helper for the remaining hardcoded-equality test-pin sites (SHC-S1, FA6-MANIFEST, AF-1d, AF-V065) not covered by FLN-v81-1's `versionAtLeast()` conversion.
+- **FLN-v841-2** (long-term, open): activity-feed `dashboard-section-state.json` growth policy.
+- **FLN-v842-1** (v0.85.0+ candidate, open): flip `--bump-pins` to default-on; add `--no-bump-pins` for legacy idempotent-reinstall behavior; one-line CLI change in `platform/cli/verbs/update.js` + doc updates.
+- **FLN-v84-4** (Smart Connections semantic retrieval over memory notes) — CLOSED in v0.87.0: new `cowork:gather-semantic-memory` sub-skill wrapping `sc-bridge semantic-search`, graceful failure taxonomy, MB step 3b auto-include.
+- **FLN-v85-1** (deploy-time active-pantry resolution) — CLOSED v0.85.1: `handleBumpPins` auto-populates `installed.workshop_path` on first resolve.
+- **FLN-v85-2** (process candidate, open): formalize prior-cycle assertion supersedure pattern in `build-test-verify.md` § Writing HC cases.
+- **FLN-v85-3** (test-pin hygiene candidate, open): smoke regex assertions should accept both escaped and unescaped forms for JSON-stored `naming_patterns`.
+- **FLN-v85-4** (v0.86.0+ candidate, open): scheduled-job cron migration hints — v0.85.1 changed synthesize-week's default cron; existing consumer-registered scheduled jobs don't auto-update.
+- **FLN-v86-1** (open): per-orchestrator semantic-retrieval wire-through follow-through (v0.87.0 → v0.89.0 distill-week).
+- **FLN-v86-2** (open): selective drift management for `build-test-verify.md`/CLAUDE.md/`claude-surface-registry.json`/`platform-installed.json` — recommend targeted `git checkout HEAD --` restoration over stash/unstash.
+- **FLN-v86-3** (small polish candidate, open): weekly-review + monthly-review missing the `[!quote]- Memory log` backlink that morning-briefing/midday-tripwire/eod-review got in v0.85.0 §0.3.
+- **FLN-v87-1** (empirical validation owed, open at archival): `min_similarity: 0.45` threshold needs real-corpus validation post-deploy.
+- **FLN-v87-2** (user-invocation slash command, deferred): `/cowork recall <query>` explicit user-driven semantic query.
+- **FLN-v87-3** (open, terse note only): follow-on to gather-semantic-memory / synthesize-week interaction.
+- **v0.89.0 next-cycle (people-cohesion integration-without-auto-stub)** — CLOSED v0.89.0: new `people-identity@0.1.0` mechanism + `cowork:resolve-person` sub-skill + `wikilink_people` hard rule + morning-briefing inner-circle resolution. Slice E (brain-map rollups) deferred to v0.91.0+.
+- **v0.90.0+ pointer** (shifted to v0.89.0, third displacement): distill-week + auto-update-prefs MINOR arc, `cowork:distill-week` + `cowork:apply-distillation` sub-skills.
+- **v0.91.0+ pointer** (shifted + coalesced with v0.92.0+ slice E): retro/insights views plus people-cohesion brain-map rollup fields.
+- **FLN-v89-1..FLN-v89-10** (various, open at archival): auto-stub-on-miss for people resolution; collision-as-audit-error; >500-person PeopleIdentity scale; bare-string wikilink-shape future-proofing; `personality.hard_rules` disable-path (spec'd, not implemented); FLN-v89-6 CLOSED v0.89.1 (`gather-from-served-by` → `cowork:resolve-person` hybrid pre-resolve wiring); FLN-v89-7 (`--subscribe <mech>=<ver>` CLI flag, hit twice on 2026-06-04 deploy — real footgun); FLN-v89-8 (phone-alias exact-match normalization); FLN-v89-9 (wikilink-emit ALWAYS-WIN precedence, open post-v0.89.1); FLN-v89-10 (toast-source race, low priority diagnostic owed).
+- **FLN-v891-1** (v0.89.2+ candidate, open): manifest `files[].dest` substitution-token validator — catch undefined `{{...}}` tokens at preflight (closes a real v0.89.1 typo class).
+- **FLN-v891-2** (v0.89.2+ candidate, open): prose cleanup in `write-run-note-morning-briefing` Step 2a (redundant after v0.89.1 S2.1 refactor).
+- **FLN-v82-2** (ranch/rules/cowork.json dedup) — CLOSED v0.82.1: `resetSourceContributions` helper, 7929→635 bytes.
+- **FLN-v82-3** (hyphenated-key parsing) — CLOSED v0.82.1: `parseYamlIsh` regex widened for MCP names like `lharries-whatsapp`.
+- **FLN-v821-1** (exact-version test-pin extension, open at archival, later addressed): extend `semver-helper.js` `versionEquals()`.
+- **FLN-v821-2** (installItem version-skip interaction, open): new logic inside the per-item install loop is silently bypassed by version-skip guards unless the blueprint version bumps — plan-template candidate for mandatory co-occurring PATCH bump.
+- **FLN-v821-3** (S0 verification pattern cleanup, open): v0.82.1 S0.3's divergent-bodies check caught a design-assumption error before it shipped — candidate for a standing "S0 data-shape verification" step in cleanup-cycle plan templates.
+
+### Test harness per-cycle detail (v0.75.1 → v0.102.0, archived verbatim)
+
+Full per-version sub-assert-count narrative as recorded at time of archival (harness count was 23–24 across this range; now 139 as of workshop v0.229.0):
+
+v0.75.1 (+11 HC-V0751-*), v0.76.0 (+16 HC-V0760-*), v0.77.0 (+11 HC-V0770-*), v0.78.0 (+14 HC-V0780-*), v0.78.1 (+2 HC-V0781-*), v0.79.0 (+~30, cowork-smoke tally 608/0), v0.80.0 (+~43, tally 651/0), v0.80.1 (+4, tally 655/0), v0.81.0 (+~26, tally ~688/0), v0.81.1 (+1, tally 685/0), v0.82.0 (+~17, tally 713/0), v0.82.1 (+~10, new `semver-helper.js` shared test helper), v0.83.0 (+~14 cases/~14 sub-asserts across materialization + atomic-note read + bootstrap + prose-lint), v0.84.0 (+~14 cases/~29 sub-asserts: capture-tick, synthesize-day, morning-briefing pre-flight, engagement-type schema 0.4.0, onboard cadence walk, customization contract; tally 754→803/0), v0.84.1 (+~32 HC-V0841-*, new `run-scratch.js` harness file, harness count 23→24), v0.85.0 (+~24 HC-V0850-*, memory parser + synthesis-file + composeMemoryCallouts golden fixtures, tally 864/0), v0.85.1 (+~6 HC-V0851-*, workshop-path resolver layouts, tally 868/0), v0.86.0 (+~16 HC-V0860-*, 4-orchestrator memory-callout composition + 10 golden fixtures, tally 902/0), v0.87.0 (+~10 HC-V0870-*/~28 inner assertions, gather-semantic-memory contract + golden fixture, tally 929/0), v0.98.0 (+11 HC-V0980-*, synopsis + cadence-variant titles, tally 2301/0), v0.98.1 (+12 HC-V0981-*, feedback-capture sentinel v=1, NEW `check-files-forbidden-paths.js` preflight safeguard, tally 2313/0), v0.98.2 (+18+5 HC-V0982-*, feedback-capture v=2 + downvotes + ingest-feedback entity-delta formula, tally 2336/0), v0.99.0 (+26 HC-V0990-*, v=3 sentinel + tap-gate classification matrix + schema V4, tally 2362/0), v0.100.0 (+7 net, ProjectDocsCards/AccentButton delegation; v0.100.1 hotfix +1, tally 2370/0), v0.101.0 (+24 cases/+85 sub-asserts HC-V1010-*, feedback-capture v=4 + satisfaction intent + schema normalizeLearnedWeightsV5, tally 2455/0), v0.101.1 (+2 HC + 6 DHBR-*, docs-hub button repair heal + 1 renderer-template bug-lock-in reversal, tallies 2457/0 helper-cases + 30/0 wiki-to-docs-migration), v0.102.0 (+~116 net HC-V01020-*, project docs-sections + meetings panel + vault-default-paths, tally 2573/0 + claude-surface 217/0), v0.104.0 (+12 net HC-V01040-*, DocSearch mechanism + project-docs-index/section-hub search integration, tally 2713/0). CS-MIG-1 count grew from ~215 to 217 across this range via additive `claude_surface[]` entries; version-pin sweeps (hardcoded `"0.9x.x"`-style assertion literals) occurred almost every cycle and are not separately itemized here.
+
+### Landmines summary (as recorded pre-GA-D2, superseded by GA-D4)
+
+At v0.103.0 close the source file recorded **25 entries** (later reconciled against `Docs/landmines.md`'s canonical numbering during GA-D4 — see that card's commit for the authoritative count). Most recent additions at time of archival: #25 (v0.103.0, multi-shape doc-note `section:` frontmatter tolerance during migration window), #24 (v0.102.0, workshop manifest catalogue drift from per-mechanism manifests), #23 (v0.70.7, `file.mtime` unreliable on Obsidian Mobile), #22 (v0.32.0, `.local/` consumer override seam), #21 (v0.29.0, `sauce audit` read-only), #20 (v0.28.0, source vault read-only during `sauce migrate`), #19 (v0.26.0, platform-managed dir names lowercase). Landmine #12 allowlist at time of archival: 18 paths + CLAUDE.md marker regions.
