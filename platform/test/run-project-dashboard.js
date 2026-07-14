@@ -261,8 +261,8 @@ function makeApp(files) {
     ok('PROJDASH-5a pill rendered', !!pill && pill.textContent.toLowerCase() === 'in-progress');
     if (pill) pill.click();
     ok('PROJDASH-5b click opens MenuPopover', global.__mpCalls.length === 1);
-    ok('PROJDASH-5c popover has 7 entries',
-        global.__mpCalls[0] && global.__mpCalls[0].entries.filter(e => e.label).length === 7,
+    ok('PROJDASH-5c popover has 8 entries',
+        global.__mpCalls[0] && global.__mpCalls[0].entries.filter(e => e.label).length === 8,
         global.__mpCalls[0] ? String(global.__mpCalls[0].entries.length) : 'no call');
 }
 
@@ -501,6 +501,18 @@ function makeApp(files) {
     ok('PROJDASH-9b 6 tiles', tiles.length === 6, String(tiles.length));
     ok('PROJDASH-9c 2 recent rows (doc + meeting)', rows.length === 2, String(rows.length));
     ok('PROJDASH-9d 1 link chip', chips.length === 1, String(chips.length));
+
+    // PROJDASH-14 — archived status in picker + stash logic.
+    {
+        ok('PROJDASH-14a STATUSES includes archived', ProjectDashboard.STATUSES.includes('archived'), JSON.stringify(ProjectDashboard.STATUSES));
+        ok('PROJDASH-14b STATUS_COLORS has archived', !!ProjectDashboard.STATUS_COLORS.archived);
+        const fm = { status: 'blocked' };
+        ProjectDashboard._applyStatusChange(fm, 'archived', '2026-07-13');
+        ok('PROJDASH-14c archive stashes prior', fm.status === 'archived' && fm.pre_archive_status === 'blocked', JSON.stringify(fm));
+        const fm2 = { status: 'archived', pre_archive_status: 'done' };
+        ProjectDashboard._applyStatusChange(fm2, 'idea', '2026-07-14');
+        ok('PROJDASH-14d unarchive clears stash', fm2.status === 'idea' && !('pre_archive_status' in fm2), JSON.stringify(fm2));
+    }
 
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);

@@ -124,7 +124,7 @@ class ProjectDashboard {
   // ── Static helpers ─────────────────────────────────────────────────────
 
   static get STATUSES() {
-    return ["idea", "planning", "in-progress", "blocked", "superseded", "cancelled", "done"];
+    return ["idea", "planning", "in-progress", "blocked", "superseded", "cancelled", "done", "archived"];
   }
 
   static get STATUS_COLORS() {
@@ -136,7 +136,21 @@ class ProjectDashboard {
       superseded:    "var(--color-orange)",
       cancelled:     "var(--text-faint)",
       done:          "var(--color-purple)",
+      archived:      "var(--text-faint)",
     };
+  }
+
+  static _applyStatusChange(fm, newStatus, todayStr) {
+    if (!fm || typeof fm !== "object") return fm;
+    const prior = String(fm.status == null ? "" : fm.status).trim();
+    if (newStatus === "archived") {
+      if (prior && prior !== "archived") fm.pre_archive_status = prior;
+    } else if ("pre_archive_status" in fm) {
+      delete fm.pre_archive_status;
+    }
+    fm.status = newStatus;
+    fm.status_changed_at = todayStr;
+    return fm;
   }
 
   static _projectMatches(field, currentPath, projectName) {
@@ -433,8 +447,7 @@ class ProjectDashboard {
           try {
             if (realApp && realApp.fileManager && realApp.fileManager.processFrontMatter) {
               await realApp.fileManager.processFrontMatter(file, fm => {
-                fm.status = s;
-                fm.status_changed_at = new Date().toISOString().split("T")[0];
+                ProjectDashboard._applyStatusChange(fm, s, new Date().toISOString().split("T")[0]);
               });
             }
           } catch (_e) {}

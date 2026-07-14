@@ -293,6 +293,9 @@ class ProjectsHubCards {
         // the persisted sort mode). _renderCards renders in the order given.
         await customJS.BeaconCards.render(dv, {
             pages,
+            // BeaconCards re-sorts by default (mtime-desc); identity comparator
+            // preserves our _sortProjects order (A–Z toggle).
+            sort: () => 0,
             layout: "row",
             // v0.59.10: titleWrap=true so long project display-names (e.g.
             // "Denali - Migrate Content-Registry to GH Actions") are NOT
