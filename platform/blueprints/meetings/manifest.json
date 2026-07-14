@@ -45,6 +45,10 @@
     {
       "name": "chrome-bar",
       "range": ">=0.3.0"
+    },
+    {
+      "name": "section-explorer",
+      "range": ">=0.6.0"
     }
   ],
   "customjs_classes": [
@@ -247,6 +251,10 @@
               },
               "attendees": {
                 "required": true,
+                "type": "list"
+              },
+              "links": {
+                "required": false,
                 "type": "list"
               }
             }
