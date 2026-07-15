@@ -310,6 +310,23 @@ function selectClaimCandidate({ boardMd, state, loadCard }) {
   return { action: 'no-work', skipped, reason: 'no eligible execution card' };
 }
 
+function summarizeClaimSelection(selected) {
+  const skipped = selected.skipped || [];
+  if (selected.action === 'claim') {
+    return {
+      action: 'claim', card: selected.card,
+      model_profile: selected.meta.modelProfile,
+      touch_zones: selected.meta.touchZones,
+      skipped_count: skipped.length,
+    };
+  }
+  if (selected.action === 'at-capacity') return { action: 'at-capacity', active: selected.active || [] };
+  return {
+    action: selected.action, reason: selected.reason || null,
+    skipped_count: skipped.length, first_blocker: skipped[0] || null,
+  };
+}
+
 function slugify(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 72);
 }
@@ -668,13 +685,19 @@ async function commandAdvance(ctx, args) {
   }
 }
 
-function commandStatus(ctx) {
+function commandStatus(ctx, opts = {}) {
   const state = readState(ctx); const active = activeRecords(state);
+  const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
+  const loadCard = opts.loadCard || ((card) => {
+    const p = findCard(CARDS_ROOT, card);
+    return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  });
+  const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard }));
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
     active: active.map((r) => ({ card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch, pr: r.feature_pr || null })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
-    state_path: ctx.statePath,
+    next, state_path: ctx.statePath,
   };
 }
 
@@ -707,7 +730,8 @@ async function main() {
 
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
-  parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, checkRollup, versionFrom,
+  parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
+  checkRollup, versionFrom,
   moveBoardCard, patchFrontmatter,
 };
 
