@@ -9,7 +9,7 @@ const {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, isReleasableTitle,
-  releasePrWaitReceipt, moveBoardCard, patchFrontmatter,
+  releasePrWaitReceipt, commandRecordPr, stepCard, moveBoardCard, patchFrontmatter,
 } = require('../../scripts/autoloop/codex-coordinator');
 
 let count = 0;
@@ -26,6 +26,8 @@ function card({ profile = 'standard', zones = ['platform/mechanisms/example'], d
     '---', '', '# Work', '', 'Bounded work.',
   ].join('\n');
 }
+
+(async () => {
 
 const meta = parseExecutionMeta(card({ profile: 'heavy', zones: ['platform/install.js', 'platform/test/run-x.js'], deps: ['A'] }));
 eq(meta.modelProfile, 'heavy', 'parses model profile');
@@ -86,12 +88,52 @@ ok(isReleasableTitle('feat!: replace the loop contract'), 'breaking feature titl
 ok(isReleasableTitle('perf(coordinator): reduce status latency'), 'release classifier accepts other patch types');
 ok(!isReleasableTitle('test(preflight): guard orphan harnesses'), 'test-only title cannot enter the deploy loop');
 ok(!isReleasableTitle('docs(autoloop): explain mobile prompts'), 'docs-only title cannot enter the deploy loop');
-eq(releasePrWaitReceipt(), {
+const waitRecord = { card: 'A', phase: 'feature_merged', feature_merge_sha: 'abc123' };
+eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
+  findContainingTag: () => '',
+  findContainingRelease: () => null,
+}), {
   action: 'waiting',
   phase: 'feature_merged',
   waiting_for: 'release_pr',
   reason: 'containing release PR not created yet',
-}, 'release wait receipt preserves the durable phase and names the next phase');
+}, 'release branch preserves the durable phase and names the next phase');
+eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable state');
+
+const recordState = emptyState();
+recordState.cards.A = { card: 'A', branch: 'autoloop/a', worktree: '/worktrees/a', phase: 'implementing' };
+const basePr = {
+  number: 42, state: 'OPEN', title: 'test(preflight): guard orphan harnesses', url: 'https://example.test/pr/42',
+  baseRefName: 'main', headRefName: 'autoloop/a', headRefOid: 'head42', autoMergeRequest: null,
+};
+let writes = 0; let merges = 0;
+assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => basePr,
+  sh: () => { throw new Error('git or gh must not run for a rejected title'); },
+  writeState: () => { writes++; },
+  armFeatureAutoMerge: () => { merges++; },
+}), /will not trigger a release/, 'record-pr rejects a non-releasable title');
+eq(writes, 0, 'rejected title is not persisted');
+eq(merges, 0, 'rejected title never arms auto-merge');
+eq(recordState.cards.A.phase, 'implementing', 'rejected title leaves the recorded phase unchanged');
+
+const events = []; const mergeCalls = [];
+const accepted = commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
+  sh: (cmd, args) => {
+    if (cmd === 'git' && args[0] === 'status') return '';
+    if (cmd === 'git' && args[0] === 'rev-parse') return 'head42';
+    if (cmd === 'gh') { events.push('merge'); mergeCalls.push(args); return ''; }
+    throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+  },
+  writeState: () => { events.push('write'); writes++; },
+});
+eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
+eq(events, ['write', 'merge'], 'record-pr persists validated state before arming auto-merge');
+ok(mergeCalls[0].includes('--subject'), 'auto-merge sets an explicit squash subject');
+eq(mergeCalls[0][mergeCalls[0].indexOf('--subject') + 1], 'fix(autoloop): guard release triggering', 'squash subject matches the validated PR title');
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');
@@ -141,3 +183,4 @@ eq(status.next.first_blocker.card, 'Missing', 'status names the first card that 
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
+})().catch((err) => { console.error(err); process.exit(1); });
