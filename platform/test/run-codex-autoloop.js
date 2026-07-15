@@ -10,7 +10,7 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
-  commandRecordPr, stepCard, moveBoardCard, patchFrontmatter,
+  runIsolatedWorkshopSelfInstall, commandRecordPr, stepCard, moveBoardCard, patchFrontmatter,
 } = require('../../scripts/autoloop/codex-coordinator');
 
 let count = 0;
@@ -90,14 +90,18 @@ ok(isReleasableTitle('perf(coordinator): reduce status latency'), 'release class
 ok(!isReleasableTitle('test(preflight): guard orphan harnesses'), 'test-only title cannot enter the deploy loop');
 ok(!isReleasableTitle('docs(autoloop): explain mobile prompts'), 'docs-only title cannot enter the deploy loop');
 const passingReceipt = (head = 'head42', behavioral = true) => ({
-  status: 'pass', head_sha: head, behavioral,
+  status: 'pass', head_sha: head, base_ref: 'origin/main', base_sha: 'base42', behavioral,
   checks: { adequacy: 'pass', release_preflight: 'pass', workshop_self_install: 'pass', release_preflight_bumped: 'pass' },
   reviews: behavioral ? Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, head_sha: head, verdict: 'pass' }])) : {},
 });
 ok(gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42').valid, 'complete current gate receipt is valid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt('old') }, 'head42').valid, 'stale gate receipt is invalid');
+ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'new-base').valid, 'stale base receipt is invalid for an open PR');
 ok(pathCoveredByTouchZones('platform/mechanisms/x/a.js', ['platform/mechanisms/x']), 'touch zone covers descendants');
 ok(!pathCoveredByTouchZones('platform/test/run-x.js', ['platform/mechanisms/x']), 'touch zone rejects undeclared files');
+ok(pathCoveredByTouchZones('scripts/autoloop/gate.js', ['scripts']), 'top-level directory touch zone covers descendants');
+ok(!pathCoveredByTouchZones('platform/install.js', ['scripts']), 'top-level directory touch zone rejects other roots');
+ok(!pathCoveredByTouchZones('platform/install.js', ['shared-registries']), 'symbolic-only touch zones fail closed for file changes');
 const waitRecord = { card: 'A', phase: 'feature_merged', feature_merge_sha: 'abc123' };
 eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
   findContainingTag: () => '',
@@ -114,12 +118,34 @@ const recordState = emptyState();
 recordState.cards.A = { card: 'A', branch: 'autoloop/a', worktree: '/worktrees/a', phase: 'implementing' };
 const basePr = {
   number: 42, state: 'OPEN', title: 'test(preflight): guard orphan harnesses', url: 'https://example.test/pr/42',
-  baseRefName: 'main', headRefName: 'autoloop/a', headRefOid: 'head42', autoMergeRequest: null,
+  baseRefName: 'main', baseRefOid: 'base42', headRefName: 'autoloop/a', headRefOid: 'head42', autoMergeRequest: null,
 };
 const staleGateRecord = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt('old') };
 eq((await stepCard({ root: '/workshop' }, emptyState(), staleGateRecord, {}, {
   prView: () => ({ ...basePr, title: 'fix(x): y', headRefOid: 'new', statusCheckRollup: [] }),
 })).action, 'verify-gates', 'feature PR refuses stale local gates before auto-merge');
+let disabled = 0;
+const legacyAutoMergeRecord = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: null };
+eq((await stepCard({ root: '/workshop' }, emptyState(), legacyAutoMergeRecord, {}, {
+  prView: () => ({ ...basePr, title: 'fix(x): y', autoMergeRequest: { enabledAt: 'now' }, statusCheckRollup: [] }),
+  disableFeatureAutoMerge: () => { disabled++; },
+})).action, 'verify-gates', 'invalid receipt returns to gate verification');
+eq(disabled, 1, 'invalid receipt disables a legacy auto-merge request');
+const mergedWithoutGates = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: null };
+eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithoutGates, {}, {
+  prView: () => ({ ...basePr, state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
+  writeState: () => {},
+})).action, 'needs-inspection', 'merged PR cannot advance without a current gate receipt');
+const mergedWithStaleGates = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt('old') };
+eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithStaleGates, {}, {
+  prView: () => ({ ...basePr, state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
+  writeState: () => {},
+})).action, 'needs-inspection', 'merged PR cannot advance with a stale gate receipt');
+const mergedWithGates = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt() };
+eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithGates, {}, {
+  prView: () => ({ ...basePr, state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
+  writeState: () => {},
+})).phase, 'feature_merged', 'merged PR advances with a current canonical gate receipt');
 let armed = 0;
 const validGateRecord = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt() };
 await stepCard({ root: '/workshop' }, emptyState(), validGateRecord, {}, {
@@ -151,8 +177,15 @@ assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42'
   writeState: () => { writes++; },
 }), /gate receipt is missing/, 'record-pr refuses a clean matching PR without gate receipts');
 
-const events = [];
 recordState.cards.A.gate_receipt = passingReceipt();
+assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => ({ ...basePr, baseRefOid: 'new-base', title: 'fix(autoloop): require gate receipts' }),
+  sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
+  writeState: () => { writes++; },
+}), /gate receipt base is stale/, 'record-pr refuses gates run against an outdated main base');
+
+const events = [];
 const accepted = commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
@@ -181,22 +214,34 @@ reviewState.cards.Review.reviews = Object.fromEntries(['correctness', 'regressio
   lens, verdict: 'pass', refuted: false, summary: `${lens} review found no release-blocking defect.`, head_sha: 'review-head',
 }]));
 const gateCalls = [];
-const verified = commandVerifyGates({ root: '/workshop' }, { card: 'Review' }, {
+const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review', base: 'HEAD' }, {
   readState: () => reviewState,
   writeState: () => {},
+  withLock: async (_ctx, name, fn) => { gateCalls.push(name); return fn(); },
   runIsolatedWorkshopSelfInstall: () => { gateCalls.push('self-install'); },
   sh: (cmd, args) => {
     if (cmd === 'git' && args[0] === 'status') return '';
-    if (cmd === 'git' && args[0] === 'rev-parse') return 'review-head';
+    if (cmd === 'git' && args[0] === 'fetch') { gateCalls.push('fetch-main'); return ''; }
+    if (cmd === 'git' && args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'base-current' : 'review-head';
     if (cmd === 'git' && args[0] === 'diff') return 'scripts/autoloop/codex-coordinator.js\nplatform/test/run-codex-autoloop.js';
-    if (cmd === 'node' && args[0] === 'scripts/autoloop/gate.js') return JSON.stringify({ behavioral: true, adequate: true, reason: 'red then green' });
+    if (cmd === 'node' && args[0] === 'scripts/autoloop/gate.js') {
+      eq(args[args.indexOf('--base') + 1], 'base-current', 'verify-gates ignores caller base overrides and uses fetched origin/main');
+      return JSON.stringify({ behavioral: true, adequate: true, reason: 'red then green' });
+    }
     if (cmd === 'npm') { gateCalls.push(args[1]); return ''; }
     throw new Error(`unexpected gate command: ${cmd} ${args.join(' ')}`);
   },
 });
 eq(verified.action, 'gates-passed', 'verify-gates records a passing combined receipt');
-eq(gateCalls, ['release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates owns every deterministic release check');
+eq(gateCalls, ['gates-review', 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates serializes, fetches main, and owns every deterministic release check');
+eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
+eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
+
+assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+  if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');
+  return '';
+}), /failed to remove disposable self-install worktree .*cleanup denied/, 'self-install gate surfaces disposable worktree cleanup failures');
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');

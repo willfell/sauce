@@ -18,7 +18,7 @@ Pending external state is resumable, not failure. Exception states are `blocked`
 
 ## Gate receipts
 
-Every feature commit has three review receipts and one combined gate receipt in the shared ledger. Review receipts name the lens, verdict, summary, and exact `HEAD`. `verify-gates` reruns mutation adequacy, full preflight, workshop self-install in a disposable worktree, and bumped preflight. `record-pr` rejects missing, failed, incomplete, or stale receipts. A changed PR head also blocks `advance`; auto-merge is armed only after the current receipt and GitHub CI are both green.
+Every feature commit has three review receipts and one combined gate receipt in the shared ledger. Review receipts name the lens, verdict, summary, and exact `HEAD`. `verify-gates` serializes per card, fetches canonical `origin/main`, and records both exact commits after mutation adequacy, full preflight, workshop self-install in a disposable worktree, and bumped preflight. `record-pr` rejects missing, failed, incomplete, noncanonical, or stale receipts. A changed PR head/base also blocks `advance`, invalid legacy auto-merge is disabled, and a merged PR without valid gates stops at `needs-inspection`.
 
 ## Concurrency
 
