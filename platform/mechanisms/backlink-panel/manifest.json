@@ -11,6 +11,10 @@
     {
       "name": "cards",
       "range": ">=0.2.5"
+    },
+    {
+      "name": "render-safe",
+      "range": ">=0.2.2"
     }
   ],
   "customjs_classes": [

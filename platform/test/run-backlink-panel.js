@@ -73,6 +73,7 @@ if (manifest) {
   const depNames = deps.map((d) => d && d.name).filter(Boolean);
   assertTrue("BP-3a: depends_on includes customjs-guard", depNames.indexOf("customjs-guard") >= 0);
   assertTrue("BP-3b: depends_on includes cards", depNames.indexOf("cards") >= 0);
+  assertTrue("BP-3c: depends_on includes render-safe", depNames.indexOf("render-safe") >= 0);
 
   // files[] must materialize the JS at scripts_path/backlink-panel/backlink-panel.js
   const files = manifest.files || [];
@@ -81,7 +82,7 @@ if (manifest) {
     typeof f.dest === "string" &&
     f.dest.indexOf("backlink-panel/backlink-panel.js") >= 0
   );
-  assertTrue("BP-3c: files[] declares backlink-panel.js → scripts_path/backlink-panel/", hasJsEntry);
+  assertTrue("BP-3d: files[] declares backlink-panel.js → scripts_path/backlink-panel/", hasJsEntry);
 }
 
 // ── Pass 2: class source lint ─────────────────────────────────────────────
@@ -161,6 +162,57 @@ if (src.length > 0) {
   // BP-16: Notice on BeaconCards unavailable branch.
   assertTrue("BP-16: Notice on BeaconCards unavailable branch present",
     /BeaconCards.*unavailable|unavailable.*BeaconCards/i.test(src));
+
+  // BP-17: a mobile cold-load can produce a partial DV page: `.file` is there
+  // but frontmatter has not been indexed. BacklinkPanel must route through
+  // RenderSafe.page(dv), which overlays metadataCache before querying. The
+  // call-count assertion deliberately fails if _reverseQuery regresses to a
+  // direct dv.current()?.file lookup.
+  const RenderSafeClass = new Function(
+    fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/render-safe/render-safe.js"), "utf8") +
+    "\nreturn RenderSafe;"
+  )();
+  const partialPath = "spice/projects/Partial Project.md";
+  const relatedPath = "spice/meetings/Related.md";
+  const partial = { file: { path: partialPath, name: "Partial Project" } };
+  const activeFile = { path: partialPath, basename: "Partial Project" };
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  let renderSafeCalls = 0;
+  try {
+    global.app = {
+      workspace: { getActiveFile: () => activeFile },
+      metadataCache: { getFileCache: () => ({ frontmatter: { type: "project" } }) },
+    };
+    const actualRenderSafe = new RenderSafeClass();
+    global.customJS = {
+      RenderSafe: {
+        page(dv) {
+          renderSafeCalls++;
+          const resolved = actualRenderSafe.page(dv);
+          if (!resolved || resolved.type !== "project") throw new Error("RenderSafe did not overlay partial-page frontmatter");
+          return resolved;
+        },
+      },
+    };
+    const BacklinkPanel = new Function(src + "\nreturn BacklinkPanel;")();
+    const rows = [{ file: { path: relatedPath, name: "Related" }, projects: [{ path: partialPath }] }];
+    const chain = {
+      result: [],
+      where(predicate) { this.result = rows.filter(predicate); return this; },
+      sort() { return this; },
+      slice() { return this.result; },
+    };
+    const panel = new BacklinkPanel();
+    const result = panel._reverseQuery({ current: () => partial, pages: () => chain }, "projects", "created_at", 25);
+    assertEq("BP-17b: partial page returns its matching backlink", result, rows);
+    assertEq("BP-17c: backlink query calls RenderSafe.page exactly once", renderSafeCalls, 1);
+  } catch (e) {
+    assertTrue("BP-17: partial-page metadata overlay regression", false, e && e.message);
+  } finally {
+    if (priorApp === undefined) delete global.app; else global.app = priorApp;
+    if (priorCustomJS === undefined) delete global.customJS; else global.customJS = priorCustomJS;
+  }
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
