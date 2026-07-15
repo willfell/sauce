@@ -6561,8 +6561,10 @@ function _healNoteChromeBody(body, type) {
     }
   }
   // 2b. person only: rewrite the four canonical content headings to
-  // SectionLabel blocks. Like the meeting pass above, this is fence-aware so a
-  // user-owned `## Notes` example inside a fenced code sample is never changed.
+  // SectionLabel blocks. Like the meeting pass above, this is fence-aware so
+  // matching headings inside backtick or tilde fences are never changed; the
+  // tracked delimiter length also keeps shorter sample fences inside a longer
+  // outer fence from closing it.
   // Notes is the first content section and therefore owns `top: true`; the
   // remaining labels retain their template order and widget bodies. Idempotent:
   // once converted, no depth-zero H2 heading remains to match on pass two.
@@ -6570,28 +6572,38 @@ function _healNoteChromeBody(body, type) {
     const labels = { "Notes": true, "Meetings": false, "Daily Mentions": false, "Mentions": false };
     const lines = out.split("\n");
     const result = [];
-    let inFence = false;
+    let fenceChar = null;
+    let fenceLength = 0;
     let changed = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (line.trimStart().startsWith("```")) {
-        inFence = !inFence;
+      const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (!fenceChar && fence) {
+        fenceChar = fence[1][0];
+        fenceLength = fence[1].length;
         result.push(line);
         continue;
       }
-      if (!inFence) {
-        const m = line.match(/^##\s+(Notes|Meetings|Daily Mentions|Mentions)\s*$/);
-        if (m) {
-          const text = m[1];
-          const args = labels[text] ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
-          result.push("```dataviewjs");
-          result.push('await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });');
-          result.push("```");
-          result.push("");
-          if (i + 1 < lines.length && lines[i + 1].trim() === "") i++;
-          changed = true;
-          continue;
+      if (fenceChar) {
+        if (fence && fence[1][0] === fenceChar &&
+            fence[1].length >= fenceLength && fence[2].trim() === "") {
+          fenceChar = null;
+          fenceLength = 0;
         }
+        result.push(line);
+        continue;
+      }
+      const m = line.match(/^##\s+(Notes|Meetings|Daily Mentions|Mentions)\s*$/);
+      if (m) {
+        const text = m[1];
+        const args = labels[text] ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
+        result.push("```dataviewjs");
+        result.push('await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });');
+        result.push("```");
+        result.push("");
+        if (i + 1 < lines.length && lines[i + 1].trim() === "") i++;
+        changed = true;
+        continue;
       }
       result.push(line);
     }
@@ -7311,8 +7323,16 @@ async function applyNoteChromeHeal(tp, history, git) {
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
         const backupPath = `.sauce-backup/${ts}/${fpath}`;
         const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
-        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
-        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        try {
+          if (!(await adapter.exists(backupParent))) await adapter.mkdir(backupParent);
+          await adapter.write(backupPath, before);
+        } catch (backupError) {
+          warned += 1;
+          history?.push({ event: "warning", step: "note_chrome_heal", target: fpath,
+            reason: `${fpath}: backup failed: ${backupError && backupError.message ? backupError.message : String(backupError)}`,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+          continue;
+        }
         await adapter.write(fpath, after);
         healed += 1;
         history?.push({ event: "info", step: "note_chrome_heal", target: fpath, action: "healed",

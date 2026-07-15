@@ -7791,18 +7791,32 @@ async function caseHCV0880PeopleC() {
 }
 
 async function caseGAS3bPeopleSectionLabels() {
-  console.log("\n--- Case GA-S3b-PEOPLE-SECTIONLABEL: People template content-section contract ---");
-  const body = fs.readFileSync(
+  console.log("\n--- Case GA-S3b-PEOPLE-SECTIONLABEL: canonical People creation bodies ---");
+  const templateBody = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/templates/Template, People.md"), "utf8");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  const personButton = (manifest.new_entity_buttons || []).find((button) => button.id === "person");
+  const manifestBody = personButton && personButton.inline_body;
   const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
-  for (const label of labels) {
-    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${label} SectionLabel present`,
-      new RegExp('class: "SectionLabel"[^`]*text: "' + label + '"').test(body));
-    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: raw ## ${label} absent`,
-      !new RegExp('^##\\s+' + label + '\\s*$', "m").test(body));
+  const expectedShapes = labels.map((label, index) => ({ label, top: index === 0 }));
+  const sectionShapes = (body) => Array.from(String(body || "").matchAll(
+    /class: "SectionLabel", args: \[\{ text: "([^"]+)"(, top: true)? \}\]/g),
+    (match) => ({ label: match[1], top: Boolean(match[2]) }));
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: person EntityCreate inline_body exists",
+    typeof manifestBody === "string" && manifestBody.length > 0);
+  for (const [surface, body] of [["template", templateBody], ["manifest inline_body", manifestBody]]) {
+    for (const label of labels) {
+      assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} ${label} SectionLabel present`,
+        new RegExp('class: "SectionLabel"[^`]*text: "' + label + '"').test(body));
+      assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} raw ## ${label} absent`,
+        !new RegExp('^##\\s+' + label + '\\s*$', "m").test(body));
+    }
+    assertEq(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} has exactly the canonical four label shapes`,
+      sectionShapes(body), expectedShapes);
   }
-  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: Notes is top: true",
-    /class: "SectionLabel"[^`]*text: "Notes", top: true/.test(body));
+  assertEq("GA-S3b-PEOPLE-SECTIONLABEL: template and manifest section order agree",
+    sectionShapes(templateBody), sectionShapes(manifestBody));
   const order = [
     'text: "Notes"',
     'text: "Meetings"',
@@ -7812,10 +7826,12 @@ async function caseGAS3bPeopleSectionLabels() {
     'text: "Mentions"',
     'class: "BacklinkPanel"',
   ];
-  const indexes = order.map((needle) => body.indexOf(needle));
-  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: existing render blocks remain in content order",
-    indexes.every((idx) => idx !== -1) && indexes.every((idx, i) => i === 0 || indexes[i - 1] < idx),
-    `indexes=${indexes.join(",")}`);
+  for (const [surface, body] of [["template", templateBody], ["manifest inline_body", manifestBody]]) {
+    const indexes = order.map((needle) => body.indexOf(needle));
+    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} render blocks remain in content order`,
+      indexes.every((idx) => idx !== -1) && indexes.every((idx, i) => i === 0 || indexes[i - 1] < idx),
+      `indexes=${indexes.join(",")}`);
+  }
 }
 
 async function caseHCV0880PeopleD() {

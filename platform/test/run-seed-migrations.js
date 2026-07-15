@@ -4393,9 +4393,11 @@ async function runTaskHealTitleCleanupFamily() {
 
 // ===== GA-S3b-PEOPLE-SECTIONLABEL-* — real applyNoteChromeHeal person path =====
 // A legacy person note must have all four depth-zero content H2s converted, while
-// a same-looking heading in a fenced user sample remains byte-for-byte intact.
-// This calls the production walker, not the pure helper, so backup/history and a
-// second-pass no-op are exercised together.
+// unrelated H2s and matching headings inside backtick/tilde fences (including
+// longer outer fences containing shorter fence samples) remain byte-for-byte
+// intact. This calls the production walker, not the pure helper, so mandatory
+// backup/history, backup-failure continuation, and a second-pass no-op are
+// exercised together.
 async function runPeopleSectionLabelHealFamily() {
     const { applyNoteChromeHeal } = require("../install.js");
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-people-chrome-"));
@@ -4407,7 +4409,9 @@ async function runPeopleSectionLabelHealFamily() {
         "## Meetings", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "PeopleRendering" });', "```", "",
         "## Daily Mentions", "daily user prose", "",
         "## Mentions", "backlinks user prose", "",
-        "```markdown", "## Notes", "```", "",
+        "## Biography", "unrelated user prose", "",
+        "````markdown", "```text", "## Meetings", "```", "## Daily Mentions", "````", "",
+        "~~~~markdown", "~~~text", "## Mentions", "~~~", "## Notes", "~~~~", "",
     ].join("\n");
     try {
         const file = path.join(root, rel);
@@ -4419,10 +4423,22 @@ async function runPeopleSectionLabelHealFamily() {
         const once = fs.readFileSync(file, "utf8");
         const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
         const hasDepthZeroHeading = (body, label) => {
-            let inFence = false;
+            let fenceChar = null;
+            let fenceLength = 0;
             for (const line of body.split("\n")) {
-                if (line.trimStart().startsWith("```")) { inFence = !inFence; continue; }
-                if (!inFence && new RegExp("^##\\s+" + label + "\\s*$").test(line)) return true;
+                const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+                if (!fenceChar && match) {
+                    fenceChar = match[1][0];
+                    fenceLength = match[1].length;
+                    continue;
+                }
+                if (fenceChar && match && match[1][0] === fenceChar &&
+                    match[1].length >= fenceLength && match[2].trim() === "") {
+                    fenceChar = null;
+                    fenceLength = 0;
+                    continue;
+                }
+                if (!fenceChar && new RegExp("^##\\s+" + label + "\\s*$").test(line)) return true;
             }
             return false;
         };
@@ -4433,8 +4449,12 @@ async function runPeopleSectionLabelHealFamily() {
         }
         ok("GA-S3b-PEOPLE-SECTIONLABEL-Notes first label has top: true",
            /class: "SectionLabel"[^`]*text: "Notes", top: true/.test(once));
-        ok("GA-S3b-PEOPLE-SECTIONLABEL-fence matching heading preserved",
-           once.includes("```markdown\n## Notes\n```"));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-unrelated H2 preserved",
+           once.includes("## Biography\nunrelated user prose"));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-long backtick fence preserved exactly",
+           once.includes("````markdown\n```text\n## Meetings\n```\n## Daily Mentions\n````"));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-long tilde fence preserved exactly",
+           once.includes("~~~~markdown\n~~~text\n## Mentions\n~~~\n## Notes\n~~~~"));
         const backupRoot = path.join(root, ".sauce-backup");
         const backupFiles = [];
         if (fs.existsSync(backupRoot)) {
@@ -4450,13 +4470,48 @@ async function runPeopleSectionLabelHealFamily() {
         }
         const personBackup = backupFiles.find((backupPath) =>
             backupPath.replace(/\\/g, "/").endsWith("/" + rel));
-        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup written before heal",
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup contains exact original bytes",
            Boolean(personBackup) && fs.readFileSync(personBackup, "utf8") === legacy);
         ok("GA-S3b-PEOPLE-SECTIONLABEL-history records real note chrome heal",
            history.some((entry) => entry.step === "note_chrome_heal" && entry.target === rel && entry.action === "healed"));
         await applyNoteChromeHeal({ app: { vault: { adapter: makeFsAdapter(root) } } }, history, git);
         ok("GA-S3b-PEOPLE-SECTIONLABEL-second pass is byte-identical",
            fs.readFileSync(file, "utf8") === once);
+
+        const failedRel = "spice/people/A Backup Failure.md";
+        const continuedRel = "spice/people/B Continue.md";
+        const legacyFor = (name) => [
+            "---", "type: person", `name: ${name}`, "---", "",
+            "## Notes", "- original", "", "## Meetings", "meeting prose", "",
+        ].join("\n");
+        const failedBefore = legacyFor("Backup Failure");
+        const continuedBefore = legacyFor("Continue");
+        fs.writeFileSync(path.join(root, failedRel), failedBefore, "utf8");
+        fs.writeFileSync(path.join(root, continuedRel), continuedBefore, "utf8");
+        const baseAdapter = makeFsAdapter(root);
+        const failingAdapter = {
+            ...baseAdapter,
+            async write(target, content) {
+                if (target.startsWith(".sauce-backup/") &&
+                    target.replace(/\\\\/g, "/").endsWith("/" + failedRel)) {
+                    throw new Error("injected backup failure");
+                }
+                return baseAdapter.write(target, content);
+            },
+        };
+        await applyNoteChromeHeal({ app: { vault: { adapter: failingAdapter } } }, history, git);
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup failure leaves live note byte-identical",
+           fs.readFileSync(path.join(root, failedRel), "utf8") === failedBefore);
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup failure records a per-note warning",
+           history.some((entry) => entry.event === "warning" && entry.step === "note_chrome_heal" &&
+               String(entry.reason || "").includes(failedRel) &&
+               String(entry.reason || "").includes("backup") &&
+               String(entry.reason || "").includes("injected backup failure")));
+        const continuedAfter = fs.readFileSync(path.join(root, continuedRel), "utf8");
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup failure continues safely to other notes",
+           continuedAfter !== continuedBefore &&
+               continuedAfter.includes('class: "SectionLabel"') &&
+               history.some((entry) => entry.target === continuedRel && entry.action === "healed"));
     } finally {
         try { fs.rmSync(root, { recursive: true, force: true }); } catch (_e) {}
     }
