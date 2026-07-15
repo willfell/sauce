@@ -79,6 +79,34 @@ function inside(candidate, root) {
   return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
 }
 
+function digestInventory(inventory) {
+  return crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
+}
+
+function validatePlan(plan) {
+  if (!plan || plan.schema_version !== 1 || plan.tool !== 'sauce-worktree-sweep'
+    || plan.mode !== 'dry-run' || plan.action !== 'dry-run' || !Array.isArray(plan.inventory)
+    || !Array.isArray(plan.safe_to_remove)) return 'apply requires an unmodified dry-run JSON plan';
+  const digest = digestInventory(plan.inventory);
+  if (digest !== plan.inventory_digest || digest !== plan.plan_id) return 'plan inventory digest is invalid';
+  const paths = plan.inventory.map((entry) => entry && entry.path);
+  if (paths.some((value) => typeof value !== 'string') || new Set(paths).size !== paths.length) {
+    return 'plan inventory paths are invalid or duplicated';
+  }
+  const project = (entry) => ({
+    path: entry.path, branch: entry.branch, head: entry.head, fingerprint: entry.fingerprint,
+  });
+  const derived = plan.inventory.filter((entry) => entry.classification === 'safe_to_remove').map(project);
+  const supplied = plan.safe_to_remove.map(project);
+  if (JSON.stringify(derived) !== JSON.stringify(supplied)) return 'safe candidate set does not match plan inventory';
+  if (plan.inventory.some((entry) => entry.classification === 'safe_to_remove'
+    && (!Array.isArray(entry.reasons) || entry.reasons.length !== 0
+      || entry.merged_into_origin_main !== true || !entry.branch))) {
+    return 'safe candidate classification is inconsistent';
+  }
+  return null;
+}
+
 function readActiveOwners(ctx) {
   if (!fs.existsSync(ctx.statePath)) return { owners: new Map(), error: null };
   try {
@@ -151,9 +179,11 @@ function inspectManaged(record, ctx, options, active, processes, globalErrors, b
   for (const process of processes.paths) if (inside(process.path, record.path)) add('live process uses worktree');
   for (const error of globalErrors) add(error);
 
-  const dirty = statusResult(record.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+  const dirty = statusResult(record.path, [
+    'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching',
+  ]);
   if (!dirty.ok) add(`status inspection failed: ${dirty.error}`);
-  else if (dirty.output.length) add('dirty including untracked files');
+  else if (dirty.output.length) add('dirty including untracked or ignored files');
 
   const branch = statusResult(record.path, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (!branch.ok) add('detached');
@@ -228,7 +258,7 @@ function buildReport(ctx, options = {}) {
     }
     const entry = inspectManaged(record, ctx, options, active, processes, globalErrors, report.base_sha);
     const reasonText = entry.reasons.join('\n');
-    if (/dirty including untracked/.test(reasonText)) report.dirty.push(entry);
+    if (/dirty including untracked or ignored/.test(reasonText)) report.dirty.push(entry);
     if (/unmerged branch/.test(reasonText)) report.unmerged.push(entry);
     if (/^locked:/m.test(reasonText)) report.locked.push(entry);
     if (/current execution|main checkout|autoloop |live process/.test(reasonText)) report.active_or_in_use.push(entry);
@@ -238,7 +268,7 @@ function buildReport(ctx, options = {}) {
     report.inventory.push({ ...entry, classification: entry.reasons.length ? 'needs_inspection' : 'safe_to_remove' });
   }
   for (const key of REPORT_KEYS) report[key].sort((a, b) => a.path.localeCompare(b.path));
-  report.inventory_digest = crypto.createHash('sha256').update(JSON.stringify(report.inventory)).digest('hex');
+  report.inventory_digest = digestInventory(report.inventory);
   report.plan_id = report.inventory_digest;
   return report;
 }
@@ -313,9 +343,10 @@ function executeSweep(options = {}) {
     const runOptions = { ...options, mode, currentWorktree };
     const report = buildReport(ctx, runOptions);
     if (mode === 'dry-run') return report;
-    if (!options.plan || options.plan.schema_version !== 1 || options.plan.tool !== report.tool) {
+    const planError = validatePlan(options.plan);
+    if (planError) {
       report.action = 'refused-invalid-plan';
-      report.error = 'apply requires a saved sauce-worktree-sweep dry-run JSON plan';
+      report.error = planError;
       return report;
     }
     if (options.plan.inventory_digest !== report.inventory_digest
@@ -327,7 +358,8 @@ function executeSweep(options = {}) {
     }
 
     const removed = [];
-    for (const planned of options.plan.safe_to_remove || []) {
+    const plannedCandidates = options.plan.inventory.filter((entry) => entry.classification === 'safe_to_remove');
+    for (const planned of plannedCandidates) {
       if (typeof options.beforeRemove === 'function') options.beforeRemove(planned, removed.length);
       const latest = buildReport(ctx, runOptions);
       const candidate = latest.safe_to_remove.find((entry) => entry.path === planned.path);

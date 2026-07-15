@@ -45,7 +45,8 @@ try {
   sh(repo, ['config', 'user.name', 'Sweep Test']);
   sh(repo, ['config', 'user.email', 'sweep@example.invalid']);
   write(path.join(repo, 'tracked.txt'), 'base\n');
-  sh(repo, ['add', 'tracked.txt']);
+  write(path.join(repo, '.gitignore'), 'Ignored/\n');
+  sh(repo, ['add', 'tracked.txt', '.gitignore']);
   sh(repo, ['commit', '-m', 'initial']);
   sh(tmp, ['init', '--bare', '--initial-branch', 'main', remote]);
   sh(repo, ['remote', 'add', 'origin', remote]);
@@ -69,6 +70,11 @@ try {
   sh(repo, ['branch', 'untracked-branch']);
   sh(repo, ['worktree', 'add', untracked, 'untracked-branch']);
   write(path.join(untracked, 'new.txt'), 'preserve me\n');
+
+  const ignored = path.join(managed, 'ignored');
+  sh(repo, ['branch', 'ignored-branch']);
+  sh(repo, ['worktree', 'add', ignored, 'ignored-branch']);
+  write(path.join(ignored, 'Ignored', 'preserve.txt'), 'ignored but still user data\n');
 
   const unmerged = path.join(managed, 'unmerged');
   sh(repo, ['branch', 'unmerged-branch']);
@@ -121,6 +127,8 @@ try {
   check('path with spaces survives structured parsing', !!cleanItem && cleanItem.branch === 'clean-merged');
   check('tracked dirty worktree is preserved', !!item(plan, 'dirty', dirty) && fs.existsSync(dirty));
   check('untracked file makes a worktree dirty and preserved', !!item(plan, 'dirty', untracked) && fs.existsSync(path.join(untracked, 'new.txt')));
+  check('ignored untracked content makes a worktree dirty and preserved',
+    !!item(plan, 'dirty', ignored) && fs.existsSync(path.join(ignored, 'Ignored', 'preserve.txt')));
   check('unmerged branch is preserved', !!item(plan, 'unmerged', unmerged) && fs.existsSync(unmerged));
   check('detached worktree is preserved', !!item(plan, 'detached', detached) && fs.existsSync(detached));
   check('Git-locked worktree is preserved', !!item(plan, 'locked', locked) && fs.existsSync(locked));
@@ -131,7 +139,7 @@ try {
     !!item(plan, 'needs_inspection', knownDirty) && fs.existsSync(path.join(knownDirty, 'legacy.txt')));
   check('outside registered path is reported without inspection', !!item(plan, 'outside_managed_roots', outside) && fs.existsSync(outside));
   check('all unsafe managed worktrees flow to needs inspection',
-    [dirty, untracked, unmerged, detached, locked, active, parked, inUse, knownDirty]
+    [dirty, untracked, ignored, unmerged, detached, locked, active, parked, inUse, knownDirty]
       .every((p) => item(plan, 'needs_inspection', p)));
   const sameUseDifferentPid = executeSweep({
     repo,
@@ -140,6 +148,17 @@ try {
   });
   check('transient PID changes do not invalidate an otherwise identical plan',
     sameUseDifferentPid.inventory_digest === plan.inventory_digest);
+  const tamperedPlan = JSON.parse(JSON.stringify(plan));
+  tamperedPlan.safe_to_remove.push(plan.outside_managed_roots[0]);
+  const tamperedRefusal = executeSweep({
+    repo,
+    mode: 'apply',
+    plan: tamperedPlan,
+    currentWorktree: repo,
+    processPaths: [{ pid: 4242, path: path.join(inUse, 'tracked.txt') }],
+  });
+  check('apply rejects a candidate set altered after dry-run',
+    tamperedRefusal.action === 'refused-invalid-plan' && fs.existsSync(clean));
 
   const changed = path.join(claudeManaged, 'changes-after-plan');
   sh(repo, ['branch', 'changes-after-plan']);
@@ -157,6 +176,26 @@ try {
   check('state-change refusal removes no planned candidate', fs.existsSync(clean) && fs.existsSync(changed));
 
   fs.unlinkSync(path.join(changed, 'late.txt'));
+  const immediatePlan = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
+  let immediateMutation = null;
+  const immediateRefusal = executeSweep({
+    repo,
+    mode: 'apply',
+    plan: immediatePlan,
+    currentWorktree: repo,
+    processPaths: [],
+    beforeRemove(candidate, index) {
+      if (index !== 0) return;
+      immediateMutation = path.join(candidate.path, 'changed-during-apply.txt');
+      write(immediateMutation, 'changed immediately before removal\n');
+    },
+  });
+  check('every candidate is revalidated immediately before removal',
+    immediateRefusal.action === 'stopped-state-changed'
+      && immediateRefusal.removed.length === 0
+      && immediateMutation && fs.existsSync(immediateMutation));
+  fs.unlinkSync(immediateMutation);
+
   const applyPlan = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
   const applied = executeSweep({
     repo,
@@ -170,6 +209,10 @@ try {
   check('removed paths are gone but branches remain',
     !fs.existsSync(clean) && !fs.existsSync(changed)
       && sh(repo, ['show-ref', '--verify', '--quiet', 'refs/heads/clean-merged']) === '');
+  const source = fs.readFileSync(path.resolve(__dirname, '../../scripts/autoloop/sweep-worktrees.js'), 'utf8');
+  check('removal command is statically pinned to git worktree remove without force',
+    source.includes("git(ctx.root, ['worktree', 'remove', '--', planned.path])")
+      && !/worktree['"],\s*['"]remove['"],\s*['"]--force/.test(source));
 
   const noop = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
   check('repeat dry-run is a clean no-op for removable candidates', noop.safe_to_remove.length === 0);
