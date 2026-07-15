@@ -223,6 +223,7 @@
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 11px;
   width: 100%;
   min-height: 40px;
@@ -235,6 +236,9 @@
   font-weight: 550;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
   transition: background 0.13s var(--sh-ease), padding-left 0.13s var(--sh-ease);
 }
 .sauce-home .sauce-home-add-item::before {
