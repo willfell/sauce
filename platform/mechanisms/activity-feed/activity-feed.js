@@ -750,7 +750,16 @@ class ActivityFeed {
       initialOpen = !!groupState[stateKey];
     }
     if (initialOpen) details.open = true;
+    // Persist ONLY genuine user toggles. Setting details.open programmatically
+    // above queues an ASYNC `toggle` event that fires after this listener is
+    // attached — writing ranch/cache/dashboard-section-state.json on every render.
+    // That file is inside the vault, so Dataview's file-change auto-refresh
+    // re-executes the block → re-render → write again → an endless reload loop
+    // (the Home "reloads every time"). Skip the spurious programmatic toggle.
+    let lastPersisted = initialOpen;
     details.addEventListener("toggle", () => {
+      if (details.open === lastPersisted) return;
+      lastPersisted = details.open;
       this._writeGroupStateKey(stateKey, details.open);
     });
 
@@ -933,6 +942,10 @@ class ActivityFeed {
           }
         }
       } catch (_) { cur = {}; }
+      // Idempotent — never rewrite the file with an unchanged value. A redundant
+      // write is a vault modification that triggers Dataview's file-change
+      // auto-refresh, which re-renders the block (and would sustain the loop).
+      if (Object.prototype.hasOwnProperty.call(cur, key) && cur[key] === !!value) return;
       cur[key] = !!value;
       try {
         if (typeof app.vault.adapter.mkdir === "function") {
