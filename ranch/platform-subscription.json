@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.232.4",
+  "workshop_version": "0.232.5",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -84,7 +84,7 @@
     },
     {
       "name": "backlink-panel",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "name": "activity-feed",

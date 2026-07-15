@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.232.4",
+  "workshop_version": "0.232.5",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -79,7 +79,7 @@
     },
     {
       "name": "backlink-panel",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "path": "mechanisms/backlink-panel"
     },
     {
