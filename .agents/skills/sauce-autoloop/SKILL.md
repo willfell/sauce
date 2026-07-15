@@ -63,7 +63,7 @@ When the action is `implement`:
    node scripts/autoloop/codex-coordinator.js record-review --card "<card>" --lens test-adequacy --verdict pass --summary "<specific finding>" --json
    ```
 
-9. Let the coordinator fetch the current `origin/main`, lock this card's gate run, rerun adequacy, full preflight, isolated workshop self-install, and bumped preflight, then save one receipt tied to the exact head and base commits:
+9. Let the coordinator fetch the current `origin/main`, use this card's shared review/gate/PR lock, rerun adequacy, full preflight, isolated workshop self-install, and bumped preflight, then save one receipt tied to the exact head and base commits:
 
    ```bash
    node scripts/autoloop/codex-coordinator.js verify-gates --card "<card>" --json

@@ -480,7 +480,16 @@ function runIsolatedWorkshopSelfInstall(ctx, headSha, run = sh) {
   } catch (err) {
     failure = err;
   } finally {
-    if (added) {
+    let registered = added;
+    if (!registered) {
+      try {
+        const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
+        registered = String(listed).split('\n').some((line) => line === `worktree ${temp}`);
+      } catch (err) {
+        failure = failure ? new Error(`${failure.message}; could not inspect disposable worktree registration: ${err.message}`) : err;
+      }
+    }
+    if (registered) {
       try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }
       catch (err) {
         const cleanup = new Error(`failed to remove disposable self-install worktree ${temp}: ${err.message}`);
@@ -621,7 +630,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   const persist = deps.writeState || writeState;
   if (record.phase === 'feature_pr') {
     const pr = viewPr(REPO, record.feature_pr, ctx.root);
-    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.state === 'OPEN' ? pr.baseRefOid : null);
+    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);
     if (pr.state === 'MERGED') {
       if (!gateStatus.valid) {
         record.phase = 'needs-inspection';
@@ -708,6 +717,9 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
 
   if (record.phase === 'deployed') return { action: 'complete', card: record.card, version: record.brew_version, receipts: record.vault_receipts };
   if (record.phase === 'blocked') return { action: 'blocked', card: record.card, reason: record.reason };
+  if (record.phase === 'needs-inspection') {
+    return { action: 'needs-inspection', card: record.card, phase: record.phase, reason: record.reason, url: record.feature_url || null };
+  }
   return { action: 'needs-implementation', card: record.card, phase: record.phase, worktree: record.worktree };
 }
 
@@ -747,7 +759,7 @@ async function commandClaim(ctx, args) {
   });
 }
 
-function commandRecordReview(ctx, args, deps = {}) {
+async function commandRecordReview(ctx, args, deps = {}) {
   const card = args.card; const lens = args.lens; const verdict = args.verdict;
   const summary = String(args.summary || '').trim();
   if (!card || !REVIEW_LENSES.includes(lens)) throw new Error(`record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
@@ -756,16 +768,19 @@ function commandRecordReview(ctx, args, deps = {}) {
   const loadState = deps.readState || readState;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
-  const state = loadState(ctx); const record = state.cards[card];
-  if (!record) throw new Error(`card ${card} is not claimed`);
-  if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
-  const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
-  record.gate_receipt = null;
-  record.reviews = { ...(record.reviews || {}), [lens]: {
-    lens, verdict, refuted: verdict === 'refute', summary, head_sha: headSha, recorded_at: new Date().toISOString(),
-  } };
-  persist(ctx, state, record);
-  return { action: 'review-recorded', card, lens, verdict, head_sha: headSha };
+  const gateLock = deps.withLock || withLock;
+  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    record.gate_receipt = null;
+    record.reviews = { ...(record.reviews || {}), [lens]: {
+      lens, verdict, refuted: verdict === 'refute', summary, head_sha: headSha, recorded_at: new Date().toISOString(),
+    } };
+    persist(ctx, state, record);
+    return { action: 'review-recorded', card, lens, verdict, head_sha: headSha };
+  }, { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandVerifyGates(ctx, args, deps = {}) {
@@ -834,28 +849,31 @@ async function commandVerifyGates(ctx, args, deps = {}) {
   }, { card, staleMs: 60 * 60 * 1000 });
 }
 
-function commandRecordPr(ctx, args, deps = {}) {
+async function commandRecordPr(ctx, args, deps = {}) {
   const card = args.card; const number = Number(args.pr);
   if (!card || !Number.isInteger(number)) throw new Error('record-pr requires --card and numeric --pr');
   const loadState = deps.readState || readState;
   const viewPr = deps.prView || prView;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
-  const state = loadState(ctx); const record = state.cards[card];
-  if (!record) throw new Error(`card ${card} is not claimed`);
-  const pr = viewPr(REPO, number, ctx.root);
-  if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
-  if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
-  assertReleasableTitle(pr.title);
-  const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
-  if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
-  const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
-  if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
-  const gateStatus = gateReceiptStatus(record, localHead, pr.baseRefOid);
-  if (!gateStatus.valid) throw new Error(`record-pr refused: ${gateStatus.reason}`);
-  record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
-  persist(ctx, state, record);
-  return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
+  const gateLock = deps.withLock || withLock;
+  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    const pr = viewPr(REPO, number, ctx.root);
+    if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
+    if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
+    assertReleasableTitle(pr.title);
+    const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
+    if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
+    const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
+    const gateStatus = gateReceiptStatus(record, localHead, pr.baseRefOid);
+    if (!gateStatus.valid) throw new Error(`record-pr refused: ${gateStatus.reason}`);
+    record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
+    persist(ctx, state, record);
+    return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
+  }, { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandAdvance(ctx, args) {
@@ -915,7 +933,7 @@ async function main() {
   let result;
   if (command === 'status') result = commandStatus(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
-  else if (command === 'record-review') result = commandRecordReview(ctx, args);
+  else if (command === 'record-review') result = await commandRecordReview(ctx, args);
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
   else if (command === 'advance') { await commandAdvance(ctx, args); return; }

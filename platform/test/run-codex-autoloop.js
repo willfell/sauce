@@ -141,11 +141,17 @@ eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithStaleGates, {}
   prView: () => ({ ...basePr, state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
   writeState: () => {},
 })).action, 'needs-inspection', 'merged PR cannot advance with a stale gate receipt');
+const mergedWithStaleBase = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt() };
+eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithStaleBase, {}, {
+  prView: () => ({ ...basePr, baseRefOid: 'new-base', state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
+  writeState: () => {},
+})).action, 'needs-inspection', 'merged PR cannot advance with a stale base receipt');
 const mergedWithGates = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt() };
 eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithGates, {}, {
   prView: () => ({ ...basePr, state: 'MERGED', title: 'fix(x): y', mergeCommit: { oid: 'merge42' } }),
   writeState: () => {},
 })).phase, 'feature_merged', 'merged PR advances with a current canonical gate receipt');
+eq((await stepCard({ root: '/workshop' }, emptyState(), mergedWithoutGates, {}, {})).action, 'needs-inspection', 'resuming needs-inspection preserves its durable action');
 let armed = 0;
 const validGateRecord = { card: 'A', phase: 'feature_pr', feature_pr: 42, gate_receipt: passingReceipt() };
 await stepCard({ root: '/workshop' }, emptyState(), validGateRecord, {}, {
@@ -159,34 +165,39 @@ await stepCard({ root: '/workshop' }, emptyState(), validGateRecord, {}, {
 });
 eq(armed, 1, 'feature PR arms auto-merge only after current local gates and GitHub CI are green');
 let writes = 0; let merges = 0;
-assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+const immediateCardLock = async (_ctx, _name, fn) => fn();
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => basePr,
   sh: () => { throw new Error('git or gh must not run for a rejected title'); },
   writeState: () => { writes++; },
   armFeatureAutoMerge: () => { merges++; },
+  withLock: immediateCardLock,
 }), /will not trigger a release/, 'record-pr rejects a non-releasable title');
 eq(writes, 0, 'rejected title is not persisted');
 eq(merges, 0, 'rejected title never arms auto-merge');
 eq(recordState.cards.A.phase, 'implementing', 'rejected title leaves the recorded phase unchanged');
 
-assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
   writeState: () => { writes++; },
+  withLock: immediateCardLock,
 }), /gate receipt is missing/, 'record-pr refuses a clean matching PR without gate receipts');
 
 recordState.cards.A.gate_receipt = passingReceipt();
-assert.throws(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, baseRefOid: 'new-base', title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
   writeState: () => { writes++; },
+  withLock: immediateCardLock,
 }), /gate receipt base is stale/, 'record-pr refuses gates run against an outdated main base');
 
 const events = [];
-const accepted = commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+let prLock = '';
+const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
   sh: (cmd, args) => {
@@ -195,18 +206,23 @@ const accepted = commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' },
     throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
   },
   writeState: () => { events.push('write'); writes++; },
+  withLock: async (_ctx, name, fn) => { prLock = name; return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
+eq(prLock, 'gates-a', 'record-pr shares the per-card gate lock');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
 
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
-const review = commandRecordReview({ root: '/workshop' }, {
+let reviewLock = '';
+const review = await commandRecordReview({ root: '/workshop' }, {
   card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
 }, {
   readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
+  withLock: async (_ctx, name, fn) => { reviewLock = name; return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
+eq(reviewLock, 'gates-review', 'review writes share the per-card gate lock');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 
 reviewState.cards.Review.touch_zones = ['scripts/autoloop', 'platform/test'];
@@ -242,6 +258,21 @@ assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head4
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');
   return '';
 }), /failed to remove disposable self-install worktree .*cleanup denied/, 'self-install gate surfaces disposable worktree cleanup failures');
+
+let partialRemoved = false;
+let partialPath = '';
+assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+  if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+    partialPath = args[3];
+    throw new Error('checkout failed after registration');
+  }
+  if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+    return `worktree ${partialPath}\nHEAD head42\ndetached`;
+  }
+  if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') { partialRemoved = true; return ''; }
+  return '';
+}), /checkout failed after registration/, 'self-install preserves the original partial-add failure');
+ok(partialRemoved, 'self-install unregisters a partially-added disposable worktree');
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');
