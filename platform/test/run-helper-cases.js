@@ -7790,6 +7790,34 @@ async function caseHCV0880PeopleC() {
     `body excerpt: ${body.slice(-200)}`);
 }
 
+async function caseGAS3bPeopleSectionLabels() {
+  console.log("\n--- Case GA-S3b-PEOPLE-SECTIONLABEL: People template content-section contract ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/templates/Template, People.md"), "utf8");
+  const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
+  for (const label of labels) {
+    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${label} SectionLabel present`,
+      new RegExp('class: "SectionLabel"[^`]*text: "' + label + '"').test(body));
+    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: raw ## ${label} absent`,
+      !new RegExp('^##\\s+' + label + '\\s*$', "m").test(body));
+  }
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: Notes is top: true",
+    /class: "SectionLabel"[^`]*text: "Notes", top: true/.test(body));
+  const order = [
+    'text: "Notes"',
+    'text: "Meetings"',
+    'class: "PeopleRendering",\n  method: "renderMentionList",\n  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/meetings" }',
+    'text: "Daily Mentions"',
+    'scopePath: "spice/daily"',
+    'text: "Mentions"',
+    'class: "BacklinkPanel"',
+  ];
+  const indexes = order.map((needle) => body.indexOf(needle));
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: existing render blocks remain in content order",
+    indexes.every((idx) => idx !== -1) && indexes.every((idx, i) => i === 0 || indexes[i - 1] < idx),
+    `indexes=${indexes.join(",")}`);
+}
+
 async function caseHCV0880PeopleD() {
   console.log("\n--- Case HC-V0880-PEOPLE-D: people version >= 0.5.0 (v0.88.x line) ---");
   const m = JSON.parse(fs.readFileSync(
@@ -15478,6 +15506,7 @@ async function caseRetireOldClaudianOnce() {
   await caseHCV0880PeopleA();
   await caseHCV0880PeopleB();
   await caseHCV0880PeopleC();
+  await caseGAS3bPeopleSectionLabels();
   await caseHCV0880PeopleD();
   await caseHCV0880MeetingsA();
   await caseHCV0880MeetingsB();

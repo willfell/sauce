@@ -6459,7 +6459,7 @@ const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
 // wave-1 heal. (1) Injects a Breadcrumb dataviewjs block immediately before the
 // first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
 // (!/Breadcrumb/) makes the inject a no-op on already-healed notes. (2) For
-// meeting notes only, rewrites the four `## H2` content headers to SectionLabel
+// meeting and person notes, rewrites their canonical `## H2` content headers to SectionLabel
 // dataviewjs blocks matching the Meeting.md template's args shape. (3) For
 // meeting notes only, drops a leftover markdown `---` divider that the old
 // blank-shielded Meeting.md template left before each header (double-divider
@@ -6559,6 +6559,43 @@ function _healNoteChromeBody(body, type) {
         }
       }
     }
+  }
+  // 2b. person only: rewrite the four canonical content headings to
+  // SectionLabel blocks. Like the meeting pass above, this is fence-aware so a
+  // user-owned `## Notes` example inside a fenced code sample is never changed.
+  // Notes is the first content section and therefore owns `top: true`; the
+  // remaining labels retain their template order and widget bodies. Idempotent:
+  // once converted, no depth-zero H2 heading remains to match on pass two.
+  if (type === "person") {
+    const labels = { "Notes": true, "Meetings": false, "Daily Mentions": false, "Mentions": false };
+    const lines = out.split("\n");
+    const result = [];
+    let inFence = false;
+    let changed = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trimStart().startsWith("```")) {
+        inFence = !inFence;
+        result.push(line);
+        continue;
+      }
+      if (!inFence) {
+        const m = line.match(/^##\s+(Notes|Meetings|Daily Mentions|Mentions)\s*$/);
+        if (m) {
+          const text = m[1];
+          const args = labels[text] ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
+          result.push("```dataviewjs");
+          result.push('await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });');
+          result.push("```");
+          result.push("");
+          if (i + 1 < lines.length && lines[i + 1].trim() === "") i++;
+          changed = true;
+          continue;
+        }
+      }
+      result.push(line);
+    }
+    if (changed) out = result.join("\n");
   }
   // Step 4 (v0.127.0 §A) — scrub `args: [dv, ...]` from PeopleRendering
   // invocations. v0.126.1 fixed the source (template + inline_body), but 411+
@@ -22031,6 +22068,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // (run-project-chrome-heal-guard.js).
     module.exports._hasChromeBar = _hasChromeBar;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
+    module.exports.applyNoteChromeHeal = applyNoteChromeHeal;
     module.exports._healChromeBarMigration = _healChromeBarMigration;
     module.exports.applyMeetingsHubChromeBarHeal = applyMeetingsHubChromeBarHeal;
     module.exports.applyStickyHubTitleHeal = applyStickyHubTitleHeal;

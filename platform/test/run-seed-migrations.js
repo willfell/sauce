@@ -4391,6 +4391,63 @@ async function runTaskHealTitleCleanupFamily() {
     }
 }
 
+// ===== GA-S3b-PEOPLE-SECTIONLABEL-* — real applyNoteChromeHeal person path =====
+// A legacy person note must have all four depth-zero content H2s converted, while
+// a same-looking heading in a fenced user sample remains byte-for-byte intact.
+// This calls the production walker, not the pure helper, so backup/history and a
+// second-pass no-op are exercised together.
+async function runPeopleSectionLabelHealFamily() {
+    const { applyNoteChromeHeal } = require("../install.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-people-chrome-"));
+    const rel = "spice/people/Legacy Person.md";
+    const legacy = [
+        "---", "type: person", "---", "",
+        "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "PersonNavButtons" });', "```", "",
+        "## Notes", "- user note", "",
+        "## Meetings", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "PeopleRendering" });', "```", "",
+        "## Daily Mentions", "daily user prose", "",
+        "## Mentions", "backlinks user prose", "",
+        "```markdown", "## Notes", "```", "",
+    ].join("\n");
+    try {
+        const file = path.join(root, rel);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, legacy, "utf8");
+        const history = [];
+        const git = { commit: "test", tag: "test", dirty: false };
+        await applyNoteChromeHeal({ app: { vault: { adapter: makeFsAdapter(root) } } }, history, git);
+        const once = fs.readFileSync(file, "utf8");
+        const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
+        const hasDepthZeroHeading = (body, label) => {
+            let inFence = false;
+            for (const line of body.split("\n")) {
+                if (line.trimStart().startsWith("```")) { inFence = !inFence; continue; }
+                if (!inFence && new RegExp("^##\\s+" + label + "\\s*$").test(line)) return true;
+            }
+            return false;
+        };
+        for (const label of labels) {
+            ok(`GA-S3b-PEOPLE-SECTIONLABEL-${label} depth-zero H2 converted`,
+               !hasDepthZeroHeading(once, label) &&
+               new RegExp('class: "SectionLabel"[^`]*text: "' + label + '"').test(once));
+        }
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-Notes first label has top: true",
+           /class: "SectionLabel"[^`]*text: "Notes", top: true/.test(once));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-fence matching heading preserved",
+           once.includes("```markdown\n## Notes\n```"));
+        const backupRoot = path.join(root, ".sauce-backup");
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-backup written before heal",
+           fs.existsSync(backupRoot) && fs.readdirSync(backupRoot).length > 0);
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-history records real note chrome heal",
+           history.some((entry) => entry.step === "note_chrome_heal" && entry.target === rel && entry.action === "healed"));
+        await applyNoteChromeHeal({ app: { vault: { adapter: makeFsAdapter(root) } } }, history, git);
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-second pass is byte-identical",
+           fs.readFileSync(file, "utf8") === once);
+    } finally {
+        try { fs.rmSync(root, { recursive: true, force: true }); } catch (_e) {}
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -4488,6 +4545,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-TASKHEAL-TITLE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-TASKHEAL-TITLE-FAMILY");
+    })
+    .then(() => runPeopleSectionLabelHealFamily())
+    .catch((e) => {
+        console.log(`  FAIL GA-S3b-PEOPLE-SECTIONLABEL-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("GA-S3b-PEOPLE-SECTIONLABEL-FAMILY");
     })
     .finally(() => {
         console.log("");
