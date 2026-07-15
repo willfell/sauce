@@ -177,6 +177,30 @@ try {
   check('state-change refusal removes no planned candidate', fs.existsSync(clean) && fs.existsSync(changed));
 
   fs.unlinkSync(path.join(changed, 'late.txt'));
+  const otherCandidatePlan = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
+  let otherCandidateMutation = null;
+  let protectedFirstCandidate = null;
+  const wholeInventoryRefusal = executeSweep({
+    repo,
+    mode: 'apply',
+    plan: otherCandidatePlan,
+    currentWorktree: repo,
+    processPaths: [],
+    beforeRemove(candidate, index) {
+      if (index !== 0) return;
+      protectedFirstCandidate = candidate.path;
+      const other = otherCandidatePlan.safe_to_remove.find((entry) => entry.path !== candidate.path);
+      otherCandidateMutation = path.join(other.path, 'other-candidate-changed.txt');
+      write(otherCandidateMutation, 'different candidate changed during apply\n');
+    },
+  });
+  check('any remaining-inventory drift stops before the current removal',
+    wholeInventoryRefusal.action === 'stopped-state-changed'
+      && wholeInventoryRefusal.removed.length === 0
+      && protectedFirstCandidate && fs.existsSync(protectedFirstCandidate)
+      && otherCandidateMutation && fs.existsSync(otherCandidateMutation));
+  fs.unlinkSync(otherCandidateMutation);
+
   const immediatePlan = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
   let immediateMutation = null;
   const immediateRefusal = executeSweep({
@@ -240,6 +264,14 @@ try {
   }));
   check('lsof warnings make process detection fail closed',
     /scan incomplete/.test(incompleteLsof.error || ''));
+  const incompleteScanPlan = executeSweep({
+    repo,
+    currentWorktree: currentManaged,
+    processScanner: () => ({ paths: [], error: 'live-process scan incomplete: permission denied' }),
+  });
+  check('an incomplete process scan leaves no removable worktree',
+    incompleteScanPlan.safe_to_remove.length === 0
+      && incompleteScanPlan.needs_inspection.length === incompleteScanPlan.inventory.length);
 
   const noop = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
   check('repeat dry-run is a clean no-op for removable candidates', noop.safe_to_remove.length === 0);

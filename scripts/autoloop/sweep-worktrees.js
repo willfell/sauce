@@ -235,7 +235,7 @@ function buildReport(ctx, options = {}) {
   const records = parseWorktreeList(git(ctx.root, ['worktree', 'list', '--porcelain', '-z'], { encoding: null }));
   const active = readActiveOwners(ctx);
   const processes = options.processPaths === undefined
-    ? liveProcessPaths(ctx)
+    ? (options.processScanner || liveProcessPaths)(ctx)
     : { paths: options.processPaths.map((value) => typeof value === 'string'
       ? { pid: null, path: canonicalPath(value) }
       : { pid: value.pid || null, path: canonicalPath(value.path) }), error: null };
@@ -362,11 +362,14 @@ function executeSweep(options = {}) {
 
     const removed = [];
     const plannedCandidates = options.plan.inventory.filter((entry) => entry.classification === 'safe_to_remove');
+    let expectedInventory = options.plan.inventory;
     for (const planned of plannedCandidates) {
       if (typeof options.beforeRemove === 'function') options.beforeRemove(planned, removed.length);
       const latest = buildReport(ctx, runOptions);
       const candidate = latest.safe_to_remove.find((entry) => entry.path === planned.path);
-      if (!candidate || candidate.fingerprint !== planned.fingerprint) {
+      if (latest.base_sha !== options.plan.base_sha
+        || latest.inventory_digest !== digestInventory(expectedInventory)
+        || !candidate || candidate.fingerprint !== planned.fingerprint) {
         latest.action = 'stopped-state-changed';
         latest.removed = removed;
         latest.changed_candidate = planned.path;
@@ -381,6 +384,7 @@ function executeSweep(options = {}) {
         return stopped;
       }
       removed.push({ ...planned, removed_at: new Date().toISOString() });
+      expectedInventory = expectedInventory.filter((entry) => entry.path !== planned.path);
     }
     const final = buildReport(ctx, runOptions);
     final.action = 'applied';
