@@ -276,19 +276,42 @@ try {
   const noop = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
   check('repeat dry-run is a clean no-op for removable candidates', noop.safe_to_remove.length === 0);
 
-  const lockRoot = path.join(ctx.locksDir, 'worktree-sweep.lock');
-  fs.mkdirSync(lockRoot, { recursive: true });
-  write(path.join(lockRoot, 'owner.json'), `${JSON.stringify({
-    pid: process.pid,
-    host: os.hostname(),
-    started_at: new Date().toISOString(),
-    command: 'concurrent behavioral test',
-  })}\n`);
+  function holdLock(name) {
+    const lock = path.join(ctx.locksDir, `${name}.lock`);
+    fs.mkdirSync(lock, { recursive: true });
+    write(path.join(lock, 'owner.json'), `${JSON.stringify({
+      pid: process.pid,
+      host: os.hostname(),
+      started_at: new Date().toISOString(),
+      command: `held ${name} behavioral test`,
+    })}\n`);
+    return lock;
+  }
+  function dropHeldLock(lock) {
+    fs.unlinkSync(path.join(lock, 'owner.json'));
+    fs.rmdirSync(lock);
+  }
+
+  const selectorLock = holdLock('selector');
+  const selectorRefusal = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('a concurrent claim selector lock refuses the sweep and releases its partial lock',
+    selectorRefusal.action === 'refused-concurrent' && selectorRefusal.lock === 'selector'
+      && !fs.existsSync(path.join(ctx.locksDir, 'worktree-sweep.lock')));
+  dropHeldLock(selectorLock);
+
+  const promotionLock = holdLock('homebrew-promotion');
+  const promotionRefusal = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('a concurrent deployment lock refuses the sweep and releases earlier locks',
+    promotionRefusal.action === 'refused-concurrent' && promotionRefusal.lock === 'homebrew-promotion'
+      && !fs.existsSync(path.join(ctx.locksDir, 'worktree-sweep.lock'))
+      && !fs.existsSync(path.join(ctx.locksDir, 'selector.lock')));
+  dropHeldLock(promotionLock);
+
+  const lockRoot = holdLock('worktree-sweep');
   const lockRefusal = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
   check('concurrent sweep is refused with lock owner evidence',
     lockRefusal.action === 'refused-concurrent' && lockRefusal.lock === 'worktree-sweep');
-  fs.unlinkSync(path.join(lockRoot, 'owner.json'));
-  fs.rmdirSync(lockRoot);
+  dropHeldLock(lockRoot);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
