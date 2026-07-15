@@ -8,7 +8,8 @@ const path = require('path');
 const {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, moveBoardCard, patchFrontmatter,
+  selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, isReleasableTitle,
+  releasePrWaitReceipt, moveBoardCard, patchFrontmatter,
 } = require('../../scripts/autoloop/codex-coordinator');
 
 let count = 0;
@@ -80,6 +81,17 @@ eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).gr
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'FAILURE' }]).failed, ['mac'], 'failed rollup');
 eq(versionFrom('chore(release): v0.232.1'), '0.232.1', 'extracts release version');
+ok(isReleasableTitle('fix(autoloop): reject non-releasable PR titles'), 'fix title triggers a release');
+ok(isReleasableTitle('feat!: replace the loop contract'), 'breaking feature title triggers a release');
+ok(isReleasableTitle('perf(coordinator): reduce status latency'), 'release classifier accepts other patch types');
+ok(!isReleasableTitle('test(preflight): guard orphan harnesses'), 'test-only title cannot enter the deploy loop');
+ok(!isReleasableTitle('docs(autoloop): explain mobile prompts'), 'docs-only title cannot enter the deploy loop');
+eq(releasePrWaitReceipt(), {
+  action: 'waiting',
+  phase: 'feature_merged',
+  waiting_for: 'release_pr',
+  reason: 'containing release PR not created yet',
+}, 'release wait receipt preserves the durable phase and names the next phase');
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');

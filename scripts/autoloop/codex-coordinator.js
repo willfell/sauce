@@ -18,6 +18,7 @@ const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
 const { parseBoard, parseDependsOn } = require('./select-card');
 const { cmpVersion } = require('./deploy');
+const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
@@ -422,6 +423,19 @@ function versionFrom(value) {
   return match ? match[1] : '';
 }
 
+function isReleasableTitle(title) {
+  return bumpLevel(parseCommit(title), true) !== 'none';
+}
+
+function releasePrWaitReceipt() {
+  return {
+    action: 'waiting',
+    phase: 'feature_merged',
+    waiting_for: 'release_pr',
+    reason: 'containing release PR not created yet',
+  };
+}
+
 function findContainingTag(mergeSha, root) {
   try { sh('git', ['fetch', 'origin', 'main', '--tags', '--quiet'], { cwd: root }); } catch (_) {}
   const tags = sh('git', ['tag', '--list', 'v[0-9]*', '--sort=version:refname'], { cwd: root }).split('\n').filter(Boolean);
@@ -552,7 +566,7 @@ async function stepCard(ctx, state, record, opts = {}) {
       return { action: 'phase-change', phase: 'tagged', tag };
     }
     let release = record.release_pr ? prView(REPO, record.release_pr, ctx.root) : findContainingRelease(record.feature_merge_sha, ctx.root);
-    if (!release) return { action: 'waiting', phase: 'release_pr', reason: 'containing release PR not created yet' };
+    if (!release) return releasePrWaitReceipt();
     if (release.state === 'OPEN' && !release.statusCheckRollup) release = prView(REPO, release.number, ctx.root);
     record.release_pr = release.number; record.release_url = release.url;
     if (release.state === 'MERGED') {
@@ -648,6 +662,9 @@ async function commandRecordPr(ctx, args) {
   const pr = prView(REPO, number, ctx.root);
   if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
   if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
+  if (!isReleasableTitle(pr.title)) {
+    throw new Error(`PR title "${pr.title}" will not trigger a release; use a releasable conventional title such as fix(scope): ... or feat(scope): ...`);
+  }
   const dirty = sh('git', ['status', '--short'], { cwd: record.worktree });
   if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
   const localHead = sh('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
@@ -731,7 +748,7 @@ async function main() {
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
-  checkRollup, versionFrom,
+  checkRollup, versionFrom, isReleasableTitle, releasePrWaitReceipt,
   moveBoardCard, patchFrontmatter,
 };
 
