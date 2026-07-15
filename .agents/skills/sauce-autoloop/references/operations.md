@@ -16,6 +16,10 @@ claimed -> implementing -> feature_pr -> feature_merged -> release_pr
 
 Pending external state is resumable, not failure. Exception states are `blocked`, `failed`, `cancelled`, and `needs-inspection`.
 
+## Gate receipts
+
+Every feature commit has three review receipts and one combined gate receipt in the shared ledger. Review receipts name the lens, verdict, summary, and exact `HEAD`. `verify-gates` reruns mutation adequacy, full preflight, workshop self-install in a disposable worktree, and bumped preflight. `record-pr` rejects missing, failed, incomplete, or stale receipts. A changed PR head also blocks `advance`; auto-merge is armed only after the current receipt and GitHub CI are both green.
+
 ## Concurrency
 
 - Maximum active claims: three.

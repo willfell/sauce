@@ -18,6 +18,7 @@ const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
 const { parseBoard, parseDependsOn } = require('./select-card');
 const { cmpVersion } = require('./deploy');
+const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 
 const execFileAsync = promisify(execFile);
@@ -27,6 +28,7 @@ const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
+const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const EXCLUSIVE_ZONES = [
   'platform/install.js', 'package.json', '.github/workflows',
@@ -433,6 +435,47 @@ function assertReleasableTitle(title) {
   }
 }
 
+function gateReceiptStatus(record, headSha) {
+  const receipt = record && record.gate_receipt;
+  if (!receipt) return { valid: false, reason: 'required gate receipt is missing' };
+  if (receipt.head_sha !== headSha) {
+    return { valid: false, reason: `gate receipt is stale (${receipt.head_sha || 'unknown'} != ${headSha})` };
+  }
+  if (receipt.status !== 'pass') return { valid: false, reason: `gate receipt did not pass: ${receipt.reason || 'unknown failure'}` };
+  const required = ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped'];
+  const missing = required.filter((name) => !receipt.checks || receipt.checks[name] !== 'pass');
+  if (missing.length) return { valid: false, reason: `gate receipt is incomplete: ${missing.join(', ')}` };
+  if (receipt.behavioral) {
+    const reviews = receipt.reviews || {};
+    const stale = REVIEW_LENSES.filter((lens) => !reviews[lens] || reviews[lens].head_sha !== headSha);
+    if (stale.length) return { valid: false, reason: `review receipts are missing or stale: ${stale.join(', ')}` };
+  }
+  return { valid: true, reason: 'all required gates passed for this commit' };
+}
+
+function pathCoveredByTouchZones(file, zones) {
+  const normalized = normalizeZone(file);
+  const pathZones = (zones || []).map(normalizeZone).filter((zone) => zone.includes('/') || zone.includes('.'));
+  if (!pathZones.length) return true;
+  return pathZones.some((zone) => normalized === zone || normalized.startsWith(`${zone}/`));
+}
+
+function runIsolatedWorkshopSelfInstall(ctx, headSha, run = sh) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-autoloop-self-install-'));
+  fs.rmSync(temp, { recursive: true, force: true });
+  let added = false;
+  try {
+    run('git', ['worktree', 'add', '--detach', temp, headSha], { cwd: ctx.root, stdio: 'pipe' });
+    added = true;
+    run('node', ['platform/install.js', '--vault', '.', '--auto-approve'], { cwd: temp, stdio: 'pipe' });
+  } finally {
+    if (added) {
+      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }
+      catch (_) { /* recovery will surface a leftover worktree */ }
+    } else fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
 function armFeatureAutoMerge(pr, cwd, run = sh) {
   assertReleasableTitle(pr.title);
   run('gh', ['pr', 'merge', String(pr.number), '-R', REPO, '--squash', '--auto', '--subject', pr.title], { cwd });
@@ -563,6 +606,10 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
       return { action: 'phase-change', phase: record.phase, pr: record.feature_pr, merge_sha: record.feature_merge_sha };
     }
     if (pr.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `feature PR ${pr.state}`; writeState(ctx, state, record); return { action: 'blocked', reason: record.reason, url: pr.url }; }
+    const gateStatus = gateReceiptStatus(record, pr.headRefOid);
+    if (!gateStatus.valid) {
+      return { action: 'verify-gates', card: record.card, phase: 'feature_pr', head_sha: pr.headRefOid, reason: gateStatus.reason, url: pr.url };
+    }
     const checks = checkRollup(pr.statusCheckRollup);
     if (checks.failed.length) return { action: 'fix-ci', card: record.card, pr: pr.number, failed_checks: checks.failed, url: pr.url };
     if (['BEHIND', 'DIRTY'].includes(pr.mergeStateStatus)) {
@@ -571,7 +618,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     if (!isReleasableTitle(pr.title)) {
       return { action: 'blocked', card: record.card, phase: 'feature_pr', reason: `PR title "${pr.title}" will not trigger a release`, url: pr.url };
     }
-    if (!pr.autoMergeRequest) {
+    if (checks.green && !pr.autoMergeRequest) {
       try { armAutoMerge(pr, ctx.root); } catch (_) {}
     }
     return { action: 'waiting', phase: 'feature_pr', pending_checks: checks.pending, url: pr.url };
@@ -672,6 +719,84 @@ async function commandClaim(ctx, args) {
   });
 }
 
+function commandRecordReview(ctx, args, deps = {}) {
+  const card = args.card; const lens = args.lens; const verdict = args.verdict;
+  const summary = String(args.summary || '').trim();
+  if (!card || !REVIEW_LENSES.includes(lens)) throw new Error(`record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
+  if (!['pass', 'refute'].includes(verdict)) throw new Error('record-review requires --verdict pass|refute');
+  if (summary.length < 20) throw new Error('record-review requires a specific --summary of at least 20 characters');
+  const loadState = deps.readState || readState;
+  const run = deps.sh || sh;
+  const persist = deps.writeState || writeState;
+  const state = loadState(ctx); const record = state.cards[card];
+  if (!record) throw new Error(`card ${card} is not claimed`);
+  if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+  const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+  record.gate_receipt = null;
+  record.reviews = { ...(record.reviews || {}), [lens]: {
+    lens, verdict, refuted: verdict === 'refute', summary, head_sha: headSha, recorded_at: new Date().toISOString(),
+  } };
+  persist(ctx, state, record);
+  return { action: 'review-recorded', card, lens, verdict, head_sha: headSha };
+}
+
+function commandVerifyGates(ctx, args, deps = {}) {
+  const card = args.card;
+  if (!card) throw new Error('verify-gates requires --card');
+  const loadState = deps.readState || readState;
+  const run = deps.sh || sh;
+  const persist = deps.writeState || writeState;
+  const runSelfInstall = deps.runIsolatedWorkshopSelfInstall || runIsolatedWorkshopSelfInstall;
+  const state = loadState(ctx); const record = state.cards[card];
+  if (!record) throw new Error(`card ${card} is not claimed`);
+  if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+  const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
+  if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
+  const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+  const base = args.base || 'origin/main';
+  const paths = run('git', ['diff', '--name-only', `${base}...HEAD`], { cwd: record.worktree }).split('\n').map((s) => s.trim()).filter(Boolean);
+  const outside = paths.filter((file) => !pathCoveredByTouchZones(file, record.touch_zones));
+  if (outside.length) throw new Error(`diff exceeds declared touch zones: ${outside.join(', ')}`);
+
+  const receipt = {
+    status: 'fail', reason: 'gate verification did not finish', head_sha: headSha, base, paths,
+    checks: {}, reviews: {}, started_at: new Date().toISOString(),
+  };
+  try {
+    const adequacyText = run('node', ['scripts/autoloop/gate.js', 'verify-adequacy', '--base', base, '--json'], { cwd: record.worktree });
+    const adequacy = JSON.parse(adequacyText);
+    receipt.behavioral = adequacy.behavioral === true;
+    receipt.adequacy = adequacy;
+    if (adequacy.adequate !== true) throw new Error(`Gate B adequacy failed: ${adequacy.reason}`);
+    receipt.checks.adequacy = 'pass';
+
+    if (receipt.behavioral) {
+      const reviews = record.reviews || {};
+      const selected = REVIEW_LENSES.map((lens) => reviews[lens]).filter((review) => review && review.head_sha === headSha);
+      const panel = gateVerdict({ adequacy, votes: selected });
+      if (panel.gate !== 'pass') throw new Error(panel.reason);
+      receipt.reviews = Object.fromEntries(selected.map((review) => [review.lens, review]));
+      receipt.review_panel = panel;
+    }
+
+    run('npm', ['run', 'release:preflight'], { cwd: record.worktree, stdio: 'pipe' });
+    receipt.checks.release_preflight = 'pass';
+    runSelfInstall(ctx, headSha, run);
+    receipt.checks.workshop_self_install = 'pass';
+    run('npm', ['run', 'release:preflight-bumped'], { cwd: record.worktree, stdio: 'pipe' });
+    receipt.checks.release_preflight_bumped = 'pass';
+    receipt.status = 'pass'; receipt.reason = 'all required gates passed for this commit'; receipt.completed_at = new Date().toISOString();
+    record.gate_receipt = receipt;
+    persist(ctx, state, record);
+    return { action: 'gates-passed', card, head_sha: headSha, behavioral: receipt.behavioral, checks: receipt.checks };
+  } catch (err) {
+    receipt.reason = err.message; receipt.completed_at = new Date().toISOString();
+    record.gate_receipt = receipt;
+    persist(ctx, state, record);
+    throw err;
+  }
+}
+
 function commandRecordPr(ctx, args, deps = {}) {
   const card = args.card; const number = Number(args.pr);
   if (!card || !Number.isInteger(number)) throw new Error('record-pr requires --card and numeric --pr');
@@ -679,7 +804,6 @@ function commandRecordPr(ctx, args, deps = {}) {
   const viewPr = deps.prView || prView;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
-  const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
   const state = loadState(ctx); const record = state.cards[card];
   if (!record) throw new Error(`card ${card} is not claimed`);
   const pr = viewPr(REPO, number, ctx.root);
@@ -690,11 +814,10 @@ function commandRecordPr(ctx, args, deps = {}) {
   if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
   const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
   if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
+  const gateStatus = gateReceiptStatus(record, localHead);
+  if (!gateStatus.valid) throw new Error(`record-pr refused: ${gateStatus.reason}`);
   record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
   persist(ctx, state, record);
-  if (pr.state === 'OPEN' && !pr.autoMergeRequest) {
-    try { armAutoMerge(pr, ctx.root, run); } catch (_) {}
-  }
   return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
 }
 
@@ -755,6 +878,8 @@ async function main() {
   let result;
   if (command === 'status') result = commandStatus(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
+  else if (command === 'record-review') result = commandRecordReview(ctx, args);
+  else if (command === 'verify-gates') result = commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
   else if (command === 'advance') { await commandAdvance(ctx, args); return; }
   else if (command === 'deploy') {
@@ -762,14 +887,15 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|record-pr|advance|deploy|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|record-review|verify-gates|record-pr|advance|deploy|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
-  checkRollup, versionFrom, isReleasableTitle, releasePrWaitReceipt, armFeatureAutoMerge, commandRecordPr, stepCard,
+  checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
+  armFeatureAutoMerge, commandRecordReview, commandVerifyGates, commandRecordPr, stepCard,
   moveBoardCard, patchFrontmatter,
 };
 

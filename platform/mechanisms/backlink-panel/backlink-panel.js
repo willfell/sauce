@@ -83,10 +83,10 @@ class BacklinkPanel {
    * @returns {Array}
    */
   _reverseQuery(dv, key, sortBy, limit) {
-    // Dataview can expose a partial current page on mobile cold-load: its
-    // `.file` is present while frontmatter is still unindexed. RenderSafe.page
-    // overlays the active file's metadataCache frontmatter without mutating the
-    // live page, so every consumer resolves the same cold-load-safe page shape.
+    // Dataview can expose a partial page or no current page on mobile cold-load.
+    // This query only needs the path: RenderSafe preserves the partial page and
+    // supplies an active-file shim for the null case, which otherwise drops all
+    // backlinks on the first render.
     const currentPage = (typeof customJS !== "undefined" && customJS.RenderSafe &&
       typeof customJS.RenderSafe.page === "function")
       ? customJS.RenderSafe.page(dv)
