@@ -1,6 +1,6 @@
 {
   "name": "home",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "kind": "blueprint",
   "module_directory": "home",
   "skills_dir": ".claude/skills/home",
