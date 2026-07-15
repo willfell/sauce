@@ -12,6 +12,7 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
+  attemptProjection, completionResult,
 } = require('../../scripts/autoloop/codex-coordinator');
 const { parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
 
@@ -395,17 +396,26 @@ reconcileState.cards['Tracked deployed'] = {
   required_version: '0.233.0', vault_receipts: successfulVaultReceipts(),
 };
 let reconcileWrites = 0; let redeploys = 0;
+const reconcileLocks = [];
 const reconcileDeps = {
   readState: () => reconcileState,
   writeState: () => { reconcileWrites++; },
-  withLock: immediateCardLock,
+  withLock: async (_ctx, name, fn) => { reconcileLocks.push(name); return fn(); },
   boardPath: reconcileBoardPath,
   deployVault: () => { redeploys++; throw new Error('reconciliation must never deploy'); },
   now: () => '2026-07-15T15:00:00.000Z',
 };
 const receiptsBeforeReconcile = JSON.stringify(reconcileState.cards['Tracked deployed'].vault_receipts);
+const driftBeforeReconcile = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+eq(driftBeforeReconcile.board_drift, [{
+  card: 'Tracked deployed', phase: 'deployed', expected_column: 'Completed', actual_column: 'Archive',
+  expected_checked: true, actual_checked: true,
+}], 'status reports deployed board drift separately from projection failures');
 const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
 eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
+eq(reconcileLocks.slice(0, 2), ['gates-tracked-deployed', 'completion-projection'], 'reconciliation serializes card state then shared board projection');
 eq(firstReconcile.changed, 1, 'first reconciliation repairs projection');
 ok(/## Completed[\s\S]*- \[x\] \[\[Tracked deployed\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'deployed execution card moves to checked Completed');
 ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unchecked Archive entry stays untouched');
@@ -463,12 +473,30 @@ eq(repairedSavedError.action, 'reconciled', 'successful reconciliation repairs a
 ok(!reconcileState.cards['Tracked deployed'].projection_error, 'successful reconciliation clears saved projection error');
 eq((await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed'])).action, 'complete', 'clean projection restores clean completion output');
 
+const automaticProjectionRecord = {
+  card: 'Automatic deployed', phase: 'deployed', card_path: path.join(reconcileRoot, 'automatic.md'),
+  required_version: '0.233.0', vault_receipts: successfulVaultReceipts(),
+};
+const automaticReceiptsBefore = JSON.stringify(automaticProjectionRecord.vault_receipts);
+let automaticProjectionLock = '';
+const automaticProjection = await attemptProjection({ root: reconcileRoot }, automaticProjectionRecord, reconcileBoardPath, {
+  withLock: async (_ctx, name, fn) => { automaticProjectionLock = name; return fn(); },
+  projectCard: () => { throw new Error('automatic completion projection denied'); },
+  now: () => '2026-07-15T15:00:30.000Z',
+});
+eq(automaticProjectionLock, 'completion-projection', 'automatic completion projection uses the shared board lock');
+eq(automaticProjection.ok, false, 'deployment-time projection failure is returned');
+eq(automaticProjectionRecord.projection_error, 'automatic completion projection denied', 'deployment-time projection failure is saved on the deployed record');
+eq(completionResult(automaticProjectionRecord).action, 'completion-projection-failed', 'saved automatic projection failure blocks clean completion');
+eq(JSON.stringify(automaticProjectionRecord.vault_receipts), automaticReceiptsBefore, 'automatic projection failure preserves successful deployment receipts');
+
 const failedProjectionState = emptyState();
 failedProjectionState.cards.Failed = {
   card: 'Failed', phase: 'deployed', card_path: path.join(reconcileRoot, 'missing-card.md'),
   vault_receipts: successfulVaultReceipts(), projection_error: 'old projection failure',
 };
 let failedProjectionWrites = 0;
+const failedProjectionReceiptsBefore = JSON.stringify(failedProjectionState.cards.Failed.vault_receipts);
 const failedReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Failed' }, {
   readState: () => failedProjectionState,
   writeState: () => { failedProjectionWrites++; },
@@ -480,6 +508,7 @@ const failedReconcile = await commandReconcile({ root: reconcileRoot }, { card: 
 eq(failedReconcile.action, 'reconcile-failed', 'projection failure remains explicit');
 eq(failedProjectionState.cards.Failed.projection_error, 'card note missing', 'latest projection error stays saved');
 eq(failedProjectionWrites, 1, 'failed projection persists its error without touching receipts');
+eq(JSON.stringify(failedProjectionState.cards.Failed.vault_receipts), failedProjectionReceiptsBefore, 'failed reconciliation preserves saved receipt values');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));

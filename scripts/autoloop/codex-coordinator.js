@@ -445,15 +445,18 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   };
 }
 
-function attemptProjection(record, boardPath = BOARD, opts = {}) {
+async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const project = opts.projectCard || projectCard;
   const now = opts.now || (() => new Date().toISOString());
+  const projectionLock = opts.withLock || withLock;
   try {
-    const result = project(record.card_path, boardPath, record.card, record.phase, { now });
-    delete record.projection_error;
-    delete record.projection_failed_at;
-    record.projection_reconciled_at = now();
-    return { ok: true, ...result };
+    return await projectionLock(ctx, 'completion-projection', async () => {
+      const result = project(record.card_path, boardPath, record.card, record.phase, { now });
+      delete record.projection_error;
+      delete record.projection_failed_at;
+      record.projection_reconciled_at = now();
+      return { ok: true, ...result };
+    }, { card: record.card });
   } catch (err) {
     record.projection_error = err.message;
     record.projection_failed_at = now();
@@ -727,7 +730,7 @@ async function promoteAndDeploy(ctx, state, record) {
     const allOk = VAULTS.every((vault) => record.vault_receipts[vault.id] && record.vault_receipts[vault.id].ok);
     if (allOk) {
       record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
-      attemptProjection(record);
+      await attemptProjection(ctx, record);
     }
     writeState(ctx, state, record);
     return allOk
@@ -868,7 +871,7 @@ async function commandClaim(ctx, args) {
       throw err;
     }
     record.phase = 'implementing';
-    attemptProjection(record);
+    await attemptProjection(ctx, record);
     writeState(ctx, state, record);
     return { action: 'implement', ...record, skipped: selected.skipped };
   });
@@ -1054,55 +1057,60 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
-  return reconcileLock(ctx, 'completion-projection', async () => {
-    const state = loadState(ctx);
-    let records;
-    if (args.card) {
-      const record = state.cards[args.card];
-      if (!record) throw new Error(`reconcile requires a tracked --card; ${args.card} is not tracked`);
-      records = [record];
-    } else {
-      records = Object.values(state.cards || {});
-    }
-    const results = [];
-    for (const record of records) {
-      if (!projectionMapping(record.phase)) {
-        results.push({ card: record.card, phase: record.phase, ok: true, changed: false, skipped: 'phase has no board projection' });
-        continue;
-      }
-      const priorError = record.projection_error || null;
-      const priorFailedAt = record.projection_failed_at || null;
-      try {
-        const projected = project(record.card_path, boardPath, record.card, record.phase, { now });
-        const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
-        if (stateChanged) {
-          delete record.projection_error;
-          delete record.projection_failed_at;
-          record.projection_reconciled_at = now();
-          persist(ctx, state, record);
+  const initialState = loadState(ctx);
+  const cardNames = args.card ? [args.card] : Object.keys(initialState.cards || {});
+  if (args.card && !initialState.cards[args.card]) {
+    throw new Error(`reconcile requires a tracked --card; ${args.card} is not tracked`);
+  }
+  const results = [];
+  for (const card of cardNames) {
+    try {
+      const result = await reconcileLock(ctx, `gates-${slugify(card)}`, async () => {
+        const state = loadState(ctx);
+        const record = state.cards[card];
+        if (!record) return { card, phase: null, ok: false, changed: false, error: 'tracked record disappeared during reconciliation' };
+        if (!projectionMapping(record.phase)) {
+          return { card: record.card, phase: record.phase, ok: true, changed: false, skipped: 'phase has no board projection' };
         }
-        results.push({
-          card: record.card, phase: record.phase, ok: true,
-          changed: Boolean(projected.changed || stateChanged),
-          projection_changed: Boolean(projected.changed), state_changed: stateChanged,
-        });
-      } catch (err) {
-        const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
-        record.projection_error = err.message;
-        if (stateChanged) record.projection_failed_at = now();
-        if (stateChanged) persist(ctx, state, record);
-        results.push({ card: record.card, phase: record.phase, ok: false, changed: stateChanged, error: err.message });
-      }
+        return reconcileLock(ctx, 'completion-projection', async () => {
+          const priorError = record.projection_error || null;
+          const priorFailedAt = record.projection_failed_at || null;
+          try {
+            const projected = project(record.card_path, boardPath, record.card, record.phase, { now });
+            const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
+            if (stateChanged) {
+              delete record.projection_error;
+              delete record.projection_failed_at;
+              record.projection_reconciled_at = now();
+              persist(ctx, state, record);
+            }
+            return {
+              card: record.card, phase: record.phase, ok: true,
+              changed: Boolean(projected.changed || stateChanged),
+              projection_changed: Boolean(projected.changed), state_changed: stateChanged,
+            };
+          } catch (err) {
+            const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
+            record.projection_error = err.message;
+            if (stateChanged) record.projection_failed_at = now();
+            if (stateChanged) persist(ctx, state, record);
+            return { card: record.card, phase: record.phase, ok: false, changed: stateChanged, error: err.message };
+          }
+        }, { card });
+      }, { card });
+      results.push(result);
+    } catch (err) {
+      results.push({ card, phase: null, ok: false, changed: false, error: `reconciliation lock failed: ${err.message}` });
     }
-    const failed = results.filter((result) => !result.ok);
-    const changed = results.filter((result) => result.changed).length;
-    return {
-      action: failed.length ? 'reconcile-failed' : 'reconciled',
-      scope: args.card ? 'card' : 'all-tracked', checked: results.length,
-      changed, failed: failed.length, no_op: changed === 0 && failed.length === 0,
-      results,
-    };
-  }, { card: args.card || null });
+  }
+  const failed = results.filter((result) => !result.ok);
+  const changed = results.filter((result) => result.changed).length;
+  return {
+    action: failed.length ? 'reconcile-failed' : 'reconciled',
+    scope: args.card ? 'card' : 'all-tracked', checked: results.length,
+    changed, failed: failed.length, no_op: changed === 0 && failed.length === 0,
+    results,
+  };
 }
 
 function commandRecover(ctx) {
@@ -1142,7 +1150,7 @@ module.exports = {
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  moveBoardCard, patchFrontmatter, projectCard, projectionBoardDrift, completionResult,
+  moveBoardCard, patchFrontmatter, projectCard, attemptProjection, projectionBoardDrift, completionResult,
 };
 
 if (require.main === module) {

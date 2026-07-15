@@ -70,7 +70,10 @@ The command projects only `implementing` → `In Progress`/`in_progress`,
 `projection_reconciled_at`; a second clean run is a no-op. It does not claim,
 implement, release, promote Homebrew, deploy a vault, roll up a parent card, or
 rewrite any saved deployment receipt. Mixed checked/unchecked Archive entries
-and unrelated cards remain untouched.
+and unrelated cards remain untouched. Automatic claim/deployment projection and
+manual reconciliation share one board-projection lock. Reconciliation also
+rereads each record under that card's gate lock before writing, so it cannot
+overwrite a concurrent phase transition with stale ledger state.
 
 ## Recovery
 
