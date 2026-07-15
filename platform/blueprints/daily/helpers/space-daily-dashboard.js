@@ -1310,7 +1310,20 @@ class SpaceDailyDashboard {
     const body = details.createEl("div");
     body.className = "sauce-section-body";
     if (stateKey) {
+      // Persist ONLY genuine user toggles. Setting details.open programmatically
+      // above (initial-state restore) queues an ASYNC `toggle` event that fires
+      // AFTER this listener is attached — so without a guard it writes
+      // ranch/cache/dashboard-section-state.json on every render. Because that
+      // file lives inside the vault, Dataview's file-change auto-refresh then
+      // re-executes the block → re-render → programmatic open → write again → an
+      // endless ~refreshInterval reload loop (the reported Home "reloads every
+      // time"). Tracking the last-persisted value lets us skip the spurious
+      // programmatic toggle (open still equals the restored value) and write only
+      // when the user actually flips the section.
+      let lastPersisted = initialOpen;
       details.addEventListener("toggle", () => {
+        if (details.open === lastPersisted) return;
+        lastPersisted = details.open;
         this._writeSectionStateKey(stateKey, details.open);
       });
     }
@@ -1361,6 +1374,10 @@ class SpaceDailyDashboard {
           }
         }
       } catch (_) { cur = {}; }
+      // Idempotent — never rewrite the file with an unchanged value. A redundant
+      // write is a vault modification that triggers Dataview's file-change
+      // auto-refresh, so a no-op write would still re-render the Home/daily block.
+      if (Object.prototype.hasOwnProperty.call(cur, key) && cur[key] === !!value) return;
       cur[key] = !!value;
       try {
         if (typeof app.vault.adapter.mkdir === "function") {
