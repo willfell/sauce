@@ -93,6 +93,8 @@ function makeMoment() {
     return m;
 }
 const momentFn = (..._args) => makeMoment();
+let activeFile = null;
+let beaconCalls = 0;
 
 // dv stub — `currentVal` is what dv.current() returns (cold-load: undefined/null).
 function makeDv(embed, currentVal) {
@@ -119,36 +121,31 @@ const cjs = {
     AccentButton: { render: () => makeEl() },
     Breadcrumb: { render: async () => {} },
     // MeetingsHubCards delegates its (empty) grid to BeaconCards.
-    BeaconCards: { render: async () => {} },
+    BeaconCards: { render: async () => { beaconCalls++; } },
     RenderSafe: new RenderSafeClass(),
 };
 global.customJS = Object.assign(global.customJS || {}, cjs);
 global.app = {
-    workspace: { openLinkText() {}, getActiveFile() { return null; } },
+    workspace: { openLinkText() {}, getActiveFile() { return activeFile; } },
     vault: { getAbstractFileByPath() { return null; }, async createFolder() {}, async create() {}, async read() { return ''; } },
     commands: { executeCommandById() {} },
     plugins: { plugins: {} },
-    metadataCache: { getFirstLinkpathDest() { return null; } },
+    metadataCache: { getFirstLinkpathDest() { return null; }, getFileCache() { return { frontmatter: {} }; } },
 };
 global.window = Object.assign(global.window || {}, { customJS: global.customJS, moment: momentFn, app: global.app });
 global.moment = momentFn;
 
-// Only MeetingLeafActions is exercised here: it is the axis's uncovered widget and
-// is cold-load-safe (embed guard + no dv.current() dependency — it renders three
-// AccentButton actions). MeetingsHubCards is deliberately NOT included: it is
-// already credited via run-renderer.js AND it is NOT cold-load-safe (render() reads
-// dv.current().file.name with no `if (!cur) return` guard, so it throws during the
-// pre-index window). Adding a guard to MeetingsHubCards is a BEHAVIORAL fix, out of
-// scope for this test-category coverage item — filed as a follow-up bug finding.
 const widgets = [
+    { name: 'MeetingsHubCards', path: 'platform/blueprints/meetings/helpers/meetings-hub-cards.js' },
     { name: 'MeetingLeafActions', path: 'platform/blueprints/meetings/helpers/meeting-leaf-actions.js' },
 ];
 
-// cold-load variants: Dataview not indexed → dv.current() undefined/null and
-// dv.pages() empty; plus the embed context.
+// cold-load variants: Dataview not indexed → dv.current() undefined/null, or
+// a partial page with no `.file`; plus the embed context.
 const variants = [
     { label: 'normal container, dv.current()=undefined (cold-load)', embed: false, current: undefined },
     { label: 'normal container, dv.current()=null (cold-load)', embed: false, current: null },
+    { label: 'normal container, dv.current() has no .file (cold-load)', embed: false, current: {} },
     { label: '.markdown-embed context', embed: true, current: undefined },
 ];
 
@@ -164,6 +161,17 @@ const variants = [
             });
         }
     }
+    await guard('MTGGUARD MeetingsHubCards — RenderSafe active-file recovery', async () => {
+        activeFile = { path: 'spice/meetings/Meetings-2026-07-03.md', basename: 'Meetings-2026-07-03' };
+        beaconCalls = 0;
+        try {
+            await new (loadWidget('platform/blueprints/meetings/helpers/meetings-hub-cards.js', 'MeetingsHubCards'))()
+                .render(makeDv(false, undefined));
+            if (beaconCalls !== 1) throw new Error(`expected BeaconCards.render once after RenderSafe recovery, got ${beaconCalls}`);
+        } finally {
+            activeFile = null;
+        }
+    });
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();

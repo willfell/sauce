@@ -13,8 +13,16 @@
  */
 class MeetingsHubCards {
   async render(dv) {
-    const currentFile = dv.current();
-    const dateMatch = currentFile.file.name.match(/(\d{4}-\d{2}-\d{2})/);
+    // Dataview may render before indexing the embedding note. RenderSafe keeps a
+    // usable active-file shim when available; otherwise a missing page/file is a
+    // quiet no-op rather than a rejected render promise.
+    const renderSafe = (typeof window !== "undefined" && window.customJS && window.customJS.RenderSafe) || null;
+    const currentPage = renderSafe && typeof renderSafe.page === "function"
+      ? renderSafe.page(dv)
+      : (dv && typeof dv.current === "function" ? dv.current() : null);
+    const currentFile = currentPage && currentPage.file;
+    if (!currentFile || !currentFile.name) return;
+    const dateMatch = currentFile.name.match(/(\d{4}-\d{2}-\d{2})/);
     const currentDateStr = dateMatch ? dateMatch[1] : window.moment().format("YYYY-MM-DD");
 
     const icons = {
