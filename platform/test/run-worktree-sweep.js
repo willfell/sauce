@@ -7,6 +7,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const {
   executeSweep,
+  liveProcessPaths,
   sweepContext,
 } = require('../../scripts/autoloop/sweep-worktrees');
 
@@ -214,7 +215,33 @@ try {
     source.includes("git(ctx.root, ['worktree', 'remove', '--', planned.path])")
       && !/worktree['"],\s*['"]remove['"],\s*['"]--force/.test(source));
 
-  const noop = executeSweep({ repo, currentWorktree: repo, processPaths: [] });
+  const currentManaged = path.join(claudeManaged, 'current execution');
+  sh(repo, ['branch', 'current-execution-branch']);
+  sh(repo, ['worktree', 'add', currentManaged, 'current-execution-branch']);
+  const currentPlan = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('managed current execution worktree is classified active and needs inspection',
+    !!item(currentPlan, 'active_or_in_use', currentManaged)
+      && !!item(currentPlan, 'needs_inspection', currentManaged));
+  const currentApply = executeSweep({
+    repo,
+    mode: 'apply',
+    plan: currentPlan,
+    currentWorktree: currentManaged,
+    processPaths: [],
+  });
+  check('apply preserves a clean merged managed current execution worktree',
+    currentApply.action === 'applied' && fs.existsSync(currentManaged));
+
+  const incompleteLsof = liveProcessPaths(ctx, () => ({
+    status: 1,
+    stdout: '',
+    stderr: "lsof: WARNING: can't opendir unreadable: Permission denied\n",
+    error: null,
+  }));
+  check('lsof warnings make process detection fail closed',
+    /scan incomplete/.test(incompleteLsof.error || ''));
+
+  const noop = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
   check('repeat dry-run is a clean no-op for removable candidates', noop.safe_to_remove.length === 0);
 
   const lockRoot = path.join(ctx.locksDir, 'worktree-sweep.lock');

@@ -138,13 +138,16 @@ function parseLsof(output) {
   return found;
 }
 
-function liveProcessPaths(ctx) {
+function liveProcessPaths(ctx, run = spawnSync) {
   const found = [];
   const commands = [['-a', '-d', 'cwd', '-F', 'pn']];
   for (const root of ctx.managedRoots) if (fs.existsSync(root)) commands.push(['-F', 'pn', '+D', root]);
   for (const args of commands) {
-    const result = spawnSync('lsof', args, { encoding: 'utf8', maxBuffer: MAXBUF });
+    const result = run('lsof', args, { encoding: 'utf8', maxBuffer: MAXBUF });
     if (result.error) return { paths: [], error: `live-process scan failed: ${result.error.message}` };
+    if (String(result.stderr || '').trim()) {
+      return { paths: [], error: `live-process scan incomplete: ${String(result.stderr).trim()}` };
+    }
     if (result.status !== 0 && result.status !== 1) {
       return { paths: [], error: `live-process scan failed with exit ${result.status}` };
     }
@@ -405,6 +408,7 @@ module.exports = {
   acquireSweepLocks,
   buildReport,
   executeSweep,
+  liveProcessPaths,
   parseWorktreeList,
   releaseSweepLocks,
   sweepContext,
