@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Autoloop"
+  short_description: "Ship one Sauce execution slice end to end"
+  default_prompt: "Use $sauce-autoloop to run or resume one bounded Sauce board turn."
