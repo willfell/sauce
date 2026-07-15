@@ -1,9 +1,9 @@
 {
-  "workshop_version": "0.231.3",
+  "workshop_version": "0.231.4",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
-    "daily": "0.23.0",
+    "daily": "0.23.1",
     "meetings": "0.19.1",
     "people": "0.8.1",
     "products": "0.4.0",
@@ -15,7 +15,7 @@
     "sticky-notes": "0.11.3",
     "teams": "0.4.0",
     "wiki": "0.8.2",
-    "home": "0.8.4",
+    "home": "0.8.5",
     "reader": "0.6.0",
     "editor-width": "0.2.0",
     "agent-embed": "0.2.0",
@@ -47,7 +47,7 @@
     "sauce-plugin": "0.3.0",
     "task-entity": "0.15.4",
     "menu-popover": "0.3.0",
-    "chrome-bar": "0.4.1",
+    "chrome-bar": "0.4.2",
     "section-explorer": "0.6.0"
   }
 }
