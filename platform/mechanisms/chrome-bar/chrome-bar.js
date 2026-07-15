@@ -178,8 +178,14 @@ class ChromeBar {
     if (!adapter || typeof adapter.resolve !== "function") return;
     const ICON = this.CHROME_ICONS;
     // Cold-load guard (mirror doc-leaf-actions.js): bail on missing page/file or
-    // an embedded render context.
-    const page = customJS.RenderSafe.page(dv);
+    // an embedded render context. RenderSafe itself may not be registered yet on
+    // a cold customJS load (Home renders during app startup) — guard its absence
+    // and fall back to dv.current() so this async render can't reject with
+    // "Cannot read properties of undefined (reading 'page')".
+    const RS = (typeof customJS !== "undefined" && customJS && customJS.RenderSafe) || null;
+    const page = (RS && typeof RS.page === "function")
+      ? RS.page(dv)
+      : (dv && typeof dv.current === "function" ? dv.current() : null);
     if (!page || !page.file) return;
     const container0 = (dv && dv.container) ? dv.container : dv;
     if (!container0 || typeof container0.createEl !== "function") return;

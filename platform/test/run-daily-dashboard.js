@@ -61,7 +61,9 @@ function makeDashEl() {
     createEl(tag, _opts) { const c = makeDashEl(); c._tag = tag; this._children.push(c); return c; },
     querySelector() { return null; },
     querySelectorAll() { return []; },
-    addEventListener() {},
+    _listeners: null,
+    addEventListener(type, fn) { (this._listeners || (this._listeners = {}))[type] = fn; },
+    _fire(type) { const fn = this._listeners && this._listeners[type]; if (fn) fn(); },
     remove() {},
     get textContent() { return this._text + this._children.map(c => c.textContent).join(''); },
     set textContent(v) { this._text = String(v == null ? '' : v); this._children = []; },
@@ -377,6 +379,48 @@ function loadActivityFeed(windowShim) {
     const proj = metaText({ type: 'project', file: { mtime: 0 } });
     assert(!proj.includes('Reading') && !proj.includes('Added'),
       'expected non-reader meta to not inject reader words, got ' + proj);
+  });
+
+  // ── SEC-STATE: the section-collapse-state persistence must not feed Dataview's
+  //    file-change auto-refresh (root cause of the Home "reload every time" loop).
+  await ok('SDD-SECSTATE-1 _writeSectionStateKey idempotent — unchanged value does not rewrite (refresh-loop breaker)', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    const store = {};
+    let writes = 0;
+    global.app = { vault: { adapter: {
+      read: async (p) => { if (!Object.prototype.hasOwnProperty.call(store, p)) throw new Error('ENOENT'); return store[p]; },
+      write: async (p, c) => { writes++; store[p] = c; },
+      mkdir: async () => {},
+      exists: async (p) => Object.prototype.hasOwnProperty.call(store, p),
+    } } };
+    try {
+      await dash._writeSectionStateKey('tasks', true);
+      assert(writes === 1, 'first write persists, got ' + writes);
+      await dash._writeSectionStateKey('tasks', true);
+      assert(writes === 1, 'unchanged value must NOT rewrite the file, got ' + writes);
+      await dash._writeSectionStateKey('tasks', false);
+      assert(writes === 2, 'a changed value writes, got ' + writes);
+    } finally { delete global.app; }
+  });
+
+  await ok('SDD-SECSTATE-2 programmatic details.open restore does NOT persist (only genuine user toggle writes)', async () => {
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    let writeCalls = 0;
+    dash._writeSectionStateKey = async () => { writeCalls++; };
+    const container = makeDashEl();
+    dash._renderSection(container, { accent: 'a', iconHtml: '', title: 'T', rightHtml: '', defaultOpen: false, stateKey: 'tasks', sectionState: { tasks: true } });
+    const section = container._children[container._children.length - 1];
+    const details = section._children.find((c) => c._tag === 'details');
+    assert(!!details, 'details element created');
+    // The programmatic restore set details.open=true; its async toggle fires now:
+    details._fire('toggle');
+    assert(writeCalls === 0, 'programmatic open must not write, got ' + writeCalls);
+    // A genuine user toggle flips the value → writes.
+    details.open = false;
+    details._fire('toggle');
+    assert(writeCalls === 1, 'a user toggle writes, got ' + writeCalls);
   });
 
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
