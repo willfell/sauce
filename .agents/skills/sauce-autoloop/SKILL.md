@@ -47,33 +47,36 @@ When the action is `implement`:
 2. Read the selected execution card in full. Enforce its `touch_zones`, `model_profile`, dependencies, and deployment map.
 3. Verify every cited loader/helper/precedent before changing code.
 4. Keep the slice to one coherent outcome. If it crosses an undeclared touch zone or adds another high-risk dimension, block with a proposed child card.
-5. Add a regression test for every behavioral change. It must fail without the source change.
-6. Run targeted tests, then:
-
-   ```bash
-   npm run release:preflight
-   ```
-
-7. Run workshop self-install when the slice touches manifests, installer behavior, materialized files, commands, skills, or consumer-facing helpers:
-
-   ```bash
-   node platform/install.js --vault . --auto-approve
-   ```
-
-8. From a clean committed worktree, run `npm run release:preflight-bumped` for component-changing work.
-9. For behavioral source changes, run Gate B Layer 1:
+5. Add a regression test for every behavioral change. It must fail without the source change. Run the targeted test for fast feedback.
+6. Commit the clean slice with a release-triggering `fix:` or `feat:` title. Never edit versions, tags, release PRs, or the tap.
+7. For behavioral source changes, run Gate B Layer 1:
 
    ```bash
    node scripts/autoloop/gate.js verify-adequacy --base origin/main --json
    ```
 
-10. If Layer 1 is adequate, dispatch three **read-only** reviewers in separate contexts over `git diff origin/main...HEAD`: correctness, regression risk, and test adequacy. Do not dispatch parallel implementers. Treat missing/uncertain reviews as refutations; use `gateVerdict` from `scripts/autoloop/gate.js` and block when two or more refute.
-11. Use a release-triggering `fix:` or `feat:` commit and PR title for every live card. A deployable card must not use a `test:`, `docs:`, or `chore:` PR title. Never edit versions, tags, release PRs, or the tap.
-12. Push and open the PR against `main`, but do not arm auto-merge yourself. Record it first; the coordinator validates the title, sets it as the squash subject, then arms auto-merge:
+8. If Layer 1 is adequate, dispatch three **read-only** reviewers in separate contexts over `git diff origin/main...HEAD`: correctness, regression risk, and test adequacy. Do not dispatch parallel implementers. Record each returned verdict; uncertain evidence is a refutation:
+
+   ```bash
+   node scripts/autoloop/codex-coordinator.js record-review --card "<card>" --lens correctness --verdict pass --summary "<specific finding>" --json
+   node scripts/autoloop/codex-coordinator.js record-review --card "<card>" --lens regression-risk --verdict pass --summary "<specific finding>" --json
+   node scripts/autoloop/codex-coordinator.js record-review --card "<card>" --lens test-adequacy --verdict pass --summary "<specific finding>" --json
+   ```
+
+9. Let the coordinator fetch the current `origin/main`, use this card's shared review/gate/PR/advance lock, rerun adequacy, full preflight, isolated workshop self-install, and bumped preflight, then save one receipt tied to the exact head and base commits:
+
+   ```bash
+   node scripts/autoloop/codex-coordinator.js verify-gates --card "<card>" --json
+   ```
+
+   Any new commit invalidates the reviews and combined receipt. Repeat steps 7–9 after a fix.
+10. Push and open the PR against `main`, using the same `fix:` or `feat:` title. Do not arm auto-merge yourself. Record it only after `verify-gates` passes:
 
    ```bash
    node scripts/autoloop/codex-coordinator.js record-pr --card "<card>" --pr <number> --json
    ```
+
+The coordinator refuses a missing, failed, noncanonical, or stale gate receipt. Reviews close after the feature PR merges. If an older run already armed auto-merge, the coordinator disables that request until the current head/base receipt and GitHub CI are green. A merged PR without a valid exact-head receipt stops at `needs-inspection`.
 
 ## Advance
 
@@ -87,7 +90,8 @@ Let the coordinator poll feature CI/merge, release PR/merge, tag, tap PR/merge, 
 
 If it returns:
 
-- `fix-ci`: inspect the named failures in the existing worktree, repair within scope, rerun every gate, push, and advance again if lease remains.
+- `fix-ci`: inspect the named failures in the existing worktree, repair within scope, commit, repeat reviews plus `verify-gates`, push, and advance again if lease remains.
+- `verify-gates`: the PR head changed or its receipt is incomplete. Repeat reviews plus `verify-gates`; do not arm or merge it.
 - `refresh-feature`: update the existing feature branch from `origin/main`, resolve only in-scope conflicts, rerun every gate, push, and advance again. Never force-push.
 - `waiting`: return the saved phase and resume condition.
 - `deploy`: run the coordinator's deploy command; do not hand-edit consumer subscriptions beyond the card's explicit map.

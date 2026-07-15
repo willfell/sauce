@@ -18,6 +18,7 @@ const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
 const { parseBoard, parseDependsOn } = require('./select-card');
 const { cmpVersion } = require('./deploy');
+const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 
 const execFileAsync = promisify(execFile);
@@ -27,11 +28,13 @@ const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
+const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const EXCLUSIVE_ZONES = [
   'platform/install.js', 'package.json', '.github/workflows',
   'platform/manifest.json', 'shared-registries', 'homebrew-promotion',
 ];
+const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
 const BOARD = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
 const CARDS_ROOT = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
@@ -397,7 +400,7 @@ function ghJson(args, cwd) {
 
 function prView(repo, number, cwd) {
   return ghJson(['pr', 'view', String(number), '-R', repo, '--json',
-    'number,state,title,url,baseRefName,headRefName,headRefOid,mergeStateStatus,mergeCommit,statusCheckRollup,autoMergeRequest'], cwd);
+    'number,state,title,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,mergeCommit,statusCheckRollup,autoMergeRequest'], cwd);
 }
 
 function commitContains(repo, ancestor, descendant, cwd) {
@@ -433,9 +436,77 @@ function assertReleasableTitle(title) {
   }
 }
 
+function gateReceiptStatus(record, headSha, baseSha = null) {
+  const receipt = record && record.gate_receipt;
+  if (!receipt) return { valid: false, reason: 'required gate receipt is missing' };
+  if (receipt.head_sha !== headSha) {
+    return { valid: false, reason: `gate receipt is stale (${receipt.head_sha || 'unknown'} != ${headSha})` };
+  }
+  if (receipt.status !== 'pass') return { valid: false, reason: `gate receipt did not pass: ${receipt.reason || 'unknown failure'}` };
+  if (receipt.base_ref !== 'origin/main' || !receipt.base_sha) {
+    return { valid: false, reason: 'gate receipt does not use the canonical origin/main base' };
+  }
+  if (baseSha && receipt.base_sha !== baseSha) {
+    return { valid: false, reason: `gate receipt base is stale (${receipt.base_sha} != ${baseSha})` };
+  }
+  const required = ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped'];
+  const missing = required.filter((name) => !receipt.checks || receipt.checks[name] !== 'pass');
+  if (missing.length) return { valid: false, reason: `gate receipt is incomplete: ${missing.join(', ')}` };
+  if (receipt.behavioral) {
+    const reviews = receipt.reviews || {};
+    const stale = REVIEW_LENSES.filter((lens) => !reviews[lens] || reviews[lens].head_sha !== headSha);
+    if (stale.length) return { valid: false, reason: `review receipts are missing or stale: ${stale.join(', ')}` };
+  }
+  return { valid: true, reason: 'all required gates passed for this commit' };
+}
+
+function pathCoveredByTouchZones(file, zones) {
+  const normalized = normalizeZone(file);
+  const pathZones = (zones || []).map(normalizeZone)
+    .filter((zone) => zone && !SYMBOLIC_TOUCH_ZONES.has(zone) && !/\s/.test(zone));
+  if (!pathZones.length) return false;
+  return pathZones.some((zone) => normalized === zone || normalized.startsWith(`${zone}/`));
+}
+
+function runIsolatedWorkshopSelfInstall(ctx, headSha, run = sh) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-autoloop-self-install-'));
+  fs.rmSync(temp, { recursive: true, force: true });
+  let added = false;
+  let failure = null;
+  try {
+    run('git', ['worktree', 'add', '--detach', temp, headSha], { cwd: ctx.root, stdio: 'pipe' });
+    added = true;
+    run('node', ['platform/install.js', '--vault', '.', '--auto-approve'], { cwd: temp, stdio: 'pipe' });
+  } catch (err) {
+    failure = err;
+  } finally {
+    let registered = added;
+    if (!registered) {
+      try {
+        const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
+        registered = String(listed).split('\n').some((line) => line === `worktree ${temp}`);
+      } catch (err) {
+        failure = failure ? new Error(`${failure.message}; could not inspect disposable worktree registration: ${err.message}`) : err;
+      }
+    }
+    if (registered) {
+      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }
+      catch (err) {
+        const cleanup = new Error(`failed to remove disposable self-install worktree ${temp}: ${err.message}`);
+        failure = failure ? new Error(`${failure.message}; ${cleanup.message}`) : cleanup;
+      }
+    } else fs.rmSync(temp, { recursive: true, force: true });
+  }
+  if (failure) throw failure;
+}
+
 function armFeatureAutoMerge(pr, cwd, run = sh) {
   assertReleasableTitle(pr.title);
   run('gh', ['pr', 'merge', String(pr.number), '-R', REPO, '--squash', '--auto', '--subject', pr.title], { cwd });
+}
+
+function disableFeatureAutoMerge(pr, cwd, run = sh) {
+  run('gh', ['pr', 'merge', String(pr.number), '-R', REPO, '--disable-auto'], { cwd });
 }
 
 function releasePrWaitReceipt() {
@@ -555,14 +626,27 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   const findTag = deps.findContainingTag || findContainingTag;
   const findRelease = deps.findContainingRelease || findContainingRelease;
   const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
+  const disableAutoMerge = deps.disableFeatureAutoMerge || disableFeatureAutoMerge;
+  const persist = deps.writeState || writeState;
   if (record.phase === 'feature_pr') {
     const pr = viewPr(REPO, record.feature_pr, ctx.root);
+    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);
     if (pr.state === 'MERGED') {
+      if (!gateStatus.valid) {
+        record.phase = 'needs-inspection';
+        record.reason = `merged feature PR has no valid gate receipt: ${gateStatus.reason}`;
+        persist(ctx, state, record);
+        return { action: 'needs-inspection', card: record.card, phase: record.phase, reason: record.reason, url: pr.url };
+      }
       record.feature_merge_sha = pr.mergeCommit && pr.mergeCommit.oid;
-      record.phase = 'feature_merged'; record.feature_merged_at = new Date().toISOString(); writeState(ctx, state, record);
+      record.phase = 'feature_merged'; record.feature_merged_at = new Date().toISOString(); persist(ctx, state, record);
       return { action: 'phase-change', phase: record.phase, pr: record.feature_pr, merge_sha: record.feature_merge_sha };
     }
-    if (pr.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `feature PR ${pr.state}`; writeState(ctx, state, record); return { action: 'blocked', reason: record.reason, url: pr.url }; }
+    if (pr.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `feature PR ${pr.state}`; persist(ctx, state, record); return { action: 'blocked', reason: record.reason, url: pr.url }; }
+    if (!gateStatus.valid) {
+      if (pr.autoMergeRequest) disableAutoMerge(pr, ctx.root);
+      return { action: 'verify-gates', card: record.card, phase: 'feature_pr', head_sha: pr.headRefOid, reason: gateStatus.reason, url: pr.url };
+    }
     const checks = checkRollup(pr.statusCheckRollup);
     if (checks.failed.length) return { action: 'fix-ci', card: record.card, pr: pr.number, failed_checks: checks.failed, url: pr.url };
     if (['BEHIND', 'DIRTY'].includes(pr.mergeStateStatus)) {
@@ -571,7 +655,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     if (!isReleasableTitle(pr.title)) {
       return { action: 'blocked', card: record.card, phase: 'feature_pr', reason: `PR title "${pr.title}" will not trigger a release`, url: pr.url };
     }
-    if (!pr.autoMergeRequest) {
+    if (checks.green && !pr.autoMergeRequest) {
       try { armAutoMerge(pr, ctx.root); } catch (_) {}
     }
     return { action: 'waiting', phase: 'feature_pr', pending_checks: checks.pending, url: pr.url };
@@ -580,7 +664,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   if (record.phase === 'feature_merged' || record.phase === 'release_pr') {
     const tag = findTag(record.feature_merge_sha, ctx.root);
     if (tag) {
-      record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; writeState(ctx, state, record);
+      record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; persist(ctx, state, record);
       return { action: 'phase-change', phase: 'tagged', tag };
     }
     let release = record.release_pr ? viewPr(REPO, record.release_pr, ctx.root) : findRelease(record.feature_merge_sha, ctx.root);
@@ -590,23 +674,23 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     if (release.state === 'MERGED') {
       record.release_merge_sha = release.mergeCommit && release.mergeCommit.oid;
       record.required_version = versionFrom(release.title);
-      record.phase = 'release_merged'; writeState(ctx, state, record);
+      record.phase = 'release_merged'; persist(ctx, state, record);
       return { action: 'phase-change', phase: record.phase, release_pr: release.number, version: record.required_version };
     }
-    if (release.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `release PR ${release.state}`; writeState(ctx, state, record); return { action: 'blocked-external', reason: record.reason, url: release.url }; }
+    if (release.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `release PR ${release.state}`; persist(ctx, state, record); return { action: 'blocked-external', reason: record.reason, url: release.url }; }
     const releaseChecks = checkRollup(release.statusCheckRollup);
     if (releaseChecks.failed.length) {
-      record.phase = 'blocked'; record.reason = `release PR checks failed: ${releaseChecks.failed.join(', ')}`; writeState(ctx, state, record);
+      record.phase = 'blocked'; record.reason = `release PR checks failed: ${releaseChecks.failed.join(', ')}`; persist(ctx, state, record);
       return { action: 'blocked-external', reason: record.reason, url: release.url };
     }
-    record.phase = 'release_pr'; writeState(ctx, state, record);
+    record.phase = 'release_pr'; persist(ctx, state, record);
     return { action: 'waiting', phase: 'release_pr', release_pr: release.number, url: release.url };
   }
 
   if (record.phase === 'release_merged') {
     const tag = findTag(record.feature_merge_sha, ctx.root);
     if (!tag) return { action: 'waiting', phase: 'tag', reason: 'containing tag not created yet' };
-    record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; writeState(ctx, state, record);
+    record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; persist(ctx, state, record);
     return { action: 'phase-change', phase: record.phase, tag };
   }
 
@@ -615,14 +699,14 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     if (!tap) return { action: 'waiting', phase: 'tap_pr', reason: `bump-v${record.required_version} not created yet` };
     if (tap.state === 'OPEN' && !tap.statusCheckRollup) tap = prView(TAP_REPO, tap.number, ctx.root);
     record.tap_pr = tap.number; record.tap_url = tap.url;
-    if (tap.state === 'MERGED') { record.phase = 'tap_merged'; writeState(ctx, state, record); return { action: 'phase-change', phase: record.phase, tap_pr: tap.number }; }
-    if (tap.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `tap PR ${tap.state}`; writeState(ctx, state, record); return { action: 'blocked-external', reason: record.reason, url: tap.url }; }
+    if (tap.state === 'MERGED') { record.phase = 'tap_merged'; persist(ctx, state, record); return { action: 'phase-change', phase: record.phase, tap_pr: tap.number }; }
+    if (tap.state !== 'OPEN') { record.phase = 'blocked'; record.reason = `tap PR ${tap.state}`; persist(ctx, state, record); return { action: 'blocked-external', reason: record.reason, url: tap.url }; }
     const tapChecks = checkRollup(tap.statusCheckRollup);
     if (tapChecks.failed.length) {
-      record.phase = 'blocked'; record.reason = `tap PR checks failed: ${tapChecks.failed.join(', ')}`; writeState(ctx, state, record);
+      record.phase = 'blocked'; record.reason = `tap PR checks failed: ${tapChecks.failed.join(', ')}`; persist(ctx, state, record);
       return { action: 'blocked-external', reason: record.reason, url: tap.url };
     }
-    record.phase = 'tap_pr'; writeState(ctx, state, record);
+    record.phase = 'tap_pr'; persist(ctx, state, record);
     return { action: 'waiting', phase: 'tap_pr', tap_pr: tap.number, url: tap.url };
   }
 
@@ -633,6 +717,9 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
 
   if (record.phase === 'deployed') return { action: 'complete', card: record.card, version: record.brew_version, receipts: record.vault_receipts };
   if (record.phase === 'blocked') return { action: 'blocked', card: record.card, reason: record.reason };
+  if (record.phase === 'needs-inspection') {
+    return { action: 'needs-inspection', card: record.card, phase: record.phase, reason: record.reason, url: record.feature_url || null };
+  }
   return { action: 'needs-implementation', card: record.card, phase: record.phase, worktree: record.worktree };
 }
 
@@ -672,52 +759,152 @@ async function commandClaim(ctx, args) {
   });
 }
 
-function commandRecordPr(ctx, args, deps = {}) {
+async function commandRecordReview(ctx, args, deps = {}) {
+  const card = args.card; const lens = args.lens; const verdict = args.verdict;
+  const summary = String(args.summary || '').trim();
+  if (!card || !REVIEW_LENSES.includes(lens)) throw new Error(`record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
+  if (!['pass', 'refute'].includes(verdict)) throw new Error('record-review requires --verdict pass|refute');
+  if (summary.length < 20) throw new Error('record-review requires a specific --summary of at least 20 characters');
+  const loadState = deps.readState || readState;
+  const run = deps.sh || sh;
+  const persist = deps.writeState || writeState;
+  const gateLock = deps.withLock || withLock;
+  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+    if (!['implementing', 'feature_pr'].includes(record.phase)) {
+      throw new Error(`reviews are closed for ${card} in phase ${record.phase}`);
+    }
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    record.gate_receipt = null;
+    record.reviews = { ...(record.reviews || {}), [lens]: {
+      lens, verdict, refuted: verdict === 'refute', summary, head_sha: headSha, recorded_at: new Date().toISOString(),
+    } };
+    persist(ctx, state, record);
+    return { action: 'review-recorded', card, lens, verdict, head_sha: headSha };
+  }, { card, staleMs: 60 * 60 * 1000 });
+}
+
+async function commandVerifyGates(ctx, args, deps = {}) {
+  const card = args.card;
+  if (!card) throw new Error('verify-gates requires --card');
+  const loadState = deps.readState || readState;
+  const run = deps.sh || sh;
+  const persist = deps.writeState || writeState;
+  const runSelfInstall = deps.runIsolatedWorkshopSelfInstall || runIsolatedWorkshopSelfInstall;
+  const gateLock = deps.withLock || withLock;
+  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+    const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
+    if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    const baseRef = 'origin/main';
+    run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
+    const baseSha = run('git', ['rev-parse', baseRef], { cwd: record.worktree });
+    const paths = run('git', ['diff', '--name-only', `${baseSha}...${headSha}`], { cwd: record.worktree }).split('\n').map((s) => s.trim()).filter(Boolean);
+    const outside = paths.filter((file) => !pathCoveredByTouchZones(file, record.touch_zones));
+    if (outside.length) throw new Error(`diff exceeds declared touch zones: ${outside.join(', ')}`);
+
+    const receipt = {
+      status: 'fail', reason: 'gate verification did not finish', head_sha: headSha,
+      base_ref: baseRef, base_sha: baseSha, paths,
+      checks: {}, reviews: {}, started_at: new Date().toISOString(),
+    };
+    try {
+      const adequacyText = run('node', ['scripts/autoloop/gate.js', 'verify-adequacy', '--base', baseSha, '--json'], { cwd: record.worktree });
+      const adequacy = JSON.parse(adequacyText);
+      receipt.behavioral = adequacy.behavioral === true;
+      receipt.adequacy = adequacy;
+      if (adequacy.adequate !== true) throw new Error(`Gate B adequacy failed: ${adequacy.reason}`);
+      receipt.checks.adequacy = 'pass';
+
+      if (receipt.behavioral) {
+        const reviews = record.reviews || {};
+        const selected = REVIEW_LENSES.map((lens) => reviews[lens]).filter((review) => review && review.head_sha === headSha);
+        const panel = gateVerdict({ adequacy, votes: selected });
+        if (panel.gate !== 'pass') throw new Error(panel.reason);
+        receipt.reviews = Object.fromEntries(selected.map((review) => [review.lens, review]));
+        receipt.review_panel = panel;
+      }
+
+      run('npm', ['run', 'release:preflight'], { cwd: record.worktree, stdio: 'pipe' });
+      receipt.checks.release_preflight = 'pass';
+      runSelfInstall(ctx, headSha, run);
+      receipt.checks.workshop_self_install = 'pass';
+      run('npm', ['run', 'release:preflight-bumped'], { cwd: record.worktree, stdio: 'pipe' });
+      receipt.checks.release_preflight_bumped = 'pass';
+      const finalDirty = run('git', ['status', '--short'], { cwd: record.worktree });
+      const finalHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+      if (finalDirty || finalHead !== headSha) throw new Error('worktree or HEAD changed while gate verification was running');
+      receipt.status = 'pass'; receipt.reason = 'all required gates passed for this commit'; receipt.completed_at = new Date().toISOString();
+      record.gate_receipt = receipt;
+      persist(ctx, state, record);
+      return { action: 'gates-passed', card, head_sha: headSha, base_sha: baseSha, behavioral: receipt.behavioral, checks: receipt.checks };
+    } catch (err) {
+      receipt.reason = err.message; receipt.completed_at = new Date().toISOString();
+      record.gate_receipt = receipt;
+      persist(ctx, state, record);
+      throw err;
+    }
+  }, { card, staleMs: 60 * 60 * 1000 });
+}
+
+async function commandRecordPr(ctx, args, deps = {}) {
   const card = args.card; const number = Number(args.pr);
   if (!card || !Number.isInteger(number)) throw new Error('record-pr requires --card and numeric --pr');
   const loadState = deps.readState || readState;
   const viewPr = deps.prView || prView;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
-  const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
-  const state = loadState(ctx); const record = state.cards[card];
-  if (!record) throw new Error(`card ${card} is not claimed`);
-  const pr = viewPr(REPO, number, ctx.root);
-  if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
-  if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
-  assertReleasableTitle(pr.title);
-  const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
-  if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
-  const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
-  if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
-  record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
-  persist(ctx, state, record);
-  if (pr.state === 'OPEN' && !pr.autoMergeRequest) {
-    try { armAutoMerge(pr, ctx.root, run); } catch (_) {}
-  }
-  return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
+  const gateLock = deps.withLock || withLock;
+  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    const pr = viewPr(REPO, number, ctx.root);
+    if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
+    if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
+    assertReleasableTitle(pr.title);
+    const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
+    if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
+    const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
+    const gateStatus = gateReceiptStatus(record, localHead, pr.baseRefOid);
+    if (!gateStatus.valid) throw new Error(`record-pr refused: ${gateStatus.reason}`);
+    record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
+    persist(ctx, state, record);
+    return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
+  }, { card, staleMs: 60 * 60 * 1000 });
 }
 
-async function commandAdvance(ctx, args) {
+async function commandAdvance(ctx, args, deps = {}) {
   const card = args.card; if (!card) throw new Error('advance requires --card');
   const lease = Math.min(DEFAULT_LEASE_SECONDS, Math.max(0, Number(args['lease-seconds'] || DEFAULT_LEASE_SECONDS)));
   const poll = Math.max(5, Number(args['poll-seconds'] || DEFAULT_POLL_SECONDS));
+  const loadState = deps.readState || readState;
+  const gateLock = deps.withLock || withLock;
+  const step = deps.stepCard || stepCard;
+  const emit = deps.emit || ((value) => process.stdout.write(`${JSON.stringify(value)}\n`));
   const deadline = Date.now() + lease * 1000;
   let last = '';
   while (true) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
-      process.stdout.write(`${JSON.stringify(halted)}\n`); return halted;
+      emit(halted); return halted;
     }
-    const state = readState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} not in state`);
-    const result = await stepCard(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+    const result = await gateLock(ctx, `gates-${slugify(card)}`, async () => {
+      const state = loadState(ctx); const record = state.cards[card];
+      if (!record) throw new Error(`card ${card} not in state`);
+      return step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+    }, { card, staleMs: 60 * 60 * 1000 });
     const fingerprint = JSON.stringify(result);
-    if (fingerprint !== last) { process.stdout.write(`${fingerprint}\n`); last = fingerprint; }
+    if (fingerprint !== last) { emit(result); last = fingerprint; }
     if (!['waiting', 'phase-change'].includes(result.action) || lease === 0) return result;
     if (Date.now() >= deadline) {
-      const receipt = { action: 'waiting', card, phase: readState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
-      process.stdout.write(`${JSON.stringify(receipt)}\n`); return receipt;
+      const receipt = { action: 'waiting', card, phase: loadState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
+      emit(receipt); return receipt;
     }
     await new Promise((resolve) => setTimeout(resolve, Math.min(poll * 1000, Math.max(0, deadline - Date.now()))));
   }
@@ -755,6 +942,8 @@ async function main() {
   let result;
   if (command === 'status') result = commandStatus(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
+  else if (command === 'record-review') result = await commandRecordReview(ctx, args);
+  else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
   else if (command === 'advance') { await commandAdvance(ctx, args); return; }
   else if (command === 'deploy') {
@@ -762,14 +951,16 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|record-pr|advance|deploy|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|record-review|verify-gates|record-pr|advance|deploy|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
-  checkRollup, versionFrom, isReleasableTitle, releasePrWaitReceipt, armFeatureAutoMerge, commandRecordPr, stepCard,
+  checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
+  armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
+  commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   moveBoardCard, patchFrontmatter,
 };
 

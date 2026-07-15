@@ -163,11 +163,10 @@ if (src.length > 0) {
   assertTrue("BP-16: Notice on BeaconCards unavailable branch present",
     /BeaconCards.*unavailable|unavailable.*BeaconCards/i.test(src));
 
-  // BP-17: a mobile cold-load can produce a partial DV page: `.file` is there
-  // but frontmatter has not been indexed. BacklinkPanel must route through
-  // RenderSafe.page(dv), which overlays metadataCache before querying. The
-  // call-count assertion deliberately fails if _reverseQuery regresses to a
-  // direct dv.current()?.file lookup.
+  // BP-17: mobile cold-load can expose either a partial DV page or no current
+  // page yet. The partial case verifies the shared RenderSafe routing contract;
+  // the null case proves the user-visible fix by resolving the active file and
+  // returning backlinks that the old direct dv.current()?.file lookup dropped.
   const RenderSafeClass = new Function(
     fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/render-safe/render-safe.js"), "utf8") +
     "\nreturn RenderSafe;"
@@ -207,6 +206,10 @@ if (src.length > 0) {
     const result = panel._reverseQuery({ current: () => partial, pages: () => chain }, "projects", "created_at", 25);
     assertEq("BP-17b: partial page returns its matching backlink", result, rows);
     assertEq("BP-17c: backlink query calls RenderSafe.page exactly once", renderSafeCalls, 1);
+    chain.result = [];
+    const coldResult = panel._reverseQuery({ current: () => null, pages: () => chain }, "projects", "created_at", 25);
+    assertEq("BP-17d: null current page falls back to the active file", coldResult, rows);
+    assertEq("BP-17e: both cold-load shapes route through RenderSafe.page", renderSafeCalls, 2);
   } catch (e) {
     assertTrue("BP-17: partial-page metadata overlay regression", false, e && e.message);
   } finally {

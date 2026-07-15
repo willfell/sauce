@@ -115,6 +115,10 @@
       "version": "0.3.0"
     },
     {
+      "name": "section-explorer",
+      "version": "0.6.0"
+    },
+    {
       "name": "chrome-bar",
       "version": "0.4.2"
     }
