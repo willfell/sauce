@@ -8,7 +8,7 @@ const path = require('path');
 const {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  selectClaimCandidate, checkRollup, versionFrom, moveBoardCard, patchFrontmatter,
+  selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, moveBoardCard, patchFrontmatter,
 } = require('../../scripts/autoloop/codex-coordinator');
 
 let count = 0;
@@ -71,6 +71,11 @@ state = emptyState();
 state.cards.A = { card: 'A', phase: 'blocked', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).action, 'no-work', 'tracked blocked card is not reclaimed');
 
+const eligibleSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard }));
+eq(eligibleSummary, { action: 'claim', card: 'A', model_profile: 'standard', touch_zones: ['platform/a'], skipped_count: 0 }, 'summarizes next eligible card');
+const blockedSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['Missing']), state: emptyState(), loadCard }));
+eq(blockedSummary.first_blocker, { card: 'Missing', reason: 'card note missing' }, 'summarizes the first board blocker');
+
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'FAILURE' }]).failed, ['mac'], 'failed rollup');
@@ -117,6 +122,10 @@ writeState(ctx, staleB, recordB);
 const merged = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
 eq(merged.cards.A.phase, 'feature_merged', 'stale writer preserves another card advancement');
 eq(merged.cards.B.phase, 'release_pr', 'stale writer merges only its changed card');
+const statusCtx = { ...ctx, root: tmp };
+const status = commandStatus(statusCtx, { boardMd: board(['Missing']), loadCard });
+eq(status.next.action, 'no-work', 'status includes the read-only selector result');
+eq(status.next.first_blocker.card, 'Missing', 'status names the first card that needs preparation');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);

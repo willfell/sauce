@@ -30,8 +30,12 @@ Use a 600-second polling lease unless the user specifies a shorter one. Never ex
    ```
 
 4. If status reports `halted`, stop. Do not remove `.autoloop-halt` without an explicit user request.
-5. Unless `--live` is explicit, call `claim --dry-run --json`, report, and stop. For `status`, report status and stop.
-6. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
+5. Read `status.next` before recommending any live action:
+   - `claim`: name the eligible card and its model profile. Only this result may lead to a `run --live` recommendation.
+   - `no-work`: report `first_blocker` and tell the user to prepare the next card. Never recommend `run --live`.
+   - `at-capacity`: name the active cards and recommend resuming one of them. Never claim another card.
+6. Unless `--live` is explicit, call `claim --dry-run --json` to show the full read-only plan, report, and stop. In `status` mode, the compact `status.next` result is sufficient; do not claim.
+7. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
 
 The coordinator may return `implement`, `fix-ci`, `waiting`, `deploy`, `complete`, `blocked`, `no-work`, or `at-capacity`.
 
