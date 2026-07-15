@@ -9,12 +9,12 @@ Run one resumable Sauce turn. Let deterministic scripts own operational state; s
 
 ## Inputs
 
-Infer the mode from the prompt:
+Infer the mode from the prompt. Default to `dry-run`; only `--live` authorizes mutations:
 
-- `run` (default): resume eligible active work first, otherwise claim one card.
+- `run --live`: resume eligible active work first, otherwise claim one card.
 - `resume <card>`: operate only on that card.
 - `status`: read-only; do not claim or mutate.
-- `dry-run`: read-only claim and release/deploy plan.
+- `dry-run` (default): read-only claim and release/deploy plan.
 - `recover`: inspect interrupted state; never delete dirty work automatically.
 
 Use a 600-second polling lease unless the user specifies a shorter one. Never exceed ten minutes without returning a durable resume receipt.
@@ -30,7 +30,7 @@ Use a 600-second polling lease unless the user specifies a shorter one. Never ex
    ```
 
 4. If status reports `halted`, stop. Do not remove `.autoloop-halt` without an explicit user request.
-5. For `status`, report the result and stop. For `dry-run`, call `claim --dry-run --json`, report, and stop.
+5. Unless `--live` is explicit, call `claim --dry-run --json`, report, and stop. For `status`, report status and stop.
 6. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
 
 The coordinator may return `implement`, `fix-ci`, `waiting`, `deploy`, `complete`, `blocked`, `no-work`, or `at-capacity`.
