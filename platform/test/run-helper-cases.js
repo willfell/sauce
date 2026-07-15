@@ -7790,6 +7790,53 @@ async function caseHCV0880PeopleC() {
     `body excerpt: ${body.slice(-200)}`);
 }
 
+async function caseGAS3bPeopleSectionLabels() {
+  console.log("\n--- Case GA-S3b-PEOPLE-SECTIONLABEL: canonical People creation bodies ---");
+  const templateBody = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/templates/Template, People.md"), "utf8");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  const personButton = (manifest.new_entity_buttons || []).find((button) => button.id === "person");
+  const manifestBody = personButton && personButton.inline_body;
+  const sectionLabelDependency = (manifest.depends_on || []).find((dependency) => dependency.name === "section-label");
+  const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
+  const expectedShapes = labels.map((label, index) => ({ label, top: index === 0 }));
+  const sectionShapes = (body) => Array.from(String(body || "").matchAll(
+    /class: "SectionLabel", args: \[\{ text: "([^"]+)"(, top: true)? \}\]/g),
+    (match) => ({ label: match[1], top: Boolean(match[2]) }));
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: person EntityCreate inline_body exists",
+    typeof manifestBody === "string" && manifestBody.length > 0);
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: People directly depends on section-label",
+    sectionLabelDependency && sectionLabelDependency.range === ">=0.1.0");
+  for (const [surface, body] of [["template", templateBody], ["manifest inline_body", manifestBody]]) {
+    for (const label of labels) {
+      assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} ${label} SectionLabel present`,
+        new RegExp('class: "SectionLabel"[^`]*text: "' + label + '"').test(body));
+      assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} raw ## ${label} absent`,
+        !new RegExp('^##\\s+' + label + '\\s*$', "m").test(body));
+    }
+    assertEq(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} has exactly the canonical four label shapes`,
+      sectionShapes(body), expectedShapes);
+  }
+  assertEq("GA-S3b-PEOPLE-SECTIONLABEL: template and manifest section order agree",
+    sectionShapes(templateBody), sectionShapes(manifestBody));
+  const order = [
+    'text: "Notes"',
+    'text: "Meetings"',
+    'class: "PeopleRendering",\n  method: "renderMentionList",\n  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/meetings" }',
+    'text: "Daily Mentions"',
+    'scopePath: "spice/daily"',
+    'text: "Mentions"',
+    'class: "BacklinkPanel"',
+  ];
+  for (const [surface, body] of [["template", templateBody], ["manifest inline_body", manifestBody]]) {
+    const indexes = order.map((needle) => body.indexOf(needle));
+    assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} render blocks remain in content order`,
+      indexes.every((idx) => idx !== -1) && indexes.every((idx, i) => i === 0 || indexes[i - 1] < idx),
+      `indexes=${indexes.join(",")}`);
+  }
+}
+
 async function caseHCV0880PeopleD() {
   console.log("\n--- Case HC-V0880-PEOPLE-D: people version >= 0.5.0 (v0.88.x line) ---");
   const m = JSON.parse(fs.readFileSync(
@@ -15478,6 +15525,7 @@ async function caseRetireOldClaudianOnce() {
   await caseHCV0880PeopleA();
   await caseHCV0880PeopleB();
   await caseHCV0880PeopleC();
+  await caseGAS3bPeopleSectionLabels();
   await caseHCV0880PeopleD();
   await caseHCV0880MeetingsA();
   await caseHCV0880MeetingsB();

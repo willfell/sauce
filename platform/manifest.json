@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.232.6",
+  "workshop_version": "0.232.8",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -221,7 +221,7 @@
     },
     {
       "name": "people",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "path": "blueprints/people"
     },
     {
