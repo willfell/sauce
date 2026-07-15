@@ -96,19 +96,19 @@ const cfg = inst._config();
 }
 
 // TDCB-CONTRACT — end-to-end proof that ToDoChromeBar's new-task dispatch
-// opts actually produce a scheduled task via the REAL TaskEntity.defaultsForSurface
+// opts actually produce a due task via the REAL TaskEntity.defaultsForSurface
 // (not a mock). This is the regression the bug fix targets: the dispatch used to
 // send { surface: "today", scheduled: <date> } — a surface value / key name
 // defaultsForSurface does not recognize — which silently fell through to its
-// default case (source: manual, no scheduled date), so the created task never
-// appeared in TaskTodayList (which requires a scheduled date). Loading the real
+// default case (source: manual, no due date), so the created task never
+// appeared in TaskTodayList (which requires a due date). Loading the real
 // TaskDialog class here (not stubbed) closes the gap that let a wrong-but-plausible
 // opts shape ship without any test catching it.
 {
   const TaskDialogClass = loadClass('platform/mechanisms/task-entity/task-dialog.js', 'TaskDialog');
   const correctDefaults = TaskDialogClass.defaultsForSurface({ surface: 'daily', today: '2026-07-06' });
-  ok('TDCB-CONTRACT-1 the dispatch opts shape (surface:"daily", today:<date>) yields a real scheduled date + source:daily',
-    correctDefaults.scheduled === '2026-07-06' && correctDefaults.source === 'daily');
+  ok('TDCB-CONTRACT-1 the dispatch opts shape (surface:"daily", today:<date>) yields a real due date + source:daily',
+    correctDefaults.due === '2026-07-06' && correctDefaults.source === 'daily');
 
   const buggyDefaults = TaskDialogClass.defaultsForSurface({ surface: 'today', scheduled: '2026-07-06' });
   ok('TDCB-CONTRACT-2 sanity: the OLD buggy opts shape (surface:"today", scheduled:<date>) is confirmed unrecognized (source:manual, no scheduled) — proves this was a real, silent defect',
