@@ -148,7 +148,7 @@ function inspectManaged(record, ctx, options, active, processes, globalErrors, b
     add('known dirty legacy worktree; preserve for inspection');
   }
   for (const owner of active.owners.get(record.path) || []) add(`autoloop ${owner.phase}: ${owner.card}`);
-  for (const process of processes.paths) if (inside(process.path, record.path)) add(`live process ${process.pid || 'unknown'} uses worktree`);
+  for (const process of processes.paths) if (inside(process.path, record.path)) add('live process uses worktree');
   for (const error of globalErrors) add(error);
 
   const dirty = statusResult(record.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);

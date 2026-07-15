@@ -133,6 +133,13 @@ try {
   check('all unsafe managed worktrees flow to needs inspection',
     [dirty, untracked, unmerged, detached, locked, active, parked, inUse, knownDirty]
       .every((p) => item(plan, 'needs_inspection', p)));
+  const sameUseDifferentPid = executeSweep({
+    repo,
+    currentWorktree: repo,
+    processPaths: [{ pid: 9898, path: path.join(inUse, 'tracked.txt') }],
+  });
+  check('transient PID changes do not invalidate an otherwise identical plan',
+    sameUseDifferentPid.inventory_digest === plan.inventory_digest);
 
   const changed = path.join(claudeManaged, 'changes-after-plan');
   sh(repo, ['branch', 'changes-after-plan']);
