@@ -111,6 +111,16 @@ if (src.length > 0) {
   const classMatches = src.match(/class\s+ActivityFeed\b/g) || [];
   assertEq("AF-5: exactly one 'class ActivityFeed' declaration", classMatches.length, 1);
 
+  // AF-SECSTATE: the group-collapse-state persistence must NOT write on the
+  // programmatic details.open restore (async toggle) — that write hits
+  // ranch/cache/dashboard-section-state.json inside the vault and feeds Dataview's
+  // file-change auto-refresh → the Home "reloads every time" loop. Guard the
+  // toggle (skip when open still equals lastPersisted) + idempotent write.
+  assertTrue("AF-SECSTATE-1: toggle handler guards programmatic open (lastPersisted)",
+    /let\s+lastPersisted\s*=\s*initialOpen/.test(src) && /if\s*\(\s*details\.open\s*===\s*lastPersisted\s*\)\s*return/.test(src));
+  assertTrue("AF-SECSTATE-2: _writeGroupStateKey is idempotent (skips unchanged value)",
+    /hasOwnProperty\.call\(cur,\s*key\)\s*&&\s*cur\[key\]\s*===\s*!!value\)\s*return/.test(src));
+
   // AF-6: all 3 scope literals present.
   for (const sc of ["today", "week", "month"]) {
     assertTrue(`AF-6.${sc}: scope literal '${sc}' present in source`,
