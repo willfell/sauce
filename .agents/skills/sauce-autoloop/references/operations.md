@@ -39,6 +39,8 @@ advanced but never merges, rebases, pushes, or force-pushes the preserved branch
 - Parked cards are listed separately and consume neither capacity nor touch-zone
   ownership.
 - Selector locking lasts only through atomic claim creation.
+- Resume shares the selector lock with claims and other resumes, then rechecks
+  capacity, touch-zone conflicts, and same-parent ownership before reactivation.
 - Each card owns explicit branch/worktree/PR fields.
 - A tracked dependency requires authoritative `deployed` state and successful
   receipts from every required vault. Its board placement is projection only;
@@ -81,9 +83,10 @@ node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
 node scripts/autoloop/codex-coordinator.js reconcile --json
 ```
 
-The command projects only `implementing` → `In Progress`/`in_progress`,
-`blocked` → `Blocked`/`blocked`, and `deployed` → checked
-`Completed`/`completed`. A successful repair clears the saved error and records
+The command projects `implementing` → `In Progress`/`in_progress`, `parked` →
+`In Progress`/`parked` plus its dependency/resume metadata, `blocked` →
+`Blocked`/`blocked`, and `deployed` → checked `Completed`/`completed`. A
+successful repair clears the saved error and records
 `projection_reconciled_at`; a second clean run is a no-op. It does not claim,
 implement, release, promote Homebrew, deploy a vault, roll up a parent card, or
 rewrite any saved deployment receipt. Mixed checked/unchecked Archive entries
@@ -96,6 +99,8 @@ overwrite a concurrent phase transition with stale ledger state.
 
 - Reclaim a lock only when its PID is dead and it is older than the stale threshold.
 - Never delete a dirty interrupted worktree automatically.
+- Recovery inspects parked worktrees too; resume refuses a missing parked
+  worktree instead of reading a fallback checkout.
 - Reconcile a card by its recorded PR number and merge SHA.
 - Git/PR state wins over board projection.
 - After recovering authoritative state, run the reconciliation command rather

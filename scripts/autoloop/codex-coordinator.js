@@ -981,7 +981,8 @@ async function commandResume(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
-  return transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+  const worktreeExists = deps.worktreeExists || fs.existsSync;
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (record.phase !== 'parked') return resumeRefused(record, `card is ${record.phase}, not parked`);
@@ -1000,6 +1001,9 @@ async function commandResume(ctx, args, deps = {}) {
     if (typeof record.resume_condition !== 'string' || !record.resume_condition.trim()) {
       return resumeRefused(record, 'parked resume condition is missing or malformed');
     }
+    if (!record.worktree || !worktreeExists(record.worktree)) {
+      return resumeRefused(record, 'preserved parked worktree is missing; recover before resuming');
+    }
     for (const dependency of record.dependencies) {
       if (!find(CARDS_ROOT, normalizeCardLink(dependency))) {
         return resumeRefused(record, `prerequisite card ${normalizeCardLink(dependency)} does not exist`);
@@ -1016,17 +1020,25 @@ async function commandResume(ctx, args, deps = {}) {
         reconcile: `reconcile --card ${card}`,
       });
     }
-    const sibling = sameParentConflict(record.parent_card, activeRecords(state), card);
+    const active = activeRecords(state);
+    if (active.length >= MAX_ACTIVE) {
+      return resumeRefused(record, `active capacity is full (${active.length}/${MAX_ACTIVE})`, {
+        active: active.map((item) => item.card),
+      });
+    }
+    const sibling = sameParentConflict(record.parent_card, active, card);
     if (sibling) return resumeRefused(record, `active sibling ${sibling.card} has parent ${normalizeCardLink(record.parent_card)}`);
+    const conflict = conflictsWithActive({ touchZones: record.touch_zones || [] }, active);
+    if (conflict) return resumeRefused(record, `touch-zone conflict with ${conflict.card}: ${conflict.zone}`);
     const boardMd = fs.readFileSync(boardPath, 'utf8');
     const unmet = record.dependencies.filter((dependency) => !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd));
     if (unmet.length) return resumeRefused(record, `dependencies not deployed: ${unmet.join(', ')}`, { unmet });
 
-    run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree || ctx.root, stdio: 'pipe' });
-    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree || ctx.root });
-    const originMainSha = run('git', ['rev-parse', 'origin/main'], { cwd: record.worktree || ctx.root });
+    run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    const originMainSha = run('git', ['rev-parse', 'origin/main'], { cwd: record.worktree });
     let originMainAdvanced = false;
-    try { run('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'], { cwd: record.worktree || ctx.root }); }
+    try { run('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'], { cwd: record.worktree }); }
     catch (_) { originMainAdvanced = true; }
 
     const invalidatedAt = now();
@@ -1058,7 +1070,7 @@ async function commandResume(ctx, args, deps = {}) {
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
     };
-  }, { card, staleMs: 60 * 60 * 1000 });
+  }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandClaim(ctx, args) {
@@ -1343,11 +1355,13 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   };
 }
 
-function commandRecover(ctx) {
-  const state = readState(ctx); const inspections = [];
-  for (const record of activeRecords(state)) {
+function commandRecover(ctx, opts = {}) {
+  const state = opts.state || readState(ctx); const inspections = [];
+  const run = opts.sh || sh;
+  const recoverable = Object.values(state.cards || {}).filter((record) => !TERMINAL.has(record.phase));
+  for (const record of recoverable) {
     if (!record.worktree || !fs.existsSync(record.worktree)) { inspections.push({ card: record.card, issue: 'worktree missing', phase: record.phase }); continue; }
-    const dirty = sh('git', ['status', '--short'], { cwd: record.worktree });
+    const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
     if (dirty) inspections.push({ card: record.card, issue: 'dirty worktree requires inspection', sample: dirty.split('\n').slice(0, 20) });
   }
   return { action: inspections.length ? 'needs-inspection' : 'clean', inspections };
@@ -1376,9 +1390,9 @@ async function main() {
 }
 
 module.exports = {
-  emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
+  parseArgs, emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
-  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile,
+  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
