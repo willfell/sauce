@@ -21,10 +21,14 @@ await dv.view("{{views_path}}/customjs-guard", { class: "PersonNavButtons" });
 
 # [[<% tp.file.title %>]]
 
-## Notes
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes", top: true }] });
+```
 -
 
-## Meetings
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Meetings" }] });
+```
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", {
   class: "PeopleRendering",
@@ -33,7 +37,9 @@ await dv.view("{{views_path}}/customjs-guard", {
 });
 ```
 
-## Daily Mentions
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Daily Mentions" }] });
+```
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", {
   class: "PeopleRendering",
@@ -42,7 +48,9 @@ await dv.view("{{views_path}}/customjs-guard", {
 });
 ```
 
-## Mentions
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Mentions" }] });
+```
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", {
   class: "BacklinkPanel",
