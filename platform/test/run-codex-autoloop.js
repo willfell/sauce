@@ -8,7 +8,8 @@ const path = require('path');
 const {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile,
+  normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
+  commandStatus, commandPark, commandResume, commandReconcile,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
@@ -20,10 +21,11 @@ let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
 
-function card({ profile = 'standard', zones = ['platform/mechanisms/example'], deps = [], deploy = true } = {}) {
+function card({ profile = 'standard', zones = ['platform/mechanisms/example'], deps = [], deploy = true, parent = '' } = {}) {
   return [
     '---',
     `model_profile: ${profile}`,
+    ...(parent ? [`parent_card: "[[${parent}]]"`] : []),
     'touch_zones:', ...zones.map((z) => `  - ${z}`),
     'depends_on:', ...deps.map((d) => `  - "[[${d}]]"`),
     ...(deploy ? ['deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []'] : []),
@@ -104,6 +106,27 @@ state.cards.Busy2 = { card: 'Busy2', phase: 'release_pr', touch_zones: ['platfor
 state.cards.Busy3 = { card: 'Busy3', phase: 'tap_pr', touch_zones: ['platform/y'] };
 eq(selectClaimCandidate({ boardMd: board(['C']), state, loadCard }).action, 'at-capacity', 'three active claims enforce cap');
 
+state.cards.Active.phase = 'parked';
+eq(selectClaimCandidate({ boardMd: board(['C']), state, loadCard }).card, 'C', 'parked work does not consume active capacity');
+state.cards.Busy2.phase = 'parked';
+state.cards.Busy3.phase = 'parked';
+eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).card, 'A', 'parked work does not create touch-zone conflicts');
+
+eq(normalizeCardLink('"[[Parent card|Parent alias]]"'), 'Parent card', 'normalizes parent wikilinks before comparison');
+const parentBodies = {
+  Child2: card({ zones: ['platform/child-2'], parent: 'Shared parent' }),
+  Child3: card({ zones: ['platform/child-3'], parent: 'Shared parent' }),
+};
+const loadParentCard = (name) => parentBodies[name] ? { path: `/cards/${name}.md`, raw: parentBodies[name] } : null;
+const siblingState = emptyState();
+siblingState.cards.Child1 = {
+  card: 'Child1', phase: 'implementing', parent_card: '[[Shared parent|Alias]]', touch_zones: ['platform/child-1'],
+};
+eq(sameParentConflict('Shared parent', Object.values(siblingState.cards)).card, 'Child1', 'same-parent detection uses normalized links');
+eq(selectClaimCandidate({ boardMd: board(['Child2']), state: siblingState, loadCard: loadParentCard }).action, 'no-work', 'claim refuses a second active child of one parent');
+siblingState.cards.Child1.phase = 'parked';
+eq(selectClaimCandidate({ boardMd: board(['Child2']), state: siblingState, loadCard: loadParentCard }).card, 'Child2', 'parked sibling allows another child claim');
+
 state = emptyState();
 state.cards.A = { card: 'A', phase: 'blocked', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).action, 'no-work', 'tracked blocked card is not reclaimed');
@@ -149,6 +172,13 @@ eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
   reason: 'containing release PR not created yet',
 }, 'release branch preserves the durable phase and names the next phase');
 eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable state');
+const parkedAdvanceRecord = {
+  card: 'Parked work', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
+};
+eq(await stepCard({ root: '/workshop' }, emptyState(), parkedAdvanceRecord), {
+  action: 'parked', card: 'Parked work', phase: 'parked', dependencies: ['Prerequisite'],
+  resume_condition: 'Prerequisite deploys', resume: 'resume --card Parked work',
+}, 'advance stops on a parked card and returns its explicit resume command');
 
 const recordState = emptyState();
 recordState.cards.A = { card: 'A', branch: 'autoloop/a', worktree: '/worktrees/a', phase: 'implementing' };
@@ -313,6 +343,13 @@ const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advan
 eq(advanceLock, 'gates-advance', 'advance shares the per-card gate lock');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
+const parkedAdvanceState = emptyState();
+parkedAdvanceState.cards.Parked = {
+  card: 'Parked', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
+};
+eq((await commandAdvance({ root: '/workshop' }, { card: 'Parked', 'lease-seconds': '0' }, {
+  withLock: immediateCardLock, readState: () => parkedAdvanceState, emit: () => {},
+})).action, 'parked', 'advance command refuses to treat a parked card as implementation');
 
 assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');
@@ -380,6 +417,166 @@ const statusCtx = { ...ctx, root: tmp };
 const status = commandStatus(statusCtx, { boardMd: board(['Missing']), loadCard });
 eq(status.next.action, 'no-work', 'status includes the read-only selector result');
 eq(status.next.first_blocker.card, 'Missing', 'status names the first card that needs preparation');
+
+const parkRoot = path.join(tmp, 'park');
+fs.mkdirSync(parkRoot, { recursive: true });
+const parkBoardPath = path.join(parkRoot, 'sauce-board.md');
+const parkCardPath = path.join(parkRoot, 'Park me.md');
+fs.writeFileSync(parkBoardPath, liveBoard({ progress: ['Park me'] }));
+fs.writeFileSync(parkCardPath, [
+  '---', 'kanban_column: In Progress', 'status: in_progress',
+  'parent_card: "[[Shared parent]]"', 'depends_on: []', '---', 'body',
+].join('\n'));
+const oldReviews = { correctness: { lens: 'correctness', verdict: 'pass', head_sha: 'old-head' } };
+const oldGate = passingReceipt('old-head');
+const parkState = emptyState();
+parkState.cards['Park me'] = {
+  card: 'Park me', phase: 'implementing', parent_card: '[[Shared parent]]', card_path: parkCardPath,
+  branch: 'codex-autoloop/park-me', worktree: '/worktrees/park-me', touch_zones: ['platform/park-me'],
+  reviews: oldReviews, gate_receipt: oldGate,
+};
+const parkLocks = [];
+let parkWrites = 0;
+const parkDeps = {
+  readState: () => parkState,
+  writeState: () => { parkWrites++; },
+  withLock: async (_ctx, name, fn) => { parkLocks.push(name); return fn(); },
+  boardPath: parkBoardPath,
+  findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
+  now: () => '2026-07-15T16:00:00.000Z',
+};
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  card: 'Park me', 'depends-on': 'Park me', 'resume-condition': 'wait for myself',
+}, parkDeps), /cannot depend on itself/, 'park rejects self-dependencies');
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  card: 'Park me', 'depends-on': 'Missing prerequisite', 'resume-condition': 'wait for it',
+}, parkDeps), /prerequisite card .* does not exist/, 'park rejects missing prerequisite cards');
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': '   ',
+}, parkDeps), /non-empty --resume-condition/, 'park requires an exact non-empty resume condition');
+parkState.cards['Park me'].phase = 'feature_pr';
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': 'wait for deployment',
+}, parkDeps), /claimed pre-PR work/, 'park refuses post-feature-PR phases');
+parkState.cards['Park me'].phase = 'implementing';
+const parked = await commandPark({ root: parkRoot }, {
+  card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
+}, parkDeps);
+eq(parked.action, 'parked', 'park succeeds through the explicit command');
+eq(parkLocks.slice(-2), ['gates-park-me', 'completion-projection'], 'park serializes the card transition and metadata projection');
+eq(parkState.cards['Park me'].phase, 'parked', 'park records the durable parked phase');
+eq(parkState.cards['Park me'].dependencies, ['Prerequisite A', 'Prerequisite B'], 'park records exact prerequisite names');
+eq(parkState.cards['Park me'].resume_condition, 'Both prerequisites deploy cleanly', 'park records exact resume condition');
+eq(parkState.cards['Park me'].branch, 'codex-autoloop/park-me', 'park preserves the branch');
+eq(parkState.cards['Park me'].worktree, '/worktrees/park-me', 'park preserves the worktree');
+eq(parkState.cards['Park me'].reviews, oldReviews, 'park preserves historical review receipts');
+eq(parkState.cards['Park me'].gate_receipt, oldGate, 'park preserves the combined gate receipt');
+ok(/depends_on: \["\[\[Prerequisite A\]\]","\[\[Prerequisite B\]\]"\]/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects exact dependencies into card metadata');
+ok(/resume_condition: "Both prerequisites deploy cleanly"/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects the resume condition into card metadata');
+ok(parkWrites >= 2, 'park saves authoritative state before and after projection for crash recovery');
+
+const parkedStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(parkBoardPath, 'utf8'), loadCard, state: parkState,
+});
+eq(parkedStatus.active_count, 0, 'parked cards do not count against capacity');
+eq(parkedStatus.parked, [{
+  card: 'Park me', phase: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
+  dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
+  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null,
+}], 'status lists parked cards separately with prerequisites and resume condition');
+
+const crashCardPath = path.join(parkRoot, 'Crash parked.md');
+const crashBoardPath = path.join(parkRoot, 'crash-board.md');
+fs.writeFileSync(crashCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\ndepends_on: []\n---\nbody\n');
+fs.writeFileSync(crashBoardPath, liveBoard({ progress: ['Crash parked'] }));
+const crashParkState = emptyState();
+crashParkState.cards['Crash parked'] = {
+  card: 'Crash parked', phase: 'parked', card_path: crashCardPath,
+  dependencies: ['Prerequisite A'], resume_condition: 'Prerequisite A deploys',
+};
+eq(commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(crashBoardPath, 'utf8'), loadCard, state: crashParkState,
+}).projection_problems, [{
+  card: 'Crash parked', phase: 'parked', error: 'parked card metadata differs from the ledger; reconcile before resuming',
+}], 'status detects a crash between authoritative park state and card metadata projection');
+
+const failedParkState = emptyState();
+failedParkState.cards.Failed = {
+  card: 'Failed', phase: 'implementing', card_path: parkCardPath, branch: 'codex-autoloop/failed', worktree: '/worktrees/failed',
+};
+let failedParkWrites = 0;
+const failedPark = await commandPark({ root: parkRoot }, {
+  card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
+}, {
+  ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
+  projectCard: () => { throw new Error('metadata projection denied'); },
+});
+eq(failedPark.action, 'parked-projection-failed', 'metadata projection failure is explicit');
+eq(failedParkState.cards.Failed.phase, 'parked', 'failed metadata projection preserves authoritative parked state');
+eq(failedParkState.cards.Failed.projection_error, 'metadata projection denied', 'failed metadata projection is saved for reconciliation');
+ok(failedParkWrites >= 2, 'failed metadata projection persists both transition and failure receipt');
+eq((await commandResume({ root: parkRoot }, { card: 'Failed' }, {
+  ...parkDeps, readState: () => failedParkState, writeState: () => {},
+})).action, 'resume-refused', 'resume refuses a parked card with unresolved metadata projection failure');
+
+const malformedResumeState = emptyState();
+malformedResumeState.cards.Malformed = { card: 'Malformed', phase: 'parked', dependencies: [], resume_condition: 'later', card_path: parkCardPath };
+eq((await commandResume({ root: parkRoot }, { card: 'Malformed' }, {
+  ...parkDeps, readState: () => malformedResumeState, writeState: () => {},
+})).action, 'resume-refused', 'resume refuses missing dependency metadata');
+const missingResumeState = emptyState();
+missingResumeState.cards.Missing = {
+  card: 'Missing', phase: 'parked', dependencies: ['Vanished prerequisite'], resume_condition: 'later', card_path: parkCardPath,
+};
+eq((await commandResume({ root: parkRoot }, { card: 'Missing' }, {
+  ...parkDeps, readState: () => missingResumeState, writeState: () => {},
+})).action, 'resume-refused', 'resume refuses a dependency whose card no longer exists');
+
+parkState.cards['Prerequisite A'] = {
+  card: 'Prerequisite A', phase: 'deployed', required_version: '0.233.1', vault_receipts: successfulVaultReceipts('0.233.1'),
+};
+fs.writeFileSync(parkBoardPath, liveBoard({
+  progress: ['Park me'], completed: [[true, 'Prerequisite A'], [true, 'Prerequisite B']],
+}));
+parkState.cards.Sibling = {
+  card: 'Sibling', phase: 'implementing', parent_card: 'Shared parent', touch_zones: ['platform/sibling'],
+};
+eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+  ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
+})).action, 'resume-refused', 'resume refuses a second active child of the normalized parent');
+parkState.cards.Sibling.phase = 'parked';
+parkState.cards['Prerequisite A'].vault_receipts.ero.ok = false;
+eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+  ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
+})).action, 'resume-refused', 'resume refuses a tracked prerequisite with a failed required-vault receipt');
+parkState.cards['Prerequisite A'].vault_receipts.ero.ok = true;
+const gitCalls = [];
+const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+  ...parkDeps,
+  findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
+  sh: (cmd, args) => {
+    gitCalls.push([cmd, ...args]);
+    if (args[0] === 'fetch') return '';
+    if (args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'new-main' : 'old-branch-head';
+    if (args[0] === 'merge-base') throw new Error('origin/main is not an ancestor');
+    throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
+  },
+  now: () => '2026-07-15T16:05:00.000Z',
+});
+eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite is satisfied');
+eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
+eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
+ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
+eq(parkState.cards['Park me'].phase, 'implementing', 'successful resume returns to implementing');
+eq(parkState.cards['Park me'].reviews, {}, 'successful resume invalidates all current review receipts');
+eq(parkState.cards['Park me'].gate_receipt, null, 'successful resume invalidates the combined gate receipt');
+eq(parkState.cards['Park me'].receipt_invalidations.length, 1, 'successful resume records one exact receipt invalidation');
+eq(parkState.cards['Park me'].receipt_invalidations[0].reviews, oldReviews, 'receipt invalidation preserves the prior review history');
+eq(parkState.cards['Park me'].receipt_invalidations[0].gate_receipt, oldGate, 'receipt invalidation preserves the prior combined gate history');
+eq(parkState.cards['Park me'].resume_condition, null, 'successful resume clears the active resume condition');
+ok(!/^resume_condition:/m.test(fs.readFileSync(parkCardPath, 'utf8')), 'successful resume clears resume condition from card metadata');
+eq(parkState.cards['Park me'].branch, 'codex-autoloop/park-me', 'resume preserves the branch');
+eq(parkState.cards['Park me'].worktree, '/worktrees/park-me', 'resume preserves the worktree and implementation');
 
 const reconcileRoot = path.join(tmp, 'projection');
 fs.mkdirSync(reconcileRoot, { recursive: true });
