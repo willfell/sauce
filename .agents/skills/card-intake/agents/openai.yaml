@@ -1,0 +1,4 @@
+interface:
+  display_name: "Card Intake"
+  short_description: "Turn intent into claim-ready Sauce board work"
+  default_prompt: "Use $card-intake to turn this requirement into board-ready Sauce work."

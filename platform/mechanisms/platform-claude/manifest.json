@@ -10,12 +10,16 @@
     { "kind": "command", "source": "commands/install.md",   "dest": ".claude/commands/install.md" },
     { "kind": "command", "source": "commands/upgrade.md",   "dest": ".claude/commands/upgrade.md" },
     { "kind": "command", "source": "commands/bootstrap.md", "dest": ".claude/commands/bootstrap.md" },
+    { "kind": "command", "source": "commands/card-intake.md", "dest": ".claude/commands/card-intake.md" },
     { "kind": "skill",   "source": "skills/install/SKILL.md",   "dest": "{{skills_dir}}/install/SKILL.md" },
     { "kind": "skill",   "source": "skills/upgrade/SKILL.md",   "dest": "{{skills_dir}}/upgrade/SKILL.md" },
     { "kind": "skill",   "source": "skills/bootstrap/SKILL.md", "dest": "{{skills_dir}}/bootstrap/SKILL.md" },
+    { "kind": "skill",   "source": "skills/card-intake/SKILL.md", "dest": "{{skills_dir}}/card-intake/SKILL.md" },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Install",   "path": ".claude/commands/install.md",   "command": "/install"   } },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Upgrade",   "path": ".claude/commands/upgrade.md",   "command": "/upgrade"   } },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Bootstrap", "path": ".claude/commands/bootstrap.md", "command": "/bootstrap" } }
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Bootstrap", "path": ".claude/commands/bootstrap.md", "command": "/bootstrap" } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Card Intake", "path": ".claude/commands/card-intake.md", "command": "/card-intake" } },
+    { "kind": "claude_md_row", "table": "skills-index", "row": { "command": "/card-intake", "skill_path": ".claude/skills/platform/card-intake/SKILL.md" } }
   ],
   "post_install": [
     { "type": "notice", "message": "platform-claude@0.1.0 installed. Lifecycle slash commands /install /upgrade /bootstrap now available in Claude Code." }
