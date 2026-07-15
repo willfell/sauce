@@ -467,21 +467,13 @@ class SpaceHome {
     };
     const onDocKey = (ev) => { if (menuOpen && ev && ev.key === "Escape") setMenu(false); };
     addBtn.onclick = () => {
-      const opening = !menuOpen;
-      setMenu(opening);
-      // Focus the "Jot a task…" input the moment the menu springs open, so the
-      // user can start typing immediately — this is an explicit click gesture,
-      // not an autofocus-on-page-load (which would pop the mobile keyboard on
-      // every Home open; see the render()-time comment on `input` below).
-      if (opening && input && typeof input.focus === "function") {
-        try { input.focus(); } catch (_e) { /* never throw out of a click handler */ }
-      }
+      setMenu(!menuOpen);
     };
 
     // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
     // guarded; then close the menu + re-render so the Tasks panel + glance chip
-    // reflect the new task). NO autofocus — home opens on every launch and an
-    // autofocus would pop the mobile keyboard each time.
+    // reflect the new task). NO autofocus — opening the menu (via "+") must
+    // never pop the mobile keyboard; the user taps the input to type.
     const captureRow = menu.createEl("div", { cls: "sauce-home-add-input-row" });
     const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
     input.setAttribute("type", "text");

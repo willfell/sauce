@@ -1101,9 +1101,9 @@ function descendants(el) {
     if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
   }
 
-  // ── HOME-FOCUS: clicking "+" focuses the "Jot a task…" input so the user
-  // can start typing immediately (an explicit click gesture, not page-load
-  // autofocus).
+  // ── HOME-FOCUS: clicking "+" must NOT focus the "Jot a task…" input — an
+  // autofocus pops the mobile on-screen keyboard on every menu open. The user
+  // taps the input themselves to type.
   {
     installMoment("2026-07-02", 9);
     const dv = makeDv();
@@ -1122,12 +1122,12 @@ function descendants(el) {
     if (input) input.focus = () => { focused = true; };
 
     if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
-    assertTrue("HOME-FOCUS-1 opening the menu focuses the jot-a-task input", focused);
+    assertTrue("HOME-FOCUS-1 opening the menu does NOT focus the jot-a-task input", !focused);
 
-    // Closing the menu again must NOT re-focus (only the OPEN transition does).
+    // Closing the menu again must also not focus it.
     focused = false;
     if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
-    assertTrue("HOME-FOCUS-2 closing the menu does not (re-)focus the input", !focused);
+    assertTrue("HOME-FOCUS-2 closing the menu does not focus the input", !focused);
 
     delete global.customJS;
     delete global.window.customJS;
