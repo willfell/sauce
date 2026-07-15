@@ -133,22 +133,17 @@ global.app = {
 global.window = Object.assign(global.window || {}, { customJS: global.customJS, moment: momentFn, app: global.app });
 global.moment = momentFn;
 
-// Only MeetingLeafActions is exercised here: it is the axis's uncovered widget and
-// is cold-load-safe (embed guard + no dv.current() dependency — it renders three
-// AccentButton actions). MeetingsHubCards is deliberately NOT included: it is
-// already credited via run-renderer.js AND it is NOT cold-load-safe (render() reads
-// dv.current().file.name with no `if (!cur) return` guard, so it throws during the
-// pre-index window). Adding a guard to MeetingsHubCards is a BEHAVIORAL fix, out of
-// scope for this test-category coverage item — filed as a follow-up bug finding.
 const widgets = [
+    { name: 'MeetingsHubCards', path: 'platform/blueprints/meetings/helpers/meetings-hub-cards.js' },
     { name: 'MeetingLeafActions', path: 'platform/blueprints/meetings/helpers/meeting-leaf-actions.js' },
 ];
 
-// cold-load variants: Dataview not indexed → dv.current() undefined/null and
-// dv.pages() empty; plus the embed context.
+// cold-load variants: Dataview not indexed → dv.current() undefined/null, or
+// a partial page with no `.file`; plus the embed context.
 const variants = [
     { label: 'normal container, dv.current()=undefined (cold-load)', embed: false, current: undefined },
     { label: 'normal container, dv.current()=null (cold-load)', embed: false, current: null },
+    { label: 'normal container, dv.current() has no .file (cold-load)', embed: false, current: {} },
     { label: '.markdown-embed context', embed: true, current: undefined },
 ];
 
