@@ -4436,8 +4436,22 @@ async function runPeopleSectionLabelHealFamily() {
         ok("GA-S3b-PEOPLE-SECTIONLABEL-fence matching heading preserved",
            once.includes("```markdown\n## Notes\n```"));
         const backupRoot = path.join(root, ".sauce-backup");
+        const backupFiles = [];
+        if (fs.existsSync(backupRoot)) {
+            const stack = [backupRoot];
+            while (stack.length) {
+                const dir = stack.pop();
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                    const entryPath = path.join(dir, entry.name);
+                    if (entry.isDirectory()) stack.push(entryPath);
+                    else backupFiles.push(entryPath);
+                }
+            }
+        }
+        const personBackup = backupFiles.find((backupPath) =>
+            backupPath.replace(/\\/g, "/").endsWith("/" + rel));
         ok("GA-S3b-PEOPLE-SECTIONLABEL-backup written before heal",
-           fs.existsSync(backupRoot) && fs.readdirSync(backupRoot).length > 0);
+           Boolean(personBackup) && fs.readFileSync(personBackup, "utf8") === legacy);
         ok("GA-S3b-PEOPLE-SECTIONLABEL-history records real note chrome heal",
            history.some((entry) => entry.step === "note_chrome_heal" && entry.target === rel && entry.action === "healed"));
         await applyNoteChromeHeal({ app: { vault: { adapter: makeFsAdapter(root) } } }, history, git);
