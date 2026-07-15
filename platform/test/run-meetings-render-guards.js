@@ -93,6 +93,8 @@ function makeMoment() {
     return m;
 }
 const momentFn = (..._args) => makeMoment();
+let activeFile = null;
+let beaconCalls = 0;
 
 // dv stub — `currentVal` is what dv.current() returns (cold-load: undefined/null).
 function makeDv(embed, currentVal) {
@@ -119,16 +121,16 @@ const cjs = {
     AccentButton: { render: () => makeEl() },
     Breadcrumb: { render: async () => {} },
     // MeetingsHubCards delegates its (empty) grid to BeaconCards.
-    BeaconCards: { render: async () => {} },
+    BeaconCards: { render: async () => { beaconCalls++; } },
     RenderSafe: new RenderSafeClass(),
 };
 global.customJS = Object.assign(global.customJS || {}, cjs);
 global.app = {
-    workspace: { openLinkText() {}, getActiveFile() { return null; } },
+    workspace: { openLinkText() {}, getActiveFile() { return activeFile; } },
     vault: { getAbstractFileByPath() { return null; }, async createFolder() {}, async create() {}, async read() { return ''; } },
     commands: { executeCommandById() {} },
     plugins: { plugins: {} },
-    metadataCache: { getFirstLinkpathDest() { return null; } },
+    metadataCache: { getFirstLinkpathDest() { return null; }, getFileCache() { return { frontmatter: {} }; } },
 };
 global.window = Object.assign(global.window || {}, { customJS: global.customJS, moment: momentFn, app: global.app });
 global.moment = momentFn;
@@ -159,6 +161,17 @@ const variants = [
             });
         }
     }
+    await guard('MTGGUARD MeetingsHubCards — RenderSafe active-file recovery', async () => {
+        activeFile = { path: 'spice/meetings/Meetings-2026-07-03.md', basename: 'Meetings-2026-07-03' };
+        beaconCalls = 0;
+        try {
+            await new (loadWidget('platform/blueprints/meetings/helpers/meetings-hub-cards.js', 'MeetingsHubCards'))()
+                .render(makeDv(false, undefined));
+            if (beaconCalls !== 1) throw new Error(`expected BeaconCards.render once after RenderSafe recovery, got ${beaconCalls}`);
+        } finally {
+            activeFile = null;
+        }
+    });
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();
