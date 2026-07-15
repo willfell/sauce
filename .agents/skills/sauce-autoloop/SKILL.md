@@ -13,6 +13,7 @@ Infer the mode from the prompt. Default to `dry-run`; only `--live` authorizes m
 
 - `run --live`: resume eligible active work first, otherwise claim one card.
 - `resume <card>`: operate only on that card.
+- `park <card>`: park only that claimed pre-PR card with explicit prerequisites and a resume condition.
 - `status`: read-only; do not claim or mutate.
 - `dry-run` (default): read-only claim and release/deploy plan.
 - `recover`: inspect interrupted state; never delete dirty work automatically.
@@ -38,9 +39,45 @@ Use a 600-second polling lease unless the user specifies a shorter one. Never ex
    - `no-work`: report `first_blocker` and tell the user to prepare the next card. Never recommend `run --live`.
    - `at-capacity`: name the active cards and recommend resuming one of them. Never claim another card.
 7. Unless `--live` is explicit, call `claim --dry-run --json` to show the full read-only plan, report, and stop. In `status` mode, the compact `status.next` result is sufficient; do not claim.
-8. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
+8. Resume the named/eligible active card before claiming fresh work. A parked card
+   is never an implicit resume target: report its prerequisites and resume
+   condition and stop. Otherwise call `claim --json`.
 
 The coordinator may return `implement`, `fix-ci`, `waiting`, `deploy`, `complete`, `blocked`, `no-work`, or `at-capacity`.
+
+## Park and resume
+
+Never hand-edit shared coordinator state or card dependency metadata. Park only
+claimed pre-PR work through the coordinator, naming every prerequisite explicitly:
+
+```bash
+node scripts/autoloop/codex-coordinator.js park \
+  --card "<card>" \
+  --depends-on "<prerequisite card>" \
+  --resume-condition "<exact non-empty condition>" \
+  --json
+```
+
+Repeat `--depends-on` for multiple prerequisites. Park preserves the branch,
+worktree, implementation, and historical receipts, but removes the card from
+capacity and touch-zone conflict calculations. A failed metadata projection is a
+saved reconciliation problem; repair it with `reconcile --card "<card>"` before
+attempting resume.
+
+Resume only through the explicit command:
+
+```bash
+node scripts/autoloop/codex-coordinator.js resume --card "<card>" --json
+```
+
+Resume refuses missing, malformed, self-referential, or unmet dependencies and a
+second active child of the same normalized parent. Tracked prerequisites require
+`deployed` state plus successful required-vault receipts; the untracked fallback is
+a checked `Completed` entry. A parked sibling does not block resume or a new claim.
+A successful resume preserves implementation, reports whether `origin/main`
+advanced, and never merges, rebases, pushes, or force-pushes. It invalidates every
+old review and combined gate receipt, so rerun Gate B, all three reviews, and
+`verify-gates` before opening or advancing a PR.
 
 ## Implement
 
@@ -93,6 +130,9 @@ Let the coordinator poll feature CI/merge, release PR/merge, tag, tap PR/merge, 
 
 If it returns:
 
+- `parked`: stop. Report dependencies, the exact resume condition, and the
+  explicit `resume --card` command; never bypass it or treat the card as normal
+  implementation.
 - `fix-ci`: inspect the named failures in the existing worktree, repair within scope, commit, repeat reviews plus `verify-gates`, push, and advance again if lease remains.
 - `verify-gates`: the PR head changed or its receipt is incomplete. Repeat reviews plus `verify-gates`; do not arm or merge it.
 - `refresh-feature`: update the existing feature branch from `origin/main`, resolve only in-scope conflicts, rerun every gate, push, and advance again. Never force-push.
@@ -123,9 +163,10 @@ node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
 node scripts/autoloop/codex-coordinator.js reconcile --json
 ```
 
-Reconciliation only projects `implementing`, `blocked`, and `deployed` into the
-board and card frontmatter. It never claims, implements, releases, deploys,
-rolls up a parent, or changes saved vault receipts. It is idempotent: a second
+Reconciliation projects `implementing`, `blocked`, and `deployed` into the board
+and card frontmatter, plus `parked` dependency/resume metadata into its existing
+In Progress card. It never claims, implements, releases, deploys, rolls up a
+parent, or changes saved vault receipts. It is idempotent: a second
 clean run reports `no_op: true`. Recovery uses this command after inspecting
 saved `projection_problems`; do not retry deployment when receipts are already
 successful.

@@ -12,24 +12,44 @@ Card phases are:
 claimed -> implementing -> feature_pr -> feature_merged -> release_pr
 -> release_merged -> tagged -> tap_pr -> tap_merged -> brew_installed
 -> deploying -> deployed
+
+claimed|implementing -> parked -> implementing
 ```
 
 Pending external state is resumable, not failure. Exception states are `blocked`, `failed`, `cancelled`, and `needs-inspection`.
+
+`park` is the only supported way to enter `parked`, and `resume` is the only
+supported way to leave it. Never hand-edit the ledger or card metadata. The
+locked park transition saves authoritative dependencies and the exact resume
+condition before projecting card frontmatter, so an interrupted projection is
+visible and recoverable through `reconcile --card`.
 
 ## Gate receipts
 
 Every feature commit has three review receipts and one combined gate receipt in the shared ledger. Review receipts name the lens, verdict, summary, and exact `HEAD`. Review writes, `verify-gates`, `record-pr`, and each `advance` transition share one per-card lock so a late refutation cannot be overwritten; reviews close once the feature PR merges. `verify-gates` fetches canonical `origin/main` and records both exact commits after mutation adequacy, full preflight, workshop self-install in a disposable worktree, and bumped preflight. `record-pr` rejects missing, failed, incomplete, noncanonical, or stale receipts. A changed PR head/base also blocks `advance`, invalid legacy auto-merge is disabled, and a merged PR without valid gates remains durably at `needs-inspection`.
 
+A successful resume snapshots every prior review and combined gate receipt into
+the invalidation history, clears the current receipts, and records why. All three
+reviews and `verify-gates` must run again. Resume reports whether `origin/main`
+advanced but never merges, rebases, pushes, or force-pushes the preserved branch.
+
 ## Concurrency
 
 - Maximum active claims: three.
+- Parked cards are listed separately and consume neither capacity nor touch-zone
+  ownership.
 - Selector locking lasts only through atomic claim creation.
+- Park and resume share the selector lock with claims and each other. Resume then
+  rechecks capacity, touch-zone conflicts, and same-parent ownership before
+  reactivation.
 - Each card owns explicit branch/worktree/PR fields.
 - A tracked dependency requires authoritative `deployed` state and successful
   receipts from every required vault. Its board placement is projection only;
   report drift separately. An untracked dependency requires a checked entry in
   `Completed`. `Archive` never satisfies a dependency.
 - Intersecting `touch_zones` reject a claim.
+- Claim and resume reject a second active non-parked child of the same normalized
+  `parent_card`; a parked sibling does not block another child.
 - Treat `platform/install.js`, `package.json`, `.github/workflows`, `platform/manifest.json`, shared registries, Homebrew promotion, and each vault deployment as exclusive zones.
 - Preserve unrelated branches, worktrees, and dirty files.
 
@@ -64,9 +84,10 @@ node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
 node scripts/autoloop/codex-coordinator.js reconcile --json
 ```
 
-The command projects only `implementing` → `In Progress`/`in_progress`,
-`blocked` → `Blocked`/`blocked`, and `deployed` → checked
-`Completed`/`completed`. A successful repair clears the saved error and records
+The command projects `implementing` → `In Progress`/`in_progress`, `parked` →
+`In Progress`/`parked` plus its dependency/resume metadata, `blocked` →
+`Blocked`/`blocked`, and `deployed` → checked `Completed`/`completed`. A
+successful repair clears the saved error and records
 `projection_reconciled_at`; a second clean run is a no-op. It does not claim,
 implement, release, promote Homebrew, deploy a vault, roll up a parent card, or
 rewrite any saved deployment receipt. Mixed checked/unchecked Archive entries
@@ -79,10 +100,16 @@ overwrite a concurrent phase transition with stale ledger state.
 
 - Reclaim a lock only when its PID is dead and it is older than the stale threshold.
 - Never delete a dirty interrupted worktree automatically.
+- Recovery inspects parked worktrees too; resume refuses a missing parked
+  worktree instead of reading a fallback checkout.
 - Reconcile a card by its recorded PR number and merge SHA.
 - Git/PR state wins over board projection.
 - After recovering authoritative state, run the reconciliation command rather
   than replaying release or deployment. Preserve successful vault receipts on
   projection failure.
 - Malformed state requires backup/recovery; never overwrite it with an empty state.
+- Missing, malformed, self-referential, or unmet parked dependencies refuse
+  resume without changing the card. Tracked prerequisites require `deployed`
+  plus successful required-vault receipts; untracked prerequisites require a
+  checked `Completed` entry.
 - Release/tap workflow failure blocks externally. Do not cut manual versions/tags or edit the tap.

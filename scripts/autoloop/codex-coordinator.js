@@ -55,8 +55,11 @@ function parseArgs(argv) {
     if (!token.startsWith('--')) { out._.push(token); continue; }
     const key = token.slice(2);
     const value = argv[i + 1];
-    if (value && !value.startsWith('--')) { out[key] = value; i++; }
-    else out[key] = true;
+    const parsed = value && !value.startsWith('--') ? value : true;
+    if (Object.prototype.hasOwnProperty.call(out, key)) {
+      out[key] = Array.isArray(out[key]) ? [...out[key], parsed] : [out[key], parsed];
+    } else out[key] = parsed;
+    if (parsed !== true) i++;
   }
   return out;
 }
@@ -178,6 +181,20 @@ function normalizeZone(zone) {
   return String(zone || '').trim().replace(/^\.\//, '').replace(/\/+$/, '');
 }
 
+function normalizeCardLink(value) {
+  const raw = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+  const wikilink = raw.match(/^\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]$/);
+  return (wikilink ? wikilink[1] : raw).trim();
+}
+
+function sameParentConflict(parentCard, records, excludeCard = '') {
+  const parent = normalizeCardLink(parentCard);
+  if (!parent) return null;
+  return (records || []).find((record) => record.card !== excludeCard
+    && record.phase !== 'parked'
+    && normalizeCardLink(record.parent_card) === parent) || null;
+}
+
 function zonesOverlap(a, b) {
   const x = normalizeZone(a); const y = normalizeZone(b);
   if (!x || !y) return false;
@@ -280,7 +297,7 @@ function findCard(cardsRoot, card) {
 }
 
 function activeRecords(state) {
-  return Object.values(state.cards || {}).filter((r) => !TERMINAL.has(r.phase));
+  return Object.values(state.cards || {}).filter((r) => r.phase !== 'parked' && !TERMINAL.has(r.phase));
 }
 
 function successfulDeploymentReceipts(record) {
@@ -325,6 +342,8 @@ function selectClaimCandidate({ boardMd, state, loadCard }) {
       }
     }
     if (unmet.length) { skipped.push({ card, reason: `dependencies not deployed: ${unmet.join(', ')}` }); continue; }
+    const sibling = sameParentConflict(meta.parentCard, active);
+    if (sibling) { skipped.push({ card, reason: `active sibling ${sibling.card} has parent ${normalizeCardLink(meta.parentCard)}` }); continue; }
     const conflict = conflictsWithActive(meta, active);
     if (conflict) { skipped.push({ card, reason: `touch-zone conflict with ${conflict.card}: ${conflict.zone}` }); continue; }
     return {
@@ -365,18 +384,24 @@ function slugify(value) {
 
 function patchFrontmatter(raw, fields) {
   return String(raw).replace(/^---\n([\s\S]*?)\n---/, (_, body) => {
-    let next = body;
+    const lines = body.split('\n');
     for (const [key, value] of Object.entries(fields)) {
-      const re = new RegExp(`^${key}:.*$`, 'm');
-      next = re.test(next) ? next.replace(re, `${key}: ${value}`) : `${next}\n${key}: ${value}`;
+      const idx = lines.findIndex((line) => new RegExp(`^${key}:`).test(line));
+      let end = idx + 1;
+      if (idx >= 0) while (end < lines.length && /^\s+/.test(lines[end])) end++;
+      if (value == null) {
+        if (idx >= 0) lines.splice(idx, end - idx);
+      } else if (idx >= 0) lines.splice(idx, end - idx, `${key}: ${value}`);
+      else lines.push(`${key}: ${value}`);
     }
-    return `---\n${next}\n---`;
+    return `---\n${lines.join('\n')}\n---`;
   });
 }
 
 function projectionMapping(phase) {
   return {
     implementing: { column: 'In Progress', status: 'in_progress', complete: false },
+    parked: { column: 'In Progress', status: 'parked', complete: false },
     blocked: { column: 'Blocked', status: 'blocked', complete: false },
     deployed: { column: 'Completed', status: 'completed', complete: true },
   }[phase] || null;
@@ -423,15 +448,30 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const boardRaw = fs.readFileSync(boardPath, 'utf8');
   const cardRaw = fs.readFileSync(cardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
+  const record = opts.record || null;
+  const ownsParkMetadata = Boolean(record && Object.prototype.hasOwnProperty.call(record, 'resume_condition'));
+  const expectedDependencies = ownsParkMetadata ? (record.dependencies || []).map(normalizeCardLink) : null;
+  const currentDependencies = ownsParkMetadata ? parseDependsOn(cardRaw).map(normalizeCardLink) : null;
+  const hasResumeCondition = /^resume_condition:/m.test(frontmatter(cardRaw));
+  const expectedResumeCondition = ownsParkMetadata && record.resume_condition != null
+    ? String(record.resume_condition).trim() : null;
   const metadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
-    || scalarField(cardRaw, 'status') !== mapping.status;
+    || scalarField(cardRaw, 'status') !== mapping.status
+    || (ownsParkMetadata && JSON.stringify(currentDependencies) !== JSON.stringify(expectedDependencies))
+    || (ownsParkMetadata && (expectedResumeCondition == null
+      ? hasResumeCondition : scalarField(cardRaw, 'resume_condition') !== expectedResumeCondition));
   const boardChanged = boardNext !== boardRaw;
+  const metadataFields = {
+    kanban_column: mapping.column,
+    status: mapping.status,
+    status_changed_at: (opts.now || (() => new Date().toISOString()))(),
+  };
+  if (ownsParkMetadata) {
+    metadataFields.depends_on = JSON.stringify(expectedDependencies.map((dep) => `[[${dep}]]`));
+    metadataFields.resume_condition = expectedResumeCondition == null ? null : JSON.stringify(expectedResumeCondition);
+  }
   const cardNext = metadataChanged || boardChanged
-    ? patchFrontmatter(cardRaw, {
-      kanban_column: mapping.column,
-      status: mapping.status,
-      status_changed_at: (opts.now || (() => new Date().toISOString()))(),
-    })
+    ? patchFrontmatter(cardRaw, metadataFields)
     : cardRaw;
   if ((metadataChanged || boardChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
@@ -451,7 +491,7 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const projectionLock = opts.withLock || withLock;
   try {
     return await projectionLock(ctx, 'completion-projection', async () => {
-      const result = project(record.card_path, boardPath, record.card, record.phase, { now });
+      const result = project(record.card_path, boardPath, record.card, record.phase, { now, record });
       delete record.projection_error;
       delete record.projection_failed_at;
       record.projection_reconciled_at = now();
@@ -475,6 +515,25 @@ function projectionBoardDrift(boardMd, record) {
       expected_column: mapping.column, actual_column: location.column,
       expected_checked: mapping.complete, actual_checked: location.checked,
     };
+  }
+  return null;
+}
+
+function parkedMetadataProblem(record) {
+  if (!record || record.phase !== 'parked' || record.projection_error) return null;
+  try {
+    const raw = fs.readFileSync(record.card_path, 'utf8');
+    const dependencies = parseDependsOn(raw).map(normalizeCardLink);
+    const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
+    const condition = typeof record.resume_condition === 'string' ? record.resume_condition.trim() : '';
+    if (!expected.length || !condition
+      || JSON.stringify(dependencies) !== JSON.stringify(expected)
+      || scalarField(raw, 'resume_condition') !== condition
+      || scalarField(raw, 'status') !== 'parked') {
+      return { card: record.card, phase: record.phase, error: 'parked card metadata differs from the ledger; reconcile before resuming' };
+    }
+  } catch (err) {
+    return { card: record.card, phase: record.phase, error: `parked card metadata is unreadable: ${err.message}` };
   }
   return null;
 }
@@ -746,6 +805,13 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
   const disableAutoMerge = deps.disableFeatureAutoMerge || disableFeatureAutoMerge;
   const persist = deps.writeState || writeState;
+  if (record.phase === 'parked') {
+    return {
+      action: 'parked', card: record.card, phase: 'parked',
+      dependencies: record.dependencies || [], resume_condition: record.resume_condition || '',
+      resume: `resume --card ${record.card}`,
+    };
+  }
   if (record.phase === 'feature_pr') {
     const pr = viewPr(REPO, record.feature_pr, ctx.root);
     const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);
@@ -839,6 +905,172 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     return { action: 'needs-inspection', card: record.card, phase: record.phase, reason: record.reason, url: record.feature_url || null };
   }
   return { action: 'needs-implementation', card: record.card, phase: record.phase, worktree: record.worktree };
+}
+
+function argumentValues(value) {
+  return (Array.isArray(value) ? value : [value])
+    .filter((item) => typeof item === 'string')
+    .map(normalizeCardLink)
+    .filter(Boolean);
+}
+
+function resumeRefused(record, reason, extra = {}) {
+  return {
+    action: 'resume-refused', card: record.card, phase: record.phase,
+    reason, dependencies: record.dependencies || [],
+    resume_condition: record.resume_condition || '', ...extra,
+  };
+}
+
+async function commandPark(ctx, args, deps = {}) {
+  const card = String(args.card || '').trim();
+  const resumeCondition = Array.isArray(args['resume-condition']) ? '' : String(args['resume-condition'] || '').trim();
+  const dependencies = [...new Set(argumentValues(args['depends-on']))];
+  if (!card) throw new Error('park requires --card');
+  if (!dependencies.length) throw new Error('park requires one or more --depends-on prerequisite cards');
+  if (!resumeCondition) throw new Error('park requires a non-empty --resume-condition');
+  if (dependencies.some((dependency) => normalizeCardLink(dependency) === normalizeCardLink(card))) {
+    throw new Error(`${card} cannot depend on itself`);
+  }
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const find = deps.findCard || findCard;
+  const boardPath = deps.boardPath || BOARD;
+  const project = deps.projectCard || projectCard;
+  const now = deps.now || (() => new Date().toISOString());
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!['claimed', 'implementing'].includes(record.phase)) {
+      throw new Error(`park only accepts claimed pre-PR work; ${card} is ${record.phase}`);
+    }
+    for (const dependency of dependencies) {
+      if (!find(CARDS_ROOT, dependency)) throw new Error(`prerequisite card ${dependency} does not exist`);
+    }
+    record.phase = 'parked';
+    record.dependencies = dependencies;
+    record.resume_condition = resumeCondition;
+    record.parked_at = now();
+    persist(ctx, state, record);
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now,
+    });
+    persist(ctx, state, record);
+    const result = {
+      action: projection.ok ? 'parked' : 'parked-projection-failed',
+      card, phase: record.phase, dependencies, resume_condition: resumeCondition,
+      branch: record.branch, worktree: record.worktree,
+    };
+    if (!projection.ok) {
+      result.projection_error = projection.error;
+      result.reconcile = `reconcile --card ${card}`;
+    }
+    return result;
+  }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
+}
+
+async function commandResume(ctx, args, deps = {}) {
+  const card = String(args.card || '').trim();
+  if (!card) throw new Error('resume requires --card');
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const find = deps.findCard || findCard;
+  const run = deps.sh || sh;
+  const boardPath = deps.boardPath || BOARD;
+  const project = deps.projectCard || projectCard;
+  const now = deps.now || (() => new Date().toISOString());
+  const worktreeExists = deps.worktreeExists || fs.existsSync;
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (record.phase !== 'parked') return resumeRefused(record, `card is ${record.phase}, not parked`);
+    if (record.projection_error) {
+      return resumeRefused(record, `park metadata projection is unresolved: ${record.projection_error}`, {
+        reconcile: `reconcile --card ${card}`,
+      });
+    }
+    if (!Array.isArray(record.dependencies) || !record.dependencies.length
+      || record.dependencies.some((dependency) => typeof dependency !== 'string' || !normalizeCardLink(dependency))) {
+      return resumeRefused(record, 'parked dependency metadata is missing or malformed');
+    }
+    if (record.dependencies.some((dependency) => normalizeCardLink(dependency) === normalizeCardLink(card))) {
+      return resumeRefused(record, 'parked dependency metadata contains a self-dependency');
+    }
+    if (typeof record.resume_condition !== 'string' || !record.resume_condition.trim()) {
+      return resumeRefused(record, 'parked resume condition is missing or malformed');
+    }
+    if (!record.worktree || !worktreeExists(record.worktree)) {
+      return resumeRefused(record, 'preserved parked worktree is missing; recover before resuming');
+    }
+    for (const dependency of record.dependencies) {
+      if (!find(CARDS_ROOT, normalizeCardLink(dependency))) {
+        return resumeRefused(record, `prerequisite card ${normalizeCardLink(dependency)} does not exist`);
+      }
+    }
+    let cardRaw;
+    try { cardRaw = fs.readFileSync(record.card_path, 'utf8'); }
+    catch (err) { return resumeRefused(record, `parked card metadata is unreadable: ${err.message}`); }
+    const projectedDependencies = parseDependsOn(cardRaw).map(normalizeCardLink);
+    if (JSON.stringify(projectedDependencies) !== JSON.stringify(record.dependencies.map(normalizeCardLink))
+      || scalarField(cardRaw, 'resume_condition') !== record.resume_condition.trim()
+      || scalarField(cardRaw, 'status') !== 'parked') {
+      return resumeRefused(record, 'parked card metadata does not match the ledger; reconcile before resuming', {
+        reconcile: `reconcile --card ${card}`,
+      });
+    }
+    const active = activeRecords(state);
+    if (active.length >= MAX_ACTIVE) {
+      return resumeRefused(record, `active capacity is full (${active.length}/${MAX_ACTIVE})`, {
+        active: active.map((item) => item.card),
+      });
+    }
+    const sibling = sameParentConflict(record.parent_card, active, card);
+    if (sibling) return resumeRefused(record, `active sibling ${sibling.card} has parent ${normalizeCardLink(record.parent_card)}`);
+    const conflict = conflictsWithActive({ touchZones: record.touch_zones || [] }, active);
+    if (conflict) return resumeRefused(record, `touch-zone conflict with ${conflict.card}: ${conflict.zone}`);
+    const boardMd = fs.readFileSync(boardPath, 'utf8');
+    const unmet = record.dependencies.filter((dependency) => !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd));
+    if (unmet.length) return resumeRefused(record, `dependencies not deployed: ${unmet.join(', ')}`, { unmet });
+
+    run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    const originMainSha = run('git', ['rev-parse', 'origin/main'], { cwd: record.worktree });
+    let originMainAdvanced = false;
+    try { run('git', ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'], { cwd: record.worktree }); }
+    catch (_) { originMainAdvanced = true; }
+
+    const invalidatedAt = now();
+    const invalidation = {
+      invalidated_at: invalidatedAt,
+      reason: 'successful resume after parked prerequisites deployed; rerun every review and combined gate',
+      head_sha: headSha,
+      reviews: record.reviews || {},
+      gate_receipt: record.gate_receipt || null,
+    };
+    record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
+    record.reviews = {};
+    record.gate_receipt = null;
+    record.phase = 'implementing';
+    record.resume_condition = null;
+    record.resumed_at = invalidatedAt;
+    record.resume_invalidation_reason = invalidation.reason;
+    persist(ctx, state, record);
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now,
+    });
+    persist(ctx, state, record);
+    return {
+      action: projection.ok ? 'implement' : 'resume-projection-failed',
+      card, phase: record.phase, branch: record.branch, worktree: record.worktree,
+      dependencies: record.dependencies, reviews_invalidated: true,
+      invalidation_reason: invalidation.reason,
+      head_sha: headSha, origin_main_sha: originMainSha,
+      origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
+      ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
+    };
+  }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandClaim(ctx, args) {
@@ -1030,21 +1262,31 @@ async function commandAdvance(ctx, args, deps = {}) {
 
 function commandStatus(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const active = activeRecords(state);
+  const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
   const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard }));
-  const projectionProblems = Object.values(state.cards || {})
+  const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
+  const detectedParkProblems = Object.values(state.cards || {})
+    .map(parkedMetadataProblem)
+    .filter(Boolean);
+  const projectionProblems = [...savedProjectionProblems, ...detectedParkProblems];
   const boardDrift = Object.values(state.cards || {})
     .map((record) => projectionBoardDrift(boardMd, record))
     .filter(Boolean);
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
     active: active.map((r) => ({ card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch, pr: r.feature_pr || null })),
+    parked: parked.map((r) => ({
+      card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch,
+      dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
+      parked_at: r.parked_at || null, projection_error: r.projection_error || null,
+    })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
@@ -1076,7 +1318,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
           const priorError = record.projection_error || null;
           const priorFailedAt = record.projection_failed_at || null;
           try {
-            const projected = project(record.card_path, boardPath, record.card, record.phase, { now });
+            const projected = project(record.card_path, boardPath, record.card, record.phase, { now, record });
             const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
             if (stateChanged) {
               delete record.projection_error;
@@ -1113,11 +1355,13 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   };
 }
 
-function commandRecover(ctx) {
-  const state = readState(ctx); const inspections = [];
-  for (const record of activeRecords(state)) {
+function commandRecover(ctx, opts = {}) {
+  const state = opts.state || readState(ctx); const inspections = [];
+  const run = opts.sh || sh;
+  const recoverable = Object.values(state.cards || {}).filter((record) => !TERMINAL.has(record.phase));
+  for (const record of recoverable) {
     if (!record.worktree || !fs.existsSync(record.worktree)) { inspections.push({ card: record.card, issue: 'worktree missing', phase: record.phase }); continue; }
-    const dirty = sh('git', ['status', '--short'], { cwd: record.worktree });
+    const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
     if (dirty) inspections.push({ card: record.card, issue: 'dirty worktree requires inspection', sample: dirty.split('\n').slice(0, 20) });
   }
   return { action: inspections.length ? 'needs-inspection' : 'clean', inspections };
@@ -1129,6 +1373,8 @@ async function main() {
   let result;
   if (command === 'status') result = commandStatus(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
+  else if (command === 'park') result = await commandPark(ctx, args);
+  else if (command === 'resume') result = await commandResume(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
@@ -1139,17 +1385,17 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|park|resume|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
 module.exports = {
-  emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
-  parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
-  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile,
+  parseArgs, emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
+  normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
+  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   moveBoardCard, patchFrontmatter, projectCard, attemptProjection, projectionBoardDrift, completionResult,
 };
 
