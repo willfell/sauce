@@ -30,12 +30,15 @@ Use a 600-second polling lease unless the user specifies a shorter one. Never ex
    ```
 
 4. If status reports `halted`, stop. Do not remove `.autoloop-halt` without an explicit user request.
-5. Read `status.next` before recommending any live action:
+5. Read `projection_problems` and `board_drift` even when no card is active. A
+   deployed card with a projection problem is not active work, but it is not a
+   clean completion report either; reconcile it without redeploying.
+6. Read `status.next` before recommending any live action:
    - `claim`: name the eligible card and its model profile. Only this result may lead to a `run --live` recommendation.
    - `no-work`: report `first_blocker` and tell the user to prepare the next card. Never recommend `run --live`.
    - `at-capacity`: name the active cards and recommend resuming one of them. Never claim another card.
-6. Unless `--live` is explicit, call `claim --dry-run --json` to show the full read-only plan, report, and stop. In `status` mode, the compact `status.next` result is sufficient; do not claim.
-7. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
+7. Unless `--live` is explicit, call `claim --dry-run --json` to show the full read-only plan, report, and stop. In `status` mode, the compact `status.next` result is sufficient; do not claim.
+8. Resume the named/eligible active card before claiming fresh work. Otherwise call `claim --json`.
 
 The coordinator may return `implement`, `fix-ci`, `waiting`, `deploy`, `complete`, `blocked`, `no-work`, or `at-capacity`.
 
@@ -95,13 +98,37 @@ If it returns:
 - `refresh-feature`: update the existing feature branch from `origin/main`, resolve only in-scope conflicts, rerun every gate, push, and advance again. Never force-push.
 - `waiting`: return the saved phase and resume condition.
 - `deploy`: run the coordinator's deploy command; do not hand-edit consumer subscriptions beyond the card's explicit map.
-- `complete`: reconcile board/card projection, report receipts, and stop.
+- `complete`: run `reconcile --card "<card>" --json`, verify it succeeds, then
+  report deployment and projection receipts.
+- `completion-projection-failed`: deployment and vault receipts succeeded but
+  board/card projection did not. Preserve every deployment receipt, run the
+  single-card reconciliation command, and report both truths until it passes.
 - `blocked-external`: report the workflow/PR URL. Never use a manual release escape hatch.
 - `needs-inspection`: preserve all files and ask for direction.
 
 ## Board and completion
 
-Git/PR ancestry is authoritative; the board is a projection. An execution card becomes Completed only after all required vault receipts pass. A parent roadmap card becomes Completed only after every child is deployed.
+Git/PR ancestry and the shared ledger are authoritative; the board is a
+projection. `Completed` and `Archive` are separate lanes. Never treat a checked
+or unchecked Archive entry as dependency completion. A tracked dependency is
+satisfied only by `phase: deployed` plus successful required-vault receipts;
+report a missing checked Completed entry as board drift without rejecting that
+authoritative deployment. An untracked dependency requires a checked Completed
+entry.
+
+Reconcile one tracked card or every tracked card with:
+
+```bash
+node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
+node scripts/autoloop/codex-coordinator.js reconcile --json
+```
+
+Reconciliation only projects `implementing`, `blocked`, and `deployed` into the
+board and card frontmatter. It never claims, implements, releases, deploys,
+rolls up a parent, or changes saved vault receipts. It is idempotent: a second
+clean run reports `no_op: true`. Recovery uses this command after inspecting
+saved `projection_problems`; do not retry deployment when receipts are already
+successful.
 
 Do not commit operational handoffs to `main`. Coordinator state and receipts live under the shared Git common directory.
 

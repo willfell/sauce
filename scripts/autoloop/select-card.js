@@ -68,6 +68,22 @@ function parsePlanningChecked(md) {
   return set;
 }
 
+// Checked entries in one named lane. Completion fallback is intentionally
+// scoped to `Completed`; Archive is a separate lane and contains mixed
+// checked/unchecked historical work on the live Sauce board.
+function parseCheckedColumn(md, column) {
+  const set = new Set();
+  let current = null;
+  for (const raw of String(md || '').split('\n')) {
+    const h = raw.match(/^#{1,6}\s+(.*\S)\s*$/);
+    if (h) { current = h[1].trim(); continue; }
+    if (current !== column) continue;
+    const m = raw.match(/^\s*-\s*\[[xX]\]\s*\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/);
+    if (m) set.add(m[1].trim());
+  }
+  return set;
+}
+
 // Parse a card note's `depends_on` frontmatter into an array of predecessor card
 // names. Supports every YAML shape the loop is likely to author:
 //   depends_on: "[[Slice 2]]"          (inline scalar, wikilink)
@@ -165,7 +181,7 @@ function selectCard(o) {
     : planning.slice();
   const skipped = [];
   const checked = parsePlanningChecked(boardMd);
-  const completed = new Set(cols['Completed']);
+  const completed = parseCheckedColumn(boardMd, 'Completed');
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const raw = loadBody ? (loadBody(card) || '') : '';
@@ -225,7 +241,10 @@ function cliLoadBody(cardsRoot) {
   };
 }
 
-module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome };
+module.exports = {
+  selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked,
+  parseCheckedColumn, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
+};
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));

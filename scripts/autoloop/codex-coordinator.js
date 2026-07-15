@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
-const { parseBoard, parseDependsOn } = require('./select-card');
+const { parseBoard, parseCheckedColumn, parseDependsOn } = require('./select-card');
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
@@ -283,17 +283,31 @@ function activeRecords(state) {
   return Object.values(state.cards || {}).filter((r) => !TERMINAL.has(r.phase));
 }
 
-function dependencySatisfied(dep, board, state) {
-  if (!board.Completed.includes(dep)) return false;
+function successfulDeploymentReceipts(record) {
+  if (!record || record.phase !== 'deployed') return false;
+  return VAULTS.every((vault) => {
+    const receipt = record.vault_receipts && record.vault_receipts[vault.id];
+    if (!receipt || receipt.ok !== true) return false;
+    if (record.required_version && (!receipt.installed_version
+      || cmpVersion(receipt.installed_version, record.required_version) < 0)) return false;
+    return true;
+  });
+}
+
+function dependencySatisfied(dep, board, state, boardMd) {
   const record = state.cards[dep];
-  return !record || record.phase === 'deployed';
+  if (record) return successfulDeploymentReceipts(record);
+  const completed = boardMd == null
+    ? new Set(board.Completed || [])
+    : parseCheckedColumn(boardMd, 'Completed');
+  return completed.has(dep);
 }
 
 function selectClaimCandidate({ boardMd, state, loadCard }) {
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) return { action: 'at-capacity', active: active.map((r) => r.card) };
-  const skipped = [];
+  const skipped = []; const boardDrift = [];
   for (const card of board['In Planning']) {
     if (state.cards[card] && state.cards[card].phase !== 'cancelled') { skipped.push({ card, reason: `already tracked (${state.cards[card].phase})` }); continue; }
     const loaded = loadCard(card);
@@ -304,31 +318,45 @@ function selectClaimCandidate({ boardMd, state, loadCard }) {
     // Keep the unmet set explicit so recovery diagnostics can name each gate.
     const unmet = [];
     for (const dep of meta.dependencies) {
-      if (!dependencySatisfied(dep, board, state)) unmet.push(dep);
+      if (!dependencySatisfied(dep, board, state, boardMd)) unmet.push(dep);
+      else if (state.cards[dep] && !parseCheckedColumn(boardMd, 'Completed').has(dep)
+        && !boardDrift.some((item) => item.card === dep)) {
+        boardDrift.push({ card: dep, issue: 'deployed dependency is not checked in Completed' });
+      }
     }
     if (unmet.length) { skipped.push({ card, reason: `dependencies not deployed: ${unmet.join(', ')}` }); continue; }
     const conflict = conflictsWithActive(meta, active);
     if (conflict) { skipped.push({ card, reason: `touch-zone conflict with ${conflict.card}: ${conflict.zone}` }); continue; }
-    return { action: 'claim', card, cardPath: loaded.path, meta, skipped };
+    return {
+      action: 'claim', card, cardPath: loaded.path, meta, skipped,
+      ...(boardDrift.length ? { board_drift: boardDrift } : {}),
+    };
   }
-  return { action: 'no-work', skipped, reason: 'no eligible execution card' };
+  return {
+    action: 'no-work', skipped, reason: 'no eligible execution card',
+    ...(boardDrift.length ? { board_drift: boardDrift } : {}),
+  };
 }
 
 function summarizeClaimSelection(selected) {
   const skipped = selected.skipped || [];
   if (selected.action === 'claim') {
-    return {
+    const summary = {
       action: 'claim', card: selected.card,
       model_profile: selected.meta.modelProfile,
       touch_zones: selected.meta.touchZones,
       skipped_count: skipped.length,
     };
+    if (selected.board_drift) summary.board_drift = selected.board_drift;
+    return summary;
   }
   if (selected.action === 'at-capacity') return { action: 'at-capacity', active: selected.active || [] };
-  return {
+  const summary = {
     action: selected.action, reason: selected.reason || null,
     skipped_count: skipped.length, first_blocker: skipped[0] || null,
   };
+  if (selected.board_drift) summary.board_drift = selected.board_drift;
+  return summary;
 }
 
 function slugify(value) {
@@ -346,39 +374,126 @@ function patchFrontmatter(raw, fields) {
   });
 }
 
-function moveBoardCard(md, card, target, complete = false) {
+function projectionMapping(phase) {
+  return {
+    implementing: { column: 'In Progress', status: 'in_progress', complete: false },
+    blocked: { column: 'Blocked', status: 'blocked', complete: false },
+    deployed: { column: 'Completed', status: 'completed', complete: true },
+  }[phase] || null;
+}
+
+function boardCardLocation(md, card) {
+  const escaped = card.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let section = null;
   const lines = String(md).split('\n');
-  let section = null; let found = -1;
   for (let i = 0; i < lines.length; i++) {
     const h = lines[i].match(/^##\s+(.+?)\s*$/);
     if (h) section = h[1];
-    if (section && new RegExp(`^\\s*- \\[[ xX]\\] \\[\\[${card.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\||\\]\\])`).test(lines[i])) { found = i; break; }
+    const match = lines[i].match(new RegExp(`^\\s*- \\[([ xX])\\] \\[\\[${escaped}(?:\\|[^\\]]+)?\\]\\]`));
+    if (match) return { column: section, checked: /x/i.test(match[1]), line: i };
   }
-  if (found < 0) throw new Error(`card ${card} not found on board`);
-  lines.splice(found, 1);
+  return null;
+}
+
+function moveBoardCard(md, card, target, complete = false) {
+  const lines = String(md).split('\n');
+  const location = boardCardLocation(md, card);
+  if (!location) throw new Error(`card ${card} not found on board`);
+  if (location.column === target && location.checked === complete) return String(md);
+  if (location.column === target) {
+    lines[location.line] = lines[location.line].replace(/^\s*- \[[ xX]\]/, `- [${complete ? 'x' : ' '}]`);
+    return lines.join('\n');
+  }
+  lines.splice(location.line, 1);
   const header = lines.findIndex((line) => line.trim() === `## ${target}`);
   if (header < 0) throw new Error(`board column ${target} missing`);
   lines.splice(header + 1, 0, '', `- [${complete ? 'x' : ' '}] [[${card}]]`);
   return lines.join('\n');
 }
 
-function projectCard(cardPath, boardPath, card, phase) {
-  const mapping = {
-    implementing: { column: 'In Progress', status: 'in_progress', complete: false },
-    blocked: { column: 'Blocked', status: 'blocked', complete: false },
-    deployed: { column: 'Completed', status: 'completed', complete: true },
-  }[phase];
-  if (!mapping) return;
+function atomicWriteText(file, value) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, value);
+  fs.renameSync(tmp, file);
+}
+
+function projectCard(cardPath, boardPath, card, phase, opts = {}) {
+  const mapping = projectionMapping(phase);
+  if (!mapping) return { changed: false, skipped: true };
   const boardRaw = fs.readFileSync(boardPath, 'utf8');
   const cardRaw = fs.readFileSync(cardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
-  const cardNext = patchFrontmatter(cardRaw, {
-    kanban_column: mapping.column,
-    status: mapping.status,
-    status_changed_at: new Date().toISOString(),
-  });
-  fs.writeFileSync(`${boardPath}.tmp`, boardNext); fs.renameSync(`${boardPath}.tmp`, boardPath);
-  fs.writeFileSync(`${cardPath}.tmp`, cardNext); fs.renameSync(`${cardPath}.tmp`, cardPath);
+  const metadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
+    || scalarField(cardRaw, 'status') !== mapping.status;
+  const boardChanged = boardNext !== boardRaw;
+  const cardNext = metadataChanged || boardChanged
+    ? patchFrontmatter(cardRaw, {
+      kanban_column: mapping.column,
+      status: mapping.status,
+      status_changed_at: (opts.now || (() => new Date().toISOString()))(),
+    })
+    : cardRaw;
+  if ((metadataChanged || boardChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
+    throw new Error(`card ${card} frontmatter missing`);
+  }
+  if (boardChanged) atomicWriteText(boardPath, boardNext);
+  if (cardNext !== cardRaw) atomicWriteText(cardPath, cardNext);
+  return {
+    changed: boardChanged || cardNext !== cardRaw,
+    board_changed: boardChanged,
+    card_changed: cardNext !== cardRaw,
+  };
+}
+
+function attemptProjection(record, boardPath = BOARD, opts = {}) {
+  const project = opts.projectCard || projectCard;
+  const now = opts.now || (() => new Date().toISOString());
+  try {
+    const result = project(record.card_path, boardPath, record.card, record.phase, { now });
+    delete record.projection_error;
+    delete record.projection_failed_at;
+    record.projection_reconciled_at = now();
+    return { ok: true, ...result };
+  } catch (err) {
+    record.projection_error = err.message;
+    record.projection_failed_at = now();
+    return { ok: false, changed: false, error: err.message };
+  }
+}
+
+function projectionBoardDrift(boardMd, record) {
+  const mapping = projectionMapping(record.phase);
+  if (!mapping) return null;
+  const location = boardCardLocation(boardMd, record.card);
+  if (!location) return { card: record.card, phase: record.phase, issue: 'card is missing from board' };
+  if (location.column !== mapping.column || location.checked !== mapping.complete) {
+    return {
+      card: record.card, phase: record.phase,
+      expected_column: mapping.column, actual_column: location.column,
+      expected_checked: mapping.complete, actual_checked: location.checked,
+    };
+  }
+  return null;
+}
+
+function completionResult(record) {
+  const result = {
+    card: record.card,
+    version: record.brew_version,
+    receipts: record.vault_receipts,
+  };
+  if (record.projection_error) {
+    return {
+      action: 'completion-projection-failed', deployment: 'deployed', ...result,
+      projection_error: record.projection_error,
+      projection_failed_at: record.projection_failed_at || null,
+      reconcile: `reconcile --card ${record.card}`,
+    };
+  }
+  return {
+    action: 'complete', deployment: 'deployed', ...result,
+    projection_reconciled_at: record.projection_reconciled_at || null,
+  };
 }
 
 function checkRollup(items) {
@@ -612,11 +727,11 @@ async function promoteAndDeploy(ctx, state, record) {
     const allOk = VAULTS.every((vault) => record.vault_receipts[vault.id] && record.vault_receipts[vault.id].ok);
     if (allOk) {
       record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
-      try { projectCard(record.card_path, BOARD, record.card, 'deployed'); } catch (err) { record.projection_error = err.message; }
+      attemptProjection(record);
     }
     writeState(ctx, state, record);
     return allOk
-      ? { action: 'complete', card: record.card, version: installed, receipts: record.vault_receipts }
+      ? completionResult(record)
       : { action: 'deploy-failed', card: record.card, version: installed, receipts: record.vault_receipts };
   }, { card: record.card, staleMs: 60 * 60 * 1000 });
 }
@@ -715,7 +830,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     return promoteAndDeploy(ctx, state, record);
   }
 
-  if (record.phase === 'deployed') return { action: 'complete', card: record.card, version: record.brew_version, receipts: record.vault_receipts };
+  if (record.phase === 'deployed') return completionResult(record);
   if (record.phase === 'blocked') return { action: 'blocked', card: record.card, reason: record.reason };
   if (record.phase === 'needs-inspection') {
     return { action: 'needs-inspection', card: record.card, phase: record.phase, reason: record.reason, url: record.feature_url || null };
@@ -753,7 +868,7 @@ async function commandClaim(ctx, args) {
       throw err;
     }
     record.phase = 'implementing';
-    try { projectCard(selected.cardPath, BOARD, selected.card, 'implementing'); } catch (err) { record.projection_error = err.message; }
+    attemptProjection(record);
     writeState(ctx, state, record);
     return { action: 'implement', ...record, skipped: selected.skipped };
   });
@@ -911,19 +1026,83 @@ async function commandAdvance(ctx, args, deps = {}) {
 }
 
 function commandStatus(ctx, opts = {}) {
-  const state = readState(ctx); const active = activeRecords(state);
+  const state = opts.state || readState(ctx); const active = activeRecords(state);
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
   const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard }));
+  const projectionProblems = Object.values(state.cards || {})
+    .filter((record) => record.projection_error)
+    .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
+  const boardDrift = Object.values(state.cards || {})
+    .map((record) => projectionBoardDrift(boardMd, record))
+    .filter(Boolean);
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
     active: active.map((r) => ({ card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch, pr: r.feature_pr || null })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
-    next, state_path: ctx.statePath,
+    next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
+}
+
+async function commandReconcile(ctx, args = {}, deps = {}) {
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const reconcileLock = deps.withLock || withLock;
+  const boardPath = deps.boardPath || BOARD;
+  const project = deps.projectCard || projectCard;
+  const now = deps.now || (() => new Date().toISOString());
+  return reconcileLock(ctx, 'completion-projection', async () => {
+    const state = loadState(ctx);
+    let records;
+    if (args.card) {
+      const record = state.cards[args.card];
+      if (!record) throw new Error(`reconcile requires a tracked --card; ${args.card} is not tracked`);
+      records = [record];
+    } else {
+      records = Object.values(state.cards || {});
+    }
+    const results = [];
+    for (const record of records) {
+      if (!projectionMapping(record.phase)) {
+        results.push({ card: record.card, phase: record.phase, ok: true, changed: false, skipped: 'phase has no board projection' });
+        continue;
+      }
+      const priorError = record.projection_error || null;
+      const priorFailedAt = record.projection_failed_at || null;
+      try {
+        const projected = project(record.card_path, boardPath, record.card, record.phase, { now });
+        const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
+        if (stateChanged) {
+          delete record.projection_error;
+          delete record.projection_failed_at;
+          record.projection_reconciled_at = now();
+          persist(ctx, state, record);
+        }
+        results.push({
+          card: record.card, phase: record.phase, ok: true,
+          changed: Boolean(projected.changed || stateChanged),
+          projection_changed: Boolean(projected.changed), state_changed: stateChanged,
+        });
+      } catch (err) {
+        const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
+        record.projection_error = err.message;
+        if (stateChanged) record.projection_failed_at = now();
+        if (stateChanged) persist(ctx, state, record);
+        results.push({ card: record.card, phase: record.phase, ok: false, changed: stateChanged, error: err.message });
+      }
+    }
+    const failed = results.filter((result) => !result.ok);
+    const changed = results.filter((result) => result.changed).length;
+    return {
+      action: failed.length ? 'reconcile-failed' : 'reconciled',
+      scope: args.card ? 'card' : 'all-tracked', checked: results.length,
+      changed, failed: failed.length, no_op: changed === 0 && failed.length === 0,
+      results,
+    };
+  }, { card: args.card || null });
 }
 
 function commandRecover(ctx) {
@@ -946,22 +1125,24 @@ async function main() {
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
   else if (command === 'advance') { await commandAdvance(ctx, args); return; }
+  else if (command === 'reconcile') result = await commandReconcile(ctx, args);
   else if (command === 'deploy') {
     const state = readState(ctx); const record = state.cards[args.card];
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|record-review|verify-gates|record-pr|advance|deploy|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
-  parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
+  parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
+  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  moveBoardCard, patchFrontmatter,
+  moveBoardCard, patchFrontmatter, projectCard, projectionBoardDrift, completionResult,
 };
 
 if (require.main === module) {
