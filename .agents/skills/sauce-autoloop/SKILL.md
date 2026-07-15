@@ -68,8 +68,8 @@ When the action is `implement`:
    ```
 
 10. If Layer 1 is adequate, dispatch three **read-only** reviewers in separate contexts over `git diff origin/main...HEAD`: correctness, regression risk, and test adequacy. Do not dispatch parallel implementers. Treat missing/uncertain reviews as refutations; use `gateVerdict` from `scripts/autoloop/gate.js` and block when two or more refute.
-11. Commit conventionally. Never edit versions, tags, release PRs, or the tap.
-12. Push, open a PR against `main`, and arm squash auto-merge. Record it:
+11. Use a release-triggering `fix:` or `feat:` commit and PR title for every live card. A deployable card must not use a `test:`, `docs:`, or `chore:` PR title. Never edit versions, tags, release PRs, or the tap.
+12. Push and open the PR against `main`, but do not arm auto-merge yourself. Record it first; the coordinator validates the title, sets it as the squash subject, then arms auto-merge:
 
    ```bash
    node scripts/autoloop/codex-coordinator.js record-pr --card "<card>" --pr <number> --json

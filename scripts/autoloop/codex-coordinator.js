@@ -18,6 +18,7 @@ const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
 const { parseBoard, parseDependsOn } = require('./select-card');
 const { cmpVersion } = require('./deploy');
+const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
@@ -422,6 +423,30 @@ function versionFrom(value) {
   return match ? match[1] : '';
 }
 
+function isReleasableTitle(title) {
+  return bumpLevel(parseCommit(title), true) !== 'none';
+}
+
+function assertReleasableTitle(title) {
+  if (!isReleasableTitle(title)) {
+    throw new Error(`PR title "${title}" will not trigger a release; use a releasable conventional title such as fix(scope): ... or feat(scope): ...`);
+  }
+}
+
+function armFeatureAutoMerge(pr, cwd, run = sh) {
+  assertReleasableTitle(pr.title);
+  run('gh', ['pr', 'merge', String(pr.number), '-R', REPO, '--squash', '--auto', '--subject', pr.title], { cwd });
+}
+
+function releasePrWaitReceipt() {
+  return {
+    action: 'waiting',
+    phase: 'feature_merged',
+    waiting_for: 'release_pr',
+    reason: 'containing release PR not created yet',
+  };
+}
+
 function findContainingTag(mergeSha, root) {
   try { sh('git', ['fetch', 'origin', 'main', '--tags', '--quiet'], { cwd: root }); } catch (_) {}
   const tags = sh('git', ['tag', '--list', 'v[0-9]*', '--sort=version:refname'], { cwd: root }).split('\n').filter(Boolean);
@@ -525,9 +550,13 @@ async function promoteAndDeploy(ctx, state, record) {
   }, { card: record.card, staleMs: 60 * 60 * 1000 });
 }
 
-async function stepCard(ctx, state, record, opts = {}) {
+async function stepCard(ctx, state, record, opts = {}, deps = {}) {
+  const viewPr = deps.prView || prView;
+  const findTag = deps.findContainingTag || findContainingTag;
+  const findRelease = deps.findContainingRelease || findContainingRelease;
+  const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
   if (record.phase === 'feature_pr') {
-    const pr = prView(REPO, record.feature_pr, ctx.root);
+    const pr = viewPr(REPO, record.feature_pr, ctx.root);
     if (pr.state === 'MERGED') {
       record.feature_merge_sha = pr.mergeCommit && pr.mergeCommit.oid;
       record.phase = 'feature_merged'; record.feature_merged_at = new Date().toISOString(); writeState(ctx, state, record);
@@ -539,21 +568,24 @@ async function stepCard(ctx, state, record, opts = {}) {
     if (['BEHIND', 'DIRTY'].includes(pr.mergeStateStatus)) {
       return { action: 'refresh-feature', card: record.card, pr: pr.number, merge_state: pr.mergeStateStatus, url: pr.url };
     }
+    if (!isReleasableTitle(pr.title)) {
+      return { action: 'blocked', card: record.card, phase: 'feature_pr', reason: `PR title "${pr.title}" will not trigger a release`, url: pr.url };
+    }
     if (!pr.autoMergeRequest) {
-      try { sh('gh', ['pr', 'merge', String(pr.number), '-R', REPO, '--squash', '--auto'], { cwd: ctx.root }); } catch (_) {}
+      try { armAutoMerge(pr, ctx.root); } catch (_) {}
     }
     return { action: 'waiting', phase: 'feature_pr', pending_checks: checks.pending, url: pr.url };
   }
 
   if (record.phase === 'feature_merged' || record.phase === 'release_pr') {
-    const tag = findContainingTag(record.feature_merge_sha, ctx.root);
+    const tag = findTag(record.feature_merge_sha, ctx.root);
     if (tag) {
       record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; writeState(ctx, state, record);
       return { action: 'phase-change', phase: 'tagged', tag };
     }
-    let release = record.release_pr ? prView(REPO, record.release_pr, ctx.root) : findContainingRelease(record.feature_merge_sha, ctx.root);
-    if (!release) return { action: 'waiting', phase: 'release_pr', reason: 'containing release PR not created yet' };
-    if (release.state === 'OPEN' && !release.statusCheckRollup) release = prView(REPO, release.number, ctx.root);
+    let release = record.release_pr ? viewPr(REPO, record.release_pr, ctx.root) : findRelease(record.feature_merge_sha, ctx.root);
+    if (!release) return releasePrWaitReceipt();
+    if (release.state === 'OPEN' && !release.statusCheckRollup) release = viewPr(REPO, release.number, ctx.root);
     record.release_pr = release.number; record.release_url = release.url;
     if (release.state === 'MERGED') {
       record.release_merge_sha = release.mergeCommit && release.mergeCommit.oid;
@@ -572,7 +604,7 @@ async function stepCard(ctx, state, record, opts = {}) {
   }
 
   if (record.phase === 'release_merged') {
-    const tag = findContainingTag(record.feature_merge_sha, ctx.root);
+    const tag = findTag(record.feature_merge_sha, ctx.root);
     if (!tag) return { action: 'waiting', phase: 'tag', reason: 'containing tag not created yet' };
     record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; writeState(ctx, state, record);
     return { action: 'phase-change', phase: record.phase, tag };
@@ -640,22 +672,28 @@ async function commandClaim(ctx, args) {
   });
 }
 
-async function commandRecordPr(ctx, args) {
+function commandRecordPr(ctx, args, deps = {}) {
   const card = args.card; const number = Number(args.pr);
   if (!card || !Number.isInteger(number)) throw new Error('record-pr requires --card and numeric --pr');
-  const state = readState(ctx); const record = state.cards[card];
+  const loadState = deps.readState || readState;
+  const viewPr = deps.prView || prView;
+  const run = deps.sh || sh;
+  const persist = deps.writeState || writeState;
+  const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
+  const state = loadState(ctx); const record = state.cards[card];
   if (!record) throw new Error(`card ${card} is not claimed`);
-  const pr = prView(REPO, number, ctx.root);
+  const pr = viewPr(REPO, number, ctx.root);
   if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
   if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
-  const dirty = sh('git', ['status', '--short'], { cwd: record.worktree });
+  assertReleasableTitle(pr.title);
+  const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
   if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
-  const localHead = sh('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+  const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
   if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
   record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
-  writeState(ctx, state, record);
+  persist(ctx, state, record);
   if (pr.state === 'OPEN' && !pr.autoMergeRequest) {
-    try { sh('gh', ['pr', 'merge', String(number), '-R', REPO, '--squash', '--auto'], { cwd: ctx.root }); } catch (_) {}
+    try { armAutoMerge(pr, ctx.root, run); } catch (_) {}
   }
   return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
 }
@@ -731,7 +769,7 @@ async function main() {
 module.exports = {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
-  checkRollup, versionFrom,
+  checkRollup, versionFrom, isReleasableTitle, releasePrWaitReceipt, armFeatureAutoMerge, commandRecordPr, stepCard,
   moveBoardCard, patchFrontmatter,
 };
 
