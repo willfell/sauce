@@ -15,6 +15,7 @@ const MAN     = path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'manifes
 const CAT     = path.join(ROOT, 'platform', 'manifest.json');
 const LEGACY  = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'breadcrumb.js');
 const SNAPSHOT = path.join(ROOT, 'platform', 'test', 'fixtures', 'breadcrumb-legacy.js');
+const PEOPLE_MAN = path.join(ROOT, 'platform', 'blueprints', 'people', 'manifest.json');
 
 const results = [];
 const ok = (n, c) => { results.push([n, !!c]); console.log(`  ${c ? 'PASS' : 'FAIL'} — ${n}`); };
@@ -60,6 +61,17 @@ let cat = null;
 try { cat = JSON.parse(fs.readFileSync(CAT, 'utf8')); } catch (_e) {}
 const catEntry = cat && Array.isArray(cat.mechanisms) && cat.mechanisms.find(m => m.name === 'breadcrumb');
 ok('BR4 catalogue includes breadcrumb', catEntry && catEntry.version === VERSION_SNAPSHOT.components.breadcrumb);
+
+let peopleManifest = null;
+try { peopleManifest = JSON.parse(fs.readFileSync(PEOPLE_MAN, 'utf8')); } catch (_e) {}
+const PERSON_BREADCRUMB = peopleManifest && peopleManifest.breadcrumb && peopleManifest.breadcrumb.types && peopleManifest.breadcrumb.types.person;
+ok('BR30 people manifest declares person: People hub ancestor + basename current',
+   PERSON_BREADCRUMB
+   && Array.isArray(PERSON_BREADCRUMB.ancestors)
+   && PERSON_BREADCRUMB.ancestors.length === 1
+   && PERSON_BREADCRUMB.ancestors[0].label === 'lit:People'
+   && PERSON_BREADCRUMB.ancestors[0].link === 'spice/people/People.md'
+   && PERSON_BREADCRUMB.current && PERSON_BREADCRUMB.current.label === 'file:basename');
 
 // ── Load NEW class ────────────────────────────────────────────────────────
 const NEW_SRC = fs.existsSync(MECH) ? fs.readFileSync(MECH, 'utf8') : '';
@@ -249,7 +261,8 @@ const REGISTRY = {
     meetings: { types: MEETINGS_TYPES },
     scratch:  { types: SCRATCH_TYPES },
     "to-do":  { types: TODO_TYPES },
-    wiki:     { types: WIKI_TYPES }
+    wiki:     { types: WIKI_TYPES },
+    people:   { types: peopleManifest?.breadcrumb?.types || {} }
   }
 };
 
@@ -455,6 +468,21 @@ async function runAsync(fn) { return await fn(); }
     const all = fx.expect.every((seg) => html.includes(seg));
     ok(fx.name + ' trail contains ' + fx.expect.join(' / '), !!wrap && all);
     if (!all) console.log(`    HTML: ${html}`);
+  }
+
+  // ── BR31: people manifest contribution renders from the registry shape ───
+  {
+    const dv = makeDv({
+      type: 'person',
+      file: { path: 'spice/people/Ada Lovelace.md', name: 'Ada Lovelace' }
+    });
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const html = dv._els[0] ? dv._els[0].innerHTML : '';
+    const hasPeopleHub = html.includes('href="spice/people/People.md"') && html.includes('>People<');
+    const hasCurrent = html.includes('>Ada Lovelace<') && !html.includes('href="spice/people/Ada Lovelace.md"');
+    ok('BR31 person registry trail: People(hub link) / <person> current', hasPeopleHub && hasCurrent);
+    if (!hasPeopleHub || !hasCurrent) console.log(`    BR31 HTML: ${html}`);
   }
 
   // ── BR28–BR29: WS7 board-card breadcrumb coverage (task-hub / task-board-card) ──

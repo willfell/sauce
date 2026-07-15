@@ -84,6 +84,21 @@
       }
     }
   ],
+  "breadcrumb": {
+    "types": {
+      "person": {
+        "ancestors": [
+          {
+            "label": "lit:People",
+            "link": "spice/people/People.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      }
+    }
+  },
   "new_entity_buttons": [
     {
       "id": "person",
