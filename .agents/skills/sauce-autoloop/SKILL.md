@@ -63,7 +63,7 @@ When the action is `implement`:
    node scripts/autoloop/codex-coordinator.js record-review --card "<card>" --lens test-adequacy --verdict pass --summary "<specific finding>" --json
    ```
 
-9. Let the coordinator fetch the current `origin/main`, use this card's shared review/gate/PR lock, rerun adequacy, full preflight, isolated workshop self-install, and bumped preflight, then save one receipt tied to the exact head and base commits:
+9. Let the coordinator fetch the current `origin/main`, use this card's shared review/gate/PR/advance lock, rerun adequacy, full preflight, isolated workshop self-install, and bumped preflight, then save one receipt tied to the exact head and base commits:
 
    ```bash
    node scripts/autoloop/codex-coordinator.js verify-gates --card "<card>" --json
@@ -76,7 +76,7 @@ When the action is `implement`:
    node scripts/autoloop/codex-coordinator.js record-pr --card "<card>" --pr <number> --json
    ```
 
-The coordinator refuses a missing, failed, noncanonical, or stale gate receipt. If an older run already armed auto-merge, it disables that request until the current head/base receipt and GitHub CI are green. A merged PR without a valid exact-head receipt stops at `needs-inspection`.
+The coordinator refuses a missing, failed, noncanonical, or stale gate receipt. Reviews close after the feature PR merges. If an older run already armed auto-merge, the coordinator disables that request until the current head/base receipt and GitHub CI are green. A merged PR without a valid exact-head receipt stops at `needs-inspection`.
 
 ## Advance
 

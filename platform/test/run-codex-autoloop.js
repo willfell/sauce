@@ -10,7 +10,7 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
-  runIsolatedWorkshopSelfInstall, commandRecordPr, stepCard, moveBoardCard, patchFrontmatter,
+  runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
 } = require('../../scripts/autoloop/codex-coordinator');
 
 let count = 0;
@@ -225,6 +225,14 @@ eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit')
 eq(reviewLock, 'gates-review', 'review writes share the per-card gate lock');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 
+reviewState.cards.Review.phase = 'feature_merged';
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  card: 'Review', lens: 'correctness', verdict: 'refute', summary: 'A late refutation must not reopen a merged feature.',
+}, {
+  readState: () => reviewState, sh: () => 'review-head', writeState: () => {}, withLock: immediateCardLock,
+}), /reviews are closed .*feature_merged/, 'review writes are rejected after the feature PR merges');
+reviewState.cards.Review.phase = 'implementing';
+
 reviewState.cards.Review.touch_zones = ['scripts/autoloop', 'platform/test'];
 reviewState.cards.Review.reviews = Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, {
   lens, verdict: 'pass', refuted: false, summary: `${lens} review found no release-blocking defect.`, head_sha: 'review-head',
@@ -253,6 +261,22 @@ eq(gateCalls, ['gates-review', 'fetch-main', 'release:preflight', 'self-install'
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
+
+const advanceState = emptyState();
+advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
+let advanceLock = ''; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
+  withLock: async (_ctx, name, fn) => {
+    advanceLock = name; insideAdvanceLock = true;
+    try { return await fn(); } finally { insideAdvanceLock = false; }
+  },
+  readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
+  stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
+  emit: () => {},
+});
+eq(advanceLock, 'gates-advance', 'advance shares the per-card gate lock');
+ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
+eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
 
 assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');

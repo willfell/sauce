@@ -773,6 +773,9 @@ async function commandRecordReview(ctx, args, deps = {}) {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+    if (!['implementing', 'feature_pr'].includes(record.phase)) {
+      throw new Error(`reviews are closed for ${card} in phase ${record.phase}`);
+    }
     const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
     record.gate_receipt = null;
     record.reviews = { ...(record.reviews || {}), [lens]: {
@@ -876,26 +879,32 @@ async function commandRecordPr(ctx, args, deps = {}) {
   }, { card, staleMs: 60 * 60 * 1000 });
 }
 
-async function commandAdvance(ctx, args) {
+async function commandAdvance(ctx, args, deps = {}) {
   const card = args.card; if (!card) throw new Error('advance requires --card');
   const lease = Math.min(DEFAULT_LEASE_SECONDS, Math.max(0, Number(args['lease-seconds'] || DEFAULT_LEASE_SECONDS)));
   const poll = Math.max(5, Number(args['poll-seconds'] || DEFAULT_POLL_SECONDS));
+  const loadState = deps.readState || readState;
+  const gateLock = deps.withLock || withLock;
+  const step = deps.stepCard || stepCard;
+  const emit = deps.emit || ((value) => process.stdout.write(`${JSON.stringify(value)}\n`));
   const deadline = Date.now() + lease * 1000;
   let last = '';
   while (true) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
-      process.stdout.write(`${JSON.stringify(halted)}\n`); return halted;
+      emit(halted); return halted;
     }
-    const state = readState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} not in state`);
-    const result = await stepCard(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+    const result = await gateLock(ctx, `gates-${slugify(card)}`, async () => {
+      const state = loadState(ctx); const record = state.cards[card];
+      if (!record) throw new Error(`card ${card} not in state`);
+      return step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+    }, { card, staleMs: 60 * 60 * 1000 });
     const fingerprint = JSON.stringify(result);
-    if (fingerprint !== last) { process.stdout.write(`${fingerprint}\n`); last = fingerprint; }
+    if (fingerprint !== last) { emit(result); last = fingerprint; }
     if (!['waiting', 'phase-change'].includes(result.action) || lease === 0) return result;
     if (Date.now() >= deadline) {
-      const receipt = { action: 'waiting', card, phase: readState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
-      process.stdout.write(`${JSON.stringify(receipt)}\n`); return receipt;
+      const receipt = { action: 'waiting', card, phase: loadState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
+      emit(receipt); return receipt;
     }
     await new Promise((resolve) => setTimeout(resolve, Math.min(poll * 1000, Math.max(0, deadline - Date.now()))));
   }
@@ -951,7 +960,7 @@ module.exports = {
   parseExecutionMeta, validateExecutionMeta, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandRecordReview, commandVerifyGates, commandRecordPr, stepCard,
+  commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   moveBoardCard, patchFrontmatter,
 };
 
