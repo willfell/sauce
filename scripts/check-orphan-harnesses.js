@@ -17,18 +17,7 @@ function repositoryHarnesses(root) {
     .sort();
 }
 
-function runSelfTest() {
-  const registered = { preflight: 'node platform/test/run-covered.js' };
-  const covered = orphanHarnesses(['run-covered.js'], registered);
-  const missing = orphanHarnesses(['run-covered.js', 'run-orphan.js'], registered);
-  const passes = covered.length === 0 && missing.length === 1 && missing[0] === 'run-orphan.js';
-  console.log(`${passes ? 'PASS' : 'FAIL'} — orphan harness guard accepts registered harnesses and rejects a synthetic orphan`);
-  return passes;
-}
-
 function main() {
-  if (process.argv.includes('--self-test')) process.exit(runSelfTest() ? 0 : 1);
-
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const missing = orphanHarnesses(repositoryHarnesses(ROOT), pkg.scripts || {});
   if (missing.length === 0) {
@@ -40,4 +29,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+module.exports = { orphanHarnesses, repositoryHarnesses };
+
+if (require.main === module) main();
