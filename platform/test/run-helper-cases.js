@@ -7798,6 +7798,7 @@ async function caseGAS3bPeopleSectionLabels() {
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
   const personButton = (manifest.new_entity_buttons || []).find((button) => button.id === "person");
   const manifestBody = personButton && personButton.inline_body;
+  const sectionLabelDependency = (manifest.depends_on || []).find((dependency) => dependency.name === "section-label");
   const labels = ["Notes", "Meetings", "Daily Mentions", "Mentions"];
   const expectedShapes = labels.map((label, index) => ({ label, top: index === 0 }));
   const sectionShapes = (body) => Array.from(String(body || "").matchAll(
@@ -7805,6 +7806,8 @@ async function caseGAS3bPeopleSectionLabels() {
     (match) => ({ label: match[1], top: Boolean(match[2]) }));
   assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: person EntityCreate inline_body exists",
     typeof manifestBody === "string" && manifestBody.length > 0);
+  assertTrue("GA-S3b-PEOPLE-SECTIONLABEL: People directly depends on section-label",
+    sectionLabelDependency && sectionLabelDependency.range === ">=0.1.0");
   for (const [surface, body] of [["template", templateBody], ["manifest inline_body", manifestBody]]) {
     for (const label of labels) {
       assertTrue(`GA-S3b-PEOPLE-SECTIONLABEL: ${surface} ${label} SectionLabel present`,

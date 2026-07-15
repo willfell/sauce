@@ -22,6 +22,10 @@
       "range": ">=0.1.0"
     },
     {
+      "name": "section-label",
+      "range": ">=0.1.0"
+    },
+    {
       "name": "cards",
       "range": ">=0.2.4"
     },

@@ -4410,6 +4410,8 @@ async function runPeopleSectionLabelHealFamily() {
         "## Daily Mentions", "daily user prose", "",
         "## Mentions", "backlinks user prose", "",
         "## Biography", "unrelated user prose", "",
+        "```markdown", "## Notes", "```", "",
+        "~~~markdown", "## Meetings", "~~~", "",
         "````markdown", "```text", "## Meetings", "```", "## Daily Mentions", "````", "",
         "~~~~markdown", "~~~text", "## Mentions", "~~~", "## Notes", "~~~~", "",
     ].join("\n");
@@ -4451,6 +4453,10 @@ async function runPeopleSectionLabelHealFamily() {
            /class: "SectionLabel"[^`]*text: "Notes", top: true/.test(once));
         ok("GA-S3b-PEOPLE-SECTIONLABEL-unrelated H2 preserved",
            once.includes("## Biography\nunrelated user prose"));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-triple backtick fence preserved exactly",
+           once.includes("```markdown\n## Notes\n```"));
+        ok("GA-S3b-PEOPLE-SECTIONLABEL-triple tilde fence preserved exactly",
+           once.includes("~~~markdown\n## Meetings\n~~~"));
         ok("GA-S3b-PEOPLE-SECTIONLABEL-long backtick fence preserved exactly",
            once.includes("````markdown\n```text\n## Meetings\n```\n## Daily Mentions\n````"));
         ok("GA-S3b-PEOPLE-SECTIONLABEL-long tilde fence preserved exactly",
@@ -4489,13 +4495,22 @@ async function runPeopleSectionLabelHealFamily() {
         fs.writeFileSync(path.join(root, failedRel), failedBefore, "utf8");
         fs.writeFileSync(path.join(root, continuedRel), continuedBefore, "utf8");
         const baseAdapter = makeFsAdapter(root);
+        const writeEvents = [];
         const failingAdapter = {
             ...baseAdapter,
+            async list(target) {
+                const listing = await baseAdapter.list(target);
+                listing.files.sort((a, b) => a.localeCompare(b));
+                listing.folders.sort((a, b) => a.localeCompare(b));
+                return listing;
+            },
             async write(target, content) {
                 if (target.startsWith(".sauce-backup/") &&
                     target.replace(/\\\\/g, "/").endsWith("/" + failedRel)) {
+                    writeEvents.push("backup-failed:A");
                     throw new Error("injected backup failure");
                 }
+                if (target === continuedRel) writeEvents.push("live-write:B");
                 return baseAdapter.write(target, content);
             },
         };
@@ -4511,7 +4526,9 @@ async function runPeopleSectionLabelHealFamily() {
         ok("GA-S3b-PEOPLE-SECTIONLABEL-backup failure continues safely to other notes",
            continuedAfter !== continuedBefore &&
                continuedAfter.includes('class: "SectionLabel"') &&
-               history.some((entry) => entry.target === continuedRel && entry.action === "healed"));
+               history.some((entry) => entry.target === continuedRel && entry.action === "healed") &&
+               writeEvents.indexOf("backup-failed:A") !== -1 &&
+               writeEvents.indexOf("backup-failed:A") < writeEvents.indexOf("live-write:B"));
     } finally {
         try { fs.rmSync(root, { recursive: true, force: true }); } catch (_e) {}
     }
