@@ -463,7 +463,7 @@ function gateReceiptStatus(record, headSha, baseSha = null) {
 function pathCoveredByTouchZones(file, zones) {
   const normalized = normalizeZone(file);
   const pathZones = (zones || []).map(normalizeZone)
-    .filter((zone) => zone && !SYMBOLIC_TOUCH_ZONES.has(zone) && !/\s/.test(zone));
+    .filter((zone) => zone && !SYMBOLIC_TOUCH_ZONES.has(zone));
   if (!pathZones.length) return false;
   return pathZones.some((zone) => normalized === zone || normalized.startsWith(`${zone}/`));
 }

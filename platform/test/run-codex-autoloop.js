@@ -102,6 +102,9 @@ ok(!pathCoveredByTouchZones('platform/test/run-x.js', ['platform/mechanisms/x'])
 ok(pathCoveredByTouchZones('scripts/autoloop/gate.js', ['scripts']), 'top-level directory touch zone covers descendants');
 ok(!pathCoveredByTouchZones('platform/install.js', ['scripts']), 'top-level directory touch zone rejects other roots');
 ok(!pathCoveredByTouchZones('platform/install.js', ['shared-registries']), 'symbolic-only touch zones fail closed for file changes');
+const spacedTouchZone = 'platform/blueprints/people/templates/Template, People.md';
+ok(pathCoveredByTouchZones(spacedTouchZone, [spacedTouchZone]), 'exact touch-zone paths may contain spaces');
+ok(!pathCoveredByTouchZones('platform/install.js', [spacedTouchZone]), 'spaced touch-zone paths still reject other files');
 const waitRecord = { card: 'A', phase: 'feature_merged', feature_merge_sha: 'abc123' };
 eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
   findContainingTag: () => '',
