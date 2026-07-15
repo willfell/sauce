@@ -25,7 +25,10 @@ Every feature commit has three review receipts and one combined gate receipt in 
 - Maximum active claims: three.
 - Selector locking lasts only through atomic claim creation.
 - Each card owns explicit branch/worktree/PR fields.
-- Dependencies require `deployed` state.
+- A tracked dependency requires authoritative `deployed` state and successful
+  receipts from every required vault. Its board placement is projection only;
+  report drift separately. An untracked dependency requires a checked entry in
+  `Completed`. `Archive` never satisfies a dependency.
 - Intersecting `touch_zones` reject a claim.
 - Treat `platform/install.js`, `package.json`, `.github/workflows`, `platform/manifest.json`, shared registries, Homebrew promotion, and each vault deployment as exclusive zones.
 - Preserve unrelated branches, worktrees, and dirty files.
@@ -46,11 +49,40 @@ Acquire one host promotion lock, recheck the installed formula, then run `brew u
 
 Each verifies identity and the brew workshop path, applies only explicit subscription additions, runs `sauce update --bump-pins`, checks the new install-history segment for errors, verifies the installed version floor, and returns a receipt. Retry only failed/behind vaults.
 
+## Completion projection and reconciliation
+
+Deployment truth and projection truth are reported independently. Once every
+required vault receipt passes, the card remains authoritatively `deployed` even
+if its board/card projection fails. The coordinator saves `projection_error`,
+includes it in `status.projection_problems`, and returns
+`completion-projection-failed` instead of silently returning `complete`.
+
+Repair one card or all tracked cards with:
+
+```bash
+node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
+node scripts/autoloop/codex-coordinator.js reconcile --json
+```
+
+The command projects only `implementing` → `In Progress`/`in_progress`,
+`blocked` → `Blocked`/`blocked`, and `deployed` → checked
+`Completed`/`completed`. A successful repair clears the saved error and records
+`projection_reconciled_at`; a second clean run is a no-op. It does not claim,
+implement, release, promote Homebrew, deploy a vault, roll up a parent card, or
+rewrite any saved deployment receipt. Mixed checked/unchecked Archive entries
+and unrelated cards remain untouched. Automatic claim/deployment projection and
+manual reconciliation share one board-projection lock. Reconciliation also
+rereads each record under that card's gate lock before writing, so it cannot
+overwrite a concurrent phase transition with stale ledger state.
+
 ## Recovery
 
 - Reclaim a lock only when its PID is dead and it is older than the stale threshold.
 - Never delete a dirty interrupted worktree automatically.
 - Reconcile a card by its recorded PR number and merge SHA.
 - Git/PR state wins over board projection.
+- After recovering authoritative state, run the reconciliation command rather
+  than replaying release or deployment. Preserve successful vault receipts on
+  projection failure.
 - Malformed state requires backup/recovery; never overwrite it with an empty state.
 - Release/tap workflow failure blocks externally. Do not cut manual versions/tags or edit the tap.

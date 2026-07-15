@@ -8,10 +8,13 @@ const path = require('path');
 const {
   emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  selectClaimCandidate, summarizeClaimSelection, commandStatus, checkRollup, versionFrom, isReleasableTitle,
+  dependencySatisfied, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile,
+  checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
+  attemptProjection, completionResult,
 } = require('../../scripts/autoloop/codex-coordinator');
+const { parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
@@ -49,6 +52,19 @@ const board = (planning, completed = []) => [
   '## In Progress', '', '## Blocked', '',
   '## Completed', ...completed.map((c) => `- [x] [[${c}]]`), '',
 ].join('\n');
+const liveBoard = ({ planning = [], progress = [], blocked = [], completed = [], archive = [] } = {}) => [
+  '---', 'kanban-plugin: board', '---', '',
+  '## In Planning', ...planning.map((c) => `- [ ] [[${c}]]`), '',
+  '## In Progress', ...progress.map((c) => `- [ ] [[${c}]]`), '',
+  '## Blocked', ...blocked.map((c) => `- [ ] [[${c}]]`), '',
+  '## Discovered (autoloop)', '- [ ] [[Unrelated discovery]]', '',
+  '## Completed', ...completed.map(([checked, c]) => `- [${checked ? 'x' : ' '}] [[${c}]]`), '',
+  '***', '', '## Archive', ...archive.map(([checked, c]) => `- [${checked ? 'x' : ' '}] [[${c}]]`), '',
+  '%% kanban:settings', '{}', '%%',
+].join('\n');
+const successfulVaultReceipts = (version = '0.233.0') => Object.fromEntries(
+  ['headspace', 'accuris', 'ero'].map((vault) => [vault, { vault, ok: true, installed_version: version }]),
+);
 const bodies = {
   A: card({ zones: ['platform/a'] }),
   B: card({ zones: ['platform/b'], deps: ['Done'] }),
@@ -59,10 +75,27 @@ const loadCard = (name) => bodies[name] ? { path: `/cards/${name}.md`, raw: bodi
 
 let state = emptyState();
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).card, 'A', 'selects first eligible card');
-state.cards.Done = { card: 'Done', phase: 'feature_merged', touch_zones: [] };
+state.cards.Done = { card: 'Done', phase: 'feature_merged', required_version: '0.233.0', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['B', 'C'], ['Done']), state, loadCard }).card, 'C', 'requires dependency deployed, skips to next');
 state.cards.Done.phase = 'deployed';
-eq(selectClaimCandidate({ boardMd: board(['B'], ['Done']), state, loadCard }).card, 'B', 'deployed dependency satisfies gate');
+eq(selectClaimCandidate({ boardMd: board(['B']), state, loadCard }).action, 'no-work', 'tracked deployed dependency still requires successful vault receipts');
+state.cards.Done.vault_receipts = successfulVaultReceipts();
+const driftedTrackedDependency = selectClaimCandidate({
+  boardMd: liveBoard({ planning: ['B'], archive: [[true, 'Done'], [false, 'Archived unchecked work']] }), state, loadCard,
+});
+eq(driftedTrackedDependency.card, 'B', 'authoritative tracked deployment satisfies dependency despite board drift');
+eq(driftedTrackedDependency.board_drift, [{ card: 'Done', issue: 'deployed dependency is not checked in Completed' }], 'tracked dependency board drift is reported separately');
+state.cards.Done.vault_receipts.ero.ok = false;
+eq(selectClaimCandidate({ boardMd: board(['B'], ['Done']), state, loadCard }).action, 'no-work', 'failed required-vault receipt rejects tracked dependency');
+state.cards.Done.vault_receipts.ero = { vault: 'ero', ok: true };
+eq(selectClaimCandidate({ boardMd: board(['B'], ['Done']), state, loadCard }).action, 'no-work', 'required-version deployment receipt must name an installed version');
+
+state = emptyState();
+eq(selectClaimCandidate({ boardMd: liveBoard({ planning: ['B'], completed: [[true, 'Done']] }), state, loadCard }).card, 'B', 'checked Completed entry satisfies an untracked dependency');
+eq(selectClaimCandidate({ boardMd: liveBoard({ planning: ['B'], completed: [[false, 'Done']] }), state, loadCard }).action, 'no-work', 'unchecked Completed entry does not satisfy an untracked dependency');
+eq(selectClaimCandidate({ boardMd: liveBoard({ planning: ['B'], archive: [[true, 'Done'], [false, 'Archived unchecked work']] }), state, loadCard }).action, 'no-work', 'checked Archive entry does not satisfy an untracked dependency');
+eq([...parseCheckedColumn(liveBoard({ completed: [[true, 'Completed only']], archive: [[true, 'Archived checked'], [false, 'Archived unchecked']] }), 'Completed')], ['Completed only'], 'checked-column parser keeps Completed separate from mixed Archive');
+eq(selectCard({ boardMd: liveBoard({ planning: ['B'], archive: [[true, 'Done']] }), loadBody: (name) => bodies[name] || '' }).action, 'no-eligible-work', 'legacy selector also refuses checked Archive as completion');
 
 state = emptyState();
 state.cards.Active = { card: 'Active', phase: 'feature_pr', touch_zones: ['platform/a'] };
@@ -306,6 +339,7 @@ ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source l
 ok(/## In Progress\n\n- \[ \] \[\[A\]\]/.test(moved), 'adds card to target lane');
 const completed = moveBoardCard(moved, 'A', 'Completed', true);
 ok(/## Completed\n\n- \[x\] \[\[A\]\]/.test(completed), 'marks completed projection checked');
+eq(moveBoardCard(completed, 'A', 'Completed', true), completed, 'board projection is idempotent when lane and check state already match');
 
 const patched = patchFrontmatter('---\nstatus: planning\n---\nbody', { status: 'in_progress', kanban_column: 'In Progress' });
 ok(/status: in_progress/.test(patched), 'patches existing frontmatter key');
@@ -346,6 +380,135 @@ const statusCtx = { ...ctx, root: tmp };
 const status = commandStatus(statusCtx, { boardMd: board(['Missing']), loadCard });
 eq(status.next.action, 'no-work', 'status includes the read-only selector result');
 eq(status.next.first_blocker.card, 'Missing', 'status names the first card that needs preparation');
+
+const reconcileRoot = path.join(tmp, 'projection');
+fs.mkdirSync(reconcileRoot, { recursive: true });
+const reconcileBoardPath = path.join(reconcileRoot, 'sauce-board.md');
+const reconciledCardPath = path.join(reconcileRoot, 'Tracked deployed.md');
+fs.writeFileSync(reconcileBoardPath, liveBoard({
+  completed: [[true, 'Already completed']],
+  archive: [[true, 'Tracked deployed'], [false, 'Archived unchecked work'], [true, 'Unrelated archived completion']],
+}));
+fs.writeFileSync(reconciledCardPath, '---\nkanban_column: Archive\nstatus: planning\n---\nbody\n');
+const reconcileState = emptyState();
+reconcileState.cards['Tracked deployed'] = {
+  card: 'Tracked deployed', phase: 'deployed', card_path: reconciledCardPath,
+  required_version: '0.233.0', vault_receipts: successfulVaultReceipts(),
+};
+let reconcileWrites = 0; let redeploys = 0;
+const reconcileLocks = [];
+const reconcileDeps = {
+  readState: () => reconcileState,
+  writeState: () => { reconcileWrites++; },
+  withLock: async (_ctx, name, fn) => { reconcileLocks.push(name); return fn(); },
+  boardPath: reconcileBoardPath,
+  deployVault: () => { redeploys++; throw new Error('reconciliation must never deploy'); },
+  now: () => '2026-07-15T15:00:00.000Z',
+};
+const receiptsBeforeReconcile = JSON.stringify(reconcileState.cards['Tracked deployed'].vault_receipts);
+const driftBeforeReconcile = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+eq(driftBeforeReconcile.board_drift, [{
+  card: 'Tracked deployed', phase: 'deployed', expected_column: 'Completed', actual_column: 'Archive',
+  expected_checked: true, actual_checked: true,
+}], 'status reports deployed board drift separately from projection failures');
+const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
+eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
+eq(reconcileLocks.slice(0, 2), ['gates-tracked-deployed', 'completion-projection'], 'reconciliation serializes card state then shared board projection');
+eq(firstReconcile.changed, 1, 'first reconciliation repairs projection');
+ok(/## Completed[\s\S]*- \[x\] \[\[Tracked deployed\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'deployed execution card moves to checked Completed');
+ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unchecked Archive entry stays untouched');
+ok(/## Archive[\s\S]*- \[x\] \[\[Unrelated archived completion\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unrelated checked Archive entry stays untouched');
+ok(/kanban_column: Completed/.test(fs.readFileSync(reconciledCardPath, 'utf8')), 'reconciliation repairs card column metadata');
+ok(/status: completed/.test(fs.readFileSync(reconciledCardPath, 'utf8')), 'reconciliation repairs card status metadata');
+eq(reconcileState.cards['Tracked deployed'].projection_reconciled_at, '2026-07-15T15:00:00.000Z', 'successful reconciliation records timestamp');
+eq(JSON.stringify(reconcileState.cards['Tracked deployed'].vault_receipts), receiptsBeforeReconcile, 'reconciliation preserves saved deployment receipts');
+eq(redeploys, 0, 'reconciliation never redeploys');
+const writesAfterFirstReconcile = reconcileWrites;
+const secondReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
+eq(secondReconcile.changed, 0, 'second reconciliation is a projection no-op');
+eq(secondReconcile.no_op, true, 'second reconciliation reports no-op');
+eq(reconcileWrites, writesAfterFirstReconcile, 'second reconciliation does not rewrite ledger state');
+
+const implementingCardPath = path.join(reconcileRoot, 'Tracked implementing.md');
+const blockedCardPath = path.join(reconcileRoot, 'Tracked blocked.md');
+const waitingCardPath = path.join(reconcileRoot, 'Tracked waiting.md');
+fs.writeFileSync(implementingCardPath, '---\nkanban_column: In Planning\nstatus: planning\n---\nbody\n');
+fs.writeFileSync(blockedCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
+fs.writeFileSync(waitingCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
+fs.writeFileSync(reconcileBoardPath, liveBoard({
+  planning: ['Parent roadmap card', 'Tracked implementing'],
+  progress: ['Tracked blocked', 'Tracked waiting'],
+  completed: [[true, 'Tracked deployed']],
+  archive: [[false, 'Archived unchecked work'], [true, 'Unrelated archived completion']],
+}));
+reconcileState.cards['Tracked implementing'] = { card: 'Tracked implementing', phase: 'implementing', card_path: implementingCardPath };
+reconcileState.cards['Tracked blocked'] = { card: 'Tracked blocked', phase: 'blocked', card_path: blockedCardPath };
+reconcileState.cards['Tracked waiting'] = { card: 'Tracked waiting', phase: 'feature_pr', card_path: waitingCardPath };
+const allReconcile = await commandReconcile({ root: reconcileRoot }, {}, reconcileDeps);
+eq(allReconcile.scope, 'all-tracked', 'reconcile without --card covers all tracked records');
+eq(allReconcile.changed, 2, 'all-tracked reconciliation repairs implementing and blocked projections only');
+ok(/## In Planning[\s\S]*- \[ \] \[\[Parent roadmap card\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation does not move parent roadmap cards');
+ok(/## In Progress[\s\S]*- \[ \] \[\[Tracked implementing\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation projects implementing lane');
+ok(/## Blocked[\s\S]*- \[ \] \[\[Tracked blocked\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation projects blocked lane');
+ok(/## In Progress[\s\S]*- \[ \] \[\[Tracked waiting\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'non-projectable tracked phase stays in place');
+ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation preserves unrelated Archive entries');
+const allReconcileAgain = await commandReconcile({ root: reconcileRoot }, {}, reconcileDeps);
+eq(allReconcileAgain.changed, 0, 'second all-tracked reconciliation is a no-op');
+eq(allReconcileAgain.no_op, true, 'all-tracked no-op is explicit');
+
+reconcileState.cards['Tracked deployed'].projection_error = 'permission denied';
+const terminalStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+ok(!terminalStatus.active.some((record) => record.card === 'Tracked deployed'), 'deployed card with projection failure is not counted active');
+eq(terminalStatus.projection_problems, [{ card: 'Tracked deployed', phase: 'deployed', error: 'permission denied' }], 'status exposes saved terminal projection failure');
+const failedCompletion = await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed']);
+eq(failedCompletion.action, 'completion-projection-failed', 'deployed card never reports clean completion while projection failed');
+eq(failedCompletion.deployment, 'deployed', 'failed completion preserves authoritative deployment truth');
+eq(failedCompletion.receipts, reconcileState.cards['Tracked deployed'].vault_receipts, 'failed completion still returns vault receipts');
+const repairedSavedError = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
+eq(repairedSavedError.action, 'reconciled', 'successful reconciliation repairs a saved terminal projection failure');
+ok(!reconcileState.cards['Tracked deployed'].projection_error, 'successful reconciliation clears saved projection error');
+eq((await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed'])).action, 'complete', 'clean projection restores clean completion output');
+
+const automaticProjectionRecord = {
+  card: 'Automatic deployed', phase: 'deployed', card_path: path.join(reconcileRoot, 'automatic.md'),
+  required_version: '0.233.0', vault_receipts: successfulVaultReceipts(),
+};
+const automaticReceiptsBefore = JSON.stringify(automaticProjectionRecord.vault_receipts);
+let automaticProjectionLock = '';
+const automaticProjection = await attemptProjection({ root: reconcileRoot }, automaticProjectionRecord, reconcileBoardPath, {
+  withLock: async (_ctx, name, fn) => { automaticProjectionLock = name; return fn(); },
+  projectCard: () => { throw new Error('automatic completion projection denied'); },
+  now: () => '2026-07-15T15:00:30.000Z',
+});
+eq(automaticProjectionLock, 'completion-projection', 'automatic completion projection uses the shared board lock');
+eq(automaticProjection.ok, false, 'deployment-time projection failure is returned');
+eq(automaticProjectionRecord.projection_error, 'automatic completion projection denied', 'deployment-time projection failure is saved on the deployed record');
+eq(completionResult(automaticProjectionRecord).action, 'completion-projection-failed', 'saved automatic projection failure blocks clean completion');
+eq(JSON.stringify(automaticProjectionRecord.vault_receipts), automaticReceiptsBefore, 'automatic projection failure preserves successful deployment receipts');
+
+const failedProjectionState = emptyState();
+failedProjectionState.cards.Failed = {
+  card: 'Failed', phase: 'deployed', card_path: path.join(reconcileRoot, 'missing-card.md'),
+  vault_receipts: successfulVaultReceipts(), projection_error: 'old projection failure',
+};
+let failedProjectionWrites = 0;
+const failedProjectionReceiptsBefore = JSON.stringify(failedProjectionState.cards.Failed.vault_receipts);
+const failedReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Failed' }, {
+  readState: () => failedProjectionState,
+  writeState: () => { failedProjectionWrites++; },
+  withLock: immediateCardLock,
+  boardPath: reconcileBoardPath,
+  projectCard: () => { throw new Error('card note missing'); },
+  now: () => '2026-07-15T15:01:00.000Z',
+});
+eq(failedReconcile.action, 'reconcile-failed', 'projection failure remains explicit');
+eq(failedProjectionState.cards.Failed.projection_error, 'card note missing', 'latest projection error stays saved');
+eq(failedProjectionWrites, 1, 'failed projection persists its error without touching receipts');
+eq(JSON.stringify(failedProjectionState.cards.Failed.vault_receipts), failedProjectionReceiptsBefore, 'failed reconciliation preserves saved receipt values');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));
