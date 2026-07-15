@@ -476,7 +476,7 @@ const parked = await commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
-eq(parkLocks.slice(-2), ['gates-park-me', 'completion-projection'], 'park serializes the card transition and metadata projection');
+eq(parkLocks.slice(-3), ['selector', 'gates-park-me', 'completion-projection'], 'park serializes selector, card transition, and metadata projection');
 eq(parkState.cards['Park me'].phase, 'parked', 'park records the durable parked phase');
 eq(parkState.cards['Park me'].dependencies, ['Prerequisite A', 'Prerequisite B'], 'park records exact prerequisite names');
 eq(parkState.cards['Park me'].resume_condition, 'Both prerequisites deploy cleanly', 'park records exact resume condition');
@@ -494,6 +494,24 @@ eq((await commandPark({ root: parkRoot }, {
 }, {
   ...parkDeps, readState: () => claimedParkState, writeState: () => {}, projectCard: () => ({ changed: false }),
 })).action, 'parked', 'park accepts the claimed pre-implementation phase');
+const parkRaceState = emptyState();
+parkRaceState.cards.Race = { card: 'Race', phase: 'claimed', card_path: parkCardPath };
+let parkSelectorEntered = false; let parkReadAfterSelector = false;
+eq((await commandPark({ root: parkRoot }, {
+  card: 'Race', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
+}, {
+  ...parkDeps,
+  readState: () => { parkReadAfterSelector = parkSelectorEntered; return parkRaceState; },
+  writeState: () => {}, projectCard: () => ({ changed: false }),
+  withLock: async (_ctx, name, fn) => {
+    if (name === 'selector') {
+      parkSelectorEntered = true;
+      parkRaceState.cards.Race.phase = 'implementing';
+    }
+    return fn();
+  },
+})).action, 'parked', 'park waits for a competing claim transition before parking');
+ok(parkReadAfterSelector, 'park rereads claimed state only after acquiring the selector lock');
 
 const parkedStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
   boardMd: fs.readFileSync(parkBoardPath, 'utf8'), loadCard, state: parkState,
@@ -598,14 +616,18 @@ eq((await commandResume({ root: parkRoot }, { card: 'Invalid' }, {
 eq(JSON.stringify(invalidDependencyState.cards.Invalid), invalidBefore, 'malformed-dependency refusal preserves receipts and state');
 const selfResumeState = emptyState();
 selfResumeState.cards.Self = { card: 'Self', phase: 'parked', dependencies: ['Self'], resume_condition: 'later', card_path: parkCardPath };
+const selfBefore = JSON.stringify(selfResumeState.cards.Self);
 eq((await commandResume({ root: parkRoot }, { card: 'Self' }, {
   ...parkDeps, readState: () => selfResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a saved self-dependency');
+eq(JSON.stringify(selfResumeState.cards.Self), selfBefore, 'self-dependency refusal preserves receipts and state byte-for-byte');
 const emptyConditionState = emptyState();
 emptyConditionState.cards.Empty = { card: 'Empty', phase: 'parked', dependencies: ['Prerequisite A'], resume_condition: ' ', card_path: parkCardPath };
+const emptyConditionBefore = JSON.stringify(emptyConditionState.cards.Empty);
 eq((await commandResume({ root: parkRoot }, { card: 'Empty' }, {
   ...parkDeps, readState: () => emptyConditionState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses an empty saved resume condition');
+eq(JSON.stringify(emptyConditionState.cards.Empty), emptyConditionBefore, 'empty-condition refusal preserves receipts and state byte-for-byte');
 const missingResumeState = emptyState();
 missingResumeState.cards.Missing = {
   card: 'Missing', phase: 'parked', dependencies: ['Vanished prerequisite'], resume_condition: 'later', card_path: parkCardPath,
@@ -620,6 +642,30 @@ parkState.cards['Prerequisite A'] = {
 fs.writeFileSync(parkBoardPath, liveBoard({
   progress: ['Park me'], completed: [[true, 'Prerequisite A'], [true, 'Prerequisite B']],
 }));
+const resumeRaceState = emptyState();
+resumeRaceState.cards.Target = {
+  card: 'Target', phase: 'parked', parent_card: '[[Shared parent]]', card_path: parkCardPath,
+  branch: 'codex-autoloop/target', worktree: parkRoot, touch_zones: ['platform/target'],
+  dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
+};
+resumeRaceState.cards.Contender = { card: 'Contender', phase: 'parked', parent_card: 'Shared parent', touch_zones: ['platform/contender'] };
+let resumeSelectorEntered = false; let resumeReadAfterSelector = false;
+const resumeRace = await commandResume({ root: parkRoot }, { card: 'Target' }, {
+  ...parkDeps,
+  readState: () => { resumeReadAfterSelector = resumeSelectorEntered; return resumeRaceState; },
+  writeState: () => {}, worktreeExists: () => true,
+  findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
+  withLock: async (_ctx, name, fn) => {
+    if (name === 'selector') {
+      resumeSelectorEntered = true;
+      resumeRaceState.cards.Contender.phase = 'implementing';
+    }
+    return fn();
+  },
+});
+eq(resumeRace.action, 'resume-refused', 'resume contender sees a sibling activated by the preceding selector transition');
+ok(resumeReadAfterSelector, 'resume rereads state only after acquiring the shared selector lock');
+eq(resumeRaceState.cards.Target.phase, 'parked', 'losing resume contender remains durably parked');
 for (const name of ['Capacity 1', 'Capacity 2', 'Capacity 3']) {
   parkState.cards[name] = { card: name, phase: 'implementing', touch_zones: [`platform/${name.toLowerCase().replace(' ', '-')}`] };
 }

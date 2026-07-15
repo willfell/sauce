@@ -939,7 +939,7 @@ async function commandPark(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
-  return transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (!['claimed', 'implementing'].includes(record.phase)) {
@@ -967,7 +967,7 @@ async function commandPark(ctx, args, deps = {}) {
       result.reconcile = `reconcile --card ${card}`;
     }
     return result;
-  }, { card, staleMs: 60 * 60 * 1000 });
+  }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandResume(ctx, args, deps = {}) {

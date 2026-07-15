@@ -39,8 +39,9 @@ advanced but never merges, rebases, pushes, or force-pushes the preserved branch
 - Parked cards are listed separately and consume neither capacity nor touch-zone
   ownership.
 - Selector locking lasts only through atomic claim creation.
-- Resume shares the selector lock with claims and other resumes, then rechecks
-  capacity, touch-zone conflicts, and same-parent ownership before reactivation.
+- Park and resume share the selector lock with claims and each other. Resume then
+  rechecks capacity, touch-zone conflicts, and same-parent ownership before
+  reactivation.
 - Each card owns explicit branch/worktree/PR fields.
 - A tracked dependency requires authoritative `deployed` state and successful
   receipts from every required vault. Its board placement is projection only;
