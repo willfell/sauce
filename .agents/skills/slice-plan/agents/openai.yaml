@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slice Plan"
+  short_description: "Plan a feature as ordered card slices, then implement them in order"
+  default_prompt: "Use $slice-plan to plan this work as ordered card slices, or to implement an existing sliced plan."

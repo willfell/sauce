@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "kind": "mechanism",
   "skills_dir": ".claude/skills/platform",
-  "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture — subscribe in every consumer. v0.1.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'platform-claude' to canonical command body dest paths ('.claude/commands/<verb>.md') so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket. v0.1.3 PATCH (v0.102.0): adds spice/resources/ to DIRECTORY_MAP_SEEDS — registers the vault-default-paths namespace introduced by applyVaultDefaultPaths in install.js.",
+  "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture \u2014 subscribe in every consumer. v0.1.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'platform-claude' to canonical command body dest paths ('.claude/commands/<verb>.md') so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket. v0.1.3 PATCH (v0.102.0): adds spice/resources/ to DIRECTORY_MAP_SEEDS \u2014 registers the vault-default-paths namespace introduced by applyVaultDefaultPaths in install.js.",
   "depends_on": [],
   "files": [],
   "claude_surface": [
@@ -89,6 +89,33 @@
       "row": {
         "command": "/card-intake",
         "skill_path": ".claude/skills/platform/card-intake/SKILL.md"
+      }
+    },
+    {
+      "kind": "command",
+      "source": "commands/slice-plan.md",
+      "dest": ".claude/commands/slice-plan.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/slice-plan/SKILL.md",
+      "dest": "{{skills_dir}}/slice-plan/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Slice Plan",
+        "path": ".claude/commands/slice-plan.md",
+        "command": "/slice-plan"
+      }
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "skills-index",
+      "row": {
+        "command": "/slice-plan",
+        "skill_path": ".claude/skills/platform/slice-plan/SKILL.md"
       }
     }
   ],
