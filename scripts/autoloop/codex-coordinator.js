@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
-const { parseBoard, parseCheckedColumn, parseDependsOn } = require('./select-card');
+const { parseBoard, parseCheckedColumn, parseDependsOn, parseCardStatus, parseBatchPolicy } = require('./select-card');
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
@@ -270,6 +270,8 @@ function parseExecutionMeta(raw) {
     deploySubscriptions: deploymentField(raw),
     parentCard: scalarField(raw, 'parent_card'),
     slice: scalarField(raw, 'slice'),
+    status: parseCardStatus(raw),
+    batchPolicy: parseBatchPolicy(raw),
   };
 }
 
@@ -277,6 +279,7 @@ function validateExecutionMeta(meta) {
   const errors = [];
   if (!['standard', 'heavy'].includes(meta.modelProfile)) errors.push('model_profile must be standard|heavy');
   if (!meta.touchZones.length) errors.push('touch_zones must be non-empty');
+  if (meta.status !== undefined && meta.status !== 'planning') errors.push(`status must normalize to planning for eligibility (got ${meta.status || 'unknown'})`);
   if (!meta.deploySubscriptions) errors.push('deploy_subscriptions is required');
   else for (const id of VAULTS.map((v) => v.id)) if (!Array.isArray(meta.deploySubscriptions[id])) errors.push(`deploy_subscriptions.${id} is required`);
   return errors;
@@ -294,6 +297,11 @@ function findCard(cardsRoot, card) {
     }
   }
   return null;
+}
+
+function resolveCardPath(cardPath, card, cardsRoot = CARDS_ROOT) {
+  if (cardPath && fs.existsSync(cardPath)) return cardPath;
+  return card ? (findCard(cardsRoot, card) || cardPath) : cardPath;
 }
 
 function activeRecords(state) {
@@ -320,7 +328,7 @@ function dependencySatisfied(dep, board, state, boardMd) {
   return completed.has(dep);
 }
 
-function selectClaimCandidate({ boardMd, state, loadCard }) {
+function selectClaimCandidate({ boardMd, state, loadCard, supervised = false }) {
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) return { action: 'at-capacity', active: active.map((r) => r.card) };
@@ -331,6 +339,7 @@ function selectClaimCandidate({ boardMd, state, loadCard }) {
     if (!loaded || !loaded.raw) { skipped.push({ card, reason: 'card note missing' }); continue; }
     const meta = parseExecutionMeta(loaded.raw);
     const errors = validateExecutionMeta(meta);
+    if (meta.batchPolicy === 'supervised_only' && !supervised) errors.push('batch_policy supervised_only requires an explicit supervised run');
     if (errors.length) { skipped.push({ card, reason: errors.join('; ') }); continue; }
     // Keep the unmet set explicit so recovery diagnostics can name each gate.
     const unmet = [];
@@ -366,6 +375,8 @@ function summarizeClaimSelection(selected) {
       touch_zones: selected.meta.touchZones,
       skipped_count: skipped.length,
     };
+    if (selected.meta.status) summary.status = selected.meta.status;
+    if (selected.meta.batchPolicy) summary.batch_policy = selected.meta.batchPolicy;
     if (selected.board_drift) summary.board_drift = selected.board_drift;
     return summary;
   }
@@ -399,10 +410,22 @@ function patchFrontmatter(raw, fields) {
 }
 
 function projectionMapping(phase) {
+  const inProgress = { column: 'In Progress', status: 'in_progress', complete: false };
   return {
-    implementing: { column: 'In Progress', status: 'in_progress', complete: false },
+    claimed: inProgress,
+    implementing: inProgress,
+    feature_pr: inProgress,
+    feature_merged: inProgress,
+    release_pr: inProgress,
+    release_merged: inProgress,
+    tagged: inProgress,
+    tap_pr: inProgress,
+    tap_merged: inProgress,
+    brew_installed: inProgress,
+    deploying: inProgress,
     parked: { column: 'In Progress', status: 'parked', complete: false },
     blocked: { column: 'Blocked', status: 'blocked', complete: false },
+    'needs-inspection': { column: 'Blocked', status: 'blocked', complete: false },
     deployed: { column: 'Completed', status: 'completed', complete: true },
   }[phase] || null;
 }
@@ -445,8 +468,9 @@ function atomicWriteText(file, value) {
 function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
   if (!mapping) return { changed: false, skipped: true };
+  const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const boardRaw = fs.readFileSync(boardPath, 'utf8');
-  const cardRaw = fs.readFileSync(cardPath, 'utf8');
+  const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
   const record = opts.record || null;
   const ownsParkMetadata = Boolean(record && Object.prototype.hasOwnProperty.call(record, 'resume_condition'));
@@ -456,7 +480,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const expectedResumeCondition = ownsParkMetadata && record.resume_condition != null
     ? String(record.resume_condition).trim() : null;
   const metadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
-    || scalarField(cardRaw, 'status') !== mapping.status
+    || parseCardStatus(cardRaw) !== mapping.status
     || (ownsParkMetadata && JSON.stringify(currentDependencies) !== JSON.stringify(expectedDependencies))
     || (ownsParkMetadata && (expectedResumeCondition == null
       ? hasResumeCondition : scalarField(cardRaw, 'resume_condition') !== expectedResumeCondition));
@@ -470,14 +494,14 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     metadataFields.depends_on = JSON.stringify(expectedDependencies.map((dep) => `[[${dep}]]`));
     metadataFields.resume_condition = expectedResumeCondition == null ? null : JSON.stringify(expectedResumeCondition);
   }
-  const cardNext = metadataChanged || boardChanged
+  const cardNext = metadataChanged
     ? patchFrontmatter(cardRaw, metadataFields)
     : cardRaw;
-  if ((metadataChanged || boardChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
+  if (metadataChanged && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
   }
   if (boardChanged) atomicWriteText(boardPath, boardNext);
-  if (cardNext !== cardRaw) atomicWriteText(cardPath, cardNext);
+  if (cardNext !== cardRaw) atomicWriteText(resolvedCardPath, cardNext);
   return {
     changed: boardChanged || cardNext !== cardRaw,
     board_changed: boardChanged,
@@ -491,7 +515,9 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const projectionLock = opts.withLock || withLock;
   try {
     return await projectionLock(ctx, 'completion-projection', async () => {
-      const result = project(record.card_path, boardPath, record.card, record.phase, { now, record });
+      const result = project(record.card_path, boardPath, record.card, record.phase, {
+        now, record, cardsRoot: opts.cardsRoot,
+      });
       delete record.projection_error;
       delete record.projection_failed_at;
       record.projection_reconciled_at = now();
@@ -519,21 +545,31 @@ function projectionBoardDrift(boardMd, record) {
   return null;
 }
 
-function parkedMetadataProblem(record) {
-  if (!record || record.phase !== 'parked' || record.projection_error) return null;
+function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
+  const mapping = record && projectionMapping(record.phase);
+  if (!mapping || record.projection_error) return null;
   try {
-    const raw = fs.readFileSync(record.card_path, 'utf8');
-    const dependencies = parseDependsOn(raw).map(normalizeCardLink);
-    const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
-    const condition = typeof record.resume_condition === 'string' ? record.resume_condition.trim() : '';
-    if (!expected.length || !condition
-      || JSON.stringify(dependencies) !== JSON.stringify(expected)
-      || scalarField(raw, 'resume_condition') !== condition
-      || scalarField(raw, 'status') !== 'parked') {
-      return { card: record.card, phase: record.phase, error: 'parked card metadata differs from the ledger; reconcile before resuming' };
+    const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
+    const actualStatus = parseCardStatus(raw);
+    let differs = scalarField(raw, 'kanban_column') !== mapping.column || actualStatus !== mapping.status;
+    if (record.phase === 'parked') {
+      const dependencies = parseDependsOn(raw).map(normalizeCardLink);
+      const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
+      const condition = typeof record.resume_condition === 'string' ? record.resume_condition.trim() : '';
+      differs = differs || !expected.length || !condition
+        || JSON.stringify(dependencies) !== JSON.stringify(expected)
+        || scalarField(raw, 'resume_condition') !== condition;
+    }
+    if (differs) {
+      return {
+        card: record.card, phase: record.phase,
+        expected_column: mapping.column, actual_column: scalarField(raw, 'kanban_column') || null,
+        expected_status: mapping.status, actual_status: actualStatus || null,
+        error: 'card metadata differs from the authoritative ledger; reconcile before continuing',
+      };
     }
   } catch (err) {
-    return { card: record.card, phase: record.phase, error: `parked card metadata is unreadable: ${err.message}` };
+    return { card: record.card, phase: record.phase, error: `card metadata is unreadable: ${err.message}` };
   }
   return null;
 }
@@ -1081,6 +1117,9 @@ async function commandClaim(ctx, args) {
     const selected = selectClaimCandidate({
       boardMd, state,
       loadCard: (card) => { const p = findCard(CARDS_ROOT, card); return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null; },
+      // A direct coordinator claim is the supervised operator path. Future
+      // batch callers use the pure selector without this capability.
+      supervised: true,
     });
     if (selected.action !== 'claim' || args['dry-run']) return selected;
     const slug = slugify(selected.card);
@@ -1090,6 +1129,7 @@ async function commandClaim(ctx, args) {
     const record = {
       card: selected.card, parent_card: selected.meta.parentCard || null, slice: selected.meta.slice || null,
       phase: 'claimed', model_profile: selected.meta.modelProfile,
+      batch_policy: selected.meta.batchPolicy || null,
       touch_zones: selected.meta.touchZones, dependencies: selected.meta.dependencies,
       deploy_subscriptions: selected.meta.deploySubscriptions, card_path: selected.cardPath,
       branch, worktree, claimed_at: new Date().toISOString(),
@@ -1263,29 +1303,37 @@ async function commandAdvance(ctx, args, deps = {}) {
 function commandStatus(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const active = activeRecords(state);
   const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
+  const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
-  const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard }));
+  const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard, supervised: opts.supervised !== false }));
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
-  const detectedParkProblems = Object.values(state.cards || {})
-    .map(parkedMetadataProblem)
+  const detectedMetadataProblems = Object.values(state.cards || {})
+    .map((record) => projectionMetadataProblem(record, opts.cardsRoot || CARDS_ROOT))
     .filter(Boolean);
-  const projectionProblems = [...savedProjectionProblems, ...detectedParkProblems];
+  const projectionProblems = [...savedProjectionProblems, ...detectedMetadataProblems];
   const boardDrift = Object.values(state.cards || {})
     .map((record) => projectionBoardDrift(boardMd, record))
     .filter(Boolean);
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
-    active: active.map((r) => ({ card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch, pr: r.feature_pr || null })),
+    active: active.map((r) => ({
+      card: r.card, phase: r.phase, status: (projectionMapping(r.phase) || {}).status || null,
+      model_profile: r.model_profile, batch_policy: r.batch_policy || null, branch: r.branch, pr: r.feature_pr || null,
+    })),
     parked: parked.map((r) => ({
-      card: r.card, phase: r.phase, model_profile: r.model_profile, branch: r.branch,
+      card: r.card, phase: r.phase, status: 'parked', model_profile: r.model_profile, branch: r.branch,
       dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
       parked_at: r.parked_at || null, projection_error: r.projection_error || null,
+    })),
+    tracked: tracked.map((r) => ({
+      card: r.card, phase: r.phase, status: projectionMapping(r.phase).status,
+      model_profile: r.model_profile, batch_policy: r.batch_policy || null,
     })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
@@ -1318,7 +1366,9 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
           const priorError = record.projection_error || null;
           const priorFailedAt = record.projection_failed_at || null;
           try {
-            const projected = project(record.card_path, boardPath, record.card, record.phase, { now, record });
+            const projected = project(record.card_path, boardPath, record.card, record.phase, {
+              now, record, cardsRoot: deps.cardsRoot,
+            });
             const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
             if (stateChanged) {
               delete record.projection_error;
@@ -1396,7 +1446,8 @@ module.exports = {
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  moveBoardCard, patchFrontmatter, projectCard, attemptProjection, projectionBoardDrift, completionResult,
+  moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
+  projectionBoardDrift, projectionMetadataProblem, completionResult,
 };
 
 if (require.main === module) {
