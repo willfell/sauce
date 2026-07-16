@@ -19,6 +19,41 @@ const BROAD_PATTERNS = [
   /\bmigrat(e|ion) (all|every)\b/i, /\bfigure out\b/i,
 ];
 
+const STATUS_ALIASES = new Map([
+  ['planning', 'planning'],
+  ['in-planning', 'planning'],
+  ['in_progress', 'in_progress'],
+  ['in-progress', 'in_progress'],
+  ['blocked', 'blocked'],
+  ['parked', 'parked'],
+  ['completed', 'completed'],
+]);
+
+function normalizeStatus(value) {
+  const raw = String(value == null ? '' : value).trim().toLowerCase().replace(/^['"]|['"]$/g, '');
+  return raw ? (STATUS_ALIASES.get(raw) || null) : null;
+}
+
+function frontmatterScalar(raw, key) {
+  const match = String(raw || '').match(/^\s*---\n([\s\S]*?)\n---/);
+  if (!match) return undefined;
+  const line = match[1].split('\n').find((value) => new RegExp(`^${key}\\s*:`).test(value));
+  if (!line) return undefined;
+  return line.slice(line.indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '');
+}
+
+function parseCardStatus(raw) {
+  const value = frontmatterScalar(raw, 'status');
+  return value === undefined ? undefined : normalizeStatus(value);
+}
+
+function parseBatchPolicy(raw) {
+  const frontmatterValue = frontmatterScalar(raw, 'batch_policy');
+  if (frontmatterValue) return frontmatterValue.split(/\s|—/)[0].trim().toLowerCase();
+  const match = String(raw || '').match(/^\s*batch_policy:\s*([a-z][a-z0-9_-]*)\b/im);
+  return match ? match[1].toLowerCase() : null;
+}
+
 function isBroadScope(text) {
   if (!text) return { broad: false, reason: null };
   for (const re of BROAD_PATTERNS) {
@@ -170,7 +205,7 @@ function recommendedFrom(handoffMd) {
  * @returns {{action:string, card?:string, reason:string, skipped?:Array, cards?:string[]}}
  */
 function selectCard(o) {
-  const { haltExists, boardMd, handoffMd, loadBody } = o || {};
+  const { haltExists, boardMd, handoffMd, loadBody, supervised = false } = o || {};
   if (haltExists) return { action: 'halt', reason: 'kill-switch sentinel present' };
   const cols = parseBoard(boardMd);
   const planning = cols['In Planning'];
@@ -185,6 +220,14 @@ function selectCard(o) {
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const raw = loadBody ? (loadBody(card) || '') : '';
+    const status = parseCardStatus(raw);
+    if (status !== undefined && status !== 'planning') {
+      skipped.push({ card, reason: `card status is not planning: ${status || 'unknown'}` }); continue;
+    }
+    const batchPolicy = parseBatchPolicy(raw);
+    if (batchPolicy === 'supervised_only' && !supervised) {
+      skipped.push({ card, reason: 'batch_policy supervised_only requires an explicit supervised run' }); continue;
+    }
     // Dependency gate: a card with `depends_on: [[X]]` frontmatter is skipped
     // until EVERY predecessor is in the Completed column (the loop's done-signal).
     // Fail-safe by construction — an unmet, misspelled, or cyclic dependency
@@ -244,6 +287,7 @@ function cliLoadBody(cardsRoot) {
 module.exports = {
   selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked,
   parseCheckedColumn, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
+  normalizeStatus, parseCardStatus, parseBatchPolicy,
 };
 
 if (require.main === module) {
@@ -254,6 +298,7 @@ if (require.main === module) {
     boardMd: args.board ? read(args.board) : '',
     handoffMd: args.handoff ? read(args.handoff) : '',
     loadBody: cliLoadBody(args['cards-root']),
+    supervised: Boolean(args.supervised),
   });
   if (args.json) console.log(JSON.stringify(result, null, 2));
   else console.log(`${result.action}${result.card ? ': ' + result.card : ''} — ${result.reason}`);

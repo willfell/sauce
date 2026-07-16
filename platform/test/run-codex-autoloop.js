@@ -14,9 +14,9 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult,
+  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
 } = require('../../scripts/autoloop/codex-coordinator');
-const { parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
+const { normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
@@ -45,6 +45,26 @@ eq(validateExecutionMeta(meta), [], 'valid execution metadata');
 ok(validateExecutionMeta(parseExecutionMeta(card({ deploy: false }))).includes('deploy_subscriptions is required'), 'deployment map required');
 ok(validateExecutionMeta(parseExecutionMeta(card({ profile: 'luna' }))).some((e) => /model_profile/.test(e)), 'only two model profiles');
 eq(parseArgs(['park', '--depends-on', 'A', '--depends-on', 'B'])['depends-on'], ['A', 'B'], 'CLI preserves repeated dependency arguments');
+eq(projectionMapping('claimed').status, 'in_progress', 'claimed lifecycle projects to canonical in_progress');
+eq(projectionMapping('feature_pr').status, 'in_progress', 'waiting release lifecycle remains canonical in_progress');
+eq(projectionMapping('blocked').status, 'blocked', 'blocked lifecycle keeps canonical blocked');
+eq(projectionMapping('parked').status, 'parked', 'parked remains distinct from its In Progress board lane');
+eq(projectionMapping('deployed').status, 'completed', 'deployed lifecycle projects to canonical completed');
+eq(normalizeStatus('in-progress'), 'in_progress', 'Obsidian in-progress alias normalizes at the coordinator boundary');
+
+const obsidianA1 = [
+  '---', 'model_profile: heavy', 'kanban_column: In Planning', 'status: in-planning',
+  'status_prev: planning', 'status_changed_at: 2026-07-16', 'touch_zones:', '  - scripts/autoloop/codex-coordinator.js',
+  'depends_on: []', 'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []', '---', '',
+  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  '## A1 status normalization and drift visibility', '',
+  'batch_policy: supervised_only — Normalize the live GA status vocabulary.',
+].join('\n');
+eq(parseCardStatus(obsidianA1), 'planning', 'real Obsidian planning rewrite parses into the canonical contract');
+eq(parseBatchPolicy(obsidianA1), 'supervised_only', 'A1 textual batch policy is preserved as supervised_only');
+const obsidianMeta = parseExecutionMeta(obsidianA1);
+eq(obsidianMeta.status, 'planning', 'execution metadata exposes normalized planning status');
+eq(obsidianMeta.batchPolicy, 'supervised_only', 'execution metadata exposes the supervised-only policy');
 
 eq(normalizeZone('./platform/mechanisms/x/'), 'platform/mechanisms/x', 'normalizes zones');
 ok(zonesOverlap('platform/mechanisms/x', 'platform/mechanisms/x/sub'), 'parent and child overlap');
@@ -79,6 +99,22 @@ const loadCard = (name) => bodies[name] ? { path: `/cards/${name}.md`, raw: bodi
 
 let state = emptyState();
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).card, 'A', 'selects first eligible card');
+eq(selectClaimCandidate({
+  boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(),
+  loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
+}).action, 'no-work', 'unattended coordinator eligibility refuses supervised-only A1');
+eq(selectClaimCandidate({
+  boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
+  loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
+}).card, 'A1 status normalization and drift visibility', 'explicit supervised coordinator eligibility accepts A1 with Obsidian planning status');
+eq(summarizeClaimSelection(selectClaimCandidate({
+  boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
+  loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
+})).status, 'planning', 'status selection output exposes canonical planning');
+eq(selectClaimCandidate({
+  boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
+  loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1.replace('status: in-planning', 'status: post-ga') }),
+}).action, 'no-work', 'Post-GA card metadata is not planning-eligible even if the board lane is stale');
 state.cards.Done = { card: 'Done', phase: 'feature_merged', required_version: '0.233.0', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['B', 'C'], ['Done']), state, loadCard }).card, 'C', 'requires dependency deployed, skips to next');
 state.cards.Done.phase = 'deployed';
@@ -419,6 +455,8 @@ const statusCtx = { ...ctx, root: tmp };
 const status = commandStatus(statusCtx, { boardMd: board(['Missing']), loadCard });
 eq(status.next.action, 'no-work', 'status includes the read-only selector result');
 eq(status.next.first_blocker.card, 'Missing', 'status names the first card that needs preparation');
+ok(status.active.every((record) => record.status === 'in_progress'), 'status output normalizes every active lifecycle phase to in_progress');
+ok(status.tracked.every((record) => record.status === 'in_progress'), 'all-tracked status view includes active in_progress records');
 const parkedRecoveryState = emptyState();
 parkedRecoveryState.cards.MissingParked = { card: 'MissingParked', phase: 'parked', worktree: '/definitely/missing/parked-worktree' };
 eq(commandRecover(statusCtx, { state: parkedRecoveryState }).action, 'needs-inspection', 'recovery reports a missing parked worktree');
@@ -520,14 +558,21 @@ eq(parkedStatus.active_count, 0, 'parked cards do not count against capacity');
 eq(parkedStatus.active, [], 'parked cards are excluded from the active list');
 eq(parkedStatus.available_slots, 3, 'parked cards leave every capacity slot available');
 eq(parkedStatus.parked, [{
-  card: 'Park me', phase: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
+  card: 'Park me', phase: 'parked', status: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
   dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
   parked_at: '2026-07-15T16:00:00.000Z', projection_error: null,
 }], 'status lists parked cards separately with prerequisites and resume condition');
+eq(parkedStatus.tracked.find((record) => record.card === 'Park me').status, 'parked', 'all-tracked status view includes canonical parked');
 
 const crashCardPath = path.join(parkRoot, 'Crash parked.md');
 const crashBoardPath = path.join(parkRoot, 'crash-board.md');
-fs.writeFileSync(crashCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\ndepends_on: []\n---\nbody\n');
+const obsidianParkedRewrite = [
+  '---', 'kanban_column: In Progress', 'status: in-progress', 'status_prev: parked',
+  'status_changed_at: 2026-07-16', 'depends_on: []', '---', '',
+  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  '## Crash parked', '', 'body', '',
+].join('\n');
+fs.writeFileSync(crashCardPath, obsidianParkedRewrite);
 fs.writeFileSync(crashBoardPath, liveBoard({ progress: ['Crash parked'] }));
 const crashParkState = emptyState();
 crashParkState.cards['Crash parked'] = {
@@ -537,8 +582,11 @@ crashParkState.cards['Crash parked'] = {
 eq(commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
   boardMd: fs.readFileSync(crashBoardPath, 'utf8'), loadCard, state: crashParkState,
 }).projection_problems, [{
-  card: 'Crash parked', phase: 'parked', error: 'parked card metadata differs from the ledger; reconcile before resuming',
+  card: 'Crash parked', phase: 'parked', expected_column: 'In Progress', actual_column: 'In Progress',
+  expected_status: 'parked', actual_status: 'in_progress',
+  error: 'card metadata differs from the authoritative ledger; reconcile before continuing',
 }], 'status detects a crash between authoritative park state and card metadata projection');
+eq(crashParkState.cards['Crash parked'].phase, 'parked', 'authoritative ledger remains parked while human projection says in_progress');
 const crashBeforeRefusal = JSON.stringify(crashParkState.cards['Crash parked']);
 eq((await commandResume({ root: parkRoot }, { card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
@@ -554,10 +602,18 @@ eq(crashReconciled.action, 'reconciled', 'parked reconciliation repairs an inter
 ok(/status: parked/.test(fs.readFileSync(crashCardPath, 'utf8')), 'parked reconciliation restores parked card status');
 ok(/depends_on: \["\[\[Prerequisite A\]\]"\]/.test(fs.readFileSync(crashCardPath, 'utf8')), 'parked reconciliation restores exact dependency metadata');
 ok(/resume_condition: "Prerequisite A deploys"/.test(fs.readFileSync(crashCardPath, 'utf8')), 'parked reconciliation restores the exact resume condition');
+ok(/status_prev: parked/.test(fs.readFileSync(crashCardPath, 'utf8')), 'reconciliation preserves Obsidian status history evidence');
+ok(/status_changed_at: 2026-07-15T16:02:00.000Z/.test(fs.readFileSync(crashCardPath, 'utf8')), 'reconciliation records the canonical repair timestamp');
+ok(/ProjectChromeBar/.test(fs.readFileSync(crashCardPath, 'utf8')), 'reconciliation preserves rewritten project chrome');
 ok(!crashParkState.cards['Crash parked'].projection_error, 'parked reconciliation clears any projection error');
 const writesAfterCrashReconcile = crashReconcileWrites;
 eq((await commandReconcile({ root: parkRoot }, { card: 'Crash parked' }, crashReconcileDeps)).no_op, true, 'second parked reconciliation is idempotent');
 eq(crashReconcileWrites, writesAfterCrashReconcile, 'idempotent parked reconciliation preserves state writes');
+const crashAudit = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(crashBoardPath, 'utf8'), loadCard, state: crashParkState,
+});
+eq(crashAudit.projection_problems, [], 'post-reconciliation audit has zero parked projection problems');
+eq(crashAudit.board_drift, [], 'post-reconciliation audit has zero parked board drift');
 crashParkState.cards['Crash parked'].branch = 'codex-autoloop/crash-parked';
 crashParkState.cards['Crash parked'].worktree = parkRoot;
 crashParkState.cards['Crash parked'].touch_zones = ['platform/crash'];
@@ -748,6 +804,18 @@ reconcileState.cards['Tracked deployed'] = {
   card: 'Tracked deployed', phase: 'deployed', card_path: reconciledCardPath,
   required_version: '0.233.0', vault_receipts: successfulVaultReceipts(),
 };
+const movedCardsRoot = path.join(reconcileRoot, 'cards');
+const movedCardPath = path.join(movedCardsRoot, 'Parent after move', 'Moved deployed', 'Moved deployed.md');
+fs.mkdirSync(path.dirname(movedCardPath), { recursive: true });
+fs.writeFileSync(movedCardPath, '---\nkanban_column: Completed\nstatus: completed\n---\nbody\n');
+const movedState = emptyState();
+movedState.cards['Moved deployed'] = {
+  card: 'Moved deployed', phase: 'deployed',
+  card_path: path.join(movedCardsRoot, 'Moved deployed', 'Moved deployed.md'),
+};
+eq(commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: liveBoard({ completed: [[true, 'Moved deployed']] }), loadCard, state: movedState, cardsRoot: movedCardsRoot,
+}).projection_problems, [], 'drift inspection resolves a current card after its parent folder moved');
 let reconcileWrites = 0; let redeploys = 0;
 const reconcileLocks = [];
 const reconcileDeps = {
@@ -766,6 +834,11 @@ eq(driftBeforeReconcile.board_drift, [{
   card: 'Tracked deployed', phase: 'deployed', expected_column: 'Completed', actual_column: 'Archive',
   expected_checked: true, actual_checked: true,
 }], 'status reports deployed board drift separately from projection failures');
+eq(driftBeforeReconcile.projection_problems, [{
+  card: 'Tracked deployed', phase: 'deployed', expected_column: 'Completed', actual_column: 'Archive',
+  expected_status: 'completed', actual_status: 'planning',
+  error: 'card metadata differs from the authoritative ledger; reconcile before continuing',
+}], 'status reports card projection problems independently from board drift');
 const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
 eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
 eq(reconcileLocks.slice(0, 2), ['gates-tracked-deployed', 'completion-projection'], 'reconciliation serializes card state then shared board projection');
@@ -784,6 +857,34 @@ eq(secondReconcile.changed, 0, 'second reconciliation is a projection no-op');
 eq(secondReconcile.no_op, true, 'second reconciliation reports no-op');
 eq(reconcileWrites, writesAfterFirstReconcile, 'second reconciliation does not rewrite ledger state');
 
+const aliasCardPath = path.join(reconcileRoot, 'Alias implementing.md');
+const ailsArtifactPath = path.join(reconcileRoot, 'AILS historical artifact.md');
+const ops5ArtifactPath = path.join(reconcileRoot, 'GA-OPS5 historical artifact.md');
+const aliasCardRaw = [
+  '---', 'kanban_column: In Progress', 'status: in-progress', 'status_prev: planning',
+  'status_changed_at: 2026-07-16', '---', '',
+  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  'body', '',
+].join('\n');
+const ailsArtifactRaw = '---\nstatus: completed\n---\nHistorical AILS body and chrome.\n';
+const ops5ArtifactRaw = '---\nstatus: planning\n---\nHistorical GA-OPS5 body and chrome.\n';
+fs.writeFileSync(aliasCardPath, aliasCardRaw);
+fs.writeFileSync(ailsArtifactPath, ailsArtifactRaw);
+fs.writeFileSync(ops5ArtifactPath, ops5ArtifactRaw);
+fs.writeFileSync(reconcileBoardPath, liveBoard({ planning: ['Alias implementing'], completed: [[true, 'Tracked deployed']] }));
+reconcileState.cards['Alias implementing'] = { card: 'Alias implementing', phase: 'implementing', card_path: aliasCardPath };
+const aliasDrift = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+ok(!aliasDrift.projection_problems.some((problem) => problem.card === 'Alias implementing'), 'Obsidian in-progress alias is not false-positive projection drift');
+ok(aliasDrift.board_drift.some((problem) => problem.card === 'Alias implementing'), 'lane mismatch remains independently visible as board drift');
+const aliasReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Alias implementing' }, reconcileDeps);
+eq(aliasReconcile.changed, 1, 'reconciliation repairs only the alias card board projection');
+eq(fs.readFileSync(aliasCardPath, 'utf8'), aliasCardRaw, 'board-only reconciliation preserves status timestamps and chrome byte-for-byte');
+eq(fs.readFileSync(ailsArtifactPath, 'utf8'), ailsArtifactRaw, 'historical AILS artifact remains byte-identical');
+eq(fs.readFileSync(ops5ArtifactPath, 'utf8'), ops5ArtifactRaw, 'historical GA-OPS5 artifact remains byte-identical');
+eq((await commandReconcile({ root: reconcileRoot }, { card: 'Alias implementing' }, reconcileDeps)).no_op, true, 'board-only repair is idempotent on its second run');
+
 const implementingCardPath = path.join(reconcileRoot, 'Tracked implementing.md');
 const blockedCardPath = path.join(reconcileRoot, 'Tracked blocked.md');
 const waitingCardPath = path.join(reconcileRoot, 'Tracked waiting.md');
@@ -792,7 +893,7 @@ fs.writeFileSync(blockedCardPath, '---\nkanban_column: In Progress\nstatus: in_p
 fs.writeFileSync(waitingCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
 fs.writeFileSync(reconcileBoardPath, liveBoard({
   planning: ['Parent roadmap card', 'Tracked implementing'],
-  progress: ['Tracked blocked', 'Tracked waiting'],
+  progress: ['Alias implementing', 'Tracked blocked', 'Tracked waiting'],
   completed: [[true, 'Tracked deployed']],
   archive: [[false, 'Archived unchecked work'], [true, 'Unrelated archived completion']],
 }));
@@ -801,7 +902,7 @@ reconcileState.cards['Tracked blocked'] = { card: 'Tracked blocked', phase: 'blo
 reconcileState.cards['Tracked waiting'] = { card: 'Tracked waiting', phase: 'feature_pr', card_path: waitingCardPath };
 const allReconcile = await commandReconcile({ root: reconcileRoot }, {}, reconcileDeps);
 eq(allReconcile.scope, 'all-tracked', 'reconcile without --card covers all tracked records');
-eq(allReconcile.changed, 2, 'all-tracked reconciliation repairs implementing and blocked projections only');
+eq(allReconcile.changed, 3, 'all-tracked reconciliation repairs implementing and blocked projections and records the waiting-phase check');
 ok(/## In Planning[\s\S]*- \[ \] \[\[Parent roadmap card\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation does not move parent roadmap cards');
 ok(/## In Progress[\s\S]*- \[ \] \[\[Tracked implementing\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation projects implementing lane');
 ok(/## Blocked[\s\S]*- \[ \] \[\[Tracked blocked\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'all-tracked reconciliation projects blocked lane');
@@ -815,6 +916,8 @@ reconcileState.cards['Tracked deployed'].projection_error = 'permission denied';
 const terminalStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
   boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
 });
+ok(terminalStatus.tracked.some((record) => record.card === 'Tracked blocked' && record.status === 'blocked'), 'all-tracked status view includes canonical blocked');
+ok(terminalStatus.tracked.some((record) => record.card === 'Tracked deployed' && record.status === 'completed'), 'all-tracked status view includes canonical completed');
 ok(!terminalStatus.active.some((record) => record.card === 'Tracked deployed'), 'deployed card with projection failure is not counted active');
 eq(terminalStatus.projection_problems, [{ card: 'Tracked deployed', phase: 'deployed', error: 'permission denied' }], 'status exposes saved terminal projection failure');
 const failedCompletion = await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed']);

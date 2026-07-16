@@ -6,7 +6,8 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
+  normalizeStatus, parseCardStatus, parseBatchPolicy } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -79,6 +80,30 @@ ok('SC-6 broad-looking board card is PICKED (attempt-anything) with a broadHint'
   skipPick.action === 'work' && skipPick.card === 'Wiki area redesign' && !!skipPick.broadHint);
 const allBroad = '## In Planning\n- [ ] [[Wiki area redesign]]\n## In Progress\n';
 ok('SC-7 broad-only board still returns work (no pre-filter)', selectCard({ boardMd: allBroad, loadBody }).action === 'work');
+
+// ---- normalized status + supervised policy (NS-*) ----
+ok('NS-1 canonical status aliases normalize to one vocabulary',
+  ['planning', 'in-planning'].every((value) => normalizeStatus(value) === 'planning')
+  && ['in_progress', 'in-progress'].every((value) => normalizeStatus(value) === 'in_progress')
+  && ['blocked', 'parked', 'completed'].every((value) => normalizeStatus(value) === value));
+ok('NS-2 unknown statuses stay outside the execution contract', normalizeStatus('post-ga') === null);
+const OBSIDIAN_PLANNING = [
+  '---', 'kanban_column: In Planning', 'status: in-planning',
+  'status_prev: planning', 'status_changed_at: 2026-07-16', '---', '',
+  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  '## A1 status normalization and drift visibility', '',
+  'batch_policy: supervised_only — Normalize the live status vocabulary.',
+].join('\n');
+ok('NS-3 real Obsidian planning rewrite parses as canonical planning', parseCardStatus(OBSIDIAN_PLANNING) === 'planning');
+ok('NS-4 textual A1 policy remains supervised_only', parseBatchPolicy(OBSIDIAN_PLANNING) === 'supervised_only');
+const supervisedBoard = '## In Planning\n- [ ] [[A1 status normalization and drift visibility]]\n## In Progress\n';
+const supervisedLoad = () => OBSIDIAN_PLANNING;
+ok('NS-5 unattended eligibility refuses supervised-only A1',
+  selectCard({ boardMd: supervisedBoard, loadBody: supervisedLoad }).action === 'no-eligible-work');
+ok('NS-6 explicit supervised eligibility accepts rewritten A1',
+  selectCard({ boardMd: supervisedBoard, loadBody: supervisedLoad, supervised: true }).card === 'A1 status normalization and drift visibility');
+ok('NS-7 a card projected as in-progress is not planning-eligible',
+  selectCard({ boardMd: supervisedBoard, loadBody: () => OBSIDIAN_PLANNING.replace('status: in-planning', 'status: in-progress'), supervised: true }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
