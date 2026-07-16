@@ -359,11 +359,15 @@ async function caseCSSUB1PlatformClaudeIncluded() {
     surface.filter((e) => e.kind === "claude_md_row" && e.table === "resolvers").length);
   const topics = platRows.map((r) => r.topic).sort();
   assertEq("CS-SUB-1: resolver topics include Card Intake",
-    topics, ["Bootstrap", "Card Intake", "Install", "Upgrade"]);
+    topics, ["Bootstrap", "Card Intake", "Install", "Slice Plan", "Upgrade"]);
   const skillRows = out.rows["skills-index"].filter((r) => r.owner === "platform-claude");
-  assertEq("CS-SUB-1: Card Intake skills-index row registered", skillRows, [{
+  assertEq("CS-SUB-1: Card Intake + Slice Plan skills-index rows registered", skillRows, [{
     command: "/card-intake",
     skill_path: ".claude/skills/platform/card-intake/SKILL.md",
+    owner: "platform-claude",
+  }, {
+    command: "/slice-plan",
+    skill_path: ".claude/skills/platform/slice-plan/SKILL.md",
     owner: "platform-claude",
   }]);
 }
