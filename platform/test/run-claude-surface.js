@@ -315,12 +315,11 @@ async function caseCSAG7Unsubscribed() {
 }
 
 // ============================================================
-// CS-SUB-1: real platform-claude manifest loaded; subscription includes it →
-//           registry.contributions["platform-claude"] has 9 entries
-//           (3 commands + 3 skills + 3 claude_md_row).
+// CS-SUB-1: real platform-claude manifest loaded; contribution counts and
+//           router rows match the manifest-derived canonical surface.
 // ============================================================
 async function caseCSSUB1PlatformClaudeIncluded() {
-  console.log("\n--- Case CS-SUB-1: subscription with platform-claude → 9 contributions ---");
+  console.log("\n--- Case CS-SUB-1: subscription with platform-claude → manifest-derived contributions ---");
   const mechManifestPath = path.join(WORKSHOP, "platform/mechanisms/platform-claude/manifest.json");
   assertTrue("CS-SUB-1: platform-claude manifest.json exists", fs.existsSync(mechManifestPath));
   const mechMan = JSON.parse(fs.readFileSync(mechManifestPath, "utf8"));
@@ -337,13 +336,16 @@ async function caseCSSUB1PlatformClaudeIncluded() {
 
   assertTrue("CS-SUB-1: registry has platform-claude key",
     Array.isArray(out.registry.contributions["platform-claude"]));
-  assertEq("CS-SUB-1: 9 contributions total (3 cmd + 3 skill + 3 row)",
-    out.registry.contributions["platform-claude"].length, 9);
+  const surface = mechMan.claude_surface || [];
+  assertEq("CS-SUB-1: contribution total matches manifest",
+    out.registry.contributions["platform-claude"].length, surface.length);
 
   const cmdEntries = out.materializeList.filter((e) => e.owner === "platform-claude" && e.kind === "command");
   const skillEntries = out.materializeList.filter((e) => e.owner === "platform-claude" && e.kind === "skill");
-  assertEq("CS-SUB-1: 3 command entries in materializeList", cmdEntries.length, 3);
-  assertEq("CS-SUB-1: 3 skill entries in materializeList", skillEntries.length, 3);
+  assertEq("CS-SUB-1: command count matches manifest", cmdEntries.length,
+    surface.filter((e) => e.kind === "command").length);
+  assertEq("CS-SUB-1: skill count matches manifest", skillEntries.length,
+    surface.filter((e) => e.kind === "skill").length);
 
   // Skill dests should have {{skills_dir}} substituted to ".claude/skills/platform".
   for (const e of skillEntries) {
@@ -353,10 +355,17 @@ async function caseCSSUB1PlatformClaudeIncluded() {
 
   // claude_md_row entries appear under rows.resolvers.
   const platRows = out.rows.resolvers.filter((r) => r.owner === "platform-claude");
-  assertEq("CS-SUB-1: 3 resolver rows owned by platform-claude", platRows.length, 3);
+  assertEq("CS-SUB-1: resolver count matches manifest", platRows.length,
+    surface.filter((e) => e.kind === "claude_md_row" && e.table === "resolvers").length);
   const topics = platRows.map((r) => r.topic).sort();
-  assertEq("CS-SUB-1: resolver topics are Bootstrap/Install/Upgrade",
-    topics, ["Bootstrap", "Install", "Upgrade"]);
+  assertEq("CS-SUB-1: resolver topics include Card Intake",
+    topics, ["Bootstrap", "Card Intake", "Install", "Upgrade"]);
+  const skillRows = out.rows["skills-index"].filter((r) => r.owner === "platform-claude");
+  assertEq("CS-SUB-1: Card Intake skills-index row registered", skillRows, [{
+    command: "/card-intake",
+    skill_path: ".claude/skills/platform/card-intake/SKILL.md",
+    owner: "platform-claude",
+  }]);
 }
 
 // ============================================================

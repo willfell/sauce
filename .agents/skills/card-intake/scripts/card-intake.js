@@ -1,0 +1,428 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
+const STATUSES = new Set(['planning', 'in_progress', 'blocked', 'parked', 'completed']);
+const HEAVY_RISKS = new Set(['new_mechanism', 'shared_abstraction', 'schema', 'migration', 'heal', 'loader', 'multi_blueprint', 'high_regression_refactor']);
+const VAULTS = ['headspace', 'accuris', 'ero'];
+
+function argsOf(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    if (!argv[i].startsWith('--')) continue;
+    const key = argv[i].slice(2);
+    if (argv[i + 1] && !argv[i + 1].startsWith('--')) out[key] = argv[++i];
+    else out[key] = true;
+  }
+  return out;
+}
+
+function linkName(value) {
+  const match = String(value || '').match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/);
+  return match ? match[1].trim() : null;
+}
+
+function escapeRe(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function slug(value) { return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+function quoted(value) { return JSON.stringify(String(value)); }
+function within(root, target) {
+  const base = path.resolve(root);
+  const file = path.resolve(target);
+  return file === base || file.startsWith(`${base}${path.sep}`);
+}
+
+function safeTitle(value) {
+  return Boolean(value) && value === value.trim() && !/[\\/\0\n\r]/.test(value) && value !== '.' && value !== '..';
+}
+
+function parseBoard(md) {
+  const lanes = {};
+  let lane = null;
+  for (const line of String(md || '').split('\n')) {
+    const heading = line.match(/^##\s+(.+?)\s*$/);
+    if (heading) { lane = heading[1]; lanes[lane] ||= []; continue; }
+    if (!lane) continue;
+    const card = line.match(/^\s*-\s*\[([ xX])\]\s*\[\[([^\]|]+)(?:\|[^\]]+)?\]\](.*)$/);
+    if (card) lanes[lane].push({ checked: /x/i.test(card[1]), title: card[2].trim(), suffix: card[3] || '' });
+  }
+  return lanes;
+}
+
+function boardLane(lanes, title) {
+  return Object.entries(lanes).find(([, entries]) => entries.some((entry) => entry.title === title))?.[0] || null;
+}
+
+function findCard(cardsRoot, title) {
+  if (!cardsRoot || !fs.existsSync(cardsRoot)) return null;
+  const wanted = `${title}.md`;
+  const stack = [cardsRoot];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else if (entry.name === wanted) return item;
+    }
+  }
+  return null;
+}
+
+function findNote(roots, title) {
+  const target = linkName(title) || String(title || '').trim();
+  if (!target) return null;
+  const basename = `${target.replace(/\.md$/i, '')}.md`;
+  for (const root of roots) {
+    if (!root || !fs.existsSync(root)) continue;
+    const direct = path.resolve(root, basename);
+    if (within(root, direct) && fs.existsSync(direct) && fs.statSync(direct).isFile()) return direct;
+    if (basename.includes('/') || basename.includes('\\')) continue;
+    const stack = [path.resolve(root)];
+    while (stack.length) {
+      const dir = stack.pop();
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
+      for (const entry of entries) {
+        const item = path.join(dir, entry.name);
+        if (entry.isDirectory()) stack.push(item);
+        else if (entry.name === basename) return item;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveEvidence(roots, item) {
+  if (!item || typeof item.path !== 'string' || !item.path || path.isAbsolute(item.path) || !Number.isInteger(item.line) || item.line < 1) return null;
+  for (const root of roots) {
+    const file = path.resolve(root, item.path);
+    if (!within(root, file) || !fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+    const lineCount = fs.readFileSync(file, 'utf8').split('\n').length;
+    if (item.line <= lineCount) return file;
+  }
+  return null;
+}
+
+function artifactEvidence(markdown) {
+  return [...String(markdown || '').matchAll(/([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_. -]+)*):(\d+)/g)]
+    .map((match) => ({ path: match[1], line: Number(match[2]) }));
+}
+
+function validateCard(card, completionMode, errors) {
+  const role = card.role || 'execution';
+  if (!safeTitle(card.title)) errors.push('every card needs a safe one-line title without path separators');
+  if (card.parent_title && !safeTitle(card.parent_title)) errors.push(`${card.title}: parent title is unsafe`);
+  if (!['parent', 'execution'].includes(role)) errors.push(`${card.title}: role must be parent|execution`);
+  if (!STATUSES.has(card.status || 'planning')) errors.push(`${card.title}: invalid normalized status`);
+  if (!Array.isArray(card.depends_on)) errors.push(`${card.title}: depends_on must be an array`);
+  else for (const dep of card.depends_on) if (!linkName(dep)) errors.push(`${card.title}: dependencies must be wikilinks`);
+  if (completionMode === 'docs_only' && card.lane !== 'Docs Only') errors.push(`${card.title}: docs_only card must use Docs Only lane`);
+  if (role === 'parent') {
+    for (const key of ['model_profile', 'touch_zones', 'deploy_subscriptions']) {
+      if (card[key] != null) errors.push(`${card.title}: parent must remain non-claimable; remove ${key}`);
+    }
+    return;
+  }
+  if (!['standard', 'heavy'].includes(card.model_profile)) errors.push(`${card.title}: model_profile must be standard|heavy`);
+  const needsHeavy = (card.risk_flags || []).some((risk) => HEAVY_RISKS.has(risk));
+  if ((needsHeavy ? 'heavy' : 'standard') !== card.model_profile) errors.push(`${card.title}: model profile does not match risk rules`);
+  for (const field of ['touch_zones', 'acceptance_tests', 'applicable_guides', 'trap_warnings']) {
+    if (!Array.isArray(card[field]) || !card[field].length) errors.push(`${card.title}: ${field} must be non-empty`);
+  }
+  if (card.parent_title && !card.slice) errors.push(`${card.title}: nested child needs slice`);
+  if (completionMode === 'release') {
+    if (card.execution_mode && card.execution_mode !== 'release') errors.push(`${card.title}: execution_mode mismatch`);
+    if (!card.deploy_subscriptions || VAULTS.some((vault) => !Array.isArray(card.deploy_subscriptions[vault]))) errors.push(`${card.title}: release cards require all three deployment arrays`);
+  } else {
+    if (card.execution_mode !== 'docs_only' || card.release_required !== false || card.deployment_required !== false) errors.push(`${card.title}: docs_only routing flags are required`);
+  }
+}
+
+function validateSpec(spec, boardRaw = '') {
+  const errors = [];
+  if (!['single', 'roadmap'].includes(spec.mode)) errors.push('mode must be single|roadmap');
+  if (!CLASSIFICATIONS.has(spec.classification)) errors.push('classification is invalid');
+  if (!['release', 'docs_only'].includes(spec.completion_mode)) errors.push('completion_mode must be release|docs_only');
+  if (!spec.outcome || /[\n\r]/.test(spec.outcome)) errors.push('outcome must be one sentence on one line');
+  if (!spec.project_root || !spec.board_path || !spec.cards_root) errors.push('project_root, board_path, and cards_root are required');
+  const projectRoot = spec.project_root ? path.resolve(spec.project_root) : null;
+  const boardRoot = spec.board_path ? path.dirname(path.resolve(spec.board_path)) : null;
+  if (projectRoot && boardRoot && projectRoot !== boardRoot) errors.push('project_root must equal the existing board directory');
+  if (spec.board_path && (!fs.existsSync(spec.board_path) || !/^##\s+In Planning\s*$/m.test(boardRaw))) errors.push('board_path must be an existing Sauce project board');
+  for (const [label, target] of [['board_path', spec.board_path], ['cards_root', spec.cards_root], ['roadmap_path', spec.roadmap_path], ['ga_exception_path', spec.ga_exception_path]]) {
+    if (boardRoot && target && !within(boardRoot, target)) errors.push(`${label} must stay inside the board directory`);
+  }
+  const evidenceRoots = [...new Set([boardRoot, ...(Array.isArray(spec.evidence_roots) ? spec.evidence_roots : [])].filter(Boolean).map((root) => path.resolve(root)))];
+  const evidence = Array.isArray(spec.evidence) ? spec.evidence : [];
+  const hasEvidence = evidence.length > 0 && evidence.every((item) => resolveEvidence(evidenceRoots, item));
+  const linkRoots = [...new Set([spec.cards_root, boardRoot, ...(Array.isArray(spec.link_roots) ? spec.link_roots : [])].filter(Boolean).map((root) => path.resolve(root)))];
+  const researchPath = spec.research_artifact ? findNote(linkRoots, spec.research_artifact) : null;
+  const hasResearch = Boolean(researchPath && artifactEvidence(fs.readFileSync(researchPath, 'utf8')).some((item) => resolveEvidence(evidenceRoots, item)));
+  const scoutOnly = !hasEvidence && !hasResearch && Boolean(spec.scout_artifact);
+  if (spec.research_artifact && !hasResearch) errors.push('research_artifact must resolve and contain path:line evidence');
+  if (!hasEvidence && !hasResearch && !scoutOnly) errors.push('file evidence path+line, research_artifact, or scout_artifact is required');
+  const cards = Array.isArray(spec.cards) ? spec.cards : [];
+  if (new Set(cards.map((card) => card.title)).size !== cards.length) errors.push('card titles must be unique across parents and children');
+  if (scoutOnly && cards.some((card) => (card.role || 'execution') === 'execution')) errors.push('scout-only intake cannot create an execution card');
+  if (!scoutOnly && !cards.length) errors.push('evidenced intake requires cards');
+  for (const card of cards) validateCard(card, spec.completion_mode, errors);
+  if (spec.completion_mode === 'docs_only') {
+    if (cards.some((card) => card.lane !== 'Docs Only')) errors.push('docs_only cards must route to Docs Only');
+  } else if (spec.classification === 'roadmap_theme') {
+    if (cards.some((card) => card.role === 'parent' ? !['In Planning', 'Post-GA'].includes(card.lane) : card.lane !== 'In Planning')) errors.push('roadmap parents must route to In Planning|Post-GA and prepared children to In Planning');
+  } else {
+    const expectedLane = spec.classification === 'bug' ? 'Discovered (autoloop)'
+      : spec.classification === 'post_ga' ? 'Post-GA' : 'In Planning';
+    if (cards.some((card) => card.lane !== expectedLane)) errors.push(`${spec.classification} cards must route to ${expectedLane}`);
+  }
+  const executionCards = cards.filter((card) => (card.role || 'execution') === 'execution');
+  const parentCards = cards.filter((card) => card.role === 'parent');
+  if (!scoutOnly && spec.classification === 'bug') {
+    if (!spec.reproduction || /[\n\r]/.test(spec.reproduction)) errors.push('bugs require one-line reproduction evidence');
+    if (cards.length !== 1 || executionCards.length !== 1 || cards.some((card) => card.parent_title)) errors.push('a bug intake must create one direct execution card');
+    if (cards.some((card) => card.lane !== 'Discovered (autoloop)')) errors.push('bugs must route to Discovered (autoloop)');
+  }
+  if (!scoutOnly && spec.classification === 'direct_execution' && (cards.length !== 1 || executionCards.length !== 1 || cards.some((card) => card.parent_title))) errors.push('direct_execution requires one root execution card');
+  if (!scoutOnly && spec.classification === 'post_ga') {
+    if (cards.some((card) => card.lane !== 'Post-GA')) errors.push('post_ga cards must route to Post-GA');
+    if (executionCards.length || parentCards.length !== 1 || cards.some((card) => card.parent_title)) errors.push('post_ga must remain one undecomposed parent');
+  }
+  if (spec.mode === 'roadmap' && (!spec.roadmap_path || !spec.roadmap_section)) errors.push('roadmap mode requires roadmap_path and roadmap_section');
+  if (spec.mode === 'roadmap' && spec.classification !== 'roadmap_theme') errors.push('roadmap mode requires roadmap_theme classification');
+  if (spec.classification === 'roadmap_theme' && spec.mode !== 'roadmap') errors.push('roadmap_theme classification requires roadmap mode');
+  if (spec.classification === 'ga_exception' && (!spec.ga_exception_path || !spec.ga_exception_section)) errors.push('ga_exception requires Priorities path and exception section');
+  const roots = cards.filter((card) => !card.parent_title);
+  const childParents = [...new Set(cards.filter((card) => card.parent_title).map((card) => card.parent_title))];
+  if (spec.mode === 'roadmap' && childParents.some((parent) => !roots[0] || parent !== roots[0].title)) errors.push('lazy lookahead permits children only for the first parent');
+  if (spec.mode === 'roadmap' && childParents.length && roots[0]?.lane !== 'In Planning') errors.push('the prepared roadmap parent must be In Planning');
+  if (!scoutOnly && spec.mode === 'roadmap' && (roots.length === 0 || roots.some((card) => card.role !== 'parent'))) errors.push('roadmap roots must be non-claimable parents');
+  if (!scoutOnly && spec.mode === 'roadmap' && roots.some((card) => card.lane === 'In Planning')
+    && (roots[0]?.lane !== 'In Planning' || childParents.length !== 1 || childParents[0] !== roots[0].title)) errors.push('the first In Planning roadmap parent requires prepared execution children');
+  if (!scoutOnly && spec.classification === 'parent_children' && (roots.length !== 1 || roots[0].role !== 'parent' || childParents.length !== 1 || childParents[0] !== roots[0].title)) errors.push('parent_children requires one prepared parent with nested children');
+  if (!scoutOnly && spec.classification === 'ga_exception') {
+    const directShape = cards.length === 1 && executionCards.length === 1 && !cards[0].parent_title;
+    const parentShape = roots.length === 1 && roots[0].role === 'parent' && childParents.length === 1 && childParents[0] === roots[0].title;
+    if (!directShape && !parentShape) errors.push('ga_exception requires direct execution or one prepared parent with nested children');
+  }
+  const order = new Map(cards.map((card, index) => [card.title, index]));
+  for (const card of cards) for (const dep of card.depends_on || []) {
+    const name = linkName(dep);
+    if (order.has(name) && order.get(name) > order.get(card.title)) errors.push(`${card.title}: dependency appears after dependent`);
+    if (!order.has(name) && !findCard(spec.cards_root, name)) errors.push(`${card.title}: dependency does not resolve: ${name}`);
+  }
+  const lanes = parseBoard(boardRaw);
+  const protectedNames = new Set([...(spec.protected_cards || []), ...['In Progress', 'Parked'].flatMap((lane) => (lanes[lane] || []).map((entry) => entry.title))]);
+  for (const card of cards) {
+    if (protectedNames.has(card.title) || protectedNames.has(card.parent_title)) errors.push(`${card.title}: refuses to touch active/protected card`);
+    const priorPath = findCard(spec.cards_root, card.title);
+    if (card.existing === true && !priorPath) errors.push(`${card.title}: existing card does not resolve`);
+    if (card.existing === true && card.role !== 'parent') errors.push(`${card.title}: only non-claimable parents may be updated as existing cards`);
+    const actualLane = boardLane(lanes, card.title);
+    if (card.existing === true && actualLane && actualLane !== card.lane) {
+      const promotableRoadmapParent = spec.classification === 'roadmap_theme' && card.role === 'parent'
+        && [actualLane, card.lane].every((lane) => ['In Planning', 'Post-GA'].includes(lane));
+      if (!promotableRoadmapParent) errors.push(`${card.title}: existing card cannot move from ${actualLane} to ${card.lane}`);
+    }
+    if (priorPath) {
+      const priorStatus = (fs.readFileSync(priorPath, 'utf8').match(/^status:\s*([^\s#]+)/m) || [])[1];
+      if (['in_progress', 'parked'].includes(priorStatus)) errors.push(`${card.title}: refuses to touch ${priorStatus} card`);
+    }
+  }
+  if (!scoutOnly && cards.length) {
+    const plannedNames = new Set(cards.map((card) => card.title));
+    const emitted = [...cards.map((card) => renderCard(card, spec)), spec.roadmap_section, spec.ga_exception_section].filter(Boolean).join('\n');
+    for (const match of emitted.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
+      const target = match[1].trim();
+      if (!plannedNames.has(target) && !findNote(linkRoots, target)) errors.push(`emitted wikilink does not resolve: ${target}`);
+    }
+  }
+  return { errors, scoutOnly, cards, lanes };
+}
+
+function renderCard(card, spec) {
+  const role = card.role || 'execution';
+  const boardRef = spec.source_board || spec.board_path;
+  const lines = ['---', 'type: task-hub', `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${card.status || 'planning'}`];
+  if (spec.epic) lines.push(`epic: ${quoted(spec.epic)}`);
+  if (role === 'execution') {
+    if (card.parent_title) lines.push(`parent_card: ${quoted(`[[${card.parent_title}]]`)}`, `slice: ${quoted(card.slice)}`);
+    lines.push(`model_profile: ${card.model_profile}`, `execution_mode: ${card.execution_mode || spec.completion_mode}`);
+    if (spec.completion_mode === 'docs_only') lines.push('release_required: false', 'deployment_required: false');
+    lines.push('touch_zones:', ...card.touch_zones.map((item) => `  - ${quoted(item)}`));
+  }
+  lines.push('depends_on:');
+  if ((card.depends_on || []).length) lines.push(...card.depends_on.map((item) => `  - ${quoted(item)}`));
+  else lines.push('  []');
+  if (role === 'execution' && spec.completion_mode === 'release') {
+    lines.push('deploy_subscriptions:');
+    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(card.deploy_subscriptions[vault])}`);
+  }
+  lines.push('tags:', '  - kanban-card', '  - project-card', '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
+  for (const item of spec.evidence || []) lines.push(`- \`${item.path}:${item.line}\`${item.note ? ` — ${item.note}` : ''}`);
+  if (spec.reproduction) lines.push(`- Reproduction: ${spec.reproduction}`);
+  if (spec.research_artifact) lines.push(`- Research artifact: [[${spec.research_artifact}]]`);
+  if (spec.scout_artifact) lines.push(`- Scout required: [[${spec.scout_artifact}]]`);
+  if (role === 'parent') lines.push('', 'Parent only — do not claim. Decompose per [[Loop System with Codex]] §Execution-slice contract.');
+  else lines.push('', '### Acceptance tests', '', ...card.acceptance_tests.map((item) => `- ${item}`), '', '### Applicable guides', '', ...card.applicable_guides.map((item) => `- \`${item}\``), '', '### Trap warnings', '', ...card.trap_warnings.map((item) => `- ${item}`));
+  return `${lines.join('\n')}\n`;
+}
+
+function ensureLane(board, lane) {
+  if (new RegExp(`^## ${escapeRe(lane)}\\s*$`, 'm').test(board)) return board;
+  const anchor = board.match(/^## (Post-GA|Completed)\s*$/m);
+  const block = `## ${lane}\n\n`;
+  return anchor ? `${board.slice(0, anchor.index)}${block}${board.slice(anchor.index)}` : `${board.trimEnd()}\n\n${block}`;
+}
+
+function insertBoardCard(board, card, children = []) {
+  board = ensureLane(board, card.lane);
+  const existing = new RegExp(`^(\\s*-\\s*\\[[ xX]\\]\\s*\\[\\[${escapeRe(card.title)}(?:\\|[^\\]]+)?\\]\\]).*$`, 'm');
+  const suffix = children.length ? ` (decomposed → ${children.map((child) => `[[${child.title}]]`).join(' → ')})` : '';
+  let next = board;
+  if (existing.test(board)) {
+    const actualLane = boardLane(parseBoard(board), card.title);
+    if (actualLane === card.lane) next = board.replace(existing, `$1${suffix}`);
+    else next = board.replace(new RegExp(`^\\s*-\\s*\\[[ xX]\\]\\s*\\[\\[${escapeRe(card.title)}(?:\\|[^\\]]+)?\\]\\].*\\n?`, 'm'), '');
+  }
+  if (!existing.test(next)) {
+    const heading = next.match(new RegExp(`^## ${escapeRe(card.lane)}\\s*$`, 'm'));
+    const sectionStart = heading.index + heading[0].length;
+    const tail = next.slice(sectionStart);
+    const nextHeading = tail.search(/^##\s+/m);
+    const section = nextHeading < 0 ? tail : tail.slice(0, nextHeading);
+    const anchors = [...(card.depends_on || []).map(linkName), card.parent_title].filter(Boolean);
+    let at = sectionStart;
+    for (const anchor of anchors) {
+      const match = section.match(new RegExp(`^\\s*-\\s*\\[[ xX]\\]\\s*\\[\\[${escapeRe(anchor)}(?:\\|[^\\]]+)?\\]\\].*$`, 'm'));
+      if (match) at = Math.max(at, sectionStart + match.index + match[0].length);
+    }
+    const separator = at === sectionStart ? '\n\n' : '\n';
+    next = `${next.slice(0, at)}${separator}- [ ] [[${card.title}]]${suffix}${next.slice(at)}`;
+  }
+  for (const child of children) next = next.replace(new RegExp(`^\\s*-\\s*\\[[ xX]\\]\\s*\\[\\[${escapeRe(child.title)}(?:\\|[^\\]]+)?\\]\\].*\\n?`, 'm'), '');
+  for (const child of children) next = insertBoardCard(next, child, []);
+  return next;
+}
+
+function cardPath(spec, card) {
+  const target = card.parent_title ? path.join(spec.cards_root, card.parent_title, card.title, `${card.title}.md`) : path.join(spec.cards_root, card.title, `${card.title}.md`);
+  if (!within(spec.cards_root, target)) throw new Error(`card path escapes cards_root: ${card.title}`);
+  return target;
+}
+
+function atomicWrite(file, content) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.card-intake-${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content, 'utf8');
+  fs.renameSync(tmp, file);
+}
+
+function priorCreatedAt(markdown) {
+  const match = String(markdown || '').match(/^created_at:\s*(.+?)\s*$/m);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch (_) { return match[1].replace(/^['"]|['"]$/g, ''); }
+}
+
+function patchExistingLane(markdown, lane) {
+  if (/^kanban_column:\s*.+$/m.test(markdown)) return markdown.replace(/^kanban_column:\s*.+$/m, `kanban_column: ${quoted(lane)}`);
+  if (markdown.startsWith('---\n')) return markdown.replace('---\n', `---\nkanban_column: ${quoted(lane)}\n`);
+  return markdown;
+}
+
+function patchExistingCard(markdown, card) {
+  let result = patchExistingLane(markdown, card.lane);
+  if (card.role !== 'parent') return result;
+  if (/^status:\s*.+$/m.test(result)) result = result.replace(/^status:\s*.+$/m, `status: ${card.status || 'planning'}`);
+  const lines = ['depends_on:'];
+  if ((card.depends_on || []).length) lines.push(...card.depends_on.map((dep) => `  - ${quoted(dep)}`));
+  else lines.push('  []');
+  const depends = `${lines.join('\n')}\n`;
+  const block = /^depends_on:[^\n]*\n(?:^[ \t]+.*\n)*/m;
+  if (block.test(result)) return result.replace(block, depends);
+  return result.replace(/^status:.*$/m, (line) => `${line}\n${depends.trimEnd()}`);
+}
+
+function roadmapContent(raw, spec) {
+  const key = slug(spec.roadmap_key || spec.outcome);
+  const begin = `<!-- card-intake:${key} BEGIN -->`;
+  const end = `<!-- card-intake:${key} END -->`;
+  const block = `${begin}\n${spec.roadmap_section.trim()}\n${end}`;
+  const re = new RegExp(`${escapeRe(begin)}[\\s\\S]*?${escapeRe(end)}`);
+  return re.test(raw) ? raw.replace(re, block) : `${raw.trimEnd()}\n\n${block}\n`;
+}
+
+function posture(spec, validation, boardRaw) {
+  if (validation.scoutOnly) return { result: 'awaiting_user_decision', next_card: null, model_profile: null };
+  if (spec.completion_mode === 'docs_only') return { result: 'docs_only', next_card: null, model_profile: null };
+  if (['bug', 'post_ga'].includes(spec.classification)) return { result: 'awaiting_user_decision', next_card: null, model_profile: null };
+  const next = validation.cards.find((card) => (card.role || 'execution') === 'execution' && card.lane === 'In Planning');
+  if (!next) return { result: 'awaiting_user_decision', next_card: null, model_profile: null };
+  return { result: 'awaiting_user_decision', next_card: null, model_profile: null, candidate_card: next.title, candidate_model_profile: next.model_profile, eligibility_dry_run_required: true };
+}
+
+function run(spec, apply = false) {
+  const boardRaw = fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : '';
+  const validation = validateSpec(spec, boardRaw);
+  if (validation.errors.length) return { ok: false, errors: validation.errors };
+  let nextBoard = boardRaw;
+  const planned = [];
+  const roots = validation.cards.filter((card) => !card.parent_title);
+  const boardOrder = [];
+  for (const root of roots) {
+    const children = validation.cards.filter((card) => card.parent_title === root.title);
+    boardOrder.push({ card: root, children });
+    boardOrder.push(...children.map((card) => ({ card, children: [] })));
+  }
+  boardOrder.push(...validation.cards
+    .filter((card) => card.parent_title && !roots.some((root) => root.title === card.parent_title))
+    .map((card) => ({ card, children: [] })));
+  for (const item of boardOrder.reverse()) nextBoard = insertBoardCard(nextBoard, item.card, item.children);
+  for (const card of validation.cards) {
+    if (card.existing === true) {
+      const file = findCard(spec.cards_root, card.title);
+      const prior = fs.readFileSync(file, 'utf8');
+      const content = patchExistingCard(prior, card);
+      planned.push({ path: file, content, changed: prior !== content });
+      continue;
+    }
+    const file = cardPath(spec, card);
+    const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+    const stableSpec = !spec.created_at && prior ? { ...spec, created_at: priorCreatedAt(prior) || undefined } : spec;
+    const content = renderCard(card, stableSpec);
+    if (prior !== null && prior !== content) return { ok: false, errors: [`refuses to overwrite existing card: ${card.title}`] };
+    planned.push({ path: file, content, changed: prior !== content });
+  }
+  if (spec.mode === 'roadmap') {
+    const prior = fs.existsSync(spec.roadmap_path) ? fs.readFileSync(spec.roadmap_path, 'utf8') : '';
+    const content = roadmapContent(prior, spec);
+    planned.push({ path: spec.roadmap_path, content, changed: prior !== content });
+  }
+  if (spec.classification === 'ga_exception') {
+    const prior = fs.existsSync(spec.ga_exception_path) ? fs.readFileSync(spec.ga_exception_path, 'utf8') : '';
+    const content = roadmapContent(prior, { ...spec, roadmap_key: `ga-exception-${slug(spec.outcome)}`, roadmap_section: spec.ga_exception_section });
+    planned.push({ path: spec.ga_exception_path, content, changed: prior !== content });
+  }
+  planned.push({ path: spec.board_path, content: nextBoard, changed: nextBoard !== boardRaw });
+  const changed = planned.filter((item) => item.changed);
+  if (apply) for (const item of changed) atomicWrite(item.path, item.content);
+  const finalBoard = apply && fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : nextBoard;
+  return { ok: true, applied: apply, no_op: changed.length === 0, plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(spec)).digest('hex'), changed_paths: changed.map((item) => item.path), ...posture(spec, validation, finalBoard) };
+}
+
+module.exports = { validateSpec, renderCard, parseBoard, run, roadmapContent, cardPath };
+
+if (require.main === module) {
+  const args = argsOf(process.argv.slice(2));
+  if (!args.spec) { console.error('usage: card-intake.js --spec <plan.json> [--apply] [--json]'); process.exit(2); }
+  try {
+    const result = run(JSON.parse(fs.readFileSync(path.resolve(args.spec), 'utf8')), Boolean(args.apply));
+    console.log(args.json ? JSON.stringify(result, null, 2) : `${result.ok ? 'ok' : 'refused'}: ${result.result || (result.errors || []).join('; ')}`);
+    process.exit(result.ok ? 0 : 1);
+  } catch (error) {
+    console.error(args.json ? JSON.stringify({ ok: false, errors: [error.message] }, null, 2) : error.message);
+    process.exit(1);
+  }
+}
