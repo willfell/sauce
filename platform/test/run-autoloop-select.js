@@ -188,6 +188,16 @@ ok('NS-33 unquoted null context_pack fails closed instead of becoming a string',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack: null') }).action === 'no-eligible-work');
 ok('NS-34 unquoted null dependency fails closed instead of becoming an identity',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: null') }).action === 'no-eligible-work');
+ok('NS-35 flow-list null dependency retains its YAML type and fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: [null]') }).action === 'no-eligible-work');
+ok('NS-36 block-list null dependency retains its YAML type and fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on:\n  - null') }).action === 'no-eligible-work');
+ok('NS-37 touch-zone tuple preserves its invalid root for shared validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: other\n    path: package.json') }).action === 'no-eligible-work');
+ok('NS-38 valid workshop touch-zone tuple remains selectable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: workshop\n    path: Docs/autoloop-fixture.md') }).card === 'Required fields');
+ok('NS-39 malformed risk-dimension mapping fails closed instead of becoming an empty list',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('risk_dimensions: []', 'risk_dimensions:\n  bad: mapping') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

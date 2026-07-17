@@ -159,6 +159,71 @@ function parseYamlScalar(value) {
   return raw;
 }
 
+function invalidYamlValue(raw) {
+  return { __invalid_yaml__: String(raw || '') };
+}
+
+function splitYamlFlow(raw) {
+  const values = [];
+  let current = ''; let quote = null; let escaped = false;
+  let squareDepth = 0; let curlyDepth = 0; let wikilinkDepth = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index]; const pair = raw.slice(index, index + 2);
+    if (escaped) { current += char; escaped = false; continue; }
+    if (quote) {
+      current += char;
+      if (char === '\\' && quote === '"') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; current += char; continue; }
+    if (pair === '[[') { wikilinkDepth += 1; current += pair; index += 1; continue; }
+    if (pair === ']]' && wikilinkDepth > 0) { wikilinkDepth -= 1; current += pair; index += 1; continue; }
+    if (wikilinkDepth === 0) {
+      if (char === '[') squareDepth += 1;
+      else if (char === ']') squareDepth -= 1;
+      else if (char === '{') curlyDepth += 1;
+      else if (char === '}') curlyDepth -= 1;
+      if (char === ',' && squareDepth === 0 && curlyDepth === 0) {
+        values.push(current.trim()); current = ''; continue;
+      }
+    }
+    current += char;
+  }
+  if (quote || wikilinkDepth || squareDepth || curlyDepth) return null;
+  values.push(current.trim());
+  return values;
+}
+
+function parseYamlValue(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (raw.startsWith('[[') && raw.endsWith(']]') && !raw.startsWith('[[[')) return raw;
+  if (raw.startsWith('[')) {
+    if (!raw.endsWith(']')) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) {
+      const parts = splitYamlFlow(raw.slice(1, -1));
+      if (!parts) return invalidYamlValue(raw);
+      if (parts.length === 1 && parts[0] === '') return [];
+      return parts.map(parseYamlValue);
+    }
+  }
+  if (raw.startsWith('{')) {
+    if (!raw.endsWith('}')) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) {
+      const parts = splitYamlFlow(raw.slice(1, -1));
+      if (!parts) return invalidYamlValue(raw);
+      const out = {};
+      for (const part of parts) {
+        const match = part.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+        if (!match || Object.prototype.hasOwnProperty.call(out, match[1])) return invalidYamlValue(raw);
+        out[match[1]] = parseYamlValue(match[2]);
+      }
+      return out;
+    }
+  }
+  return parseYamlScalar(raw);
+}
+
 function typedScalarField(raw, key) {
   return parseYamlScalar(rawScalarField(raw, key));
 }
@@ -168,24 +233,31 @@ function listField(raw, key) {
   const index = lines.findIndex((value) => new RegExp(`^${key}\\s*:`).test(value));
   if (index < 0) return undefined;
   const inline = lines[index].slice(lines[index].indexOf(':') + 1).trim();
-  if (inline) {
-    if (inline === '[]') return [];
-    if (inline.startsWith('[')) {
-      try { return JSON.parse(inline); } catch (_) { return inline; }
+  if (inline) return parseYamlValue(inline);
+  const block = [];
+  for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) block.push(lines[i]);
+  if (!block.length) return null;
+  if (block.length === 1 && block[0].trim() === '[]') return [];
+  const out = []; let currentObject = null;
+  for (const line of block) {
+    const item = line.match(/^\s+-\s*(.*?)\s*$/);
+    if (item) {
+      const mapping = item[1].match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+      if (mapping) {
+        currentObject = { [mapping[1]]: parseYamlValue(mapping[2]) };
+        out.push(currentObject);
+      } else {
+        currentObject = null;
+        out.push(parseYamlValue(item[1]));
+      }
+      continue;
     }
-    return parseYamlScalar(inline);
+    const continuation = line.match(/^\s+([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
+    if (!continuation || !currentObject
+      || Object.prototype.hasOwnProperty.call(currentObject, continuation[1])) return invalidYamlValue(block.join('\n'));
+    currentObject[continuation[1]] = parseYamlValue(continuation[2]);
   }
-  const out = [];
-  let sawIndented = false;
-  let sawExplicitEmpty = false;
-  for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) {
-    sawIndented = true;
-    if (lines[i].trim() === '[]') { sawExplicitEmpty = true; continue; }
-    const match = lines[i].match(/^\s+-\s+(.*?)\s*$/);
-    if (match) out.push(parseYamlScalar(match[1]));
-  }
-  if (!sawIndented) return null;
-  return sawExplicitEmpty && out.length === 0 ? [] : out;
+  return out;
 }
 
 function deploymentField(raw) {
@@ -237,7 +309,7 @@ function parseDeliveryCard(raw, card) {
   const executionMode = typedScalarField(raw, 'execution_mode');
   const touchZones = listField(raw, 'touch_zones');
   const authoredDependencies = rawScalarField(raw, 'depends_on');
-  const typedDependencies = typedScalarField(raw, 'depends_on');
+  const dependencies = listField(raw, 'depends_on');
   const evidence = evidenceField(raw);
   const parsed = {
     // Historical notes may infer a missing identity from their exact board/file
@@ -260,15 +332,7 @@ function parseDeliveryCard(raw, card) {
   if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
   if (executionMode !== undefined) parsed.execution_mode = executionMode;
   if (touchZones !== undefined) parsed.touch_zones = touchZones;
-  if (authoredDependencies !== undefined) {
-    const dependencyLines = frontmatterBody(raw).split('\n');
-    const dependencyIndex = dependencyLines.findIndex((line) => /^depends_on\s*:/.test(line));
-    const hasIndentedValue = dependencyIndex >= 0 && /^\s+/.test(dependencyLines[dependencyIndex + 1] || '');
-    parsed.depends_on = !hasIndentedValue && typedDependencies !== undefined
-      && typeof typedDependencies !== 'string'
-      ? typedDependencies
-      : (authoredDependencies === '' && !hasIndentedValue ? null : parseDependsOn(raw));
-  }
+  if (authoredDependencies !== undefined) parsed.depends_on = dependencies;
   if (evidence !== undefined) parsed.evidence = evidence;
   if (authoredBatchPolicy !== undefined) parsed.batch_policy = authoredBatchPolicy;
   else if (schemaVersion === undefined && batchPolicy) parsed.batch_policy = batchPolicy;
