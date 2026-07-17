@@ -168,11 +168,16 @@ for (const [opts, pattern, label] of [
   fs.rmSync(ctx.lockPath, { recursive: true, force: true });
   fs.mkdirSync(ctx.lockPath);
   fs.writeFileSync(path.join(ctx.lockPath, 'owner.json'), JSON.stringify({ pid: 42, host: 'test-host', started_at: '2026-07-17T10:00:00Z' }));
-  eq(batch.withBatchLock(ctx, () => 'recovered', fixed), 'recovered', 'dead stale lock is reclaimed');
+  throws(() => batch.withBatchLock(ctx, () => null, fixed), /stale batch lock.*explicit recovery/, 'dead stale lock is detected but never destructively reclaimed');
+  fs.rmSync(ctx.lockPath, { recursive: true, force: true });
   fs.mkdirSync(ctx.lockPath);
   throws(() => batch.withBatchLock(ctx, () => null, fixed), /ambiguous batch lock/, 'fresh ownerless lock fails closed');
   fs.utimesSync(ctx.lockPath, new Date('2026-07-17T10:00:00Z'), new Date('2026-07-17T10:00:00Z'));
-  eq(batch.withBatchLock(ctx, () => 'recovered-ownerless', fixed), 'recovered-ownerless', 'old ownerless lock is recoverable');
+  throws(() => batch.withBatchLock(ctx, () => null, fixed), /ambiguous batch lock/, 'old ownerless lock remains ambiguous');
+  fs.rmSync(ctx.lockPath, { recursive: true, force: true });
+  fs.mkdirSync(ctx.lockPath);
+  fs.writeFileSync(path.join(ctx.lockPath, 'owner.json'), JSON.stringify({ pid: 42, host: 'other-host', started_at: '2026-07-17T10:00:00Z' }));
+  throws(() => batch.withBatchLock(ctx, () => null, fixed), /ambiguous batch lock.*foreign host/, 'foreign-host lock is never reclaimed');
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
@@ -212,33 +217,69 @@ for (const [mutate, pattern, label] of [
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
+// Even self-consistent/rehashed malformed state fails structural and derived-value validation.
+for (const [mutate, pattern, label] of [
+  [(ledger) => { ledger.counters.infra_retries = '1'; }, /infra_retries/, 'nonnumeric retry counter'],
+  [(ledger) => { delete ledger.counters.code_repairs; }, /code_repairs/, 'missing repair counter'],
+  [(ledger) => { ledger.counters.model_turns = -1; }, /model_turns/, 'negative usage counter'],
+  [(ledger) => { ledger.counters.intervention_weight = NaN; }, /intervention_weight/, 'nonfinite intervention counter'],
+  [(ledger) => { ledger.counters.distinct_cards = ['A', 'A']; }, /distinct_cards/, 'duplicate distinct-card accounting'],
+  [(ledger) => { ledger.counters.failure_signatures = [42]; }, /failure_signatures/, 'nonstrig failure signature'],
+  [(ledger) => { ledger.effects = []; }, /effects/, 'array effects registry'],
+  [(ledger) => { ledger.deadline_at = 'tomorrow'; }, /deadline_at/, 'malformed deadline'],
+  [(ledger) => { ledger.deadline_at = '2026-07-17T19:59:59.000Z'; }, /deadline_at/, 'deadline inconsistent with immutable duration'],
+]) {
+  const ledger = batch.createLedger({}, fixed); mutate(ledger); ledger.integrity = batch.integrityFor(ledger);
+  const validation = batch.validateLedger(ledger);
+  ok(!validation.ok && validation.errors.some((error) => pattern.test(error)), `rehashed malformed ledger rejects ${label}`);
+}
+
 // One allowlisted retry and one repair are durable; duplicate or unknown failures stop.
 {
-  const ledger = batch.createLedger({}, fixed);
-  const first = batch.recordFailure(ledger, { kind: 'infra', signature: 'network:reset' });
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  const first = batch.recordFailure(ctx, { kind: 'infra', signature: 'network:reset' }, fixed);
   eq(first.action, 'retry', 'first allowlisted infrastructure failure may retry');
-  eq(first.ledger.counters.infra_retries, 1, 'infra retry is durably counted');
-  eq(batch.recordFailure(first.ledger, { kind: 'infra', signature: 'network:reset' }).action, 'stop', 'same normalized signature twice stops');
-  const repair = batch.recordFailure(ledger, { kind: 'code', signature: 'assert:a1' });
+  eq(batch.readLedger(ctx).counters.infra_retries, 1, 'infra retry is durably counted');
+  eq(batch.recordFailure(ctx, { kind: 'infra', signature: 'network:reset' }, fixed).action, 'stop', 'same normalized signature twice stops');
+  const repair = batch.recordFailure(ctx, { kind: 'code', signature: 'assert:a1' }, fixed);
   eq(repair.action, 'repair', 'first code failure may repair once');
-  eq(batch.recordFailure(repair.ledger, { kind: 'code', signature: 'assert:a1' }).action, 'stop', 'same code defect after repair stops');
-  eq(batch.recordFailure(ledger, { kind: 'mixed', signature: 'mixed' }).action, 'stop', 'mixed failures stop');
-  eq(batch.recordFailure(ledger, { kind: 'unknown', signature: 'unknown' }).action, 'stop', 'unknown failures stop');
+  eq(batch.readLedger(ctx).counters.code_repairs, 1, 'code repair is durably counted');
+  eq(batch.recordFailure(ctx, { kind: 'code', signature: 'assert:a1' }, fixed).action, 'stop', 'same code defect after repair stops');
+  eq(batch.recordFailure(ctx, { kind: 'mixed', signature: 'mixed' }, fixed).action, 'stop', 'mixed failures stop');
+  eq(batch.recordFailure(ctx, { kind: 'unknown', signature: 'unknown' }, fixed).action, 'stop', 'unknown failures stop');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
 // Every side-effect class has a durable idempotency key and uncertain state is inspected, never repeated.
 {
-  let ledger = batch.createLedger({}, fixed);
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
   for (const kind of ['claim', 'retry', 'pr', 'release', 'promotion', 'deployment', 'projection']) {
-    const reserved = batch.reserveEffect(ledger, { kind, key: `${kind}:42` });
-    ok(reserved.execute, `${kind} executes once`); ledger = reserved.ledger;
-    const uncertain = batch.reserveEffect(ledger, { kind, key: `${kind}:42` });
+    const reserved = batch.reserveEffect(ctx, { kind, key: `${kind}:42` }, fixed);
+    ok(reserved.execute, `${kind} executes once`);
+    ok(batch.readLedger(ctx).effects[`${kind}:${kind}:42`], `${kind} reservation is durable before execution`);
+    const uncertain = batch.reserveEffect(ctx, { kind, key: `${kind}:42` }, fixed);
     eq(uncertain.action, 'inspect', `${kind} pending state is inspected before retry`);
-    const completed = batch.completeEffect(ledger, { kind, key: `${kind}:42`, receipt: `${kind}-receipt` });
-    ledger = completed.ledger;
-    const repeated = batch.reserveEffect(ledger, { kind, key: `${kind}:42` });
+    batch.completeEffect(ctx, { kind, key: `${kind}:42`, receipt: `${kind}-receipt` }, fixed);
+    eq(batch.readLedger(ctx).effects[`${kind}:${kind}:42`].receipt, `${kind}-receipt`, `${kind} receipt is durable`);
+    const repeated = batch.reserveEffect(ctx, { kind, key: `${kind}:42` }, fixed);
     eq(repeated.action, 'already-complete', `${kind} completed state is not duplicated`);
   }
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Distinct-card, usage, and intervention accounting mutate only through the durable locked ledger.
+{
+  const ctx = tempContext(); batch.start(ctx, { max_cards: 2, max_model_turns: 16, max_intervention_weight: 1 }, fixed);
+  eq(batch.recordDistinctCard(ctx, 'Card A', fixed).action, 'recorded', 'first distinct card records');
+  eq(batch.recordDistinctCard(ctx, 'Card A', fixed).action, 'already-recorded', 'same card does not double count');
+  eq(batch.recordDistinctCard(ctx, 'Card B', fixed).action, 'recorded', 'second distinct card records');
+  eq(batch.recordDistinctCard(ctx, 'Card C', fixed).action, 'stop', 'third card refuses at immutable budget');
+  eq(batch.recordUsage(ctx, 3, fixed).action, 'recorded', 'model usage records');
+  eq(batch.readLedger(ctx).counters.model_turns, 3, 'model usage survives a new read');
+  eq(batch.recordIntervention(ctx, 0.5, fixed).action, 'recorded', 'intervention weight records');
+  eq(batch.readLedger(ctx).counters.intervention_weight, 0.5, 'intervention weight survives a new read');
+  eq(batch.recordIntervention(ctx, 0.6, fixed).action, 'stop', 'intervention cannot exceed immutable budget');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
 // Ten changing board snapshots match the coordinator's exact unattended candidate/refusal and mutate nothing.

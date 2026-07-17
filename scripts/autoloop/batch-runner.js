@@ -158,9 +158,37 @@ function validateLedger(value) {
     });
     if (JSON.stringify(normalized) !== JSON.stringify(ledger.budgets)) errors.push('noncanonical budgets');
   } catch (err) { errors.push(err.message); }
-  if (!ledger.counters || !Array.isArray(ledger.counters.distinct_cards)
-    || !Array.isArray(ledger.counters.failure_signatures) || !ledger.effects || typeof ledger.effects !== 'object') {
-    errors.push('malformed mutable accounting');
+  const startedMs = Date.parse(ledger.started_at); const deadlineMs = Date.parse(ledger.deadline_at);
+  if (!Number.isFinite(startedMs)) errors.push('started_at must be an ISO timestamp');
+  if (!Number.isFinite(deadlineMs)
+    || (ledger.budgets && deadlineMs !== startedMs + ledger.budgets.duration_seconds * 1000)) {
+    errors.push('deadline_at must equal started_at plus duration_seconds');
+  }
+  const counters = ledger.counters;
+  if (!counters || typeof counters !== 'object' || Array.isArray(counters)) errors.push('counters must be an object');
+  else {
+    if (!Array.isArray(counters.distinct_cards)
+      || counters.distinct_cards.some((item) => typeof item !== 'string' || !item.trim())
+      || new Set(counters.distinct_cards).size !== counters.distinct_cards.length) errors.push('distinct_cards must be unique non-empty strings');
+    for (const field of ['infra_retries', 'code_repairs', 'model_turns']) {
+      if (!Number.isInteger(counters[field]) || counters[field] < 0) errors.push(`${field} must be a nonnegative integer`);
+    }
+    if (!Number.isFinite(counters.intervention_weight) || counters.intervention_weight < 0) {
+      errors.push('intervention_weight must be a nonnegative finite number');
+    }
+    if (!Array.isArray(counters.failure_signatures)
+      || counters.failure_signatures.some((item) => typeof item !== 'string' || !item.trim())
+      || new Set(counters.failure_signatures).size !== counters.failure_signatures.length) {
+      errors.push('failure_signatures must be unique non-empty strings');
+    }
+  }
+  if (!ledger.effects || typeof ledger.effects !== 'object' || Array.isArray(ledger.effects)) errors.push('effects must be an object');
+  else for (const [id, effect] of Object.entries(ledger.effects)) {
+    if (!effect || typeof effect !== 'object' || Array.isArray(effect)
+      || !EFFECT_KINDS.has(effect.kind) || typeof effect.key !== 'string' || !effect.key.trim()
+      || id !== effectId(effect) || !['pending', 'complete'].includes(effect.status)
+      || (effect.status === 'complete' && (typeof effect.receipt !== 'string' || !effect.receipt.trim()))
+      || (effect.status === 'pending' && effect.receipt !== null)) errors.push(`effects.${id} is malformed`);
   }
   if (ledger.integrity !== integrityFor(ledger)) errors.push('ledger integrity mismatch');
   return { ok: errors.length === 0, errors };
@@ -191,35 +219,46 @@ function readLedger(ctx) {
 }
 
 function lockStale(ctx, owner, deps = {}) {
+  if (!owner || owner.host !== (deps.hostname || os.hostname())) return false;
   const now = Date.parse(nowOf(deps));
-  let startedAt = owner && Date.parse(owner.started_at);
-  if (!Number.isFinite(startedAt)) {
-    try { startedAt = fs.statSync(ctx.lockPath).mtimeMs; } catch (_) { return false; }
-  }
+  const startedAt = Date.parse(owner.started_at);
+  if (!Number.isFinite(startedAt)) return false;
   if (now - startedAt <= LOCK_STALE_MS) return false;
-  if (!owner) return true;
-  if (owner.host && owner.host !== (deps.hostname || os.hostname())) return true;
   return !(deps.pidAlive || pidAliveDefault)(Number(owner.pid));
 }
 
 function withBatchLock(ctx, fn, deps = {}) {
   fs.mkdirSync(ctx.batchesDir, { recursive: true });
+  const localHost = deps.hostname || os.hostname();
   if (fs.existsSync(ctx.lockPath)) {
     let owner = null;
     try { owner = JSON.parse(fs.readFileSync(path.join(ctx.lockPath, 'owner.json'), 'utf8')); } catch (_) {}
-    if (!lockStale(ctx, owner, deps)) {
-      if (!owner) throw new Error('ambiguous batch lock has no readable owner');
-      throw new Error(`batch lock held by pid ${owner.pid || '?'} on ${owner.host || '?'}`);
-    }
-    fs.rmSync(ctx.lockPath, { recursive: true, force: true });
+    if (!owner) throw new Error('ambiguous batch lock has no readable owner');
+    if (owner.host !== localHost) throw new Error(`ambiguous batch lock belongs to foreign host ${owner.host || '?'}`);
+    if (lockStale(ctx, owner, deps)) throw new Error('stale batch lock requires explicit recovery; it was not removed');
+    throw new Error(`batch lock held by pid ${owner.pid || '?'} on ${owner.host || '?'}`);
   }
-  fs.mkdirSync(ctx.lockPath);
+  try { fs.mkdirSync(ctx.lockPath); }
+  catch (err) {
+    if (err.code === 'EEXIST') throw new Error('batch lock was acquired concurrently');
+    throw err;
+  }
+  const lockId = crypto.randomBytes(32).toString('hex');
   atomicWriteJson(path.join(ctx.lockPath, 'owner.json'), {
-    pid: process.pid, host: deps.hostname || os.hostname(), started_at: nowOf(deps),
+    lock_id: lockId, pid: process.pid, host: localHost, started_at: nowOf(deps),
     command: process.argv.slice(2).join(' '),
   });
   try { return fn(); }
-  finally { fs.rmSync(ctx.lockPath, { recursive: true, force: true }); }
+  finally {
+    let current = null;
+    try { current = JSON.parse(fs.readFileSync(path.join(ctx.lockPath, 'owner.json'), 'utf8')); } catch (_) {}
+    const entries = fs.existsSync(ctx.lockPath) ? fs.readdirSync(ctx.lockPath) : [];
+    if (!current || current.lock_id !== lockId || entries.length !== 1 || entries[0] !== 'owner.json') {
+      throw new Error('batch lock cleanup ownership became ambiguous; preserve it for explicit recovery');
+    }
+    fs.unlinkSync(path.join(ctx.lockPath, 'owner.json'));
+    fs.rmdirSync(ctx.lockPath);
+  }
 }
 
 function findReservedIntakeArtifact(roots) {
@@ -368,41 +407,91 @@ function resume(ctx, options = {}, deps = {}) {
   }, deps);
 }
 
-function recordFailure(input, failure) {
-  const ledger = clone(input); const kind = String(failure && failure.kind || 'unknown');
-  const signature = String(failure && failure.signature || '').trim();
-  if (!signature || !['infra', 'code', 'mixed', 'unknown'].includes(kind)) return { action: 'stop', reason: 'unknown failure', ledger };
-  if (['mixed', 'unknown'].includes(kind)) return { action: 'stop', reason: `${kind} failure`, ledger };
-  if (ledger.counters.failure_signatures.includes(signature)) return { action: 'stop', reason: 'same normalized signature repeated', ledger };
-  ledger.counters.failure_signatures.push(signature);
-  const counter = kind === 'infra' ? 'infra_retries' : 'code_repairs';
-  const limit = kind === 'infra' ? 'max_infra_retries' : 'max_code_repairs';
-  if (ledger.counters[counter] >= ledger.budgets[limit]) return { action: 'stop', reason: `${kind} budget exhausted`, ledger };
-  ledger.counters[counter] += 1; ledger.integrity = integrityFor(ledger);
-  return { action: kind === 'infra' ? 'retry' : 'repair', ledger };
+function mutateLedger(ctx, updater, deps = {}) {
+  return withBatchLock(ctx, () => {
+    const ledger = readLedger(ctx);
+    if (!ledger) throw new Error('no batch ledger exists');
+    assertPinnedRuntime(ledger, deps);
+    const result = updater(ledger) || { action: 'stop', reason: 'empty ledger mutation' };
+    if (result.changed) {
+      ledger.integrity = integrityFor(ledger);
+      const validation = validateLedger(ledger);
+      if (!validation.ok) throw new Error(`ledger mutation refused: ${validation.errors.join('; ')}`);
+      atomicWriteJson(ctx.ledgerPath, ledger);
+    }
+    return { ...result, ledger };
+  }, deps);
+}
+
+function recordFailure(ctx, failure, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    const kind = String(failure && failure.kind || 'unknown');
+    const signature = String(failure && failure.signature || '').trim();
+    if (!signature || !['infra', 'code', 'mixed', 'unknown'].includes(kind)) return { action: 'stop', reason: 'unknown failure' };
+    if (['mixed', 'unknown'].includes(kind)) return { action: 'stop', reason: `${kind} failure` };
+    if (ledger.counters.failure_signatures.includes(signature)) return { action: 'stop', reason: 'same normalized signature repeated' };
+    const counter = kind === 'infra' ? 'infra_retries' : 'code_repairs';
+    const limit = kind === 'infra' ? 'max_infra_retries' : 'max_code_repairs';
+    if (ledger.counters[counter] >= ledger.budgets[limit]) return { action: 'stop', reason: `${kind} budget exhausted` };
+    ledger.counters.failure_signatures.push(signature); ledger.counters[counter] += 1;
+    return { action: kind === 'infra' ? 'retry' : 'repair', changed: true };
+  }, deps);
 }
 
 function effectId(effect) { return `${effect.kind}:${effect.key}`; }
-function reserveEffect(input, effect) {
-  const ledger = clone(input);
-  if (!EFFECT_KINDS.has(effect && effect.kind) || !String(effect && effect.key || '').trim()) {
-    return { action: 'stop', execute: false, reason: 'invalid side-effect identity', ledger };
-  }
-  const id = effectId(effect); const existing = ledger.effects[id];
-  if (existing) return { action: existing.status === 'complete' ? 'already-complete' : 'inspect', execute: false, ledger };
-  ledger.effects[id] = { kind: effect.kind, key: String(effect.key), status: 'pending', receipt: null };
-  ledger.integrity = integrityFor(ledger);
-  return { action: 'execute', execute: true, ledger };
+function reserveEffect(ctx, effect, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    if (!EFFECT_KINDS.has(effect && effect.kind) || !String(effect && effect.key || '').trim()) {
+      return { action: 'stop', execute: false, reason: 'invalid side-effect identity' };
+    }
+    const id = effectId(effect); const existing = ledger.effects[id];
+    if (existing) return { action: existing.status === 'complete' ? 'already-complete' : 'inspect', execute: false };
+    ledger.effects[id] = { kind: effect.kind, key: String(effect.key), status: 'pending', receipt: null };
+    return { action: 'execute', execute: true, changed: true };
+  }, deps);
 }
 
-function completeEffect(input, effect) {
-  const ledger = clone(input); const id = effectId(effect || {}); const existing = ledger.effects[id];
-  if (!existing) return { action: 'stop', reason: 'side effect was not reserved', ledger };
-  if (existing.status === 'complete') return { action: 'already-complete', ledger };
-  existing.status = 'complete'; existing.receipt = String(effect.receipt || '').trim();
-  if (!existing.receipt) return { action: 'stop', reason: 'completion receipt is required', ledger: clone(input) };
-  ledger.integrity = integrityFor(ledger);
-  return { action: 'completed', ledger };
+function completeEffect(ctx, effect, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    const id = effectId(effect || {}); const existing = ledger.effects[id];
+    if (!existing) return { action: 'stop', reason: 'side effect was not reserved' };
+    if (existing.status === 'complete') return { action: 'already-complete' };
+    const receipt = String(effect.receipt || '').trim();
+    if (!receipt) return { action: 'stop', reason: 'completion receipt is required' };
+    existing.status = 'complete'; existing.receipt = receipt;
+    return { action: 'completed', changed: true };
+  }, deps);
+}
+
+function recordDistinctCard(ctx, card, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    const identity = delivery.normalizeIdentity(card);
+    if (!identity) return { action: 'stop', reason: 'card identity is required' };
+    if (ledger.counters.distinct_cards.includes(identity)) return { action: 'already-recorded' };
+    if (ledger.counters.distinct_cards.length >= ledger.budgets.max_distinct_cards) return { action: 'stop', reason: 'distinct-card budget exhausted' };
+    ledger.counters.distinct_cards.push(identity);
+    return { action: 'recorded', changed: true };
+  }, deps);
+}
+
+function recordUsage(ctx, turns, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    if (!Number.isInteger(turns) || turns <= 0) return { action: 'stop', reason: 'usage turns must be a positive integer' };
+    if (ledger.counters.model_turns + turns > ledger.budgets.max_model_turns) return { action: 'stop', reason: 'usage budget exhausted' };
+    ledger.counters.model_turns += turns;
+    return { action: 'recorded', changed: true };
+  }, deps);
+}
+
+function recordIntervention(ctx, weight, deps = {}) {
+  return mutateLedger(ctx, (ledger) => {
+    if (!Number.isFinite(weight) || weight <= 0) return { action: 'stop', reason: 'intervention weight must be positive' };
+    if (ledger.counters.intervention_weight + weight > ledger.budgets.max_intervention_weight) {
+      return { action: 'stop', reason: 'intervention budget exhausted' };
+    }
+    ledger.counters.intervention_weight += weight;
+    return { action: 'recorded', changed: true };
+  }, deps);
 }
 
 function shadowSelection({ boardMd, state, loadCard }) {
@@ -445,7 +534,9 @@ function main() {
 module.exports = {
   LEDGER_VERSION, MODE, parseArgs, resolveContext, normalizeBudgets, integrityFor, createLedger, validateLedger,
   atomicWriteJson, readLedger, withBatchLock, findReservedIntakeArtifact, readiness, budgetProblems,
-  start, status, stop, resume, assertPinnedRuntime, recordFailure, reserveEffect, completeEffect, shadowSelection, shadowFromContext,
+  start, status, stop, resume, assertPinnedRuntime, mutateLedger,
+  recordFailure, reserveEffect, completeEffect, recordDistinctCard, recordUsage, recordIntervention,
+  shadowSelection, shadowFromContext,
 };
 
 if (require.main === module) {
