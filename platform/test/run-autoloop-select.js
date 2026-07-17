@@ -36,6 +36,7 @@ function ok(label, cond, detail) {
 
 function deliveryCard(name, body, options = {}) {
   const zones = options.zones || ['Docs/autoloop-fixture.md'];
+  const deps = options.deps || [];
   const profile = options.profile || (zones.some((zone) => /^(?:scripts\/autoloop|platform\/mechanisms)/.test(zone)) ? 'heavy' : 'standard');
   const batchPolicy = options.batch_policy || delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
   const evidence = [{
@@ -47,7 +48,7 @@ function deliveryCard(name, body, options = {}) {
     'parent_card: "[[Selector fixtures]]"', `slice: ${name}`, `model_profile: ${profile}`,
     'execution_mode: release', `batch_policy: ${batchPolicy}`, `status: ${options.status || 'planning'}`,
     'kanban_column: In Planning', 'touch_zones:', ...zones.map((zone) => `  - ${zone}`),
-    'depends_on:', ...(options.deps || []).map((dep) => `  - "[[${dep}]]"`),
+    ...(deps.length ? ['depends_on:', ...deps.map((dep) => `  - "[[${dep}]]"`)] : ['depends_on: []']),
     'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
     'epic: "[[Selector fixtures]]"', `evidence: ${JSON.stringify(evidence)}`, 'risk_dimensions: []',
     'release_required: true', 'deployment_required: true', ...(options.frontmatter || []), '---', '', body,
@@ -136,7 +137,7 @@ const requiredFieldCard = deliveryCard('Required fields', 'Required field fixtur
 ok('NS-11 current cards missing execution_mode fail closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^execution_mode:.*\n/m, '') }).action === 'no-eligible-work');
 ok('NS-12 current cards missing depends_on fail closed',
-  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^depends_on:\n/m, '') }).action === 'no-eligible-work');
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^depends_on: \[\]\n/m, '') }).action === 'no-eligible-work');
 const evidenceLessHistorical = deliveryCard('Historical evidence optional', 'Historical fixture.')
   .replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^evidence:.*\n/m, '');
 ok('NS-13 evidence-less historical cards remain readable through in-memory migration',
@@ -171,6 +172,14 @@ ok('NS-25 valid optional context_pack is preserved through shared validation',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard }).card === 'Required fields');
 ok('NS-26 explicitly empty context_pack fails closed instead of being discarded',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack:') }).action === 'no-eligible-work');
+ok('NS-27 malformed release_required fails closed instead of defaulting true',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('release_required: true', 'release_required: nonsense') }).action === 'no-eligible-work');
+ok('NS-28 YAML-null depends_on fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on:') }).action === 'no-eligible-work');
+ok('NS-29 YAML-null risk_dimensions fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('risk_dimensions: []', 'risk_dimensions:') }).action === 'no-eligible-work');
+ok('NS-30 YAML-null deployment vault fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace:') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

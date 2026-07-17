@@ -42,7 +42,7 @@ function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], de
     `batch_policy: ${policy}`,
     'status: planning',
     'touch_zones:', ...zones.map((z) => `  - ${z}`),
-    'depends_on:', ...deps.map((d) => `  - "[[${d}]]"`),
+    ...(deps.length ? ['depends_on:', ...deps.map((d) => `  - "[[${d}]]"`)] : ['depends_on: []']),
     ...(deploy ? ['deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []'] : []),
     'context_pack: "Docs/test-context.md"',
     'epic: "[[Test epic]]"',

@@ -159,11 +159,16 @@ function listField(raw, key) {
     return inline;
   }
   const out = [];
+  let sawIndented = false;
+  let sawExplicitEmpty = false;
   for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) {
+    sawIndented = true;
+    if (lines[i].trim() === '[]') { sawExplicitEmpty = true; continue; }
     const match = lines[i].match(/^\s+-\s+(.*?)\s*$/);
     if (match) out.push(match[1].replace(/^['"]|['"]$/g, ''));
   }
-  return out;
+  if (!sawIndented) return null;
+  return sawExplicitEmpty && out.length === 0 ? [] : out;
 }
 
 function deploymentField(raw) {
@@ -177,7 +182,8 @@ function deploymentField(raw) {
     if (vault) {
       current = vault[1];
       const inline = vault[2];
-      if (!inline || inline === '[]') out[current] = [];
+      if (!inline) out[current] = null;
+      else if (inline === '[]') out[current] = [];
       else {
         try { out[current] = JSON.parse(inline); }
         catch (_) { out[current] = inline; }
@@ -185,7 +191,10 @@ function deploymentField(raw) {
       continue;
     }
     const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
-    if (item && current && Array.isArray(out[current])) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
+    if (item && current) {
+      if (out[current] === null) out[current] = [];
+      if (Array.isArray(out[current])) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
+    }
   }
   return out;
 }
@@ -193,7 +202,7 @@ function deploymentField(raw) {
 function parseBoolean(value) {
   if (value === 'true') return true;
   if (value === 'false') return false;
-  return undefined;
+  return value;
 }
 
 function evidenceField(raw) {
@@ -216,7 +225,7 @@ function parseDeliveryCard(raw, card) {
   const authoredCard = frontmatterScalar(raw, 'card');
   const executionMode = frontmatterScalar(raw, 'execution_mode');
   const touchZones = listField(raw, 'touch_zones');
-  const dependencyFieldPresent = rawScalarField(raw, 'depends_on') !== undefined;
+  const authoredDependencies = rawScalarField(raw, 'depends_on');
   const evidence = evidenceField(raw);
   const parsed = {
     // Historical notes may infer a missing identity from their exact board/file
@@ -234,18 +243,23 @@ function parseDeliveryCard(raw, card) {
   const authoredBatchPolicy = rawScalarField(raw, 'batch_policy');
   const batchPolicy = parseBatchPolicy(raw);
   const riskDimensions = listField(raw, 'risk_dimensions');
-  const releaseRequired = parseBoolean(frontmatterScalar(raw, 'release_required'));
-  const deploymentRequired = parseBoolean(frontmatterScalar(raw, 'deployment_required'));
+  const authoredReleaseRequired = frontmatterScalar(raw, 'release_required');
+  const authoredDeploymentRequired = frontmatterScalar(raw, 'deployment_required');
   if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
   if (executionMode !== undefined) parsed.execution_mode = executionMode;
   if (touchZones !== undefined) parsed.touch_zones = touchZones;
-  if (dependencyFieldPresent) parsed.depends_on = parseDependsOn(raw);
+  if (authoredDependencies !== undefined) {
+    const dependencyLines = frontmatterBody(raw).split('\n');
+    const dependencyIndex = dependencyLines.findIndex((line) => /^depends_on\s*:/.test(line));
+    const hasIndentedValue = dependencyIndex >= 0 && /^\s+/.test(dependencyLines[dependencyIndex + 1] || '');
+    parsed.depends_on = authoredDependencies === '' && !hasIndentedValue ? null : parseDependsOn(raw);
+  }
   if (evidence !== undefined) parsed.evidence = evidence;
   if (authoredBatchPolicy !== undefined) parsed.batch_policy = batchPolicy || authoredBatchPolicy;
   else if (schemaVersion === undefined && batchPolicy) parsed.batch_policy = batchPolicy;
   if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
-  if (releaseRequired !== undefined) parsed.release_required = releaseRequired;
-  if (deploymentRequired !== undefined) parsed.deployment_required = deploymentRequired;
+  if (authoredReleaseRequired !== undefined) parsed.release_required = parseBoolean(authoredReleaseRequired);
+  if (authoredDeploymentRequired !== undefined) parsed.deployment_required = parseBoolean(authoredDeploymentRequired);
   return parsed;
 }
 
