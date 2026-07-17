@@ -13,6 +13,7 @@ Prepare work; never implement or claim it. Default to read-only discovery and as
 2. Read the board, roadmap, named requirement/research notes, directly involved source, and tests. Record `path:line` evidence; a named research/scout artifact substitutes only when it contains those references.
 3. Run coordinator status. Treat active and parked cards as immutable. Never edit coordinator state.
 4. Read `[[Loop System with Codex]]` §Execution-slice contract. Link it from cards; do not copy it.
+5. Describe the execution-card schema through the Delivery public contract at `ranch/content/delivery/index.js` (workshop source: `platform/mechanisms/delivery/index.js`). Use that API's version, enums, normalization, policy, and validation rather than local prose as contract authority.
 
 ## Classify and route
 
@@ -36,7 +37,7 @@ Choose `heavy` iff work adds a mechanism, shared abstraction, schema, migration/
 
 ## Author safely
 
-Every execution card requires exact touch zones, wikilink-list dependencies, deployment settings, acceptance tests, applicable guides, trap warnings, and one status from `planning|in_progress|blocked|parked|completed`. Keep parents non-claimable and visible in Planning with their child annotation.
+Every execution card requires exact touch zones, wikilink-list dependencies, deployment settings, acceptance tests, applicable guides, trap warnings, and one Delivery-normalized lifecycle status. Evidence claims pin `source_identity`, `captured_at`, `revision`, `locator`, and `claim`. Keep parents non-claimable and visible in Planning with their child annotation.
 
 Before writing, set `project_root` to the existing board's directory and keep all mutation paths inside it. Provide narrow `evidence_roots` for real `path:line` validation and `link_roots` for emitted links. Refuse any action that would:
 
@@ -45,14 +46,14 @@ Before writing, set `project_root` to the existing board's directory and keep al
 - place a child at tasks root, decompose later roadmap parents, reverse dependency order, or make docs-only coordinator-eligible;
 - touch generated router marker regions or the coordinator ledger.
 
-When available, resolve the installed workshop path and dry-run its deterministic validator:
+Resolve the installed workshop path and dry-run its deterministic validator:
 
 ```bash
 node <workshop>/.agents/skills/card-intake/scripts/card-intake.js --spec <temporary-spec.json> --json
 node <workshop>/.agents/skills/card-intake/scripts/card-intake.js --spec <temporary-spec.json> --apply --json
 ```
 
-Inspect the plan before apply. Re-run the same spec and require `no_op: true`; then remove it. If the validator is unavailable, preserve the same constraints and make atomic, minimal edits.
+The validator stamps the current `schema_version`, derives a policy that cannot weaken `supervised_only`, and validates through the Delivery public contract. Inspect the plan before apply. Re-run the same spec and require `no_op: true`; then remove it. If the validator is unavailable, stop rather than inventing a second contract implementation.
 
 ## Finish
 

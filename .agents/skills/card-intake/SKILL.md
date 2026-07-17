@@ -13,6 +13,7 @@ Prepare work; never implement or claim it. Default to read-only discovery and as
 2. Locate and read the project board, roadmap doc, named requirement/research notes, and directly involved source/tests. Record evidence as `path:line`; a named research/scout artifact may substitute only when it contains those references.
 3. Run coordinator status. Treat every active or parked card as immutable and pass their names to the planner as `protected_cards`. Never edit coordinator state.
 4. Read `[[Loop System with Codex]]` §Execution-slice contract. Link it from cards; do not copy it.
+5. Load the Delivery public contract from `platform/mechanisms/delivery/index.js`. New execution cards use its current version, enums, normalization, policy derivation, and validator; never duplicate that semantic core in this skill.
 
 ## Choose depth and route
 
@@ -43,7 +44,7 @@ node .agents/skills/card-intake/scripts/card-intake.js --spec <spec.json> --json
 node .agents/skills/card-intake/scripts/card-intake.js --spec <spec.json> --apply --json
 ```
 
-Every execution card must include exact touch zones, wikilink-list dependencies, three-vault deployment settings, acceptance tests, applicable guides, trap warnings, and one normalized status: `planning`, `in_progress`, `blocked`, `parked`, or `completed`. Execution children live at `tasks/<parent>/<child>/<child>.md`; parents remain at `tasks/<parent>/<parent>.md`.
+Every execution card must include exact touch zones, wikilink-list dependencies, three-vault deployment settings, acceptance tests, applicable guides, trap warnings, and one Delivery-normalized lifecycle status. Evidence claims must pin `source_identity`, `captured_at`, `revision`, `locator`, and `claim`. Execution children live at `tasks/<parent>/<child>/<child>.md`; parents remain at `tasks/<parent>/<parent>.md`.
 
 Before `--apply`, inspect the dry-run plan. Refuse any plan that:
 
@@ -52,7 +53,7 @@ Before `--apply`, inspect the dry-run plan. Refuse any plan that:
 - makes a parent claimable, places an execution child at root, or decomposes more than the next parent;
 - inserts dependency order backwards, uses a non-normalized status, or makes docs-only coordinator-eligible.
 
-Use the script's atomic/idempotent apply only after validation. Never hand-edit a generated marker region. Re-run the same spec and require `no_op: true`. Remove the temporary spec afterward.
+The validator stamps `schema_version`, derives a policy that cannot weaken `supervised_only`, and validates through the Delivery public API. Use its atomic/idempotent apply only after validation. Never hand-edit a generated marker region. Re-run the same spec and require `no_op: true`. Remove the temporary spec afterward.
 
 ## Finish
 

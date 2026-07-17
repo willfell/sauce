@@ -9,6 +9,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const delivery = require('../../platform/mechanisms/delivery');
 
 // Broad-scope heuristic: signals multi-cycle work the autonomous loop must NOT
 // pick (it would run unbounded). Deterministic mirror of the human pipeline's
@@ -19,19 +20,8 @@ const BROAD_PATTERNS = [
   /\bmigrat(e|ion) (all|every)\b/i, /\bfigure out\b/i,
 ];
 
-const STATUS_ALIASES = new Map([
-  ['planning', 'planning'],
-  ['in-planning', 'planning'],
-  ['in_progress', 'in_progress'],
-  ['in-progress', 'in_progress'],
-  ['blocked', 'blocked'],
-  ['parked', 'parked'],
-  ['completed', 'completed'],
-]);
-
 function normalizeStatus(value) {
-  const raw = String(value == null ? '' : value).trim().toLowerCase().replace(/^['"]|['"]$/g, '');
-  return raw ? (STATUS_ALIASES.get(raw) || null) : null;
+  return delivery.normalizeStatus(value);
 }
 
 function frontmatterScalar(raw, key) {
@@ -49,7 +39,7 @@ function parseCardStatus(raw) {
 
 function parseBatchPolicy(raw) {
   const frontmatterValue = frontmatterScalar(raw, 'batch_policy');
-  if (frontmatterValue) return frontmatterValue.split(/\s|—/)[0].trim().toLowerCase();
+  if (frontmatterValue !== undefined) return frontmatterValue.trim().toLowerCase();
   const match = String(raw || '').match(/^\s*batch_policy:\s*([a-z][a-z0-9_-]*)\b/im);
   return match ? match[1].toLowerCase() : null;
 }
@@ -141,23 +131,438 @@ function parseDependsOn(raw) {
   if (block.trim() === '') {
     for (let i = start + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) block += '\n' + lines[i];
   }
-  const out = [];
-  // 1. Every `[[wikilink]]` anywhere in the value — handles inline, flow-list,
-  //    and block-list wikilink forms, and preserves commas inside a name.
-  for (const w of block.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g) || []) {
-    const m = w.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/);
-    if (m) out.push(m[1].trim());
+  return delivery.parseDependencyField(`depends_on:${block}`);
+}
+
+// A2 public Delivery adapter. It keeps markdown/YAML parsing at the consumer
+// boundary while every semantic decision comes from the shared contract API.
+function frontmatterBody(raw) {
+  const match = String(raw || '').match(/^\s*---\n([\s\S]*?)\n---/);
+  return match ? match[1] : '';
+}
+
+function rawScalarField(raw, key) {
+  const line = frontmatterBody(raw).split('\n').find((value) => new RegExp(`^${key}\\s*:`).test(value));
+  return line ? line.slice(line.indexOf(':') + 1).trim() : undefined;
+}
+
+function stripYamlComment(value) {
+  const source = String(value == null ? '' : value);
+  const first = source.search(/\S/);
+  const collection = first >= 0 && (source[first] === '[' || source[first] === '{');
+  let quote = first >= 0 && (source[first] === '"' || source[first] === "'") ? source[first] : null;
+  let escaped = false;
+  let previousSignificant = first >= 0 ? source[first] : '';
+  for (let index = quote ? first + 1 : Math.max(first, 0); index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) { escaped = false; continue; }
+    if (quote === '"') {
+      if (char === '\\') escaped = true;
+      else if (char === '"') { quote = null; previousSignificant = char; }
+      continue;
+    }
+    if (quote === "'") {
+      if (char === "'" && source[index + 1] === "'") index += 1;
+      else if (char === "'") { quote = null; previousSignificant = char; }
+      continue;
+    }
+    if (collection && (char === '"' || char === "'") && /[\[\{,:]/.test(previousSignificant)) {
+      quote = char; continue;
+    }
+    if (char === '#' && (index === 0 || /\s/.test(source[index - 1]))) return source.slice(0, index).trimEnd();
+    if (!/\s/.test(char)) previousSignificant = char;
   }
-  // 2. Bare names: from the value with wikilinks stripped out, take each
-  //    remaining block-list/flow-list token (dash + quotes/brackets removed).
-  const bareBlock = block.replace(/\[\[[^\]]*\]\]/g, '');
-  for (const line of bareBlock.split('\n')) {
-    for (const tok of line.split(',')) {
-      const name = tok.trim().replace(/^-\s*/, '').replace(/[[\]"']/g, '').trim();
-      if (name) out.push(name);
+  return source;
+}
+
+function parseYamlScalar(value) {
+  if (value === undefined) return undefined;
+  const raw = stripYamlComment(value).trim();
+  if (!raw || /^(?:null|~)$/i.test(raw)) return null;
+  if (raw.startsWith('"')) {
+    if (!raw.endsWith('"')) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) { return invalidYamlValue(raw); }
+  }
+  if (raw.startsWith("'")) {
+    if (!raw.endsWith("'")) return invalidYamlValue(raw);
+    const body = raw.slice(1, -1);
+    if (body.replace(/''/g, '').includes("'")) return invalidYamlValue(raw);
+    return body.replace(/''/g, "'");
+  }
+  if (/^(?:true|false)$/i.test(raw)) return raw.toLowerCase() === 'true';
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) return Number(raw);
+  return raw;
+}
+
+function invalidYamlValue(raw) {
+  return { __invalid_yaml__: String(raw || '') };
+}
+
+function jsonDuplicateStatus(raw) {
+  let index = 0; let duplicate = false;
+  const skip = () => { while (/\s/.test(raw[index] || '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (raw[index] !== '"') throw new Error('string');
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === '\\') { index += 2; continue; }
+      if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated');
+  };
+  const value = () => {
+    skip();
+    if (raw[index] === '{') {
+      index += 1; skip();
+      const keys = new Set();
+      if (raw[index] === '}') { index += 1; return; }
+      while (index < raw.length) {
+        const key = string();
+        if (keys.has(key)) duplicate = true;
+        keys.add(key); skip();
+        if (raw[index] !== ':') throw new Error('colon');
+        index += 1; value(); skip();
+        if (raw[index] === '}') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1; skip();
+      }
+      throw new Error('object');
+    }
+    if (raw[index] === '[') {
+      index += 1; skip();
+      if (raw[index] === ']') { index += 1; return; }
+      while (index < raw.length) {
+        value(); skip();
+        if (raw[index] === ']') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+      }
+      throw new Error('array');
+    }
+    if (raw[index] === '"') { string(); return; }
+    const token = raw.slice(index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
+    if (!token) throw new Error('value');
+    index += token[0].length;
+  };
+  try {
+    value(); skip();
+    return index === raw.length ? duplicate : null;
+  } catch (_) { return null; }
+}
+
+function splitYamlFlow(raw) {
+  const values = [];
+  let current = ''; let quote = null; let escaped = false;
+  let squareDepth = 0; let curlyDepth = 0; let wikilinkDepth = 0;
+  let previousSignificant = '';
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index]; const pair = raw.slice(index, index + 2);
+    if (escaped) { current += char; escaped = false; continue; }
+    if (quote) {
+      current += char;
+      if (char === '\\' && quote === '"') escaped = true;
+      else if (char === "'" && quote === "'" && raw[index + 1] === "'") {
+        current += raw[index + 1]; index += 1;
+      }
+      else if (char === quote) { quote = null; previousSignificant = char; }
+      continue;
+    }
+    if (wikilinkDepth === 0 && (char === '"' || char === "'")
+      && (!previousSignificant || /[\[\{,:]/.test(previousSignificant))) {
+      quote = char; current += char; continue;
+    }
+    if (pair === '[[') { wikilinkDepth += 1; current += pair; previousSignificant = '['; index += 1; continue; }
+    if (pair === ']]' && wikilinkDepth > 0) { wikilinkDepth -= 1; current += pair; previousSignificant = ']'; index += 1; continue; }
+    if (wikilinkDepth === 0) {
+      if (char === '[') squareDepth += 1;
+      else if (char === ']') squareDepth -= 1;
+      else if (char === '{') curlyDepth += 1;
+      else if (char === '}') curlyDepth -= 1;
+      if (char === ',' && squareDepth === 0 && curlyDepth === 0) {
+        values.push(current.trim()); current = ''; previousSignificant = ''; continue;
+      }
+    }
+    current += char;
+    if (!/\s/.test(char)) previousSignificant = char;
+  }
+  if (quote || wikilinkDepth || squareDepth || curlyDepth) return null;
+  values.push(current.trim());
+  return values;
+}
+
+function parseYamlValue(value) {
+  const raw = stripYamlComment(value).trim();
+  if (/^\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]$/.test(raw)) return raw;
+  if (raw.startsWith('[')) {
+    if (!raw.endsWith(']')) return invalidYamlValue(raw);
+    const duplicateStatus = jsonDuplicateStatus(raw);
+    if (duplicateStatus) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) {
+      const parts = splitYamlFlow(raw.slice(1, -1));
+      if (!parts) return invalidYamlValue(raw);
+      if (parts.length === 1 && parts[0] === '') return [];
+      return parts.map(parseYamlValue);
     }
   }
-  return [...new Set(out)];
+  if (raw.startsWith('{')) {
+    if (!raw.endsWith('}')) return invalidYamlValue(raw);
+    const duplicateStatus = jsonDuplicateStatus(raw);
+    if (duplicateStatus) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) {
+      const parts = splitYamlFlow(raw.slice(1, -1));
+      if (!parts) return invalidYamlValue(raw);
+      const out = {};
+      for (const part of parts) {
+        const match = part.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+        if (!match || Object.prototype.hasOwnProperty.call(out, match[1])) return invalidYamlValue(raw);
+        out[match[1]] = parseYamlValue(match[2]);
+      }
+      return out;
+    }
+  }
+  return parseYamlScalar(raw);
+}
+
+function typedScalarField(raw, key) {
+  return parseYamlScalar(rawScalarField(raw, key));
+}
+
+function listField(raw, key) {
+  const lines = frontmatterBody(raw).split('\n');
+  const index = lines.findIndex((value) => new RegExp(`^${key}\\s*:`).test(value));
+  if (index < 0) return undefined;
+  const inline = lines[index].slice(lines[index].indexOf(':') + 1).trim();
+  if (inline) return parseYamlValue(inline);
+  const block = [];
+  for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) block.push(lines[i]);
+  const content = block.filter((line) => line.trim() && !line.trim().startsWith('#'));
+  if (!content.length) return null;
+  if (content.length === 1 && content[0].trim() === '[]') return [];
+  const out = []; let currentObject = null;
+  for (const line of content) {
+    const item = line.match(/^\s+-\s*(.*?)\s*$/);
+    if (item) {
+      const mapping = item[1].match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+      if (mapping) {
+        currentObject = { [mapping[1]]: parseYamlValue(mapping[2]) };
+        out.push(currentObject);
+      } else {
+        currentObject = null;
+        out.push(parseYamlValue(item[1]));
+      }
+      continue;
+    }
+    const continuation = line.match(/^\s+([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
+    if (!continuation || !currentObject
+      || Object.prototype.hasOwnProperty.call(currentObject, continuation[1])) return invalidYamlValue(content.join('\n'));
+    currentObject[continuation[1]] = parseYamlValue(continuation[2]);
+  }
+  return out;
+}
+
+function canonicalizeDeploymentTokens(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([vault, additions]) => [
+    vault,
+    Array.isArray(additions)
+      ? additions.map((item) => (typeof item === 'string' ? item.trim() : item))
+      : additions,
+  ]));
+}
+
+function deploymentField(raw) {
+  const lines = frontmatterBody(raw).split('\n');
+  const index = lines.findIndex((value) => /^deploy_subscriptions\s*:/.test(value));
+  if (index < 0) return undefined;
+  const inlineMap = lines[index].slice(lines[index].indexOf(':') + 1).trim();
+  if (inlineMap) return canonicalizeDeploymentTokens(parseYamlValue(inlineMap));
+  const out = {}; let current = null;
+  for (let i = index + 1; i < lines.length; i += 1) {
+    if (lines[i] && !/^\s+/.test(lines[i])) break;
+    if (!lines[i].trim() || lines[i].trim().startsWith('#')) continue;
+    const vault = lines[i].match(/^\s{2}([a-zA-Z0-9_-]+)\s*:\s*(.*?)\s*$/);
+    if (vault) {
+      current = vault[1];
+      const inline = vault[2];
+      if (!inline) out[current] = null;
+      else out[current] = parseYamlValue(inline);
+      continue;
+    }
+    const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
+    if (item && current) {
+      if (out[current] === null) out[current] = [];
+      if (!Array.isArray(out[current])) return invalidYamlValue(lines[i]);
+      out[current].push(parseYamlValue(item[1]));
+      continue;
+    }
+    return invalidYamlValue(lines[i]);
+  }
+  return canonicalizeDeploymentTokens(out);
+}
+
+function evidenceField(raw) {
+  const inline = rawScalarField(raw, 'evidence');
+  if (inline !== undefined) return listField(raw, 'evidence');
+  const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
+  if (!section) return undefined;
+  const claims = section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
+    .filter(Boolean).map((match) => match[1].trim());
+  return claims.length ? claims : undefined;
+}
+
+function parseDeliveryCard(raw, card) {
+  const schemaVersion = typedScalarField(raw, 'schema_version');
+  const authoredCard = typedScalarField(raw, 'card');
+  const executionMode = typedScalarField(raw, 'execution_mode');
+  const touchZones = listField(raw, 'touch_zones');
+  const authoredDependencies = rawScalarField(raw, 'depends_on');
+  const dependencies = listField(raw, 'depends_on');
+  const evidence = evidenceField(raw);
+  const parsed = {
+    // Historical notes may infer a missing identity from their exact board/file
+    // name. Current contracts must author it, and an authored value is never
+    // overwritten by the caller because that would mask identity drift.
+    card: authoredCard !== undefined ? authoredCard : (schemaVersion === undefined ? card : ''),
+    parent_card: typedScalarField(raw, 'parent_card'),
+    slice: typedScalarField(raw, 'slice'),
+    model_profile: typedScalarField(raw, 'model_profile'),
+    status: typedScalarField(raw, 'status'),
+    deploy_subscriptions: deploymentField(raw),
+    epic: typedScalarField(raw, 'epic'),
+    context_pack: typedScalarField(raw, 'context_pack'),
+  };
+  const authoredBatchPolicy = typedScalarField(raw, 'batch_policy');
+  const batchPolicy = parseBatchPolicy(raw);
+  const riskDimensions = listField(raw, 'risk_dimensions');
+  const authoredReleaseRequired = typedScalarField(raw, 'release_required');
+  const authoredDeploymentRequired = typedScalarField(raw, 'deployment_required');
+  if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
+  if (executionMode !== undefined) parsed.execution_mode = executionMode;
+  if (touchZones !== undefined) parsed.touch_zones = touchZones;
+  if (authoredDependencies !== undefined) parsed.depends_on = dependencies;
+  if (evidence !== undefined) parsed.evidence = evidence;
+  if (authoredBatchPolicy !== undefined) parsed.batch_policy = authoredBatchPolicy;
+  else if (schemaVersion === undefined && batchPolicy) parsed.batch_policy = batchPolicy;
+  if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
+  if (authoredReleaseRequired !== undefined) parsed.release_required = authoredReleaseRequired;
+  if (authoredDeploymentRequired !== undefined) parsed.deployment_required = authoredDeploymentRequired;
+  return parsed;
+}
+
+function prepareDeliveryObject(value) {
+  const original = value && typeof value === 'object' && !Array.isArray(value)
+    ? JSON.parse(JSON.stringify(value)) : {};
+  const version = original.schema_version;
+  const hasVersion = Object.prototype.hasOwnProperty.call(original, 'schema_version');
+  const comparison = hasVersion ? delivery.compareVersions(version, delivery.CONTRACT_VERSION) : -1;
+  if (hasVersion && (typeof version !== 'string' || comparison == null)) {
+    const validation = delivery.validateCard(original, 'current');
+    return { ok: false, source: 'invalid', card: validation.card, validation, migration: null };
+  }
+  if (comparison === 1) {
+    const validation = delivery.validateCard(original, 'current');
+    return { ok: false, source: 'future', card: validation.card, validation, migration: null };
+  }
+  if (comparison === -1) {
+    const historical = delivery.validateCard(original, 'historical');
+    const migrationBackfills = new Set(['execution_mode', 'depends_on', 'deploy_subscriptions']);
+    const blockingErrors = historical.errors.filter((item) => !(
+      item.code === 'required-field' && migrationBackfills.has(item.field)
+    ));
+    if (blockingErrors.length) {
+      return {
+        ok: false, source: 'historical', card: historical.card, migration: null,
+        validation: { ...historical, ok: false, errors: blockingErrors },
+      };
+    }
+    const migration = delivery.migrate(original, version);
+    if (!migration.ok) {
+      return {
+        ok: false, source: 'historical', card: original, migration,
+        validation: { ok: false, errors: [{ code: migration.reason, field: 'schema_version', message: migration.reason }], warnings: [] },
+      };
+    }
+    const validation = delivery.validateCard(migration.note, 'historical');
+    const migratedCard = { ...validation.card };
+    // normalizeCard represents an omitted optional historical evidence field as
+    // []; preserve the omission so a second shared validation does not turn a
+    // readable historical card into an explicitly invalid empty evidence list.
+    if (!Object.prototype.hasOwnProperty.call(migration.note, 'evidence')) delete migratedCard.evidence;
+    return { ok: validation.ok, source: 'historical', card: migratedCard, validation, migration };
+  }
+  const validation = delivery.validateCard(original, 'current');
+  return { ok: validation.ok && !validation.requires_migration, source: 'current', card: validation.card, validation, migration: null };
+}
+
+function prepareDeliveryCard(raw, card) {
+  const rawCard = parseDeliveryCard(raw, card);
+  const prepared = prepareDeliveryObject(rawCard);
+  const authoredIdentity = typedScalarField(raw, 'card');
+  const expectedIdentity = delivery.normalizeIdentity(card);
+  const boundaryErrors = [];
+  if (typeof rawCard.depends_on === 'string' && !delivery.normalizeIdentity(rawCard.depends_on)) {
+    boundaryErrors.push({
+      code: 'invalid-dependency', field: 'depends_on',
+      message: 'authored scalar dependency must contain a non-empty identity',
+    });
+  }
+  if (authoredIdentity !== undefined && expectedIdentity
+    && delivery.normalizeIdentity(authoredIdentity) !== expectedIdentity) {
+    boundaryErrors.push({
+      code: 'identity-mismatch', field: 'card',
+      message: `authored card identity ${delivery.normalizeIdentity(authoredIdentity)} differs from ${expectedIdentity}`,
+    });
+  }
+  const contractFields = new Set(delivery.registry.types['execution-card'].fields.map((field) => field.name));
+  const counts = new Map();
+  const deploymentVaultCounts = new Map();
+  let inDeploymentMap = false;
+  for (const line of frontmatterBody(raw).split('\n')) {
+    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*:/);
+    if (match) {
+      inDeploymentMap = match[1] === 'deploy_subscriptions';
+      if (contractFields.has(match[1])) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+      continue;
+    }
+    if (inDeploymentMap) {
+      const vault = line.match(/^\s{2}([a-zA-Z0-9_-]+)\s*:/);
+      if (vault) deploymentVaultCounts.set(vault[1], (deploymentVaultCounts.get(vault[1]) || 0) + 1);
+      else if (line && !/^\s+/.test(line)) inDeploymentMap = false;
+    }
+  }
+  for (const [field, count] of counts) {
+    if (count > 1) boundaryErrors.push({
+      code: 'duplicate-field', field,
+      message: `${field} is authored ${count} times and is ambiguous`,
+    });
+  }
+  for (const [vault, count] of deploymentVaultCounts) {
+    if (count > 1) boundaryErrors.push({
+      code: 'duplicate-field', field: `deploy_subscriptions.${vault}`,
+      message: `deploy_subscriptions.${vault} is authored ${count} times and is ambiguous`,
+    });
+  }
+  if (boundaryErrors.length) {
+    return {
+      ...prepared, ok: false, raw_card: rawCard,
+      validation: {
+        ...(prepared.validation || {}), ok: false,
+        errors: [...((prepared.validation && prepared.validation.errors) || []), ...boundaryErrors],
+      },
+    };
+  }
+  return { ...prepared, raw_card: rawCard };
+}
+
+function validationReason(prepared) {
+  const errors = prepared && prepared.validation && Array.isArray(prepared.validation.errors)
+    ? prepared.validation.errors : [];
+  return errors.length ? errors.map((item) => `${item.code}:${item.field}`).join(', ') : 'contract-invalid';
 }
 
 // Parse autoloop-queue.md into items. Each item starts at a `- id:` line; its
@@ -220,13 +625,13 @@ function selectCard(o) {
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const raw = loadBody ? (loadBody(card) || '') : '';
-    const status = parseCardStatus(raw);
+    const prepared = prepareDeliveryCard(raw, card);
+    if (!prepared.ok) {
+      skipped.push({ card, reason: `delivery contract invalid: ${validationReason(prepared)}` }); continue;
+    }
+    const status = prepared.card.status;
     if (status !== undefined && status !== 'planning') {
       skipped.push({ card, reason: `card status is not planning: ${status || 'unknown'}` }); continue;
-    }
-    const batchPolicy = parseBatchPolicy(raw);
-    if (batchPolicy === 'supervised_only' && !supervised) {
-      skipped.push({ card, reason: 'batch_policy supervised_only requires an explicit supervised run' }); continue;
     }
     // Dependency gate: a card with `depends_on: [[X]]` frontmatter is skipped
     // until EVERY predecessor is in the Completed column (the loop's done-signal).
@@ -234,9 +639,17 @@ function selectCard(o) {
     // leaves the card un-eligible (it never runs prematurely) and surfaces the
     // reason in `skipped`, rather than guessing. This is what lets a multi-slice
     // epic self-sequence in order when the whole chain sits in Planning.
-    const deps = parseDependsOn(raw);
+    const deps = prepared.card.depends_on;
     const unmet = deps.filter((d) => !completed.has(d));
     if (unmet.length) { skipped.push({ card, reason: `depends_on not complete: ${unmet.join(', ')}` }); continue; }
+    const eligibility = delivery.batchEligibility(prepared.card, {
+      mode: prepared.source === 'historical' ? 'historical' : 'current',
+      supervised,
+      dependency_result: { eligible: true, missing_proof: [] },
+    });
+    if (!eligibility.eligible) {
+      skipped.push({ card, reason: `delivery batch ineligible: ${eligibility.reason}` }); continue;
+    }
     // Attempt-anything: do NOT skip on broad scope — pick it and pass a hint so
     // Phase C can scope / block-with-questions if it really is too big.
     const scope = isBroadScope(`${card}\n${stripCardChrome(raw)}`);
@@ -288,6 +701,7 @@ module.exports = {
   selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked,
   parseCheckedColumn, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
   normalizeStatus, parseCardStatus, parseBatchPolicy,
+  delivery, parseDeliveryCard, prepareDeliveryObject, prepareDeliveryCard, validationReason,
 };
 
 if (require.main === module) {

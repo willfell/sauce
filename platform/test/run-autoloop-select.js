@@ -7,7 +7,7 @@
 'use strict';
 const path = require('path');
 const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
-  normalizeStatus, parseCardStatus, parseBatchPolicy } =
+  normalizeStatus, parseCardStatus, parseBatchPolicy, delivery } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -32,6 +32,27 @@ let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
   if (cond) { console.log(`  ok  ${label}`); pass++; }
   else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; }
+}
+
+function deliveryCard(name, body, options = {}) {
+  const zones = options.zones || ['Docs/autoloop-fixture.md'];
+  const deps = options.deps || [];
+  const profile = options.profile || (zones.some((zone) => /^(?:scripts\/autoloop|platform\/mechanisms)/.test(zone)) ? 'heavy' : 'standard');
+  const batchPolicy = options.batch_policy || delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
+  const evidence = [{
+    source_identity: 'run-autoloop-select fixture', captured_at: '2026-07-17T06:00:00Z',
+    revision: 'fixture-v1', locator: 'platform/test/run-autoloop-select.js', claim: 'Selector fixture.',
+  }];
+  return [
+    '---', `card: ${name}`, `schema_version: ${delivery.CONTRACT_VERSION}`,
+    'parent_card: "[[Selector fixtures]]"', `slice: ${name}`, `model_profile: ${profile}`,
+    'execution_mode: release', `batch_policy: ${batchPolicy}`, `status: ${options.status || 'planning'}`,
+    'kanban_column: In Planning', 'touch_zones:', ...zones.map((zone) => `  - ${zone}`),
+    ...(deps.length ? ['depends_on:', ...deps.map((dep) => `  - "[[${dep}]]"`)] : ['depends_on: []']),
+    'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
+    'epic: "[[Selector fixtures]]"', `evidence: ${JSON.stringify(evidence)}`, 'risk_dimensions: []',
+    'release_required: true', 'deployment_required: true', ...(options.frontmatter || []), '---', '', body,
+  ].join('\n');
 }
 
 // ---- isBroadScope (AB-*) ----
@@ -60,9 +81,9 @@ ok('PB-7 recommendedFrom null when absent', recommendedFrom('## Board snapshot\n
 
 // ---- selectCard (SC-*) ----
 const bodies = {
-  'Fix breadcrumb paren': 'Small render fix for a stray paren.',
-  'Add render harness': 'Add a behavioral harness for X.',
-  'Wiki area redesign': 'Redesign the entire wiki area across all blueprints.',
+  'Fix breadcrumb paren': deliveryCard('Fix breadcrumb paren', 'Small render fix for a stray paren.'),
+  'Add render harness': deliveryCard('Add render harness', 'Add a behavioral harness for X.'),
+  'Wiki area redesign': deliveryCard('Wiki area redesign', 'Redesign the entire wiki area across all blueprints.'),
 };
 const loadBody = (c) => bodies[c] || '';
 ok('SC-1 halt wins', selectCard({ haltExists: true, boardMd: BOARD, loadBody }).action === 'halt');
@@ -88,11 +109,13 @@ ok('NS-1 canonical status aliases normalize to one vocabulary',
   && ['blocked', 'parked', 'completed'].every((value) => normalizeStatus(value) === value));
 ok('NS-2 unknown statuses stay outside the execution contract', normalizeStatus('post-ga') === null);
 const OBSIDIAN_PLANNING = [
-  '---', 'kanban_column: In Planning', 'status: in-planning',
-  'status_prev: planning', 'status_changed_at: 2026-07-16', '---', '',
-  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
-  '## A1 status normalization and drift visibility', '',
-  'batch_policy: supervised_only — Normalize the live status vocabulary.',
+  deliveryCard('A1 status normalization and drift visibility', [
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+    '## A1 status normalization and drift visibility', '', 'Normalize the live status vocabulary.',
+  ].join('\n'), {
+    status: 'in-planning', batch_policy: 'supervised_only', profile: 'heavy',
+    zones: ['scripts/autoloop/select-card.js'], frontmatter: ['status_prev: planning', 'status_changed_at: 2026-07-16'],
+  }),
 ].join('\n');
 ok('NS-3 real Obsidian planning rewrite parses as canonical planning', parseCardStatus(OBSIDIAN_PLANNING) === 'planning');
 ok('NS-4 textual A1 policy remains supervised_only', parseBatchPolicy(OBSIDIAN_PLANNING) === 'supervised_only');
@@ -104,6 +127,157 @@ ok('NS-6 explicit supervised eligibility accepts rewritten A1',
   selectCard({ boardMd: supervisedBoard, loadBody: supervisedLoad, supervised: true }).card === 'A1 status normalization and drift visibility');
 ok('NS-7 a card projected as in-progress is not planning-eligible',
   selectCard({ boardMd: supervisedBoard, loadBody: () => OBSIDIAN_PLANNING.replace('status: in-planning', 'status: in-progress'), supervised: true }).action === 'no-eligible-work');
+ok('NS-8 empty card bodies fail closed before selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Missing body]]\n', loadBody: () => '' }).action === 'no-eligible-work');
+ok('NS-9 skeletal historical cards fail closed before selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Skeleton]]\n', loadBody: () => '---\nstatus: planning\n---\n' }).action === 'no-eligible-work');
+ok('NS-10 authored and board card identities must match exactly',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Board identity]]\n', loadBody: () => deliveryCard('Authored identity', 'Mismatch.') }).action === 'no-eligible-work');
+const requiredFieldCard = deliveryCard('Required fields', 'Required field fixture.');
+ok('NS-11 current cards missing execution_mode fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^execution_mode:.*\n/m, '') }).action === 'no-eligible-work');
+ok('NS-12 current cards missing depends_on fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^depends_on: \[\]\n/m, '') }).action === 'no-eligible-work');
+const evidenceLessHistorical = deliveryCard('Historical evidence optional', 'Historical fixture.')
+  .replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^evidence:.*\n/m, '');
+ok('NS-13 evidence-less historical cards remain readable through in-memory migration',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => evidenceLessHistorical }).card === 'Historical evidence optional');
+const sparseStaleHistorical = requiredFieldCard
+  .replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 0.9.0')
+  .replace(/^execution_mode:.*\n/m, '').replace(/^batch_policy:.*\n/m, '')
+  .replace(/^depends_on:.*\n/m, '')
+  .replace(/^deploy_subscriptions:\n  headspace: \[\]\n  accuris: \[\]\n  ero: \[\]\n/m, '')
+  .replace(/^release_required:.*\n/m, '').replace(/^deployment_required:.*\n/m, '');
+ok('NS-13b stale historical cards reach shared migration-owned field backfills',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => sparseStaleHistorical }).card === 'Required fields');
+ok('NS-14 malformed scalar touch_zones fail closed instead of being coerced',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
+const emptyIdentityHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^card:.*$/m, 'card:');
+ok('NS-15 explicitly empty historical identity fails closed instead of inheriting the board name',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyIdentityHistorical }).action === 'no-eligible-work');
+const emptyPolicyHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*$/m, 'batch_policy:');
+ok('NS-16 explicitly empty historical batch policy fails closed instead of being treated as omitted',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyPolicyHistorical }).action === 'no-eligible-work');
+ok('NS-17 multi-token frontmatter batch policy fails closed instead of truncating',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('batch_policy: continue', 'batch_policy: continue garbage') }).action === 'no-eligible-work');
+ok('NS-18 duplicate card keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard: Different') }).action === 'no-eligible-work');
+ok('NS-19 duplicate status keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('status: planning', 'status: planning\nstatus: blocked') }).action === 'no-eligible-work');
+ok('NS-20 duplicate deployment vault keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace: []') }).action === 'no-eligible-work');
+const currentPolicyOnlyInBody = requiredFieldCard.replace(/^batch_policy:.*\n/m, '') + '\nbatch_policy: continue — prose only\n';
+ok('NS-21 current cards cannot source a missing batch policy from body prose',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => currentPolicyOnlyInBody }).action === 'no-eligible-work');
+ok('NS-22 an empty historical Evidence section remains readable as omitted evidence',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => `${evidenceLessHistorical}\n### Evidence\n\n` }).card === 'Historical evidence optional');
+ok('NS-23 spaced duplicate card keys fail closed as ambiguous YAML',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard : Different') }).action === 'no-eligible-work');
+ok('NS-24 spaced duplicate deployment keys fail closed as ambiguous YAML',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace : []') }).action === 'no-eligible-work');
+const contextPackCard = requiredFieldCard.replace('epic: "[[Selector fixtures]]"', 'context_pack: "Docs/context.md"\nepic: "[[Selector fixtures]]"');
+ok('NS-25 valid optional context_pack is preserved through shared validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard }).card === 'Required fields');
+ok('NS-26 explicitly empty context_pack fails closed instead of being discarded',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack:') }).action === 'no-eligible-work');
+ok('NS-27 malformed release_required fails closed instead of defaulting true',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('release_required: true', 'release_required: nonsense') }).action === 'no-eligible-work');
+ok('NS-28 YAML-null depends_on fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on:') }).action === 'no-eligible-work');
+ok('NS-29 YAML-null risk_dimensions fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('risk_dimensions: []', 'risk_dimensions:') }).action === 'no-eligible-work');
+ok('NS-30 YAML-null deployment vault fails closed instead of becoming an empty array',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace:') }).action === 'no-eligible-work');
+ok('NS-31 quoted boolean remains a string and fails shared boolean validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('release_required: true', 'release_required: "true"') }).action === 'no-eligible-work');
+ok('NS-32 unquoted null parent identity fails closed instead of becoming a string',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: null') }).action === 'no-eligible-work');
+ok('NS-33 unquoted null context_pack fails closed instead of becoming a string',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack: null') }).action === 'no-eligible-work');
+ok('NS-34 unquoted null dependency fails closed instead of becoming an identity',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: null') }).action === 'no-eligible-work');
+ok('NS-35 flow-list null dependency retains its YAML type and fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: [null]') }).action === 'no-eligible-work');
+ok('NS-36 block-list null dependency retains its YAML type and fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on:\n  - null') }).action === 'no-eligible-work');
+ok('NS-37 touch-zone tuple preserves its invalid root for shared validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: other\n    path: package.json') }).action === 'no-eligible-work');
+ok('NS-38 valid workshop touch-zone tuple remains selectable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: workshop\n    path: Docs/autoloop-fixture.md') }).card === 'Required fields');
+ok('NS-39 malformed risk-dimension mapping fails closed instead of becoming an empty list',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('risk_dimensions: []', 'risk_dimensions:\n  bad: mapping') }).action === 'no-eligible-work');
+ok('NS-40 malformed double-quoted scalar escape fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: "bad\\q"') }).action === 'no-eligible-work');
+ok('NS-41 unmatched scalar quote fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: "bad') }).action === 'no-eligible-work');
+ok('NS-42 duplicate JSON touch-zone keys fail closed before parsing overwrites them',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [{"root":"other","root":"workshop","path":"Docs/autoloop-fixture.md"}]') }).action === 'no-eligible-work');
+ok('NS-43 duplicate evidence keys fail closed before parsing overwrites them',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^evidence:.*$/m, 'evidence: [{"source_identity":"fixture","captured_at":"invalid","captured_at":"2026-07-17T06:00:00Z","revision":"v1","locator":"fixture","claim":"claim"}]') }).action === 'no-eligible-work');
+ok('NS-44 repeated evidence field names in separate objects remain unambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^evidence:.*$/m, 'evidence: [{"source_identity":"fixture-a","captured_at":"2026-07-17T06:00:00Z","revision":"v1","locator":"fixture-a","claim":"claim a"},{"source_identity":"fixture-b","captured_at":"2026-07-17T06:01:00Z","revision":"v2","locator":"fixture-b","claim":"claim b"}]') }).card === 'Required fields');
+ok('NS-45 duplicate keys in a block touch-zone tuple fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: other\n    root: workshop\n    path: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
+ok('NS-46 explicitly empty quoted scalar dependency fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: ""') }).action === 'no-eligible-work');
+ok('NS-47 nested YAML flow dependencies remain structured and fail shared identity typing',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: [[A], [B]]') }).action === 'no-eligible-work');
+const blockEvidenceCard = requiredFieldCard.replace(/^evidence:.*$/m, [
+  'evidence:', '  - source_identity: selector fixture', '    captured_at: "2026-07-17T06:00:00Z"',
+  '    revision: fixture-v1', '    locator: platform/test/run-autoloop-select.js', '    claim: Block evidence fixture.',
+].join('\n'));
+ok('NS-48 block YAML evidence-claim mappings remain readable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => blockEvidenceCard }).card === 'Required fields');
+const inlineDeploymentCard = requiredFieldCard.replace(
+  'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+  'deploy_subscriptions: {headspace: [], accuris: [], ero: []}',
+);
+ok('NS-49 inline YAML deployment map remains readable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => inlineDeploymentCard }).card === 'Required fields');
+ok('NS-50 malformed indented deployment-map lines fail closed instead of disappearing',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  ero: []', '  ero: []\n    broken mapping line') }).action === 'no-eligible-work');
+ok('NS-51 unquoted YAML flow arrays remain typed deployment lists',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [mechanism:delivery]') }).card === 'Required fields');
+const commentedContractCard = requiredFieldCard
+  .replace('parent_card: "[[Selector fixtures]]"', 'parent_card: Selector fixtures # same parent authority')
+  .replace('  - Docs/autoloop-fixture.md', '  - Docs/autoloop-fixture.md # same touch-zone authority');
+ok('NS-52 unquoted YAML comments do not become contract identity or path data',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedContractCard }).card === 'Required fields');
+ok('NS-53 quoted hash characters remain literal scalar data',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: "Selector # literal"') }).card === 'Required fields');
+ok('NS-54 apostrophes in plain YAML remain literal while trailing comments are stripped',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', "parent_card: Will's project # comment") }).card === 'Required fields');
+ok('NS-55 interior double quotes in plain YAML remain literal while trailing comments are stripped',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: Project "Alpha" # comment') }).card === 'Required fields');
+const commentedStructuredCard = requiredFieldCard
+  .replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [Docs/autoloop-fixture.md] # unchanged zones')
+  .replace('depends_on: []', 'depends_on: [] # no dependencies')
+  .replace('deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []', 'deploy_subscriptions: {headspace: [], accuris: [], ero: []} # unchanged map')
+  .replace(/^evidence: (.*)$/m, 'evidence: $1 # pinned evidence')
+  .replace('risk_dimensions: []', 'risk_dimensions: [] # no explicit risk');
+ok('NS-56 trailing comments on inline structured YAML preserve contract semantics',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedStructuredCard }).card === 'Required fields');
+ok('NS-57 hash characters inside quoted flow values remain literal',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: ["Docs/hash # literal.md"] # trailing comment') }).card === 'Required fields');
+ok('NS-58 apostrophes inside plain flow paths remain literal while comments are stripped',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', "touch_zones: [Docs/Will's file.md] # trailing comment") }).card === 'Required fields');
+ok('NS-59 apostrophes inside flow wikilinks remain literal while comments are stripped',
+  selectCard({ boardMd: "## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[Will's project]]\n", loadBody: () => requiredFieldCard.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment") }).card === 'Required fields');
+ok('NS-60 interior double quotes inside plain flow paths remain literal',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment') }).card === 'Required fields');
+ok('NS-61 doubled apostrophes preserve commas inside single-quoted flow values',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment") }).card === 'Required fields');
+ok('NS-62 deployment subscription whitespace canonicalizes without blocking selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [" mechanism:delivery "]') }).card === 'Required fields');
+ok('NS-63 whitespace-equivalent duplicate subscriptions still fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]') }).action === 'no-eligible-work');
+const commentedBlockCard = blockEvidenceCard
+  .replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  # canonical zone\n  - Docs/autoloop-fixture.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace('evidence:\n', 'evidence:\n  # pinned evidence\n')
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []');
+ok('NS-64 comment-only lines inside block contract fields preserve semantics',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedBlockCard }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
@@ -130,9 +304,9 @@ ok('DEP-1 parseDependsOn reads every YAML shape (inline/flow/block/alias/bare)',
   && JSON.stringify(parseDependsOn('---\ntype: card\n---')) === '[]');
 // A depends-chain board: A done, B depends A, C depends B.
 const depBodies = {
-  A: '---\ntype: card\n---\ndo A',
-  B: '---\ndepends_on: "[[A]]"\n---\ndo B',
-  C: '---\ndepends_on: "[[B]]"\n---\ndo C',
+  A: deliveryCard('A', 'do A'),
+  B: deliveryCard('B', 'do B', { deps: ['A'] }),
+  C: deliveryCard('C', 'do C', { deps: ['B'] }),
 };
 const depLoad = (c) => depBodies[c] || '';
 const depBoard = '## In Planning\n- [ ] [[B]]\n- [ ] [[C]]\n## Completed\n- [x] [[A]]\n';
@@ -168,7 +342,7 @@ ok('SCH-1 strips frontmatter', !stripCardChrome(CHROME).includes('status: in-pla
 ok('SCH-2 strips dataviewjs fenced block', !stripCardChrome(CHROME).includes('customjs-guard'));
 ok('SCH-3 keeps the task prose', stripCardChrome(CHROME).includes('Fix the separator'));
 const chromeBoard = '## In Planning\n- [ ] [[Chrome card]]\n## In Progress\n';
-const chromeLoad = (c) => c === 'Chrome card' ? ('---\nx: ' + 'y'.repeat(1300) + '\n---\n```dataviewjs\ncode\n```\nFix a small styling bug.') : '';
+const chromeLoad = (c) => c === 'Chrome card' ? deliveryCard('Chrome card', '```dataviewjs\ncode\n```\nFix a small styling bug.', { frontmatter: [`x: ${'y'.repeat(1300)}`] }) : '';
 ok('SCH-4 chrome-inflated card → broadHint null after strip (still picked)',
   (r => r.action === 'work' && r.broadHint === null)(selectCard({ boardMd: chromeBoard, loadBody: chromeLoad })));
 

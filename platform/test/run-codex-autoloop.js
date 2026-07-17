@@ -14,22 +14,42 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
-const { normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
+const {
+  normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
+  delivery, prepareDeliveryCard, prepareDeliveryObject,
+} = require('../../scripts/autoloop/select-card');
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
 
-function card({ profile = 'standard', zones = ['platform/mechanisms/example'], deps = [], deploy = true, parent = '' } = {}) {
+function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
+  const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
+  const evidence = [{
+    source_identity: 'autoloop test', captured_at: '2026-07-17T06:00:00Z',
+    revision: 'fixture-v1', locator: 'platform/test/run-codex-autoloop.js', claim: 'Bounded test card.',
+  }];
   return [
     '---',
+    `card: ${name}`,
+    `schema_version: ${delivery.CONTRACT_VERSION}`,
+    `parent_card: "[[${parent}]]"`,
+    'slice: T1',
     `model_profile: ${profile}`,
-    ...(parent ? [`parent_card: "[[${parent}]]"`] : []),
+    'execution_mode: release',
+    `batch_policy: ${policy}`,
+    'status: planning',
     'touch_zones:', ...zones.map((z) => `  - ${z}`),
-    'depends_on:', ...deps.map((d) => `  - "[[${d}]]"`),
+    ...(deps.length ? ['depends_on:', ...deps.map((d) => `  - "[[${d}]]"`)] : ['depends_on: []']),
     ...(deploy ? ['deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []'] : []),
+    'context_pack: "Docs/test-context.md"',
+    'epic: "[[Test epic]]"',
+    `evidence: ${JSON.stringify(evidence)}`,
+    'risk_dimensions: []',
+    'release_required: true',
+    'deployment_required: true',
     '---', '', '# Work', '', 'Bounded work.',
   ].join('\n');
 }
@@ -42,8 +62,109 @@ eq(meta.touchZones, ['platform/install.js', 'platform/test/run-x.js'], 'parses t
 eq(meta.dependencies, ['A'], 'parses dependencies');
 eq(meta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'parses deployment map');
 eq(validateExecutionMeta(meta), [], 'valid execution metadata');
+eq(meta.contractVersion, delivery.CONTRACT_VERSION, 'coordinator reports the shared Delivery contract version');
+eq(meta.contractSource, 'current', 'versioned execution metadata uses the current Delivery path');
 ok(validateExecutionMeta(parseExecutionMeta(card({ deploy: false }))).includes('deploy_subscriptions is required'), 'deployment map required');
 ok(validateExecutionMeta(parseExecutionMeta(card({ profile: 'luna' }))).some((e) => /model_profile/.test(e)), 'only two model profiles');
+
+const currentRaw = card();
+const historicalRaw = currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}\n`, '').replace('batch_policy: continue\n', '');
+const historicalSnapshot = historicalRaw;
+const historicalPrepared = prepareDeliveryCard(historicalRaw, 'Test card');
+ok(historicalPrepared.ok, 'unversioned historical cards are readable through the shared compatibility path');
+eq(historicalPrepared.source, 'historical', 'unversioned cards are identified as historical');
+eq(historicalPrepared.card.schema_version, delivery.CONTRACT_VERSION, 'historical cards migrate in memory to the current schema');
+eq(historicalRaw, historicalSnapshot, 'historical compatibility never rewrites the protected source note');
+const stalePrepared = prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 0.9.0'), 'Test card');
+ok(stalePrepared.ok && stalePrepared.migration.applied.some((item) => /schema_version/.test(item)), 'stale schema versions migrate deterministically in memory');
+const sparseStaleObject = JSON.parse(JSON.stringify(delivery.registry.fixtures.base_execution_card));
+sparseStaleObject.schema_version = '0.9.0';
+for (const field of ['execution_mode', 'depends_on', 'deploy_subscriptions', 'release_required', 'deployment_required', 'batch_policy']) delete sparseStaleObject[field];
+const sparseStalePrepared = prepareDeliveryObject(sparseStaleObject);
+ok(sparseStalePrepared.ok, 'coordinator permits shared migration-owned backfills on stale historical cards');
+eq(sparseStalePrepared.card.depends_on, [], 'historical migration backfills dependencies');
+eq(sparseStalePrepared.card.deploy_subscriptions, { headspace: [], accuris: [], ero: [] }, 'historical migration backfills the deployment map');
+ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 9.0.0'), 'Test card').ok, 'future schema versions fail closed');
+ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: v1'), 'Test card').ok, 'malformed schema versions fail closed');
+ok(!prepareDeliveryCard(currentRaw.replace('status: planning', 'status: mystery'), 'Test card').ok, 'unknown lifecycle vocabulary fails closed');
+const emptyScalarDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: ""'));
+ok(!emptyScalarDependency.contractOk, 'coordinator rejects an explicitly empty quoted scalar dependency');
+ok(validateExecutionMeta(emptyScalarDependency).some((error) => /invalid-dependency:depends_on/.test(error)), 'coordinator surfaces the empty scalar dependency boundary error');
+const nestedFlowDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: [[A], [B]]'));
+ok(!nestedFlowDependency.contractOk, 'coordinator rejects nested YAML flow sequences as non-string dependencies');
+ok(validateExecutionMeta(nestedFlowDependency).some((error) => /depends_on/.test(error)), 'coordinator surfaces nested dependency typing failure');
+const blockEvidenceMeta = parseExecutionMeta(currentRaw.replace(/^evidence:.*$/m, [
+  'evidence:', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+  '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Block evidence fixture.',
+].join('\n')));
+ok(blockEvidenceMeta.contractOk, 'coordinator accepts valid block YAML evidence-claim mappings');
+const inlineDeploymentMeta = parseExecutionMeta(currentRaw.replace(
+  'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+  'deploy_subscriptions: {headspace: [], accuris: [], ero: []}',
+));
+ok(inlineDeploymentMeta.contractOk, 'coordinator accepts a valid inline YAML deployment map');
+eq(inlineDeploymentMeta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'inline deployment map preserves every required vault');
+const malformedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  ero: []', '  ero: []\n    broken mapping line'));
+ok(!malformedDeploymentMeta.contractOk, 'coordinator rejects unsupported indented deployment-map lines');
+const flowDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [mechanism:delivery]'));
+ok(flowDeploymentMeta.contractOk, 'coordinator accepts unquoted YAML flow arrays for deployment additions');
+eq(flowDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator preserves typed unquoted flow deployment entries');
+const commentedMeta = parseExecutionMeta(currentRaw
+  .replace('parent_card: "[[Test parent]]"', 'parent_card: Test parent # first comment')
+  .replace('  - Docs/example.md', '  - Docs/example.md # first comment'));
+const differentlyCommentedMeta = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: Test parent # second comment'));
+eq(commentedMeta.parentCard, 'Test parent', 'coordinator strips unquoted YAML comments from parent identity');
+eq(commentedMeta.touchZones, ['Docs/example.md'], 'coordinator strips unquoted YAML comments from touch zones');
+ok(sameParentConflict(differentlyCommentedMeta.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: commentedMeta.parentCard }]), 'different comments cannot evade same-parent conflict detection');
+ok(zonesOverlap(commentedMeta.touchZones[0], 'Docs/example.md'), 'commented touch zones retain exact conflict authority');
+eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: "Test # literal"')).parentCard, 'Test # literal', 'quoted hash remains literal parent data');
+const apostropheParentA = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', "parent_card: Will's project # first"));
+const apostropheParentB = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', "parent_card: Will's project # second"));
+eq(apostropheParentA.parentCard, "Will's project", 'apostrophe remains literal in a plain parent scalar');
+ok(sameParentConflict(apostropheParentB.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: apostropheParentA.parentCard }]), 'apostrophe-bearing parents cannot evade same-parent conflict via comments');
+eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: Project "Alpha" # comment')).parentCard, 'Project "Alpha"', 'interior double quotes remain literal in a plain parent scalar');
+const commentedStructuredMeta = parseExecutionMeta(currentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/example.md] # unchanged zones')
+  .replace('depends_on: []', 'depends_on: [] # no dependencies')
+  .replace('deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []', 'deploy_subscriptions: {headspace: [], accuris: [], ero: []} # unchanged map')
+  .replace(/^evidence: (.*)$/m, 'evidence: $1 # pinned evidence')
+  .replace('risk_dimensions: []', 'risk_dimensions: [] # no explicit risk'));
+ok(commentedStructuredMeta.contractOk, 'coordinator accepts trailing comments on inline structured YAML');
+eq(commentedStructuredMeta.touchZones, ['Docs/example.md'], 'structured comments do not alter touch-zone authority');
+eq(commentedStructuredMeta.dependencies, [], 'structured comments do not invent dependencies');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: ["Docs/hash # literal.md"] # trailing comment')).touchZones, ['Docs/hash # literal.md'], 'quoted hash inside a flow value remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: [Docs/Will's file.md] # trailing comment")).touchZones, ["Docs/Will's file.md"], 'apostrophe inside a plain flow path remains literal');
+eq(parseExecutionMeta(currentRaw.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment")).dependencies, ["Will's project"], 'apostrophe inside a flow wikilink remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment')).touchZones, ['Docs/Project "Alpha".md'], 'interior double quote inside a plain flow path remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment")).touchZones, ["Docs/Will's, file.md"], 'doubled apostrophe preserves a comma inside a single-quoted flow path');
+const spacedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [" mechanism:delivery "]'));
+ok(spacedDeploymentMeta.contractOk, 'coordinator accepts canonicalizable deployment subscription whitespace');
+eq(spacedDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator trims deployment subscription tokens');
+ok(!parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]')).contractOk, 'coordinator still rejects whitespace-equivalent duplicate subscriptions');
+const commentedBlockMeta = parseExecutionMeta(currentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones:\n  # canonical zone\n  - Docs/example.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace(/^evidence:.*$/m, [
+    'evidence:', '  # pinned evidence', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+    '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Block evidence fixture.',
+  ].join('\n'))
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []'));
+ok(commentedBlockMeta.contractOk, 'coordinator accepts comment-only lines inside block contract fields');
+eq(commentedBlockMeta.touchZones, ['Docs/example.md'], 'block comments do not alter touch zones');
+eq(commentedBlockMeta.dependencies, [], 'block comments do not alter dependencies');
+
+const sharedFixtures = delivery.registry.fixtures;
+const fixtureValue = (fixture) => {
+  const value = JSON.parse(JSON.stringify(sharedFixtures.base_execution_card));
+  for (const field of fixture.remove || []) delete value[field];
+  return Object.assign(value, JSON.parse(JSON.stringify(fixture.patch || {})));
+};
+for (const fixture of sharedFixtures.valid) {
+  ok(prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter accepts shared valid fixture: ${fixture.name}`);
+}
+for (const fixture of sharedFixtures.invalid) {
+  ok(!prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter rejects shared invalid fixture: ${fixture.name}`);
+}
 eq(parseArgs(['park', '--depends-on', 'A', '--depends-on', 'B'])['depends-on'], ['A', 'B'], 'CLI preserves repeated dependency arguments');
 eq(projectionMapping('claimed').status, 'in_progress', 'claimed lifecycle projects to canonical in_progress');
 eq(projectionMapping('feature_pr').status, 'in_progress', 'waiting release lifecycle remains canonical in_progress');
@@ -52,13 +173,76 @@ eq(projectionMapping('parked').status, 'parked', 'parked remains distinct from i
 eq(projectionMapping('deployed').status, 'completed', 'deployed lifecycle projects to canonical completed');
 eq(normalizeStatus('in-progress'), 'in_progress', 'Obsidian in-progress alias normalizes at the coordinator boundary');
 
+const driftRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-delivery-drift-'));
+const driftPath = path.join(driftRoot, 'Test card.md');
+const currentContract = prepareDeliveryCard(currentRaw, 'Test card').card;
+const projectedCurrentRaw = currentRaw.replace('status: planning', 'kanban_column: In Progress\nstatus: in_progress');
+const currentRecord = {
+  card: 'Test card', phase: 'implementing', card_path: driftPath,
+  dependencies: currentContract.depends_on, touch_zones: currentContract.touch_zones,
+  deploy_subscriptions: currentContract.deploy_subscriptions, delivery_contract: currentContract,
+};
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card:   Test card  ')
+  .replace('  - Docs/example.md', '  -   Docs/example.md   '));
+eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'whitespace-only Delivery projection changes canonicalize without drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones:\n  # canonical zone\n  - Docs/example.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace(/^evidence:.*$/m, [
+    'evidence:', '  # pinned evidence', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+    '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Bounded test card.',
+  ].join('\n'))
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []'));
+eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'comment-only block collection edits canonicalize without lifecycle drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('Docs/example.md', 'Docs/other.md'));
+ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'meaningful Delivery contract edits surface as lifecycle drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card: Different card'));
+ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'authored identity drift cannot be masked by the ledger card name');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('context_pack: "Docs/test-context.md"', 'context_pack: "Docs/different-context.md"'));
+ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'context_pack changes surface as meaningful Delivery contract drift');
+eq(DELIVERY_STABLE_FIELDS, delivery.registry.types['execution-card'].fields.map((field) => field.name), 'lifecycle drift fields derive from all 17 registry fields');
+const ledgerFieldValues = {
+  schema_version: '9.0.0', card: 'Different ledger card', parent_card: 'Different parent', slice: 'T2',
+  model_profile: 'heavy', execution_mode: 'docs_only', batch_policy: 'stop_after', epic: 'Different epic',
+  context_pack: 'Docs/different-context.md',
+  evidence: [{ source_identity: 'other', captured_at: '2026-07-17T06:00:00Z', revision: 'other-v1', locator: 'other', claim: 'Other claim.' }],
+  risk_dimensions: ['shared_contract'], release_required: false, deployment_required: false,
+};
+for (const field of DELIVERY_STABLE_FIELDS) {
+  const fieldRecord = JSON.parse(JSON.stringify(currentRecord));
+  let fieldRaw = projectedCurrentRaw;
+  if (field === 'status') fieldRaw = fieldRaw.replace('status: in_progress', 'status: blocked');
+  else if (field === 'touch_zones') fieldRecord.touch_zones = ['Docs/other.md'];
+  else if (field === 'depends_on') fieldRecord.dependencies = ['Other dependency'];
+  else if (field === 'deploy_subscriptions') fieldRecord.deploy_subscriptions = { headspace: ['mechanism:delivery'], accuris: [], ero: [] };
+  else fieldRecord.delivery_contract[field] = ledgerFieldValues[field];
+  fs.writeFileSync(driftPath, fieldRaw);
+  ok(projectionMetadataProblem(fieldRecord, driftRoot), `semantic lifecycle drift is detected for ${field}`);
+}
+const deploymentContractRaw = currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery"]');
+const deploymentContract = prepareDeliveryCard(deploymentContractRaw, 'Test card').card;
+const deploymentRecord = {
+  ...currentRecord,
+  deploy_subscriptions: deploymentContract.deploy_subscriptions,
+  delivery_contract: deploymentContract,
+};
+fs.writeFileSync(driftPath, deploymentContractRaw
+  .replace('status: planning', 'kanban_column: In Progress\nstatus: in_progress')
+  .replace('["mechanism:delivery"]', '[" mechanism:delivery "]'));
+eq(projectionMetadataProblem(deploymentRecord, driftRoot), null, 'deployment token whitespace canonicalizes as lifecycle no-op');
+fs.rmSync(driftRoot, { recursive: true, force: true });
+
 const obsidianA1 = [
-  '---', 'model_profile: heavy', 'kanban_column: In Planning', 'status: in-planning',
+  '---', 'card: A1 status normalization and drift visibility',
+  'parent_card: "[[Tranche A — trustworthy substrate]]"', 'slice: A1',
+  'model_profile: heavy', 'execution_mode: release', 'kanban_column: In Planning', 'status: in-planning',
   'status_prev: planning', 'status_changed_at: 2026-07-16', 'touch_zones:', '  - scripts/autoloop/codex-coordinator.js',
-  'depends_on: []', 'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []', '---', '',
+  'depends_on: []', 'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
+  'epic: "[[Final Initial Design]]"', 'release_required: true', 'deployment_required: true', '---', '',
   '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
   '## A1 status normalization and drift visibility', '',
-  'batch_policy: supervised_only — Normalize the live GA status vocabulary.',
+  'batch_policy: supervised_only — Normalize the live GA status vocabulary.', '',
+  '### Evidence', '- legacy evidence',
 ].join('\n');
 eq(parseCardStatus(obsidianA1), 'planning', 'real Obsidian planning rewrite parses into the canonical contract');
 eq(parseBatchPolicy(obsidianA1), 'supervised_only', 'A1 textual batch policy is preserved as supervised_only');
@@ -90,10 +274,10 @@ const successfulVaultReceipts = (version = '0.233.0') => Object.fromEntries(
   ['headspace', 'accuris', 'ero'].map((vault) => [vault, { vault, ok: true, installed_version: version }]),
 );
 const bodies = {
-  A: card({ zones: ['platform/a'] }),
-  B: card({ zones: ['platform/b'], deps: ['Done'] }),
-  C: card({ zones: ['platform/c'] }),
-  Done: card(),
+  A: card({ name: 'A', zones: ['platform/a'] }),
+  B: card({ name: 'B', zones: ['platform/b'], deps: ['Done'] }),
+  C: card({ name: 'C', zones: ['platform/c'] }),
+  Done: card({ name: 'Done' }),
 };
 const loadCard = (name) => bodies[name] ? { path: `/cards/${name}.md`, raw: bodies[name] } : null;
 
@@ -107,6 +291,9 @@ eq(selectClaimCandidate({
   boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
   loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
 }).card, 'A1 status normalization and drift visibility', 'explicit supervised coordinator eligibility accepts A1 with Obsidian planning status');
+const forcedSupervisionBody = card({ zones: ['scripts/autoloop/select-card.js'], profile: 'heavy', name: 'Control plane' });
+eq(selectCard({ boardMd: board(['Control plane']), loadBody: () => forcedSupervisionBody }).action, 'no-eligible-work', 'selector enforces Delivery-derived control-plane supervision');
+eq(selectCard({ boardMd: board(['Control plane']), loadBody: () => forcedSupervisionBody, supervised: true }).card, 'Control plane', 'selector accepts a Delivery-valid control-plane card only with supervision');
 eq(summarizeClaimSelection(selectClaimCandidate({
   boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
   loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
@@ -152,8 +339,8 @@ eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).card, 'A', '
 
 eq(normalizeCardLink('"[[Parent card|Parent alias]]"'), 'Parent card', 'normalizes parent wikilinks before comparison');
 const parentBodies = {
-  Child2: card({ zones: ['platform/child-2'], parent: 'Shared parent' }),
-  Child3: card({ zones: ['platform/child-3'], parent: 'Shared parent' }),
+  Child2: card({ name: 'Child2', zones: ['platform/child-2'], parent: 'Shared parent' }),
+  Child3: card({ name: 'Child3', zones: ['platform/child-3'], parent: 'Shared parent' }),
 };
 const loadParentCard = (name) => parentBodies[name] ? { path: `/cards/${name}.md`, raw: parentBodies[name] } : null;
 const siblingState = emptyState();
@@ -170,7 +357,10 @@ state.cards.A = { card: 'A', phase: 'blocked', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).action, 'no-work', 'tracked blocked card is not reclaimed');
 
 const eligibleSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard }));
-eq(eligibleSummary, { action: 'claim', card: 'A', model_profile: 'standard', touch_zones: ['platform/a'], skipped_count: 0 }, 'summarizes next eligible card');
+eq(eligibleSummary, {
+  action: 'claim', card: 'A', model_profile: 'standard', touch_zones: ['platform/a'], skipped_count: 0,
+  contract_version: delivery.CONTRACT_VERSION, contract_source: 'current', status: 'planning', batch_policy: 'continue',
+}, 'summarizes next eligible card with Delivery contract provenance');
 const blockedSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['Missing']), state: emptyState(), loadCard }));
 eq(blockedSummary.first_blocker, { card: 'Missing', reason: 'card note missing' }, 'summarizes the first board blocker');
 
