@@ -152,21 +152,25 @@ function stripYamlComment(value) {
   const collection = first >= 0 && (source[first] === '[' || source[first] === '{');
   let quote = first >= 0 && (source[first] === '"' || source[first] === "'") ? source[first] : null;
   let escaped = false;
+  let previousSignificant = first >= 0 ? source[first] : '';
   for (let index = quote ? first + 1 : Math.max(first, 0); index < source.length; index += 1) {
     const char = source[index];
     if (escaped) { escaped = false; continue; }
     if (quote === '"') {
       if (char === '\\') escaped = true;
-      else if (char === '"') quote = null;
+      else if (char === '"') { quote = null; previousSignificant = char; }
       continue;
     }
     if (quote === "'") {
       if (char === "'" && source[index + 1] === "'") index += 1;
-      else if (char === "'") quote = null;
+      else if (char === "'") { quote = null; previousSignificant = char; }
       continue;
     }
-    if (collection && (char === '"' || char === "'")) { quote = char; continue; }
+    if (collection && (char === '"' || char === "'") && /[\[\{,:]/.test(previousSignificant)) {
+      quote = char; continue;
+    }
     if (char === '#' && (index === 0 || /\s/.test(source[index - 1]))) return source.slice(0, index).trimEnd();
+    if (!/\s/.test(char)) previousSignificant = char;
   }
   return source;
 }
@@ -255,28 +259,33 @@ function splitYamlFlow(raw) {
   const values = [];
   let current = ''; let quote = null; let escaped = false;
   let squareDepth = 0; let curlyDepth = 0; let wikilinkDepth = 0;
+  let previousSignificant = '';
   for (let index = 0; index < raw.length; index += 1) {
     const char = raw[index]; const pair = raw.slice(index, index + 2);
     if (escaped) { current += char; escaped = false; continue; }
     if (quote) {
       current += char;
       if (char === '\\' && quote === '"') escaped = true;
-      else if (char === quote) quote = null;
+      else if (char === quote) { quote = null; previousSignificant = char; }
       continue;
     }
-    if (char === '"' || char === "'") { quote = char; current += char; continue; }
-    if (pair === '[[') { wikilinkDepth += 1; current += pair; index += 1; continue; }
-    if (pair === ']]' && wikilinkDepth > 0) { wikilinkDepth -= 1; current += pair; index += 1; continue; }
+    if (wikilinkDepth === 0 && (char === '"' || char === "'")
+      && (!previousSignificant || /[\[\{,:]/.test(previousSignificant))) {
+      quote = char; current += char; continue;
+    }
+    if (pair === '[[') { wikilinkDepth += 1; current += pair; previousSignificant = '['; index += 1; continue; }
+    if (pair === ']]' && wikilinkDepth > 0) { wikilinkDepth -= 1; current += pair; previousSignificant = ']'; index += 1; continue; }
     if (wikilinkDepth === 0) {
       if (char === '[') squareDepth += 1;
       else if (char === ']') squareDepth -= 1;
       else if (char === '{') curlyDepth += 1;
       else if (char === '}') curlyDepth -= 1;
       if (char === ',' && squareDepth === 0 && curlyDepth === 0) {
-        values.push(current.trim()); current = ''; continue;
+        values.push(current.trim()); current = ''; previousSignificant = ''; continue;
       }
     }
     current += char;
+    if (!/\s/.test(char)) previousSignificant = char;
   }
   if (quote || wikilinkDepth || squareDepth || curlyDepth) return null;
   values.push(current.trim());

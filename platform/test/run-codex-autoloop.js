@@ -133,6 +133,9 @@ ok(commentedStructuredMeta.contractOk, 'coordinator accepts trailing comments on
 eq(commentedStructuredMeta.touchZones, ['Docs/example.md'], 'structured comments do not alter touch-zone authority');
 eq(commentedStructuredMeta.dependencies, [], 'structured comments do not invent dependencies');
 eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: ["Docs/hash # literal.md"] # trailing comment')).touchZones, ['Docs/hash # literal.md'], 'quoted hash inside a flow value remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: [Docs/Will's file.md] # trailing comment")).touchZones, ["Docs/Will's file.md"], 'apostrophe inside a plain flow path remains literal');
+eq(parseExecutionMeta(currentRaw.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment")).dependencies, ["Will's project"], 'apostrophe inside a flow wikilink remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment')).touchZones, ['Docs/Project "Alpha".md'], 'interior double quote inside a plain flow path remains literal');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
