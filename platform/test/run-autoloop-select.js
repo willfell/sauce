@@ -143,6 +143,9 @@ ok('NS-13 evidence-less historical cards remain readable through in-memory migra
   selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => evidenceLessHistorical }).card === 'Historical evidence optional');
 ok('NS-14 malformed scalar touch_zones fail closed instead of being coerced',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
+const emptyIdentityHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^card:.*$/m, 'card:');
+ok('NS-15 explicitly empty historical identity fails closed instead of inheriting the board name',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyIdentityHistorical }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

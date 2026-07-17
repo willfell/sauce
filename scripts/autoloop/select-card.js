@@ -221,7 +221,7 @@ function parseDeliveryCard(raw, card) {
     // Historical notes may infer a missing identity from their exact board/file
     // name. Current contracts must author it, and an authored value is never
     // overwritten by the caller because that would mask identity drift.
-    card: String(authoredCard || (schemaVersion === undefined ? card : '') || '').trim(),
+    card: String(authoredCard !== undefined ? authoredCard : (schemaVersion === undefined ? card : '') || '').trim(),
     parent_card: frontmatterScalar(raw, 'parent_card'),
     slice: frontmatterScalar(raw, 'slice'),
     model_profile: frontmatterScalar(raw, 'model_profile'),
@@ -285,7 +285,7 @@ function prepareDeliveryCard(raw, card) {
   const prepared = prepareDeliveryObject(rawCard);
   const authoredIdentity = frontmatterScalar(raw, 'card');
   const expectedIdentity = delivery.normalizeIdentity(card);
-  if (authoredIdentity && expectedIdentity
+  if (authoredIdentity !== undefined && expectedIdentity
     && delivery.normalizeIdentity(authoredIdentity) !== expectedIdentity) {
     const mismatch = {
       code: 'identity-mismatch', field: 'card',
