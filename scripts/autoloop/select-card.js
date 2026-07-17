@@ -336,23 +336,23 @@ function deploymentField(raw) {
   const out = {}; let current = null;
   for (let i = index + 1; i < lines.length; i += 1) {
     if (lines[i] && !/^\s+/.test(lines[i])) break;
+    if (!lines[i].trim() || lines[i].trim().startsWith('#')) continue;
     const vault = lines[i].match(/^\s{2}([a-zA-Z0-9_-]+)\s*:\s*(.*?)\s*$/);
     if (vault) {
       current = vault[1];
       const inline = vault[2];
       if (!inline) out[current] = null;
-      else if (inline === '[]') out[current] = [];
-      else {
-        try { out[current] = JSON.parse(inline); }
-        catch (_) { out[current] = parseYamlScalar(inline); }
-      }
+      else out[current] = parseYamlValue(inline);
       continue;
     }
     const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
     if (item && current) {
       if (out[current] === null) out[current] = [];
-      if (Array.isArray(out[current])) out[current].push(parseYamlScalar(item[1]));
+      if (!Array.isArray(out[current])) return invalidYamlValue(lines[i]);
+      out[current].push(parseYamlValue(item[1]));
+      continue;
     }
+    return invalidYamlValue(lines[i]);
   }
   return out;
 }

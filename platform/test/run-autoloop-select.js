@@ -234,6 +234,10 @@ const inlineDeploymentCard = requiredFieldCard.replace(
 );
 ok('NS-49 inline YAML deployment map remains readable',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => inlineDeploymentCard }).card === 'Required fields');
+ok('NS-50 malformed indented deployment-map lines fail closed instead of disappearing',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  ero: []', '  ero: []\n    broken mapping line') }).action === 'no-eligible-work');
+ok('NS-51 unquoted YAML flow arrays remain typed deployment lists',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [mechanism:delivery]') }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

@@ -104,6 +104,11 @@ const inlineDeploymentMeta = parseExecutionMeta(currentRaw.replace(
 ));
 ok(inlineDeploymentMeta.contractOk, 'coordinator accepts a valid inline YAML deployment map');
 eq(inlineDeploymentMeta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'inline deployment map preserves every required vault');
+const malformedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  ero: []', '  ero: []\n    broken mapping line'));
+ok(!malformedDeploymentMeta.contractOk, 'coordinator rejects unsupported indented deployment-map lines');
+const flowDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [mechanism:delivery]'));
+ok(flowDeploymentMeta.contractOk, 'coordinator accepts unquoted YAML flow arrays for deployment additions');
+eq(flowDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator preserves typed unquoted flow deployment entries');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
