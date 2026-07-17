@@ -406,10 +406,10 @@ function assertPinnedRuntime(ledger, deps = {}) {
   }
 }
 
-function markStopped(ledger, reason, deps = {}) {
+function markStopped(ledger, reason, deps = {}, stoppedAt = nowOf(deps)) {
   const normalizedReason = String(reason || '').trim() || 'stop requested';
   ledger.phase = 'stopped';
-  ledger.stop_requested_at = nowOf(deps);
+  ledger.stop_requested_at = stoppedAt;
   ledger.stop_reason = normalizedReason;
 }
 
@@ -420,25 +420,38 @@ function persistValidatedLedger(ctx, ledger) {
   atomicWriteJson(ctx.ledgerPath, ledger);
 }
 
+function enforceDeadline(ctx, ledger, deps = {}) {
+  if (ledger.phase !== 'running') return;
+  const observedAt = nowOf(deps);
+  const observedMs = canonicalTimestampMs(observedAt);
+  if (!Number.isFinite(observedMs)) throw new Error('operation time must be a canonical ISO timestamp');
+  if (observedMs < canonicalTimestampMs(ledger.deadline_at)) return;
+  markStopped(ledger, 'deadline budget exhausted', deps, observedAt);
+  persistValidatedLedger(ctx, ledger);
+  throw new Error('deadline budget exhausted; batch is stopped and terminal');
+}
+
 function start(ctx, options = {}, deps = {}) {
   return withBatchLock(ctx, () => {
-    readiness(ctx);
     const existing = readLedger(ctx);
     if (existing) {
       if (existing.phase === 'stopped') throw new Error('batch is stopped and terminal; start refused');
+      enforceDeadline(ctx, existing, deps);
+      readiness(ctx);
       assertPinnedRuntime(existing, deps);
       if (!requestedConfigMatches(existing, options)) throw new Error('active batch has a different immutable configuration');
       return { action: 'already-started', ledger: existing };
     }
+    readiness(ctx);
     const ledger = createLedger(options, deps);
     atomicWriteJson(ctx.ledgerPath, ledger);
     return { action: 'started', ledger };
   }, deps);
 }
 
-function status(ctx) {
+function status(ctx, deps = {}) {
   const ledger = readLedger(ctx);
-  return ledger ? { action: 'status', ledger, budget_problems: budgetProblems(ledger) } : { action: 'no-batch' };
+  return ledger ? { action: 'status', ledger, budget_problems: budgetProblems(ledger, nowOf(deps)) } : { action: 'no-batch' };
 }
 
 function stop(ctx, options = {}, deps = {}) {
@@ -457,6 +470,7 @@ function resume(ctx, options = {}, deps = {}) {
     const ledger = readLedger(ctx);
     if (!ledger) throw new Error('no batch to resume');
     if (ledger.phase === 'stopped') throw new Error('resume refused: batch is stopped and terminal');
+    enforceDeadline(ctx, ledger, deps);
     readiness(ctx);
     assertPinnedRuntime(ledger, deps);
     if (!requestedConfigMatches(ledger, options)) throw new Error('resume cannot change immutable configuration');
@@ -469,6 +483,7 @@ function mutateLedger(ctx, updater, deps = {}) {
     const ledger = readLedger(ctx);
     if (!ledger) throw new Error('no batch ledger exists');
     if (ledger.phase === 'stopped') throw new Error('batch is stopped and terminal; mutation refused');
+    enforceDeadline(ctx, ledger, deps);
     assertPinnedRuntime(ledger, deps);
     let result = updater(ledger) || { action: 'stop', reason: 'empty ledger mutation' };
     if (result.action === 'stop') {

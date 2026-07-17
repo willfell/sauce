@@ -45,6 +45,9 @@ const fixed = {
   pidAlive: () => false,
   hostname: 'test-host',
 };
+const beforeDeadline = { ...fixed, now: () => '2026-07-17T19:59:59.999Z' };
+const atDeadline = { ...fixed, now: () => '2026-07-17T20:00:00.000Z' };
+const afterDeadline = { ...fixed, now: () => '2026-07-17T20:00:00.001Z' };
 
 function makeCard(name, policy = 'continue') {
   return [
@@ -133,6 +136,92 @@ for (const [opts, pattern, label] of [
   ledger.contract_version = '0.9.0';
   throws(() => batch.assertPinnedRuntime(ledger, fixed), /Delivery contract version changed during batch/,
     'runtime refuses a changed Delivery contract version');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// The injected deadline boundary is strict: mutable before, exhausted at, and exhausted after.
+{
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  eq(batch.recordUsage(ctx, 1, beforeDeadline).action, 'recorded', 'running ledger mutates one instant before deadline');
+  eq(batch.readLedger(ctx).phase, 'running', 'pre-deadline mutation leaves the ledger running');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+for (const [deps, label] of [[atDeadline, 'exact deadline'], [afterDeadline, 'after deadline']]) {
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  throws(() => batch.recordUsage(ctx, 1, deps), /deadline budget exhausted.*stopped.*terminal/, `${label} is exhausted`);
+  const reloaded = batch.readLedger(ctx);
+  eq(reloaded.phase, 'stopped', `${label} durably stops the ledger`);
+  eq(reloaded.stop_reason, 'deadline budget exhausted', `${label} records the deadline reason`);
+  eq(reloaded.counters.model_turns, 0, `${label} does not execute usage accounting`);
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Status reports injected deadline exhaustion but remains byte-for-byte read-only.
+{
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  const runningBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
+  ok(batch.status(ctx, atDeadline).budget_problems.includes('deadline budget exhausted'), 'status reports exact deadline exhaustion');
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), runningBytes, 'deadline status performs no write');
+  eq(batch.status(ctx, beforeDeadline).budget_problems.includes('deadline budget exhausted'), false,
+    'status does not exhaust one instant before deadline');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Resume and repeated start both make the first expired encounter durable, then refuse byte-level no-ops.
+for (const [firstOperation, label] of [
+  [(ctx) => batch.resume(ctx, {}, atDeadline), 'resume'],
+  [(ctx) => batch.start(ctx, {}, atDeadline), 'start-again'],
+]) {
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  throws(() => firstOperation(ctx), /deadline budget exhausted.*stopped.*terminal/, `expired ${label} durably refuses`);
+  const terminalBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
+  eq(batch.readLedger(ctx).phase, 'stopped', `expired ${label} survives reload`);
+  throws(() => batch.resume(ctx, {}, afterDeadline), /stopped.*terminal/, `expired ${label} later resume refuses terminally`);
+  throws(() => batch.start(ctx, {}, afterDeadline), /stopped.*terminal/, `expired ${label} later start refuses terminally`);
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), terminalBytes, `expired ${label} repeated lifecycle operations are byte no-ops`);
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Every public accounting/effect mutation stops before its updater can alter durable state.
+for (const { label, setup, invoke } of [
+  { label: 'infra retry', invoke: (ctx) => batch.recordFailure(ctx, { kind: 'infra', signature: 'network:expired' }, afterDeadline) },
+  { label: 'code repair', invoke: (ctx) => batch.recordFailure(ctx, { kind: 'code', signature: 'assert:expired' }, afterDeadline) },
+  { label: 'distinct card', invoke: (ctx) => batch.recordDistinctCard(ctx, 'Expired Card', afterDeadline) },
+  { label: 'usage', invoke: (ctx) => batch.recordUsage(ctx, 1, afterDeadline) },
+  { label: 'intervention', invoke: (ctx) => batch.recordIntervention(ctx, 0.5, afterDeadline) },
+  { label: 'effect reservation', invoke: (ctx) => batch.reserveEffect(ctx, { kind: 'pr', key: 'pr:expired' }, afterDeadline) },
+  {
+    label: 'effect completion',
+    setup: (ctx) => batch.reserveEffect(ctx, { kind: 'claim', key: 'claim:pending' }, beforeDeadline),
+    invoke: (ctx) => batch.completeEffect(ctx, { kind: 'claim', key: 'claim:pending', receipt: 'must-not-land' }, afterDeadline),
+  },
+]) {
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  if (setup) setup(ctx);
+  const before = batch.readLedger(ctx);
+  throws(() => invoke(ctx), /deadline budget exhausted.*stopped.*terminal/, `expired ${label} refuses`);
+  const stopped = batch.readLedger(ctx);
+  eq(stopped.counters, before.counters, `expired ${label} does not change counters`);
+  eq(stopped.effects, before.effects, `expired ${label} does not change effects or receipts`);
+  eq(stopped.stop_reason, 'deadline budget exhausted', `expired ${label} records terminal reason`);
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// The centralized expiration check never invokes an arbitrary updater and all later mutations are byte no-ops.
+{
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  let invoked = false;
+  throws(() => batch.mutateLedger(ctx, () => { invoked = true; return { action: 'recorded', changed: true }; }, atDeadline),
+    /deadline budget exhausted.*stopped.*terminal/, 'expired generic mutation refuses');
+  eq(invoked, false, 'expired generic mutation never invokes its updater callback');
+  const terminalBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
+  for (const [operation, label] of [
+    [() => batch.recordDistinctCard(ctx, 'Later Card', afterDeadline), 'distinct-card mutation'],
+    [() => batch.recordUsage(ctx, 1, afterDeadline), 'usage mutation'],
+    [() => batch.recordIntervention(ctx, 0.5, afterDeadline), 'intervention mutation'],
+    [() => batch.reserveEffect(ctx, { kind: 'release', key: 'release:later' }, afterDeadline), 'effect mutation'],
+  ]) throws(operation, /stopped.*terminal/, `terminal ledger rejects later ${label}`);
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), terminalBytes, 'all repeated terminal mutations preserve exact ledger bytes');
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
@@ -279,6 +368,21 @@ for (const [failure, label] of [
   const result = batch.recordFailure(ctx, failure, fixed);
   eq(result.action, 'stop', `${label} stops`);
   eq(batch.readLedger(ctx).phase, 'stopped', `${label} is durably terminal`);
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Zero retry/repair ceilings refuse the first matching failure without incrementing accounting.
+for (const { kind, option, counter, reason } of [
+  { kind: 'infra', option: 'max_infra_retries', counter: 'infra_retries', reason: 'infra budget exhausted' },
+  { kind: 'code', option: 'max_code_repairs', counter: 'code_repairs', reason: 'code budget exhausted' },
+]) {
+  const ctx = tempContext(); batch.start(ctx, { [option]: 0 }, fixed);
+  const result = batch.recordFailure(ctx, { kind, signature: `${kind}:zero-ceiling` }, fixed);
+  eq(result.action, 'stop', `zero ${kind} ceiling refuses first failure`);
+  const stopped = batch.readLedger(ctx);
+  eq(stopped.counters[counter], 0, `zero ${kind} ceiling does not increment ${counter}`);
+  eq(stopped.counters.failure_signatures, [], `zero ${kind} ceiling does not record a failure signature`);
+  eq(stopped.stop_reason, reason, `zero ${kind} ceiling records its non-time budget reason`);
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
