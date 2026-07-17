@@ -77,6 +77,13 @@ eq(historicalPrepared.card.schema_version, delivery.CONTRACT_VERSION, 'historica
 eq(historicalRaw, historicalSnapshot, 'historical compatibility never rewrites the protected source note');
 const stalePrepared = prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 0.9.0'), 'Test card');
 ok(stalePrepared.ok && stalePrepared.migration.applied.some((item) => /schema_version/.test(item)), 'stale schema versions migrate deterministically in memory');
+const sparseStaleObject = JSON.parse(JSON.stringify(delivery.registry.fixtures.base_execution_card));
+sparseStaleObject.schema_version = '0.9.0';
+for (const field of ['execution_mode', 'depends_on', 'deploy_subscriptions', 'release_required', 'deployment_required', 'batch_policy']) delete sparseStaleObject[field];
+const sparseStalePrepared = prepareDeliveryObject(sparseStaleObject);
+ok(sparseStalePrepared.ok, 'coordinator permits shared migration-owned backfills on stale historical cards');
+eq(sparseStalePrepared.card.depends_on, [], 'historical migration backfills dependencies');
+eq(sparseStalePrepared.card.deploy_subscriptions, { headspace: [], accuris: [], ero: [] }, 'historical migration backfills the deployment map');
 ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 9.0.0'), 'Test card').ok, 'future schema versions fail closed');
 ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: v1'), 'Test card').ok, 'malformed schema versions fail closed');
 ok(!prepareDeliveryCard(currentRaw.replace('status: planning', 'status: mystery'), 'Test card').ok, 'unknown lifecycle vocabulary fails closed');

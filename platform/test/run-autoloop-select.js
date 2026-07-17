@@ -142,6 +142,14 @@ const evidenceLessHistorical = deliveryCard('Historical evidence optional', 'His
   .replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^evidence:.*\n/m, '');
 ok('NS-13 evidence-less historical cards remain readable through in-memory migration',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => evidenceLessHistorical }).card === 'Historical evidence optional');
+const sparseStaleHistorical = requiredFieldCard
+  .replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 0.9.0')
+  .replace(/^execution_mode:.*\n/m, '').replace(/^batch_policy:.*\n/m, '')
+  .replace(/^depends_on:.*\n/m, '')
+  .replace(/^deploy_subscriptions:\n  headspace: \[\]\n  accuris: \[\]\n  ero: \[\]\n/m, '')
+  .replace(/^release_required:.*\n/m, '').replace(/^deployment_required:.*\n/m, '');
+ok('NS-13b stale historical cards reach shared migration-owned field backfills',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => sparseStaleHistorical }).card === 'Required fields');
 ok('NS-14 malformed scalar touch_zones fail closed instead of being coerced',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
 const emptyIdentityHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^card:.*$/m, 'card:');

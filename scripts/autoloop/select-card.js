@@ -420,7 +420,16 @@ function prepareDeliveryObject(value) {
   }
   if (comparison === -1) {
     const historical = delivery.validateCard(original, 'historical');
-    if (!historical.ok) return { ok: false, source: 'historical', card: historical.card, validation: historical, migration: null };
+    const migrationBackfills = new Set(['execution_mode', 'depends_on', 'deploy_subscriptions']);
+    const blockingErrors = historical.errors.filter((item) => !(
+      item.code === 'required-field' && migrationBackfills.has(item.field)
+    ));
+    if (blockingErrors.length) {
+      return {
+        ok: false, source: 'historical', card: historical.card, migration: null,
+        validation: { ...historical, ok: false, errors: blockingErrors },
+      };
+    }
     const migration = delivery.migrate(original, version);
     if (!migration.ok) {
       return {
