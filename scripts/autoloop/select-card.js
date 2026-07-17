@@ -150,10 +150,16 @@ function parseYamlScalar(value) {
   if (value === undefined) return undefined;
   const raw = String(value).trim();
   if (!raw || /^(?:null|~)$/i.test(raw)) return null;
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    try { return JSON.parse(raw); } catch (_) { return raw.slice(1, -1); }
+  if (raw.startsWith('"') || raw.endsWith('"')) {
+    if (!(raw.startsWith('"') && raw.endsWith('"'))) return invalidYamlValue(raw);
+    try { return JSON.parse(raw); } catch (_) { return invalidYamlValue(raw); }
   }
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1).replace(/''/g, "'");
+  if (raw.startsWith("'") || raw.endsWith("'")) {
+    if (!(raw.startsWith("'") && raw.endsWith("'"))) return invalidYamlValue(raw);
+    const body = raw.slice(1, -1);
+    if (body.replace(/''/g, '').includes("'")) return invalidYamlValue(raw);
+    return body.replace(/''/g, "'");
+  }
   if (/^(?:true|false)$/i.test(raw)) return raw.toLowerCase() === 'true';
   if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) return Number(raw);
   return raw;
@@ -161,6 +167,63 @@ function parseYamlScalar(value) {
 
 function invalidYamlValue(raw) {
   return { __invalid_yaml__: String(raw || '') };
+}
+
+function jsonDuplicateStatus(raw) {
+  let index = 0; let duplicate = false;
+  const skip = () => { while (/\s/.test(raw[index] || '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (raw[index] !== '"') throw new Error('string');
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === '\\') { index += 2; continue; }
+      if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated');
+  };
+  const value = () => {
+    skip();
+    if (raw[index] === '{') {
+      index += 1; skip();
+      const keys = new Set();
+      if (raw[index] === '}') { index += 1; return; }
+      while (index < raw.length) {
+        const key = string();
+        if (keys.has(key)) duplicate = true;
+        keys.add(key); skip();
+        if (raw[index] !== ':') throw new Error('colon');
+        index += 1; value(); skip();
+        if (raw[index] === '}') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1; skip();
+      }
+      throw new Error('object');
+    }
+    if (raw[index] === '[') {
+      index += 1; skip();
+      if (raw[index] === ']') { index += 1; return; }
+      while (index < raw.length) {
+        value(); skip();
+        if (raw[index] === ']') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+      }
+      throw new Error('array');
+    }
+    if (raw[index] === '"') { string(); return; }
+    const token = raw.slice(index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
+    if (!token) throw new Error('value');
+    index += token[0].length;
+  };
+  try {
+    value(); skip();
+    return index === raw.length ? duplicate : null;
+  } catch (_) { return null; }
 }
 
 function splitYamlFlow(raw) {
@@ -200,6 +263,8 @@ function parseYamlValue(value) {
   if (raw.startsWith('[[') && raw.endsWith(']]') && !raw.startsWith('[[[')) return raw;
   if (raw.startsWith('[')) {
     if (!raw.endsWith(']')) return invalidYamlValue(raw);
+    const duplicateStatus = jsonDuplicateStatus(raw);
+    if (duplicateStatus) return invalidYamlValue(raw);
     try { return JSON.parse(raw); } catch (_) {
       const parts = splitYamlFlow(raw.slice(1, -1));
       if (!parts) return invalidYamlValue(raw);
@@ -209,6 +274,8 @@ function parseYamlValue(value) {
   }
   if (raw.startsWith('{')) {
     if (!raw.endsWith('}')) return invalidYamlValue(raw);
+    const duplicateStatus = jsonDuplicateStatus(raw);
+    if (duplicateStatus) return invalidYamlValue(raw);
     try { return JSON.parse(raw); } catch (_) {
       const parts = splitYamlFlow(raw.slice(1, -1));
       if (!parts) return invalidYamlValue(raw);
@@ -290,12 +357,7 @@ function deploymentField(raw) {
 
 function evidenceField(raw) {
   const inline = rawScalarField(raw, 'evidence');
-  if (inline !== undefined) {
-    try {
-      const parsed = JSON.parse(inline);
-      return parsed;
-    } catch (_) { return inline; }
-  }
+  if (inline !== undefined) return parseYamlValue(inline);
   const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
   if (!section) return undefined;
   const claims = section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
