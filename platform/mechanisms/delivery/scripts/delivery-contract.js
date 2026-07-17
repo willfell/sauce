@@ -99,7 +99,8 @@ function fieldTypeValid(value, field) {
     case 'string': return typeof value === 'string' && value.trim().length > 0;
     case 'boolean': return typeof value === 'boolean';
     case 'array:string': return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim());
-    case 'array:identity': return Array.isArray(value) && value.every((item) => typeof item === 'string' && normalizeIdentity(item));
+    case 'array:identity': return (typeof value === 'string')
+      || (Array.isArray(value) && value.every((item) => typeof item === 'string' && normalizeIdentity(item)));
     case 'array:zone': return Array.isArray(value) && value.length > 0;
     case 'array:risk-dimension': return Array.isArray(value) && value.every((item) => registry.enums.risk_dimension.includes(item));
     case 'object:deployment-map': return value && typeof value === 'object' && !Array.isArray(value);
@@ -146,8 +147,7 @@ function validateCard(card, mode = 'current') {
     }
     if (!present && historical && historicalOptional.has(field.name)) continue;
     if (!present) continue;
-    const value = field.name === 'status' || field.name === 'depends_on'
-      ? normalized[field.name] : raw[field.name];
+    const value = field.name === 'status' ? normalized[field.name] : raw[field.name];
     if (!fieldTypeValid(value, field)) errors.push(error('invalid-type', field.name, `${field.name} must be ${field.type}`));
     if (field.enum && value != null && !registry.enums[field.enum].includes(value)) {
       errors.push(error('invalid-enum', field.name, `${field.name} must be one of ${registry.enums[field.enum].join('|')}`));
@@ -182,8 +182,9 @@ function validateCard(card, mode = 'current') {
     for (const vault of REQUIRED_VAULTS) {
       if (!Array.isArray(deployments[vault])) {
         errors.push(error('missing-deployment-vault', `deploy_subscriptions.${vault}`, `${vault} array is required`));
-      } else if (deployments[vault].some((item) => typeof item !== 'string' || !item.trim())) {
-        errors.push(error('invalid-deployment-entry', `deploy_subscriptions.${vault}`, 'subscription additions must be non-empty strings'));
+      } else if (deployments[vault].some((item) => typeof item !== 'string'
+        || !/^(?:mechanism|blueprint):[a-z0-9][a-z0-9._-]*$/.test(item.trim()))) {
+        errors.push(error('invalid-deployment-entry', `deploy_subscriptions.${vault}`, 'subscription additions must use mechanism:name or blueprint:name'));
       }
     }
   }
@@ -312,15 +313,10 @@ function resolveDependencies(cards, ledger = {}, options = {}) {
 function zoneConflicts(left, right, options = {}) {
   const zones = (claim) => Array.isArray(claim) ? claim : ((claim && claim.touch_zones) || []);
   const normalize = (zone) => normalizeZoneEntry(zone, options.default_root || 'workshop');
-  const exclusive = new Set(options.exclusive_zones || registry.policies.exclusive_zones);
   for (const aRaw of zones(left)) {
     const a = normalize(aRaw); if (!a) continue;
     for (const bRaw of zones(right)) {
       const b = normalize(bRaw); if (!b || a.root !== b.root) continue;
-      if (exclusive.has(a.path) || exclusive.has(b.path)) {
-        if (a.path === b.path) return true;
-        continue;
-      }
       if (a.path === b.path || a.path.startsWith(`${b.path}/`) || b.path.startsWith(`${a.path}/`)) return true;
     }
   }

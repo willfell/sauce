@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const DELIVERY = path.join(ROOT, 'platform', 'mechanisms', 'delivery');
@@ -55,6 +55,19 @@ eq('DEL-NORM-1 wikilink aliases and whitespace normalize',
   api.normalizeIdentity('  "[[Parent Card|Parent]]"  '), 'Parent Card');
 eq('DEL-NORM-2 historical status alias normalizes', api.normalizeStatus(' in-planning '), 'planning');
 eq('DEL-NORM-3 unknown status fails closed', api.normalizeStatus('almost-done'), null);
+const normalizedFixture = api.validateCard(fixtureCard(
+  api.registry.fixtures.valid.find((fixture) => fixture.name === 'whitespace-and-unicode-normalization')));
+eq('DEL-NORM-4 card validation returns normalized identities and zones', {
+  card: normalizedFixture.card.card,
+  parent_card: normalizedFixture.card.parent_card,
+  touch_zones: normalizedFixture.card.touch_zones,
+  depends_on: normalizedFixture.card.depends_on,
+}, {
+  card: 'Delivery 🚚',
+  parent_card: 'Tranche A — trustworthy substrate',
+  touch_zones: ['platform/mechanisms/delivery'],
+  depends_on: ['A1 status normalization and drift visibility'],
+});
 
 const base = fixtureCard({});
 const fullReceipt = {
@@ -75,6 +88,16 @@ check('DEL-COMP-2 missing vault receipt names the missing proof', !incompletePro
   && incompleteProof.missing.includes('vault_receipts.ero'));
 check('DEL-COMP-3 docs-only completion uses validation proof without release evidence',
   api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: true } }).complete);
+for (const [label, mutate, missing] of [
+  ['DEL-COMP-4 stale tag is rejected', (receipt) => { receipt.tag = 'v1.2.2'; }, 'tag'],
+  ['DEL-COMP-5 malformed brew version is rejected', (receipt) => { receipt.brew_version = 'latest'; }, 'brew_version'],
+  ['DEL-COMP-6 stale vault install is rejected', (receipt) => { receipt.vault_receipts.headspace.installed_version = '1.2.2'; }, 'vault_receipts.headspace'],
+]) {
+  const receipt = JSON.parse(JSON.stringify(fullReceipt));
+  mutate(receipt);
+  const proof = api.completionProof(receipt);
+  check(label, !proof.complete && proof.missing.includes(missing));
+}
 
 const depCards = [
   { ...base, card: 'Tracked child', depends_on: ['Dependency'] },
@@ -101,6 +124,14 @@ const ambiguous = api.resolveDependencies([{ ...base, card: 'Ambiguous child', d
 check('DEL-DEP-7 ambiguous duplicate basenames fail closed', ambiguous['Ambiguous child'].reason === 'ambiguous-dependency');
 const parked = api.resolveDependencies([{ ...base, card: 'No deps', depends_on: [] }], {}, { parked: ['Sibling'] });
 check('DEL-DEP-8 parked siblings do not block dependency eligibility', parked['No deps'].eligible);
+const incompleteDependency = JSON.parse(JSON.stringify(fullReceipt));
+incompleteDependency.vault_receipts.ero.installed_version = '1.2.2';
+const incompleteTracked = api.resolveDependencies([
+  { ...base, card: 'Incomplete tracked child', depends_on: ['Dependency'] },
+], { Dependency: incompleteDependency });
+check('DEL-DEP-9 incomplete tracked proof fails closed with exact missing evidence',
+  incompleteTracked['Incomplete tracked child'].reason === 'dependency-proof-missing'
+  && incompleteTracked['Incomplete tracked child'].missing_proof.includes('vault_receipts.ero'));
 
 check('DEL-ZONE-1 nested paths conflict', api.zoneConflicts(
   { touch_zones: ['scripts/autoloop'] }, { touch_zones: ['scripts/autoloop/gate.js'] }));
@@ -113,6 +144,8 @@ check('DEL-ZONE-4 exclusive zones conflict on exact identity', api.zoneConflicts
   { touch_zones: ['package.json'] }, { touch_zones: ['package.json'] }));
 check('DEL-ZONE-5 disjoint paths do not conflict', !api.zoneConflicts(
   { touch_zones: ['platform/mechanisms/delivery'] }, { touch_zones: ['Docs/Index.md'] }));
+check('DEL-ZONE-6 nesting under an exclusive zone still conflicts', api.zoneConflicts(
+  { touch_zones: ['.github/workflows'] }, { touch_zones: ['.github/workflows/ci.yml'] }));
 
 eq('DEL-POLICY-1 control-plane work is supervised-only',
   api.derivePolicy({ batch_policy: 'continue', touch_zones: ['platform/mechanisms/delivery'] }), 'supervised_only');
@@ -164,6 +197,19 @@ check('DEL-MIGRATE-2 migration is idempotent', remigrated.ok && remigrated.appli
 const future = api.migrate({ ...base, schema_version: '9.0.0' }, '9.0.0');
 check('DEL-MIGRATE-3 newer-than-engine refuses without mutation', !future.ok
   && future.reason === 'newer-than-engine');
+const sparseHistorical = fixtureCard({});
+for (const field of ['schema_version', 'execution_mode', 'depends_on', 'deploy_subscriptions',
+  'release_required', 'deployment_required', 'batch_policy']) delete sparseHistorical[field];
+sparseHistorical.touch_zones = ['platform/mechanisms/delivery'];
+const backfilled = api.migrate(sparseHistorical);
+check('DEL-MIGRATE-4 migration backfills release defaults and derives supervised_only', backfilled.ok
+  && backfilled.note.schema_version === api.CONTRACT_VERSION
+  && backfilled.note.execution_mode === 'release'
+  && backfilled.note.release_required === true
+  && backfilled.note.deployment_required === true
+  && JSON.stringify(backfilled.note.depends_on) === '[]'
+  && JSON.stringify(backfilled.note.deploy_subscriptions) === JSON.stringify({ headspace: [], accuris: [], ero: [] })
+  && backfilled.note.batch_policy === 'supervised_only');
 
 const planner = api.describe('execution-card', 'planner');
 const coordinator = api.describe('execution-card', 'coordinator');
@@ -177,6 +223,12 @@ const cli = JSON.parse(execFileSync(process.execPath, [
 ], { encoding: 'utf8' }));
 check('DEL-CLI-1 describe CLI returns the public contract version and fields', cli.ok
   && cli.contract_version === api.CONTRACT_VERSION && cli.fields.length === coordinator.fields.length);
+const badCli = spawnSync(process.execPath, [
+  path.join(DELIVERY, 'scripts', 'delivery-schema-cli.js'), 'describe', 'unknown-type', '--json',
+], { encoding: 'utf8' });
+const badCliBody = JSON.parse(badCli.stdout);
+check('DEL-CLI-2 unknown contract types fail with machine-readable output', badCli.status === 2
+  && badCliBody.ok === false && /unknown Delivery contract type/.test(badCliBody.error));
 
 const manifest = JSON.parse(fs.readFileSync(path.join(DELIVERY, 'manifest.json'), 'utf8'));
 const installed = new Map((manifest.files || []).map((file) => [file.source, file.dest]));
@@ -186,6 +238,22 @@ check('DEL-MAN-2 registry is installed under ranch scripts',
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
   'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
 ].every((source) => installed.has(source)));
+const platformManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform', 'manifest.json'), 'utf8'));
+const deliveryCatalogue = platformManifest.mechanisms.filter((mechanism) => mechanism.name === 'delivery');
+check('DEL-MAN-4 platform catalogue registers Delivery exactly once at its manifest version',
+  deliveryCatalogue.length === 1
+  && deliveryCatalogue[0].version === manifest.version
+  && deliveryCatalogue[0].path === 'mechanisms/delivery');
+eq('DEL-MAN-5 platform catalogue contains 33 mechanisms including Delivery', platformManifest.mechanisms.length, 33);
+const schemasIndex = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform', 'schemas-index.json'), 'utf8'));
+const deliverySchemas = schemasIndex.schemas.filter((schema) => schema.id === 'delivery-execution-card-contract');
+check('DEL-SCHEMA-1 schema catalogue registers the Delivery registry and semantic validator exactly once',
+  deliverySchemas.length === 1
+  && deliverySchemas[0].owner.type === 'mechanism'
+  && deliverySchemas[0].owner.name === 'delivery'
+  && deliverySchemas[0].source === 'platform/mechanisms/delivery/data/delivery-schema.json'
+  && deliverySchemas[0].validator === 'platform/mechanisms/delivery/scripts/delivery-contract.js'
+  && deliverySchemas[0].accepted_versions.includes(api.CONTRACT_VERSION));
 
 console.log(`\nDelivery contract: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
