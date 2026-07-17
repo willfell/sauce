@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sauce Delivery shared execution contract registry",
+  "contract": {
+    "name": "delivery",
+    "version": "1.0.0",
+    "minimum_compatible_version": "0.0.0",
+    "description": "Registry half of the Delivery contract. The semantic module owns cross-field rules and proof evaluation."
+  },
+  "enums": {
+    "status": ["planning", "in_progress", "blocked", "parked", "completed"],
+    "model_profile": ["standard", "heavy"],
+    "execution_mode": ["release", "docs_only"],
+    "batch_policy": ["continue", "stop_after", "supervised_only"],
+    "posture": ["claimable", "blocked_by_dependencies", "docs_only", "awaiting_user_decision"],
+    "failure_class": ["infra", "code", "mixed", "unknown"],
+    "risk_dimension": ["new_mechanism", "schema", "migration", "consumer_subscription", "multi_blueprint_ui", "shared_contract", "control_plane"]
+  },
+  "status_aliases": {
+    "planning": "planning",
+    "in-planning": "planning",
+    "in_progress": "in_progress",
+    "in-progress": "in_progress",
+    "blocked": "blocked",
+    "parked": "parked",
+    "completed": "completed"
+  },
+  "types": {
+    "execution-card": {
+      "description": "One bounded, independently releasable Delivery execution child.",
+      "fields": [
+        {
+          "name": "card",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Canonical card identity supplied from the note filename or intake title.",
+          "consumer_descriptions": {
+            "planner": "Author one unique trimmed card title; filenames and frontmatter comparisons use this identity.",
+            "coordinator": "Use the canonical normalized identity as the ledger key; never infer ownership from an identifier prefix."
+          }
+        },
+        {
+          "name": "schema_version",
+          "type": "string",
+          "required": true,
+          "default": "1.0.0",
+          "since_version": "1.0.0",
+          "description": "Delivery contract version stamped at authoring time. Newer-than-engine versions fail closed."
+        },
+        {
+          "name": "parent_card",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Explicit parent authority; wikilink, alias, and bare forms normalize to one identity.",
+          "consumer_descriptions": {
+            "planner": "Link the exact non-claimable parent card.",
+            "coordinator": "Compare this normalized field for sibling ownership; identifier prefixes are never authority."
+          }
+        },
+        {
+          "name": "slice",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Short human navigation label within the explicit parent."
+        },
+        {
+          "name": "model_profile",
+          "type": "string",
+          "required": true,
+          "enum": "model_profile",
+          "since_version": "1.0.0",
+          "description": "Reasoning profile; independent from unattended safety policy."
+        },
+        {
+          "name": "execution_mode",
+          "type": "string",
+          "required": true,
+          "enum": "execution_mode",
+          "default": "release",
+          "since_version": "1.0.0",
+          "description": "Release-backed code work or explicitly supervised docs-only validation."
+        },
+        {
+          "name": "batch_policy",
+          "type": "string",
+          "required": true,
+          "enum": "batch_policy",
+          "default": "continue",
+          "since_version": "1.0.0",
+          "description": "Machine-readable continuation ceiling. Derived policy may strengthen but never weaken it."
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "enum": "status",
+          "default": "planning",
+          "since_version": "1.0.0",
+          "description": "Normalized projection vocabulary shared by cards, boards, and coordinator phases."
+        },
+        {
+          "name": "touch_zones",
+          "type": "array:zone",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Non-empty exclusive working set expressed as workspace-relative paths or {root,path} tuples.",
+          "consumer_descriptions": {
+            "planner": "Declare the smallest canonical path set covering every intended edit; use tuples only for multi-root work.",
+            "coordinator": "Normalize path segments and reject equality or nesting conflicts within the same logical root."
+          }
+        },
+        {
+          "name": "depends_on",
+          "type": "array:identity",
+          "required": true,
+          "default": [],
+          "since_version": "1.0.0",
+          "description": "Forward dependencies only. Reverse links are derived and Archive never proves completion."
+        },
+        {
+          "name": "deploy_subscriptions",
+          "type": "object:deployment-map",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Exact headspace, Accuris, and ERO component additions; empty arrays remain explicit."
+        },
+        {
+          "name": "epic",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Planning authority or design artifact that explains the execution child."
+        },
+        {
+          "name": "evidence",
+          "type": "array:string",
+          "required": false,
+          "default": [],
+          "since_version": "1.0.0",
+          "description": "Pinned evidence locators loaded before implementation."
+        },
+        {
+          "name": "context_pack",
+          "type": "string",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Optional versioned context-pack link; absence is backward-safe."
+        },
+        {
+          "name": "release_required",
+          "type": "boolean",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Derived true for release mode and false for docs_only; conflicting authored values are invalid."
+        },
+        {
+          "name": "deployment_required",
+          "type": "boolean",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Derived true for release mode and false for docs_only; completion proof follows the derived value."
+        },
+        {
+          "name": "risk_dimensions",
+          "type": "array:risk-dimension",
+          "required": false,
+          "default": [],
+          "since_version": "1.0.0",
+          "description": "Explicit high-risk dimensions. Any listed dimension requires the heavy model profile."
+        }
+      ]
+    }
+  },
+  "policies": {
+    "required_vaults": ["headspace", "accuris", "ero"],
+    "workspace_roots": ["workshop", "headspace", "accuris", "ero"],
+    "exclusive_zones": ["platform/install.js", "package.json", ".github/workflows", "platform/manifest.json", "shared-registries", "homebrew-promotion"],
+    "control_plane_zone_prefixes": ["scripts/autoloop", "scripts/release", ".agents/skills/card-intake", "platform/mechanisms/delivery", ".github/workflows"],
+    "high_risk_zone_prefixes": ["platform/mechanisms", "platform/install.js", "scripts/autoloop", "scripts/release", ".github/workflows"],
+    "policy_strength": ["continue", "stop_after", "supervised_only"]
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": [
+        { "field": "schema_version", "migration": { "type": "default_backfill", "value": "1.0.0" } },
+        { "field": "execution_mode", "migration": { "type": "default_backfill", "value": "release" } },
+        { "field": "depends_on", "migration": { "type": "default_backfill", "value": [] } },
+        { "field": "deploy_subscriptions", "migration": { "type": "default_backfill", "value": { "headspace": [], "accuris": [], "ero": [] } } },
+        { "field": "batch_policy", "migration": { "type": "derive_from", "expression": "derivePolicy(card)" } },
+        { "field": "release_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } },
+        { "field": "deployment_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } }
+      ]
+    }
+  ],
+  "fixtures": {
+    "base_execution_card": {
+      "card": "A2 shared registry and semantic contract core",
+      "schema_version": "1.0.0",
+      "parent_card": "[[Tranche A — trustworthy substrate]]",
+      "slice": "A2",
+      "model_profile": "heavy",
+      "execution_mode": "release",
+      "batch_policy": "supervised_only",
+      "status": "planning",
+      "touch_zones": ["platform/mechanisms/delivery", "platform/test/run-delivery-contract.js"],
+      "depends_on": ["[[A1 status normalization and drift visibility]]"],
+      "deploy_subscriptions": {
+        "headspace": ["mechanism:delivery"],
+        "accuris": ["mechanism:delivery"],
+        "ero": ["mechanism:delivery"]
+      },
+      "epic": "[[Final Initial Design]]",
+      "evidence": ["docs/final-initial-design/Final Initial Design.md:98"],
+      "release_required": true,
+      "deployment_required": true,
+      "risk_dimensions": ["shared_contract", "new_mechanism"]
+    },
+    "valid": [
+      { "name": "release-supervised-control-plane", "patch": {} },
+      {
+        "name": "docs-only-standard",
+        "patch": {
+          "card": "Docs decision",
+          "slice": "D1",
+          "model_profile": "standard",
+          "execution_mode": "docs_only",
+          "batch_policy": "stop_after",
+          "touch_zones": ["Docs/decision.md"],
+          "depends_on": [],
+          "deploy_subscriptions": { "headspace": [], "accuris": [], "ero": [] },
+          "release_required": false,
+          "deployment_required": false,
+          "risk_dimensions": []
+        }
+      },
+      {
+        "name": "historical-unversioned",
+        "mode": "historical",
+        "remove": ["schema_version", "batch_policy"],
+        "patch": { "card": "Historical card", "risk_dimensions": [] }
+      },
+      {
+        "name": "whitespace-and-unicode-normalization",
+        "patch": {
+          "card": "  Delivery 🚚  ",
+          "parent_card": "  [[Tranche A — trustworthy substrate|Tranche A]]  ",
+          "touch_zones": ["  platform/mechanisms/delivery  "],
+          "depends_on": ["  [[A1 status normalization and drift visibility]]  "]
+        }
+      },
+      { "name": "older-contract-requires-migration", "patch": { "schema_version": "0.9.0" } }
+    ],
+    "invalid": [
+      { "name": "missing-parent", "remove": ["parent_card"], "expected_error": "required-field" },
+      { "name": "unknown-profile", "patch": { "model_profile": "ultra" }, "expected_error": "invalid-enum" },
+      { "name": "status-stray", "patch": { "status": "in planning soon" }, "expected_error": "invalid-status" },
+      { "name": "newer-than-engine", "patch": { "schema_version": "9.0.0" }, "expected_error": "schema-newer-than-engine" },
+      { "name": "malformed-version", "patch": { "schema_version": "v1" }, "expected_error": "invalid-schema-version" },
+      {
+        "name": "docs-only-cannot-require-release",
+        "patch": { "execution_mode": "docs_only", "release_required": true, "deployment_required": false },
+        "expected_error": "docs-only-release-conflict"
+      },
+      {
+        "name": "release-requires-all-vault-arrays",
+        "patch": { "deploy_subscriptions": { "headspace": [], "accuris": [] } },
+        "expected_error": "missing-deployment-vault"
+      },
+      {
+        "name": "deployment-entries-are-typed",
+        "patch": { "deploy_subscriptions": { "headspace": [42], "accuris": [], "ero": [] } },
+        "expected_error": "invalid-deployment-entry"
+      },
+      { "name": "high-risk-requires-heavy", "patch": { "model_profile": "standard" }, "expected_error": "high-risk-requires-heavy" },
+      { "name": "zone-cannot-escape-workspace", "patch": { "touch_zones": ["../outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "derived-policy-cannot-be-weakened", "patch": { "batch_policy": "continue" }, "expected_error": "policy-weakened" },
+      {
+        "name": "self-dependency",
+        "patch": { "depends_on": ["[[A2 shared registry and semantic contract core]]"] },
+        "expected_error": "self-dependency"
+      },
+      { "name": "evidence-must-be-an-array", "patch": { "evidence": "one locator" }, "expected_error": "invalid-type" },
+      { "name": "risk-dimension-must-be-known", "patch": { "risk_dimensions": ["mystery"] }, "expected_error": "invalid-type" },
+      {
+        "name": "touch-zones-must-be-unique",
+        "patch": { "touch_zones": ["platform/mechanisms/delivery", "./platform/mechanisms/delivery/"] },
+        "expected_error": "duplicate-touch-zone"
+      }
+    ],
+    "dependency_syntax": [
+      { "name": "quoted-scalar-wikilink", "input": "depends_on: \"[[A]]\"", "expected": ["A"] },
+      { "name": "unquoted-scalar-wikilink", "input": "depends_on: [[A]]", "expected": ["A"] },
+      { "name": "bare-scalar", "input": "depends_on: A", "expected": ["A"] },
+      { "name": "flow-list", "input": "depends_on: [\"[[A]]\", \"B\"]", "expected": ["A", "B"] },
+      { "name": "block-list", "input": "depends_on:\n  - \"[[A]]\"\n  - B", "expected": ["A", "B"] }
+    ]
+  }
+}

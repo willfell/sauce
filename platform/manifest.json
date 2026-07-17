@@ -196,6 +196,11 @@
       "name": "section-explorer",
       "version": "0.6.0",
       "path": "mechanisms/section-explorer"
+    },
+    {
+      "name": "delivery",
+      "version": "0.1.0",
+      "path": "mechanisms/delivery"
     }
   ],
   "blueprints": [
