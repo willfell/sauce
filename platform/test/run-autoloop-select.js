@@ -220,6 +220,8 @@ ok('NS-45 duplicate keys in a block touch-zone tuple fail closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: other\n    root: workshop\n    path: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
 ok('NS-46 explicitly empty quoted scalar dependency fails closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: ""') }).action === 'no-eligible-work');
+ok('NS-47 nested YAML flow dependencies remain structured and fail shared identity typing',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: [[A], [B]]') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

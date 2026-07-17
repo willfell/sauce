@@ -260,7 +260,7 @@ function splitYamlFlow(raw) {
 
 function parseYamlValue(value) {
   const raw = String(value == null ? '' : value).trim();
-  if (raw.startsWith('[[') && raw.endsWith(']]') && !raw.startsWith('[[[')) return raw;
+  if (/^\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]$/.test(raw)) return raw;
   if (raw.startsWith('[')) {
     if (!raw.endsWith(']')) return invalidYamlValue(raw);
     const duplicateStatus = jsonDuplicateStatus(raw);

@@ -90,6 +90,9 @@ ok(!prepareDeliveryCard(currentRaw.replace('status: planning', 'status: mystery'
 const emptyScalarDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: ""'));
 ok(!emptyScalarDependency.contractOk, 'coordinator rejects an explicitly empty quoted scalar dependency');
 ok(validateExecutionMeta(emptyScalarDependency).some((error) => /invalid-dependency:depends_on/.test(error)), 'coordinator surfaces the empty scalar dependency boundary error');
+const nestedFlowDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: [[A], [B]]'));
+ok(!nestedFlowDependency.contractOk, 'coordinator rejects nested YAML flow sequences as non-string dependencies');
+ok(validateExecutionMeta(nestedFlowDependency).some((error) => /depends_on/.test(error)), 'coordinator surfaces nested dependency typing failure');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
