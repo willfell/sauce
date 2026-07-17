@@ -266,6 +266,9 @@ function splitYamlFlow(raw) {
     if (quote) {
       current += char;
       if (char === '\\' && quote === '"') escaped = true;
+      else if (char === "'" && quote === "'" && raw[index + 1] === "'") {
+        current += raw[index + 1]; index += 1;
+      }
       else if (char === quote) { quote = null; previousSignificant = char; }
       continue;
     }

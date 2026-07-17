@@ -265,6 +265,8 @@ ok('NS-59 apostrophes inside flow wikilinks remain literal while comments are st
   selectCard({ boardMd: "## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[Will's project]]\n", loadBody: () => requiredFieldCard.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment") }).card === 'Required fields');
 ok('NS-60 interior double quotes inside plain flow paths remain literal',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment') }).card === 'Required fields');
+ok('NS-61 doubled apostrophes preserve commas inside single-quoted flow values',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment") }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

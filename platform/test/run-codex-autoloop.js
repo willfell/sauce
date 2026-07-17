@@ -136,6 +136,7 @@ eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 't
 eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: [Docs/Will's file.md] # trailing comment")).touchZones, ["Docs/Will's file.md"], 'apostrophe inside a plain flow path remains literal');
 eq(parseExecutionMeta(currentRaw.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment")).dependencies, ["Will's project"], 'apostrophe inside a flow wikilink remains literal');
 eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment')).touchZones, ['Docs/Project "Alpha".md'], 'interior double quote inside a plain flow path remains literal');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment")).touchZones, ["Docs/Will's, file.md"], 'doubled apostrophe preserves a comma inside a single-quoted flow path');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
