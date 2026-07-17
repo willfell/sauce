@@ -118,6 +118,11 @@ eq(commentedMeta.touchZones, ['Docs/example.md'], 'coordinator strips unquoted Y
 ok(sameParentConflict(differentlyCommentedMeta.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: commentedMeta.parentCard }]), 'different comments cannot evade same-parent conflict detection');
 ok(zonesOverlap(commentedMeta.touchZones[0], 'Docs/example.md'), 'commented touch zones retain exact conflict authority');
 eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: "Test # literal"')).parentCard, 'Test # literal', 'quoted hash remains literal parent data');
+const apostropheParentA = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', "parent_card: Will's project # first"));
+const apostropheParentB = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', "parent_card: Will's project # second"));
+eq(apostropheParentA.parentCard, "Will's project", 'apostrophe remains literal in a plain parent scalar');
+ok(sameParentConflict(apostropheParentB.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: apostropheParentA.parentCard }]), 'apostrophe-bearing parents cannot evade same-parent conflict via comments');
+eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: Project "Alpha" # comment')).parentCard, 'Project "Alpha"', 'interior double quotes remain literal in a plain parent scalar');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {

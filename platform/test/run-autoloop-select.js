@@ -245,6 +245,10 @@ ok('NS-52 unquoted YAML comments do not become contract identity or path data',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedContractCard }).card === 'Required fields');
 ok('NS-53 quoted hash characters remain literal scalar data',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: "Selector # literal"') }).card === 'Required fields');
+ok('NS-54 apostrophes in plain YAML remain literal while trailing comments are stripped',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', "parent_card: Will's project # comment") }).card === 'Required fields');
+ok('NS-55 interior double quotes in plain YAML remain literal while trailing comments are stripped',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: Project "Alpha" # comment') }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

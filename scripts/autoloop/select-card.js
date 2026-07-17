@@ -148,8 +148,10 @@ function rawScalarField(raw, key) {
 
 function stripYamlComment(value) {
   const source = String(value == null ? '' : value);
-  let quote = null; let escaped = false;
-  for (let index = 0; index < source.length; index += 1) {
+  const first = source.search(/\S/);
+  let quote = first >= 0 && (source[first] === '"' || source[first] === "'") ? source[first] : null;
+  let escaped = false;
+  for (let index = quote ? first + 1 : Math.max(first, 0); index < source.length; index += 1) {
     const char = source[index];
     if (escaped) { escaped = false; continue; }
     if (quote === '"') {
@@ -162,7 +164,6 @@ function stripYamlComment(value) {
       else if (char === "'") quote = null;
       continue;
     }
-    if (char === '"' || char === "'") { quote = char; continue; }
     if (char === '#' && (index === 0 || /\s/.test(source[index - 1]))) return source.slice(0, index).trimEnd();
   }
   return source;
@@ -172,12 +173,12 @@ function parseYamlScalar(value) {
   if (value === undefined) return undefined;
   const raw = stripYamlComment(value).trim();
   if (!raw || /^(?:null|~)$/i.test(raw)) return null;
-  if (raw.startsWith('"') || raw.endsWith('"')) {
-    if (!(raw.startsWith('"') && raw.endsWith('"'))) return invalidYamlValue(raw);
+  if (raw.startsWith('"')) {
+    if (!raw.endsWith('"')) return invalidYamlValue(raw);
     try { return JSON.parse(raw); } catch (_) { return invalidYamlValue(raw); }
   }
-  if (raw.startsWith("'") || raw.endsWith("'")) {
-    if (!(raw.startsWith("'") && raw.endsWith("'"))) return invalidYamlValue(raw);
+  if (raw.startsWith("'")) {
+    if (!raw.endsWith("'")) return invalidYamlValue(raw);
     const body = raw.slice(1, -1);
     if (body.replace(/''/g, '').includes("'")) return invalidYamlValue(raw);
     return body.replace(/''/g, "'");
