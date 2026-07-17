@@ -180,6 +180,14 @@ ok('NS-29 YAML-null risk_dimensions fails closed instead of becoming an empty ar
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('risk_dimensions: []', 'risk_dimensions:') }).action === 'no-eligible-work');
 ok('NS-30 YAML-null deployment vault fails closed instead of becoming an empty array',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace:') }).action === 'no-eligible-work');
+ok('NS-31 quoted boolean remains a string and fails shared boolean validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('release_required: true', 'release_required: "true"') }).action === 'no-eligible-work');
+ok('NS-32 unquoted null parent identity fails closed instead of becoming a string',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: null') }).action === 'no-eligible-work');
+ok('NS-33 unquoted null context_pack fails closed instead of becoming a string',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack: null') }).action === 'no-eligible-work');
+ok('NS-34 unquoted null dependency fails closed instead of becoming an identity',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n## Completed\n- [x] [[null]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: null') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

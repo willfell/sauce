@@ -146,6 +146,23 @@ function rawScalarField(raw, key) {
   return line ? line.slice(line.indexOf(':') + 1).trim() : undefined;
 }
 
+function parseYamlScalar(value) {
+  if (value === undefined) return undefined;
+  const raw = String(value).trim();
+  if (!raw || /^(?:null|~)$/i.test(raw)) return null;
+  if (raw.startsWith('"') && raw.endsWith('"')) {
+    try { return JSON.parse(raw); } catch (_) { return raw.slice(1, -1); }
+  }
+  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1).replace(/''/g, "'");
+  if (/^(?:true|false)$/i.test(raw)) return raw.toLowerCase() === 'true';
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) return Number(raw);
+  return raw;
+}
+
+function typedScalarField(raw, key) {
+  return parseYamlScalar(rawScalarField(raw, key));
+}
+
 function listField(raw, key) {
   const lines = frontmatterBody(raw).split('\n');
   const index = lines.findIndex((value) => new RegExp(`^${key}\\s*:`).test(value));
@@ -156,7 +173,7 @@ function listField(raw, key) {
     if (inline.startsWith('[')) {
       try { return JSON.parse(inline); } catch (_) { return inline; }
     }
-    return inline;
+    return parseYamlScalar(inline);
   }
   const out = [];
   let sawIndented = false;
@@ -165,7 +182,7 @@ function listField(raw, key) {
     sawIndented = true;
     if (lines[i].trim() === '[]') { sawExplicitEmpty = true; continue; }
     const match = lines[i].match(/^\s+-\s+(.*?)\s*$/);
-    if (match) out.push(match[1].replace(/^['"]|['"]$/g, ''));
+    if (match) out.push(parseYamlScalar(match[1]));
   }
   if (!sawIndented) return null;
   return sawExplicitEmpty && out.length === 0 ? [] : out;
@@ -186,23 +203,17 @@ function deploymentField(raw) {
       else if (inline === '[]') out[current] = [];
       else {
         try { out[current] = JSON.parse(inline); }
-        catch (_) { out[current] = inline; }
+        catch (_) { out[current] = parseYamlScalar(inline); }
       }
       continue;
     }
     const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
     if (item && current) {
       if (out[current] === null) out[current] = [];
-      if (Array.isArray(out[current])) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
+      if (Array.isArray(out[current])) out[current].push(parseYamlScalar(item[1]));
     }
   }
   return out;
-}
-
-function parseBoolean(value) {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return value;
 }
 
 function evidenceField(raw) {
@@ -221,30 +232,31 @@ function evidenceField(raw) {
 }
 
 function parseDeliveryCard(raw, card) {
-  const schemaVersion = frontmatterScalar(raw, 'schema_version');
-  const authoredCard = frontmatterScalar(raw, 'card');
-  const executionMode = frontmatterScalar(raw, 'execution_mode');
+  const schemaVersion = typedScalarField(raw, 'schema_version');
+  const authoredCard = typedScalarField(raw, 'card');
+  const executionMode = typedScalarField(raw, 'execution_mode');
   const touchZones = listField(raw, 'touch_zones');
   const authoredDependencies = rawScalarField(raw, 'depends_on');
+  const typedDependencies = typedScalarField(raw, 'depends_on');
   const evidence = evidenceField(raw);
   const parsed = {
     // Historical notes may infer a missing identity from their exact board/file
     // name. Current contracts must author it, and an authored value is never
     // overwritten by the caller because that would mask identity drift.
-    card: String(authoredCard !== undefined ? authoredCard : (schemaVersion === undefined ? card : '') || '').trim(),
-    parent_card: frontmatterScalar(raw, 'parent_card'),
-    slice: frontmatterScalar(raw, 'slice'),
-    model_profile: frontmatterScalar(raw, 'model_profile'),
-    status: frontmatterScalar(raw, 'status'),
+    card: authoredCard !== undefined ? authoredCard : (schemaVersion === undefined ? card : ''),
+    parent_card: typedScalarField(raw, 'parent_card'),
+    slice: typedScalarField(raw, 'slice'),
+    model_profile: typedScalarField(raw, 'model_profile'),
+    status: typedScalarField(raw, 'status'),
     deploy_subscriptions: deploymentField(raw),
-    epic: frontmatterScalar(raw, 'epic'),
-    context_pack: frontmatterScalar(raw, 'context_pack'),
+    epic: typedScalarField(raw, 'epic'),
+    context_pack: typedScalarField(raw, 'context_pack'),
   };
-  const authoredBatchPolicy = rawScalarField(raw, 'batch_policy');
+  const authoredBatchPolicy = typedScalarField(raw, 'batch_policy');
   const batchPolicy = parseBatchPolicy(raw);
   const riskDimensions = listField(raw, 'risk_dimensions');
-  const authoredReleaseRequired = frontmatterScalar(raw, 'release_required');
-  const authoredDeploymentRequired = frontmatterScalar(raw, 'deployment_required');
+  const authoredReleaseRequired = typedScalarField(raw, 'release_required');
+  const authoredDeploymentRequired = typedScalarField(raw, 'deployment_required');
   if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
   if (executionMode !== undefined) parsed.execution_mode = executionMode;
   if (touchZones !== undefined) parsed.touch_zones = touchZones;
@@ -252,14 +264,17 @@ function parseDeliveryCard(raw, card) {
     const dependencyLines = frontmatterBody(raw).split('\n');
     const dependencyIndex = dependencyLines.findIndex((line) => /^depends_on\s*:/.test(line));
     const hasIndentedValue = dependencyIndex >= 0 && /^\s+/.test(dependencyLines[dependencyIndex + 1] || '');
-    parsed.depends_on = authoredDependencies === '' && !hasIndentedValue ? null : parseDependsOn(raw);
+    parsed.depends_on = !hasIndentedValue && typedDependencies !== undefined
+      && typeof typedDependencies !== 'string'
+      ? typedDependencies
+      : (authoredDependencies === '' && !hasIndentedValue ? null : parseDependsOn(raw));
   }
   if (evidence !== undefined) parsed.evidence = evidence;
-  if (authoredBatchPolicy !== undefined) parsed.batch_policy = batchPolicy || authoredBatchPolicy;
+  if (authoredBatchPolicy !== undefined) parsed.batch_policy = authoredBatchPolicy;
   else if (schemaVersion === undefined && batchPolicy) parsed.batch_policy = batchPolicy;
   if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
-  if (authoredReleaseRequired !== undefined) parsed.release_required = parseBoolean(authoredReleaseRequired);
-  if (authoredDeploymentRequired !== undefined) parsed.deployment_required = parseBoolean(authoredDeploymentRequired);
+  if (authoredReleaseRequired !== undefined) parsed.release_required = authoredReleaseRequired;
+  if (authoredDeploymentRequired !== undefined) parsed.deployment_required = authoredDeploymentRequired;
   return parsed;
 }
 
@@ -267,8 +282,9 @@ function prepareDeliveryObject(value) {
   const original = value && typeof value === 'object' && !Array.isArray(value)
     ? JSON.parse(JSON.stringify(value)) : {};
   const version = original.schema_version;
-  const comparison = version == null ? -1 : delivery.compareVersions(version, delivery.CONTRACT_VERSION);
-  if (version != null && comparison == null) {
+  const hasVersion = Object.prototype.hasOwnProperty.call(original, 'schema_version');
+  const comparison = hasVersion ? delivery.compareVersions(version, delivery.CONTRACT_VERSION) : -1;
+  if (hasVersion && (typeof version !== 'string' || comparison == null)) {
     const validation = delivery.validateCard(original, 'current');
     return { ok: false, source: 'invalid', card: validation.card, validation, migration: null };
   }
@@ -301,7 +317,7 @@ function prepareDeliveryObject(value) {
 function prepareDeliveryCard(raw, card) {
   const rawCard = parseDeliveryCard(raw, card);
   const prepared = prepareDeliveryObject(rawCard);
-  const authoredIdentity = frontmatterScalar(raw, 'card');
+  const authoredIdentity = typedScalarField(raw, 'card');
   const expectedIdentity = delivery.normalizeIdentity(card);
   const boundaryErrors = [];
   if (authoredIdentity !== undefined && expectedIdentity
