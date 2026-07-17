@@ -369,6 +369,20 @@
         "platform/install.js"
       ],
       "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware). v0.210: contract extended to LEAF types wiki-page + doc-note — links[] rendered as clickable cards + an '＋ Add link' pill via SectionExplorer.renderNoteLinks (invoked by WikiChromeBar/ProjectChromeBar after the bar). NOT backfilled on leaf notes: the links key is created lazily on first write via processFrontMatter."
+    },
+    {
+      "id": "delivery-execution-card-contract",
+      "kind": "contract",
+      "owner": { "type": "mechanism", "name": "delivery" },
+      "source": "platform/mechanisms/delivery/data/delivery-schema.json",
+      "accepted_versions": ["1.0.0"],
+      "validator": "platform/mechanisms/delivery/scripts/delivery-contract.js",
+      "consumers": [
+        "platform/mechanisms/delivery/index.js",
+        "platform/mechanisms/delivery/scripts/delivery-schema-cli.js",
+        "platform/test/run-delivery-contract.js"
+      ],
+      "notes": "Delivery contract v1.0.0. The registry declares the execution-card field set, lifecycle enums, migration rules, agent-facing descriptions, machine-readable batch_policy including supervised_only, and the shared valid/invalid fixture corpus. The pure validator adds dependency/completion proof, touch-zone conflicts, normalization, policy derivation, migration, posture, and failure taxonomy. A3 owns consumer adoption and historical-card migration."
     }
   ]
 }

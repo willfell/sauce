@@ -1,0 +1,449 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sauce Delivery shared execution contract registry",
+  "contract": {
+    "name": "delivery",
+    "version": "1.0.0",
+    "minimum_compatible_version": "0.0.0",
+    "description": "Registry half of the Delivery contract. The semantic module owns cross-field rules and proof evaluation."
+  },
+  "enums": {
+    "status": ["planning", "in_progress", "blocked", "parked", "completed"],
+    "model_profile": ["standard", "heavy"],
+    "execution_mode": ["release", "docs_only"],
+    "batch_policy": ["continue", "stop_after", "supervised_only"],
+    "posture": ["claimable", "blocked_by_dependencies", "docs_only", "awaiting_user_decision"],
+    "failure_class": ["infra", "code", "mixed", "unknown"],
+    "risk_dimension": ["new_mechanism", "schema", "migration", "consumer_subscription", "multi_blueprint_ui", "shared_contract", "control_plane"]
+  },
+  "status_aliases": {
+    "planning": "planning",
+    "in-planning": "planning",
+    "in_progress": "in_progress",
+    "in-progress": "in_progress",
+    "blocked": "blocked",
+    "parked": "parked",
+    "completed": "completed"
+  },
+  "types": {
+    "execution-card": {
+      "description": "One bounded, independently releasable Delivery execution child.",
+      "fields": [
+        {
+          "name": "card",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Canonical card identity supplied from the note filename or intake title.",
+          "consumer_descriptions": {
+            "planner": "Author one unique trimmed card title; filenames and frontmatter comparisons use this identity.",
+            "coordinator": "Use the canonical normalized identity as the ledger key; never infer ownership from an identifier prefix."
+          }
+        },
+        {
+          "name": "schema_version",
+          "type": "string",
+          "required": true,
+          "default": "1.0.0",
+          "since_version": "1.0.0",
+          "description": "Delivery contract version stamped at authoring time. Newer-than-engine versions fail closed."
+        },
+        {
+          "name": "parent_card",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Explicit parent authority; wikilink, alias, and bare forms normalize to one identity.",
+          "consumer_descriptions": {
+            "planner": "Link the exact non-claimable parent card.",
+            "coordinator": "Compare this normalized field for sibling ownership; identifier prefixes are never authority."
+          }
+        },
+        {
+          "name": "slice",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Short human navigation label within the explicit parent."
+        },
+        {
+          "name": "model_profile",
+          "type": "string",
+          "required": true,
+          "enum": "model_profile",
+          "since_version": "1.0.0",
+          "description": "Reasoning profile; independent from unattended safety policy."
+        },
+        {
+          "name": "execution_mode",
+          "type": "string",
+          "required": true,
+          "enum": "execution_mode",
+          "default": "release",
+          "since_version": "1.0.0",
+          "description": "Release-backed code work or explicitly supervised docs-only validation."
+        },
+        {
+          "name": "batch_policy",
+          "type": "string",
+          "required": true,
+          "enum": "batch_policy",
+          "default": "continue",
+          "since_version": "1.0.0",
+          "description": "Machine-readable continuation ceiling. Derived policy may strengthen but never weaken it."
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "enum": "status",
+          "default": "planning",
+          "since_version": "1.0.0",
+          "description": "Normalized projection vocabulary shared by cards, boards, and coordinator phases."
+        },
+        {
+          "name": "touch_zones",
+          "type": "array:zone",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Non-empty exclusive working set expressed as workspace-relative paths or {root,path} tuples.",
+          "consumer_descriptions": {
+            "planner": "Declare the smallest canonical path set covering every intended edit; use tuples only for multi-root work.",
+            "coordinator": "Normalize path segments and reject equality or nesting conflicts within the same logical root."
+          }
+        },
+        {
+          "name": "depends_on",
+          "type": "array:identity",
+          "required": true,
+          "default": [],
+          "since_version": "1.0.0",
+          "description": "Forward dependencies only. Reverse links are derived and Archive never proves completion."
+        },
+        {
+          "name": "deploy_subscriptions",
+          "type": "object:deployment-map",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Exact headspace, Accuris, and ERO component additions; empty arrays remain explicit."
+        },
+        {
+          "name": "epic",
+          "type": "string",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Planning authority or design artifact that explains the execution child."
+        },
+        {
+          "name": "evidence",
+          "type": "array:evidence-claim",
+          "required": true,
+          "since_version": "1.0.0",
+          "description": "Pinned evidence claims. Current claims require source identity, capture timestamp, revision or external identifier, locator, and supported claim; historical strings remain readable only with an unpinned-evidence warning."
+        },
+        {
+          "name": "context_pack",
+          "type": "string",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Optional versioned context-pack link; absence is backward-safe."
+        },
+        {
+          "name": "release_required",
+          "type": "boolean",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Derived true for release mode and false for docs_only; conflicting authored values are invalid."
+        },
+        {
+          "name": "deployment_required",
+          "type": "boolean",
+          "required": false,
+          "since_version": "1.0.0",
+          "description": "Derived true for release mode and false for docs_only; completion proof follows the derived value."
+        },
+        {
+          "name": "risk_dimensions",
+          "type": "array:risk-dimension",
+          "required": false,
+          "default": [],
+          "since_version": "1.0.0",
+          "description": "Explicit high-risk dimensions. Any listed dimension requires the heavy model profile."
+        }
+      ]
+    },
+    "evidence-claim": {
+      "description": "A pinned snapshot supporting one claim about mutable state.",
+      "fields": [
+        { "name": "source_identity", "type": "string", "required": true, "since_version": "1.0.0", "description": "Stable identity of the repository, service, vault, or authority observed." },
+        { "name": "captured_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 timestamp with timezone recording when the source was observed." },
+        { "name": "revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Commit, hash, receipt ID, PR/tag, or external revision pin." },
+        { "name": "locator", "type": "string", "required": true, "since_version": "1.0.0", "description": "Path/line, symbol, heading, URL, or other source locator." },
+        { "name": "claim", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact claim the pinned snapshot supports." }
+      ]
+    },
+    "release-ancestry-receipt": {
+      "description": "Pinned deterministic proof that a feature PR merge is contained by the recorded release and tag.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after the deterministic ancestry adapter verifies containment." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable identifier for this ancestry check." },
+        { "name": "repository", "type": "string", "required": true, "since_version": "1.0.0", "description": "Repository identity against which ancestry was checked." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 timestamp with timezone for the ancestry observation." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact deterministic engine revision that produced the receipt." },
+        { "name": "feature_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Feature PR identity tied to feature_merge_sha." },
+        { "name": "feature_merge_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified feature merge commit." },
+        { "name": "release_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Containing release PR identity." },
+        { "name": "release_merge_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified containing release merge commit." },
+        { "name": "tag", "type": "string", "required": true, "since_version": "1.0.0", "description": "Release tag verified against the containing release." }
+      ]
+    },
+    "docs-validation-receipt": {
+      "description": "Pinned exact-head/base proof for supervised docs-only completion.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only when the documented validation passed." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable validation receipt identity." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 validation timestamp with timezone." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact verifier revision." },
+        { "name": "head_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact validated head commit." },
+        { "name": "base_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact validated base commit." }
+      ]
+    },
+    "brew-promotion-receipt": {
+      "description": "Pinned proof that the recorded tap PR produced the installed Homebrew version.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after deterministic Homebrew verification." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable promotion receipt identity." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 promotion observation timestamp with timezone." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact deterministic verifier revision." },
+        { "name": "tap_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Tap PR that promoted the formula." },
+        { "name": "installed_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified Homebrew installation version." }
+      ]
+    },
+    "vault-deployment-receipt": {
+      "description": "Vault-specific install and drift-verification proof.",
+      "fields": [
+        { "name": "vault", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact required vault identity." },
+        { "name": "path", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified vault locator." },
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after install and status checks pass." },
+        { "name": "required_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Release floor applied to this vault." },
+        { "name": "installed_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified installed Sauce version." },
+        { "name": "started_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment start timestamp with timezone." },
+        { "name": "finished_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment completion timestamp with timezone; must not precede started_at." },
+        { "name": "status_exit", "type": "integer:nonnegative", "required": true, "since_version": "1.0.0", "description": "Read-only post-install status exit code; completion requires zero." },
+        { "name": "history_errors", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Install-history errors; completion requires an empty array." },
+        { "name": "added_subscriptions", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Subscriptions newly inserted by this deployment attempt; may be empty on retry." },
+        { "name": "verified_subscriptions", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Current post-install subscription snapshot used for retry-safe requested-component proof." }
+      ]
+    }
+  },
+  "policies": {
+    "required_vaults": ["headspace", "accuris", "ero"],
+    "workspace_roots": ["workshop", "headspace", "accuris", "ero"],
+    "exclusive_zones": ["platform/install.js", "package.json", ".github/workflows", "platform/manifest.json", "shared-registries", "homebrew-promotion"],
+    "control_plane_zone_prefixes": ["scripts/autoloop", "scripts/release", ".agents/skills/card-intake", "platform/mechanisms/delivery", ".github/workflows"],
+    "high_risk_zone_prefixes": ["platform/mechanisms", "platform/install.js", "scripts/autoloop", "scripts/release", ".github/workflows"],
+    "policy_strength": ["continue", "stop_after", "supervised_only"]
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": [
+        { "field": "schema_version", "migration": { "type": "default_backfill", "value": "1.0.0" } },
+        { "field": "execution_mode", "migration": { "type": "default_backfill", "value": "release" } },
+        { "field": "depends_on", "migration": { "type": "default_backfill", "value": [] } },
+        { "field": "deploy_subscriptions", "migration": { "type": "default_backfill", "value": { "headspace": [], "accuris": [], "ero": [] } } },
+        { "field": "evidence", "migration": { "type": "manual", "reason": "Mutable evidence cannot be pinned without source identity, capture time, revision, locator, and claim." } },
+        { "field": "batch_policy", "migration": { "type": "derive_from", "expression": "derivePolicy(card)" } },
+        { "field": "release_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } },
+        { "field": "deployment_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } }
+      ]
+    }
+  ],
+  "fixtures": {
+    "base_execution_card": {
+      "card": "A2 shared registry and semantic contract core",
+      "schema_version": "1.0.0",
+      "parent_card": "[[Tranche A — trustworthy substrate]]",
+      "slice": "A2",
+      "model_profile": "heavy",
+      "execution_mode": "release",
+      "batch_policy": "supervised_only",
+      "status": "planning",
+      "touch_zones": ["platform/mechanisms/delivery", "platform/test/run-delivery-contract.js"],
+      "depends_on": ["[[A1 status normalization and drift visibility]]"],
+      "deploy_subscriptions": {
+        "headspace": ["mechanism:delivery"],
+        "accuris": ["mechanism:delivery"],
+        "ero": ["mechanism:delivery"]
+      },
+      "epic": "[[Final Initial Design]]",
+      "evidence": [
+        {
+          "source_identity": "Sauce canonical design",
+          "captured_at": "2026-07-16T17:51:05Z",
+          "revision": "651cdea48a0c0e9ce24832042fff87bce6855ab464edff93db19bff340784429",
+          "locator": "docs/final-initial-design/Final Initial Design.md:96",
+          "claim": "Delivery packages as a mechanism with one registry plus pure semantic contract."
+        }
+      ],
+      "release_required": true,
+      "deployment_required": true,
+      "risk_dimensions": ["shared_contract", "new_mechanism"]
+    },
+    "valid": [
+      { "name": "release-supervised-control-plane", "patch": {} },
+      {
+        "name": "docs-only-standard",
+        "patch": {
+          "card": "Docs decision",
+          "slice": "D1",
+          "model_profile": "standard",
+          "execution_mode": "docs_only",
+          "batch_policy": "stop_after",
+          "touch_zones": ["Docs/decision.md"],
+          "depends_on": [],
+          "deploy_subscriptions": { "headspace": [], "accuris": [], "ero": [] },
+          "release_required": false,
+          "deployment_required": false,
+          "risk_dimensions": []
+        }
+      },
+      {
+        "name": "historical-unversioned",
+        "mode": "historical",
+        "expected_requires_migration": true,
+        "expected_historical_unversioned": true,
+        "remove": ["schema_version", "batch_policy"],
+        "patch": { "card": "Historical card", "risk_dimensions": [] }
+      },
+      {
+        "name": "historical-unpinned-evidence-is-readable-with-warning",
+        "mode": "historical",
+        "expected_requires_migration": true,
+        "expected_historical_unversioned": true,
+        "remove": ["schema_version", "batch_policy"],
+        "patch": { "card": "Historical evidence card", "evidence": ["legacy/path.md:12"], "risk_dimensions": [] },
+        "expected_warning": "unpinned-evidence"
+      },
+      {
+        "name": "whitespace-and-unicode-normalization",
+        "patch": {
+          "card": "  Delivery 🚚  ",
+          "parent_card": "  [[Tranche A — trustworthy substrate|Tranche A]]  ",
+          "touch_zones": ["  platform/mechanisms/delivery  "],
+          "depends_on": ["  [[A1 status normalization and drift visibility]]  "]
+        }
+      },
+      {
+        "name": "offset-and-fractional-evidence-timestamp",
+        "patch": {
+          "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:05.123-06:00", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }]
+        }
+      },
+      { "name": "older-contract-requires-migration", "patch": { "schema_version": "0.9.0" }, "expected_requires_migration": true }
+    ],
+    "invalid": [
+      { "name": "missing-parent", "remove": ["parent_card"], "expected_error": "required-field" },
+      { "name": "unknown-profile", "patch": { "model_profile": "ultra" }, "expected_error": "invalid-enum" },
+      { "name": "status-stray", "patch": { "status": "in planning soon" }, "expected_error": "invalid-status" },
+      { "name": "newer-than-engine", "patch": { "schema_version": "9.0.0" }, "expected_error": "schema-newer-than-engine" },
+      { "name": "malformed-version", "patch": { "schema_version": "v1" }, "expected_error": "invalid-schema-version" },
+      {
+        "name": "docs-only-cannot-require-release",
+        "patch": { "execution_mode": "docs_only", "release_required": true, "deployment_required": false },
+        "expected_error": "docs-only-release-conflict"
+      },
+      {
+        "name": "release-requires-all-vault-arrays",
+        "patch": { "deploy_subscriptions": { "headspace": [], "accuris": [] } },
+        "expected_error": "missing-deployment-vault"
+      },
+      {
+        "name": "deployment-map-refuses-undeclared-vaults",
+        "patch": { "deploy_subscriptions": { "headspace": [], "accuris": [], "ero": [], "other": [] } },
+        "expected_error": "unexpected-deployment-vault"
+      },
+      {
+        "name": "deployment-entries-are-typed",
+        "patch": { "deploy_subscriptions": { "headspace": [42], "accuris": [], "ero": [] } },
+        "expected_error": "invalid-deployment-entry"
+      },
+      {
+        "name": "deployment-entries-require-component-kind",
+        "patch": { "deploy_subscriptions": { "headspace": ["delivery"], "accuris": [], "ero": [] } },
+        "expected_error": "invalid-deployment-entry"
+      },
+      {
+        "name": "deployment-entries-must-be-unique",
+        "patch": { "deploy_subscriptions": { "headspace": ["mechanism:delivery", "mechanism:delivery"], "accuris": [], "ero": [] } },
+        "expected_error": "duplicate-deployment-entry"
+      },
+      { "name": "high-risk-requires-heavy", "patch": { "model_profile": "standard" }, "expected_error": "high-risk-requires-heavy" },
+      { "name": "zone-cannot-escape-workspace", "patch": { "touch_zones": ["../outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-cannot-be-absolute", "patch": { "touch_zones": ["/outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-cannot-use-a-windows-absolute-path", "patch": { "touch_zones": ["C:\\outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-root-must-be-declared", "patch": { "touch_zones": [{ "root": "other", "path": "package.json" }] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-path-must-be-a-string", "patch": { "touch_zones": [{ "path": {} }] }, "expected_error": "invalid-touch-zone" },
+      { "name": "derived-policy-cannot-be-weakened", "patch": { "batch_policy": "continue" }, "expected_error": "policy-weakened" },
+      {
+        "name": "self-dependency",
+        "patch": { "depends_on": ["[[A2 shared registry and semantic contract core]]"] },
+        "expected_error": "self-dependency"
+      },
+      { "name": "dependency-object-is-invalid", "patch": { "depends_on": { "card": "A1" } }, "expected_error": "invalid-type" },
+      { "name": "dependency-array-items-are-identities", "patch": { "depends_on": [42] }, "expected_error": "invalid-type" },
+      { "name": "current-evidence-cannot-be-an-unpinned-string", "patch": { "evidence": ["path.md:12"] }, "expected_error": "invalid-evidence-claim" },
+      { "name": "current-card-requires-pinned-evidence", "remove": ["evidence"], "expected_error": "required-field" },
+      {
+        "name": "evidence-capture-needs-a-timezone",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-calendar-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-02-30T17:51:05Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-hour-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T24:00:00Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-minute-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:60:00Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-second-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:60Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-offset-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:05+24:00", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      { "name": "evidence-must-be-an-array", "patch": { "evidence": "one locator" }, "expected_error": "invalid-type" },
+      { "name": "risk-dimension-must-be-known", "patch": { "risk_dimensions": ["mystery"] }, "expected_error": "invalid-type" },
+      {
+        "name": "touch-zones-must-be-unique",
+        "patch": { "touch_zones": ["platform/mechanisms/delivery", "./platform/mechanisms/delivery/"] },
+        "expected_error": "duplicate-touch-zone"
+      }
+    ],
+    "dependency_syntax": [
+      { "name": "quoted-scalar-wikilink", "input": "depends_on: \"[[A]]\"", "expected": ["A"] },
+      { "name": "unquoted-scalar-wikilink", "input": "depends_on: [[A]]", "expected": ["A"] },
+      { "name": "bare-scalar", "input": "depends_on: A", "expected": ["A"] },
+      { "name": "flow-list", "input": "depends_on: [\"[[A]]\", \"B\"]", "expected": ["A", "B"] },
+      { "name": "flow-list-single-quoted", "input": "depends_on: ['[[A]]', 'B']", "expected": ["A", "B"] },
+      { "name": "flow-list-escaped-double-quote", "input": "depends_on: [\"Card \\\"quoted\\\"\"]", "expected": ["Card \"quoted\""] },
+      { "name": "flow-list-escaped-single-quote", "input": "depends_on: ['Card ''quoted''']", "expected": ["Card 'quoted'"] },
+      { "name": "flow-list-quoted-comma", "input": "depends_on: [\"[[Card, part 2]]\"]", "expected": ["Card, part 2"] },
+      { "name": "flow-list-unquoted-wikilink-comma", "input": "depends_on: [[[Card, part 2]]]", "expected": ["Card, part 2"] },
+      { "name": "block-list", "input": "depends_on:\n  - \"[[A]]\"\n  - B", "expected": ["A", "B"] },
+      { "name": "one-item-block-list", "input": "depends_on:\n  - \"[[A]]\"", "expected": ["A"] }
+    ]
+  }
+}
