@@ -4,9 +4,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { run } = require('../../.agents/skills/card-intake/scripts/card-intake');
+const { run, validateDeliveryContract } = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
 const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
+const { prepareDeliveryCard } = require('../../scripts/autoloop/select-card');
+const delivery = require('../mechanisms/delivery');
 const { aggregateClaudeSurface, materializeClaudeSurface } = require('../install');
 const { regenerateClaudeMd } = require('../mechanisms/platform-claude/claude-md-renderer');
 
@@ -17,7 +19,7 @@ function ok(condition, label) { if (condition) { passed += 1; console.log(`  PAS
 function eq(actual, expected, label) { ok(JSON.stringify(actual) === JSON.stringify(expected), `${label} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`); }
 function board() { return ['---', 'kanban-plugin: board', '---', '', '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Parked', '', '## Discovered (autoloop)', '', '## Post-GA', '', '## Completed', '', '- [x] [[Prerequisite]]', ''].join('\n'); }
 function base(dir, extra = {}) {
-  return { mode: 'single', classification: 'direct_execution', completion_mode: 'release', outcome: 'Ship one bounded behavior with deterministic coverage.', project_root: dir, link_roots: [dir], evidence_roots: [dir], board_path: path.join(dir, 'board.md'), cards_root: path.join(dir, 'tasks'), source_board: 'project/board.md', epic: '[[Roadmap]]', created_at: '2026-07-15T12:00:00-06:00', evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior' }], protected_cards: [], cards: [], ...extra };
+  return { mode: 'single', classification: 'direct_execution', completion_mode: 'release', outcome: 'Ship one bounded behavior with deterministic coverage.', project_root: dir, link_roots: [dir], evidence_roots: [dir], board_path: path.join(dir, 'board.md'), cards_root: path.join(dir, 'tasks'), source_board: 'project/board.md', epic: '[[Roadmap]]', created_at: '2026-07-15T12:00:00-06:00', evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior', source_identity: 'fixture repo', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-revision', claim: 'The bounded example behavior is verified.' }], protected_cards: [], cards: [], ...extra };
 }
 function execution(title, extra = {}) {
   return { title, role: 'execution', lane: 'In Planning', status: 'planning', model_profile: 'standard', risk_flags: [], execution_mode: 'release', touch_zones: ['platform/example.js', 'platform/test/run-example.js'], depends_on: [], deploy_subscriptions: { headspace: [], accuris: [], ero: [] }, acceptance_tests: ['Focused behavior test passes.', 'Full preflight passes.'], applicable_guides: ['AGENTS.md', 'Docs/agent-guides/build-test-verify.md'], trap_warnings: ['Do not widen scope or edit version pins.'], ...extra };
@@ -85,6 +87,7 @@ function validateSkillSurface() {
     ok(/^---\nname: card-intake\ndescription: .+\n---/s.test(body), `${path.relative(ROOT, file)} has valid frontmatter`);
     ok(Buffer.byteLength(body) < 8192, `${path.relative(ROOT, file)} stays under 8 KB`);
     ok(body.includes('[[Loop System with Codex]]'), `${path.relative(ROOT, file)} links the execution contract`);
+    ok(/Delivery public contract|delivery\/index\.js/.test(body), `${path.relative(ROOT, file)} routes authoring through the Delivery public contract`);
   }
   ok(fs.readFileSync(metadata, 'utf8').includes('default_prompt: "Use $card-intake'), 'openai.yaml names $card-intake');
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/mechanisms/platform-claude/manifest.json'), 'utf8'));
@@ -94,16 +97,38 @@ function validateSkillSurface() {
   ok(manifest.claude_surface.some((e) => e.kind === 'claude_md_row' && e.table === 'skills-index' && e.row.command === '/card-intake'), 'manifest registers skills index');
 }
 
+function sharedDeliveryFixtures() {
+  console.log('\n--- shared Delivery fixture corpus ---');
+  const fixtureCard = (fixture) => {
+    const card = JSON.parse(JSON.stringify(delivery.registry.fixtures.base_execution_card));
+    Object.assign(card, fixture.patch || {});
+    for (const key of fixture.remove || []) delete card[key];
+    return card;
+  };
+  for (const fixture of delivery.registry.fixtures.valid) {
+    const verdict = validateDeliveryContract(fixtureCard(fixture), fixture.mode || 'current');
+    ok(verdict.ok, `card intake accepts shared valid fixture: ${fixture.name}`);
+  }
+  for (const fixture of delivery.registry.fixtures.invalid) {
+    const verdict = validateDeliveryContract(fixtureCard(fixture), fixture.mode || 'current');
+    ok(!verdict.ok && verdict.errors.some((error) => error.code === fixture.expected_error),
+      `card intake refuses shared invalid fixture: ${fixture.name}`);
+  }
+}
+
 function localizedBug() {
   console.log('\n--- forward fixture: localized bug with evidence ---');
   tempCase((dir) => {
     const card = execution('BUG-1 Localized cold-load guard', { lane: 'Discovered (autoloop)' });
-    const spec = base(dir, { classification: 'bug', outcome: 'Prevent the localized cold-load crash.', reproduction: 'Open the packing checkbox in a cold vault and observe the null dereference.', evidence: [{ path: 'platform/helper.js', line: 86, note: 'unguarded dereference' }], cards: [card] });
+    const spec = base(dir, { classification: 'bug', outcome: 'Prevent the localized cold-load crash.', reproduction: 'Open the packing checkbox in a cold vault and observe the null dereference.', evidence: [{ path: 'platform/helper.js', line: 86, note: 'unguarded dereference', source_identity: 'fixture repo', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-revision', claim: 'The helper dereferences a missing value.' }], cards: [card] });
     eq(run(spec, false).result, 'awaiting_user_decision', 'bug dry-run routes to triage posture');
     ok(run(spec, true).ok, 'bug fixture applies');
     const raw = fs.readFileSync(path.join(dir, 'tasks', card.title, `${card.title}.md`), 'utf8');
     ok(raw.includes('kanban_column: "Discovered (autoloop)"'), 'bug metadata records lane');
     ok(raw.includes('`platform/helper.js:86`'), 'bug preserves reproduction evidence');
+    ok(raw.includes(`schema_version: "${delivery.CONTRACT_VERSION}"`) && raw.includes('batch_policy: continue'), 'new execution card stamps the current Delivery contract and derived policy');
+    const prepared = prepareDeliveryCard(raw, card.title);
+    ok(prepared.ok && prepared.source === 'current' && prepared.card.evidence[0].revision === 'fixture-revision', 'rendered card round-trips through the shared current contract');
     ok(emittedLinksResolve(raw, dir), 'every emitted bug-card wikilink resolves');
     ok(!run({ ...spec, reproduction: '' }, false).ok, 'bug without reproduction is refused');
     delete spec.created_at;
@@ -117,7 +142,7 @@ function roadmapTheme() {
     const parent1 = { title: 'RM-1 Blueprint X safety', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
     const child1 = execution('RM-1a Blueprint X safety harness', { parent_title: parent1.title, slice: 'RM-1a', depends_on: ['[[Prerequisite]]'] });
     const parent2 = { title: 'RM-2 Blueprint X polish', role: 'parent', lane: 'Post-GA', status: 'planning', depends_on: ['[[RM-1 Blueprint X safety]]'] };
-    const spec = base(dir, { mode: 'roadmap', classification: 'roadmap_theme', outcome: 'Finish Blueprint X through dependency-ordered safety and polish parents.', evidence: [{ path: 'platform/blueprints/x/manifest.json', line: 1 }], cards: [parent1, child1, parent2], roadmap_path: path.join(dir, 'docs', 'roadmap', 'Blueprint X.md'), roadmap_key: 'blueprint-x', roadmap_section: '## Blueprint X plan\n\n1. Safety\n2. Polish' });
+    const spec = base(dir, { mode: 'roadmap', classification: 'roadmap_theme', outcome: 'Finish Blueprint X through dependency-ordered safety and polish parents.', evidence: [{ path: 'platform/blueprints/x/manifest.json', line: 1, source_identity: 'fixture repo', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-revision', claim: 'The blueprint manifest establishes the implementation surface.' }], cards: [parent1, child1, parent2], roadmap_path: path.join(dir, 'docs', 'roadmap', 'Blueprint X.md'), roadmap_key: 'blueprint-x', roadmap_section: '## Blueprint X plan\n\n1. Safety\n2. Polish' });
     const result = run(spec, true);
     ok(result.ok && result.result === 'awaiting_user_decision' && result.candidate_card === child1.title && result.eligibility_dry_run_required, 'roadmap identifies a candidate but defers eligibility to coordinator');
     ok(fs.existsSync(path.join(dir, 'tasks', parent1.title, child1.title, `${child1.title}.md`)), 'first child is nested');
@@ -173,6 +198,7 @@ function docsOnly() {
     ok(selectCard({ boardMd: boardRaw, loadBody: () => '' }).card !== card.title, 'release selector cannot claim docs-only card');
     const raw = fs.readFileSync(path.join(dir, 'tasks', card.title, `${card.title}.md`), 'utf8');
     ok(raw.includes('release_required: false') && raw.includes('deployment_required: false'), 'docs-only flags materialize');
+    ok(prepareDeliveryCard(raw, card.title).ok, 'docs-only intake also round-trips through the complete Delivery contract');
     delete spec.created_at;
     ok(run(spec, true).no_op, 'repeat docs-only intake preserves generated created_at and is idempotent');
   });
@@ -195,7 +221,7 @@ function missingEvidenceAndRefusals() {
     const scout = run(base(dir, { evidence: [], scout_artifact: 'Scout Blueprint X scope', cards: [] }), false);
     ok(scout.ok && scout.result === 'awaiting_user_decision' && scout.changed_paths.length === 0, 'missing evidence yields scout posture without writes');
     fs.writeFileSync(path.join(dir, 'GA Research — Blueprint X.md'), '# Research\n\nEvidence: `package.json:74`.\n');
-    const researchSpec = base(dir, { evidence: [], research_artifact: 'GA Research — Blueprint X', cards: [execution('RESEARCH-1 Supported execution')] });
+    const researchSpec = base(dir, { evidence: [], evidence_claims: [{ source_identity: 'GA Research — Blueprint X', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-research-revision', locator: 'GA Research — Blueprint X.md:3', claim: 'The research artifact pins the package evidence.' }], research_artifact: 'GA Research — Blueprint X', cards: [execution('RESEARCH-1 Supported execution')] });
     const research = run(researchSpec, true);
     ok(research.ok && research.candidate_card === 'RESEARCH-1 Supported execution', 'resolved research artifact with path:line evidence can support candidate work');
     ok(emittedLinksResolve(fs.readFileSync(findTaskFile(dir, 'RESEARCH-1 Supported execution'), 'utf8'), dir), 'research-backed card emits only resolved wikilinks');
@@ -210,7 +236,8 @@ function missingEvidenceAndRefusals() {
     fs.writeFileSync(path.join(dir, 'board.md'), board().replace('## Parked\n', '## Parked\n\n- [ ] [[PARKED Board-only card]]\n'));
     ok(!run(base(dir, { cards: [execution('PARKED Board-only card')] }), false).ok, 'board-lane parked card is immutable without loading its note');
     ok(!run(base(dir, { cards: [execution('BAD Invented lane', { lane: 'Made Up' })] }), false).ok, 'invented board lane is refused');
-    ok(!run(base(dir, { cards: [execution('BAD Status', { status: 'in-planning' })] }), false).ok, 'bad status is refused');
+    ok(run(base(dir, { cards: [execution('ALIAS Status', { status: 'in-planning' })] }), false).ok, 'shared historical status alias is normalized');
+    ok(!run(base(dir, { cards: [execution('BAD Status', { status: 'almost-done' })] }), false).ok, 'unknown status is refused');
     const badMap = execution('BAD Map'); delete badMap.deploy_subscriptions.ero;
     ok(!run(base(dir, { cards: [badMap] }), false).ok, 'missing deployment map is refused');
     const gaException = base(dir, { classification: 'ga_exception', cards: [execution('GA-EX-1 Approved exception')], ga_exception_path: path.join(dir, 'docs', 'roadmap', 'Priorities for GA.md'), ga_exception_section: '## Approved exception\n\nGA-EX-1 is allowed.' });
@@ -297,7 +324,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  validateSkillSurface(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); await exactHeadMaterialization();
+  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

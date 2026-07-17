@@ -16,7 +16,10 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
-const { parseBoard, parseCheckedColumn, parseDependsOn, parseCardStatus, parseBatchPolicy } = require('./select-card');
+const {
+  parseBoard, parseCheckedColumn, parseDependsOn, parseCardStatus, parseBatchPolicy,
+  delivery, prepareDeliveryCard, validationReason,
+} = require('./select-card');
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
@@ -35,10 +38,6 @@ const AMEND_CONTRACT_OPTIONS = new Set([
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
 ]);
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
-const EXCLUSIVE_ZONES = [
-  'platform/install.js', 'package.json', '.github/workflows',
-  'platform/manifest.json', 'shared-registries', 'homebrew-promotion',
-];
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
 const BOARD = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
@@ -187,9 +186,7 @@ function normalizeZone(zone) {
 }
 
 function normalizeCardLink(value) {
-  const raw = String(value || '').trim().replace(/^['"]|['"]$/g, '');
-  const wikilink = raw.match(/^\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]$/);
-  return (wikilink ? wikilink[1] : raw).trim();
+  return delivery.normalizeIdentity(value);
 }
 
 function sameParentConflict(parentCard, records, excludeCard = '') {
@@ -201,10 +198,7 @@ function sameParentConflict(parentCard, records, excludeCard = '') {
 }
 
 function zonesOverlap(a, b) {
-  const x = normalizeZone(a); const y = normalizeZone(b);
-  if (!x || !y) return false;
-  if (EXCLUSIVE_ZONES.includes(x) || EXCLUSIVE_ZONES.includes(y)) return x === y;
-  return x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`);
+  return delivery.zoneConflicts([a], [b]);
 }
 
 function conflictsWithActive(meta, active) {
@@ -375,21 +369,30 @@ function executionContractProjectionProblem(record, raw) {
   return null;
 }
 
-function parseExecutionMeta(raw) {
+function parseExecutionMeta(raw, card) {
+  const prepared = prepareDeliveryCard(raw, card);
   return {
-    modelProfile: scalarField(raw, 'model_profile'),
-    touchZones: listField(raw, 'touch_zones').map(normalizeZone),
-    dependencies: parseDependsOn(raw),
-    deploySubscriptions: deploymentField(raw),
-    parentCard: scalarField(raw, 'parent_card'),
-    slice: scalarField(raw, 'slice'),
-    status: parseCardStatus(raw),
-    batchPolicy: parseBatchPolicy(raw),
+    modelProfile: prepared.card.model_profile,
+    touchZones: prepared.card.touch_zones || [],
+    dependencies: prepared.card.depends_on || [],
+    deploySubscriptions: prepared.card.deploy_subscriptions,
+    parentCard: prepared.card.parent_card,
+    slice: prepared.card.slice,
+    status: prepared.card.status,
+    batchPolicy: delivery.derivePolicy(prepared.card),
+    contract: prepared.card,
+    contractSource: prepared.source,
+    contractVersion: delivery.CONTRACT_VERSION,
+    contractValidation: prepared.validation,
+    contractMigration: prepared.migration,
+    contractOk: prepared.ok,
+    contractReason: validationReason(prepared),
   };
 }
 
 function validateExecutionMeta(meta) {
   const errors = [];
+  if (!meta.contractOk) errors.push(`delivery contract invalid: ${meta.contractReason}`);
   if (!['standard', 'heavy'].includes(meta.modelProfile)) errors.push('model_profile must be standard|heavy');
   if (!meta.touchZones.length) errors.push('touch_zones must be non-empty');
   if (meta.status !== undefined && meta.status !== 'planning') errors.push(`status must normalize to planning for eligibility (got ${meta.status || 'unknown'})`);
@@ -450,9 +453,8 @@ function selectClaimCandidate({ boardMd, state, loadCard, supervised = false }) 
     if (state.cards[card] && state.cards[card].phase !== 'cancelled') { skipped.push({ card, reason: `already tracked (${state.cards[card].phase})` }); continue; }
     const loaded = loadCard(card);
     if (!loaded || !loaded.raw) { skipped.push({ card, reason: 'card note missing' }); continue; }
-    const meta = parseExecutionMeta(loaded.raw);
+    const meta = parseExecutionMeta(loaded.raw, card);
     const errors = validateExecutionMeta(meta);
-    if (meta.batchPolicy === 'supervised_only' && !supervised) errors.push('batch_policy supervised_only requires an explicit supervised run');
     if (errors.length) { skipped.push({ card, reason: errors.join('; ') }); continue; }
     // Keep the unmet set explicit so recovery diagnostics can name each gate.
     const unmet = [];
@@ -464,6 +466,14 @@ function selectClaimCandidate({ boardMd, state, loadCard, supervised = false }) 
       }
     }
     if (unmet.length) { skipped.push({ card, reason: `dependencies not deployed: ${unmet.join(', ')}` }); continue; }
+    const eligibility = delivery.batchEligibility(meta.contract, {
+      mode: meta.contractSource === 'historical' ? 'historical' : 'current',
+      supervised,
+      dependency_result: { eligible: true, missing_proof: [] },
+    });
+    if (!eligibility.eligible) {
+      skipped.push({ card, reason: `delivery batch ineligible: ${eligibility.reason}` }); continue;
+    }
     const sibling = sameParentConflict(meta.parentCard, active);
     if (sibling) { skipped.push({ card, reason: `active sibling ${sibling.card} has parent ${normalizeCardLink(meta.parentCard)}` }); continue; }
     const conflict = conflictsWithActive(meta, active);
@@ -486,6 +496,8 @@ function summarizeClaimSelection(selected) {
       action: 'claim', card: selected.card,
       model_profile: selected.meta.modelProfile,
       touch_zones: selected.meta.touchZones,
+      contract_version: selected.meta.contractVersion,
+      contract_source: selected.meta.contractSource,
       skipped_count: skipped.length,
     };
     if (selected.meta.status) summary.status = selected.meta.status;
@@ -682,8 +694,33 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
   if (!mapping || record.projection_error) return null;
   try {
     const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
-    const actualStatus = parseCardStatus(raw);
+    const prepared = prepareDeliveryCard(raw, record.card);
+    if (!prepared.ok && (record.delivery_contract || ['current', 'future', 'invalid'].includes(prepared.source))) {
+      return {
+        card: record.card, phase: record.phase,
+        error: `card Delivery contract is invalid: ${validationReason(prepared)}`,
+      };
+    }
+    // Pre-A2 tracked cards remain readable without rewriting protected
+    // historical metadata; lifecycle still normalizes through Delivery.
+    const actualStatus = prepared.ok ? prepared.card.status : delivery.normalizeStatus(scalarField(raw, 'status'));
     let differs = scalarField(raw, 'kanban_column') !== mapping.column || actualStatus !== mapping.status;
+    if (record.delivery_contract) {
+      const expectedContract = delivery.normalizeCard({
+        ...record.delivery_contract,
+        status: mapping.status,
+        depends_on: record.dependencies,
+        touch_zones: record.touch_zones,
+        deploy_subscriptions: record.deploy_subscriptions,
+      });
+      const actualContract = prepared.card;
+      const stableFields = [
+        'schema_version', 'card', 'parent_card', 'slice', 'model_profile', 'execution_mode',
+        'batch_policy', 'status', 'touch_zones', 'depends_on', 'deploy_subscriptions',
+        'epic', 'evidence', 'risk_dimensions', 'release_required', 'deployment_required',
+      ];
+      differs = differs || stableFields.some((field) => JSON.stringify(actualContract[field]) !== JSON.stringify(expectedContract[field]));
+    }
     if (record.phase === 'parked') {
       const dependencies = parseDependsOn(raw).map(normalizeCardLink);
       const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
@@ -1428,6 +1465,11 @@ async function commandClaim(ctx, args) {
       batch_policy: selected.meta.batchPolicy || null,
       touch_zones: selected.meta.touchZones, dependencies: selected.meta.dependencies,
       deploy_subscriptions: selected.meta.deploySubscriptions, card_path: selected.cardPath,
+      delivery_contract_version: selected.meta.contractVersion,
+      delivery_contract_source: selected.meta.contractSource,
+      delivery_contract_migration: selected.meta.contractMigration
+        ? { applied: selected.meta.contractMigration.applied, manual: selected.meta.contractMigration.manual } : null,
+      ...(selected.meta.contractSource === 'current' ? { delivery_contract: selected.meta.contract } : {}),
       branch, worktree, claimed_at: new Date().toISOString(),
     };
     state.cards[selected.card] = record;

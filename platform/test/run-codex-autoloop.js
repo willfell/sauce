@@ -16,20 +16,39 @@ const {
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
 } = require('../../scripts/autoloop/codex-coordinator');
-const { normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard } = require('../../scripts/autoloop/select-card');
+const {
+  normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
+  delivery, prepareDeliveryCard, prepareDeliveryObject,
+} = require('../../scripts/autoloop/select-card');
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
 
-function card({ profile = 'standard', zones = ['platform/mechanisms/example'], deps = [], deploy = true, parent = '' } = {}) {
+function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
+  const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
+  const evidence = [{
+    source_identity: 'autoloop test', captured_at: '2026-07-17T06:00:00Z',
+    revision: 'fixture-v1', locator: 'platform/test/run-codex-autoloop.js', claim: 'Bounded test card.',
+  }];
   return [
     '---',
+    `card: ${name}`,
+    `schema_version: ${delivery.CONTRACT_VERSION}`,
+    `parent_card: "[[${parent}]]"`,
+    'slice: T1',
     `model_profile: ${profile}`,
-    ...(parent ? [`parent_card: "[[${parent}]]"`] : []),
+    'execution_mode: release',
+    `batch_policy: ${policy}`,
+    'status: planning',
     'touch_zones:', ...zones.map((z) => `  - ${z}`),
     'depends_on:', ...deps.map((d) => `  - "[[${d}]]"`),
     ...(deploy ? ['deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []'] : []),
+    'epic: "[[Test epic]]"',
+    `evidence: ${JSON.stringify(evidence)}`,
+    'risk_dimensions: []',
+    'release_required: true',
+    'deployment_required: true',
     '---', '', '# Work', '', 'Bounded work.',
   ].join('\n');
 }
@@ -42,8 +61,37 @@ eq(meta.touchZones, ['platform/install.js', 'platform/test/run-x.js'], 'parses t
 eq(meta.dependencies, ['A'], 'parses dependencies');
 eq(meta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'parses deployment map');
 eq(validateExecutionMeta(meta), [], 'valid execution metadata');
+eq(meta.contractVersion, delivery.CONTRACT_VERSION, 'coordinator reports the shared Delivery contract version');
+eq(meta.contractSource, 'current', 'versioned execution metadata uses the current Delivery path');
 ok(validateExecutionMeta(parseExecutionMeta(card({ deploy: false }))).includes('deploy_subscriptions is required'), 'deployment map required');
 ok(validateExecutionMeta(parseExecutionMeta(card({ profile: 'luna' }))).some((e) => /model_profile/.test(e)), 'only two model profiles');
+
+const currentRaw = card();
+const historicalRaw = currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}\n`, '').replace('batch_policy: continue\n', '');
+const historicalSnapshot = historicalRaw;
+const historicalPrepared = prepareDeliveryCard(historicalRaw, 'Test card');
+ok(historicalPrepared.ok, 'unversioned historical cards are readable through the shared compatibility path');
+eq(historicalPrepared.source, 'historical', 'unversioned cards are identified as historical');
+eq(historicalPrepared.card.schema_version, delivery.CONTRACT_VERSION, 'historical cards migrate in memory to the current schema');
+eq(historicalRaw, historicalSnapshot, 'historical compatibility never rewrites the protected source note');
+const stalePrepared = prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 0.9.0'), 'Test card');
+ok(stalePrepared.ok && stalePrepared.migration.applied.some((item) => /schema_version/.test(item)), 'stale schema versions migrate deterministically in memory');
+ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 9.0.0'), 'Test card').ok, 'future schema versions fail closed');
+ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: v1'), 'Test card').ok, 'malformed schema versions fail closed');
+ok(!prepareDeliveryCard(currentRaw.replace('status: planning', 'status: mystery'), 'Test card').ok, 'unknown lifecycle vocabulary fails closed');
+
+const sharedFixtures = delivery.registry.fixtures;
+const fixtureValue = (fixture) => {
+  const value = JSON.parse(JSON.stringify(sharedFixtures.base_execution_card));
+  for (const field of fixture.remove || []) delete value[field];
+  return Object.assign(value, JSON.parse(JSON.stringify(fixture.patch || {})));
+};
+for (const fixture of sharedFixtures.valid) {
+  ok(prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter accepts shared valid fixture: ${fixture.name}`);
+}
+for (const fixture of sharedFixtures.invalid) {
+  ok(!prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter rejects shared invalid fixture: ${fixture.name}`);
+}
 eq(parseArgs(['park', '--depends-on', 'A', '--depends-on', 'B'])['depends-on'], ['A', 'B'], 'CLI preserves repeated dependency arguments');
 eq(projectionMapping('claimed').status, 'in_progress', 'claimed lifecycle projects to canonical in_progress');
 eq(projectionMapping('feature_pr').status, 'in_progress', 'waiting release lifecycle remains canonical in_progress');
@@ -52,13 +100,33 @@ eq(projectionMapping('parked').status, 'parked', 'parked remains distinct from i
 eq(projectionMapping('deployed').status, 'completed', 'deployed lifecycle projects to canonical completed');
 eq(normalizeStatus('in-progress'), 'in_progress', 'Obsidian in-progress alias normalizes at the coordinator boundary');
 
+const driftRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-delivery-drift-'));
+const driftPath = path.join(driftRoot, 'Test card.md');
+const currentContract = prepareDeliveryCard(currentRaw, 'Test card').card;
+const projectedCurrentRaw = currentRaw.replace('status: planning', 'kanban_column: In Progress\nstatus: in_progress');
+const currentRecord = {
+  card: 'Test card', phase: 'implementing', card_path: driftPath,
+  dependencies: currentContract.depends_on, touch_zones: currentContract.touch_zones,
+  deploy_subscriptions: currentContract.deploy_subscriptions, delivery_contract: currentContract,
+};
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card:   Test card  ')
+  .replace('  - Docs/example.md', '  -   Docs/example.md   '));
+eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'whitespace-only Delivery projection changes canonicalize without drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('Docs/example.md', 'Docs/other.md'));
+ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'meaningful Delivery contract edits surface as lifecycle drift');
+fs.rmSync(driftRoot, { recursive: true, force: true });
+
 const obsidianA1 = [
-  '---', 'model_profile: heavy', 'kanban_column: In Planning', 'status: in-planning',
+  '---', 'card: A1 status normalization and drift visibility',
+  'parent_card: "[[Tranche A — trustworthy substrate]]"', 'slice: A1',
+  'model_profile: heavy', 'execution_mode: release', 'kanban_column: In Planning', 'status: in-planning',
   'status_prev: planning', 'status_changed_at: 2026-07-16', 'touch_zones:', '  - scripts/autoloop/codex-coordinator.js',
-  'depends_on: []', 'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []', '---', '',
+  'depends_on: []', 'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
+  'epic: "[[Final Initial Design]]"', 'release_required: true', 'deployment_required: true', '---', '',
   '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
   '## A1 status normalization and drift visibility', '',
-  'batch_policy: supervised_only — Normalize the live GA status vocabulary.',
+  'batch_policy: supervised_only — Normalize the live GA status vocabulary.', '',
+  '### Evidence', '- legacy evidence',
 ].join('\n');
 eq(parseCardStatus(obsidianA1), 'planning', 'real Obsidian planning rewrite parses into the canonical contract');
 eq(parseBatchPolicy(obsidianA1), 'supervised_only', 'A1 textual batch policy is preserved as supervised_only');
@@ -107,6 +175,9 @@ eq(selectClaimCandidate({
   boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
   loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
 }).card, 'A1 status normalization and drift visibility', 'explicit supervised coordinator eligibility accepts A1 with Obsidian planning status');
+const forcedSupervisionBody = card({ zones: ['scripts/autoloop/select-card.js'], profile: 'heavy', name: 'Control plane' });
+eq(selectCard({ boardMd: board(['Control plane']), loadBody: () => forcedSupervisionBody }).action, 'no-eligible-work', 'selector enforces Delivery-derived control-plane supervision');
+eq(selectCard({ boardMd: board(['Control plane']), loadBody: () => forcedSupervisionBody, supervised: true }).card, 'Control plane', 'selector accepts a Delivery-valid control-plane card only with supervision');
 eq(summarizeClaimSelection(selectClaimCandidate({
   boardMd: board(['A1 status normalization and drift visibility']), state: emptyState(), supervised: true,
   loadCard: () => ({ path: '/cards/A1.md', raw: obsidianA1 }),
@@ -170,7 +241,10 @@ state.cards.A = { card: 'A', phase: 'blocked', touch_zones: [] };
 eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).action, 'no-work', 'tracked blocked card is not reclaimed');
 
 const eligibleSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard }));
-eq(eligibleSummary, { action: 'claim', card: 'A', model_profile: 'standard', touch_zones: ['platform/a'], skipped_count: 0 }, 'summarizes next eligible card');
+eq(eligibleSummary, {
+  action: 'claim', card: 'A', model_profile: 'standard', touch_zones: ['platform/a'], skipped_count: 0,
+  contract_version: delivery.CONTRACT_VERSION, contract_source: 'current', status: 'planning', batch_policy: 'continue',
+}, 'summarizes next eligible card with Delivery contract provenance');
 const blockedSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['Missing']), state: emptyState(), loadCard }));
 eq(blockedSummary.first_blocker, { card: 'Missing', reason: 'card note missing' }, 'summarizes the first board blocker');
 

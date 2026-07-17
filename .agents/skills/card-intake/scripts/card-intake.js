@@ -4,11 +4,15 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const delivery = require('../../../../platform/mechanisms/delivery');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
-const STATUSES = new Set(['planning', 'in_progress', 'blocked', 'parked', 'completed']);
-const HEAVY_RISKS = new Set(['new_mechanism', 'shared_abstraction', 'schema', 'migration', 'heal', 'loader', 'multi_blueprint', 'high_regression_refactor']);
-const VAULTS = ['headspace', 'accuris', 'ero'];
+const VAULTS = delivery.registry.policies.required_vaults;
+const RISK_MAP = {
+  new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
+  migration: 'migration', heal: 'migration', loader: 'control_plane',
+  multi_blueprint: 'multi_blueprint_ui', high_regression_refactor: 'control_plane',
+};
 
 function argsOf(argv) {
   const out = {};
@@ -37,6 +41,45 @@ function within(root, target) {
 
 function safeTitle(value) {
   return Boolean(value) && value === value.trim() && !/[\\/\0\n\r]/.test(value) && value !== '.' && value !== '..';
+}
+
+function evidenceClaims(spec) {
+  return [...(Array.isArray(spec.evidence) ? spec.evidence : []), ...(Array.isArray(spec.evidence_claims) ? spec.evidence_claims : [])]
+    .map((item) => ({
+      source_identity: String(item.source_identity || '').trim(),
+      captured_at: String(item.captured_at || '').trim(),
+      revision: String(item.revision || '').trim(),
+      locator: String(item.locator || (item.path && item.line ? `${item.path}:${item.line}` : '')).trim(),
+      claim: String(item.claim || item.note || '').trim(),
+    }));
+}
+
+function deliveryContract(card, spec) {
+  const riskDimensions = [...new Set((card.risk_dimensions || card.risk_flags || []).map((risk) => RISK_MAP[risk] || risk))];
+  const contract = {
+    card: card.title,
+    schema_version: card.schema_version || delivery.CONTRACT_VERSION,
+    parent_card: card.parent_title ? `[[${card.parent_title}]]` : spec.epic,
+    slice: card.slice || card.title,
+    model_profile: card.model_profile,
+    execution_mode: card.execution_mode || spec.completion_mode,
+    batch_policy: card.batch_policy || 'continue',
+    status: card.status || 'planning',
+    touch_zones: card.touch_zones,
+    depends_on: card.depends_on,
+    deploy_subscriptions: card.deploy_subscriptions || { headspace: [], accuris: [], ero: [] },
+    epic: spec.epic,
+    evidence: evidenceClaims(spec),
+    release_required: card.release_required == null ? spec.completion_mode === 'release' : card.release_required,
+    deployment_required: card.deployment_required == null ? spec.completion_mode === 'release' : card.deployment_required,
+    risk_dimensions: riskDimensions,
+  };
+  contract.batch_policy = delivery.derivePolicy(contract);
+  return contract;
+}
+
+function validateDeliveryContract(card, mode = 'current') {
+  return delivery.validateCard(card, mode);
 }
 
 function parseBoard(md) {
@@ -111,34 +154,33 @@ function artifactEvidence(markdown) {
     .map((match) => ({ path: match[1], line: Number(match[2]) }));
 }
 
-function validateCard(card, completionMode, errors) {
+function validateCard(card, spec, errors) {
   const role = card.role || 'execution';
   if (!safeTitle(card.title)) errors.push('every card needs a safe one-line title without path separators');
   if (card.parent_title && !safeTitle(card.parent_title)) errors.push(`${card.title}: parent title is unsafe`);
   if (!['parent', 'execution'].includes(role)) errors.push(`${card.title}: role must be parent|execution`);
-  if (!STATUSES.has(card.status || 'planning')) errors.push(`${card.title}: invalid normalized status`);
+  if (!delivery.normalizeStatus(card.status || 'planning')) errors.push(`${card.title}: invalid normalized status`);
   if (!Array.isArray(card.depends_on)) errors.push(`${card.title}: depends_on must be an array`);
   else for (const dep of card.depends_on) if (!linkName(dep)) errors.push(`${card.title}: dependencies must be wikilinks`);
-  if (completionMode === 'docs_only' && card.lane !== 'Docs Only') errors.push(`${card.title}: docs_only card must use Docs Only lane`);
+  if (spec.completion_mode === 'docs_only' && card.lane !== 'Docs Only') errors.push(`${card.title}: docs_only card must use Docs Only lane`);
   if (role === 'parent') {
     for (const key of ['model_profile', 'touch_zones', 'deploy_subscriptions']) {
       if (card[key] != null) errors.push(`${card.title}: parent must remain non-claimable; remove ${key}`);
     }
     return;
   }
-  if (!['standard', 'heavy'].includes(card.model_profile)) errors.push(`${card.title}: model_profile must be standard|heavy`);
-  const needsHeavy = (card.risk_flags || []).some((risk) => HEAVY_RISKS.has(risk));
-  if ((needsHeavy ? 'heavy' : 'standard') !== card.model_profile) errors.push(`${card.title}: model profile does not match risk rules`);
   for (const field of ['touch_zones', 'acceptance_tests', 'applicable_guides', 'trap_warnings']) {
     if (!Array.isArray(card[field]) || !card[field].length) errors.push(`${card.title}: ${field} must be non-empty`);
   }
   if (card.parent_title && !card.slice) errors.push(`${card.title}: nested child needs slice`);
-  if (completionMode === 'release') {
+  if (spec.completion_mode === 'release') {
     if (card.execution_mode && card.execution_mode !== 'release') errors.push(`${card.title}: execution_mode mismatch`);
-    if (!card.deploy_subscriptions || VAULTS.some((vault) => !Array.isArray(card.deploy_subscriptions[vault]))) errors.push(`${card.title}: release cards require all three deployment arrays`);
   } else {
     if (card.execution_mode !== 'docs_only' || card.release_required !== false || card.deployment_required !== false) errors.push(`${card.title}: docs_only routing flags are required`);
   }
+  const verdict = validateDeliveryContract(deliveryContract(card, spec));
+  for (const issue of verdict.errors) errors.push(`${card.title}: Delivery ${issue.code} (${issue.field}): ${issue.message}`);
+  if (verdict.requires_migration) errors.push(`${card.title}: new intake must use Delivery ${delivery.CONTRACT_VERSION}`);
 }
 
 function validateSpec(spec, boardRaw = '') {
@@ -168,7 +210,7 @@ function validateSpec(spec, boardRaw = '') {
   if (new Set(cards.map((card) => card.title)).size !== cards.length) errors.push('card titles must be unique across parents and children');
   if (scoutOnly && cards.some((card) => (card.role || 'execution') === 'execution')) errors.push('scout-only intake cannot create an execution card');
   if (!scoutOnly && !cards.length) errors.push('evidenced intake requires cards');
-  for (const card of cards) validateCard(card, spec.completion_mode, errors);
+  for (const card of cards) validateCard(card, spec, errors);
   if (spec.completion_mode === 'docs_only') {
     if (cards.some((card) => card.lane !== 'Docs Only')) errors.push('docs_only cards must route to Docs Only');
   } else if (spec.classification === 'roadmap_theme') {
@@ -244,22 +286,25 @@ function validateSpec(spec, boardRaw = '') {
 
 function renderCard(card, spec) {
   const role = card.role || 'execution';
+  const contract = role === 'execution' ? validateDeliveryContract(deliveryContract(card, spec)).card : null;
   const boardRef = spec.source_board || spec.board_path;
-  const lines = ['---', 'type: task-hub', `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${card.status || 'planning'}`];
+  const lines = ['---', 'type: task-hub', `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
   if (spec.epic) lines.push(`epic: ${quoted(spec.epic)}`);
   if (role === 'execution') {
-    if (card.parent_title) lines.push(`parent_card: ${quoted(`[[${card.parent_title}]]`)}`, `slice: ${quoted(card.slice)}`);
-    lines.push(`model_profile: ${card.model_profile}`, `execution_mode: ${card.execution_mode || spec.completion_mode}`);
-    if (spec.completion_mode === 'docs_only') lines.push('release_required: false', 'deployment_required: false');
-    lines.push('touch_zones:', ...card.touch_zones.map((item) => `  - ${quoted(item)}`));
+    lines.push(`schema_version: ${quoted(contract.schema_version)}`, `parent_card: ${quoted(`[[${contract.parent_card}]]`)}`, `slice: ${quoted(contract.slice)}`);
+    lines.push(`model_profile: ${contract.model_profile}`, `execution_mode: ${contract.execution_mode}`, `batch_policy: ${contract.batch_policy}`);
+    lines.push(`release_required: ${contract.release_required}`, `deployment_required: ${contract.deployment_required}`);
+    lines.push('touch_zones:', ...contract.touch_zones.map((item) => `  - ${quoted(item)}`));
   }
   lines.push('depends_on:');
-  if ((card.depends_on || []).length) lines.push(...card.depends_on.map((item) => `  - ${quoted(item)}`));
+  const dependencies = contract ? contract.depends_on.map((item) => `[[${item}]]`) : (card.depends_on || []);
+  if (dependencies.length) lines.push(...dependencies.map((item) => `  - ${quoted(item)}`));
   else lines.push('  []');
-  if (role === 'execution' && spec.completion_mode === 'release') {
+  if (role === 'execution') {
     lines.push('deploy_subscriptions:');
-    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(card.deploy_subscriptions[vault])}`);
+    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);
   }
+  if (role === 'execution') lines.push(`evidence: ${JSON.stringify(contract.evidence)}`, `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`);
   lines.push('tags:', '  - kanban-card', '  - project-card', '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
   for (const item of spec.evidence || []) lines.push(`- \`${item.path}:${item.line}\`${item.note ? ` — ${item.note}` : ''}`);
   if (spec.reproduction) lines.push(`- Reproduction: ${spec.reproduction}`);
@@ -412,7 +457,7 @@ function run(spec, apply = false) {
   return { ok: true, applied: apply, no_op: changed.length === 0, plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(spec)).digest('hex'), changed_paths: changed.map((item) => item.path), ...posture(spec, validation, finalBoard) };
 }
 
-module.exports = { validateSpec, renderCard, parseBoard, run, roadmapContent, cardPath };
+module.exports = { validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath };
 
 if (require.main === module) {
   const args = argsOf(process.argv.slice(2));

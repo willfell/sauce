@@ -9,6 +9,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const delivery = require('../../platform/mechanisms/delivery');
 
 // Broad-scope heuristic: signals multi-cycle work the autonomous loop must NOT
 // pick (it would run unbounded). Deterministic mirror of the human pipeline's
@@ -19,19 +20,8 @@ const BROAD_PATTERNS = [
   /\bmigrat(e|ion) (all|every)\b/i, /\bfigure out\b/i,
 ];
 
-const STATUS_ALIASES = new Map([
-  ['planning', 'planning'],
-  ['in-planning', 'planning'],
-  ['in_progress', 'in_progress'],
-  ['in-progress', 'in_progress'],
-  ['blocked', 'blocked'],
-  ['parked', 'parked'],
-  ['completed', 'completed'],
-]);
-
 function normalizeStatus(value) {
-  const raw = String(value == null ? '' : value).trim().toLowerCase().replace(/^['"]|['"]$/g, '');
-  return raw ? (STATUS_ALIASES.get(raw) || null) : null;
+  return delivery.normalizeStatus(value);
 }
 
 function frontmatterScalar(raw, key) {
@@ -52,6 +42,12 @@ function parseBatchPolicy(raw) {
   if (frontmatterValue) return frontmatterValue.split(/\s|—/)[0].trim().toLowerCase();
   const match = String(raw || '').match(/^\s*batch_policy:\s*([a-z][a-z0-9_-]*)\b/im);
   return match ? match[1].toLowerCase() : null;
+}
+
+function protectedHistoricalSkeleton(prepared) {
+  if (!prepared || prepared.source !== 'historical' || !prepared.validation) return false;
+  return prepared.validation.errors.every((item) => item.code === 'required-field'
+    || (item.code === 'invalid-type' && ['touch_zones', 'evidence'].includes(item.field)));
 }
 
 function isBroadScope(text) {
@@ -141,23 +137,155 @@ function parseDependsOn(raw) {
   if (block.trim() === '') {
     for (let i = start + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) block += '\n' + lines[i];
   }
-  const out = [];
-  // 1. Every `[[wikilink]]` anywhere in the value — handles inline, flow-list,
-  //    and block-list wikilink forms, and preserves commas inside a name.
-  for (const w of block.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g) || []) {
-    const m = w.match(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/);
-    if (m) out.push(m[1].trim());
-  }
-  // 2. Bare names: from the value with wikilinks stripped out, take each
-  //    remaining block-list/flow-list token (dash + quotes/brackets removed).
-  const bareBlock = block.replace(/\[\[[^\]]*\]\]/g, '');
-  for (const line of bareBlock.split('\n')) {
-    for (const tok of line.split(',')) {
-      const name = tok.trim().replace(/^-\s*/, '').replace(/[[\]"']/g, '').trim();
-      if (name) out.push(name);
+  return delivery.parseDependencyField(`depends_on:${block}`);
+}
+
+// A2 public Delivery adapter. It keeps markdown/YAML parsing at the consumer
+// boundary while every semantic decision comes from the shared contract API.
+function frontmatterBody(raw) {
+  const match = String(raw || '').match(/^\s*---\n([\s\S]*?)\n---/);
+  return match ? match[1] : '';
+}
+
+function rawScalarField(raw, key) {
+  const line = frontmatterBody(raw).split('\n').find((value) => new RegExp(`^${key}:`).test(value));
+  return line ? line.slice(line.indexOf(':') + 1).trim() : undefined;
+}
+
+function listField(raw, key) {
+  const lines = frontmatterBody(raw).split('\n');
+  const index = lines.findIndex((value) => new RegExp(`^${key}:`).test(value));
+  if (index < 0) return undefined;
+  const inline = lines[index].slice(lines[index].indexOf(':') + 1).trim();
+  if (inline) {
+    if (inline === '[]') return [];
+    if (inline.startsWith('[')) {
+      try { return JSON.parse(inline); } catch (_) { /* retain historical YAML parsing below */ }
     }
+    return inline.replace(/^\[|\]$/g, '').split(',')
+      .map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
   }
-  return [...new Set(out)];
+  const out = [];
+  for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) {
+    const match = lines[i].match(/^\s+-\s+(.*?)\s*$/);
+    if (match) out.push(match[1].replace(/^['"]|['"]$/g, ''));
+  }
+  return out;
+}
+
+function deploymentField(raw) {
+  const lines = frontmatterBody(raw).split('\n');
+  const index = lines.findIndex((value) => /^deploy_subscriptions:/.test(value));
+  if (index < 0) return undefined;
+  const out = {}; let current = null;
+  for (let i = index + 1; i < lines.length; i += 1) {
+    if (lines[i] && !/^\s+/.test(lines[i])) break;
+    const vault = lines[i].match(/^\s{2}([a-zA-Z0-9_-]+):\s*(.*?)\s*$/);
+    if (vault) {
+      current = vault[1];
+      const inline = vault[2];
+      if (!inline || inline === '[]') out[current] = [];
+      else {
+        try { out[current] = JSON.parse(inline); }
+        catch (_) {
+          out[current] = inline.replace(/^\[|\]$/g, '').split(',')
+            .map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+        }
+      }
+      continue;
+    }
+    const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
+    if (item && current) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
+  }
+  return out;
+}
+
+function parseBoolean(value) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function evidenceField(raw) {
+  const inline = rawScalarField(raw, 'evidence');
+  if (inline !== undefined) {
+    try {
+      const parsed = JSON.parse(inline);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_) { return inline ? [inline] : []; }
+  }
+  const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
+  if (!section) return [];
+  return section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
+    .filter(Boolean).map((match) => match[1].trim());
+}
+
+function parseDeliveryCard(raw, card) {
+  const parsed = {
+    card: String(card || frontmatterScalar(raw, 'card') || '').trim(),
+    parent_card: frontmatterScalar(raw, 'parent_card'),
+    slice: frontmatterScalar(raw, 'slice'),
+    model_profile: frontmatterScalar(raw, 'model_profile'),
+    execution_mode: frontmatterScalar(raw, 'execution_mode') || 'release',
+    status: frontmatterScalar(raw, 'status'),
+    touch_zones: listField(raw, 'touch_zones') || [],
+    depends_on: parseDependsOn(raw),
+    deploy_subscriptions: deploymentField(raw),
+    epic: frontmatterScalar(raw, 'epic'),
+    evidence: evidenceField(raw),
+  };
+  const schemaVersion = frontmatterScalar(raw, 'schema_version');
+  const batchPolicy = parseBatchPolicy(raw);
+  const riskDimensions = listField(raw, 'risk_dimensions');
+  const releaseRequired = parseBoolean(frontmatterScalar(raw, 'release_required'));
+  const deploymentRequired = parseBoolean(frontmatterScalar(raw, 'deployment_required'));
+  if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
+  if (batchPolicy) parsed.batch_policy = batchPolicy;
+  if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
+  if (releaseRequired !== undefined) parsed.release_required = releaseRequired;
+  if (deploymentRequired !== undefined) parsed.deployment_required = deploymentRequired;
+  return parsed;
+}
+
+function prepareDeliveryObject(value) {
+  const original = value && typeof value === 'object' && !Array.isArray(value)
+    ? JSON.parse(JSON.stringify(value)) : {};
+  const version = original.schema_version;
+  const comparison = version == null ? -1 : delivery.compareVersions(version, delivery.CONTRACT_VERSION);
+  if (version != null && comparison == null) {
+    const validation = delivery.validateCard(original, 'current');
+    return { ok: false, source: 'invalid', card: validation.card, validation, migration: null };
+  }
+  if (comparison === 1) {
+    const validation = delivery.validateCard(original, 'current');
+    return { ok: false, source: 'future', card: validation.card, validation, migration: null };
+  }
+  if (comparison === -1) {
+    const historical = delivery.validateCard(original, 'historical');
+    if (!historical.ok) return { ok: false, source: 'historical', card: historical.card, validation: historical, migration: null };
+    const migration = delivery.migrate(original, version);
+    if (!migration.ok) {
+      return {
+        ok: false, source: 'historical', card: original, migration,
+        validation: { ok: false, errors: [{ code: migration.reason, field: 'schema_version', message: migration.reason }], warnings: [] },
+      };
+    }
+    const validation = delivery.validateCard(migration.note, 'historical');
+    return { ok: validation.ok, source: 'historical', card: validation.card, validation, migration };
+  }
+  const validation = delivery.validateCard(original, 'current');
+  return { ok: validation.ok && !validation.requires_migration, source: 'current', card: validation.card, validation, migration: null };
+}
+
+function prepareDeliveryCard(raw, card) {
+  const rawCard = parseDeliveryCard(raw, card);
+  return { ...prepareDeliveryObject(rawCard), raw_card: rawCard };
+}
+
+function validationReason(prepared) {
+  const errors = prepared && prepared.validation && Array.isArray(prepared.validation.errors)
+    ? prepared.validation.errors : [];
+  return errors.length ? errors.map((item) => `${item.code}:${item.field}`).join(', ') : 'contract-invalid';
 }
 
 // Parse autoloop-queue.md into items. Each item starts at a `- id:` line; its
@@ -220,13 +348,14 @@ function selectCard(o) {
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const raw = loadBody ? (loadBody(card) || '') : '';
-    const status = parseCardStatus(raw);
+    const prepared = prepareDeliveryCard(raw, card);
+    const historicalSkeleton = !prepared.ok && protectedHistoricalSkeleton(prepared);
+    if (!prepared.ok && !historicalSkeleton) {
+      skipped.push({ card, reason: `delivery contract invalid: ${validationReason(prepared)}` }); continue;
+    }
+    const status = prepared.ok ? prepared.card.status : parseCardStatus(raw);
     if (status !== undefined && status !== 'planning') {
       skipped.push({ card, reason: `card status is not planning: ${status || 'unknown'}` }); continue;
-    }
-    const batchPolicy = parseBatchPolicy(raw);
-    if (batchPolicy === 'supervised_only' && !supervised) {
-      skipped.push({ card, reason: 'batch_policy supervised_only requires an explicit supervised run' }); continue;
     }
     // Dependency gate: a card with `depends_on: [[X]]` frontmatter is skipped
     // until EVERY predecessor is in the Completed column (the loop's done-signal).
@@ -234,9 +363,27 @@ function selectCard(o) {
     // leaves the card un-eligible (it never runs prematurely) and surfaces the
     // reason in `skipped`, rather than guessing. This is what lets a multi-slice
     // epic self-sequence in order when the whole chain sits in Planning.
-    const deps = parseDependsOn(raw);
+    const deps = prepared.ok ? prepared.card.depends_on : parseDependsOn(raw);
     const unmet = deps.filter((d) => !completed.has(d));
     if (unmet.length) { skipped.push({ card, reason: `depends_on not complete: ${unmet.join(', ')}` }); continue; }
+    if (historicalSkeleton) {
+      const policy = delivery.derivePolicy({
+        batch_policy: parseBatchPolicy(raw) || 'continue',
+        touch_zones: prepared.raw_card.touch_zones,
+      });
+      if (policy === 'supervised_only' && !supervised) {
+        skipped.push({ card, reason: 'delivery batch ineligible: supervised-only' }); continue;
+      }
+    } else {
+      const eligibility = delivery.batchEligibility(prepared.card, {
+        mode: prepared.source === 'historical' ? 'historical' : 'current',
+        supervised,
+        dependency_result: { eligible: true, missing_proof: [] },
+      });
+      if (!eligibility.eligible) {
+        skipped.push({ card, reason: `delivery batch ineligible: ${eligibility.reason}` }); continue;
+      }
+    }
     // Attempt-anything: do NOT skip on broad scope — pick it and pass a hint so
     // Phase C can scope / block-with-questions if it really is too big.
     const scope = isBroadScope(`${card}\n${stripCardChrome(raw)}`);
@@ -288,6 +435,7 @@ module.exports = {
   selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked,
   parseCheckedColumn, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
   normalizeStatus, parseCardStatus, parseBatchPolicy,
+  delivery, parseDeliveryCard, prepareDeliveryObject, prepareDeliveryCard, validationReason,
 };
 
 if (require.main === module) {
