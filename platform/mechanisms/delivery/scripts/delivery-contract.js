@@ -357,7 +357,7 @@ function completionProof(record) {
     || REQUIRED_VAULTS.some((vault) => !Array.isArray(deploymentMap[vault])
       || deploymentMap[vault].some((item) => typeof item !== 'string'
         || !/^(?:mechanism|blueprint):[a-z0-9][a-z0-9._-]*$/.test(item.trim()))
-      || new Set(deploymentMap[vault]).size !== deploymentMap[vault].length)) addMissing('deploy_subscriptions');
+      || new Set(deploymentMap[vault].map((item) => item.trim())).size !== deploymentMap[vault].length)) addMissing('deploy_subscriptions');
   for (const vault of REQUIRED_VAULTS) {
     const receipt = item.vault_receipts && item.vault_receipts[vault];
     const requiredSubscriptions = deploymentMap && Array.isArray(deploymentMap[vault]) ? deploymentMap[vault] : [];
@@ -366,7 +366,10 @@ function completionProof(record) {
     if (!receipt || receipt.ok !== true || receipt.vault !== vault
       || typeof receipt.path !== 'string' || !receipt.path.trim()
       || receipt.required_version !== item.required_version
-      || !Array.isArray(receipt.added_subscriptions) || !Array.isArray(receipt.verified_subscriptions)
+      || !Array.isArray(receipt.added_subscriptions)
+      || receipt.added_subscriptions.some((subscription) => typeof subscription !== 'string' || !subscription.trim())
+      || !Array.isArray(receipt.verified_subscriptions)
+      || receipt.verified_subscriptions.some((subscription) => typeof subscription !== 'string' || !subscription.trim())
       || requiredSubscriptions.some((subscription) => !receipt.verified_subscriptions.includes(subscription))
       || !evidenceTimestampValid(receipt.started_at) || !evidenceTimestampValid(receipt.finished_at)
       || receipt.status_exit !== 0 || !Array.isArray(receipt.history_errors) || receipt.history_errors.length > 0

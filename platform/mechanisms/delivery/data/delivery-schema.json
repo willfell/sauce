@@ -394,6 +394,26 @@
         "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-02-30T17:51:05Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
         "expected_error": "invalid-evidence-timestamp"
       },
+      {
+        "name": "evidence-capture-rejects-hour-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T24:00:00Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-minute-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:60:00Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-second-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:60Z", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
+      {
+        "name": "evidence-capture-rejects-offset-rollover",
+        "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:05+24:00", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },
+        "expected_error": "invalid-evidence-timestamp"
+      },
       { "name": "evidence-must-be-an-array", "patch": { "evidence": "one locator" }, "expected_error": "invalid-type" },
       { "name": "risk-dimension-must-be-known", "patch": { "risk_dimensions": ["mystery"] }, "expected_error": "invalid-type" },
       {

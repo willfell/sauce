@@ -232,6 +232,10 @@ const duplicateDeploymentMap = JSON.parse(JSON.stringify(fullReceipt));
 duplicateDeploymentMap.deploy_subscriptions.ero.push('mechanism:delivery');
 check('DEL-COMP-23a3 completion deployment contract rejects duplicate additions',
   api.completionProof(duplicateDeploymentMap).missing.includes('deploy_subscriptions'));
+const whitespaceDuplicateDeploymentMap = JSON.parse(JSON.stringify(fullReceipt));
+whitespaceDuplicateDeploymentMap.deploy_subscriptions.ero.push(' mechanism:delivery ');
+check('DEL-COMP-23a4 completion deployment contract normalizes before duplicate detection',
+  api.completionProof(whitespaceDuplicateDeploymentMap).missing.includes('deploy_subscriptions'));
 for (const [label, mutate] of [
   ['DEL-COMP-23b vault receipt binds identity', (r) => { r.vault_receipts.ero.vault = 'other'; }],
   ['DEL-COMP-23c vault receipt pins path', (r) => { r.vault_receipts.ero.path = ''; }],
@@ -248,6 +252,14 @@ const retrySubscriptionReceipt = JSON.parse(JSON.stringify(fullReceipt));
 retrySubscriptionReceipt.vault_receipts.ero.added_subscriptions = [];
 check('DEL-COMP-23i verified subscription snapshot stays valid on idempotent retry',
   api.completionProof(retrySubscriptionReceipt).complete);
+const malformedAddedSubscriptions = JSON.parse(JSON.stringify(fullReceipt));
+malformedAddedSubscriptions.vault_receipts.ero.added_subscriptions.push(42);
+check('DEL-COMP-23j newly-added subscription evidence enforces array:string',
+  api.completionProof(malformedAddedSubscriptions).missing.includes('vault_receipts.ero'));
+const malformedVerifiedSubscriptions = JSON.parse(JSON.stringify(fullReceipt));
+malformedVerifiedSubscriptions.vault_receipts.ero.verified_subscriptions.push(42);
+check('DEL-COMP-23k current subscription evidence enforces array:string',
+  api.completionProof(malformedVerifiedSubscriptions).missing.includes('vault_receipts.ero'));
 
 const depCards = [
   { ...base, card: 'Tracked child', depends_on: ['Dependency'] },
