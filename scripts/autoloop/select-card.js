@@ -229,6 +229,7 @@ function parseDeliveryCard(raw, card) {
     deploy_subscriptions: deploymentField(raw),
     epic: frontmatterScalar(raw, 'epic'),
   };
+  const authoredBatchPolicy = rawScalarField(raw, 'batch_policy');
   const batchPolicy = parseBatchPolicy(raw);
   const riskDimensions = listField(raw, 'risk_dimensions');
   const releaseRequired = parseBoolean(frontmatterScalar(raw, 'release_required'));
@@ -238,7 +239,8 @@ function parseDeliveryCard(raw, card) {
   if (touchZones !== undefined) parsed.touch_zones = touchZones;
   if (dependencyFieldPresent) parsed.depends_on = parseDependsOn(raw);
   if (evidence !== undefined) parsed.evidence = evidence;
-  if (batchPolicy) parsed.batch_policy = batchPolicy;
+  if (authoredBatchPolicy !== undefined) parsed.batch_policy = batchPolicy || authoredBatchPolicy;
+  else if (batchPolicy) parsed.batch_policy = batchPolicy;
   if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
   if (releaseRequired !== undefined) parsed.release_required = releaseRequired;
   if (deploymentRequired !== undefined) parsed.deployment_required = deploymentRequired;

@@ -146,6 +146,9 @@ ok('NS-14 malformed scalar touch_zones fail closed instead of being coerced',
 const emptyIdentityHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^card:.*$/m, 'card:');
 ok('NS-15 explicitly empty historical identity fails closed instead of inheriting the board name',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyIdentityHistorical }).action === 'no-eligible-work');
+const emptyPolicyHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*$/m, 'batch_policy:');
+ok('NS-16 explicitly empty historical batch policy fails closed instead of being treated as omitted',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyPolicyHistorical }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
