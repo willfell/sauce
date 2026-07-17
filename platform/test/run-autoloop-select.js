@@ -249,6 +249,16 @@ ok('NS-54 apostrophes in plain YAML remain literal while trailing comments are s
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', "parent_card: Will's project # comment") }).card === 'Required fields');
 ok('NS-55 interior double quotes in plain YAML remain literal while trailing comments are stripped',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: Project "Alpha" # comment') }).card === 'Required fields');
+const commentedStructuredCard = requiredFieldCard
+  .replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [Docs/autoloop-fixture.md] # unchanged zones')
+  .replace('depends_on: []', 'depends_on: [] # no dependencies')
+  .replace('deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []', 'deploy_subscriptions: {headspace: [], accuris: [], ero: []} # unchanged map')
+  .replace(/^evidence: (.*)$/m, 'evidence: $1 # pinned evidence')
+  .replace('risk_dimensions: []', 'risk_dimensions: [] # no explicit risk');
+ok('NS-56 trailing comments on inline structured YAML preserve contract semantics',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedStructuredCard }).card === 'Required fields');
+ok('NS-57 hash characters inside quoted flow values remain literal',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: ["Docs/hash # literal.md"] # trailing comment') }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

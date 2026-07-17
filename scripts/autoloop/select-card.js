@@ -149,6 +149,7 @@ function rawScalarField(raw, key) {
 function stripYamlComment(value) {
   const source = String(value == null ? '' : value);
   const first = source.search(/\S/);
+  const collection = first >= 0 && (source[first] === '[' || source[first] === '{');
   let quote = first >= 0 && (source[first] === '"' || source[first] === "'") ? source[first] : null;
   let escaped = false;
   for (let index = quote ? first + 1 : Math.max(first, 0); index < source.length; index += 1) {
@@ -164,6 +165,7 @@ function stripYamlComment(value) {
       else if (char === "'") quote = null;
       continue;
     }
+    if (collection && (char === '"' || char === "'")) { quote = char; continue; }
     if (char === '#' && (index === 0 || /\s/.test(source[index - 1]))) return source.slice(0, index).trimEnd();
   }
   return source;
@@ -282,7 +284,7 @@ function splitYamlFlow(raw) {
 }
 
 function parseYamlValue(value) {
-  const raw = String(value == null ? '' : value).trim();
+  const raw = stripYamlComment(value).trim();
   if (/^\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]$/.test(raw)) return raw;
   if (raw.startsWith('[')) {
     if (!raw.endsWith(']')) return invalidYamlValue(raw);

@@ -123,6 +123,16 @@ const apostropheParentB = parseExecutionMeta(currentRaw.replace('parent_card: "[
 eq(apostropheParentA.parentCard, "Will's project", 'apostrophe remains literal in a plain parent scalar');
 ok(sameParentConflict(apostropheParentB.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: apostropheParentA.parentCard }]), 'apostrophe-bearing parents cannot evade same-parent conflict via comments');
 eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: Project "Alpha" # comment')).parentCard, 'Project "Alpha"', 'interior double quotes remain literal in a plain parent scalar');
+const commentedStructuredMeta = parseExecutionMeta(currentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/example.md] # unchanged zones')
+  .replace('depends_on: []', 'depends_on: [] # no dependencies')
+  .replace('deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []', 'deploy_subscriptions: {headspace: [], accuris: [], ero: []} # unchanged map')
+  .replace(/^evidence: (.*)$/m, 'evidence: $1 # pinned evidence')
+  .replace('risk_dimensions: []', 'risk_dimensions: [] # no explicit risk'));
+ok(commentedStructuredMeta.contractOk, 'coordinator accepts trailing comments on inline structured YAML');
+eq(commentedStructuredMeta.touchZones, ['Docs/example.md'], 'structured comments do not alter touch-zone authority');
+eq(commentedStructuredMeta.dependencies, [], 'structured comments do not invent dependencies');
+eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: ["Docs/hash # literal.md"] # trailing comment')).touchZones, ['Docs/hash # literal.md'], 'quoted hash inside a flow value remains literal');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
