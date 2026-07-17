@@ -7,7 +7,7 @@
 'use strict';
 const path = require('path');
 const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
-  normalizeStatus, parseCardStatus, parseBatchPolicy } =
+  normalizeStatus, parseCardStatus, parseBatchPolicy, delivery } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -32,6 +32,26 @@ let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
   if (cond) { console.log(`  ok  ${label}`); pass++; }
   else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; }
+}
+
+function deliveryCard(name, body, options = {}) {
+  const zones = options.zones || ['Docs/autoloop-fixture.md'];
+  const profile = options.profile || (zones.some((zone) => /^(?:scripts\/autoloop|platform\/mechanisms)/.test(zone)) ? 'heavy' : 'standard');
+  const batchPolicy = options.batch_policy || delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
+  const evidence = [{
+    source_identity: 'run-autoloop-select fixture', captured_at: '2026-07-17T06:00:00Z',
+    revision: 'fixture-v1', locator: 'platform/test/run-autoloop-select.js', claim: 'Selector fixture.',
+  }];
+  return [
+    '---', `card: ${name}`, `schema_version: ${delivery.CONTRACT_VERSION}`,
+    'parent_card: "[[Selector fixtures]]"', `slice: ${name}`, `model_profile: ${profile}`,
+    'execution_mode: release', `batch_policy: ${batchPolicy}`, `status: ${options.status || 'planning'}`,
+    'kanban_column: In Planning', 'touch_zones:', ...zones.map((zone) => `  - ${zone}`),
+    'depends_on:', ...(options.deps || []).map((dep) => `  - "[[${dep}]]"`),
+    'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
+    'epic: "[[Selector fixtures]]"', `evidence: ${JSON.stringify(evidence)}`, 'risk_dimensions: []',
+    'release_required: true', 'deployment_required: true', ...(options.frontmatter || []), '---', '', body,
+  ].join('\n');
 }
 
 // ---- isBroadScope (AB-*) ----
@@ -60,9 +80,9 @@ ok('PB-7 recommendedFrom null when absent', recommendedFrom('## Board snapshot\n
 
 // ---- selectCard (SC-*) ----
 const bodies = {
-  'Fix breadcrumb paren': 'Small render fix for a stray paren.',
-  'Add render harness': 'Add a behavioral harness for X.',
-  'Wiki area redesign': 'Redesign the entire wiki area across all blueprints.',
+  'Fix breadcrumb paren': deliveryCard('Fix breadcrumb paren', 'Small render fix for a stray paren.'),
+  'Add render harness': deliveryCard('Add render harness', 'Add a behavioral harness for X.'),
+  'Wiki area redesign': deliveryCard('Wiki area redesign', 'Redesign the entire wiki area across all blueprints.'),
 };
 const loadBody = (c) => bodies[c] || '';
 ok('SC-1 halt wins', selectCard({ haltExists: true, boardMd: BOARD, loadBody }).action === 'halt');
@@ -88,11 +108,13 @@ ok('NS-1 canonical status aliases normalize to one vocabulary',
   && ['blocked', 'parked', 'completed'].every((value) => normalizeStatus(value) === value));
 ok('NS-2 unknown statuses stay outside the execution contract', normalizeStatus('post-ga') === null);
 const OBSIDIAN_PLANNING = [
-  '---', 'kanban_column: In Planning', 'status: in-planning',
-  'status_prev: planning', 'status_changed_at: 2026-07-16', '---', '',
-  '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
-  '## A1 status normalization and drift visibility', '',
-  'batch_policy: supervised_only — Normalize the live status vocabulary.',
+  deliveryCard('A1 status normalization and drift visibility', [
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+    '## A1 status normalization and drift visibility', '', 'Normalize the live status vocabulary.',
+  ].join('\n'), {
+    status: 'in-planning', batch_policy: 'supervised_only', profile: 'heavy',
+    zones: ['scripts/autoloop/select-card.js'], frontmatter: ['status_prev: planning', 'status_changed_at: 2026-07-16'],
+  }),
 ].join('\n');
 ok('NS-3 real Obsidian planning rewrite parses as canonical planning', parseCardStatus(OBSIDIAN_PLANNING) === 'planning');
 ok('NS-4 textual A1 policy remains supervised_only', parseBatchPolicy(OBSIDIAN_PLANNING) === 'supervised_only');
@@ -104,6 +126,10 @@ ok('NS-6 explicit supervised eligibility accepts rewritten A1',
   selectCard({ boardMd: supervisedBoard, loadBody: supervisedLoad, supervised: true }).card === 'A1 status normalization and drift visibility');
 ok('NS-7 a card projected as in-progress is not planning-eligible',
   selectCard({ boardMd: supervisedBoard, loadBody: () => OBSIDIAN_PLANNING.replace('status: in-planning', 'status: in-progress'), supervised: true }).action === 'no-eligible-work');
+ok('NS-8 empty card bodies fail closed before selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Missing body]]\n', loadBody: () => '' }).action === 'no-eligible-work');
+ok('NS-9 skeletal historical cards fail closed before selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Skeleton]]\n', loadBody: () => '---\nstatus: planning\n---\n' }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
@@ -130,9 +156,9 @@ ok('DEP-1 parseDependsOn reads every YAML shape (inline/flow/block/alias/bare)',
   && JSON.stringify(parseDependsOn('---\ntype: card\n---')) === '[]');
 // A depends-chain board: A done, B depends A, C depends B.
 const depBodies = {
-  A: '---\ntype: card\n---\ndo A',
-  B: '---\ndepends_on: "[[A]]"\n---\ndo B',
-  C: '---\ndepends_on: "[[B]]"\n---\ndo C',
+  A: deliveryCard('A', 'do A'),
+  B: deliveryCard('B', 'do B', { deps: ['A'] }),
+  C: deliveryCard('C', 'do C', { deps: ['B'] }),
 };
 const depLoad = (c) => depBodies[c] || '';
 const depBoard = '## In Planning\n- [ ] [[B]]\n- [ ] [[C]]\n## Completed\n- [x] [[A]]\n';
@@ -168,7 +194,7 @@ ok('SCH-1 strips frontmatter', !stripCardChrome(CHROME).includes('status: in-pla
 ok('SCH-2 strips dataviewjs fenced block', !stripCardChrome(CHROME).includes('customjs-guard'));
 ok('SCH-3 keeps the task prose', stripCardChrome(CHROME).includes('Fix the separator'));
 const chromeBoard = '## In Planning\n- [ ] [[Chrome card]]\n## In Progress\n';
-const chromeLoad = (c) => c === 'Chrome card' ? ('---\nx: ' + 'y'.repeat(1300) + '\n---\n```dataviewjs\ncode\n```\nFix a small styling bug.') : '';
+const chromeLoad = (c) => c === 'Chrome card' ? deliveryCard('Chrome card', '```dataviewjs\ncode\n```\nFix a small styling bug.', { frontmatter: [`x: ${'y'.repeat(1300)}`] }) : '';
 ok('SCH-4 chrome-inflated card → broadHint null after strip (still picked)',
   (r => r.action === 'work' && r.broadHint === null)(selectCard({ boardMd: chromeBoard, loadBody: chromeLoad })));
 

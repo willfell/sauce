@@ -44,12 +44,6 @@ function parseBatchPolicy(raw) {
   return match ? match[1].toLowerCase() : null;
 }
 
-function protectedHistoricalSkeleton(prepared) {
-  if (!prepared || prepared.source !== 'historical' || !prepared.validation) return false;
-  return prepared.validation.errors.every((item) => item.code === 'required-field'
-    || (item.code === 'invalid-type' && ['touch_zones', 'evidence'].includes(item.field)));
-}
-
 function isBroadScope(text) {
   if (!text) return { broad: false, reason: null };
   for (const re of BROAD_PATTERNS) {
@@ -349,11 +343,10 @@ function selectCard(o) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const raw = loadBody ? (loadBody(card) || '') : '';
     const prepared = prepareDeliveryCard(raw, card);
-    const historicalSkeleton = !prepared.ok && protectedHistoricalSkeleton(prepared);
-    if (!prepared.ok && !historicalSkeleton) {
+    if (!prepared.ok) {
       skipped.push({ card, reason: `delivery contract invalid: ${validationReason(prepared)}` }); continue;
     }
-    const status = prepared.ok ? prepared.card.status : parseCardStatus(raw);
+    const status = prepared.card.status;
     if (status !== undefined && status !== 'planning') {
       skipped.push({ card, reason: `card status is not planning: ${status || 'unknown'}` }); continue;
     }
@@ -363,26 +356,16 @@ function selectCard(o) {
     // leaves the card un-eligible (it never runs prematurely) and surfaces the
     // reason in `skipped`, rather than guessing. This is what lets a multi-slice
     // epic self-sequence in order when the whole chain sits in Planning.
-    const deps = prepared.ok ? prepared.card.depends_on : parseDependsOn(raw);
+    const deps = prepared.card.depends_on;
     const unmet = deps.filter((d) => !completed.has(d));
     if (unmet.length) { skipped.push({ card, reason: `depends_on not complete: ${unmet.join(', ')}` }); continue; }
-    if (historicalSkeleton) {
-      const policy = delivery.derivePolicy({
-        batch_policy: parseBatchPolicy(raw) || 'continue',
-        touch_zones: prepared.raw_card.touch_zones,
-      });
-      if (policy === 'supervised_only' && !supervised) {
-        skipped.push({ card, reason: 'delivery batch ineligible: supervised-only' }); continue;
-      }
-    } else {
-      const eligibility = delivery.batchEligibility(prepared.card, {
-        mode: prepared.source === 'historical' ? 'historical' : 'current',
-        supervised,
-        dependency_result: { eligible: true, missing_proof: [] },
-      });
-      if (!eligibility.eligible) {
-        skipped.push({ card, reason: `delivery batch ineligible: ${eligibility.reason}` }); continue;
-      }
+    const eligibility = delivery.batchEligibility(prepared.card, {
+      mode: prepared.source === 'historical' ? 'historical' : 'current',
+      supervised,
+      dependency_result: { eligible: true, missing_proof: [] },
+    });
+    if (!eligibility.eligible) {
+      skipped.push({ card, reason: `delivery batch ineligible: ${eligibility.reason}` }); continue;
     }
     // Attempt-anything: do NOT skip on broad scope — pick it and pass a hint so
     // Phase C can scope / block-with-questions if it really is too big.
