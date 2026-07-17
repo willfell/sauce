@@ -383,6 +383,18 @@
         "platform/test/run-delivery-contract.js"
       ],
       "notes": "Delivery contract v1.0.0. The registry declares the execution-card field set, lifecycle enums, migration rules, agent-facing descriptions, machine-readable batch_policy including supervised_only, and the shared valid/invalid fixture corpus. The pure validator adds dependency/completion proof, touch-zone conflicts, normalization, policy derivation, migration, posture, and failure taxonomy. A3 owns consumer adoption and historical-card migration."
+    },
+    {
+      "id": "autoloop-durable-batch-ledger",
+      "kind": "contract",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "scripts/autoloop/batch-runner.js",
+      "accepted_versions": ["1.0.0"],
+      "validator": "scripts/autoloop/batch-runner.js",
+      "consumers": [
+        "platform/test/run-autoloop-batch.js"
+      ],
+      "notes": "A4 durable batch ledger v1.0.0. Stored below the Git common directory with immutable batch/attempt identity, wall-clock/card/retry/usage/intervention ceilings, exact engine and Delivery contract pins, atomic integrity-checked persistence, idempotent start/status/stop/resume controls, side-effect idempotency keys, and shadow-only unattended selection. A4 never claims or dispatches a card."
     }
   ]
 }
