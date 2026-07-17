@@ -55,6 +55,34 @@ advanced but never merges, rebases, pushes, or force-pushes the preserved branch
 
 When another merge makes a feature PR stale, update it normally and rerun CI. Never force-push or admin-merge a feature PR.
 
+## Audited execution-contract amendment
+
+`amend-contract` is a supervised control-plane transition for a tracked `claimed`
+or `implementing` card. It acquires the selector lock and then that card's gate
+lock, fetches current `origin/main`, and requires exact expected target HEAD and
+origin/main SHAs, the tracked branch, an existing clean worktree, canonical
+release-mode projection, a non-empty audit reason, and a `supervised_only` target. It never
+claims, resumes, merges, rebases, pushes, checks out, or writes the target
+worktree.
+
+Touch zones are add-only: normalization and deduplication preserve every existing
+zone in order, and the complete desired zone set is checked against every other
+active record before authority changes. Deployment replacement is compare-and-swap
+against a structurally exact three-vault expected map. The desired three-vault map
+is normalized and deduplicated and accepts only `mechanism:name` or
+`blueprint:name`. A legacy bare entry is allowed only in the expected operand so
+the exact malformed value can be named and repaired; it can never enter desired
+authority.
+
+A real amendment appends an audit entry containing old and new contracts, the two
+revision pins, reason, and timestamp. It also appends the old reviews and combined
+gate receipt to receipt-invalidation history and clears current exact-head proof.
+The ledger write happens before card-frontmatter projection. Projection failure is
+saved on the authoritative record and repaired with `reconcile --card`; neither
+reconciliation nor crash recovery replays the amendment. Once authority and
+projection already match, identical replay returns `no_op: true` and preserves
+audits, receipts, and timestamps.
+
 ## Release ancestry
 
 Do not use the globally newest PR or tag. Record the feature merge SHA, then select the first release tag containing that SHA. Several cards may share one release. A newer installed release satisfies an older required version only when the feature merge SHA is an ancestor of the newer tag.
