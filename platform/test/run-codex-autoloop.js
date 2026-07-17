@@ -80,6 +80,9 @@ ok(stalePrepared.ok && stalePrepared.migration.applied.some((item) => /schema_ve
 ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 9.0.0'), 'Test card').ok, 'future schema versions fail closed');
 ok(!prepareDeliveryCard(currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: v1'), 'Test card').ok, 'malformed schema versions fail closed');
 ok(!prepareDeliveryCard(currentRaw.replace('status: planning', 'status: mystery'), 'Test card').ok, 'unknown lifecycle vocabulary fails closed');
+const emptyScalarDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: ""'));
+ok(!emptyScalarDependency.contractOk, 'coordinator rejects an explicitly empty quoted scalar dependency');
+ok(validateExecutionMeta(emptyScalarDependency).some((error) => /invalid-dependency:depends_on/.test(error)), 'coordinator surfaces the empty scalar dependency boundary error');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {

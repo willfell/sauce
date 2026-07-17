@@ -210,6 +210,8 @@ ok('NS-44 repeated evidence field names in separate objects remain unambiguous',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^evidence:.*$/m, 'evidence: [{"source_identity":"fixture-a","captured_at":"2026-07-17T06:00:00Z","revision":"v1","locator":"fixture-a","claim":"claim a"},{"source_identity":"fixture-b","captured_at":"2026-07-17T06:01:00Z","revision":"v2","locator":"fixture-b","claim":"claim b"}]') }).card === 'Required fields');
 ok('NS-45 duplicate keys in a block touch-zone tuple fail closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  - root: other\n    root: workshop\n    path: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
+ok('NS-46 explicitly empty quoted scalar dependency fails closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: ""') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

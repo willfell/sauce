@@ -446,6 +446,12 @@ function prepareDeliveryCard(raw, card) {
   const authoredIdentity = typedScalarField(raw, 'card');
   const expectedIdentity = delivery.normalizeIdentity(card);
   const boundaryErrors = [];
+  if (typeof rawCard.depends_on === 'string' && !delivery.normalizeIdentity(rawCard.depends_on)) {
+    boundaryErrors.push({
+      code: 'invalid-dependency', field: 'depends_on',
+      message: 'authored scalar dependency must contain a non-empty identity',
+    });
+  }
   if (authoredIdentity !== undefined && expectedIdentity
     && delivery.normalizeIdentity(authoredIdentity) !== expectedIdentity) {
     boundaryErrors.push({
