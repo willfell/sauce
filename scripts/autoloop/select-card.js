@@ -364,12 +364,22 @@ function listField(raw, key) {
   return out;
 }
 
+function canonicalizeDeploymentTokens(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([vault, additions]) => [
+    vault,
+    Array.isArray(additions)
+      ? additions.map((item) => (typeof item === 'string' ? item.trim() : item))
+      : additions,
+  ]));
+}
+
 function deploymentField(raw) {
   const lines = frontmatterBody(raw).split('\n');
   const index = lines.findIndex((value) => /^deploy_subscriptions\s*:/.test(value));
   if (index < 0) return undefined;
   const inlineMap = lines[index].slice(lines[index].indexOf(':') + 1).trim();
-  if (inlineMap) return parseYamlValue(inlineMap);
+  if (inlineMap) return canonicalizeDeploymentTokens(parseYamlValue(inlineMap));
   const out = {}; let current = null;
   for (let i = index + 1; i < lines.length; i += 1) {
     if (lines[i] && !/^\s+/.test(lines[i])) break;
@@ -391,7 +401,7 @@ function deploymentField(raw) {
     }
     return invalidYamlValue(lines[i]);
   }
-  return out;
+  return canonicalizeDeploymentTokens(out);
 }
 
 function evidenceField(raw) {

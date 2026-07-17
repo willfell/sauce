@@ -267,6 +267,10 @@ ok('NS-60 interior double quotes inside plain flow paths remain literal',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment') }).card === 'Required fields');
 ok('NS-61 doubled apostrophes preserve commas inside single-quoted flow values',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment") }).card === 'Required fields');
+ok('NS-62 deployment subscription whitespace canonicalizes without blocking selection',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [" mechanism:delivery "]') }).card === 'Required fields');
+ok('NS-63 whitespace-equivalent duplicate subscriptions still fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

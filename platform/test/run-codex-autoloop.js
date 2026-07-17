@@ -137,6 +137,10 @@ eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "t
 eq(parseExecutionMeta(currentRaw.replace('depends_on: []', "depends_on: [[Will's project]] # trailing comment")).dependencies, ["Will's project"], 'apostrophe inside a flow wikilink remains literal');
 eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', 'touch_zones: [Docs/Project "Alpha".md] # trailing comment')).touchZones, ['Docs/Project "Alpha".md'], 'interior double quote inside a plain flow path remains literal');
 eq(parseExecutionMeta(currentRaw.replace('touch_zones:\n  - Docs/example.md', "touch_zones: ['Docs/Will''s, file.md'] # trailing comment")).touchZones, ["Docs/Will's, file.md"], 'doubled apostrophe preserves a comma inside a single-quoted flow path');
+const spacedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [" mechanism:delivery "]'));
+ok(spacedDeploymentMeta.contractOk, 'coordinator accepts canonicalizable deployment subscription whitespace');
+eq(spacedDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator trims deployment subscription tokens');
+ok(!parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]')).contractOk, 'coordinator still rejects whitespace-equivalent duplicate subscriptions');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
@@ -176,6 +180,17 @@ fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card
 ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'authored identity drift cannot be masked by the ledger card name');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('context_pack: "Docs/test-context.md"', 'context_pack: "Docs/different-context.md"'));
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'context_pack changes surface as meaningful Delivery contract drift');
+const deploymentContractRaw = currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery"]');
+const deploymentContract = prepareDeliveryCard(deploymentContractRaw, 'Test card').card;
+const deploymentRecord = {
+  ...currentRecord,
+  deploy_subscriptions: deploymentContract.deploy_subscriptions,
+  delivery_contract: deploymentContract,
+};
+fs.writeFileSync(driftPath, deploymentContractRaw
+  .replace('status: planning', 'kanban_column: In Progress\nstatus: in_progress')
+  .replace('["mechanism:delivery"]', '[" mechanism:delivery "]'));
+eq(projectionMetadataProblem(deploymentRecord, driftRoot), null, 'deployment token whitespace canonicalizes as lifecycle no-op');
 fs.rmSync(driftRoot, { recursive: true, force: true });
 
 const obsidianA1 = [
