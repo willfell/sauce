@@ -56,9 +56,26 @@ function parseDependencyField(value) {
   if (raw.includes('\n')) {
     return [...new Set(raw.split('\n').map((line) => normalizeIdentity(line.replace(/^\s*-\s*/, ''))).filter(Boolean))];
   }
-  if (raw.startsWith('[') && raw.endsWith(']') && !raw.startsWith('[[')) {
+  if (raw.startsWith('[') && raw.endsWith(']') && (!raw.startsWith('[[') || raw.startsWith('[[['))) {
     const body = raw.slice(1, -1);
-    return [...new Set(body.split(',').map(normalizeIdentity).filter(Boolean))];
+    const items = []; let current = ''; let quote = null; let wikilinkDepth = 0; let escaped = false;
+    for (let index = 0; index < body.length; index += 1) {
+      const char = body[index]; const pair = body.slice(index, index + 2);
+      if (escaped) { current += char; escaped = false; continue; }
+      if (quote) {
+        current += char;
+        if (char === '\\') escaped = true;
+        else if (char === quote) quote = null;
+        continue;
+      }
+      if (char === '"' || char === "'") { quote = char; current += char; continue; }
+      if (pair === '[[') { wikilinkDepth += 1; current += pair; index += 1; continue; }
+      if (pair === ']]' && wikilinkDepth > 0) { wikilinkDepth -= 1; current += pair; index += 1; continue; }
+      if (char === ',' && wikilinkDepth === 0) { items.push(current); current = ''; continue; }
+      current += char;
+    }
+    items.push(current);
+    return [...new Set(items.map(normalizeIdentity).filter(Boolean))];
   }
   if (/^-\s+/.test(raw)) return [normalizeIdentity(raw.replace(/^-\s+/, ''))].filter(Boolean);
   return [normalizeIdentity(raw)].filter(Boolean);
@@ -74,9 +91,16 @@ function normalizeEvidenceClaim(value) {
 }
 
 function evidenceTimestampValid(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && !Number.isNaN(Date.parse(value));
+  if (typeof value !== 'string') return false;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/);
+  if (!match) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, zone, offsetHourText, offsetMinuteText] = match;
+  const year = Number(yearText); const month = Number(monthText); const day = Number(dayText);
+  const hour = Number(hourText); const minute = Number(minuteText); const second = Number(secondText);
+  if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()
+    || hour > 23 || minute > 59 || second > 59) return false;
+  if (zone !== 'Z' && (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)) return false;
+  return !Number.isNaN(Date.parse(value));
 }
 
 function pinnedReceiptValid(receipt) {
@@ -342,8 +366,8 @@ function completionProof(record) {
     if (!receipt || receipt.ok !== true || receipt.vault !== vault
       || typeof receipt.path !== 'string' || !receipt.path.trim()
       || receipt.required_version !== item.required_version
-      || !Array.isArray(receipt.added_subscriptions)
-      || requiredSubscriptions.some((subscription) => !receipt.added_subscriptions.includes(subscription))
+      || !Array.isArray(receipt.added_subscriptions) || !Array.isArray(receipt.verified_subscriptions)
+      || requiredSubscriptions.some((subscription) => !receipt.verified_subscriptions.includes(subscription))
       || !evidenceTimestampValid(receipt.started_at) || !evidenceTimestampValid(receipt.finished_at)
       || receipt.status_exit !== 0 || !Array.isArray(receipt.history_errors) || receipt.history_errors.length > 0
       || !receipt.installed_version
