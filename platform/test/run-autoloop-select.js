@@ -155,6 +155,8 @@ ok('NS-18 duplicate card keys fail closed as ambiguous',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard: Different') }).action === 'no-eligible-work');
 ok('NS-19 duplicate status keys fail closed as ambiguous',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('status: planning', 'status: planning\nstatus: blocked') }).action === 'no-eligible-work');
+ok('NS-20 duplicate deployment vault keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace: []') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

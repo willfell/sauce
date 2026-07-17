@@ -297,14 +297,31 @@ function prepareDeliveryCard(raw, card) {
   }
   const contractFields = new Set(delivery.registry.types['execution-card'].fields.map((field) => field.name));
   const counts = new Map();
+  const deploymentVaultCounts = new Map();
+  let inDeploymentMap = false;
   for (const line of frontmatterBody(raw).split('\n')) {
     const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):/);
-    if (match && contractFields.has(match[1])) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+    if (match) {
+      inDeploymentMap = match[1] === 'deploy_subscriptions';
+      if (contractFields.has(match[1])) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+      continue;
+    }
+    if (inDeploymentMap) {
+      const vault = line.match(/^\s{2}([a-zA-Z0-9_-]+):/);
+      if (vault) deploymentVaultCounts.set(vault[1], (deploymentVaultCounts.get(vault[1]) || 0) + 1);
+      else if (line && !/^\s+/.test(line)) inDeploymentMap = false;
+    }
   }
   for (const [field, count] of counts) {
     if (count > 1) boundaryErrors.push({
       code: 'duplicate-field', field,
       message: `${field} is authored ${count} times and is ambiguous`,
+    });
+  }
+  for (const [vault, count] of deploymentVaultCounts) {
+    if (count > 1) boundaryErrors.push({
+      code: 'duplicate-field', field: `deploy_subscriptions.${vault}`,
+      message: `deploy_subscriptions.${vault} is authored ${count} times and is ambiguous`,
     });
   }
   if (boundaryErrors.length) {
