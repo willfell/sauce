@@ -14,7 +14,7 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
@@ -200,6 +200,25 @@ fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card
 ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'authored identity drift cannot be masked by the ledger card name');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('context_pack: "Docs/test-context.md"', 'context_pack: "Docs/different-context.md"'));
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'context_pack changes surface as meaningful Delivery contract drift');
+eq(DELIVERY_STABLE_FIELDS, delivery.registry.types['execution-card'].fields.map((field) => field.name), 'lifecycle drift fields derive from all 17 registry fields');
+const ledgerFieldValues = {
+  schema_version: '9.0.0', card: 'Different ledger card', parent_card: 'Different parent', slice: 'T2',
+  model_profile: 'heavy', execution_mode: 'docs_only', batch_policy: 'stop_after', epic: 'Different epic',
+  context_pack: 'Docs/different-context.md',
+  evidence: [{ source_identity: 'other', captured_at: '2026-07-17T06:00:00Z', revision: 'other-v1', locator: 'other', claim: 'Other claim.' }],
+  risk_dimensions: ['shared_contract'], release_required: false, deployment_required: false,
+};
+for (const field of DELIVERY_STABLE_FIELDS) {
+  const fieldRecord = JSON.parse(JSON.stringify(currentRecord));
+  let fieldRaw = projectedCurrentRaw;
+  if (field === 'status') fieldRaw = fieldRaw.replace('status: in_progress', 'status: blocked');
+  else if (field === 'touch_zones') fieldRecord.touch_zones = ['Docs/other.md'];
+  else if (field === 'depends_on') fieldRecord.dependencies = ['Other dependency'];
+  else if (field === 'deploy_subscriptions') fieldRecord.deploy_subscriptions = { headspace: ['mechanism:delivery'], accuris: [], ero: [] };
+  else fieldRecord.delivery_contract[field] = ledgerFieldValues[field];
+  fs.writeFileSync(driftPath, fieldRaw);
+  ok(projectionMetadataProblem(fieldRecord, driftRoot), `semantic lifecycle drift is detected for ${field}`);
+}
 const deploymentContractRaw = currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery"]');
 const deploymentContract = prepareDeliveryCard(deploymentContractRaw, 'Test card').card;
 const deploymentRecord = {

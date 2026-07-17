@@ -33,6 +33,9 @@ const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const DEPLOYMENT_VAULT_IDS = ['headspace', 'accuris', 'ero'];
+const DELIVERY_STABLE_FIELDS = Object.freeze(
+  delivery.registry.types['execution-card'].fields.map((field) => field.name),
+);
 const AMEND_CONTRACT_OPTIONS = new Set([
   '_', 'json', 'card', 'expected-head', 'expected-origin-main', 'reason',
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
@@ -714,12 +717,9 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
         deploy_subscriptions: record.deploy_subscriptions,
       });
       const actualContract = prepared.card;
-      const stableFields = [
-        'schema_version', 'card', 'parent_card', 'slice', 'model_profile', 'execution_mode',
-        'batch_policy', 'status', 'touch_zones', 'depends_on', 'deploy_subscriptions',
-        'epic', 'context_pack', 'evidence', 'risk_dimensions', 'release_required', 'deployment_required',
-      ];
-      differs = differs || stableFields.some((field) => JSON.stringify(actualContract[field]) !== JSON.stringify(expectedContract[field]));
+      differs = differs || DELIVERY_STABLE_FIELDS.some(
+        (field) => JSON.stringify(actualContract[field]) !== JSON.stringify(expectedContract[field]),
+      );
     }
     if (record.phase === 'parked') {
       const dependencies = parseDependsOn(raw).map(normalizeCardLink);
@@ -1786,7 +1786,7 @@ module.exports = {
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
-  projectionBoardDrift, projectionMetadataProblem, completionResult,
+  projectionBoardDrift, projectionMetadataProblem, completionResult, DELIVERY_STABLE_FIELDS,
 };
 
 if (require.main === module) {
