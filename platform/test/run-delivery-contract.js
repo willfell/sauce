@@ -38,7 +38,12 @@ check('DEL-API-1 public API exposes the semantic surface', [
 eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSION, api.registry.contract.version);
 check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
   && Object.isFrozen(api.registry.types)
-  && Object.isFrozen(api.registry.fixtures));
+  && Object.isFrozen(api.registry.fixtures)
+  && Object.isFrozen(api.registry.types['execution-card'])
+  && Object.isFrozen(api.registry.types['execution-card'].fields)
+  && Object.isFrozen(api.registry.types['execution-card'].fields[0])
+  && Object.isFrozen(api.registry.fixtures.base_execution_card)
+  && Object.isFrozen(api.registry.fixtures.base_execution_card.deploy_subscriptions.headspace));
 eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults',
   api.registry.fixtures.base_execution_card.deploy_subscriptions,
   { headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'] });
@@ -248,6 +253,7 @@ for (const [label, mutate] of [
   ['DEL-COMP-23d vault receipt binds required version', (r) => { r.vault_receipts.ero.required_version = '1.2.2'; }],
   ['DEL-COMP-23e vault receipt pins start', (r) => { r.vault_receipts.ero.started_at = 'yesterday'; }],
   ['DEL-COMP-23f vault receipt pins finish', (r) => { r.vault_receipts.ero.finished_at = 'yesterday'; }],
+  ['DEL-COMP-23f2 vault receipt completion cannot precede start', (r) => { r.vault_receipts.ero.finished_at = '2026-07-16T17:51:04Z'; }],
   ['DEL-COMP-23g vault receipt requires clean history', (r) => { r.vault_receipts.ero.history_errors = ['error']; }],
   ['DEL-COMP-23h vault receipt proves requested subscriptions are currently present', (r) => { r.vault_receipts.ero.verified_subscriptions = []; }],
 ]) {
@@ -464,6 +470,18 @@ const badCli = spawnSync(process.execPath, [
 const badCliBody = JSON.parse(badCli.stdout);
 check('DEL-CLI-2 unknown contract types fail with machine-readable output', badCli.status === 2
   && badCliBody.ok === false && /unknown Delivery contract type/.test(badCliBody.error));
+for (const [label, args] of [
+  ['DEL-CLI-3 missing arguments return machine-readable usage', []],
+  ['DEL-CLI-4 unsupported commands return machine-readable usage', ['validate', 'execution-card', '--json']],
+]) {
+  const usageCli = spawnSync(process.execPath, [
+    path.join(DELIVERY, 'scripts', 'delivery-schema-cli.js'), ...args,
+  ], { encoding: 'utf8' });
+  let usageBody = null;
+  try { usageBody = JSON.parse(usageCli.stdout); } catch (_) { /* asserted below */ }
+  check(label, usageCli.status === 2 && usageBody && usageBody.ok === false
+    && /^usage: delivery-schema-cli\.js describe/.test(usageBody.error));
+}
 
 const manifest = JSON.parse(fs.readFileSync(path.join(DELIVERY, 'manifest.json'), 'utf8'));
 const installed = new Map((manifest.files || []).map((file) => [file.source, file.dest]));

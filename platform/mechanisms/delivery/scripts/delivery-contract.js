@@ -374,6 +374,7 @@ function completionProof(record) {
       || receipt.verified_subscriptions.some((subscription) => typeof subscription !== 'string' || !subscription.trim())
       || requiredSubscriptions.some((subscription) => !receipt.verified_subscriptions.includes(subscription))
       || !evidenceTimestampValid(receipt.started_at) || !evidenceTimestampValid(receipt.finished_at)
+      || Date.parse(receipt.finished_at) < Date.parse(receipt.started_at)
       || receipt.status_exit !== 0 || !Array.isArray(receipt.history_errors) || receipt.history_errors.length > 0
       || !receipt.installed_version
       || (item.required_version && (installedComparison == null || installedComparison < 0))) {

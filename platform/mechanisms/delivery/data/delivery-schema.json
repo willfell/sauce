@@ -228,7 +228,7 @@
         { "name": "required_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Release floor applied to this vault." },
         { "name": "installed_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified installed Sauce version." },
         { "name": "started_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment start timestamp with timezone." },
-        { "name": "finished_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment completion timestamp with timezone." },
+        { "name": "finished_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment completion timestamp with timezone; must not precede started_at." },
         { "name": "status_exit", "type": "integer:nonnegative", "required": true, "since_version": "1.0.0", "description": "Read-only post-install status exit code; completion requires zero." },
         { "name": "history_errors", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Install-history errors; completion requires an empty array." },
         { "name": "added_subscriptions", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Subscriptions newly inserted by this deployment attempt; may be empty on retry." },
