@@ -86,14 +86,28 @@ eq('DEL-NORM-5 evidence claim strings normalize without losing provenance', api.
 });
 
 const base = fixtureCard({});
+const docsValidationReceipt = {
+  ok: true, receipt_id: 'docs-validation-1', checked_at: '2026-07-16T17:51:05Z',
+  verifier_revision: 'c'.repeat(40), head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),
+};
 const fullReceipt = {
   card: 'Dependency', phase: 'deployed', execution_mode: 'release',
-  feature_merge_sha: 'a'.repeat(40), release_pr: 10, release_merge_sha: 'b'.repeat(40),
+  feature_pr: 9, feature_merge_sha: 'a'.repeat(40), release_pr: 10, release_merge_sha: 'b'.repeat(40),
   required_version: '1.2.3', tag: 'v1.2.3', tap_pr: 11, brew_version: '1.2.3',
+  brew_receipt: {
+    ok: true, receipt_id: 'brew-receipt-1', checked_at: '2026-07-16T17:51:05Z',
+    verifier_revision: 'c'.repeat(40), tap_pr: 11, installed_version: '1.2.3',
+  },
+  release_ancestry_receipt: {
+    ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfellhoelter/sauce',
+    checked_at: '2026-07-16T17:51:05Z', verifier_revision: 'c'.repeat(40),
+    feature_pr: 9, feature_merge_sha: 'a'.repeat(40),
+    release_pr: 10, release_merge_sha: 'b'.repeat(40), tag: 'v1.2.3',
+  },
   vault_receipts: {
-    headspace: { ok: true, installed_version: '1.2.3' },
-    accuris: { ok: true, installed_version: '1.2.4' },
-    ero: { ok: true, installed_version: '2.0.0' },
+    headspace: { vault: 'headspace', path: '/vaults/headspace', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.3' },
+    accuris: { vault: 'accuris', path: '/vaults/accuris', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.4' },
+    ero: { vault: 'ero', path: '/vaults/ero', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '2.0.0' },
   },
 };
 check('DEL-COMP-1 complete release receipt proves completion', api.completionProof(fullReceipt).complete);
@@ -103,13 +117,15 @@ const incompleteProof = api.completionProof(incomplete);
 check('DEL-COMP-2 missing vault receipt names the missing proof', !incompleteProof.complete
   && incompleteProof.missing.includes('vault_receipts.ero'));
 check('DEL-COMP-3 docs-only completion uses validation proof without release evidence',
-  api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: true } }).complete);
+  api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: docsValidationReceipt }).complete);
 check('DEL-COMP-16 docs-only completion rejects a nonterminal phase',
-  !api.completionProof({ execution_mode: 'docs_only', phase: 'planning', validation_receipt: { ok: true } }).complete);
+  !api.completionProof({ execution_mode: 'docs_only', phase: 'planning', validation_receipt: docsValidationReceipt }).complete);
 check('DEL-COMP-17 docs-only completion requires validation proof',
   !api.completionProof({ execution_mode: 'docs_only', phase: 'completed' }).complete);
 check('DEL-COMP-18 docs-only completion rejects a failed validation receipt',
   !api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: false } }).complete);
+check('DEL-COMP-18b docs-only completion rejects an unpinned truthy validation result',
+  !api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: true } }).complete);
 for (const [label, mutate, missing] of [
   ['DEL-COMP-4 stale tag is rejected', (receipt) => { receipt.tag = 'v1.2.2'; }, 'tag'],
   ['DEL-COMP-5 malformed brew version is rejected', (receipt) => { receipt.brew_version = 'latest'; }, 'brew_version'],
@@ -124,6 +140,7 @@ for (const [label, mutate, missing] of [
   check(label, !proof.complete && proof.missing.includes(missing));
 }
 for (const [label, field, value] of [
+  ['DEL-COMP-19 string feature PR is rejected', 'feature_pr', '9'],
   ['DEL-COMP-7 fake merge SHA is rejected', 'feature_merge_sha', 'x'],
   ['DEL-COMP-8 string release PR is rejected', 'release_pr', '10'],
   ['DEL-COMP-9 fake release merge SHA is rejected', 'release_merge_sha', 'y'],
@@ -136,6 +153,22 @@ for (const [label, field, value] of [
   const proof = api.completionProof(receipt);
   check(label, !proof.complete && proof.missing.includes(field));
 }
+const missingAncestry = JSON.parse(JSON.stringify(fullReceipt));
+delete missingAncestry.release_ancestry_receipt;
+check('DEL-COMP-20 syntactic identifiers without a deterministic ancestry receipt are incomplete',
+  api.completionProof(missingAncestry).missing.includes('release_ancestry_receipt'));
+const mismatchedAncestry = JSON.parse(JSON.stringify(fullReceipt));
+mismatchedAncestry.release_ancestry_receipt.feature_merge_sha = 'd'.repeat(40);
+check('DEL-COMP-21 ancestry receipt must bind the exact completion identifiers',
+  api.completionProof(mismatchedAncestry).missing.includes('release_ancestry_receipt'));
+const missingBrewReceipt = JSON.parse(JSON.stringify(fullReceipt));
+delete missingBrewReceipt.brew_receipt;
+check('DEL-COMP-22 Homebrew version requires a pinned promotion receipt',
+  api.completionProof(missingBrewReceipt).missing.includes('brew_receipt'));
+const malformedVaultReceipt = JSON.parse(JSON.stringify(fullReceipt));
+malformedVaultReceipt.vault_receipts.ero.status_exit = 1;
+check('DEL-COMP-23 vault proof requires the exact green deployment receipt shape',
+  api.completionProof(malformedVaultReceipt).missing.includes('vault_receipts.ero'));
 
 const depCards = [
   { ...base, card: 'Tracked child', depends_on: ['Dependency'] },
@@ -243,6 +276,15 @@ check('DEL-BATCH-3 stop_after permits this card but forbids continuation',
 const docsCard = fixtureCard(api.registry.fixtures.valid.find((fixture) => fixture.name === 'docs-only-standard'));
 check('DEL-BATCH-4 docs_only remains supervised even with a weaker authored continuation policy',
   api.batchEligibility(docsCard, { supervised: false }).reason === 'docs-only-requires-supervision');
+check('DEL-BATCH-5 invalid cards fail closed before policy evaluation',
+  api.batchEligibility({ ...base, model_profile: 'ultra' }, {
+    supervised: true, dependency_result: { eligible: true },
+  }).reason === 'contract-invalid');
+const dependencyFree = { ...stopAfter, depends_on: [], batch_policy: 'continue' };
+check('DEL-BATCH-6 an explicit dependency refusal is honored even for a dependency-free card',
+  api.batchEligibility(dependencyFree, {
+    supervised: true, dependency_result: { eligible: false, missing_proof: ['external-refusal'] },
+  }).reason === 'dependencies-not-complete');
 
 const historical = fixtureCard(api.registry.fixtures.valid.find((fixture) => fixture.name === 'historical-unversioned'));
 const migrated = api.migrate(historical, historical.schema_version);
@@ -255,6 +297,10 @@ check('DEL-MIGRATE-2 migration is idempotent', remigrated.ok && remigrated.appli
 const future = api.migrate({ ...base, schema_version: '9.0.0' }, '9.0.0');
 check('DEL-MIGRATE-3 newer-than-engine refuses without mutation', !future.ok
   && future.reason === 'newer-than-engine');
+const malformedMigration = api.migrate(base, 'v1');
+check('DEL-MIGRATE-3b malformed source versions refuse without mutation', !malformedMigration.ok
+  && malformedMigration.reason === 'invalid-schema-version'
+  && JSON.stringify(malformedMigration.note) === JSON.stringify(base));
 const sparseHistorical = fixtureCard({});
 for (const field of ['schema_version', 'execution_mode', 'depends_on', 'deploy_subscriptions',
   'release_required', 'deployment_required', 'batch_policy']) delete sparseHistorical[field];
@@ -295,6 +341,8 @@ check('DEL-DESCRIBE-1 planner gets authoring descriptions', planner.fields.every
 check('DEL-DESCRIBE-2 consumer descriptions are seat-specific',
   planner.fields.find((field) => field.name === 'touch_zones').description
     !== coordinator.fields.find((field) => field.name === 'touch_zones').description);
+check('DEL-DESCRIBE-3 registry describes the deterministic ancestry receipt',
+  api.describe('release-ancestry-receipt', 'coordinator').fields.some((field) => field.name === 'verifier_revision'));
 const cli = JSON.parse(execFileSync(process.execPath, [
   path.join(DELIVERY, 'scripts', 'delivery-schema-cli.js'),
   'describe', 'execution-card', '--consumer', 'coordinator', '--json',
@@ -318,6 +366,12 @@ check('DEL-MAN-2 registry is installed in a non-loader content tree',
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
   'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
 ].every((source) => installed.has(source)));
+eq('DEL-MAN-3a every installed source has its exact non-loader destination', Object.fromEntries(installed), {
+  'data/delivery-schema.json': '{{content_path}}/delivery/data/delivery-schema.json',
+  'scripts/delivery-contract.js': '{{content_path}}/delivery/scripts/delivery-contract.js',
+  'scripts/delivery-schema-cli.js': '{{content_path}}/delivery/scripts/delivery-schema-cli.js',
+  'index.js': '{{content_path}}/delivery/index.js',
+});
 const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-contract-install-'));
 let installedLoadOk = false;
 let installedCliOk = false;

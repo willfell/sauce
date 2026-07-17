@@ -60,6 +60,7 @@ function parseDependencyField(value) {
     const body = raw.slice(1, -1);
     return [...new Set(body.split(',').map(normalizeIdentity).filter(Boolean))];
   }
+  if (/^-\s+/.test(raw)) return [normalizeIdentity(raw.replace(/^-\s+/, ''))].filter(Boolean);
   return [normalizeIdentity(raw)].filter(Boolean);
 }
 
@@ -76,6 +77,13 @@ function evidenceTimestampValid(value) {
   return typeof value === 'string'
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
     && !Number.isNaN(Date.parse(value));
+}
+
+function pinnedReceiptValid(receipt) {
+  return receipt && receipt.ok === true
+    && typeof receipt.receipt_id === 'string' && receipt.receipt_id.trim()
+    && evidenceTimestampValid(receipt.checked_at)
+    && /^[0-9a-f]{40}$/i.test(String(receipt.verifier_revision || ''));
 }
 
 function normalizeZoneEntry(zone, defaultRoot = 'workshop') {
@@ -121,6 +129,8 @@ function fieldTypeValid(value, field) {
   switch (field.type) {
     case 'string': return typeof value === 'string' && value.trim().length > 0;
     case 'boolean': return typeof value === 'boolean';
+    case 'integer:positive': return Number.isInteger(value) && value > 0;
+    case 'integer:nonnegative': return Number.isInteger(value) && value >= 0;
     case 'array:string': return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim());
     case 'array:identity': return (typeof value === 'string')
       || (Array.isArray(value) && value.every((item) => typeof item === 'string' && normalizeIdentity(item)));
@@ -278,10 +288,14 @@ function completionProof(record) {
   const addMissing = (field) => { if (!missing.includes(field)) missing.push(field); };
   if (item.execution_mode === 'docs_only') {
     if (!['completed', 'deployed'].includes(item.phase)) missing.push('phase');
-    if (!item.validation_receipt || item.validation_receipt.ok !== true) missing.push('validation_receipt');
+    const receipt = item.validation_receipt;
+    if (!pinnedReceiptValid(receipt)
+      || !/^[0-9a-f]{40}$/i.test(String(receipt && receipt.head_sha || ''))
+      || !/^[0-9a-f]{40}$/i.test(String(receipt && receipt.base_sha || ''))) missing.push('validation_receipt');
     return { complete: missing.length === 0, missing, mode: 'docs_only' };
   }
   if (item.phase !== 'deployed') addMissing('phase');
+  if (!Number.isInteger(item.feature_pr) || item.feature_pr <= 0) addMissing('feature_pr');
   if (!/^[0-9a-f]{40}$/i.test(String(item.feature_merge_sha || ''))) addMissing('feature_merge_sha');
   if (!Number.isInteger(item.release_pr) || item.release_pr <= 0) addMissing('release_pr');
   if (!/^[0-9a-f]{40}$/i.test(String(item.release_merge_sha || ''))) addMissing('release_merge_sha');
@@ -289,6 +303,23 @@ function completionProof(record) {
   if (!/^v\d+\.\d+\.\d+$/.test(String(item.tag || ''))) addMissing('tag');
   if (!Number.isInteger(item.tap_pr) || item.tap_pr <= 0) addMissing('tap_pr');
   if (compareVersions(item.brew_version, item.brew_version) !== 0) addMissing('brew_version');
+  const brewReceipt = item.brew_receipt;
+  if (!pinnedReceiptValid(brewReceipt)
+    || brewReceipt.tap_pr !== item.tap_pr
+    || brewReceipt.installed_version !== item.brew_version) addMissing('brew_receipt');
+  const ancestry = item.release_ancestry_receipt;
+  if (!ancestry || ancestry.ok !== true
+    || typeof ancestry.receipt_id !== 'string' || !ancestry.receipt_id.trim()
+    || typeof ancestry.repository !== 'string' || !ancestry.repository.trim()
+    || !evidenceTimestampValid(ancestry.checked_at)
+    || !/^[0-9a-f]{40}$/i.test(String(ancestry.verifier_revision || ''))
+    || ancestry.feature_pr !== item.feature_pr
+    || ancestry.feature_merge_sha !== item.feature_merge_sha
+    || ancestry.release_pr !== item.release_pr
+    || ancestry.release_merge_sha !== item.release_merge_sha
+    || ancestry.tag !== item.tag) {
+    addMissing('release_ancestry_receipt');
+  }
   const brewComparison = item.required_version && item.brew_version
     ? compareVersions(item.brew_version, item.required_version) : null;
   if (item.required_version && item.brew_version && (brewComparison == null || brewComparison < 0)) addMissing('brew_version');
@@ -299,7 +330,12 @@ function completionProof(record) {
     const receipt = item.vault_receipts && item.vault_receipts[vault];
     const installedComparison = receipt && receipt.installed_version && item.required_version
       ? compareVersions(receipt.installed_version, item.required_version) : null;
-    if (!receipt || receipt.ok !== true || !receipt.installed_version
+    if (!receipt || receipt.ok !== true || receipt.vault !== vault
+      || typeof receipt.path !== 'string' || !receipt.path.trim()
+      || receipt.required_version !== item.required_version
+      || !evidenceTimestampValid(receipt.started_at) || !evidenceTimestampValid(receipt.finished_at)
+      || receipt.status_exit !== 0 || !Array.isArray(receipt.history_errors) || receipt.history_errors.length > 0
+      || !receipt.installed_version
       || (item.required_version && (installedComparison == null || installedComparison < 0))) {
       addMissing(`vault_receipts.${vault}`);
     }

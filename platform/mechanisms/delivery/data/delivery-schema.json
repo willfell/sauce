@@ -181,6 +181,57 @@
         { "name": "locator", "type": "string", "required": true, "since_version": "1.0.0", "description": "Path/line, symbol, heading, URL, or other source locator." },
         { "name": "claim", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact claim the pinned snapshot supports." }
       ]
+    },
+    "release-ancestry-receipt": {
+      "description": "Pinned deterministic proof that a feature PR merge is contained by the recorded release and tag.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after the deterministic ancestry adapter verifies containment." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable identifier for this ancestry check." },
+        { "name": "repository", "type": "string", "required": true, "since_version": "1.0.0", "description": "Repository identity against which ancestry was checked." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 timestamp with timezone for the ancestry observation." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact deterministic engine revision that produced the receipt." },
+        { "name": "feature_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Feature PR identity tied to feature_merge_sha." },
+        { "name": "feature_merge_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified feature merge commit." },
+        { "name": "release_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Containing release PR identity." },
+        { "name": "release_merge_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified containing release merge commit." },
+        { "name": "tag", "type": "string", "required": true, "since_version": "1.0.0", "description": "Release tag verified against the containing release." }
+      ]
+    },
+    "docs-validation-receipt": {
+      "description": "Pinned exact-head/base proof for supervised docs-only completion.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only when the documented validation passed." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable validation receipt identity." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 validation timestamp with timezone." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact verifier revision." },
+        { "name": "head_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact validated head commit." },
+        { "name": "base_sha", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact validated base commit." }
+      ]
+    },
+    "brew-promotion-receipt": {
+      "description": "Pinned proof that the recorded tap PR produced the installed Homebrew version.",
+      "fields": [
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after deterministic Homebrew verification." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.0.0", "description": "Durable promotion receipt identity." },
+        { "name": "checked_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 promotion observation timestamp with timezone." },
+        { "name": "verifier_revision", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact deterministic verifier revision." },
+        { "name": "tap_pr", "type": "integer:positive", "required": true, "since_version": "1.0.0", "description": "Tap PR that promoted the formula." },
+        { "name": "installed_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified Homebrew installation version." }
+      ]
+    },
+    "vault-deployment-receipt": {
+      "description": "Vault-specific install and drift-verification proof.",
+      "fields": [
+        { "name": "vault", "type": "string", "required": true, "since_version": "1.0.0", "description": "Exact required vault identity." },
+        { "name": "path", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified vault locator." },
+        { "name": "ok", "type": "boolean", "required": true, "since_version": "1.0.0", "description": "True only after install and status checks pass." },
+        { "name": "required_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Release floor applied to this vault." },
+        { "name": "installed_version", "type": "string", "required": true, "since_version": "1.0.0", "description": "Verified installed Sauce version." },
+        { "name": "started_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment start timestamp with timezone." },
+        { "name": "finished_at", "type": "string", "required": true, "since_version": "1.0.0", "description": "ISO-8601 deployment completion timestamp with timezone." },
+        { "name": "status_exit", "type": "integer:nonnegative", "required": true, "since_version": "1.0.0", "description": "Read-only post-install status exit code; completion requires zero." },
+        { "name": "history_errors", "type": "array:string", "required": true, "since_version": "1.0.0", "description": "Install-history errors; completion requires an empty array." }
+      ]
     }
   },
   "policies": {
@@ -349,7 +400,8 @@
       { "name": "unquoted-scalar-wikilink", "input": "depends_on: [[A]]", "expected": ["A"] },
       { "name": "bare-scalar", "input": "depends_on: A", "expected": ["A"] },
       { "name": "flow-list", "input": "depends_on: [\"[[A]]\", \"B\"]", "expected": ["A", "B"] },
-      { "name": "block-list", "input": "depends_on:\n  - \"[[A]]\"\n  - B", "expected": ["A", "B"] }
+      { "name": "block-list", "input": "depends_on:\n  - \"[[A]]\"\n  - B", "expected": ["A", "B"] },
+      { "name": "one-item-block-list", "input": "depends_on:\n  - \"[[A]]\"", "expected": ["A"] }
     ]
   }
 }
