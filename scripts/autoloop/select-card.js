@@ -331,6 +331,8 @@ function deploymentField(raw) {
   const lines = frontmatterBody(raw).split('\n');
   const index = lines.findIndex((value) => /^deploy_subscriptions\s*:/.test(value));
   if (index < 0) return undefined;
+  const inlineMap = lines[index].slice(lines[index].indexOf(':') + 1).trim();
+  if (inlineMap) return parseYamlValue(inlineMap);
   const out = {}; let current = null;
   for (let i = index + 1; i < lines.length; i += 1) {
     if (lines[i] && !/^\s+/.test(lines[i])) break;
@@ -357,7 +359,7 @@ function deploymentField(raw) {
 
 function evidenceField(raw) {
   const inline = rawScalarField(raw, 'evidence');
-  if (inline !== undefined) return parseYamlValue(inline);
+  if (inline !== undefined) return listField(raw, 'evidence');
   const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
   if (!section) return undefined;
   const claims = section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))

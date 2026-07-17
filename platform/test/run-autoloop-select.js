@@ -222,6 +222,18 @@ ok('NS-46 explicitly empty quoted scalar dependency fails closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: ""') }).action === 'no-eligible-work');
 ok('NS-47 nested YAML flow dependencies remain structured and fail shared identity typing',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('depends_on: []', 'depends_on: [[A], [B]]') }).action === 'no-eligible-work');
+const blockEvidenceCard = requiredFieldCard.replace(/^evidence:.*$/m, [
+  'evidence:', '  - source_identity: selector fixture', '    captured_at: "2026-07-17T06:00:00Z"',
+  '    revision: fixture-v1', '    locator: platform/test/run-autoloop-select.js', '    claim: Block evidence fixture.',
+].join('\n'));
+ok('NS-48 block YAML evidence-claim mappings remain readable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => blockEvidenceCard }).card === 'Required fields');
+const inlineDeploymentCard = requiredFieldCard.replace(
+  'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+  'deploy_subscriptions: {headspace: [], accuris: [], ero: []}',
+);
+ok('NS-49 inline YAML deployment map remains readable',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => inlineDeploymentCard }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

@@ -93,6 +93,17 @@ ok(validateExecutionMeta(emptyScalarDependency).some((error) => /invalid-depende
 const nestedFlowDependency = parseExecutionMeta(currentRaw.replace('depends_on: []', 'depends_on: [[A], [B]]'));
 ok(!nestedFlowDependency.contractOk, 'coordinator rejects nested YAML flow sequences as non-string dependencies');
 ok(validateExecutionMeta(nestedFlowDependency).some((error) => /depends_on/.test(error)), 'coordinator surfaces nested dependency typing failure');
+const blockEvidenceMeta = parseExecutionMeta(currentRaw.replace(/^evidence:.*$/m, [
+  'evidence:', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+  '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Block evidence fixture.',
+].join('\n')));
+ok(blockEvidenceMeta.contractOk, 'coordinator accepts valid block YAML evidence-claim mappings');
+const inlineDeploymentMeta = parseExecutionMeta(currentRaw.replace(
+  'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+  'deploy_subscriptions: {headspace: [], accuris: [], ero: []}',
+));
+ok(inlineDeploymentMeta.contractOk, 'coordinator accepts a valid inline YAML deployment map');
+eq(inlineDeploymentMeta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'inline deployment map preserves every required vault');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
