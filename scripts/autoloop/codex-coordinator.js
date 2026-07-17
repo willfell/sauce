@@ -717,7 +717,7 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
       const stableFields = [
         'schema_version', 'card', 'parent_card', 'slice', 'model_profile', 'execution_mode',
         'batch_policy', 'status', 'touch_zones', 'depends_on', 'deploy_subscriptions',
-        'epic', 'evidence', 'risk_dimensions', 'release_required', 'deployment_required',
+        'epic', 'context_pack', 'evidence', 'risk_dimensions', 'release_required', 'deployment_required',
       ];
       differs = differs || stableFields.some((field) => JSON.stringify(actualContract[field]) !== JSON.stringify(expectedContract[field]));
     }

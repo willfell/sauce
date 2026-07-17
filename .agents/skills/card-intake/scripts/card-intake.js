@@ -83,6 +83,7 @@ function deliveryContract(card, spec) {
   if (delivery.registry.policies.policy_strength.includes(contract.batch_policy)) {
     contract.batch_policy = delivery.derivePolicy(contract);
   }
+  if (has('context_pack')) contract.context_pack = card.context_pack;
   return contract;
 }
 
@@ -301,6 +302,7 @@ function renderCard(card, spec) {
   if (role === 'execution') {
     lines.push(`card: ${quoted(contract.card)}`, `schema_version: ${quoted(contract.schema_version)}`, `parent_card: ${quoted(`[[${contract.parent_card}]]`)}`, `slice: ${quoted(contract.slice)}`);
     lines.push(`model_profile: ${contract.model_profile}`, `execution_mode: ${contract.execution_mode}`, `batch_policy: ${contract.batch_policy}`);
+    if (Object.prototype.hasOwnProperty.call(contract, 'context_pack')) lines.push(`context_pack: ${quoted(contract.context_pack)}`);
     lines.push(`release_required: ${contract.release_required}`, `deployment_required: ${contract.deployment_required}`);
     lines.push('touch_zones:', ...contract.touch_zones.map((item) => `  - ${quoted(item)}`));
   }

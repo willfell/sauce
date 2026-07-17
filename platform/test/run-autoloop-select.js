@@ -166,6 +166,11 @@ ok('NS-23 spaced duplicate card keys fail closed as ambiguous YAML',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard : Different') }).action === 'no-eligible-work');
 ok('NS-24 spaced duplicate deployment keys fail closed as ambiguous YAML',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace : []') }).action === 'no-eligible-work');
+const contextPackCard = requiredFieldCard.replace('epic: "[[Selector fixtures]]"', 'context_pack: "Docs/context.md"\nepic: "[[Selector fixtures]]"');
+ok('NS-25 valid optional context_pack is preserved through shared validation',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard }).card === 'Required fields');
+ok('NS-26 explicitly empty context_pack fails closed instead of being discarded',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => contextPackCard.replace('context_pack: "Docs/context.md"', 'context_pack:') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

@@ -44,6 +44,7 @@ function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], de
     'touch_zones:', ...zones.map((z) => `  - ${z}`),
     'depends_on:', ...deps.map((d) => `  - "[[${d}]]"`),
     ...(deploy ? ['deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []'] : []),
+    'context_pack: "Docs/test-context.md"',
     'epic: "[[Test epic]]"',
     `evidence: ${JSON.stringify(evidence)}`,
     'risk_dimensions: []',
@@ -116,6 +117,8 @@ fs.writeFileSync(driftPath, projectedCurrentRaw.replace('Docs/example.md', 'Docs
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'meaningful Delivery contract edits surface as lifecycle drift');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card: Different card'));
 ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'authored identity drift cannot be masked by the ledger card name');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('context_pack: "Docs/test-context.md"', 'context_pack: "Docs/different-context.md"'));
+ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'context_pack changes surface as meaningful Delivery contract drift');
 fs.rmSync(driftRoot, { recursive: true, force: true });
 
 const obsidianA1 = [

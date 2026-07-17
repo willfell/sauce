@@ -207,12 +207,13 @@ function docsOnly() {
 function missingEvidenceAndRefusals() {
   console.log('\n--- forward fixture: missing evidence and refusals ---');
   tempCase((dir) => {
-    const direct = execution('DIRECT-1 Small requirement', { depends_on: ['[[Prerequisite]]'] });
+    const direct = execution('DIRECT-1 Small requirement', { depends_on: ['[[Prerequisite]]'], context_pack: 'Docs/direct-context.md' });
     const directSpec = base(dir, { cards: [direct] });
     const directResult = run(directSpec, true);
     ok(directResult.ok && directResult.result === 'awaiting_user_decision' && directResult.candidate_card === direct.title, 'small direct requirement defers claimability to coordinator');
     const directRaw = fs.readFileSync(path.join(dir, 'tasks', direct.title, `${direct.title}.md`), 'utf8');
-    ok(directRaw.includes('model_profile: standard') && directRaw.includes('deploy_subscriptions:') && directRaw.includes('touch_zones:'), 'direct execution metadata is complete');
+    ok(directRaw.includes('model_profile: standard') && directRaw.includes('deploy_subscriptions:') && directRaw.includes('touch_zones:')
+      && directRaw.includes('context_pack: "Docs/direct-context.md"'), 'direct execution metadata is complete, including optional context_pack');
     const directSelected = selectClaimCandidate({ boardMd: fs.readFileSync(directSpec.board_path, 'utf8'), state: { cards: {} }, loadCard: (title) => {
       const file = findTaskFile(dir, title);
       return file ? { path: file, raw: fs.readFileSync(file, 'utf8') } : null;

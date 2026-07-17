@@ -229,6 +229,7 @@ function parseDeliveryCard(raw, card) {
     status: frontmatterScalar(raw, 'status'),
     deploy_subscriptions: deploymentField(raw),
     epic: frontmatterScalar(raw, 'epic'),
+    context_pack: frontmatterScalar(raw, 'context_pack'),
   };
   const authoredBatchPolicy = rawScalarField(raw, 'batch_policy');
   const batchPolicy = parseBatchPolicy(raw);
