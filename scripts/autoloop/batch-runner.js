@@ -107,6 +107,14 @@ function integrityFor(ledger) {
   return crypto.createHash('sha256').update(JSON.stringify(copy)).digest('hex');
 }
 
+function canonicalTimestampMs(value) {
+  if (typeof value !== 'string' || !value) return NaN;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return NaN;
+  try { return new Date(parsed).toISOString() === value ? parsed : NaN; }
+  catch (_) { return NaN; }
+}
+
 function createLedger(options = {}, deps = {}) {
   const budgets = normalizeBudgets(options);
   const startedAt = nowOf(deps);
@@ -147,8 +155,9 @@ function validateLedger(value) {
   if (!/^attempt-[0-9a-f]{64}$/.test(String(ledger.attempt_id || ''))) errors.push('invalid attempt identity');
   if (!/^[0-9a-f]{40}$/i.test(String(ledger.engine_revision || ''))) errors.push('invalid engine revision');
   if (delivery.compareVersions(ledger.contract_version, ledger.contract_version) !== 0) errors.push('invalid contract version');
+  let normalizedBudgets = null;
   try {
-    const normalized = normalizeBudgets({
+    normalizedBudgets = normalizeBudgets({
       max_cards: ledger.budgets && ledger.budgets.max_distinct_cards,
       duration_seconds: ledger.budgets && ledger.budgets.duration_seconds,
       max_infra_retries: ledger.budgets && ledger.budgets.max_infra_retries,
@@ -156,13 +165,33 @@ function validateLedger(value) {
       max_model_turns: ledger.budgets && ledger.budgets.max_model_turns,
       max_intervention_weight: ledger.budgets && ledger.budgets.max_intervention_weight,
     });
-    if (JSON.stringify(normalized) !== JSON.stringify(ledger.budgets)) errors.push('noncanonical budgets');
+    if (JSON.stringify(normalizedBudgets) !== JSON.stringify(ledger.budgets)) errors.push('noncanonical budgets');
   } catch (err) { errors.push(err.message); }
-  const startedMs = Date.parse(ledger.started_at); const deadlineMs = Date.parse(ledger.deadline_at);
-  if (!Number.isFinite(startedMs)) errors.push('started_at must be an ISO timestamp');
+  const startedMs = canonicalTimestampMs(ledger.started_at);
+  const deadlineMs = canonicalTimestampMs(ledger.deadline_at);
+  if (!Number.isFinite(startedMs)) errors.push('started_at must be a canonical ISO timestamp');
   if (!Number.isFinite(deadlineMs)
     || (ledger.budgets && deadlineMs !== startedMs + ledger.budgets.duration_seconds * 1000)) {
     errors.push('deadline_at must equal started_at plus duration_seconds');
+  }
+  const stopMs = ledger.stop_requested_at === null ? null : canonicalTimestampMs(ledger.stop_requested_at);
+  const resumedMs = ledger.resumed_at === null ? null : canonicalTimestampMs(ledger.resumed_at);
+  if (ledger.resumed_at !== null && (!Number.isFinite(resumedMs) || resumedMs < startedMs)) {
+    errors.push('resumed_at must be a canonical ISO timestamp at or after started_at');
+  }
+  if (ledger.phase === 'running' && (ledger.stop_requested_at !== null || ledger.stop_reason !== null)) {
+    errors.push('running lifecycle cannot carry stop_requested_at or stop_reason');
+  }
+  if (ledger.phase === 'stopped') {
+    if (!Number.isFinite(stopMs) || stopMs < startedMs) {
+      errors.push('stop_requested_at must be a canonical ISO timestamp at or after started_at');
+    }
+    if (typeof ledger.stop_reason !== 'string' || !ledger.stop_reason.trim()) {
+      errors.push('stopped lifecycle requires a non-empty stop_reason');
+    }
+    if (Number.isFinite(resumedMs) && Number.isFinite(stopMs) && resumedMs > stopMs) {
+      errors.push('resumed_at cannot be later than stop_requested_at');
+    }
   }
   const counters = ledger.counters;
   if (!counters || typeof counters !== 'object' || Array.isArray(counters)) errors.push('counters must be an object');
@@ -180,6 +209,28 @@ function validateLedger(value) {
       || counters.failure_signatures.some((item) => typeof item !== 'string' || !item.trim())
       || new Set(counters.failure_signatures).size !== counters.failure_signatures.length) {
       errors.push('failure_signatures must be unique non-empty strings');
+    }
+    if (normalizedBudgets) {
+      if (Array.isArray(counters.distinct_cards)
+        && counters.distinct_cards.length > normalizedBudgets.max_distinct_cards) {
+        errors.push('distinct-card accounting exceeds immutable budget');
+      }
+      if (Number.isInteger(counters.infra_retries)
+        && counters.infra_retries > normalizedBudgets.max_infra_retries) {
+        errors.push('infra retry accounting exceeds immutable budget');
+      }
+      if (Number.isInteger(counters.code_repairs)
+        && counters.code_repairs > normalizedBudgets.max_code_repairs) {
+        errors.push('code repair accounting exceeds immutable budget');
+      }
+      if (Number.isInteger(counters.model_turns)
+        && counters.model_turns > normalizedBudgets.max_model_turns) {
+        errors.push('model usage accounting exceeds immutable budget');
+      }
+      if (Number.isFinite(counters.intervention_weight)
+        && counters.intervention_weight > normalizedBudgets.max_intervention_weight) {
+        errors.push('intervention accounting exceeds immutable budget');
+      }
     }
   }
   if (!ledger.effects || typeof ledger.effects !== 'object' || Array.isArray(ledger.effects)) errors.push('effects must be an object');
@@ -355,11 +406,26 @@ function assertPinnedRuntime(ledger, deps = {}) {
   }
 }
 
+function markStopped(ledger, reason, deps = {}) {
+  const normalizedReason = String(reason || '').trim() || 'stop requested';
+  ledger.phase = 'stopped';
+  ledger.stop_requested_at = nowOf(deps);
+  ledger.stop_reason = normalizedReason;
+}
+
+function persistValidatedLedger(ctx, ledger) {
+  ledger.integrity = integrityFor(ledger);
+  const validation = validateLedger(ledger);
+  if (!validation.ok) throw new Error(`ledger mutation refused: ${validation.errors.join('; ')}`);
+  atomicWriteJson(ctx.ledgerPath, ledger);
+}
+
 function start(ctx, options = {}, deps = {}) {
   return withBatchLock(ctx, () => {
     readiness(ctx);
     const existing = readLedger(ctx);
     if (existing) {
+      if (existing.phase === 'stopped') throw new Error('batch is stopped and terminal; start refused');
       assertPinnedRuntime(existing, deps);
       if (!requestedConfigMatches(existing, options)) throw new Error('active batch has a different immutable configuration');
       return { action: 'already-started', ledger: existing };
@@ -380,30 +446,21 @@ function stop(ctx, options = {}, deps = {}) {
     const ledger = readLedger(ctx);
     if (!ledger) throw new Error('no batch to stop');
     if (ledger.phase === 'stopped') return { action: 'already-stopped', ledger };
-    ledger.phase = 'stopped';
-    ledger.stop_requested_at = nowOf(deps);
-    ledger.stop_reason = String(options.reason || 'operator request').trim();
-    ledger.integrity = integrityFor(ledger);
-    atomicWriteJson(ctx.ledgerPath, ledger);
+    markStopped(ledger, options.reason || 'operator request', deps);
+    persistValidatedLedger(ctx, ledger);
     return { action: 'stopped', ledger };
   }, deps);
 }
 
 function resume(ctx, options = {}, deps = {}) {
   return withBatchLock(ctx, () => {
-    readiness(ctx);
     const ledger = readLedger(ctx);
     if (!ledger) throw new Error('no batch to resume');
+    if (ledger.phase === 'stopped') throw new Error('resume refused: batch is stopped and terminal');
+    readiness(ctx);
     assertPinnedRuntime(ledger, deps);
     if (!requestedConfigMatches(ledger, options)) throw new Error('resume cannot change immutable configuration');
-    if (ledger.phase === 'running') return { action: 'already-running', ledger };
-    const exhausted = budgetProblems(ledger, nowOf(deps));
-    if (exhausted.length) throw new Error(`resume refused: ${exhausted.join('; ')}`);
-    ledger.phase = 'running'; ledger.resumed_at = nowOf(deps);
-    ledger.stop_requested_at = null; ledger.stop_reason = null;
-    ledger.integrity = integrityFor(ledger);
-    atomicWriteJson(ctx.ledgerPath, ledger);
-    return { action: 'resumed', ledger };
+    return { action: 'already-running', ledger };
   }, deps);
 }
 
@@ -411,13 +468,15 @@ function mutateLedger(ctx, updater, deps = {}) {
   return withBatchLock(ctx, () => {
     const ledger = readLedger(ctx);
     if (!ledger) throw new Error('no batch ledger exists');
+    if (ledger.phase === 'stopped') throw new Error('batch is stopped and terminal; mutation refused');
     assertPinnedRuntime(ledger, deps);
-    const result = updater(ledger) || { action: 'stop', reason: 'empty ledger mutation' };
+    let result = updater(ledger) || { action: 'stop', reason: 'empty ledger mutation' };
+    if (result.action === 'stop') {
+      markStopped(ledger, result.reason || 'stop-class failure', deps);
+      result = { ...result, changed: true };
+    }
     if (result.changed) {
-      ledger.integrity = integrityFor(ledger);
-      const validation = validateLedger(ledger);
-      if (!validation.ok) throw new Error(`ledger mutation refused: ${validation.errors.join('; ')}`);
-      atomicWriteJson(ctx.ledgerPath, ledger);
+      persistValidatedLedger(ctx, ledger);
     }
     return { ...result, ledger };
   }, deps);

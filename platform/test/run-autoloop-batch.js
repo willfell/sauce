@@ -100,39 +100,39 @@ for (const [opts, pattern, label] of [
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
-// Status never writes; stop and resume preserve identity, deadline, pins, budgets, counters, and receipts.
+// Status never writes; stop is idempotent and terminal while resume is a read-only no-op for running work.
 {
   const ctx = tempContext();
   const original = batch.start(ctx, { max_cards: 3, max_model_turns: 24, max_intervention_weight: 1.5 }, fixed).ledger;
   const beforeStatus = fs.readFileSync(ctx.ledgerPath, 'utf8');
   eq(batch.status(ctx, fixed).ledger.batch_id, original.batch_id, 'status reads the current identity');
   eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), beforeStatus, 'status is byte-for-byte read-only');
+  eq(batch.resume(ctx, {}, fixed).action, 'already-running', 'resume is idempotent while already running');
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), beforeStatus, 'running resume is a byte no-op');
   const stopped = batch.stop(ctx, { reason: 'operator request' }, fixed);
   eq(stopped.ledger.phase, 'stopped', 'stop records a graceful stop');
+  for (const field of ['batch_id', 'attempt_id', 'started_at', 'deadline_at', 'engine_revision', 'contract_version', 'budgets', 'counters', 'effects']) {
+    eq(stopped.ledger[field], original[field], `stop preserves ${field}`);
+  }
   const stoppedBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
   eq(batch.stop(ctx, { reason: 'ignored duplicate' }, fixed).action, 'already-stopped', 'stop is idempotent');
   eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), stoppedBytes, 'repeated stop is a byte no-op');
-  const resumed = batch.resume(ctx, {}, { ...fixed, now: () => '2026-07-17T13:00:00.000Z' });
-  eq(resumed.ledger.phase, 'running', 'resume returns the same batch to running');
-  for (const field of ['batch_id', 'attempt_id', 'started_at', 'deadline_at', 'engine_revision', 'contract_version', 'budgets', 'counters', 'effects']) {
-    eq(resumed.ledger[field], original[field], `resume preserves ${field}`);
-  }
-  const resumedBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
-  eq(batch.resume(ctx, {}, fixed).action, 'already-running', 'resume is idempotent');
-  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), resumedBytes, 'repeated resume is a byte no-op');
+  throws(() => batch.resume(ctx, {}, fixed), /stopped.*terminal/, 'resume refuses a stopped batch');
+  throws(() => batch.resume(ctx, {}, fixed), /stopped.*terminal/, 'repeated resume remains refused after reload');
+  throws(() => batch.start(ctx, {}, fixed), /stopped.*terminal/, 'start cannot restart a stopped batch');
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), stoppedBytes, 'terminal lifecycle refusals are byte no-ops');
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
-// A stopped batch never reloads changed control-plane code or a changed shared contract.
+// Runtime pins reject changed control-plane code or a changed shared contract.
 {
   const ctx = tempContext();
-  batch.start(ctx, {}, fixed); batch.stop(ctx, {}, fixed);
-  throws(() => batch.resume(ctx, {}, { ...fixed, engineRevision: () => '2'.repeat(40) }),
-    /engine revision changed during batch/, 'resume refuses a changed engine revision');
-  const ledger = batch.readLedger(ctx); ledger.contract_version = '0.9.0'; ledger.integrity = batch.integrityFor(ledger);
-  batch.atomicWriteJson(ctx.ledgerPath, ledger);
-  throws(() => batch.resume(ctx, {}, fixed), /Delivery contract version changed during batch/,
-    'resume refuses a changed Delivery contract version');
+  const ledger = batch.start(ctx, {}, fixed).ledger;
+  throws(() => batch.assertPinnedRuntime(ledger, { ...fixed, engineRevision: () => '2'.repeat(40) }),
+    /engine revision changed during batch/, 'runtime refuses a changed engine revision');
+  ledger.contract_version = '0.9.0';
+  throws(() => batch.assertPinnedRuntime(ledger, fixed), /Delivery contract version changed during batch/,
+    'runtime refuses a changed Delivery contract version');
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
@@ -194,7 +194,7 @@ for (const [mutate, pattern, label] of [
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
-// Exhaustion and ledger tampering never reset or silently continue on resume.
+// Exhaustion is visible at the exact boundary, and a subsequent stop remains terminal.
 for (const [mutate, pattern, label] of [
   [(ledger) => { ledger.counters.distinct_cards = ['A', 'B']; }, /distinct-card budget exhausted/, 'card budget'],
   [(ledger) => { ledger.counters.infra_retries = 1; }, /infra retry budget exhausted/, 'infra budget'],
@@ -203,9 +203,11 @@ for (const [mutate, pattern, label] of [
   [(ledger) => { ledger.counters.intervention_weight = ledger.budgets.max_intervention_weight; }, /intervention budget exhausted/, 'intervention budget'],
 ]) {
   const ctx = tempContext();
-  batch.start(ctx, {}, fixed); batch.stop(ctx, {}, fixed);
+  batch.start(ctx, {}, fixed);
   const ledger = batch.readLedger(ctx); mutate(ledger); ledger.integrity = batch.integrityFor(ledger); batch.atomicWriteJson(ctx.ledgerPath, ledger);
-  throws(() => batch.resume(ctx, {}, fixed), pattern, `resume refuses exhausted ${label}`);
+  ok(batch.status(ctx, fixed).budget_problems.some((problem) => pattern.test(problem)), `status reports exhausted ${label}`);
+  batch.stop(ctx, { reason: `exhausted ${label}` }, fixed);
+  throws(() => batch.resume(ctx, {}, fixed), /stopped.*terminal/, `resume refuses stopped exhausted ${label}`);
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 {
@@ -219,6 +221,14 @@ for (const [mutate, pattern, label] of [
 
 // Even self-consistent/rehashed malformed state fails structural and derived-value validation.
 for (const [mutate, pattern, label] of [
+  [(ledger) => { ledger.phase = 'paused'; }, /phase/, 'unknown lifecycle phase'],
+  [(ledger) => { ledger.started_at = 'July 17, 2026'; }, /started_at/, 'noncanonical start timestamp'],
+  [(ledger) => { ledger.phase = 'running'; ledger.stop_requested_at = '2026-07-17T12:01:00.000Z'; ledger.stop_reason = 'stale'; }, /running lifecycle/, 'running phase with stop metadata'],
+  [(ledger) => { ledger.phase = 'stopped'; }, /stopped lifecycle/, 'stopped phase without stop metadata'],
+  [(ledger) => { ledger.phase = 'stopped'; ledger.stop_requested_at = 'later'; ledger.stop_reason = 'bad timestamp'; }, /stop_requested_at/, 'malformed stop timestamp'],
+  [(ledger) => { ledger.phase = 'stopped'; ledger.stop_requested_at = '2026-07-17T11:59:59.000Z'; ledger.stop_reason = 'too early'; }, /stop_requested_at/, 'stop before start'],
+  [(ledger) => { ledger.resumed_at = 'soon'; }, /resumed_at/, 'malformed resume timestamp'],
+  [(ledger) => { ledger.resumed_at = '2026-07-17T11:59:59.000Z'; }, /resumed_at/, 'resume before start'],
   [(ledger) => { ledger.counters.infra_retries = '1'; }, /infra_retries/, 'nonnumeric retry counter'],
   [(ledger) => { delete ledger.counters.code_repairs; }, /code_repairs/, 'missing repair counter'],
   [(ledger) => { ledger.counters.model_turns = -1; }, /model_turns/, 'negative usage counter'],
@@ -228,25 +238,47 @@ for (const [mutate, pattern, label] of [
   [(ledger) => { ledger.effects = []; }, /effects/, 'array effects registry'],
   [(ledger) => { ledger.deadline_at = 'tomorrow'; }, /deadline_at/, 'malformed deadline'],
   [(ledger) => { ledger.deadline_at = '2026-07-17T19:59:59.000Z'; }, /deadline_at/, 'deadline inconsistent with immutable duration'],
+  [(ledger) => { ledger.counters.distinct_cards = ['A', 'B', 'C']; }, /distinct-card.*exceeds/, 'over-budget distinct cards'],
+  [(ledger) => { ledger.counters.infra_retries = 2; }, /infra retry.*exceeds/, 'over-budget infrastructure retries'],
+  [(ledger) => { ledger.counters.code_repairs = 2; }, /code repair.*exceeds/, 'over-budget code repairs'],
+  [(ledger) => { ledger.counters.model_turns = ledger.budgets.max_model_turns + 1; }, /model usage.*exceeds/, 'over-budget model usage'],
+  [(ledger) => { ledger.counters.intervention_weight = ledger.budgets.max_intervention_weight + 0.1; }, /intervention.*exceeds/, 'over-budget intervention weight'],
 ]) {
   const ledger = batch.createLedger({}, fixed); mutate(ledger); ledger.integrity = batch.integrityFor(ledger);
   const validation = batch.validateLedger(ledger);
   ok(!validation.ok && validation.errors.some((error) => pattern.test(error)), `rehashed malformed ledger rejects ${label}`);
 }
 
-// One allowlisted retry and one repair are durable; duplicate or unknown failures stop.
+// One allowlisted retry and one repair are durable; a stop-class failure is terminal across reload.
 {
   const ctx = tempContext(); batch.start(ctx, {}, fixed);
   const first = batch.recordFailure(ctx, { kind: 'infra', signature: 'network:reset' }, fixed);
   eq(first.action, 'retry', 'first allowlisted infrastructure failure may retry');
   eq(batch.readLedger(ctx).counters.infra_retries, 1, 'infra retry is durably counted');
-  eq(batch.recordFailure(ctx, { kind: 'infra', signature: 'network:reset' }, fixed).action, 'stop', 'same normalized signature twice stops');
   const repair = batch.recordFailure(ctx, { kind: 'code', signature: 'assert:a1' }, fixed);
   eq(repair.action, 'repair', 'first code failure may repair once');
   eq(batch.readLedger(ctx).counters.code_repairs, 1, 'code repair is durably counted');
-  eq(batch.recordFailure(ctx, { kind: 'code', signature: 'assert:a1' }, fixed).action, 'stop', 'same code defect after repair stops');
-  eq(batch.recordFailure(ctx, { kind: 'mixed', signature: 'mixed' }, fixed).action, 'stop', 'mixed failures stop');
-  eq(batch.recordFailure(ctx, { kind: 'unknown', signature: 'unknown' }, fixed).action, 'stop', 'unknown failures stop');
+  const terminal = batch.recordFailure(ctx, { kind: 'infra', signature: 'network:reset' }, fixed);
+  eq(terminal.action, 'stop', 'same normalized signature twice stops');
+  eq(terminal.ledger.phase, 'stopped', 'stop-class failure durably changes lifecycle phase');
+  const terminalBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
+  eq(batch.readLedger(ctx).phase, 'stopped', 'terminal phase survives a fresh ledger load');
+  throws(() => batch.recordFailure(ctx, { kind: 'code', signature: 'other' }, fixed), /stopped.*terminal/, 'stopped batch rejects further failure accounting');
+  throws(() => batch.resume(ctx, {}, fixed), /stopped.*terminal/, 'terminal failure refuses resume');
+  throws(() => batch.resume(ctx, {}, fixed), /stopped.*terminal/, 'terminal failure repeatedly refuses resume');
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), terminalBytes, 'terminal reload and resume refusals never rewrite the ledger');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+for (const [failure, label] of [
+  [{ kind: 'mixed', signature: 'mixed' }, 'mixed failure'],
+  [{ kind: 'unknown', signature: 'unknown' }, 'unknown failure'],
+  [{ kind: 'wat', signature: 'invalid-kind' }, 'invalid failure class'],
+  [{ kind: 'infra', signature: '' }, 'missing failure signature'],
+]) {
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  const result = batch.recordFailure(ctx, failure, fixed);
+  eq(result.action, 'stop', `${label} stops`);
+  eq(batch.readLedger(ctx).phase, 'stopped', `${label} is durably terminal`);
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
@@ -267,18 +299,47 @@ for (const [mutate, pattern, label] of [
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
-// Distinct-card, usage, and intervention accounting mutate only through the durable locked ledger.
+// Every accounting budget permits its exact boundary, then durably stops before exceeding it.
 {
   const ctx = tempContext(); batch.start(ctx, { max_cards: 2, max_model_turns: 16, max_intervention_weight: 1 }, fixed);
   eq(batch.recordDistinctCard(ctx, 'Card A', fixed).action, 'recorded', 'first distinct card records');
   eq(batch.recordDistinctCard(ctx, 'Card A', fixed).action, 'already-recorded', 'same card does not double count');
   eq(batch.recordDistinctCard(ctx, 'Card B', fixed).action, 'recorded', 'second distinct card records');
-  eq(batch.recordDistinctCard(ctx, 'Card C', fixed).action, 'stop', 'third card refuses at immutable budget');
-  eq(batch.recordUsage(ctx, 3, fixed).action, 'recorded', 'model usage records');
-  eq(batch.readLedger(ctx).counters.model_turns, 3, 'model usage survives a new read');
-  eq(batch.recordIntervention(ctx, 0.5, fixed).action, 'recorded', 'intervention weight records');
-  eq(batch.readLedger(ctx).counters.intervention_weight, 0.5, 'intervention weight survives a new read');
-  eq(batch.recordIntervention(ctx, 0.6, fixed).action, 'stop', 'intervention cannot exceed immutable budget');
+  eq(batch.recordDistinctCard(ctx, 'Card C', fixed).action, 'stop', 'third card stops at immutable boundary');
+  eq(batch.readLedger(ctx).phase, 'stopped', 'distinct-card exhaustion is terminal');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+{
+  const ctx = tempContext(); batch.start(ctx, { max_model_turns: 16 }, fixed);
+  eq(batch.recordUsage(ctx, 16, fixed).action, 'recorded', 'usage may reach the exact immutable boundary');
+  eq(batch.readLedger(ctx).counters.model_turns, 16, 'exact usage boundary survives reload');
+  eq(batch.recordUsage(ctx, 1, fixed).action, 'stop', 'usage cannot exceed immutable boundary');
+  eq(batch.readLedger(ctx).phase, 'stopped', 'usage exhaustion is terminal');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+{
+  const ctx = tempContext(); batch.start(ctx, { max_intervention_weight: 1 }, fixed);
+  eq(batch.recordIntervention(ctx, 1, fixed).action, 'recorded', 'intervention may reach the exact immutable boundary');
+  eq(batch.readLedger(ctx).counters.intervention_weight, 1, 'exact intervention boundary survives reload');
+  eq(batch.recordIntervention(ctx, 0.1, fixed).action, 'stop', 'intervention cannot exceed immutable boundary');
+  eq(batch.readLedger(ctx).phase, 'stopped', 'intervention exhaustion is terminal');
+  fs.rmSync(ctx.root, { recursive: true, force: true });
+}
+
+// Once stopped, every accounting or side-effect mutation refuses without changing authoritative bytes.
+{
+  const ctx = tempContext(); batch.start(ctx, {}, fixed);
+  batch.reserveEffect(ctx, { kind: 'claim', key: 'claim:pending' }, fixed);
+  batch.stop(ctx, { reason: 'bounded stop' }, fixed);
+  const stoppedBytes = fs.readFileSync(ctx.ledgerPath, 'utf8');
+  for (const [mutate, label] of [
+    [() => batch.recordDistinctCard(ctx, 'Card A', fixed), 'distinct-card accounting'],
+    [() => batch.recordUsage(ctx, 1, fixed), 'usage accounting'],
+    [() => batch.recordIntervention(ctx, 0.5, fixed), 'intervention accounting'],
+    [() => batch.reserveEffect(ctx, { kind: 'pr', key: 'pr:1' }, fixed), 'side-effect reservation'],
+    [() => batch.completeEffect(ctx, { kind: 'claim', key: 'claim:pending', receipt: 'done' }, fixed), 'side-effect completion'],
+  ]) throws(mutate, /stopped.*terminal/, `stopped batch rejects ${label}`);
+  eq(fs.readFileSync(ctx.ledgerPath, 'utf8'), stoppedBytes, 'stopped accounting refusals are byte no-ops');
   fs.rmSync(ctx.root, { recursive: true, force: true });
 }
 
