@@ -81,11 +81,16 @@ function evidenceTimestampValid(value) {
 function normalizeZoneEntry(zone, defaultRoot = 'workshop') {
   const entry = typeof zone === 'string' ? { root: defaultRoot, path: zone } : zone;
   if (!entry || typeof entry !== 'object') return null;
-  const root = String(entry.root || defaultRoot).trim();
-  const rawPath = String(entry.path || '').trim().replace(/^\.\//, '').replace(/\/{2,}/g, '/').replace(/\/+$/, '');
+  if (Object.prototype.hasOwnProperty.call(entry, 'root') && typeof entry.root !== 'string') return null;
+  if (typeof entry.path !== 'string') return null;
+  const root = (entry.root || defaultRoot).trim();
+  const rawPath = entry.path.trim().replace(/^\.\//, '').replace(/\/{2,}/g, '/').replace(/\/+$/, '');
   if (!root || !rawPath || rawPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rawPath)) return null;
-  if (rawPath.split('/').some((part) => part === '..' || part === '')) return null;
-  return { root, path: rawPath };
+  const parts = rawPath.split('/');
+  if (parts.some((part) => part === '..' || part === '')) return null;
+  const normalizedPath = parts.filter((part) => part !== '.').join('/');
+  if (!normalizedPath) return null;
+  return { root, path: normalizedPath };
 }
 
 function normalizeCard(card) {
@@ -119,7 +124,7 @@ function fieldTypeValid(value, field) {
     case 'array:string': return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim());
     case 'array:identity': return (typeof value === 'string')
       || (Array.isArray(value) && value.every((item) => typeof item === 'string' && normalizeIdentity(item)));
-    case 'array:evidence-claim': return Array.isArray(value);
+    case 'array:evidence-claim': return Array.isArray(value) && value.length > 0;
     case 'array:zone': return Array.isArray(value) && value.length > 0;
     case 'array:risk-dimension': return Array.isArray(value) && value.every((item) => registry.enums.risk_dimension.includes(item));
     case 'object:deployment-map': return value && typeof value === 'object' && !Array.isArray(value);
@@ -157,7 +162,7 @@ function validateCard(card, mode = 'current') {
   const errors = [];
   const warnings = [];
   const fields = registry.types['execution-card'].fields;
-  const historicalOptional = new Set(['schema_version', 'batch_policy']);
+  const historicalOptional = new Set(['schema_version', 'batch_policy', 'evidence']);
 
   for (const field of fields) {
     const present = Object.prototype.hasOwnProperty.call(raw, field.name);
@@ -213,12 +218,19 @@ function validateCard(card, mode = 'current') {
 
   const deployments = raw.deploy_subscriptions;
   if (deployments && typeof deployments === 'object' && !Array.isArray(deployments)) {
+    for (const vault of Object.keys(deployments)) {
+      if (!REQUIRED_VAULTS.includes(vault)) {
+        errors.push(error('unexpected-deployment-vault', `deploy_subscriptions.${vault}`, `${vault} is not a declared deployment target`));
+      }
+    }
     for (const vault of REQUIRED_VAULTS) {
       if (!Array.isArray(deployments[vault])) {
         errors.push(error('missing-deployment-vault', `deploy_subscriptions.${vault}`, `${vault} array is required`));
       } else if (deployments[vault].some((item) => typeof item !== 'string'
         || !/^(?:mechanism|blueprint):[a-z0-9][a-z0-9._-]*$/.test(item.trim()))) {
         errors.push(error('invalid-deployment-entry', `deploy_subscriptions.${vault}`, 'subscription additions must use mechanism:name or blueprint:name'));
+      } else if (new Set(deployments[vault].map((item) => item.trim())).size !== deployments[vault].length) {
+        errors.push(error('duplicate-deployment-entry', `deploy_subscriptions.${vault}`, 'subscription additions must be unique'));
       }
     }
   }
@@ -336,11 +348,11 @@ function resolveDependencies(cards, ledger = {}, options = {}) {
     for (const dep of dependencies) {
       if (refusal) break;
       if (duplicates.has(dep)) refusal = { reason: 'ambiguous-dependency', dependency: dep };
-      else if (archive.has(dep)) refusal = { reason: 'archive-never-satisfies', dependency: dep };
       else if (recordsByName.has(dep)) {
         const proof = completionProof(recordsByName.get(dep));
         if (!proof.complete) refusal = { reason: 'dependency-proof-missing', dependency: dep, missing_proof: proof.missing };
-      } else if (completed.has(dep)) {
+      } else if (archive.has(dep)) refusal = { reason: 'archive-never-satisfies', dependency: dep };
+      else if (completed.has(dep)) {
         // Checked Completed is the fallback for untracked historical work only.
       } else if (byName.has(dep) || known.has(dep)) refusal = { reason: 'dependency-not-complete', dependency: dep };
       else refusal = { reason: 'dangling-dependency', dependency: dep };
@@ -402,12 +414,16 @@ function migrate(note, fromVersion) {
   const original = clone(note && typeof note === 'object' ? note : {});
   const sourceVersion = fromVersion || original.schema_version || '0.0.0';
   const comparison = compareVersions(sourceVersion, CONTRACT_VERSION);
+  const evidenceManual = (value) => {
+    if (!Array.isArray(value) || value.length === 0) return ['evidence:requires-authoring'];
+    return value.flatMap((item, index) => (typeof item === 'string' ? [`evidence.${index}:requires-pinning`] : []));
+  };
   if (comparison == null) return { ok: false, reason: 'invalid-schema-version', note: original, applied: [], manual: [] };
   if (comparison === 1) return { ok: false, reason: 'newer-than-engine', note: original, applied: [], manual: [] };
-  if (comparison === 0) return { ok: true, reason: null, note: original, applied: [], manual: [] };
+  if (comparison === 0) return { ok: true, reason: null, note: original, applied: [], manual: evidenceManual(original.evidence) };
   const migrated = clone(original);
   const applied = [];
-  const manual = [];
+  const manual = evidenceManual(migrated.evidence);
   const setDefault = (key, value) => {
     if (!Object.prototype.hasOwnProperty.call(migrated, key)) {
       migrated[key] = clone(value); applied.push(`1.0.0:${key}:default_backfill`);
@@ -420,11 +436,6 @@ function migrate(note, fromVersion) {
   setDefault('deployment_required', migrated.execution_mode === 'release');
   if (!Object.prototype.hasOwnProperty.call(migrated, 'batch_policy')) {
     migrated.batch_policy = derivePolicy(migrated); applied.push('1.0.0:batch_policy:derive_from');
-  }
-  if (Array.isArray(migrated.evidence)) {
-    migrated.evidence.forEach((item, index) => {
-      if (typeof item === 'string') manual.push(`evidence.${index}:requires-pinning`);
-    });
   }
   migrated.depends_on = parseDependencyField(migrated.depends_on);
   if (migrated.status && normalizeStatus(migrated.status)) migrated.status = normalizeStatus(migrated.status);

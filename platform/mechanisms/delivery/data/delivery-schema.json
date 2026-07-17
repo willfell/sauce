@@ -137,8 +137,7 @@
         {
           "name": "evidence",
           "type": "array:evidence-claim",
-          "required": false,
-          "default": [],
+          "required": true,
           "since_version": "1.0.0",
           "description": "Pinned evidence claims. Current claims require source identity, capture timestamp, revision or external identifier, locator, and supported claim; historical strings remain readable only with an unpinned-evidence warning."
         },
@@ -200,6 +199,7 @@
         { "field": "execution_mode", "migration": { "type": "default_backfill", "value": "release" } },
         { "field": "depends_on", "migration": { "type": "default_backfill", "value": [] } },
         { "field": "deploy_subscriptions", "migration": { "type": "default_backfill", "value": { "headspace": [], "accuris": [], "ero": [] } } },
+        { "field": "evidence", "migration": { "type": "manual", "reason": "Mutable evidence cannot be pinned without source identity, capture time, revision, locator, and claim." } },
         { "field": "batch_policy", "migration": { "type": "derive_from", "expression": "derivePolicy(card)" } },
         { "field": "release_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } },
         { "field": "deployment_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } }
@@ -296,6 +296,11 @@
         "expected_error": "missing-deployment-vault"
       },
       {
+        "name": "deployment-map-refuses-undeclared-vaults",
+        "patch": { "deploy_subscriptions": { "headspace": [], "accuris": [], "ero": [], "other": [] } },
+        "expected_error": "unexpected-deployment-vault"
+      },
+      {
         "name": "deployment-entries-are-typed",
         "patch": { "deploy_subscriptions": { "headspace": [42], "accuris": [], "ero": [] } },
         "expected_error": "invalid-deployment-entry"
@@ -305,8 +310,14 @@
         "patch": { "deploy_subscriptions": { "headspace": ["delivery"], "accuris": [], "ero": [] } },
         "expected_error": "invalid-deployment-entry"
       },
+      {
+        "name": "deployment-entries-must-be-unique",
+        "patch": { "deploy_subscriptions": { "headspace": ["mechanism:delivery", "mechanism:delivery"], "accuris": [], "ero": [] } },
+        "expected_error": "duplicate-deployment-entry"
+      },
       { "name": "high-risk-requires-heavy", "patch": { "model_profile": "standard" }, "expected_error": "high-risk-requires-heavy" },
       { "name": "zone-cannot-escape-workspace", "patch": { "touch_zones": ["../outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-path-must-be-a-string", "patch": { "touch_zones": [{ "path": {} }] }, "expected_error": "invalid-touch-zone" },
       { "name": "derived-policy-cannot-be-weakened", "patch": { "batch_policy": "continue" }, "expected_error": "policy-weakened" },
       {
         "name": "self-dependency",
@@ -316,6 +327,7 @@
       { "name": "dependency-object-is-invalid", "patch": { "depends_on": { "card": "A1" } }, "expected_error": "invalid-type" },
       { "name": "dependency-array-items-are-identities", "patch": { "depends_on": [42] }, "expected_error": "invalid-type" },
       { "name": "current-evidence-cannot-be-an-unpinned-string", "patch": { "evidence": ["path.md:12"] }, "expected_error": "invalid-evidence-claim" },
+      { "name": "current-card-requires-pinned-evidence", "remove": ["evidence"], "expected_error": "required-field" },
       {
         "name": "evidence-capture-needs-a-timezone",
         "patch": { "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }] },

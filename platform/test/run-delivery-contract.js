@@ -104,6 +104,9 @@ for (const [label, mutate, missing] of [
   ['DEL-COMP-4 stale tag is rejected', (receipt) => { receipt.tag = 'v1.2.2'; }, 'tag'],
   ['DEL-COMP-5 malformed brew version is rejected', (receipt) => { receipt.brew_version = 'latest'; }, 'brew_version'],
   ['DEL-COMP-6 stale vault install is rejected', (receipt) => { receipt.vault_receipts.headspace.installed_version = '1.2.2'; }, 'vault_receipts.headspace'],
+  ['DEL-COMP-13 non-deployed phase is rejected', (receipt) => { receipt.phase = 'release_merged'; }, 'phase'],
+  ['DEL-COMP-14 stale valid brew version is rejected', (receipt) => { receipt.brew_version = '1.2.2'; }, 'brew_version'],
+  ['DEL-COMP-15 failed vault receipt is rejected', (receipt) => { receipt.vault_receipts.ero.ok = false; }, 'vault_receipts.ero'],
 ]) {
   const receipt = JSON.parse(JSON.stringify(fullReceipt));
   mutate(receipt);
@@ -157,6 +160,11 @@ const incompleteTracked = api.resolveDependencies([
 check('DEL-DEP-9 incomplete tracked proof fails closed with exact missing evidence',
   incompleteTracked['Incomplete tracked child'].reason === 'dependency-proof-missing'
   && incompleteTracked['Incomplete tracked child'].missing_proof.includes('vault_receipts.ero'));
+const archivedProjectionWithReceipt = api.resolveDependencies([
+  { ...base, card: 'Receipt authority child', depends_on: ['Dependency'] },
+], { Dependency: fullReceipt }, { archive: ['Dependency'] });
+check('DEL-DEP-10 authoritative deployed receipt outranks an Archive projection',
+  archivedProjectionWithReceipt['Receipt authority child'].eligible);
 
 check('DEL-ZONE-1 nested paths conflict', api.zoneConflicts(
   { touch_zones: ['scripts/autoloop'] }, { touch_zones: ['scripts/autoloop/gate.js'] }));
@@ -171,6 +179,8 @@ check('DEL-ZONE-5 disjoint paths do not conflict', !api.zoneConflicts(
   { touch_zones: ['platform/mechanisms/delivery'] }, { touch_zones: ['Docs/Index.md'] }));
 check('DEL-ZONE-6 nesting under an exclusive zone still conflicts', api.zoneConflicts(
   { touch_zones: ['.github/workflows'] }, { touch_zones: ['.github/workflows/ci.yml'] }));
+check('DEL-ZONE-7 dot path segments normalize before conflict comparison', api.zoneConflicts(
+  { touch_zones: ['platform/./mechanisms/delivery'] }, { touch_zones: ['platform/mechanisms/delivery/index.js'] }));
 
 eq('DEL-POLICY-1 control-plane work is supervised-only',
   api.derivePolicy({ batch_policy: 'continue', touch_zones: ['platform/mechanisms/delivery'] }), 'supervised_only');
@@ -242,6 +252,19 @@ check('DEL-MIGRATE-5 unpinned historical evidence is preserved and flagged for m
   evidenceMigration.ok
   && evidenceMigration.note.evidence[0] === 'legacy/path.md:12'
   && evidenceMigration.manual.includes('evidence.0:requires-pinning'));
+const repeatedEvidenceMigration = api.migrate(evidenceMigration.note, evidenceMigration.note.schema_version);
+check('DEL-MIGRATE-6 manual evidence work remains visible on idempotent repeat migration',
+  repeatedEvidenceMigration.ok
+  && repeatedEvidenceMigration.manual.includes('evidence.0:requires-pinning')
+  && JSON.stringify(repeatedEvidenceMigration.note) === JSON.stringify(evidenceMigration.note));
+const missingEvidenceHistorical = fixtureCard({});
+delete missingEvidenceHistorical.schema_version;
+delete missingEvidenceHistorical.evidence;
+const missingEvidenceMigration = api.migrate(missingEvidenceHistorical);
+check('DEL-MIGRATE-7 missing historical evidence is not invented and requires authoring',
+  missingEvidenceMigration.ok
+  && !Object.prototype.hasOwnProperty.call(missingEvidenceMigration.note, 'evidence')
+  && missingEvidenceMigration.manual.includes('evidence:requires-authoring'));
 
 const planner = api.describe('execution-card', 'planner');
 const coordinator = api.describe('execution-card', 'coordinator');
