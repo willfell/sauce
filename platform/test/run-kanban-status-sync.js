@@ -22,6 +22,7 @@ const WORKSHOP = path.resolve(__dirname, "../..");
 const MECH_DIR = path.join(WORKSHOP, "platform/mechanisms/kanban-status-sync");
 const MANIFEST_PATH = path.join(MECH_DIR, "manifest.json");
 const SOURCE_PATH = path.join(MECH_DIR, "kanban-status-sync.js");
+const INIT_PATH = path.join(MECH_DIR, "kanban-status-sync-init.js");
 
 let pass = 0;
 let fail = 0;
@@ -102,7 +103,6 @@ if (manifest) {
 
 console.log("\n--- Pass 1b: kanban-status-sync-init.js source lint (v0.2.0) ---");
 
-const INIT_PATH = path.join(MECH_DIR, "kanban-status-sync-init.js");
 assertTrue("KSS-INIT-3a: kanban-status-sync-init.js exists", fs.existsSync(INIT_PATH));
 
 if (fs.existsSync(INIT_PATH)) {
@@ -203,12 +203,16 @@ function syncBoardFixture(initialBoard, initialCards) {
   const boardFile = { path: boardPath, extension: "md" };
   const boardSrc = initialBoard;
   let writes = 0;
+  const commands = [];
   const cards = Object.fromEntries(Object.entries(initialCards).map(([linkpath, frontmatter]) => {
     const file = { path: `spice/projects/sauce/tasks/${linkpath}.md`, extension: "md" };
     return [linkpath, { file, frontmatter: { ...frontmatter } }];
   }));
   const byPath = Object.fromEntries(Object.values(cards).map((card) => [card.file.path, card]));
   const appStub = {
+    commands: {
+      addCommand(command) { commands.push(command); },
+    },
     vault: {
       getAbstractFileByPath(target) {
         if (target === boardPath) return boardFile;
@@ -238,6 +242,18 @@ function syncBoardFixture(initialBoard, initialCards) {
       },
     },
   };
+  const boardsDvStub = {
+    pages() {
+      const pages = [{ "kanban-plugin": "board", file: { path: boardPath } }];
+      return {
+        where(predicate) {
+          const selected = pages.filter(predicate);
+          return { array: () => selected };
+        },
+      };
+    },
+  };
+  appStub.plugins = { plugins: { dataview: { api: boardsDvStub } } };
   const windowStub = {
     app: {
       plugins: {
@@ -263,10 +279,23 @@ function syncBoardFixture(initialBoard, initialCards) {
     },
   };
   const Klass = loadKSS(appStub, windowStub);
+  const singleton = new Klass();
+  const initSrc = fs.readFileSync(INIT_PATH, "utf8");
+  const loadInit = (today) => {
+    windowStub.moment = () => ({ format: () => today });
+    const Init = new Function("app", "customJS", "Notice", "window", initSrc + "\nreturn KanbanStatusSyncInit;")
+      (appStub, { KanbanStatusSync: singleton }, function Notice() {}, windowStub);
+    return new Init();
+  };
   return {
     boardPath,
     cards,
     sync: (today) => new Klass().syncBoard(boardPath, today),
+    startup: async (today) => {
+      await loadInit(today).invoke();
+      return singleton._lastSyncResult;
+    },
+    commands,
     writes: () => writes,
   };
 }
@@ -389,7 +418,8 @@ async function runStartupSyncFixture() {
   console.log("\n--- Pass 4: startup syncBoard parked-authority behavior ---");
   const board = [
     "---", "kanban-plugin: board", "---", "",
-    "## In Progress", "", "- [[parked-authority]]", "- [[ordinary-card]]", "- [[formerly-parked]]", "",
+    "## In Progress", "", "- [[parked-authority]]", "- [[parked-board-only]]", "- [[parked-column-only]]",
+    "- [[ordinary-card]]", "- [[formerly-parked]]", "",
     "## Blocked", "", "- [[parked-blocked]]", "",
     "## Completed", "", "- [[parked-completed]]", "",
   ].join("\n");
@@ -400,6 +430,22 @@ async function runStartupSyncFixture() {
       status_changed_at: "2026-07-16",
       resume_condition: "Resume only after the prerequisite is deployed.",
       kanban_board: "stale-board.md",
+      kanban_column: "In Planning",
+    },
+    "parked-board-only": {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the board-only repair prerequisite.",
+      kanban_board: "stale-board.md",
+      kanban_column: "In Progress",
+    },
+    "parked-column-only": {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the column-only repair prerequisite.",
+      kanban_board: fixtureBoardPath(),
       kanban_column: "In Planning",
     },
     "ordinary-card": {
@@ -443,15 +489,35 @@ async function runStartupSyncFixture() {
     },
   });
 
-  const first = await fixture.sync("2026-07-17");
-  assertEq("KSS-IO-1: first startup sync repairs five board cards and archives one orphan",
-    first, { synced: 5, archived: 1 });
+  const first = await fixture.startup("2026-07-17");
+  assertEq("KSS-IO-1: actual startup path discovers the board, repairs seven cards, and archives one orphan",
+    first, { synced: 7, archived: 1, boards: 1 });
+  assertEq("KSS-IO-1b: startup invoke registers the manual resync command",
+    fixture.commands.map((command) => command.id), ["kanban-status-sync:resync-now"]);
   assertEq("KSS-IO-2: In Progress parked authority preserves lifecycle while repairing board metadata",
     fixture.cards["parked-authority"].frontmatter, {
       status: "parked",
       status_prev: "in-planning",
       status_changed_at: "2026-07-16",
       resume_condition: "Resume only after the prerequisite is deployed.",
+      kanban_board: fixture.boardPath,
+      kanban_column: "In Progress",
+    });
+  assertEq("KSS-IO-2b: parked authority repairs a stale board independently",
+    fixture.cards["parked-board-only"].frontmatter, {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the board-only repair prerequisite.",
+      kanban_board: fixture.boardPath,
+      kanban_column: "In Progress",
+    });
+  assertEq("KSS-IO-2c: parked authority repairs a stale column independently",
+    fixture.cards["parked-column-only"].frontmatter, {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the column-only repair prerequisite.",
       kanban_board: fixture.boardPath,
       kanban_column: "In Progress",
     });
