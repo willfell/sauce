@@ -340,10 +340,11 @@ function listField(raw, key) {
   if (inline) return parseYamlValue(inline);
   const block = [];
   for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) block.push(lines[i]);
-  if (!block.length) return null;
-  if (block.length === 1 && block[0].trim() === '[]') return [];
+  const content = block.filter((line) => line.trim() && !line.trim().startsWith('#'));
+  if (!content.length) return null;
+  if (content.length === 1 && content[0].trim() === '[]') return [];
   const out = []; let currentObject = null;
-  for (const line of block) {
+  for (const line of content) {
     const item = line.match(/^\s+-\s*(.*?)\s*$/);
     if (item) {
       const mapping = item[1].match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
@@ -358,7 +359,7 @@ function listField(raw, key) {
     }
     const continuation = line.match(/^\s+([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
     if (!continuation || !currentObject
-      || Object.prototype.hasOwnProperty.call(currentObject, continuation[1])) return invalidYamlValue(block.join('\n'));
+      || Object.prototype.hasOwnProperty.call(currentObject, continuation[1])) return invalidYamlValue(content.join('\n'));
     currentObject[continuation[1]] = parseYamlValue(continuation[2]);
   }
   return out;

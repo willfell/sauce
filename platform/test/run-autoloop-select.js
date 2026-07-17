@@ -271,6 +271,13 @@ ok('NS-62 deployment subscription whitespace canonicalizes without blocking sele
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [" mechanism:delivery "]') }).card === 'Required fields');
 ok('NS-63 whitespace-equivalent duplicate subscriptions still fail closed',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]') }).action === 'no-eligible-work');
+const commentedBlockCard = blockEvidenceCard
+  .replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones:\n  # canonical zone\n  - Docs/autoloop-fixture.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace('evidence:\n', 'evidence:\n  # pinned evidence\n')
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []');
+ok('NS-64 comment-only lines inside block contract fields preserve semantics',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedBlockCard }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

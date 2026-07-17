@@ -141,6 +141,17 @@ const spacedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace:
 ok(spacedDeploymentMeta.contractOk, 'coordinator accepts canonicalizable deployment subscription whitespace');
 eq(spacedDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator trims deployment subscription tokens');
 ok(!parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: ["mechanism:delivery", " mechanism:delivery "]')).contractOk, 'coordinator still rejects whitespace-equivalent duplicate subscriptions');
+const commentedBlockMeta = parseExecutionMeta(currentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones:\n  # canonical zone\n  - Docs/example.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace(/^evidence:.*$/m, [
+    'evidence:', '  # pinned evidence', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+    '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Block evidence fixture.',
+  ].join('\n'))
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []'));
+ok(commentedBlockMeta.contractOk, 'coordinator accepts comment-only lines inside block contract fields');
+eq(commentedBlockMeta.touchZones, ['Docs/example.md'], 'block comments do not alter touch zones');
+eq(commentedBlockMeta.dependencies, [], 'block comments do not alter dependencies');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
@@ -174,6 +185,15 @@ const currentRecord = {
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card:   Test card  ')
   .replace('  - Docs/example.md', '  -   Docs/example.md   '));
 eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'whitespace-only Delivery projection changes canonicalize without drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw
+  .replace('touch_zones:\n  - Docs/example.md', 'touch_zones:\n  # canonical zone\n  - Docs/example.md')
+  .replace('depends_on: []', 'depends_on:\n  # intentionally empty\n  []')
+  .replace(/^evidence:.*$/m, [
+    'evidence:', '  # pinned evidence', '  - source_identity: autoloop test', '    captured_at: "2026-07-17T06:00:00Z"',
+    '    revision: fixture-v1', '    locator: platform/test/run-codex-autoloop.js', '    claim: Bounded test card.',
+  ].join('\n'))
+  .replace('risk_dimensions: []', 'risk_dimensions:\n  # no explicit risk\n  []'));
+eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'comment-only block collection edits canonicalize without lifecycle drift');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('Docs/example.md', 'Docs/other.md'));
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'meaningful Delivery contract edits surface as lifecycle drift');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card: Different card'));
