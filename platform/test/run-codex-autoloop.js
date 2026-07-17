@@ -834,10 +834,13 @@ eq(fs.readFileSync(amend.cardPath, 'utf8'), replayCard, 'literal exact replay pe
 eq(fs.readFileSync(amend.boardPath, 'utf8'), replayBoard, 'literal exact replay performs no board projection rewrite');
 
 for (const [label, mutate] of [
+  ['json output flag', (args) => { delete args.json; }],
   ['reason', (args) => { args.reason = `${args.reason} altered`; }],
   ['expected HEAD', (args) => { args['expected-head'] = 'c'.repeat(40); }],
   ['expected origin/main', (args) => { args['expected-origin-main'] = 'c'.repeat(40); }],
+  ['expected deployment JSON bytes', (args) => { args['expected-deployment'] = '{ "ero" : ["delivery"], "accuris" : ["delivery"], "headspace" : ["delivery"] }'; }],
   ['expected deployment', (args) => { args['expected-deployment'] = JSON.stringify(typedDeployments); }],
+  ['desired deployment JSON bytes', (args) => { args['desired-deployment'] = '{ "ero" : ["mechanism:delivery"], "accuris" : ["mechanism:delivery"], "headspace" : ["mechanism:delivery"] }'; }],
   ['desired deployment', (args) => { args['desired-deployment'] = JSON.stringify({ ...typedDeployments, ero: [] }); }],
   ['expected batch policy', (args) => { args['expected-batch-policy'] = 'supervised_only'; }],
   ['desired batch policy', (args) => { args['desired-batch-policy'] = 'stop_after'; }],
@@ -879,6 +882,28 @@ eq(parkedAmendment.writes, parkedWrites, 'parked exact replay has no ledger writ
 eq(parkedAmendment.state, parkedState, 'parked exact replay preserves ledger, review, gate, audit, and timestamps');
 eq(fs.readFileSync(parkedAmendment.cardPath, 'utf8'), parkedCard, 'parked exact replay has no card write');
 eq(fs.readFileSync(parkedAmendment.boardPath, 'utf8'), parkedBoard, 'parked exact replay has no board write');
+
+const parkedProjectionFailure = makeAmendFixture({ phase: 'parked' });
+parkedProjectionFailure.deps.projectCard = () => { throw new Error('parked projection crash'); };
+const parkedFailed = await commandAmendContract(
+  { root: parkedProjectionFailure.root }, parkedProjectionFailure.args, parkedProjectionFailure.deps,
+);
+eq(parkedFailed.action, 'amend-contract-projection-failed', 'parked projection failure is recoverable without resuming');
+eq(parkedProjectionFailure.state.cards[AMEND_CARD].phase, 'parked', 'parked projection failure preserves the parked phase');
+delete parkedProjectionFailure.deps.projectCard;
+eq((await commandReconcile({ root: parkedProjectionFailure.root }, { card: AMEND_CARD }, parkedProjectionFailure.deps)).action,
+  'reconciled', 'reconciliation repairs a parked amendment projection failure');
+const parkedRecoveryWrites = parkedProjectionFailure.writes;
+const parkedProjectionRecoveryState = deepCopy(parkedProjectionFailure.state);
+const parkedRecoveryCard = fs.readFileSync(parkedProjectionFailure.cardPath, 'utf8');
+const parkedRecoveryBoard = fs.readFileSync(parkedProjectionFailure.boardPath, 'utf8');
+eq((await commandAmendContract(
+  { root: parkedProjectionFailure.root }, parkedProjectionFailure.args, parkedProjectionFailure.deps,
+)).no_op, true, 'reconciled parked amendment accepts only the literal original replay');
+eq(parkedProjectionFailure.writes, parkedRecoveryWrites, 'reconciled parked literal replay has no ledger write');
+eq(parkedProjectionFailure.state, parkedProjectionRecoveryState, 'reconciled parked literal replay preserves all receipts and timestamps');
+eq(fs.readFileSync(parkedProjectionFailure.cardPath, 'utf8'), parkedRecoveryCard, 'reconciled parked literal replay has no card write');
+eq(fs.readFileSync(parkedProjectionFailure.boardPath, 'utf8'), parkedRecoveryBoard, 'reconciled parked literal replay has no board write');
 
 for (const [label, mutate, pattern] of [
   ['missing dependencies', (f) => { f.state.cards[AMEND_CARD].dependencies = []; }, /retain non-empty dependencies/],
