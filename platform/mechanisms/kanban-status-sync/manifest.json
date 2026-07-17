@@ -1,16 +1,30 @@
 {
   "name": "kanban-status-sync",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "kind": "mechanism",
   "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncAllBoards(dv, today) discovers boards via `dv.pages().where(p => p['kanban-plugin'] === 'board')` and calls syncBoard(boardPath, today) for each. syncBoard parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, then performs a forward pass (cards present in board — write status/status_prev/status_changed_at if column changed via app.fileManager.processFrontMatter) + reverse pass (orphaned cards previously linked to this board — mark archived). Idempotent: if nothing changed, no writes. Mobile-safe — never reads file.mtime (landmine #23). Pure static helpers (Node-testable): parseBoardColumns, slugifyStatus, computeDiff (computeDiff is exported for caller composition; syncBoard inlines its own forward/reverse passes rather than composing computeDiff). v0.1.1 PATCH (workshop v0.72.1): adds instance-level once-per-day cache to syncAllBoards. Cards moved in the same session aren't picked up until next day OR CustomJS plugin toggle. v0.2.0 (sauce v0.73.0): NEW KanbanStatusSyncInit customjs startup-script class. Moves the syncAllBoards trigger out of the daily-dashboard render path; runs once at vault boot (Dataview-ready retry-with-backoff, max 30s). Also registers Obsidian command 'Sauce: Re-sync kanban boards' (id kanban-status-sync:resync-now) for manual cache-bypass re-sync. customjs_classes grows to ['KanbanStatusSync','KanbanStatusSyncInit']; customjs_startup_scripts adds 'KanbanStatusSyncInit'; new files[] entry for the init helper. Daily dashboard (daily@0.13.0) no longer triggers the sync inline.",
   "depends_on": [
-    { "name": "customjs-guard", "range": ">=1.0.0" }
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    }
   ],
-  "customjs_classes": ["KanbanStatusSync", "KanbanStatusSyncInit"],
-  "customjs_startup_scripts": ["KanbanStatusSyncInit"],
+  "customjs_classes": [
+    "KanbanStatusSync",
+    "KanbanStatusSyncInit"
+  ],
+  "customjs_startup_scripts": [
+    "KanbanStatusSyncInit"
+  ],
   "files": [
-    { "source": "kanban-status-sync.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync.js" },
-    { "source": "kanban-status-sync-init.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync-init.js" }
+    {
+      "source": "kanban-status-sync.js",
+      "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync.js"
+    },
+    {
+      "source": "kanban-status-sync-init.js",
+      "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync-init.js"
+    }
   ],
   "post_install": [],
   "rule_fragments": []
