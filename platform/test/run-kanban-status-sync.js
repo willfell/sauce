@@ -22,6 +22,7 @@ const WORKSHOP = path.resolve(__dirname, "../..");
 const MECH_DIR = path.join(WORKSHOP, "platform/mechanisms/kanban-status-sync");
 const MANIFEST_PATH = path.join(MECH_DIR, "manifest.json");
 const SOURCE_PATH = path.join(MECH_DIR, "kanban-status-sync.js");
+const INIT_PATH = path.join(MECH_DIR, "kanban-status-sync-init.js");
 
 let pass = 0;
 let fail = 0;
@@ -102,7 +103,6 @@ if (manifest) {
 
 console.log("\n--- Pass 1b: kanban-status-sync-init.js source lint (v0.2.0) ---");
 
-const INIT_PATH = path.join(MECH_DIR, "kanban-status-sync-init.js");
 assertTrue("KSS-INIT-3a: kanban-status-sync-init.js exists", fs.existsSync(INIT_PATH));
 
 if (fs.existsSync(INIT_PATH)) {
@@ -190,12 +190,114 @@ if (_kssSrc.length > 0) {
 
 // ── Helper: load the KanbanStatusSync class from source via `new Function` with stub
 // free vars. Mirrors the loadActivityFeedClass pattern in run-activity-feed.js Pass 3.
-// Stubs are sufficient for pure static methods (parseBoardColumns, slugifyStatus,
-// computeDiff). Instance-method tests would need real(er) stubs for app / customJS.
-function loadKSS() {
+// Pure helpers use the defaults; the startup-sync fixture supplies faithful app
+// and Dataview I/O stubs for syncBoard.
+function loadKSS(appStub = {}, windowStub = null) {
   const src = fs.readFileSync(SOURCE_PATH, "utf8");
   return new Function("app", "customJS", "Notice", "window", src + "\nreturn KanbanStatusSync;")
-    ({}, null, null, null);
+    (appStub, null, null, windowStub);
+}
+
+function syncBoardFixture(initialBoard, initialCards) {
+  const boardPath = "spice/projects/sauce/sauce-board.md";
+  const boardFile = { path: boardPath, extension: "md" };
+  const boardSrc = initialBoard;
+  let writes = 0;
+  const commands = [];
+  const cards = Object.fromEntries(Object.entries(initialCards).map(([linkpath, frontmatter]) => {
+    const file = { path: `spice/projects/sauce/tasks/${linkpath}.md`, extension: "md" };
+    return [linkpath, { file, frontmatter: { ...frontmatter } }];
+  }));
+  const byPath = Object.fromEntries(Object.values(cards).map((card) => [card.file.path, card]));
+  const appStub = {
+    commands: {
+      addCommand(command) { commands.push(command); },
+    },
+    vault: {
+      getAbstractFileByPath(target) {
+        if (target === boardPath) return boardFile;
+        return byPath[target] ? byPath[target].file : null;
+      },
+      async read(file) {
+        if (file !== boardFile) throw new Error(`unexpected read: ${file && file.path}`);
+        return boardSrc;
+      },
+    },
+    metadataCache: {
+      getFirstLinkpathDest(linkpath) {
+        return cards[linkpath] ? cards[linkpath].file : null;
+      },
+      getFileCache(file) {
+        return byPath[file.path] ? { frontmatter: { ...byPath[file.path].frontmatter } } : null;
+      },
+    },
+    fileManager: {
+      async processFrontMatter(file, update) {
+        const card = byPath[file.path];
+        if (!card) throw new Error(`unexpected frontmatter write: ${file.path}`);
+        const next = { ...card.frontmatter };
+        update(next);
+        card.frontmatter = next;
+        writes++;
+      },
+    },
+  };
+  const boardsDvStub = {
+    pages() {
+      const pages = [{ "kanban-plugin": "board", file: { path: boardPath } }];
+      return {
+        where(predicate) {
+          const selected = pages.filter(predicate);
+          return { array: () => selected };
+        },
+      };
+    },
+  };
+  appStub.plugins = { plugins: { dataview: { api: boardsDvStub } } };
+  const windowStub = {
+    app: {
+      plugins: {
+        plugins: {
+          dataview: {
+            api: {
+              pages() {
+                const pages = Object.values(cards).map((card) => ({
+                  ...card.frontmatter,
+                  file: { path: card.file.path },
+                }));
+                return {
+                  where(predicate) {
+                    const selected = pages.filter(predicate);
+                    return { array: () => selected };
+                  },
+                };
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const Klass = loadKSS(appStub, windowStub);
+  const singleton = new Klass();
+  const initSrc = fs.readFileSync(INIT_PATH, "utf8");
+  const loadInit = (today) => {
+    windowStub.moment = () => ({ format: () => today });
+    const Init = new Function("app", "customJS", "Notice", "window", initSrc + "\nreturn KanbanStatusSyncInit;")
+      (appStub, { KanbanStatusSync: singleton }, function Notice() {}, windowStub);
+    return new Init();
+  };
+  return {
+    boardPath,
+    cards,
+    sync: (today) => new Klass().syncBoard(boardPath, today),
+    startup: async (today) => {
+      await loadInit(today).invoke();
+      return singleton._lastSyncResult;
+    },
+    commands,
+    writes: () => writes,
+  };
 }
 
 // ── Pass 3: KanbanStatusSync.parseBoardColumns ────────────────────────────
@@ -310,12 +412,161 @@ if (KanbanStatusSync) {
       archives: [] });
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────
+// ── Pass 4: faithful startup syncBoard I/O fixture ───────────────────────
 
-console.log(`\nrun-kanban-status-sync.js: ${pass} pass · ${fail} fail`);
-if (fail > 0) {
-  console.log("\n--- Failures ---");
-  for (const f of failures) console.log(f);
-  process.exit(1);
+async function runStartupSyncFixture() {
+  console.log("\n--- Pass 4: startup syncBoard parked-authority behavior ---");
+  const board = [
+    "---", "kanban-plugin: board", "---", "",
+    "## In Progress", "", "- [[parked-authority]]", "- [[parked-board-only]]", "- [[parked-column-only]]",
+    "- [[ordinary-card]]", "- [[formerly-parked]]", "",
+    "## Blocked", "", "- [[parked-blocked]]", "",
+    "## Completed", "", "- [[parked-completed]]", "",
+  ].join("\n");
+  const fixture = syncBoardFixture(board, {
+    "parked-authority": {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume only after the prerequisite is deployed.",
+      kanban_board: "stale-board.md",
+      kanban_column: "In Planning",
+    },
+    "parked-board-only": {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the board-only repair prerequisite.",
+      kanban_board: "stale-board.md",
+      kanban_column: "In Progress",
+    },
+    "parked-column-only": {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the column-only repair prerequisite.",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Planning",
+    },
+    "ordinary-card": {
+      status: "in-planning",
+      status_prev: "planning",
+      status_changed_at: "2026-07-15",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Planning",
+    },
+    "formerly-parked": {
+      status: "parked",
+      status_prev: "in-progress",
+      status_changed_at: "2026-07-14",
+      resume_condition: "   ",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Progress",
+    },
+    "parked-blocked": {
+      status: "parked",
+      status_prev: "in-progress",
+      status_changed_at: "2026-07-13",
+      resume_condition: "Still blocked on an external prerequisite.",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Progress",
+    },
+    "parked-completed": {
+      status: "parked",
+      status_prev: "in-progress",
+      status_changed_at: "2026-07-12",
+      resume_condition: "Was parked before completion.",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Progress",
+    },
+    "parked-orphan": {
+      status: "parked",
+      status_prev: "in-progress",
+      status_changed_at: "2026-07-11",
+      resume_condition: "Was parked before board removal.",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Progress",
+    },
+  });
+
+  const first = await fixture.startup("2026-07-17");
+  assertEq("KSS-IO-1: actual startup path discovers the board, repairs seven cards, and archives one orphan",
+    first, { synced: 7, archived: 1, boards: 1 });
+  assertEq("KSS-IO-1b: startup invoke registers the manual resync command",
+    fixture.commands.map((command) => command.id), ["kanban-status-sync:resync-now"]);
+  assertEq("KSS-IO-2: In Progress parked authority preserves lifecycle while repairing board metadata",
+    fixture.cards["parked-authority"].frontmatter, {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume only after the prerequisite is deployed.",
+      kanban_board: fixture.boardPath,
+      kanban_column: "In Progress",
+    });
+  assertEq("KSS-IO-2b: parked authority repairs a stale board independently",
+    fixture.cards["parked-board-only"].frontmatter, {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the board-only repair prerequisite.",
+      kanban_board: fixture.boardPath,
+      kanban_column: "In Progress",
+    });
+  assertEq("KSS-IO-2c: parked authority repairs a stale column independently",
+    fixture.cards["parked-column-only"].frontmatter, {
+      status: "parked",
+      status_prev: "in-planning",
+      status_changed_at: "2026-07-16",
+      resume_condition: "Resume after the column-only repair prerequisite.",
+      kanban_board: fixture.boardPath,
+      kanban_column: "In Progress",
+    });
+  assertEq("KSS-IO-3: ordinary In Progress card follows the lane",
+    fixture.cards["ordinary-card"].frontmatter.status, "in-progress");
+  assertEq("KSS-IO-4: blank resume_condition restores lane-derived behavior",
+    fixture.cards["formerly-parked"].frontmatter.status, "in-progress");
+  assertEq("KSS-IO-5: moving a parked card to Blocked follows the lane",
+    fixture.cards["parked-blocked"].frontmatter.status, "blocked");
+  assertEq("KSS-IO-6: moving a parked card to Completed follows the lane",
+    fixture.cards["parked-completed"].frontmatter.status, "completed");
+  assertEq("KSS-IO-7: removing a parked card retains archive behavior",
+    fixture.cards["parked-orphan"].frontmatter.status, "archived");
+
+  const writesAfterFirst = fixture.writes();
+  const second = await fixture.sync("2026-07-17");
+  assertEq("KSS-IO-8: repeated startup sync reports a no-op", second, { synced: 0, archived: 0 });
+  assertEq("KSS-IO-9: repeated startup sync performs no frontmatter writes",
+    fixture.writes(), writesAfterFirst);
+
+  fixture.cards["parked-authority"].frontmatter.status = "parked";
+  fixture.cards["parked-authority"].frontmatter.status_prev = "in-planning";
+  fixture.cards["parked-authority"].frontmatter.status_changed_at = "2026-07-16";
+  delete fixture.cards["parked-authority"].frontmatter.resume_condition;
+  const resumed = await fixture.sync("2026-07-18");
+  assertEq("KSS-IO-10: removing resume_condition resumes normal In Progress derivation",
+    resumed, { synced: 1, archived: 0 });
+  assertEq("KSS-IO-11: resumed card receives lane status and lifecycle timestamp",
+    {
+      status: fixture.cards["parked-authority"].frontmatter.status,
+      status_prev: fixture.cards["parked-authority"].frontmatter.status_prev,
+      status_changed_at: fixture.cards["parked-authority"].frontmatter.status_changed_at,
+    },
+    { status: "in-progress", status_prev: "parked", status_changed_at: "2026-07-18" });
 }
-process.exit(0);
+
+function fixtureBoardPath() {
+  return "spice/projects/sauce/sauce-board.md";
+}
+
+function finish() {
+  console.log(`\nrun-kanban-status-sync.js: ${pass} pass · ${fail} fail`);
+  if (fail > 0) {
+    console.log("\n--- Failures ---");
+    for (const f of failures) console.log(f);
+    process.exitCode = 1;
+  }
+}
+
+runStartupSyncFixture()
+  .catch((err) => assertTrue("KSS-IO-0: startup sync fixture completes", false, err && err.stack))
+  .finally(finish);
