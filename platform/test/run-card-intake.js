@@ -238,6 +238,10 @@ function missingEvidenceAndRefusals() {
     ok(!run(base(dir, { cards: [execution('BAD Invented lane', { lane: 'Made Up' })] }), false).ok, 'invented board lane is refused');
     ok(run(base(dir, { cards: [execution('ALIAS Status', { status: 'in-planning' })] }), false).ok, 'shared historical status alias is normalized');
     ok(!run(base(dir, { cards: [execution('BAD Status', { status: 'almost-done' })] }), false).ok, 'unknown status is refused');
+    ok(!run(base(dir, { cards: [execution('BAD Empty schema', { schema_version: '' })] }), false).ok, 'explicitly empty schema version is not defaulted');
+    ok(!run(base(dir, { cards: [execution('BAD Policy', { batch_policy: 'continue garbage' })] }), false).ok, 'unknown authored batch policy is not replaced by derivation');
+    ok(!run(base(dir, { cards: [execution('BAD Null deployment', { deploy_subscriptions: null })] }), false).ok, 'explicitly null deployment map is not defaulted');
+    ok(!run(base(dir, { cards: [execution('BAD Empty execution mode', { execution_mode: '' })] }), false).ok, 'explicitly empty execution mode is not defaulted');
     const badMap = execution('BAD Map'); delete badMap.deploy_subscriptions.ero;
     ok(!run(base(dir, { cards: [badMap] }), false).ok, 'missing deployment map is refused');
     const gaException = base(dir, { classification: 'ga_exception', cards: [execution('GA-EX-1 Approved exception')], ga_exception_path: path.join(dir, 'docs', 'roadmap', 'Priorities for GA.md'), ga_exception_section: '## Approved exception\n\nGA-EX-1 is allowed.' });

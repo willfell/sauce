@@ -39,7 +39,7 @@ function parseCardStatus(raw) {
 
 function parseBatchPolicy(raw) {
   const frontmatterValue = frontmatterScalar(raw, 'batch_policy');
-  if (frontmatterValue) return frontmatterValue.split(/\s|—/)[0].trim().toLowerCase();
+  if (frontmatterValue !== undefined) return frontmatterValue.trim().toLowerCase();
   const match = String(raw || '').match(/^\s*batch_policy:\s*([a-z][a-z0-9_-]*)\b/im);
   return match ? match[1].toLowerCase() : null;
 }
@@ -287,17 +287,32 @@ function prepareDeliveryCard(raw, card) {
   const prepared = prepareDeliveryObject(rawCard);
   const authoredIdentity = frontmatterScalar(raw, 'card');
   const expectedIdentity = delivery.normalizeIdentity(card);
+  const boundaryErrors = [];
   if (authoredIdentity !== undefined && expectedIdentity
     && delivery.normalizeIdentity(authoredIdentity) !== expectedIdentity) {
-    const mismatch = {
+    boundaryErrors.push({
       code: 'identity-mismatch', field: 'card',
       message: `authored card identity ${delivery.normalizeIdentity(authoredIdentity)} differs from ${expectedIdentity}`,
-    };
+    });
+  }
+  const contractFields = new Set(delivery.registry.types['execution-card'].fields.map((field) => field.name));
+  const counts = new Map();
+  for (const line of frontmatterBody(raw).split('\n')) {
+    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):/);
+    if (match && contractFields.has(match[1])) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+  }
+  for (const [field, count] of counts) {
+    if (count > 1) boundaryErrors.push({
+      code: 'duplicate-field', field,
+      message: `${field} is authored ${count} times and is ambiguous`,
+    });
+  }
+  if (boundaryErrors.length) {
     return {
       ...prepared, ok: false, raw_card: rawCard,
       validation: {
         ...(prepared.validation || {}), ok: false,
-        errors: [...((prepared.validation && prepared.validation.errors) || []), mismatch],
+        errors: [...((prepared.validation && prepared.validation.errors) || []), ...boundaryErrors],
       },
     };
   }

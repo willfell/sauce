@@ -149,6 +149,12 @@ ok('NS-15 explicitly empty historical identity fails closed instead of inheritin
 const emptyPolicyHistorical = requiredFieldCard.replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*$/m, 'batch_policy:');
 ok('NS-16 explicitly empty historical batch policy fails closed instead of being treated as omitted',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => emptyPolicyHistorical }).action === 'no-eligible-work');
+ok('NS-17 multi-token frontmatter batch policy fails closed instead of truncating',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('batch_policy: continue', 'batch_policy: continue garbage') }).action === 'no-eligible-work');
+ok('NS-18 duplicate card keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard: Different') }).action === 'no-eligible-work');
+ok('NS-19 duplicate status keys fail closed as ambiguous',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('status: planning', 'status: planning\nstatus: blocked') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

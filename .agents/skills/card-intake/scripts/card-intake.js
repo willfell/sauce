@@ -45,36 +45,44 @@ function safeTitle(value) {
 
 function evidenceClaims(spec) {
   return [...(Array.isArray(spec.evidence) ? spec.evidence : []), ...(Array.isArray(spec.evidence_claims) ? spec.evidence_claims : [])]
-    .map((item) => ({
-      source_identity: String(item.source_identity || '').trim(),
-      captured_at: String(item.captured_at || '').trim(),
-      revision: String(item.revision || '').trim(),
-      locator: String(item.locator || (item.path && item.line ? `${item.path}:${item.line}` : '')).trim(),
-      claim: String(item.claim || item.note || '').trim(),
-    }));
+    .map((item) => {
+      const claim = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+      return {
+        source_identity: String(claim.source_identity || '').trim(),
+        captured_at: String(claim.captured_at || '').trim(),
+        revision: String(claim.revision || '').trim(),
+        locator: String(claim.locator || (claim.path && claim.line ? `${claim.path}:${claim.line}` : '')).trim(),
+        claim: String(claim.claim || claim.note || '').trim(),
+      };
+    });
 }
 
 function deliveryContract(card, spec) {
-  const riskDimensions = [...new Set((card.risk_dimensions || card.risk_flags || []).map((risk) => RISK_MAP[risk] || risk))];
+  const has = (key) => Object.prototype.hasOwnProperty.call(card, key);
+  const riskInput = has('risk_dimensions') ? card.risk_dimensions : (has('risk_flags') ? card.risk_flags : []);
+  const riskDimensions = Array.isArray(riskInput)
+    ? [...new Set(riskInput.map((risk) => RISK_MAP[risk] || risk))] : riskInput;
   const contract = {
     card: card.title,
-    schema_version: card.schema_version || delivery.CONTRACT_VERSION,
-    parent_card: card.parent_title ? `[[${card.parent_title}]]` : spec.epic,
-    slice: card.slice || card.title,
+    schema_version: has('schema_version') ? card.schema_version : delivery.CONTRACT_VERSION,
+    parent_card: has('parent_title') ? (card.parent_title ? `[[${card.parent_title}]]` : card.parent_title) : spec.epic,
+    slice: has('slice') ? card.slice : card.title,
     model_profile: card.model_profile,
-    execution_mode: card.execution_mode || spec.completion_mode,
-    batch_policy: card.batch_policy || 'continue',
-    status: card.status || 'planning',
+    execution_mode: has('execution_mode') ? card.execution_mode : spec.completion_mode,
+    batch_policy: has('batch_policy') ? card.batch_policy : 'continue',
+    status: has('status') ? card.status : 'planning',
     touch_zones: card.touch_zones,
     depends_on: card.depends_on,
-    deploy_subscriptions: card.deploy_subscriptions || { headspace: [], accuris: [], ero: [] },
+    deploy_subscriptions: has('deploy_subscriptions') ? card.deploy_subscriptions : { headspace: [], accuris: [], ero: [] },
     epic: spec.epic,
     evidence: evidenceClaims(spec),
-    release_required: card.release_required == null ? spec.completion_mode === 'release' : card.release_required,
-    deployment_required: card.deployment_required == null ? spec.completion_mode === 'release' : card.deployment_required,
+    release_required: has('release_required') ? card.release_required : spec.completion_mode === 'release',
+    deployment_required: has('deployment_required') ? card.deployment_required : spec.completion_mode === 'release',
     risk_dimensions: riskDimensions,
   };
-  contract.batch_policy = delivery.derivePolicy(contract);
+  if (delivery.registry.policies.policy_strength.includes(contract.batch_policy)) {
+    contract.batch_policy = delivery.derivePolicy(contract);
+  }
   return contract;
 }
 
@@ -273,7 +281,7 @@ function validateSpec(spec, boardRaw = '') {
       if (['in_progress', 'parked'].includes(priorStatus)) errors.push(`${card.title}: refuses to touch ${priorStatus} card`);
     }
   }
-  if (!scoutOnly && cards.length) {
+  if (!scoutOnly && cards.length && errors.length === 0) {
     const plannedNames = new Set(cards.map((card) => card.title));
     const emitted = [...cards.map((card) => renderCard(card, spec)), spec.roadmap_section, spec.ga_exception_section].filter(Boolean).join('\n');
     for (const match of emitted.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
