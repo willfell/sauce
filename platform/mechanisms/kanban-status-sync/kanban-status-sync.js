@@ -100,14 +100,21 @@ class KanbanStatusSync {
       if (!cardFile) continue;
       const cache = app.metadataCache.getFileCache(cardFile) || {};
       const fm = cache.frontmatter || {};
-      const desired = KanbanStatusSync.slugifyStatus(resolved[cardPath]);
+      const column = resolved[cardPath];
+      const preserveParked = column === "In Progress" &&
+        fm.status === "parked" &&
+        typeof fm.resume_condition === "string" &&
+        fm.resume_condition.trim().length > 0;
+      const desired = preserveParked ? "parked" : KanbanStatusSync.slugifyStatus(column);
       const sameBoard = fm.kanban_board === boardPath;
+      const sameColumn = fm.kanban_column === column;
       const sameStatus = fm.status === desired;
-      if (sameBoard && sameStatus) continue;
+      if (preserveParked ? (sameBoard && sameColumn) : (sameBoard && sameStatus)) continue;
       const prev = (typeof fm.status === "string") ? fm.status : null;
       await app.fileManager.processFrontMatter(cardFile, (cur) => {
         cur.kanban_board = boardPath;
-        cur.kanban_column = resolved[cardPath];
+        cur.kanban_column = column;
+        if (preserveParked) return;
         cur.status_prev = prev;
         cur.status = desired;
         cur.status_changed_at = today;
@@ -147,7 +154,7 @@ class KanbanStatusSync {
   /**
    * Parse an obsidian-kanban board's markdown source into a {cardLinkpath: columnName} map.
    * - Skips YAML frontmatter at the top of the file.
-   * - A column is a depth-2 heading: `## ColumnName`.
+   * - A column is a depth-2 heading: `## ColumnName`. // lint-display-markers:allow obsidian-kanban column grammar
    * - Cards are `[[wikilink]]` occurrences inside list items (`- [[...]]` or
    *   `- [[path|alias]]`) under a column heading. Bare wikilinks (not in a
    *   list item) are NOT cards — obsidian-kanban writes cards only as list items,
