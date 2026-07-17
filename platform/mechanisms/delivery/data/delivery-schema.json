@@ -317,6 +317,9 @@
       },
       { "name": "high-risk-requires-heavy", "patch": { "model_profile": "standard" }, "expected_error": "high-risk-requires-heavy" },
       { "name": "zone-cannot-escape-workspace", "patch": { "touch_zones": ["../outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-cannot-be-absolute", "patch": { "touch_zones": ["/outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-cannot-use-a-windows-absolute-path", "patch": { "touch_zones": ["C:\\outside"] }, "expected_error": "invalid-touch-zone" },
+      { "name": "zone-root-must-be-declared", "patch": { "touch_zones": [{ "root": "other", "path": "package.json" }] }, "expected_error": "invalid-touch-zone" },
       { "name": "zone-path-must-be-a-string", "patch": { "touch_zones": [{ "path": {} }] }, "expected_error": "invalid-touch-zone" },
       { "name": "derived-policy-cannot-be-weakened", "patch": { "batch_policy": "continue" }, "expected_error": "policy-weakened" },
       {

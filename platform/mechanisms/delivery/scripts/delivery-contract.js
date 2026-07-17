@@ -352,9 +352,10 @@ function resolveDependencies(cards, ledger = {}, options = {}) {
         const proof = completionProof(recordsByName.get(dep));
         if (!proof.complete) refusal = { reason: 'dependency-proof-missing', dependency: dep, missing_proof: proof.missing };
       } else if (archive.has(dep)) refusal = { reason: 'archive-never-satisfies', dependency: dep };
+      else if (byName.has(dep) || known.has(dep)) refusal = { reason: 'dependency-not-complete', dependency: dep };
       else if (completed.has(dep)) {
         // Checked Completed is the fallback for untracked historical work only.
-      } else if (byName.has(dep) || known.has(dep)) refusal = { reason: 'dependency-not-complete', dependency: dep };
+      }
       else refusal = { reason: 'dangling-dependency', dependency: dep };
     }
     result[name] = refusal ? { eligible: false, ...refusal } : { eligible: true, reason: null, missing_proof: [] };
@@ -390,6 +391,7 @@ function posture(plan) {
   if (input.decision_required) return 'awaiting_user_decision';
   if (input.dependency_result && input.dependency_result.eligible === false) return 'blocked_by_dependencies';
   const card = input.card || input;
+  if (parseDependencyField(card.depends_on).length > 0 && !input.dependency_result) return 'blocked_by_dependencies';
   if (card.execution_mode === 'docs_only') return 'docs_only';
   return 'claimable';
 }
@@ -398,6 +400,9 @@ function batchEligibility(card, context = {}) {
   const validation = validateCard(card, context.mode || 'current');
   const policy = derivePolicy(validation.card);
   if (!validation.ok) return { eligible: false, policy, reason: 'contract-invalid', errors: validation.errors };
+  if (validation.card.depends_on.length > 0 && (!context.dependency_result || context.dependency_result.eligible !== true)) {
+    return { eligible: false, policy, reason: 'dependencies-not-complete', missing_proof: (context.dependency_result && context.dependency_result.missing_proof) || [] };
+  }
   if (context.dependency_result && context.dependency_result.eligible === false) {
     return { eligible: false, policy, reason: 'dependencies-not-complete', missing_proof: context.dependency_result.missing_proof || [] };
   }

@@ -7,19 +7,19 @@
   "files": [
     {
       "source": "data/delivery-schema.json",
-      "dest": "{{templater_scripts_path}}/delivery/data/delivery-schema.json"
+      "dest": "{{content_path}}/delivery/data/delivery-schema.json"
     },
     {
       "source": "scripts/delivery-contract.js",
-      "dest": "{{templater_scripts_path}}/delivery/scripts/delivery-contract.js"
+      "dest": "{{content_path}}/delivery/scripts/delivery-contract.js"
     },
     {
       "source": "scripts/delivery-schema-cli.js",
-      "dest": "{{templater_scripts_path}}/delivery/scripts/delivery-schema-cli.js"
+      "dest": "{{content_path}}/delivery/scripts/delivery-schema-cli.js"
     },
     {
       "source": "index.js",
-      "dest": "{{templater_scripts_path}}/delivery/index.js"
+      "dest": "{{content_path}}/delivery/index.js"
     }
   ],
   "claude_surface": [],

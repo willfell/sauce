@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
@@ -38,6 +39,9 @@ eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSIO
 check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
   && Object.isFrozen(api.registry.types)
   && Object.isFrozen(api.registry.fixtures));
+eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults',
+  api.registry.fixtures.base_execution_card.deploy_subscriptions,
+  { headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'] });
 
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');
@@ -100,6 +104,12 @@ check('DEL-COMP-2 missing vault receipt names the missing proof', !incompletePro
   && incompleteProof.missing.includes('vault_receipts.ero'));
 check('DEL-COMP-3 docs-only completion uses validation proof without release evidence',
   api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: true } }).complete);
+check('DEL-COMP-16 docs-only completion rejects a nonterminal phase',
+  !api.completionProof({ execution_mode: 'docs_only', phase: 'planning', validation_receipt: { ok: true } }).complete);
+check('DEL-COMP-17 docs-only completion requires validation proof',
+  !api.completionProof({ execution_mode: 'docs_only', phase: 'completed' }).complete);
+check('DEL-COMP-18 docs-only completion rejects a failed validation receipt',
+  !api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: false } }).complete);
 for (const [label, mutate, missing] of [
   ['DEL-COMP-4 stale tag is rejected', (receipt) => { receipt.tag = 'v1.2.2'; }, 'tag'],
   ['DEL-COMP-5 malformed brew version is rejected', (receipt) => { receipt.brew_version = 'latest'; }, 'brew_version'],
@@ -165,6 +175,16 @@ const archivedProjectionWithReceipt = api.resolveDependencies([
 ], { Dependency: fullReceipt }, { archive: ['Dependency'] });
 check('DEL-DEP-10 authoritative deployed receipt outranks an Archive projection',
   archivedProjectionWithReceipt['Receipt authority child'].eligible);
+const incompleteDespiteCompleted = api.resolveDependencies([
+  { ...base, card: 'Incomplete despite projection', depends_on: ['Dependency'] },
+], { Dependency: incompleteDependency }, { completed: ['Dependency'] });
+check('DEL-DEP-11 incomplete authoritative receipt cannot be bypassed by checked Completed',
+  incompleteDespiteCompleted['Incomplete despite projection'].reason === 'dependency-proof-missing');
+const trackedCompletedWithoutReceipt = api.resolveDependencies([
+  { ...base, card: 'Tracked projection child', depends_on: ['Tracked dependency'] },
+], {}, { completed: ['Tracked dependency'], known_cards: ['Tracked dependency'] });
+check('DEL-DEP-12 checked Completed cannot satisfy a tracked dependency without a receipt',
+  trackedCompletedWithoutReceipt['Tracked projection child'].reason === 'dependency-not-complete');
 
 check('DEL-ZONE-1 nested paths conflict', api.zoneConflicts(
   { touch_zones: ['scripts/autoloop'] }, { touch_zones: ['scripts/autoloop/gate.js'] }));
@@ -205,16 +225,19 @@ eq('DEL-POSTURE-1 user decision blocks first', api.posture({ decision_required: 
 eq('DEL-POSTURE-2 dependency proof blocks claim', api.posture({ dependency_result: { eligible: false } }), 'blocked_by_dependencies');
 eq('DEL-POSTURE-3 docs-only stays outside release claims', api.posture({ card: { execution_mode: 'docs_only' } }), 'docs_only');
 eq('DEL-POSTURE-4 otherwise claimable', api.posture({ card: base, dependency_result: { eligible: true } }), 'claimable');
+eq('DEL-POSTURE-5 a declared dependency without a proof result is blocked', api.posture({ card: base }), 'blocked_by_dependencies');
 
-const unattended = api.batchEligibility(base, { supervised: false });
+const unattended = api.batchEligibility(base, { supervised: false, dependency_result: { eligible: true } });
 check('DEL-BATCH-1 supervised_only is machine-enforced for unattended selection',
   !unattended.eligible && unattended.reason === 'supervised-only');
 check('DEL-BATCH-2 explicit supervision admits a valid supervised_only card',
-  api.batchEligibility(base, { supervised: true }).eligible);
+  api.batchEligibility(base, { supervised: true, dependency_result: { eligible: true } }).eligible);
+check('DEL-BATCH-2b supervision cannot bypass a missing dependency result',
+  api.batchEligibility(base, { supervised: true }).reason === 'dependencies-not-complete');
 const stopAfter = {
   ...base, touch_zones: ['Docs/release-note.md'], risk_dimensions: [], batch_policy: 'stop_after',
 };
-const stopVerdict = api.batchEligibility(stopAfter, { supervised: false });
+const stopVerdict = api.batchEligibility(stopAfter, { supervised: false, dependency_result: { eligible: true } });
 check('DEL-BATCH-3 stop_after permits this card but forbids continuation',
   stopVerdict.eligible && stopVerdict.continue_after === false);
 const docsCard = fixtureCard(api.registry.fixtures.valid.find((fixture) => fixture.name === 'docs-only-standard'));
@@ -288,12 +311,37 @@ check('DEL-CLI-2 unknown contract types fail with machine-readable output', badC
 const manifest = JSON.parse(fs.readFileSync(path.join(DELIVERY, 'manifest.json'), 'utf8'));
 const installed = new Map((manifest.files || []).map((file) => [file.source, file.dest]));
 check('DEL-MAN-1 mechanism declares no module_directory', !Object.prototype.hasOwnProperty.call(manifest, 'module_directory'));
-check('DEL-MAN-2 registry is installed in the Templater CommonJS tree outside CustomJS scanning',
-  installed.get('data/delivery-schema.json') === '{{templater_scripts_path}}/delivery/data/delivery-schema.json'
-  && [...installed.values()].every((dest) => !dest.startsWith('{{scripts_path}}/')));
+check('DEL-MAN-2 registry is installed in a non-loader content tree',
+  installed.get('data/delivery-schema.json') === '{{content_path}}/delivery/data/delivery-schema.json'
+  && [...installed.values()].every((dest) => !dest.startsWith('{{scripts_path}}/')
+    && !dest.startsWith('{{templater_scripts_path}}/')));
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
   'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
 ].every((source) => installed.has(source)));
+const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-contract-install-'));
+let installedLoadOk = false;
+let installedCliOk = false;
+try {
+  for (const file of manifest.files) {
+    const relative = file.dest.replace(/^\{\{content_path\}\}\//, '');
+    const destination = path.join(installRoot, relative);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(path.join(DELIVERY, file.source), destination);
+  }
+  const installedApi = require(path.join(installRoot, 'delivery', 'index.js'));
+  installedLoadOk = installedApi.CONTRACT_VERSION === api.CONTRACT_VERSION
+    && installedApi.describe('execution-card', 'coordinator').fields.length === coordinator.fields.length;
+  const installedCli = spawnSync(process.execPath, [
+    path.join(installRoot, 'delivery', 'scripts', 'delivery-schema-cli.js'),
+    'describe', 'execution-card', '--json',
+  ], { encoding: 'utf8' });
+  installedCliOk = installedCli.status === 0
+    && JSON.parse(installedCli.stdout).contract_version === api.CONTRACT_VERSION;
+} finally {
+  fs.rmSync(installRoot, { recursive: true, force: true });
+}
+check('DEL-MAN-3b copied install layout loads the public API through relative dependencies', installedLoadOk);
+check('DEL-MAN-3c copied install layout runs the public CLI through relative dependencies', installedCliOk);
 const platformManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform', 'manifest.json'), 'utf8'));
 const deliveryCatalogue = platformManifest.mechanisms.filter((mechanism) => mechanism.name === 'delivery');
 check('DEL-MAN-4 platform catalogue registers Delivery exactly once at its manifest version',
