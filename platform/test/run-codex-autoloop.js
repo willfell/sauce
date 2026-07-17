@@ -698,11 +698,12 @@ function makeAmendFixture(opts = {}) {
   fs.writeFileSync(path.join(worktree, 'nested/second.txt'), 'second protected file\n');
   fs.writeFileSync(cardPath, [
     '---', 'kanban_column: In Progress', 'status: in_progress', 'model_profile: heavy', 'execution_mode: release',
+    opts.batchPolicyLine || 'batch_policy: supervised_only',
     'parent_card: "[[Protected parent]]"', 'slice: TEST', 'depends_on:', '  - "[[Prerequisite]]"',
     'touch_zones:', '  - platform/mechanisms/delivery', '  - platform/schemas-index.json',
     'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
     '---', '', '## Protected active contract', '',
-    `${opts.batchPolicyLine || 'batch_policy: supervised_only'} — protected active work.`, '',
+    'Protected active work.', '',
   ].join('\n'));
   fs.writeFileSync(boardPath, liveBoard({ progress: [AMEND_CARD] }));
   const record = {
@@ -732,6 +733,8 @@ function makeAmendFixture(opts = {}) {
     'add-touch-zone': ['./platform/manifest.json/', 'platform/manifest.json'],
     'expected-deployment': JSON.stringify(legacyDeployments),
     'desired-deployment': JSON.stringify(typedDeployments),
+    'expected-batch-policy': 'null',
+    'desired-batch-policy': 'supervised_only',
   };
   fixture.deps = {
     readState: () => deepCopy(fixture.state),
@@ -775,6 +778,9 @@ eq(amend.state.cards[AMEND_CARD].touch_zones, [
 eq(amend.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments, 'deployment replacement stores only the normalized typed desired map');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].old_contract.deploy_subscriptions, legacyDeployments, 'audit preserves the exact normalized old deployment map');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].new_contract.deploy_subscriptions, typedDeployments, 'audit records the exact new deployment map');
+eq(amend.state.cards[AMEND_CARD].contract_amendments[0].old_contract.batch_policy, null, 'audit preserves the exact null old batch policy');
+eq(amend.state.cards[AMEND_CARD].contract_amendments[0].new_contract.batch_policy, 'supervised_only', 'audit records the strengthened batch policy');
+eq(amend.state.cards[AMEND_CARD].batch_policy, 'supervised_only', 'batch-policy amendment stores the desired authority');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_head, AMEND_HEAD, 'audit pins the exact target HEAD');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_origin_main, AMEND_MAIN, 'audit pins the exact origin/main revision');
 eq(amend.state.cards[AMEND_CARD].receipt_invalidations.length, 2, 'real amendment appends one receipt invalidation');
@@ -816,6 +822,7 @@ const replayCard = fs.readFileSync(amend.cardPath, 'utf8');
 const replayArgs = {
   ...amend.args,
   'expected-deployment': JSON.stringify(typedDeployments),
+  'expected-batch-policy': 'supervised_only',
   'add-touch-zone': 'platform/manifest.json',
 };
 const replay = await commandAmendContract({ root: amend.root }, replayArgs, amend.deps);
@@ -837,6 +844,12 @@ const refusalCases = [
   ['empty touch-zone addition', (f) => { f.args['add-touch-zone'] = true; }, /non-empty paths/],
   ['missing expected deployment', (f) => { delete f.args['expected-deployment']; }, /requires --expected-deployment/],
   ['missing desired deployment', (f) => { delete f.args['desired-deployment']; }, /requires --desired-deployment/],
+  ['missing expected batch policy', (f) => { delete f.args['expected-batch-policy']; }, /requires --expected-batch-policy/],
+  ['duplicate expected batch policy', (f) => { f.args['expected-batch-policy'] = ['null', 'null']; }, /requires --expected-batch-policy/],
+  ['missing desired batch policy', (f) => { delete f.args['desired-batch-policy']; }, /requires --desired-batch-policy/],
+  ['duplicate desired batch policy', (f) => { f.args['desired-batch-policy'] = ['supervised_only', 'supervised_only']; }, /requires --desired-batch-policy/],
+  ['invalid expected batch policy', (f) => { f.args['expected-batch-policy'] = 'unattended'; }, /must be null\|continue\|stop_after\|supervised_only/],
+  ['null desired batch policy', (f) => { f.args['desired-batch-policy'] = 'null'; }, /must be continue\|stop_after\|supervised_only/],
   ['malformed expected deployment keys', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: [], accuris: [] }); }, /requires exactly/],
   ['malformed expected deployment array', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: 'delivery', accuris: [], ero: [] }); }, /headspace must be an array/],
   ['malformed expected deployment entry', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: [42], accuris: [], ero: [] }); }, /entries must be strings/],
@@ -845,10 +858,12 @@ const refusalCases = [
   ['missing worktree', (f) => { f.deps.worktreeExists = () => false; }, /existing worktree/],
   ['dirty worktree', (f) => { f.dirty = ' M protected.txt'; }, /clean target worktree/],
   ['post-PR phase', (f) => { f.state.cards[AMEND_CARD].phase = 'feature_pr'; }, /pre-PR work/],
+  ['stale tracked PR state', (f) => { f.state.cards[AMEND_CARD].feature_pr = 123; }, /feature PR state/],
   ['stale HEAD', (f) => { f.args['expected-head'] = 'c'.repeat(40); }, /stale expected HEAD/],
   ['stale origin main', (f) => { f.args['expected-origin-main'] = 'c'.repeat(40); }, /stale expected origin\/main/],
   ['wrong tracked branch', (f) => { f.deps.sh = (_cmd, argv) => argv[0] === 'fetch' ? '' : argv[0] === 'rev-parse' ? (argv[1] === 'HEAD' ? AMEND_HEAD : AMEND_MAIN) : argv[0] === 'branch' ? 'other-branch' : ''; }, /branch differs/],
   ['stale deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, ero: [] }); }, /stale expected deployment/],
+  ['stale batch-policy CAS', (f) => { f.args['expected-batch-policy'] = 'continue'; }, /stale expected batch policy/],
   ['structurally inexact deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, headspace: [' delivery ', 'delivery', ''] }); }, /stale expected deployment/],
   ['untyped desired deployment', (f) => { f.args['desired-deployment'] = JSON.stringify(legacyDeployments); }, /mechanism:name or blueprint:name/],
   ['malformed authoritative deployment', (f) => { f.state.cards[AMEND_CARD].deploy_subscriptions = { headspace: [], accuris: [] }; }, /requires exactly/],
@@ -867,8 +882,8 @@ const refusalCases = [
   ['drifted projected slice', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('slice: TEST', 'slice: OTHER')); }, /projected slice differs/],
   ['missing projected execution mode', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('execution_mode: release\n', '')); }, /execution_mode must remain release/],
   ['changed projected execution mode', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('execution_mode: release', 'execution_mode: docs_only')); }, /execution_mode must remain release/],
-  ['non-supervised target', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('batch_policy: supervised_only', 'batch_policy: unattended')); }, /supervised_only/],
-  ['ledger batch-policy drift', (f) => { f.state.cards[AMEND_CARD].batch_policy = 'unattended'; }, /supervised_only/],
+  ['non-supervised target', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('batch_policy: supervised_only', 'batch_policy: unattended')); }, /desired batch policy must match projected policy unattended/],
+  ['ledger batch-policy drift', (f) => { f.state.cards[AMEND_CARD].batch_policy = 'unattended'; }, /malformed batch_policy/],
   ['lifecycle metadata drift', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('status: in_progress', 'status: planning')); }, /metadata must be reconciled/],
   ['board projection drift', (f) => { fs.writeFileSync(f.boardPath, liveBoard({ planning: [AMEND_CARD] })); }, /board projection must be reconciled/],
   ['unsupported execution-mode mutation', (f) => { f.args['execution-mode'] = 'docs'; }, /unsupported option --execution-mode/],
@@ -916,6 +931,25 @@ await assert.rejects(
 eq(conflictFixture.state, conflictBefore, 'active-zone conflict refusal preserves all tracked records');
 eq(conflictFixture.writes, 0, 'active-zone conflict refusal occurs before authoritative mutation');
 
+const weakeningFixture = makeAmendFixture({
+  batchPolicyLine: 'batch_policy: continue',
+  record: {
+    batch_policy: 'stop_after',
+    touch_zones: ['platform/schemas-index.json'],
+  },
+});
+weakeningFixture.cardSnapshot = weakeningFixture.cardSnapshot.replace('  - platform/mechanisms/delivery\n', '');
+fs.writeFileSync(weakeningFixture.cardPath, weakeningFixture.cardSnapshot);
+weakeningFixture.args['expected-batch-policy'] = 'stop_after';
+weakeningFixture.args['desired-batch-policy'] = 'continue';
+const weakeningBefore = deepCopy(weakeningFixture.state);
+await assert.rejects(
+  () => commandAmendContract({ root: weakeningFixture.root }, weakeningFixture.args, weakeningFixture.deps),
+  /refuses batch policy weakening/, 'amend-contract refuses an explicit batch-policy weakening',
+);
+eq(weakeningFixture.state, weakeningBefore, 'batch-policy weakening preserves authoritative state');
+eq(weakeningFixture.writes, 0, 'batch-policy weakening occurs before authoritative mutation');
+
 const projectionFailure = makeAmendFixture();
 projectionFailure.deps.projectCard = () => {
   fs.writeFileSync(projectionFailure.cardPath, projectionFailure.cardSnapshot.replace(
@@ -949,6 +983,7 @@ const postReconcileWrites = projectionFailure.writes;
 const postReconcileReplay = await commandAmendContract({ root: projectionFailure.root }, {
   ...projectionFailure.args,
   'expected-deployment': JSON.stringify(typedDeployments),
+  'expected-batch-policy': 'supervised_only',
   'add-touch-zone': 'platform/manifest.json',
 }, projectionFailure.deps);
 eq(postReconcileReplay.no_op, true, 'identical replay after reconciliation is an explicit no-op');
