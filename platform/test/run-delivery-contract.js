@@ -90,6 +90,10 @@ const docsValidationReceipt = {
   ok: true, receipt_id: 'docs-validation-1', checked_at: '2026-07-16T17:51:05Z',
   verifier_revision: 'c'.repeat(40), head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),
 };
+const docsCompletionRecord = {
+  execution_mode: 'docs_only', phase: 'completed', head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),
+  validation_receipt: docsValidationReceipt,
+};
 const fullReceipt = {
   card: 'Dependency', phase: 'deployed', execution_mode: 'release',
   feature_pr: 9, feature_merge_sha: 'a'.repeat(40), release_pr: 10, release_merge_sha: 'b'.repeat(40),
@@ -98,6 +102,9 @@ const fullReceipt = {
     ok: true, receipt_id: 'brew-receipt-1', checked_at: '2026-07-16T17:51:05Z',
     verifier_revision: 'c'.repeat(40), tap_pr: 11, installed_version: '1.2.3',
   },
+  deploy_subscriptions: {
+    headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'],
+  },
   release_ancestry_receipt: {
     ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfellhoelter/sauce',
     checked_at: '2026-07-16T17:51:05Z', verifier_revision: 'c'.repeat(40),
@@ -105,9 +112,9 @@ const fullReceipt = {
     release_pr: 10, release_merge_sha: 'b'.repeat(40), tag: 'v1.2.3',
   },
   vault_receipts: {
-    headspace: { vault: 'headspace', path: '/vaults/headspace', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.3' },
-    accuris: { vault: 'accuris', path: '/vaults/accuris', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.4' },
-    ero: { vault: 'ero', path: '/vaults/ero', ok: true, required_version: '1.2.3', started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '2.0.0' },
+    headspace: { vault: 'headspace', path: '/vaults/headspace', ok: true, required_version: '1.2.3', added_subscriptions: ['mechanism:delivery'], started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.3' },
+    accuris: { vault: 'accuris', path: '/vaults/accuris', ok: true, required_version: '1.2.3', added_subscriptions: ['mechanism:delivery'], started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '1.2.4' },
+    ero: { vault: 'ero', path: '/vaults/ero', ok: true, required_version: '1.2.3', added_subscriptions: ['mechanism:delivery'], started_at: '2026-07-16T17:51:05Z', finished_at: '2026-07-16T17:51:06Z', status_exit: 0, history_errors: [], installed_version: '2.0.0' },
   },
 };
 check('DEL-COMP-1 complete release receipt proves completion', api.completionProof(fullReceipt).complete);
@@ -117,15 +124,24 @@ const incompleteProof = api.completionProof(incomplete);
 check('DEL-COMP-2 missing vault receipt names the missing proof', !incompleteProof.complete
   && incompleteProof.missing.includes('vault_receipts.ero'));
 check('DEL-COMP-3 docs-only completion uses validation proof without release evidence',
-  api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: docsValidationReceipt }).complete);
+  api.completionProof(docsCompletionRecord).complete);
 check('DEL-COMP-16 docs-only completion rejects a nonterminal phase',
-  !api.completionProof({ execution_mode: 'docs_only', phase: 'planning', validation_receipt: docsValidationReceipt }).complete);
+  !api.completionProof({ ...docsCompletionRecord, phase: 'planning' }).complete);
 check('DEL-COMP-17 docs-only completion requires validation proof',
   !api.completionProof({ execution_mode: 'docs_only', phase: 'completed' }).complete);
 check('DEL-COMP-18 docs-only completion rejects a failed validation receipt',
   !api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: false } }).complete);
 check('DEL-COMP-18b docs-only completion rejects an unpinned truthy validation result',
   !api.completionProof({ execution_mode: 'docs_only', phase: 'completed', validation_receipt: { ok: true } }).complete);
+for (const [label, mutate] of [
+  ['DEL-COMP-18c docs receipt binds head', (record) => { record.validation_receipt.head_sha = 'd'.repeat(40); }],
+  ['DEL-COMP-18d docs receipt binds base', (record) => { record.validation_receipt.base_sha = 'd'.repeat(40); }],
+  ['DEL-COMP-18e docs receipt pins timestamp', (record) => { record.validation_receipt.checked_at = 'yesterday'; }],
+  ['DEL-COMP-18f docs receipt pins verifier', (record) => { record.validation_receipt.verifier_revision = 'short'; }],
+]) {
+  const record = JSON.parse(JSON.stringify(docsCompletionRecord)); mutate(record);
+  check(label, api.completionProof(record).missing.includes('validation_receipt'));
+}
 for (const [label, mutate, missing] of [
   ['DEL-COMP-4 stale tag is rejected', (receipt) => { receipt.tag = 'v1.2.2'; }, 'tag'],
   ['DEL-COMP-5 malformed brew version is rejected', (receipt) => { receipt.brew_version = 'latest'; }, 'brew_version'],
@@ -161,14 +177,55 @@ const mismatchedAncestry = JSON.parse(JSON.stringify(fullReceipt));
 mismatchedAncestry.release_ancestry_receipt.feature_merge_sha = 'd'.repeat(40);
 check('DEL-COMP-21 ancestry receipt must bind the exact completion identifiers',
   api.completionProof(mismatchedAncestry).missing.includes('release_ancestry_receipt'));
+for (const [label, mutate] of [
+  ['DEL-COMP-21b ancestry binds feature PR', (r) => { r.release_ancestry_receipt.feature_pr = 99; }],
+  ['DEL-COMP-21c ancestry binds release PR', (r) => { r.release_ancestry_receipt.release_pr = 99; }],
+  ['DEL-COMP-21d ancestry binds release SHA', (r) => { r.release_ancestry_receipt.release_merge_sha = 'd'.repeat(40); }],
+  ['DEL-COMP-21e ancestry binds tag', (r) => { r.release_ancestry_receipt.tag = 'v1.2.4'; }],
+  ['DEL-COMP-21f ancestry pins repository', (r) => { r.release_ancestry_receipt.repository = ''; }],
+  ['DEL-COMP-21g ancestry pins timestamp', (r) => { r.release_ancestry_receipt.checked_at = 'yesterday'; }],
+  ['DEL-COMP-21h ancestry pins verifier', (r) => { r.release_ancestry_receipt.verifier_revision = 'short'; }],
+]) {
+  const receipt = JSON.parse(JSON.stringify(fullReceipt)); mutate(receipt);
+  check(label, api.completionProof(receipt).missing.includes('release_ancestry_receipt'));
+}
+const wrongContainingTag = JSON.parse(JSON.stringify(fullReceipt));
+wrongContainingTag.tag = 'v9.0.0'; wrongContainingTag.release_ancestry_receipt.tag = 'v9.0.0';
+check('DEL-COMP-21i containing tag must equal the required feature release',
+  api.completionProof(wrongContainingTag).missing.includes('tag'));
 const missingBrewReceipt = JSON.parse(JSON.stringify(fullReceipt));
 delete missingBrewReceipt.brew_receipt;
 check('DEL-COMP-22 Homebrew version requires a pinned promotion receipt',
   api.completionProof(missingBrewReceipt).missing.includes('brew_receipt'));
+for (const [label, mutate] of [
+  ['DEL-COMP-22b brew receipt binds tap PR', (r) => { r.brew_receipt.tap_pr = 99; }],
+  ['DEL-COMP-22c brew receipt binds installed version', (r) => { r.brew_receipt.installed_version = '1.2.4'; }],
+  ['DEL-COMP-22d brew receipt pins timestamp', (r) => { r.brew_receipt.checked_at = 'yesterday'; }],
+  ['DEL-COMP-22e brew receipt pins verifier', (r) => { r.brew_receipt.verifier_revision = 'short'; }],
+]) {
+  const receipt = JSON.parse(JSON.stringify(fullReceipt)); mutate(receipt);
+  check(label, api.completionProof(receipt).missing.includes('brew_receipt'));
+}
 const malformedVaultReceipt = JSON.parse(JSON.stringify(fullReceipt));
 malformedVaultReceipt.vault_receipts.ero.status_exit = 1;
 check('DEL-COMP-23 vault proof requires the exact green deployment receipt shape',
   api.completionProof(malformedVaultReceipt).missing.includes('vault_receipts.ero'));
+const missingDeploymentMap = JSON.parse(JSON.stringify(fullReceipt));
+delete missingDeploymentMap.deploy_subscriptions;
+check('DEL-COMP-23a completion requires the exact deployment contract',
+  api.completionProof(missingDeploymentMap).missing.includes('deploy_subscriptions'));
+for (const [label, mutate] of [
+  ['DEL-COMP-23b vault receipt binds identity', (r) => { r.vault_receipts.ero.vault = 'other'; }],
+  ['DEL-COMP-23c vault receipt pins path', (r) => { r.vault_receipts.ero.path = ''; }],
+  ['DEL-COMP-23d vault receipt binds required version', (r) => { r.vault_receipts.ero.required_version = '1.2.2'; }],
+  ['DEL-COMP-23e vault receipt pins start', (r) => { r.vault_receipts.ero.started_at = 'yesterday'; }],
+  ['DEL-COMP-23f vault receipt pins finish', (r) => { r.vault_receipts.ero.finished_at = 'yesterday'; }],
+  ['DEL-COMP-23g vault receipt requires clean history', (r) => { r.vault_receipts.ero.history_errors = ['error']; }],
+  ['DEL-COMP-23h vault receipt proves requested additions', (r) => { r.vault_receipts.ero.added_subscriptions = []; }],
+]) {
+  const receipt = JSON.parse(JSON.stringify(fullReceipt)); mutate(receipt);
+  check(label, api.completionProof(receipt).missing.includes('vault_receipts.ero'));
+}
 
 const depCards = [
   { ...base, card: 'Tracked child', depends_on: ['Dependency'] },

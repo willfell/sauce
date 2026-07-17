@@ -290,8 +290,9 @@ function completionProof(record) {
     if (!['completed', 'deployed'].includes(item.phase)) missing.push('phase');
     const receipt = item.validation_receipt;
     if (!pinnedReceiptValid(receipt)
-      || !/^[0-9a-f]{40}$/i.test(String(receipt && receipt.head_sha || ''))
-      || !/^[0-9a-f]{40}$/i.test(String(receipt && receipt.base_sha || ''))) missing.push('validation_receipt');
+      || !/^[0-9a-f]{40}$/i.test(String(item.head_sha || ''))
+      || !/^[0-9a-f]{40}$/i.test(String(item.base_sha || ''))
+      || receipt.head_sha !== item.head_sha || receipt.base_sha !== item.base_sha) missing.push('validation_receipt');
     return { complete: missing.length === 0, missing, mode: 'docs_only' };
   }
   if (item.phase !== 'deployed') addMissing('phase');
@@ -325,14 +326,24 @@ function completionProof(record) {
   if (item.required_version && item.brew_version && (brewComparison == null || brewComparison < 0)) addMissing('brew_version');
   const tagVersion = String(item.tag || '').replace(/^v/, '');
   const tagComparison = item.required_version && tagVersion ? compareVersions(tagVersion, item.required_version) : null;
-  if (item.required_version && item.tag && (tagComparison == null || tagComparison < 0)) addMissing('tag');
+  if (item.required_version && item.tag && tagComparison !== 0) addMissing('tag');
+  const deploymentMap = item.deploy_subscriptions;
+  if (!deploymentMap || typeof deploymentMap !== 'object' || Array.isArray(deploymentMap)
+    || Object.keys(deploymentMap).length !== REQUIRED_VAULTS.length
+    || REQUIRED_VAULTS.some((vault) => !Array.isArray(deploymentMap[vault])
+      || deploymentMap[vault].some((item) => typeof item !== 'string'
+        || !/^(?:mechanism|blueprint):[a-z0-9][a-z0-9._-]*$/.test(item.trim()))
+      || new Set(deploymentMap[vault]).size !== deploymentMap[vault].length)) addMissing('deploy_subscriptions');
   for (const vault of REQUIRED_VAULTS) {
     const receipt = item.vault_receipts && item.vault_receipts[vault];
+    const requiredSubscriptions = deploymentMap && Array.isArray(deploymentMap[vault]) ? deploymentMap[vault] : [];
     const installedComparison = receipt && receipt.installed_version && item.required_version
       ? compareVersions(receipt.installed_version, item.required_version) : null;
     if (!receipt || receipt.ok !== true || receipt.vault !== vault
       || typeof receipt.path !== 'string' || !receipt.path.trim()
       || receipt.required_version !== item.required_version
+      || !Array.isArray(receipt.added_subscriptions)
+      || requiredSubscriptions.some((subscription) => !receipt.added_subscriptions.includes(subscription))
       || !evidenceTimestampValid(receipt.started_at) || !evidenceTimestampValid(receipt.finished_at)
       || receipt.status_exit !== 0 || !Array.isArray(receipt.history_errors) || receipt.history_errors.length > 0
       || !receipt.installed_version
