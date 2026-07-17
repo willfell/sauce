@@ -154,10 +154,9 @@ function listField(raw, key) {
   if (inline) {
     if (inline === '[]') return [];
     if (inline.startsWith('[')) {
-      try { return JSON.parse(inline); } catch (_) { /* retain historical YAML parsing below */ }
+      try { return JSON.parse(inline); } catch (_) { return inline; }
     }
-    return inline.replace(/^\[|\]$/g, '').split(',')
-      .map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+    return inline;
   }
   const out = [];
   for (let i = index + 1; i < lines.length && /^\s+/.test(lines[i]); i += 1) {
@@ -181,15 +180,12 @@ function deploymentField(raw) {
       if (!inline || inline === '[]') out[current] = [];
       else {
         try { out[current] = JSON.parse(inline); }
-        catch (_) {
-          out[current] = inline.replace(/^\[|\]$/g, '').split(',')
-            .map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-        }
+        catch (_) { out[current] = inline; }
       }
       continue;
     }
     const item = lines[i].match(/^\s{4}-\s+(.*?)\s*$/);
-    if (item && current) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
+    if (item && current && Array.isArray(out[current])) out[current].push(item[1].replace(/^['"]|['"]$/g, ''));
   }
   return out;
 }
@@ -205,11 +201,11 @@ function evidenceField(raw) {
   if (inline !== undefined) {
     try {
       const parsed = JSON.parse(inline);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (_) { return inline ? [inline] : []; }
+      return parsed;
+    } catch (_) { return inline; }
   }
   const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
-  if (!section) return [];
+  if (!section) return undefined;
   return section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
     .filter(Boolean).map((match) => match[1].trim());
 }
@@ -217,6 +213,10 @@ function evidenceField(raw) {
 function parseDeliveryCard(raw, card) {
   const schemaVersion = frontmatterScalar(raw, 'schema_version');
   const authoredCard = frontmatterScalar(raw, 'card');
+  const executionMode = frontmatterScalar(raw, 'execution_mode');
+  const touchZones = listField(raw, 'touch_zones');
+  const dependencyFieldPresent = rawScalarField(raw, 'depends_on') !== undefined;
+  const evidence = evidenceField(raw);
   const parsed = {
     // Historical notes may infer a missing identity from their exact board/file
     // name. Current contracts must author it, and an authored value is never
@@ -225,19 +225,19 @@ function parseDeliveryCard(raw, card) {
     parent_card: frontmatterScalar(raw, 'parent_card'),
     slice: frontmatterScalar(raw, 'slice'),
     model_profile: frontmatterScalar(raw, 'model_profile'),
-    execution_mode: frontmatterScalar(raw, 'execution_mode') || 'release',
     status: frontmatterScalar(raw, 'status'),
-    touch_zones: listField(raw, 'touch_zones') || [],
-    depends_on: parseDependsOn(raw),
     deploy_subscriptions: deploymentField(raw),
     epic: frontmatterScalar(raw, 'epic'),
-    evidence: evidenceField(raw),
   };
   const batchPolicy = parseBatchPolicy(raw);
   const riskDimensions = listField(raw, 'risk_dimensions');
   const releaseRequired = parseBoolean(frontmatterScalar(raw, 'release_required'));
   const deploymentRequired = parseBoolean(frontmatterScalar(raw, 'deployment_required'));
   if (schemaVersion !== undefined) parsed.schema_version = schemaVersion;
+  if (executionMode !== undefined) parsed.execution_mode = executionMode;
+  if (touchZones !== undefined) parsed.touch_zones = touchZones;
+  if (dependencyFieldPresent) parsed.depends_on = parseDependsOn(raw);
+  if (evidence !== undefined) parsed.evidence = evidence;
   if (batchPolicy) parsed.batch_policy = batchPolicy;
   if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
   if (releaseRequired !== undefined) parsed.release_required = releaseRequired;
@@ -269,7 +269,12 @@ function prepareDeliveryObject(value) {
       };
     }
     const validation = delivery.validateCard(migration.note, 'historical');
-    return { ok: validation.ok, source: 'historical', card: validation.card, validation, migration };
+    const migratedCard = { ...validation.card };
+    // normalizeCard represents an omitted optional historical evidence field as
+    // []; preserve the omission so a second shared validation does not turn a
+    // readable historical card into an explicitly invalid empty evidence list.
+    if (!Object.prototype.hasOwnProperty.call(migration.note, 'evidence')) delete migratedCard.evidence;
+    return { ok: validation.ok, source: 'historical', card: migratedCard, validation, migration };
   }
   const validation = delivery.validateCard(original, 'current');
   return { ok: validation.ok && !validation.requires_migration, source: 'current', card: validation.card, validation, migration: null };

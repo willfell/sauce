@@ -132,6 +132,17 @@ ok('NS-9 skeletal historical cards fail closed before selection',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Skeleton]]\n', loadBody: () => '---\nstatus: planning\n---\n' }).action === 'no-eligible-work');
 ok('NS-10 authored and board card identities must match exactly',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Board identity]]\n', loadBody: () => deliveryCard('Authored identity', 'Mismatch.') }).action === 'no-eligible-work');
+const requiredFieldCard = deliveryCard('Required fields', 'Required field fixture.');
+ok('NS-11 current cards missing execution_mode fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^execution_mode:.*\n/m, '') }).action === 'no-eligible-work');
+ok('NS-12 current cards missing depends_on fail closed',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace(/^depends_on:\n/m, '') }).action === 'no-eligible-work');
+const evidenceLessHistorical = deliveryCard('Historical evidence optional', 'Historical fixture.')
+  .replace(/^schema_version:.*\n/m, '').replace(/^batch_policy:.*\n/m, '').replace(/^evidence:.*\n/m, '');
+ok('NS-13 evidence-less historical cards remain readable through in-memory migration',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => evidenceLessHistorical }).card === 'Historical evidence optional');
+ok('NS-14 malformed scalar touch_zones fail closed instead of being coerced',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('touch_zones:\n  - Docs/autoloop-fixture.md', 'touch_zones: Docs/autoloop-fixture.md') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
