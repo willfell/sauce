@@ -692,23 +692,27 @@ function makeAmendFixture(opts = {}) {
   const worktree = path.join(root, 'target-worktree');
   const cardPath = path.join(root, `${AMEND_CARD}.md`);
   const boardPath = path.join(root, 'sauce-board.md');
+  const parked = (opts.phase || 'implementing') === 'parked';
   fs.mkdirSync(worktree, { recursive: true });
   fs.writeFileSync(path.join(worktree, 'protected.txt'), 'target worktree must never change\n');
   fs.mkdirSync(path.join(worktree, 'nested'));
   fs.writeFileSync(path.join(worktree, 'nested/second.txt'), 'second protected file\n');
   fs.writeFileSync(cardPath, [
-    '---', 'kanban_column: In Progress', 'status: in_progress', 'model_profile: heavy', 'execution_mode: release',
+    '---', 'kanban_column: In Progress', `status: ${parked ? 'parked' : 'in_progress'}`, 'model_profile: heavy', 'execution_mode: release',
+    opts.batchPolicyLine || 'batch_policy: supervised_only',
     'parent_card: "[[Protected parent]]"', 'slice: TEST', 'depends_on:', '  - "[[Prerequisite]]"',
+    ...(parked ? ['resume_condition: "Prerequisite deploys before this card resumes."'] : []),
     'touch_zones:', '  - platform/mechanisms/delivery', '  - platform/schemas-index.json',
     'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
     '---', '', '## Protected active contract', '',
-    `${opts.batchPolicyLine || 'batch_policy: supervised_only'} — protected active work.`, '',
+    'Protected active work.', '',
   ].join('\n'));
   fs.writeFileSync(boardPath, liveBoard({ progress: [AMEND_CARD] }));
   const record = {
     card: AMEND_CARD, phase: opts.phase || 'implementing', card_path: cardPath,
     branch: 'codex-autoloop/protected-active-contract', worktree,
     model_profile: 'heavy', parent_card: '[[Protected parent]]', slice: 'TEST', dependencies: ['Prerequisite'],
+    ...(parked ? { resume_condition: 'Prerequisite deploys before this card resumes.' } : {}),
     projection_reconciled_at: '2026-07-15T00:00:00.000Z',
     touch_zones: ['platform/mechanisms/delivery', 'platform/schemas-index.json'],
     deploy_subscriptions: deepCopy(legacyDeployments),
@@ -732,6 +736,8 @@ function makeAmendFixture(opts = {}) {
     'add-touch-zone': ['./platform/manifest.json/', 'platform/manifest.json'],
     'expected-deployment': JSON.stringify(legacyDeployments),
     'desired-deployment': JSON.stringify(typedDeployments),
+    'expected-batch-policy': 'null',
+    'desired-batch-policy': 'supervised_only',
   };
   fixture.deps = {
     readState: () => deepCopy(fixture.state),
@@ -775,6 +781,9 @@ eq(amend.state.cards[AMEND_CARD].touch_zones, [
 eq(amend.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments, 'deployment replacement stores only the normalized typed desired map');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].old_contract.deploy_subscriptions, legacyDeployments, 'audit preserves the exact normalized old deployment map');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].new_contract.deploy_subscriptions, typedDeployments, 'audit records the exact new deployment map');
+eq(amend.state.cards[AMEND_CARD].contract_amendments[0].old_contract.batch_policy, null, 'audit preserves the exact null old batch policy');
+eq(amend.state.cards[AMEND_CARD].contract_amendments[0].new_contract.batch_policy, 'supervised_only', 'audit records the strengthened batch policy');
+eq(amend.state.cards[AMEND_CARD].batch_policy, 'supervised_only', 'batch-policy amendment stores the desired authority');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_head, AMEND_HEAD, 'audit pins the exact target HEAD');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_origin_main, AMEND_MAIN, 'audit pins the exact origin/main revision');
 eq(amend.state.cards[AMEND_CARD].receipt_invalidations.length, 2, 'real amendment appends one receipt invalidation');
@@ -813,17 +822,107 @@ const replayWrites = amend.writes;
 const replayInvalidations = deepCopy(amend.state.cards[AMEND_CARD].receipt_invalidations);
 const replayAudit = deepCopy(amend.state.cards[AMEND_CARD].contract_amendments);
 const replayCard = fs.readFileSync(amend.cardPath, 'utf8');
-const replayArgs = {
-  ...amend.args,
-  'expected-deployment': JSON.stringify(typedDeployments),
-  'add-touch-zone': 'platform/manifest.json',
-};
-const replay = await commandAmendContract({ root: amend.root }, replayArgs, amend.deps);
-eq(replay.no_op, true, 'identical normalized replay is an explicit no-op');
-eq(amend.writes, replayWrites, 'identical replay performs no ledger write');
-eq(amend.state.cards[AMEND_CARD].receipt_invalidations, replayInvalidations, 'identical replay preserves every receipt and invalidation timestamp');
-eq(amend.state.cards[AMEND_CARD].contract_amendments, replayAudit, 'identical replay preserves amendment audit timestamps');
-eq(fs.readFileSync(amend.cardPath, 'utf8'), replayCard, 'identical replay performs no projection rewrite');
+const replayState = deepCopy(amend.state);
+const replayBoard = fs.readFileSync(amend.boardPath, 'utf8');
+const replay = await commandAmendContract({ root: amend.root }, amend.args, amend.deps);
+eq(replay.no_op, true, 'the literal unchanged original arguments are an explicit no-op');
+eq(amend.writes, replayWrites, 'literal exact replay performs no ledger write');
+eq(amend.state, replayState, 'literal exact replay performs no ledger, audit, review, gate, or timestamp write');
+eq(amend.state.cards[AMEND_CARD].receipt_invalidations, replayInvalidations, 'literal exact replay preserves every receipt and invalidation timestamp');
+eq(amend.state.cards[AMEND_CARD].contract_amendments, replayAudit, 'literal exact replay preserves amendment audit timestamps');
+eq(fs.readFileSync(amend.cardPath, 'utf8'), replayCard, 'literal exact replay performs no card projection rewrite');
+eq(fs.readFileSync(amend.boardPath, 'utf8'), replayBoard, 'literal exact replay performs no board projection rewrite');
+
+for (const [label, mutate] of [
+  ['json output flag', (args) => { delete args.json; }],
+  ['reason', (args) => { args.reason = `${args.reason} altered`; }],
+  ['expected HEAD', (args) => { args['expected-head'] = 'c'.repeat(40); }],
+  ['expected origin/main', (args) => { args['expected-origin-main'] = 'c'.repeat(40); }],
+  ['expected deployment JSON bytes', (args) => { args['expected-deployment'] = '{ "ero" : ["delivery"], "accuris" : ["delivery"], "headspace" : ["delivery"] }'; }],
+  ['expected deployment', (args) => { args['expected-deployment'] = JSON.stringify(typedDeployments); }],
+  ['desired deployment JSON bytes', (args) => { args['desired-deployment'] = '{ "ero" : ["mechanism:delivery"], "accuris" : ["mechanism:delivery"], "headspace" : ["mechanism:delivery"] }'; }],
+  ['desired deployment', (args) => { args['desired-deployment'] = JSON.stringify({ ...typedDeployments, ero: [] }); }],
+  ['expected batch policy', (args) => { args['expected-batch-policy'] = 'supervised_only'; }],
+  ['desired batch policy', (args) => { args['desired-batch-policy'] = 'stop_after'; }],
+  ['touch-zone additions', (args) => { args['add-touch-zone'] = 'platform/manifest.json'; }],
+]) {
+  const altered = deepCopy(amend.args);
+  mutate(altered);
+  await assert.rejects(
+    () => commandAmendContract({ root: amend.root }, altered, amend.deps),
+    /desired contract state already exists without an exact successful request identity|stale expected HEAD|stale expected origin\/main|desired batch policy must match projected policy|stale expected batch policy/,
+    `desired-state equality without matching ${label} identity fails closed`,
+  );
+  eq(amend.state, replayState, `altered ${label} replay preserves all authority and evidence`);
+  eq(amend.writes, replayWrites, `altered ${label} replay performs no ledger write`);
+}
+
+// This isolated fixture mirrors A4's authority shape: clean tracked parked
+// pre-PR work with null policy, non-empty dependencies, and a resume condition.
+const parkedAmendment = makeAmendFixture({ phase: 'parked' });
+const parkedProtectedBefore = Object.fromEntries([
+  'phase', 'dependencies', 'resume_condition', 'branch', 'worktree', 'reviews', 'gate_receipt',
+  'receipt_invalidations', 'projection_reconciled_at',
+].map((key) => [key, deepCopy(parkedAmendment.state.cards[AMEND_CARD][key])]));
+const parkedResult = await commandAmendContract(
+  { root: parkedAmendment.root }, parkedAmendment.args, parkedAmendment.deps,
+);
+eq(parkedResult.action, 'contract-amended', 'amend-contract accepts a clean tracked parked pre-PR card');
+eq(parkedResult.phase, 'parked', 'parked amendment never resumes the target');
+eq(parkedResult.reviews_invalidated, false, 'parked amendment preserves historical review authority');
+eq(Object.fromEntries(Object.keys(parkedProtectedBefore).map((key) => [key, parkedAmendment.state.cards[AMEND_CARD][key]])),
+  parkedProtectedBefore, 'parked amendment preserves phase, dependencies, resume condition, worktree, and historical evidence');
+const parkedWrites = parkedAmendment.writes;
+const parkedState = deepCopy(parkedAmendment.state);
+const parkedCard = fs.readFileSync(parkedAmendment.cardPath, 'utf8');
+const parkedBoard = fs.readFileSync(parkedAmendment.boardPath, 'utf8');
+eq((await commandAmendContract({ root: parkedAmendment.root }, parkedAmendment.args, parkedAmendment.deps)).no_op, true,
+  'parked amendment replays only with the literal original arguments');
+eq(parkedAmendment.writes, parkedWrites, 'parked exact replay has no ledger write');
+eq(parkedAmendment.state, parkedState, 'parked exact replay preserves ledger, review, gate, audit, and timestamps');
+eq(fs.readFileSync(parkedAmendment.cardPath, 'utf8'), parkedCard, 'parked exact replay has no card write');
+eq(fs.readFileSync(parkedAmendment.boardPath, 'utf8'), parkedBoard, 'parked exact replay has no board write');
+
+const parkedProjectionFailure = makeAmendFixture({ phase: 'parked' });
+parkedProjectionFailure.deps.projectCard = () => { throw new Error('parked projection crash'); };
+const parkedFailed = await commandAmendContract(
+  { root: parkedProjectionFailure.root }, parkedProjectionFailure.args, parkedProjectionFailure.deps,
+);
+eq(parkedFailed.action, 'amend-contract-projection-failed', 'parked projection failure is recoverable without resuming');
+eq(parkedProjectionFailure.state.cards[AMEND_CARD].phase, 'parked', 'parked projection failure preserves the parked phase');
+delete parkedProjectionFailure.deps.projectCard;
+eq((await commandReconcile({ root: parkedProjectionFailure.root }, { card: AMEND_CARD }, parkedProjectionFailure.deps)).action,
+  'reconciled', 'reconciliation repairs a parked amendment projection failure');
+const parkedRecoveryWrites = parkedProjectionFailure.writes;
+const parkedProjectionRecoveryState = deepCopy(parkedProjectionFailure.state);
+const parkedRecoveryCard = fs.readFileSync(parkedProjectionFailure.cardPath, 'utf8');
+const parkedRecoveryBoard = fs.readFileSync(parkedProjectionFailure.boardPath, 'utf8');
+eq((await commandAmendContract(
+  { root: parkedProjectionFailure.root }, parkedProjectionFailure.args, parkedProjectionFailure.deps,
+)).no_op, true, 'reconciled parked amendment accepts only the literal original replay');
+eq(parkedProjectionFailure.writes, parkedRecoveryWrites, 'reconciled parked literal replay has no ledger write');
+eq(parkedProjectionFailure.state, parkedProjectionRecoveryState, 'reconciled parked literal replay preserves all receipts and timestamps');
+eq(fs.readFileSync(parkedProjectionFailure.cardPath, 'utf8'), parkedRecoveryCard, 'reconciled parked literal replay has no card write');
+eq(fs.readFileSync(parkedProjectionFailure.boardPath, 'utf8'), parkedRecoveryBoard, 'reconciled parked literal replay has no board write');
+
+for (const [label, mutate, pattern] of [
+  ['missing dependencies', (f) => { f.state.cards[AMEND_CARD].dependencies = []; }, /retain non-empty dependencies/],
+  ['missing resume condition', (f) => { f.state.cards[AMEND_CARD].resume_condition = ''; }, /retain a non-empty resume condition/],
+  ['unresolved projection failure', (f) => { f.state.cards[AMEND_CARD].projection_error = 'projection drift'; }, /projection is unresolved/],
+  ['dirty worktree', (f) => { f.dirty = ' M protected.txt'; }, /clean target worktree/],
+  ['post-PR state', (f) => { f.state.cards[AMEND_CARD].feature_pr = 123; }, /feature PR state/],
+  ['stale HEAD', (f) => { f.args['expected-head'] = 'c'.repeat(40); }, /stale expected HEAD/],
+  ['malformed policy', (f) => { f.state.cards[AMEND_CARD].batch_policy = 'unattended'; }, /malformed batch_policy/],
+  ['projected board drift', (f) => { fs.writeFileSync(f.boardPath, liveBoard({ planning: [AMEND_CARD] })); }, /board projection must be reconciled/],
+]) {
+  const fixture = makeAmendFixture({ phase: 'parked' });
+  mutate(fixture);
+  const before = deepCopy(fixture.state);
+  await assert.rejects(() => commandAmendContract({ root: fixture.root }, fixture.args, fixture.deps), pattern,
+    `parked amendment refuses ${label}`);
+  eq(fixture.state, before, `parked ${label} refusal preserves authority`);
+  eq(fixture.writes, 0, `parked ${label} refusal performs no ledger write`);
+}
 
 const refusalCases = [
   ['unexpected positional argument', (f) => { f.args._.push('extra'); }, /unexpected positional/],
@@ -837,6 +936,12 @@ const refusalCases = [
   ['empty touch-zone addition', (f) => { f.args['add-touch-zone'] = true; }, /non-empty paths/],
   ['missing expected deployment', (f) => { delete f.args['expected-deployment']; }, /requires --expected-deployment/],
   ['missing desired deployment', (f) => { delete f.args['desired-deployment']; }, /requires --desired-deployment/],
+  ['missing expected batch policy', (f) => { delete f.args['expected-batch-policy']; }, /requires --expected-batch-policy/],
+  ['duplicate expected batch policy', (f) => { f.args['expected-batch-policy'] = ['null', 'null']; }, /requires --expected-batch-policy/],
+  ['missing desired batch policy', (f) => { delete f.args['desired-batch-policy']; }, /requires --desired-batch-policy/],
+  ['duplicate desired batch policy', (f) => { f.args['desired-batch-policy'] = ['supervised_only', 'supervised_only']; }, /requires --desired-batch-policy/],
+  ['invalid expected batch policy', (f) => { f.args['expected-batch-policy'] = 'unattended'; }, /must be null\|continue\|stop_after\|supervised_only/],
+  ['null desired batch policy', (f) => { f.args['desired-batch-policy'] = 'null'; }, /must be continue\|stop_after\|supervised_only/],
   ['malformed expected deployment keys', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: [], accuris: [] }); }, /requires exactly/],
   ['malformed expected deployment array', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: 'delivery', accuris: [], ero: [] }); }, /headspace must be an array/],
   ['malformed expected deployment entry', (f) => { f.args['expected-deployment'] = JSON.stringify({ headspace: [42], accuris: [], ero: [] }); }, /entries must be strings/],
@@ -845,10 +950,12 @@ const refusalCases = [
   ['missing worktree', (f) => { f.deps.worktreeExists = () => false; }, /existing worktree/],
   ['dirty worktree', (f) => { f.dirty = ' M protected.txt'; }, /clean target worktree/],
   ['post-PR phase', (f) => { f.state.cards[AMEND_CARD].phase = 'feature_pr'; }, /pre-PR work/],
+  ['stale tracked PR state', (f) => { f.state.cards[AMEND_CARD].feature_pr = 123; }, /feature PR state/],
   ['stale HEAD', (f) => { f.args['expected-head'] = 'c'.repeat(40); }, /stale expected HEAD/],
   ['stale origin main', (f) => { f.args['expected-origin-main'] = 'c'.repeat(40); }, /stale expected origin\/main/],
   ['wrong tracked branch', (f) => { f.deps.sh = (_cmd, argv) => argv[0] === 'fetch' ? '' : argv[0] === 'rev-parse' ? (argv[1] === 'HEAD' ? AMEND_HEAD : AMEND_MAIN) : argv[0] === 'branch' ? 'other-branch' : ''; }, /branch differs/],
   ['stale deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, ero: [] }); }, /stale expected deployment/],
+  ['stale batch-policy CAS', (f) => { f.args['expected-batch-policy'] = 'continue'; }, /stale expected batch policy/],
   ['structurally inexact deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, headspace: [' delivery ', 'delivery', ''] }); }, /stale expected deployment/],
   ['untyped desired deployment', (f) => { f.args['desired-deployment'] = JSON.stringify(legacyDeployments); }, /mechanism:name or blueprint:name/],
   ['malformed authoritative deployment', (f) => { f.state.cards[AMEND_CARD].deploy_subscriptions = { headspace: [], accuris: [] }; }, /requires exactly/],
@@ -867,8 +974,8 @@ const refusalCases = [
   ['drifted projected slice', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('slice: TEST', 'slice: OTHER')); }, /projected slice differs/],
   ['missing projected execution mode', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('execution_mode: release\n', '')); }, /execution_mode must remain release/],
   ['changed projected execution mode', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('execution_mode: release', 'execution_mode: docs_only')); }, /execution_mode must remain release/],
-  ['non-supervised target', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('batch_policy: supervised_only', 'batch_policy: unattended')); }, /supervised_only/],
-  ['ledger batch-policy drift', (f) => { f.state.cards[AMEND_CARD].batch_policy = 'unattended'; }, /supervised_only/],
+  ['non-supervised target', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('batch_policy: supervised_only', 'batch_policy: unattended')); }, /desired batch policy must match projected policy unattended/],
+  ['ledger batch-policy drift', (f) => { f.state.cards[AMEND_CARD].batch_policy = 'unattended'; }, /malformed batch_policy/],
   ['lifecycle metadata drift', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('status: in_progress', 'status: planning')); }, /metadata must be reconciled/],
   ['board projection drift', (f) => { fs.writeFileSync(f.boardPath, liveBoard({ planning: [AMEND_CARD] })); }, /board projection must be reconciled/],
   ['unsupported execution-mode mutation', (f) => { f.args['execution-mode'] = 'docs'; }, /unsupported option --execution-mode/],
@@ -916,6 +1023,25 @@ await assert.rejects(
 eq(conflictFixture.state, conflictBefore, 'active-zone conflict refusal preserves all tracked records');
 eq(conflictFixture.writes, 0, 'active-zone conflict refusal occurs before authoritative mutation');
 
+const weakeningFixture = makeAmendFixture({
+  batchPolicyLine: 'batch_policy: continue',
+  record: {
+    batch_policy: 'stop_after',
+    touch_zones: ['platform/schemas-index.json'],
+  },
+});
+weakeningFixture.cardSnapshot = weakeningFixture.cardSnapshot.replace('  - platform/mechanisms/delivery\n', '');
+fs.writeFileSync(weakeningFixture.cardPath, weakeningFixture.cardSnapshot);
+weakeningFixture.args['expected-batch-policy'] = 'stop_after';
+weakeningFixture.args['desired-batch-policy'] = 'continue';
+const weakeningBefore = deepCopy(weakeningFixture.state);
+await assert.rejects(
+  () => commandAmendContract({ root: weakeningFixture.root }, weakeningFixture.args, weakeningFixture.deps),
+  /refuses batch policy weakening/, 'amend-contract refuses an explicit batch-policy weakening',
+);
+eq(weakeningFixture.state, weakeningBefore, 'batch-policy weakening preserves authoritative state');
+eq(weakeningFixture.writes, 0, 'batch-policy weakening occurs before authoritative mutation');
+
 const projectionFailure = makeAmendFixture();
 projectionFailure.deps.projectCard = () => {
   fs.writeFileSync(projectionFailure.cardPath, projectionFailure.cardSnapshot.replace(
@@ -946,18 +1072,16 @@ const postReconcileInvalidations = deepCopy(projectionFailure.state.cards[AMEND_
 const postReconcileAudits = deepCopy(projectionFailure.state.cards[AMEND_CARD].contract_amendments);
 const postReconcileTimestamp = projectionFailure.state.cards[AMEND_CARD].projection_reconciled_at;
 const postReconcileWrites = projectionFailure.writes;
-const postReconcileReplay = await commandAmendContract({ root: projectionFailure.root }, {
-  ...projectionFailure.args,
-  'expected-deployment': JSON.stringify(typedDeployments),
-  'add-touch-zone': 'platform/manifest.json',
-}, projectionFailure.deps);
-eq(postReconcileReplay.no_op, true, 'identical replay after reconciliation is an explicit no-op');
-eq(projectionFailure.writes, postReconcileWrites, 'post-reconciliation identical replay performs no write');
-eq(projectionFailure.state.cards[AMEND_CARD].reviews, postReconcileReviews, 'post-reconciliation identical replay preserves fresh reviews');
-eq(projectionFailure.state.cards[AMEND_CARD].gate_receipt, postReconcileGate, 'post-reconciliation identical replay preserves the fresh combined gate');
-eq(projectionFailure.state.cards[AMEND_CARD].receipt_invalidations, postReconcileInvalidations, 'post-reconciliation identical replay preserves invalidation history');
-eq(projectionFailure.state.cards[AMEND_CARD].contract_amendments, postReconcileAudits, 'post-reconciliation identical replay preserves amendment audit history');
-eq(projectionFailure.state.cards[AMEND_CARD].projection_reconciled_at, postReconcileTimestamp, 'post-reconciliation identical replay preserves projection timestamps');
+const postReconcileReplay = await commandAmendContract(
+  { root: projectionFailure.root }, projectionFailure.args, projectionFailure.deps,
+);
+eq(postReconcileReplay.no_op, true, 'literal original replay after reconciliation is an explicit no-op');
+eq(projectionFailure.writes, postReconcileWrites, 'post-reconciliation literal replay performs no write');
+eq(projectionFailure.state.cards[AMEND_CARD].reviews, postReconcileReviews, 'post-reconciliation literal replay preserves fresh reviews');
+eq(projectionFailure.state.cards[AMEND_CARD].gate_receipt, postReconcileGate, 'post-reconciliation literal replay preserves the fresh combined gate');
+eq(projectionFailure.state.cards[AMEND_CARD].receipt_invalidations, postReconcileInvalidations, 'post-reconciliation literal replay preserves invalidation history');
+eq(projectionFailure.state.cards[AMEND_CARD].contract_amendments, postReconcileAudits, 'post-reconciliation literal replay preserves amendment audit history');
+eq(projectionFailure.state.cards[AMEND_CARD].projection_reconciled_at, postReconcileTimestamp, 'post-reconciliation literal replay preserves projection timestamps');
 
 const beforeAuthorityCrash = makeAmendFixture();
 beforeAuthorityCrash.deps.beforeAuthority = () => { throw new Error('crash before authority'); };

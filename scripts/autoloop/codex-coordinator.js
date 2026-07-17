@@ -39,6 +39,7 @@ const DELIVERY_STABLE_FIELDS = Object.freeze(
 const AMEND_CONTRACT_OPTIONS = new Set([
   '_', 'json', 'card', 'expected-head', 'expected-origin-main', 'reason',
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
+  'expected-batch-policy', 'desired-batch-policy',
 ]);
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
@@ -299,6 +300,18 @@ function parseDeploymentArgument(value, label, opts = {}) {
   return normalizeDeploymentMap(parsed, { label: `--${label}`, ...opts });
 }
 
+function parseBatchPolicyArgument(value, label, opts = {}) {
+  if (Array.isArray(value) || typeof value !== 'string' || !value.trim()) {
+    throw new Error(`amend-contract requires --${label}`);
+  }
+  const normalized = value.trim().toLowerCase();
+  if (opts.allowNull && normalized === 'null') return null;
+  if (!delivery.registry.policies.policy_strength.includes(normalized)) {
+    throw new Error(`--${label} must be ${opts.allowNull ? 'null|' : ''}${delivery.registry.policies.policy_strength.join('|')}`);
+  }
+  return normalized;
+}
+
 function normalizeStoredTouchZones(value) {
   if (!Array.isArray(value) || !value.length || value.some((zone) => typeof zone !== 'string')) {
     throw new Error('tracked contract has malformed touch_zones');
@@ -315,6 +328,49 @@ function normalizeStoredTouchZones(value) {
 
 function sameDeploymentMap(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function amendmentRequestOperands(args) {
+  return {
+    positional: Array.isArray(args._) ? [...args._] : [],
+    json: args.json === true,
+    card: args.card,
+    expected_head: args['expected-head'],
+    expected_origin_main: args['expected-origin-main'],
+    reason: args.reason,
+    add_touch_zone: args['add-touch-zone'] == null
+      ? [] : (Array.isArray(args['add-touch-zone']) ? [...args['add-touch-zone']] : [args['add-touch-zone']]),
+    expected_deployment: args['expected-deployment'],
+    desired_deployment: args['desired-deployment'],
+    expected_batch_policy: args['expected-batch-policy'],
+    desired_batch_policy: args['desired-batch-policy'],
+  };
+}
+
+function amendmentReplayMatches(record, request, currentContract) {
+  const amendments = record.contract_amendments;
+  const audit = Array.isArray(amendments) ? amendments[amendments.length - 1] : null;
+  const identity = audit && audit.request_identity;
+  return Boolean(identity
+    && sameJson(identity.request, request)
+    && sameJson(identity.prior_contract, audit.old_contract)
+    && sameJson(identity.new_contract, audit.new_contract)
+    && sameJson(audit.new_contract, currentContract));
+}
+
+function parkedAmendmentProblem(record) {
+  if (!Array.isArray(record.dependencies) || !record.dependencies.length
+    || record.dependencies.some((dependency) => !normalizeCardLink(dependency))) {
+    return 'amend-contract requires parked work to retain non-empty dependencies';
+  }
+  if (typeof record.resume_condition !== 'string' || !record.resume_condition.trim()) {
+    return 'amend-contract requires parked work to retain a non-empty resume condition';
+  }
+  return '';
 }
 
 function formatExecutionContractFrontmatter(touchZones, deployments) {
@@ -347,6 +403,13 @@ function ownsAmendedContract(record) {
   return Boolean(record && Array.isArray(record.contract_amendments) && record.contract_amendments.length);
 }
 
+function ownsAmendedBatchPolicy(record) {
+  return ownsAmendedContract(record) && record.contract_amendments.some((amendment) => (
+    amendment && amendment.new_contract
+      && Object.prototype.hasOwnProperty.call(amendment.new_contract, 'batch_policy')
+  ));
+}
+
 function executionContractProjectionProblem(record, raw) {
   const projectedTouchZones = listField(raw, 'touch_zones').map(normalizeZone);
   const authoritativeTouchZones = normalizeStoredTouchZones(record.touch_zones);
@@ -369,6 +432,9 @@ function executionContractProjectionProblem(record, raw) {
   }
   if (record.slice && scalarField(raw, 'slice') !== String(record.slice)) return 'projected slice differs from authority';
   if (scalarField(raw, 'execution_mode') !== 'release') return 'projected execution_mode must remain release';
+  if (ownsAmendedBatchPolicy(record) && parseBatchPolicy(raw) !== record.batch_policy) {
+    return 'projected batch_policy differs from authority';
+  }
   return null;
 }
 
@@ -617,6 +683,8 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const expectedDeployments = ownsContract
     ? normalizeDeploymentMap(record.deploy_subscriptions, { label: 'tracked contract deployment map', requireTyped: true })
     : null;
+  const ownsBatchPolicy = ownsAmendedBatchPolicy(record);
+  const expectedBatchPolicy = ownsBatchPolicy ? record.batch_policy : null;
   const currentTouchZones = ownsContract ? listField(cardRaw, 'touch_zones').map(normalizeZone) : null;
   const currentDeployments = ownsContract ? deploymentField(cardRaw) : null;
   const contractMetadataChanged = ownsContract && (
@@ -626,6 +694,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
       normalizeDeploymentMap(currentDeployments, { label: 'projected deployment map' }),
       expectedDeployments,
     )
+    || (ownsBatchPolicy && parseBatchPolicy(cardRaw) !== expectedBatchPolicy)
   );
   const boardChanged = boardNext !== boardRaw;
   const metadataFields = {};
@@ -643,6 +712,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     : cardRaw;
   if (contractMetadataChanged) {
     cardNext = patchFrontmatterBlocks(cardNext, formatExecutionContractFrontmatter(expectedTouchZones, expectedDeployments));
+    if (ownsBatchPolicy) cardNext = patchFrontmatter(cardNext, { batch_policy: expectedBatchPolicy });
   }
   if ((lifecycleMetadataChanged || contractMetadataChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
@@ -1166,6 +1236,9 @@ async function commandAmendContract(ctx, args, deps = {}) {
   // requires typed mechanism:name / blueprint:name entries.
   const expectedDeployments = parseDeploymentArgument(args['expected-deployment'], 'expected-deployment', { preserveEntries: true });
   const desiredDeployments = parseDeploymentArgument(args['desired-deployment'], 'desired-deployment', { requireTyped: true });
+  const expectedBatchPolicy = parseBatchPolicyArgument(args['expected-batch-policy'], 'expected-batch-policy', { allowNull: true });
+  const desiredBatchPolicy = parseBatchPolicyArgument(args['desired-batch-policy'], 'desired-batch-policy');
+  const requestOperands = amendmentRequestOperands(args);
 
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;
@@ -1179,8 +1252,14 @@ async function commandAmendContract(ctx, args, deps = {}) {
     const state = loadState(ctx);
     const record = state.cards[card];
     if (!record) throw new Error(`amend-contract requires a tracked --card; ${card} is not tracked`);
-    if (!['claimed', 'implementing'].includes(record.phase)) {
-      throw new Error(`amend-contract accepts only claimed or implementing pre-PR work; ${card} is ${record.phase}`);
+    if (!['claimed', 'implementing', 'parked'].includes(record.phase)) {
+      throw new Error(`amend-contract accepts only claimed, implementing, or parked pre-PR work; ${card} is ${record.phase}`);
+    }
+    const isParked = record.phase === 'parked';
+    const parkedProblem = isParked ? parkedAmendmentProblem(record) : '';
+    if (parkedProblem) throw new Error(parkedProblem);
+    if (record.feature_pr != null || record.feature_url != null || record.feature_merge_sha != null) {
+      throw new Error('amend-contract refuses tracked feature PR state');
     }
     if (!record.worktree || !worktreeExists(record.worktree)) {
       throw new Error(`amend-contract requires the existing worktree for ${card}`);
@@ -1195,8 +1274,9 @@ async function commandAmendContract(ctx, args, deps = {}) {
     const oldDeployments = normalizeDeploymentMap(record.deploy_subscriptions, {
       label: 'tracked contract deployment map', preserveEntries: true,
     });
-    if (!sameDeploymentMap(oldDeployments, expectedDeployments)) {
-      throw new Error('stale expected deployment map; authoritative contract differs');
+    const oldBatchPolicy = record.batch_policy == null ? null : String(record.batch_policy).trim().toLowerCase();
+    if (oldBatchPolicy != null && !delivery.registry.policies.policy_strength.includes(oldBatchPolicy)) {
+      throw new Error('tracked contract has malformed batch_policy');
     }
     run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
     const actualHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree }).toLowerCase();
@@ -1211,13 +1291,22 @@ async function commandAmendContract(ctx, args, deps = {}) {
     let targetRaw;
     try { targetRaw = fs.readFileSync(resolveCardPath(record.card_path, record.card, deps.cardsRoot || CARDS_ROOT), 'utf8'); }
     catch (err) { throw new Error(`target card metadata is unreadable: ${err.message}`); }
-    if (parseBatchPolicy(targetRaw) !== 'supervised_only'
-      || (record.batch_policy && record.batch_policy !== 'supervised_only')) {
-      throw new Error('amend-contract accepts only a supervised_only target contract');
-    }
     const executionProjectionProblem = executionContractProjectionProblem(record, targetRaw);
     if (executionProjectionProblem) {
       throw new Error(`target execution contract must match authority before amendment: ${executionProjectionProblem}`);
+    }
+    if (parseBatchPolicy(targetRaw) !== desiredBatchPolicy) {
+      throw new Error(`desired batch policy must match projected policy ${parseBatchPolicy(targetRaw) || 'null'}`);
+    }
+    const targetContract = prepareDeliveryCard(targetRaw, card);
+    const projectedBatchPolicy = delivery.derivePolicy(targetContract.card);
+    if (desiredBatchPolicy !== projectedBatchPolicy) {
+      throw new Error(`desired batch policy must match Delivery-derived policy ${projectedBatchPolicy}`);
+    }
+    const policyStrength = delivery.registry.policies.policy_strength;
+    const oldPolicyStrength = oldBatchPolicy == null ? -1 : policyStrength.indexOf(oldBatchPolicy);
+    if (policyStrength.indexOf(desiredBatchPolicy) < oldPolicyStrength) {
+      throw new Error(`amend-contract refuses batch policy weakening from ${oldBatchPolicy} to ${desiredBatchPolicy}`);
     }
     const metadataProblem = projectionMetadataProblem(record, deps.cardsRoot || CARDS_ROOT);
     if (metadataProblem) throw new Error(`target metadata must be reconciled before amendment: ${metadataProblem.error}`);
@@ -1229,24 +1318,38 @@ async function commandAmendContract(ctx, args, deps = {}) {
 
     const newTouchZones = [...oldTouchZones];
     for (const zone of additions) if (!newTouchZones.includes(zone)) newTouchZones.push(zone);
+    const oldContract = {
+      touch_zones: oldTouchZones, deploy_subscriptions: oldDeployments, batch_policy: oldBatchPolicy,
+    };
+    const newContract = {
+      touch_zones: newTouchZones, deploy_subscriptions: desiredDeployments, batch_policy: desiredBatchPolicy,
+    };
+    const priorProjectionReceipt = record.projection_reconciled_at;
     const conflict = conflictsWithActive(
       { touchZones: newTouchZones },
       activeRecords(state).filter((candidate) => candidate.card !== card),
     );
     if (conflict) throw new Error(`touch-zone conflict with ${conflict.card}: ${conflict.zone}`);
-    const noOp = JSON.stringify(newTouchZones) === JSON.stringify(oldTouchZones)
-      && sameDeploymentMap(desiredDeployments, oldDeployments);
-    if (noOp) {
+    const desiredState = sameJson(newContract, oldContract);
+    if (desiredState) {
+      if (!amendmentReplayMatches(record, requestOperands, oldContract)) {
+        throw new Error('desired contract state already exists without an exact successful request identity');
+      }
       return {
         action: 'contract-amended', card, phase: record.phase, no_op: true,
         head_sha: actualHead, origin_main_sha: actualOriginMain,
         touch_zones: oldTouchZones, deploy_subscriptions: oldDeployments,
+        batch_policy: oldBatchPolicy,
       };
+    }
+    if (oldBatchPolicy !== expectedBatchPolicy) {
+      throw new Error('stale expected batch policy; authoritative contract differs');
+    }
+    if (!sameDeploymentMap(oldDeployments, expectedDeployments)) {
+      throw new Error('stale expected deployment map; authoritative contract differs');
     }
 
     const amendedAt = now();
-    const oldContract = { touch_zones: oldTouchZones, deploy_subscriptions: oldDeployments };
-    const newContract = { touch_zones: newTouchZones, deploy_subscriptions: desiredDeployments };
     const audit = {
       revision: (record.contract_amendments || []).length + 1,
       amended_at: amendedAt,
@@ -1255,6 +1358,11 @@ async function commandAmendContract(ctx, args, deps = {}) {
       expected_origin_main: expectedOriginMain,
       old_contract: oldContract,
       new_contract: newContract,
+      request_identity: {
+        request: requestOperands,
+        prior_contract: oldContract,
+        new_contract: newContract,
+      },
     };
     const invalidationReason = `execution contract amended: ${reason}; rerun every review and combined gate`;
     const invalidation = {
@@ -1267,17 +1375,24 @@ async function commandAmendContract(ctx, args, deps = {}) {
     if (deps.beforeAuthority) await deps.beforeAuthority({ state, record, audit });
     record.touch_zones = newTouchZones;
     record.deploy_subscriptions = desiredDeployments;
+    record.batch_policy = desiredBatchPolicy;
     record.contract_amendments = [...(record.contract_amendments || []), audit];
     record.contract_amended_at = amendedAt;
-    record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
-    record.reviews = {};
-    record.gate_receipt = null;
-    delete record.projection_reconciled_at;
+    if (!isParked) {
+      record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
+      record.reviews = {};
+      record.gate_receipt = null;
+      delete record.projection_reconciled_at;
+    }
     persist(ctx, state, record);
     if (deps.afterAuthority) await deps.afterAuthority({ state, record, audit });
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, cardsRoot: deps.cardsRoot,
     });
+    if (isParked) {
+      if (priorProjectionReceipt == null) delete record.projection_reconciled_at;
+      else record.projection_reconciled_at = priorProjectionReceipt;
+    }
     if (deps.afterProjection) await deps.afterProjection({ state, record, audit, projection });
     persist(ctx, state, record);
     return {
@@ -1285,7 +1400,8 @@ async function commandAmendContract(ctx, args, deps = {}) {
       card, phase: record.phase, no_op: false,
       head_sha: actualHead, origin_main_sha: actualOriginMain,
       touch_zones: newTouchZones, deploy_subscriptions: desiredDeployments,
-      audit, reviews_invalidated: true, invalidation_reason: invalidationReason,
+      batch_policy: desiredBatchPolicy,
+      audit, reviews_invalidated: !isParked, ...(isParked ? {} : { invalidation_reason: invalidationReason }),
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
     };
   }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
