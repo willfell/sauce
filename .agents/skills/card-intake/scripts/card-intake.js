@@ -291,7 +291,7 @@ function renderCard(card, spec) {
   const lines = ['---', 'type: task-hub', `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
   if (spec.epic) lines.push(`epic: ${quoted(spec.epic)}`);
   if (role === 'execution') {
-    lines.push(`schema_version: ${quoted(contract.schema_version)}`, `parent_card: ${quoted(`[[${contract.parent_card}]]`)}`, `slice: ${quoted(contract.slice)}`);
+    lines.push(`card: ${quoted(contract.card)}`, `schema_version: ${quoted(contract.schema_version)}`, `parent_card: ${quoted(`[[${contract.parent_card}]]`)}`, `slice: ${quoted(contract.slice)}`);
     lines.push(`model_profile: ${contract.model_profile}`, `execution_mode: ${contract.execution_mode}`, `batch_policy: ${contract.batch_policy}`);
     lines.push(`release_required: ${contract.release_required}`, `deployment_required: ${contract.deployment_required}`);
     lines.push('touch_zones:', ...contract.touch_zones.map((item) => `  - ${quoted(item)}`));

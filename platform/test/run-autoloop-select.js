@@ -130,6 +130,8 @@ ok('NS-8 empty card bodies fail closed before selection',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Missing body]]\n', loadBody: () => '' }).action === 'no-eligible-work');
 ok('NS-9 skeletal historical cards fail closed before selection',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Skeleton]]\n', loadBody: () => '---\nstatus: planning\n---\n' }).action === 'no-eligible-work');
+ok('NS-10 authored and board card identities must match exactly',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Board identity]]\n', loadBody: () => deliveryCard('Authored identity', 'Mismatch.') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

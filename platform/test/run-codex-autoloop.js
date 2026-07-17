@@ -114,6 +114,8 @@ fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card
 eq(projectionMetadataProblem(currentRecord, driftRoot), null, 'whitespace-only Delivery projection changes canonicalize without drift');
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('Docs/example.md', 'Docs/other.md'));
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'meaningful Delivery contract edits surface as lifecycle drift');
+fs.writeFileSync(driftPath, projectedCurrentRaw.replace('card: Test card', 'card: Different card'));
+ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'authored identity drift cannot be masked by the ledger card name');
 fs.rmSync(driftRoot, { recursive: true, force: true });
 
 const obsidianA1 = [
@@ -158,10 +160,10 @@ const successfulVaultReceipts = (version = '0.233.0') => Object.fromEntries(
   ['headspace', 'accuris', 'ero'].map((vault) => [vault, { vault, ok: true, installed_version: version }]),
 );
 const bodies = {
-  A: card({ zones: ['platform/a'] }),
-  B: card({ zones: ['platform/b'], deps: ['Done'] }),
-  C: card({ zones: ['platform/c'] }),
-  Done: card(),
+  A: card({ name: 'A', zones: ['platform/a'] }),
+  B: card({ name: 'B', zones: ['platform/b'], deps: ['Done'] }),
+  C: card({ name: 'C', zones: ['platform/c'] }),
+  Done: card({ name: 'Done' }),
 };
 const loadCard = (name) => bodies[name] ? { path: `/cards/${name}.md`, raw: bodies[name] } : null;
 
@@ -223,8 +225,8 @@ eq(selectClaimCandidate({ boardMd: board(['A']), state, loadCard }).card, 'A', '
 
 eq(normalizeCardLink('"[[Parent card|Parent alias]]"'), 'Parent card', 'normalizes parent wikilinks before comparison');
 const parentBodies = {
-  Child2: card({ zones: ['platform/child-2'], parent: 'Shared parent' }),
-  Child3: card({ zones: ['platform/child-3'], parent: 'Shared parent' }),
+  Child2: card({ name: 'Child2', zones: ['platform/child-2'], parent: 'Shared parent' }),
+  Child3: card({ name: 'Child3', zones: ['platform/child-3'], parent: 'Shared parent' }),
 };
 const loadParentCard = (name) => parentBodies[name] ? { path: `/cards/${name}.md`, raw: parentBodies[name] } : null;
 const siblingState = emptyState();

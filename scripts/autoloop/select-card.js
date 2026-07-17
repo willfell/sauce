@@ -215,8 +215,13 @@ function evidenceField(raw) {
 }
 
 function parseDeliveryCard(raw, card) {
+  const schemaVersion = frontmatterScalar(raw, 'schema_version');
+  const authoredCard = frontmatterScalar(raw, 'card');
   const parsed = {
-    card: String(card || frontmatterScalar(raw, 'card') || '').trim(),
+    // Historical notes may infer a missing identity from their exact board/file
+    // name. Current contracts must author it, and an authored value is never
+    // overwritten by the caller because that would mask identity drift.
+    card: String(authoredCard || (schemaVersion === undefined ? card : '') || '').trim(),
     parent_card: frontmatterScalar(raw, 'parent_card'),
     slice: frontmatterScalar(raw, 'slice'),
     model_profile: frontmatterScalar(raw, 'model_profile'),
@@ -228,7 +233,6 @@ function parseDeliveryCard(raw, card) {
     epic: frontmatterScalar(raw, 'epic'),
     evidence: evidenceField(raw),
   };
-  const schemaVersion = frontmatterScalar(raw, 'schema_version');
   const batchPolicy = parseBatchPolicy(raw);
   const riskDimensions = listField(raw, 'risk_dimensions');
   const releaseRequired = parseBoolean(frontmatterScalar(raw, 'release_required'));
@@ -273,7 +277,24 @@ function prepareDeliveryObject(value) {
 
 function prepareDeliveryCard(raw, card) {
   const rawCard = parseDeliveryCard(raw, card);
-  return { ...prepareDeliveryObject(rawCard), raw_card: rawCard };
+  const prepared = prepareDeliveryObject(rawCard);
+  const authoredIdentity = frontmatterScalar(raw, 'card');
+  const expectedIdentity = delivery.normalizeIdentity(card);
+  if (authoredIdentity && expectedIdentity
+    && delivery.normalizeIdentity(authoredIdentity) !== expectedIdentity) {
+    const mismatch = {
+      code: 'identity-mismatch', field: 'card',
+      message: `authored card identity ${delivery.normalizeIdentity(authoredIdentity)} differs from ${expectedIdentity}`,
+    };
+    return {
+      ...prepared, ok: false, raw_card: rawCard,
+      validation: {
+        ...(prepared.validation || {}), ok: false,
+        errors: [...((prepared.validation && prepared.validation.errors) || []), mismatch],
+      },
+    };
+  }
+  return { ...prepared, raw_card: rawCard };
 }
 
 function validationReason(prepared) {
