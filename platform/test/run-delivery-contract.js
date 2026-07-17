@@ -46,6 +46,12 @@ eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');
   check(`DEL-FIX-VALID ${fixture.name}`, verdict.ok, JSON.stringify(verdict.errors));
+  if (Object.prototype.hasOwnProperty.call(fixture, 'expected_requires_migration')) {
+    eq(`DEL-FIX-MIGRATION ${fixture.name}`, verdict.requires_migration, fixture.expected_requires_migration);
+  }
+  if (Object.prototype.hasOwnProperty.call(fixture, 'expected_historical_unversioned')) {
+    eq(`DEL-FIX-HISTORICAL ${fixture.name}`, verdict.historical_unversioned, fixture.expected_historical_unversioned);
+  }
   if (fixture.expected_warning) {
     check(`DEL-FIX-WARNING ${fixture.name}`,
       verdict.warnings.some((warning) => warning.code === fixture.expected_warning), JSON.stringify(verdict.warnings));
@@ -376,6 +382,18 @@ check('DEL-BATCH-6 an explicit dependency refusal is honored even for a dependen
   api.batchEligibility(dependencyFree, {
     supervised: true, dependency_result: { eligible: false, missing_proof: ['external-refusal'] },
   }).reason === 'dependencies-not-complete');
+const olderContractCard = fixtureCard(api.registry.fixtures.valid.find(
+  (fixture) => fixture.name === 'older-contract-requires-migration'));
+check('DEL-BATCH-7 older readable contracts cannot execute before migration',
+  api.batchEligibility(olderContractCard, {
+    supervised: true, dependency_result: { eligible: true },
+  }).reason === 'contract-migration-required');
+const unversionedContractCard = fixtureCard(api.registry.fixtures.valid.find(
+  (fixture) => fixture.name === 'historical-unversioned'));
+check('DEL-BATCH-8 unversioned historical contracts cannot execute before migration',
+  api.batchEligibility(unversionedContractCard, {
+    mode: 'historical', supervised: true, dependency_result: { eligible: true },
+  }).reason === 'contract-migration-required');
 
 const historical = fixtureCard(api.registry.fixtures.valid.find((fixture) => fixture.name === 'historical-unversioned'));
 const migrated = api.migrate(historical, historical.schema_version);

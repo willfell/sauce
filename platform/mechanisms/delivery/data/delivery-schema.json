@@ -311,12 +311,16 @@
       {
         "name": "historical-unversioned",
         "mode": "historical",
+        "expected_requires_migration": true,
+        "expected_historical_unversioned": true,
         "remove": ["schema_version", "batch_policy"],
         "patch": { "card": "Historical card", "risk_dimensions": [] }
       },
       {
         "name": "historical-unpinned-evidence-is-readable-with-warning",
         "mode": "historical",
+        "expected_requires_migration": true,
+        "expected_historical_unversioned": true,
         "remove": ["schema_version", "batch_policy"],
         "patch": { "card": "Historical evidence card", "evidence": ["legacy/path.md:12"], "risk_dimensions": [] },
         "expected_warning": "unpinned-evidence"
@@ -330,7 +334,13 @@
           "depends_on": ["  [[A1 status normalization and drift visibility]]  "]
         }
       },
-      { "name": "older-contract-requires-migration", "patch": { "schema_version": "0.9.0" } }
+      {
+        "name": "offset-and-fractional-evidence-timestamp",
+        "patch": {
+          "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:05.123-06:00", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }]
+        }
+      },
+      { "name": "older-contract-requires-migration", "patch": { "schema_version": "0.9.0" }, "expected_requires_migration": true }
     ],
     "invalid": [
       { "name": "missing-parent", "remove": ["parent_card"], "expected_error": "required-field" },
@@ -427,6 +437,9 @@
       { "name": "unquoted-scalar-wikilink", "input": "depends_on: [[A]]", "expected": ["A"] },
       { "name": "bare-scalar", "input": "depends_on: A", "expected": ["A"] },
       { "name": "flow-list", "input": "depends_on: [\"[[A]]\", \"B\"]", "expected": ["A", "B"] },
+      { "name": "flow-list-single-quoted", "input": "depends_on: ['[[A]]', 'B']", "expected": ["A", "B"] },
+      { "name": "flow-list-escaped-double-quote", "input": "depends_on: [\"Card \\\"quoted\\\"\"]", "expected": ["Card \"quoted\""] },
+      { "name": "flow-list-escaped-single-quote", "input": "depends_on: ['Card ''quoted''']", "expected": ["Card 'quoted'"] },
       { "name": "flow-list-quoted-comma", "input": "depends_on: [\"[[Card, part 2]]\"]", "expected": ["Card, part 2"] },
       { "name": "flow-list-unquoted-wikilink-comma", "input": "depends_on: [[[Card, part 2]]]", "expected": ["Card, part 2"] },
       { "name": "block-list", "input": "depends_on:\n  - \"[[A]]\"\n  - B", "expected": ["A", "B"] },

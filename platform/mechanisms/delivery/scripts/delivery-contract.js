@@ -33,7 +33,9 @@ function compareVersions(left, right) {
 function normalizeIdentity(value) {
   let raw = String(value == null ? '' : value).trim();
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    const quote = raw[0];
     raw = raw.slice(1, -1).trim();
+    raw = quote === '"' ? raw.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : raw.replace(/''/g, "'");
   }
   const wikilink = raw.match(/^\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]$/);
   return (wikilink ? wikilink[1] : raw).trim();
@@ -474,6 +476,9 @@ function batchEligibility(card, context = {}) {
   const validation = validateCard(card, context.mode || 'current');
   const policy = derivePolicy(validation.card);
   if (!validation.ok) return { eligible: false, policy, reason: 'contract-invalid', errors: validation.errors };
+  if (validation.requires_migration) {
+    return { eligible: false, policy, reason: 'contract-migration-required', errors: [] };
+  }
   if (validation.card.depends_on.length > 0 && (!context.dependency_result || context.dependency_result.eligible !== true)) {
     return { eligible: false, policy, reason: 'dependencies-not-complete', missing_proof: (context.dependency_result && context.dependency_result.missing_proof) || [] };
   }
