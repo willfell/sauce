@@ -154,7 +154,7 @@ class KanbanStatusSync {
   /**
    * Parse an obsidian-kanban board's markdown source into a {cardLinkpath: columnName} map.
    * - Skips YAML frontmatter at the top of the file.
-   * - A column is a depth-2 heading: `## ColumnName`.
+   * - A column is a depth-2 heading: `## ColumnName`. // lint-display-markers:allow obsidian-kanban column grammar
    * - Cards are `[[wikilink]]` occurrences inside list items (`- [[...]]` or
    *   `- [[path|alias]]`) under a column heading. Bare wikilinks (not in a
    *   list item) are NOT cards — obsidian-kanban writes cards only as list items,
