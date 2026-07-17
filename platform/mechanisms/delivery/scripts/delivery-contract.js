@@ -63,6 +63,21 @@ function parseDependencyField(value) {
   return [normalizeIdentity(raw)].filter(Boolean);
 }
 
+function normalizeEvidenceClaim(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out = {};
+  for (const field of ['source_identity', 'captured_at', 'revision', 'locator', 'claim']) {
+    out[field] = typeof value[field] === 'string' ? value[field].trim() : '';
+  }
+  return out;
+}
+
+function evidenceTimestampValid(value) {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && !Number.isNaN(Date.parse(value));
+}
+
 function normalizeZoneEntry(zone, defaultRoot = 'workshop') {
   const entry = typeof zone === 'string' ? { root: defaultRoot, path: zone } : zone;
   if (!entry || typeof entry !== 'object') return null;
@@ -85,7 +100,10 @@ function normalizeCard(card) {
   out.touch_zones = Array.isArray(out.touch_zones)
     ? out.touch_zones.map((zone) => normalizeZoneEntry(zone)).filter(Boolean).map((zone) => zone.root === 'workshop' ? zone.path : zone)
     : [];
-  out.evidence = Array.isArray(out.evidence) ? out.evidence.map((item) => String(item).trim()).filter(Boolean) : [];
+  out.evidence = Array.isArray(out.evidence) ? out.evidence.map((item) => {
+    const normalized = normalizeEvidenceClaim(item);
+    return normalized || (typeof item === 'string' ? item.trim() : item);
+  }).filter(Boolean) : [];
   out.risk_dimensions = Array.isArray(out.risk_dimensions)
     ? [...new Set(out.risk_dimensions.map((item) => String(item).trim()).filter(Boolean))] : [];
   if (!Object.prototype.hasOwnProperty.call(out, 'release_required')) out.release_required = out.execution_mode === 'release';
@@ -101,6 +119,7 @@ function fieldTypeValid(value, field) {
     case 'array:string': return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim());
     case 'array:identity': return (typeof value === 'string')
       || (Array.isArray(value) && value.every((item) => typeof item === 'string' && normalizeIdentity(item)));
+    case 'array:evidence-claim': return Array.isArray(value);
     case 'array:zone': return Array.isArray(value) && value.length > 0;
     case 'array:risk-dimension': return Array.isArray(value) && value.every((item) => registry.enums.risk_dimension.includes(item));
     case 'object:deployment-map': return value && typeof value === 'object' && !Array.isArray(value);
@@ -136,6 +155,7 @@ function validateCard(card, mode = 'current') {
   const raw = card && typeof card === 'object' && !Array.isArray(card) ? card : {};
   const normalized = normalizeCard(raw);
   const errors = [];
+  const warnings = [];
   const fields = registry.types['execution-card'].fields;
   const historicalOptional = new Set(['schema_version', 'batch_policy']);
 
@@ -156,6 +176,20 @@ function validateCard(card, mode = 'current') {
 
   if (Object.prototype.hasOwnProperty.call(raw, 'status') && !normalizeStatus(raw.status)) {
     errors.push(error('invalid-status', 'status', 'status does not normalize to the shared lifecycle vocabulary'));
+  }
+  if (Array.isArray(raw.evidence)) {
+    raw.evidence.forEach((item, index) => {
+      if (typeof item === 'string' && item.trim() && historical) {
+        warnings.push(error('unpinned-evidence', `evidence.${index}`, 'historical evidence string has no timestamp or revision pin'));
+        return;
+      }
+      const claim = normalizeEvidenceClaim(item);
+      if (!claim || ['source_identity', 'captured_at', 'revision', 'locator', 'claim'].some((key) => !claim[key])) {
+        errors.push(error('invalid-evidence-claim', `evidence.${index}`, 'evidence requires source_identity, captured_at, revision, locator, and claim'));
+      } else if (!evidenceTimestampValid(claim.captured_at)) {
+        errors.push(error('invalid-evidence-timestamp', `evidence.${index}.captured_at`, 'captured_at must be ISO-8601 with timezone'));
+      }
+    });
   }
   const version = raw.schema_version;
   const versionCmp = version == null ? null : compareVersions(version, CONTRACT_VERSION);
@@ -218,6 +252,7 @@ function validateCard(card, mode = 'current') {
   return {
     ok: errors.length === 0,
     errors,
+    warnings,
     card: normalized,
     contract_version: CONTRACT_VERSION,
     requires_migration: version == null || versionCmp === -1,
@@ -228,28 +263,33 @@ function validateCard(card, mode = 'current') {
 function completionProof(record) {
   const item = record && typeof record === 'object' ? record : {};
   const missing = [];
+  const addMissing = (field) => { if (!missing.includes(field)) missing.push(field); };
   if (item.execution_mode === 'docs_only') {
     if (!['completed', 'deployed'].includes(item.phase)) missing.push('phase');
     if (!item.validation_receipt || item.validation_receipt.ok !== true) missing.push('validation_receipt');
     return { complete: missing.length === 0, missing, mode: 'docs_only' };
   }
-  if (item.phase !== 'deployed') missing.push('phase');
-  for (const field of ['feature_merge_sha', 'release_pr', 'release_merge_sha', 'required_version', 'tag', 'tap_pr', 'brew_version']) {
-    if (!item[field]) missing.push(field);
-  }
+  if (item.phase !== 'deployed') addMissing('phase');
+  if (!/^[0-9a-f]{40}$/i.test(String(item.feature_merge_sha || ''))) addMissing('feature_merge_sha');
+  if (!Number.isInteger(item.release_pr) || item.release_pr <= 0) addMissing('release_pr');
+  if (!/^[0-9a-f]{40}$/i.test(String(item.release_merge_sha || ''))) addMissing('release_merge_sha');
+  if (compareVersions(item.required_version, item.required_version) !== 0) addMissing('required_version');
+  if (!/^v\d+\.\d+\.\d+$/.test(String(item.tag || ''))) addMissing('tag');
+  if (!Number.isInteger(item.tap_pr) || item.tap_pr <= 0) addMissing('tap_pr');
+  if (compareVersions(item.brew_version, item.brew_version) !== 0) addMissing('brew_version');
   const brewComparison = item.required_version && item.brew_version
     ? compareVersions(item.brew_version, item.required_version) : null;
-  if (item.required_version && item.brew_version && (brewComparison == null || brewComparison < 0)) missing.push('brew_version');
+  if (item.required_version && item.brew_version && (brewComparison == null || brewComparison < 0)) addMissing('brew_version');
   const tagVersion = String(item.tag || '').replace(/^v/, '');
   const tagComparison = item.required_version && tagVersion ? compareVersions(tagVersion, item.required_version) : null;
-  if (item.required_version && item.tag && (tagComparison == null || tagComparison < 0)) missing.push('tag');
+  if (item.required_version && item.tag && (tagComparison == null || tagComparison < 0)) addMissing('tag');
   for (const vault of REQUIRED_VAULTS) {
     const receipt = item.vault_receipts && item.vault_receipts[vault];
     const installedComparison = receipt && receipt.installed_version && item.required_version
       ? compareVersions(receipt.installed_version, item.required_version) : null;
     if (!receipt || receipt.ok !== true || !receipt.installed_version
       || (item.required_version && (installedComparison == null || installedComparison < 0))) {
-      missing.push(`vault_receipts.${vault}`);
+      addMissing(`vault_receipts.${vault}`);
     }
   }
   return { complete: missing.length === 0, missing, mode: 'release' };
@@ -367,6 +407,7 @@ function migrate(note, fromVersion) {
   if (comparison === 0) return { ok: true, reason: null, note: original, applied: [], manual: [] };
   const migrated = clone(original);
   const applied = [];
+  const manual = [];
   const setDefault = (key, value) => {
     if (!Object.prototype.hasOwnProperty.call(migrated, key)) {
       migrated[key] = clone(value); applied.push(`1.0.0:${key}:default_backfill`);
@@ -380,11 +421,16 @@ function migrate(note, fromVersion) {
   if (!Object.prototype.hasOwnProperty.call(migrated, 'batch_policy')) {
     migrated.batch_policy = derivePolicy(migrated); applied.push('1.0.0:batch_policy:derive_from');
   }
+  if (Array.isArray(migrated.evidence)) {
+    migrated.evidence.forEach((item, index) => {
+      if (typeof item === 'string') manual.push(`evidence.${index}:requires-pinning`);
+    });
+  }
   migrated.depends_on = parseDependencyField(migrated.depends_on);
   if (migrated.status && normalizeStatus(migrated.status)) migrated.status = normalizeStatus(migrated.status);
   migrated.schema_version = CONTRACT_VERSION;
   applied.push('1.0.0:schema_version:default_backfill');
-  return { ok: true, reason: null, note: migrated, applied, manual: [] };
+  return { ok: true, reason: null, note: migrated, applied, manual };
 }
 
 function describe(type, consumer) {
@@ -416,6 +462,7 @@ module.exports = {
   normalizeIdentity,
   normalizeStatus,
   parseDependencyField,
+  normalizeEvidenceClaim,
   normalizeCard,
   validateCard,
   resolveDependencies,

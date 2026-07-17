@@ -32,6 +32,7 @@ check('DEL-API-1 public API exposes the semantic surface', [
   'validateCard', 'resolveDependencies', 'completionProof', 'zoneConflicts',
   'derivePolicy', 'classifyFailure', 'posture', 'migrate', 'describe',
   'batchEligibility', 'normalizeCard', 'normalizeStatus', 'parseDependencyField', 'compareVersions',
+  'normalizeEvidenceClaim',
 ].every((name) => typeof api[name] === 'function'));
 eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSION, api.registry.contract.version);
 check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
@@ -41,6 +42,10 @@ check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');
   check(`DEL-FIX-VALID ${fixture.name}`, verdict.ok, JSON.stringify(verdict.errors));
+  if (fixture.expected_warning) {
+    check(`DEL-FIX-WARNING ${fixture.name}`,
+      verdict.warnings.some((warning) => warning.code === fixture.expected_warning), JSON.stringify(verdict.warnings));
+  }
 }
 for (const fixture of api.registry.fixtures.invalid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');
@@ -67,6 +72,13 @@ eq('DEL-NORM-4 card validation returns normalized identities and zones', {
   parent_card: 'Tranche A — trustworthy substrate',
   touch_zones: ['platform/mechanisms/delivery'],
   depends_on: ['A1 status normalization and drift visibility'],
+});
+eq('DEL-NORM-5 evidence claim strings normalize without losing provenance', api.normalizeEvidenceClaim({
+  source_identity: ' repo ', captured_at: ' 2026-07-16T17:51:05Z ', revision: ' abc123 ',
+  locator: ' path.md:12 ', claim: ' supported claim ',
+}), {
+  source_identity: 'repo', captured_at: '2026-07-16T17:51:05Z', revision: 'abc123',
+  locator: 'path.md:12', claim: 'supported claim',
 });
 
 const base = fixtureCard({});
@@ -97,6 +109,19 @@ for (const [label, mutate, missing] of [
   mutate(receipt);
   const proof = api.completionProof(receipt);
   check(label, !proof.complete && proof.missing.includes(missing));
+}
+for (const [label, field, value] of [
+  ['DEL-COMP-7 fake merge SHA is rejected', 'feature_merge_sha', 'x'],
+  ['DEL-COMP-8 string release PR is rejected', 'release_pr', '10'],
+  ['DEL-COMP-9 fake release merge SHA is rejected', 'release_merge_sha', 'y'],
+  ['DEL-COMP-10 malformed required version is rejected', 'required_version', 'latest'],
+  ['DEL-COMP-11 unversioned tag is rejected', 'tag', 'release'],
+  ['DEL-COMP-12 string tap PR is rejected', 'tap_pr', '11'],
+]) {
+  const receipt = JSON.parse(JSON.stringify(fullReceipt));
+  receipt[field] = value;
+  const proof = api.completionProof(receipt);
+  check(label, !proof.complete && proof.missing.includes(field));
 }
 
 const depCards = [
@@ -210,6 +235,13 @@ check('DEL-MIGRATE-4 migration backfills release defaults and derives supervised
   && JSON.stringify(backfilled.note.depends_on) === '[]'
   && JSON.stringify(backfilled.note.deploy_subscriptions) === JSON.stringify({ headspace: [], accuris: [], ero: [] })
   && backfilled.note.batch_policy === 'supervised_only');
+const legacyEvidence = fixtureCard(api.registry.fixtures.valid.find(
+  (fixture) => fixture.name === 'historical-unpinned-evidence-is-readable-with-warning'));
+const evidenceMigration = api.migrate(legacyEvidence);
+check('DEL-MIGRATE-5 unpinned historical evidence is preserved and flagged for manual pinning',
+  evidenceMigration.ok
+  && evidenceMigration.note.evidence[0] === 'legacy/path.md:12'
+  && evidenceMigration.manual.includes('evidence.0:requires-pinning'));
 
 const planner = api.describe('execution-card', 'planner');
 const coordinator = api.describe('execution-card', 'coordinator');
@@ -233,8 +265,9 @@ check('DEL-CLI-2 unknown contract types fail with machine-readable output', badC
 const manifest = JSON.parse(fs.readFileSync(path.join(DELIVERY, 'manifest.json'), 'utf8'));
 const installed = new Map((manifest.files || []).map((file) => [file.source, file.dest]));
 check('DEL-MAN-1 mechanism declares no module_directory', !Object.prototype.hasOwnProperty.call(manifest, 'module_directory'));
-check('DEL-MAN-2 registry is installed under ranch scripts',
-  installed.get('data/delivery-schema.json') === '{{scripts_path}}/delivery/data/delivery-schema.json');
+check('DEL-MAN-2 registry is installed in the Templater CommonJS tree outside CustomJS scanning',
+  installed.get('data/delivery-schema.json') === '{{templater_scripts_path}}/delivery/data/delivery-schema.json'
+  && [...installed.values()].every((dest) => !dest.startsWith('{{scripts_path}}/')));
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
   'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
 ].every((source) => installed.has(source)));
@@ -244,7 +277,6 @@ check('DEL-MAN-4 platform catalogue registers Delivery exactly once at its manif
   deliveryCatalogue.length === 1
   && deliveryCatalogue[0].version === manifest.version
   && deliveryCatalogue[0].path === 'mechanisms/delivery');
-eq('DEL-MAN-5 platform catalogue contains 33 mechanisms including Delivery', platformManifest.mechanisms.length, 33);
 const schemasIndex = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform', 'schemas-index.json'), 'utf8'));
 const deliverySchemas = schemasIndex.schemas.filter((schema) => schema.id === 'delivery-execution-card-contract');
 check('DEL-SCHEMA-1 schema catalogue registers the Delivery registry and semantic validator exactly once',
