@@ -157,6 +157,15 @@ ok('NS-19 duplicate status keys fail closed as ambiguous',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('status: planning', 'status: planning\nstatus: blocked') }).action === 'no-eligible-work');
 ok('NS-20 duplicate deployment vault keys fail closed as ambiguous',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace: []') }).action === 'no-eligible-work');
+const currentPolicyOnlyInBody = requiredFieldCard.replace(/^batch_policy:.*\n/m, '') + '\nbatch_policy: continue — prose only\n';
+ok('NS-21 current cards cannot source a missing batch policy from body prose',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => currentPolicyOnlyInBody }).action === 'no-eligible-work');
+ok('NS-22 an empty historical Evidence section remains readable as omitted evidence',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Historical evidence optional]]\n', loadBody: () => `${evidenceLessHistorical}\n### Evidence\n\n` }).card === 'Historical evidence optional');
+ok('NS-23 spaced duplicate card keys fail closed as ambiguous YAML',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('card: Required fields', 'card: Required fields\ncard : Different') }).action === 'no-eligible-work');
+ok('NS-24 spaced duplicate deployment keys fail closed as ambiguous YAML',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: []\n  headspace : []') }).action === 'no-eligible-work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

@@ -142,13 +142,13 @@ function frontmatterBody(raw) {
 }
 
 function rawScalarField(raw, key) {
-  const line = frontmatterBody(raw).split('\n').find((value) => new RegExp(`^${key}:`).test(value));
+  const line = frontmatterBody(raw).split('\n').find((value) => new RegExp(`^${key}\\s*:`).test(value));
   return line ? line.slice(line.indexOf(':') + 1).trim() : undefined;
 }
 
 function listField(raw, key) {
   const lines = frontmatterBody(raw).split('\n');
-  const index = lines.findIndex((value) => new RegExp(`^${key}:`).test(value));
+  const index = lines.findIndex((value) => new RegExp(`^${key}\\s*:`).test(value));
   if (index < 0) return undefined;
   const inline = lines[index].slice(lines[index].indexOf(':') + 1).trim();
   if (inline) {
@@ -168,12 +168,12 @@ function listField(raw, key) {
 
 function deploymentField(raw) {
   const lines = frontmatterBody(raw).split('\n');
-  const index = lines.findIndex((value) => /^deploy_subscriptions:/.test(value));
+  const index = lines.findIndex((value) => /^deploy_subscriptions\s*:/.test(value));
   if (index < 0) return undefined;
   const out = {}; let current = null;
   for (let i = index + 1; i < lines.length; i += 1) {
     if (lines[i] && !/^\s+/.test(lines[i])) break;
-    const vault = lines[i].match(/^\s{2}([a-zA-Z0-9_-]+):\s*(.*?)\s*$/);
+    const vault = lines[i].match(/^\s{2}([a-zA-Z0-9_-]+)\s*:\s*(.*?)\s*$/);
     if (vault) {
       current = vault[1];
       const inline = vault[2];
@@ -206,8 +206,9 @@ function evidenceField(raw) {
   }
   const section = String(raw || '').match(/^### Evidence\s*\n([\s\S]*?)(?=^###\s|\s*$)/m);
   if (!section) return undefined;
-  return section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
+  const claims = section[1].split('\n').map((line) => line.match(/^\s*-\s+(.+?)\s*$/))
     .filter(Boolean).map((match) => match[1].trim());
+  return claims.length ? claims : undefined;
 }
 
 function parseDeliveryCard(raw, card) {
@@ -240,7 +241,7 @@ function parseDeliveryCard(raw, card) {
   if (dependencyFieldPresent) parsed.depends_on = parseDependsOn(raw);
   if (evidence !== undefined) parsed.evidence = evidence;
   if (authoredBatchPolicy !== undefined) parsed.batch_policy = batchPolicy || authoredBatchPolicy;
-  else if (batchPolicy) parsed.batch_policy = batchPolicy;
+  else if (schemaVersion === undefined && batchPolicy) parsed.batch_policy = batchPolicy;
   if (riskDimensions !== undefined) parsed.risk_dimensions = riskDimensions;
   if (releaseRequired !== undefined) parsed.release_required = releaseRequired;
   if (deploymentRequired !== undefined) parsed.deployment_required = deploymentRequired;
@@ -300,14 +301,14 @@ function prepareDeliveryCard(raw, card) {
   const deploymentVaultCounts = new Map();
   let inDeploymentMap = false;
   for (const line of frontmatterBody(raw).split('\n')) {
-    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):/);
+    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*:/);
     if (match) {
       inDeploymentMap = match[1] === 'deploy_subscriptions';
       if (contractFields.has(match[1])) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
       continue;
     }
     if (inDeploymentMap) {
-      const vault = line.match(/^\s{2}([a-zA-Z0-9_-]+):/);
+      const vault = line.match(/^\s{2}([a-zA-Z0-9_-]+)\s*:/);
       if (vault) deploymentVaultCounts.set(vault[1], (deploymentVaultCounts.get(vault[1]) || 0) + 1);
       else if (line && !/^\s+/.test(line)) inDeploymentMap = false;
     }
