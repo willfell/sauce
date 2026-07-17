@@ -29,6 +29,11 @@ const MAX_ACTIVE = 3;
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
+const DEPLOYMENT_VAULT_IDS = ['headspace', 'accuris', 'ero'];
+const AMEND_CONTRACT_OPTIONS = new Set([
+  '_', 'json', 'card', 'expected-head', 'expected-origin-main', 'reason',
+  'add-touch-zone', 'expected-deployment', 'desired-deployment',
+]);
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const EXCLUSIVE_ZONES = [
   'platform/install.js', 'package.json', '.github/workflows',
@@ -262,6 +267,87 @@ function deploymentField(raw) {
   return out;
 }
 
+function normalizeDeploymentMap(value, opts = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${opts.label || 'deployment map'} must be a JSON object`);
+  }
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [...DEPLOYMENT_VAULT_IDS].sort();
+  if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
+    throw new Error(`${opts.label || 'deployment map'} requires exactly headspace, accuris, and ero arrays`);
+  }
+  const normalized = {};
+  for (const vault of DEPLOYMENT_VAULT_IDS) {
+    if (!Array.isArray(value[vault])) {
+      throw new Error(`${opts.label || 'deployment map'}.${vault} must be an array`);
+    }
+    if (value[vault].some((entry) => typeof entry !== 'string')) {
+      throw new Error(`${opts.label || 'deployment map'}.${vault} entries must be strings`);
+    }
+    normalized[vault] = [...new Set(value[vault].map((entry) => entry.trim()).filter(Boolean))];
+    if (opts.requireTyped && normalized[vault].some((entry) => !/^(mechanism|blueprint):[a-z0-9._-]+$/i.test(entry))) {
+      throw new Error(`${opts.label || 'deployment map'}.${vault} entries must match mechanism:name or blueprint:name`);
+    }
+  }
+  return normalized;
+}
+
+function parseDeploymentArgument(value, label, opts = {}) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`amend-contract requires --${label}`);
+  let parsed;
+  try { parsed = JSON.parse(value); }
+  catch (err) { throw new Error(`--${label} must be valid JSON: ${err.message}`); }
+  return normalizeDeploymentMap(parsed, { label: `--${label}`, ...opts });
+}
+
+function normalizeStoredTouchZones(value) {
+  if (!Array.isArray(value) || !value.length || value.some((zone) => typeof zone !== 'string')) {
+    throw new Error('tracked contract has malformed touch_zones');
+  }
+  const normalized = value.map(normalizeZone);
+  if (normalized.some((zone) => !zone) || new Set(normalized).size !== normalized.length) {
+    throw new Error('tracked contract has malformed touch_zones');
+  }
+  if (normalized.some((zone, index) => zone !== value[index])) {
+    throw new Error('tracked contract has noncanonical touch_zones');
+  }
+  return normalized;
+}
+
+function sameDeploymentMap(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function formatExecutionContractFrontmatter(touchZones, deployments) {
+  return {
+    touch_zones: ['touch_zones:', ...touchZones.map((zone) => `  - ${JSON.stringify(zone)}`)],
+    deploy_subscriptions: [
+      'deploy_subscriptions:',
+      ...DEPLOYMENT_VAULT_IDS.flatMap((vault) => deployments[vault].length
+        ? [`  ${vault}:`, ...deployments[vault].map((entry) => `    - ${JSON.stringify(entry)}`)]
+        : [`  ${vault}: []`]),
+    ],
+  };
+}
+
+function patchFrontmatterBlocks(raw, fields) {
+  return String(raw).replace(/^---\n([\s\S]*?)\n---/, (_, body) => {
+    let lines = body.split('\n');
+    for (const [key, replacement] of Object.entries(fields)) {
+      const idx = lines.findIndex((line) => new RegExp(`^${key}:`).test(line));
+      if (idx < 0) throw new Error(`card frontmatter is missing ${key}`);
+      let end = idx + 1;
+      while (end < lines.length && /^\s+/.test(lines[end])) end++;
+      lines.splice(idx, end - idx, ...replacement);
+    }
+    return `---\n${lines.join('\n')}\n---`;
+  });
+}
+
+function ownsAmendedContract(record) {
+  return Boolean(record && Array.isArray(record.contract_amendments) && record.contract_amendments.length);
+}
+
 function parseExecutionMeta(raw) {
   return {
     modelProfile: scalarField(raw, 'model_profile'),
@@ -479,25 +565,44 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const hasResumeCondition = /^resume_condition:/m.test(frontmatter(cardRaw));
   const expectedResumeCondition = ownsParkMetadata && record.resume_condition != null
     ? String(record.resume_condition).trim() : null;
-  const metadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
+  const lifecycleMetadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
     || parseCardStatus(cardRaw) !== mapping.status
     || (ownsParkMetadata && JSON.stringify(currentDependencies) !== JSON.stringify(expectedDependencies))
     || (ownsParkMetadata && (expectedResumeCondition == null
       ? hasResumeCondition : scalarField(cardRaw, 'resume_condition') !== expectedResumeCondition));
+  const ownsContract = ownsAmendedContract(record);
+  const expectedTouchZones = ownsContract ? normalizeStoredTouchZones(record.touch_zones) : null;
+  const expectedDeployments = ownsContract
+    ? normalizeDeploymentMap(record.deploy_subscriptions, { label: 'tracked contract deployment map', requireTyped: true })
+    : null;
+  const currentTouchZones = ownsContract ? listField(cardRaw, 'touch_zones').map(normalizeZone) : null;
+  const currentDeployments = ownsContract ? deploymentField(cardRaw) : null;
+  const contractMetadataChanged = ownsContract && (
+    JSON.stringify(currentTouchZones) !== JSON.stringify(expectedTouchZones)
+    || !currentDeployments
+    || !sameDeploymentMap(
+      normalizeDeploymentMap(currentDeployments, { label: 'projected deployment map' }),
+      expectedDeployments,
+    )
+  );
   const boardChanged = boardNext !== boardRaw;
-  const metadataFields = {
-    kanban_column: mapping.column,
-    status: mapping.status,
-    status_changed_at: (opts.now || (() => new Date().toISOString()))(),
-  };
+  const metadataFields = {};
+  if (lifecycleMetadataChanged) {
+    metadataFields.kanban_column = mapping.column;
+    metadataFields.status = mapping.status;
+    metadataFields.status_changed_at = (opts.now || (() => new Date().toISOString()))();
+  }
   if (ownsParkMetadata) {
     metadataFields.depends_on = JSON.stringify(expectedDependencies.map((dep) => `[[${dep}]]`));
     metadataFields.resume_condition = expectedResumeCondition == null ? null : JSON.stringify(expectedResumeCondition);
   }
-  const cardNext = metadataChanged
+  let cardNext = lifecycleMetadataChanged
     ? patchFrontmatter(cardRaw, metadataFields)
     : cardRaw;
-  if (metadataChanged && cardNext === cardRaw && !frontmatter(cardRaw)) {
+  if (contractMetadataChanged) {
+    cardNext = patchFrontmatterBlocks(cardNext, formatExecutionContractFrontmatter(expectedTouchZones, expectedDeployments));
+  }
+  if ((lifecycleMetadataChanged || contractMetadataChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
   }
   if (boardChanged) atomicWriteText(boardPath, boardNext);
@@ -559,6 +664,18 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
       differs = differs || !expected.length || !condition
         || JSON.stringify(dependencies) !== JSON.stringify(expected)
         || scalarField(raw, 'resume_condition') !== condition;
+    }
+    if (ownsAmendedContract(record)) {
+      const touchZones = listField(raw, 'touch_zones').map(normalizeZone);
+      const deployments = deploymentField(raw);
+      const expectedTouchZones = normalizeStoredTouchZones(record.touch_zones);
+      const expectedDeployments = normalizeDeploymentMap(record.deploy_subscriptions, {
+        label: 'tracked contract deployment map', requireTyped: true,
+      });
+      differs = differs
+        || JSON.stringify(touchZones) !== JSON.stringify(expectedTouchZones)
+        || !deployments
+        || !sameDeploymentMap(normalizeDeploymentMap(deployments, { label: 'projected deployment map' }), expectedDeployments);
     }
     if (differs) {
       return {
@@ -956,6 +1073,151 @@ function resumeRefused(record, reason, extra = {}) {
     reason, dependencies: record.dependencies || [],
     resume_condition: record.resume_condition || '', ...extra,
   };
+}
+
+async function commandAmendContract(ctx, args, deps = {}) {
+  const unsupported = Object.keys(args).filter((key) => !AMEND_CONTRACT_OPTIONS.has(key));
+  if (unsupported.length) throw new Error(`amend-contract refuses unsupported option --${unsupported[0]}`);
+  if (args._ && (args._.length !== 1 || args._[0] !== 'amend-contract')) {
+    throw new Error('amend-contract refuses unexpected positional arguments');
+  }
+  if (args.json != null && args.json !== true) throw new Error('amend-contract requires --json without a value');
+  const singleton = (key) => Array.isArray(args[key]) ? '' : String(args[key] || '').trim();
+  const card = singleton('card');
+  const expectedHead = singleton('expected-head').toLowerCase();
+  const expectedOriginMain = singleton('expected-origin-main').toLowerCase();
+  const reason = singleton('reason');
+  if (!card) throw new Error('amend-contract requires an exact --card');
+  if (!/^[0-9a-f]{40}$/.test(expectedHead)) throw new Error('amend-contract requires a 40-character --expected-head SHA');
+  if (!/^[0-9a-f]{40}$/.test(expectedOriginMain)) throw new Error('amend-contract requires a 40-character --expected-origin-main SHA');
+  if (!reason) throw new Error('amend-contract requires a non-empty --reason');
+  const rawAdditions = args['add-touch-zone'] == null
+    ? [] : (Array.isArray(args['add-touch-zone']) ? args['add-touch-zone'] : [args['add-touch-zone']]);
+  if (rawAdditions.some((zone) => typeof zone !== 'string' || !normalizeZone(zone))) {
+    throw new Error('--add-touch-zone values must be non-empty paths');
+  }
+  const additions = [...new Set(rawAdditions.map(normalizeZone))];
+  // The expected operand is structurally strict but may spell the legacy value
+  // being repaired. Only the desired map can become authoritative, so it alone
+  // requires typed mechanism:name / blueprint:name entries.
+  const expectedDeployments = parseDeploymentArgument(args['expected-deployment'], 'expected-deployment');
+  const desiredDeployments = parseDeploymentArgument(args['desired-deployment'], 'desired-deployment', { requireTyped: true });
+
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const run = deps.sh || sh;
+  const worktreeExists = deps.worktreeExists || fs.existsSync;
+  const boardPath = deps.boardPath || BOARD;
+  const project = deps.projectCard || projectCard;
+  const now = deps.now || (() => new Date().toISOString());
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[card];
+    if (!record) throw new Error(`amend-contract requires a tracked --card; ${card} is not tracked`);
+    if (!['claimed', 'implementing'].includes(record.phase)) {
+      throw new Error(`amend-contract accepts only claimed or implementing pre-PR work; ${card} is ${record.phase}`);
+    }
+    if (!record.worktree || !worktreeExists(record.worktree)) {
+      throw new Error(`amend-contract requires the existing worktree for ${card}`);
+    }
+    if (record.contract_amendments != null && !Array.isArray(record.contract_amendments)) {
+      throw new Error('tracked contract has malformed amendment audit history');
+    }
+    if (record.receipt_invalidations != null && !Array.isArray(record.receipt_invalidations)) {
+      throw new Error('tracked contract has malformed receipt invalidation history');
+    }
+    const oldTouchZones = normalizeStoredTouchZones(record.touch_zones);
+    const oldDeployments = normalizeDeploymentMap(record.deploy_subscriptions, { label: 'tracked contract deployment map' });
+    if (!sameDeploymentMap(oldDeployments, expectedDeployments)) {
+      throw new Error('stale expected deployment map; authoritative contract differs');
+    }
+    run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
+    const actualHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree }).toLowerCase();
+    const actualOriginMain = run('git', ['rev-parse', 'origin/main'], { cwd: record.worktree }).toLowerCase();
+    const actualBranch = run('git', ['branch', '--show-current'], { cwd: record.worktree });
+    if (actualHead !== expectedHead) throw new Error(`stale expected HEAD; ${card} is ${actualHead}`);
+    if (actualOriginMain !== expectedOriginMain) throw new Error(`stale expected origin/main; current revision is ${actualOriginMain}`);
+    if (!record.branch || actualBranch !== record.branch) throw new Error(`target worktree branch differs from tracked branch ${record.branch || '(missing)'}`);
+    const dirty = run('git', ['status', '--porcelain=v1'], { cwd: record.worktree });
+    if (dirty) throw new Error(`amend-contract requires a clean target worktree; ${card} is dirty`);
+    if (record.projection_error) throw new Error(`target projection is unresolved: ${record.projection_error}`);
+    let targetRaw;
+    try { targetRaw = fs.readFileSync(resolveCardPath(record.card_path, record.card, deps.cardsRoot || CARDS_ROOT), 'utf8'); }
+    catch (err) { throw new Error(`target card metadata is unreadable: ${err.message}`); }
+    if (parseBatchPolicy(targetRaw) !== 'supervised_only'
+      || (record.batch_policy && record.batch_policy !== 'supervised_only')) {
+      throw new Error('amend-contract accepts only a supervised_only target contract');
+    }
+    const metadataProblem = projectionMetadataProblem(record, deps.cardsRoot || CARDS_ROOT);
+    if (metadataProblem) throw new Error(`target metadata must be reconciled before amendment: ${metadataProblem.error}`);
+    let boardRaw;
+    try { boardRaw = fs.readFileSync(boardPath, 'utf8'); }
+    catch (err) { throw new Error(`target board projection is unreadable: ${err.message}`); }
+    const boardProblem = projectionBoardDrift(boardRaw, record);
+    if (boardProblem) throw new Error('target board projection must be reconciled before amendment');
+
+    const newTouchZones = [...oldTouchZones];
+    for (const zone of additions) if (!newTouchZones.includes(zone)) newTouchZones.push(zone);
+    const conflict = conflictsWithActive(
+      { touchZones: newTouchZones },
+      activeRecords(state).filter((candidate) => candidate.card !== card),
+    );
+    if (conflict) throw new Error(`touch-zone conflict with ${conflict.card}: ${conflict.zone}`);
+    const noOp = JSON.stringify(newTouchZones) === JSON.stringify(oldTouchZones)
+      && sameDeploymentMap(desiredDeployments, oldDeployments);
+    if (noOp) {
+      return {
+        action: 'contract-amended', card, phase: record.phase, no_op: true,
+        head_sha: actualHead, origin_main_sha: actualOriginMain,
+        touch_zones: oldTouchZones, deploy_subscriptions: oldDeployments,
+      };
+    }
+
+    const amendedAt = now();
+    const oldContract = { touch_zones: oldTouchZones, deploy_subscriptions: oldDeployments };
+    const newContract = { touch_zones: newTouchZones, deploy_subscriptions: desiredDeployments };
+    const audit = {
+      revision: (record.contract_amendments || []).length + 1,
+      amended_at: amendedAt,
+      reason,
+      expected_head: expectedHead,
+      expected_origin_main: expectedOriginMain,
+      old_contract: oldContract,
+      new_contract: newContract,
+    };
+    const invalidationReason = `execution contract amended: ${reason}; rerun every review and combined gate`;
+    const invalidation = {
+      invalidated_at: amendedAt,
+      reason: invalidationReason,
+      head_sha: actualHead,
+      reviews: record.reviews || {},
+      gate_receipt: record.gate_receipt || null,
+    };
+    if (deps.beforeAuthority) await deps.beforeAuthority({ state, record, audit });
+    record.touch_zones = newTouchZones;
+    record.deploy_subscriptions = desiredDeployments;
+    record.contract_amendments = [...(record.contract_amendments || []), audit];
+    record.contract_amended_at = amendedAt;
+    record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
+    record.reviews = {};
+    record.gate_receipt = null;
+    persist(ctx, state, record);
+    if (deps.afterAuthority) await deps.afterAuthority({ state, record, audit });
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now, cardsRoot: deps.cardsRoot,
+    });
+    if (deps.afterProjection) await deps.afterProjection({ state, record, audit, projection });
+    persist(ctx, state, record);
+    return {
+      action: projection.ok ? 'contract-amended' : 'amend-contract-projection-failed',
+      card, phase: record.phase, no_op: false,
+      head_sha: actualHead, origin_main_sha: actualOriginMain,
+      touch_zones: newTouchZones, deploy_subscriptions: desiredDeployments,
+      audit, reviews_invalidated: true, invalidation_reason: invalidationReason,
+      ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
+    };
+  }, { card, staleMs: 60 * 60 * 1000 }), { card, staleMs: 60 * 60 * 1000 });
 }
 
 async function commandPark(ctx, args, deps = {}) {
@@ -1423,6 +1685,7 @@ async function main() {
   let result;
   if (command === 'status') result = commandStatus(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
+  else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -1435,7 +1698,7 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|park|resume|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -1445,8 +1708,8 @@ module.exports = {
   selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
+  commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, projectionMetadataProblem, completionResult,
 };
 

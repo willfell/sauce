@@ -79,6 +79,39 @@ advanced, and never merges, rebases, pushes, or force-pushes. It invalidates eve
 old review and combined gate receipt, so rerun Gate B, all three reviews, and
 `verify-gates` before opening or advancing a PR.
 
+## Supervised pre-PR contract amendment
+
+`amend-contract` is the only supported way to repair the touch zones or deployment
+map of an already tracked clean pre-PR card. It is a direct supervised operator
+command, never an unattended selector action, and it does not claim, resume,
+merge, rebase, push, or modify the target worktree:
+
+```bash
+node scripts/autoloop/codex-coordinator.js amend-contract \
+  --card "<exact tracked card>" \
+  --expected-head "<exact 40-character target HEAD>" \
+  --expected-origin-main "<exact 40-character origin/main>" \
+  --reason "<non-empty audit reason>" \
+  --add-touch-zone "<additive zone>" \
+  --expected-deployment '{"headspace":[],"accuris":[],"ero":[]}' \
+  --desired-deployment '{"headspace":[],"accuris":[],"ero":[]}' \
+  --json
+```
+
+Repeat `--add-touch-zone` when needed. Existing zones remain ordered and can never
+be removed. The desired deployment map accepts only normalized, deduplicated
+`mechanism:name` or `blueprint:name` entries. The structurally exact expected map
+is a compare-and-swap operand and may quote an existing legacy bare entry only so
+that entry can be repaired; it is never written as desired state.
+
+The command refuses untracked, dirty, missing-worktree, stale-revision,
+post-feature-PR, non-`supervised_only`, projection-drifted, malformed, or
+active-zone-conflicting targets. A real change appends an audit record, snapshots
+and invalidates reviews plus the combined gate receipt, persists authority before
+card projection, and leaves projection failure for `reconcile --card`. An
+identical replay after reconciliation returns `no_op: true` without rewriting the
+card or receipts.
+
 ## Implement
 
 When the action is `implement`:
