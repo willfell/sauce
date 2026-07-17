@@ -105,7 +105,7 @@ is a compare-and-swap operand and may quote an existing legacy bare entry only s
 that entry can be repaired; it is never written as desired state.
 
 The command refuses untracked, dirty, missing-worktree, stale-revision,
-post-feature-PR, non-`supervised_only`, projection-drifted, malformed, or
+post-feature-PR, non-release, non-`supervised_only`, projection-drifted, malformed, or
 active-zone-conflicting targets. A real change appends an audit record, snapshots
 and invalidates reviews plus the combined gate receipt, persists authority before
 card projection, and leaves projection failure for `reconcile --card`. An

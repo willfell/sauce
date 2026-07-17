@@ -61,7 +61,7 @@ When another merge makes a feature PR stale, update it normally and rerun CI. Ne
 or `implementing` card. It acquires the selector lock and then that card's gate
 lock, fetches current `origin/main`, and requires exact expected target HEAD and
 origin/main SHAs, the tracked branch, an existing clean worktree, canonical
-projection, a non-empty audit reason, and a `supervised_only` target. It never
+release-mode projection, a non-empty audit reason, and a `supervised_only` target. It never
 claims, resumes, merges, rebases, pushes, checks out, or writes the target
 worktree.
 

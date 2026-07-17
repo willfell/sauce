@@ -371,7 +371,7 @@ function executionContractProjectionProblem(record, raw) {
     return 'projected parent_card differs from authority';
   }
   if (record.slice && scalarField(raw, 'slice') !== String(record.slice)) return 'projected slice differs from authority';
-  if (!scalarField(raw, 'execution_mode')) return 'projected execution_mode is missing';
+  if (scalarField(raw, 'execution_mode') !== 'release') return 'projected execution_mode must remain release';
   return null;
 }
 
@@ -1235,6 +1235,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
     record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
     record.reviews = {};
     record.gate_receipt = null;
+    delete record.projection_reconciled_at;
     persist(ctx, state, record);
     if (deps.afterAuthority) await deps.afterAuthority({ state, record, audit });
     const projection = await attemptProjection(ctx, record, boardPath, {
