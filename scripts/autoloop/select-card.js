@@ -146,9 +146,31 @@ function rawScalarField(raw, key) {
   return line ? line.slice(line.indexOf(':') + 1).trim() : undefined;
 }
 
+function stripYamlComment(value) {
+  const source = String(value == null ? '' : value);
+  let quote = null; let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) { escaped = false; continue; }
+    if (quote === '"') {
+      if (char === '\\') escaped = true;
+      else if (char === '"') quote = null;
+      continue;
+    }
+    if (quote === "'") {
+      if (char === "'" && source[index + 1] === "'") index += 1;
+      else if (char === "'") quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '#' && (index === 0 || /\s/.test(source[index - 1]))) return source.slice(0, index).trimEnd();
+  }
+  return source;
+}
+
 function parseYamlScalar(value) {
   if (value === undefined) return undefined;
-  const raw = String(value).trim();
+  const raw = stripYamlComment(value).trim();
   if (!raw || /^(?:null|~)$/i.test(raw)) return null;
   if (raw.startsWith('"') || raw.endsWith('"')) {
     if (!(raw.startsWith('"') && raw.endsWith('"'))) return invalidYamlValue(raw);

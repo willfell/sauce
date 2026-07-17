@@ -238,6 +238,13 @@ ok('NS-50 malformed indented deployment-map lines fail closed instead of disappe
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  ero: []', '  ero: []\n    broken mapping line') }).action === 'no-eligible-work');
 ok('NS-51 unquoted YAML flow arrays remain typed deployment lists',
   selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('  headspace: []', '  headspace: [mechanism:delivery]') }).card === 'Required fields');
+const commentedContractCard = requiredFieldCard
+  .replace('parent_card: "[[Selector fixtures]]"', 'parent_card: Selector fixtures # same parent authority')
+  .replace('  - Docs/autoloop-fixture.md', '  - Docs/autoloop-fixture.md # same touch-zone authority');
+ok('NS-52 unquoted YAML comments do not become contract identity or path data',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => commentedContractCard }).card === 'Required fields');
+ok('NS-53 quoted hash characters remain literal scalar data',
+  selectCard({ boardMd: '## In Planning\n- [ ] [[Required fields]]\n', loadBody: () => requiredFieldCard.replace('parent_card: "[[Selector fixtures]]"', 'parent_card: "Selector # literal"') }).card === 'Required fields');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',

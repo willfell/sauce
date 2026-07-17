@@ -109,6 +109,15 @@ ok(!malformedDeploymentMeta.contractOk, 'coordinator rejects unsupported indente
 const flowDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [mechanism:delivery]'));
 ok(flowDeploymentMeta.contractOk, 'coordinator accepts unquoted YAML flow arrays for deployment additions');
 eq(flowDeploymentMeta.deploySubscriptions.headspace, ['mechanism:delivery'], 'coordinator preserves typed unquoted flow deployment entries');
+const commentedMeta = parseExecutionMeta(currentRaw
+  .replace('parent_card: "[[Test parent]]"', 'parent_card: Test parent # first comment')
+  .replace('  - Docs/example.md', '  - Docs/example.md # first comment'));
+const differentlyCommentedMeta = parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: Test parent # second comment'));
+eq(commentedMeta.parentCard, 'Test parent', 'coordinator strips unquoted YAML comments from parent identity');
+eq(commentedMeta.touchZones, ['Docs/example.md'], 'coordinator strips unquoted YAML comments from touch zones');
+ok(sameParentConflict(differentlyCommentedMeta.parentCard, [{ card: 'Sibling', phase: 'implementing', parent_card: commentedMeta.parentCard }]), 'different comments cannot evade same-parent conflict detection');
+ok(zonesOverlap(commentedMeta.touchZones[0], 'Docs/example.md'), 'commented touch zones retain exact conflict authority');
+eq(parseExecutionMeta(currentRaw.replace('parent_card: "[[Test parent]]"', 'parent_card: "Test # literal"')).parentCard, 'Test # literal', 'quoted hash remains literal parent data');
 
 const sharedFixtures = delivery.registry.fixtures;
 const fixtureValue = (fixture) => {
