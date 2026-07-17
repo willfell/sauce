@@ -473,6 +473,30 @@ const typedDeployments = {
 };
 let amendFixtureId = 0;
 const deepCopy = (value) => JSON.parse(JSON.stringify(value));
+function snapshotDirectory(root) {
+  const rows = [];
+  const walk = (dir, prefix = '') => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { rows.push(['dir', relative]); walk(full, relative); }
+      else rows.push(['file', relative, fs.readFileSync(full).toString('base64')]);
+    }
+  };
+  walk(root);
+  return rows;
+}
+function withoutExecutionContractBlocks(raw) {
+  const lines = String(raw).split('\n');
+  const out = [];
+  for (let index = 0; index < lines.length;) {
+    if (/^(touch_zones|deploy_subscriptions):/.test(lines[index])) {
+      index++;
+      while (index < lines.length && /^\s+/.test(lines[index])) index++;
+    } else out.push(lines[index++]);
+  }
+  return out.join('\n');
+}
 function makeAmendFixture(opts = {}) {
   const root = path.join(tmp, `amend-${++amendFixtureId}`);
   const worktree = path.join(root, 'target-worktree');
@@ -480,8 +504,11 @@ function makeAmendFixture(opts = {}) {
   const boardPath = path.join(root, 'sauce-board.md');
   fs.mkdirSync(worktree, { recursive: true });
   fs.writeFileSync(path.join(worktree, 'protected.txt'), 'target worktree must never change\n');
+  fs.mkdirSync(path.join(worktree, 'nested'));
+  fs.writeFileSync(path.join(worktree, 'nested/second.txt'), 'second protected file\n');
   fs.writeFileSync(cardPath, [
-    '---', 'kanban_column: In Progress', 'status: in_progress',
+    '---', 'kanban_column: In Progress', 'status: in_progress', 'model_profile: heavy', 'execution_mode: release',
+    'parent_card: "[[Protected parent]]"', 'slice: TEST', 'depends_on:', '  - "[[Prerequisite]]"',
     'touch_zones:', '  - platform/mechanisms/delivery', '  - platform/schemas-index.json',
     'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
     '---', '', '## Protected active contract', '',
@@ -491,6 +518,7 @@ function makeAmendFixture(opts = {}) {
   const record = {
     card: AMEND_CARD, phase: opts.phase || 'implementing', card_path: cardPath,
     branch: 'codex-autoloop/protected-active-contract', worktree,
+    model_profile: 'heavy', parent_card: '[[Protected parent]]', slice: 'TEST', dependencies: ['Prerequisite'],
     touch_zones: ['platform/mechanisms/delivery', 'platform/schemas-index.json'],
     deploy_subscriptions: deepCopy(legacyDeployments),
     reviews: { correctness: { lens: 'correctness', verdict: 'pass', head_sha: AMEND_HEAD, summary: 'old exact-head review' } },
@@ -500,7 +528,10 @@ function makeAmendFixture(opts = {}) {
   };
   const fixture = {
     root, worktree, cardPath, boardPath,
-    state: { schema_version: 1, updated_at: '2026-07-16T00:00:00.000Z', cards: { [AMEND_CARD]: record } },
+    state: { schema_version: 1, updated_at: '2026-07-16T00:00:00.000Z', cards: {
+      [AMEND_CARD]: record,
+      Unrelated: { card: 'Unrelated', phase: 'deployed', untouched: { proof: true }, touch_zones: ['platform/unrelated'] },
+    } },
     writes: 0, locks: [], gitCalls: [], dirty: opts.dirty || '',
   };
   fixture.args = {
@@ -530,12 +561,19 @@ function makeAmendFixture(opts = {}) {
     boardPath, cardsRoot: root,
     now: () => '2026-07-16T18:00:00.000Z',
   };
-  fixture.worktreeSnapshot = fs.readFileSync(path.join(worktree, 'protected.txt'), 'utf8');
+  fixture.worktreeSnapshot = snapshotDirectory(worktree);
   fixture.cardSnapshot = fs.readFileSync(cardPath, 'utf8');
   return fixture;
 }
 
 const amend = makeAmendFixture();
+const amendUnrelatedBefore = deepCopy(amend.state.cards.Unrelated);
+const amendProtectedBefore = Object.fromEntries([
+  'phase', 'model_profile', 'dependencies', 'parent_card', 'slice', 'branch', 'worktree', 'card_path',
+].map((key) => [key, deepCopy(amend.state.cards[AMEND_CARD][key])]));
+const amendOldReviews = deepCopy(amend.state.cards[AMEND_CARD].reviews);
+const amendOldGate = deepCopy(amend.state.cards[AMEND_CARD].gate_receipt);
+const amendPriorInvalidation = deepCopy(amend.state.cards[AMEND_CARD].receipt_invalidations[0]);
 const amended = await commandAmendContract({ root: amend.root }, amend.args, amend.deps);
 eq(amended.action, 'contract-amended', 'amend-contract succeeds through the explicit supervised command');
 eq(amended.no_op, false, 'real execution-contract amendment is not a no-op');
@@ -549,14 +587,25 @@ eq(amend.state.cards[AMEND_CARD].contract_amendments[0].new_contract.deploy_subs
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_head, AMEND_HEAD, 'audit pins the exact target HEAD');
 eq(amend.state.cards[AMEND_CARD].contract_amendments[0].expected_origin_main, AMEND_MAIN, 'audit pins the exact origin/main revision');
 eq(amend.state.cards[AMEND_CARD].receipt_invalidations.length, 2, 'real amendment appends one receipt invalidation');
+eq(amend.state.cards[AMEND_CARD].receipt_invalidations[0], amendPriorInvalidation, 'real amendment preserves prior invalidation history byte-for-byte');
+eq(amend.state.cards[AMEND_CARD].receipt_invalidations[1], {
+  invalidated_at: '2026-07-16T18:00:00.000Z',
+  reason: 'execution contract amended: add the omitted catalogue zone and type legacy deployment additions; rerun every review and combined gate',
+  head_sha: AMEND_HEAD, reviews: amendOldReviews, gate_receipt: amendOldGate,
+}, 'real amendment snapshots exact reviews, gate, reason, timestamp, and HEAD');
 eq(amend.state.cards[AMEND_CARD].reviews, {}, 'real amendment invalidates current reviews');
 eq(amend.state.cards[AMEND_CARD].gate_receipt, null, 'real amendment invalidates the combined gate receipt');
+eq(amend.state.cards.Unrelated, amendUnrelatedBefore, 'authoritative update preserves every unrelated tracked record');
+eq(Object.fromEntries(Object.keys(amendProtectedBefore).map((key) => [key, amend.state.cards[AMEND_CARD][key]])),
+  amendProtectedBefore, 'amendment preserves every protected target metadata field outside the two authorized contract fields');
 ok(/platform\/manifest\.json/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'amended touch zones project into card frontmatter');
 ok(/mechanism:delivery/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'typed deployments project into card frontmatter');
 ok(/status: in_progress/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection preserves lifecycle metadata');
 ok(!/status_changed_at: 2026-07-16T18:00:00.000Z/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection does not rewrite the status timestamp');
-eq(fs.readFileSync(path.join(amend.worktree, 'protected.txt'), 'utf8'), amend.worktreeSnapshot, 'successful amendment never modifies the target worktree');
-ok(!amend.gitCalls.some((call) => ['merge', 'rebase', 'push', 'checkout', 'switch', 'reset'].includes(call[0])), 'amend-contract performs no target-worktree mutation command');
+eq(withoutExecutionContractBlocks(fs.readFileSync(amend.cardPath, 'utf8')), withoutExecutionContractBlocks(amend.cardSnapshot),
+  'card projection preserves every frontmatter field and body byte outside the two authorized contract blocks');
+eq(snapshotDirectory(amend.worktree), amend.worktreeSnapshot, 'successful amendment preserves the complete target worktree tree and bytes');
+eq(amend.gitCalls.map((call) => call[0]), ['fetch', 'rev-parse', 'rev-parse', 'branch', 'status'], 'amend-contract runs only the exact read-only Git verification sequence');
 eq(amend.writes, 2, 'successful amendment persists authority first and its projection receipt second');
 
 const claimedAmendment = makeAmendFixture({ phase: 'claimed' });
@@ -588,10 +637,19 @@ const refusalCases = [
   ['stale origin main', (f) => { f.args['expected-origin-main'] = 'c'.repeat(40); }, /stale expected origin\/main/],
   ['wrong tracked branch', (f) => { f.deps.sh = (_cmd, argv) => argv[0] === 'fetch' ? '' : argv[0] === 'rev-parse' ? (argv[1] === 'HEAD' ? AMEND_HEAD : AMEND_MAIN) : argv[0] === 'branch' ? 'other-branch' : ''; }, /branch differs/],
   ['stale deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, ero: [] }); }, /stale expected deployment/],
+  ['structurally inexact deployment CAS', (f) => { f.args['expected-deployment'] = JSON.stringify({ ...legacyDeployments, headspace: [' delivery ', 'delivery', ''] }); }, /stale expected deployment/],
   ['untyped desired deployment', (f) => { f.args['desired-deployment'] = JSON.stringify(legacyDeployments); }, /mechanism:name or blueprint:name/],
   ['malformed authoritative deployment', (f) => { f.state.cards[AMEND_CARD].deploy_subscriptions = { headspace: [], accuris: [] }; }, /requires exactly/],
   ['malformed authoritative touch zones', (f) => { f.state.cards[AMEND_CARD].touch_zones = ['platform/x', 'platform/x']; }, /malformed touch_zones/],
+  ['drifted projected touch zones', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('  - platform/schemas-index.json', '  - platform/other.json')); }, /projected touch_zones differ/],
+  ['drifted projected deployment map', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('    - delivery', '    - other')); }, /projected deployment map differs/],
+  ['drifted projected model profile', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('model_profile: heavy', 'model_profile: standard')); }, /projected model_profile differs/],
+  ['drifted projected dependencies', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('[[Prerequisite]]', '[[Other prerequisite]]')); }, /projected dependencies differ/],
+  ['drifted projected parent', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('[[Protected parent]]', '[[Other parent]]')); }, /projected parent_card differs/],
+  ['drifted projected slice', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('slice: TEST', 'slice: OTHER')); }, /projected slice differs/],
+  ['missing projected execution mode', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('execution_mode: release\n', '')); }, /execution_mode is missing/],
   ['non-supervised target', (f) => { fs.writeFileSync(f.cardPath, f.cardSnapshot.replace('batch_policy: supervised_only', 'batch_policy: unattended')); }, /supervised_only/],
+  ['unsupported execution-mode mutation', (f) => { f.args['execution-mode'] = 'docs'; }, /unsupported option --execution-mode/],
   ['unsupported metadata mutation', (f) => { f.args.phase = 'claimed'; }, /unsupported option --phase/],
 ];
 for (const [label, mutate, pattern] of refusalCases) {
@@ -599,12 +657,12 @@ for (const [label, mutate, pattern] of refusalCases) {
   mutate(fixture);
   const before = deepCopy(fixture.state);
   const beforeCard = fs.readFileSync(fixture.cardPath, 'utf8');
-  const beforeWorktree = fs.readFileSync(path.join(fixture.worktree, 'protected.txt'), 'utf8');
+  const beforeWorktree = snapshotDirectory(fixture.worktree);
   await assert.rejects(() => commandAmendContract({ root: fixture.root }, fixture.args, fixture.deps), pattern, `amend-contract refuses ${label}`);
   eq(fixture.state, before, `${label} refusal preserves authoritative state`);
   eq(fixture.writes, 0, `${label} refusal performs no ledger write`);
   eq(fs.readFileSync(fixture.cardPath, 'utf8'), beforeCard, `${label} refusal preserves projected card bytes`);
-  eq(fs.readFileSync(path.join(fixture.worktree, 'protected.txt'), 'utf8'), beforeWorktree, `${label} refusal preserves target worktree bytes`);
+  eq(snapshotDirectory(fixture.worktree), beforeWorktree, `${label} refusal preserves the complete target worktree tree and bytes`);
 }
 const malformedArgumentFixture = makeAmendFixture();
 malformedArgumentFixture.args['desired-deployment'] = '{bad';
@@ -635,12 +693,18 @@ eq(conflictFixture.state, conflictBefore, 'active-zone conflict refusal preserve
 eq(conflictFixture.writes, 0, 'active-zone conflict refusal occurs before authoritative mutation');
 
 const projectionFailure = makeAmendFixture();
-projectionFailure.deps.projectCard = () => { throw new Error('contract projection denied'); };
+projectionFailure.deps.projectCard = () => {
+  fs.writeFileSync(projectionFailure.cardPath, projectionFailure.cardSnapshot.replace(
+    '  - platform/schemas-index.json', '  - platform/schemas-index.json\n  - "platform/manifest.json"',
+  ));
+  throw new Error('crash during contract projection');
+};
 const failedAmend = await commandAmendContract({ root: projectionFailure.root }, projectionFailure.args, projectionFailure.deps);
 eq(failedAmend.action, 'amend-contract-projection-failed', 'projection failure is explicit after authoritative amendment');
 eq(projectionFailure.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments, 'projection failure preserves authoritative desired deployment map');
-eq(projectionFailure.state.cards[AMEND_CARD].projection_error, 'contract projection denied', 'projection failure is saved for reconciliation');
-eq(fs.readFileSync(projectionFailure.cardPath, 'utf8'), projectionFailure.cardSnapshot, 'failed projection leaves the card for reconciliation');
+eq(projectionFailure.state.cards[AMEND_CARD].projection_error, 'crash during contract projection', 'during-projection crash is saved for reconciliation');
+ok(/platform\/manifest\.json/.test(fs.readFileSync(projectionFailure.cardPath, 'utf8'))
+  && !/mechanism:delivery/.test(fs.readFileSync(projectionFailure.cardPath, 'utf8')), 'during-projection crash fixture leaves a genuinely partial card projection');
 const projectionFailureWrites = projectionFailure.writes;
 delete projectionFailure.deps.projectCard;
 const repairedAmendment = await commandReconcile({ root: projectionFailure.root }, { card: AMEND_CARD }, projectionFailure.deps);
@@ -648,7 +712,28 @@ eq(repairedAmendment.action, 'reconciled', 'reconciliation repairs a failed cont
 eq(projectionFailure.state.cards[AMEND_CARD].contract_amendments.length, 1, 'reconciliation never replays or duplicates the amendment audit');
 ok(projectionFailure.writes > projectionFailureWrites, 'reconciliation persists projection recovery');
 ok(/mechanism:delivery/.test(fs.readFileSync(projectionFailure.cardPath, 'utf8')), 'reconciliation projects the authoritative deployment contract');
+eq(snapshotDirectory(projectionFailure.worktree), projectionFailure.worktreeSnapshot, 'during-projection crash and reconciliation preserve the complete target worktree');
 eq((await commandReconcile({ root: projectionFailure.root }, { card: AMEND_CARD }, projectionFailure.deps)).no_op, true, 'second contract reconciliation is idempotent');
+const postReconcileReviews = { correctness: { lens: 'correctness', verdict: 'pass', head_sha: AMEND_HEAD, summary: 'fresh review after repair' } };
+const postReconcileGate = passingReceipt(AMEND_HEAD);
+projectionFailure.state.cards[AMEND_CARD].reviews = deepCopy(postReconcileReviews);
+projectionFailure.state.cards[AMEND_CARD].gate_receipt = deepCopy(postReconcileGate);
+const postReconcileInvalidations = deepCopy(projectionFailure.state.cards[AMEND_CARD].receipt_invalidations);
+const postReconcileAudits = deepCopy(projectionFailure.state.cards[AMEND_CARD].contract_amendments);
+const postReconcileTimestamp = projectionFailure.state.cards[AMEND_CARD].projection_reconciled_at;
+const postReconcileWrites = projectionFailure.writes;
+const postReconcileReplay = await commandAmendContract({ root: projectionFailure.root }, {
+  ...projectionFailure.args,
+  'expected-deployment': JSON.stringify(typedDeployments),
+  'add-touch-zone': 'platform/manifest.json',
+}, projectionFailure.deps);
+eq(postReconcileReplay.no_op, true, 'identical replay after reconciliation is an explicit no-op');
+eq(projectionFailure.writes, postReconcileWrites, 'post-reconciliation identical replay performs no write');
+eq(projectionFailure.state.cards[AMEND_CARD].reviews, postReconcileReviews, 'post-reconciliation identical replay preserves fresh reviews');
+eq(projectionFailure.state.cards[AMEND_CARD].gate_receipt, postReconcileGate, 'post-reconciliation identical replay preserves the fresh combined gate');
+eq(projectionFailure.state.cards[AMEND_CARD].receipt_invalidations, postReconcileInvalidations, 'post-reconciliation identical replay preserves invalidation history');
+eq(projectionFailure.state.cards[AMEND_CARD].contract_amendments, postReconcileAudits, 'post-reconciliation identical replay preserves amendment audit history');
+eq(projectionFailure.state.cards[AMEND_CARD].projection_reconciled_at, postReconcileTimestamp, 'post-reconciliation identical replay preserves projection timestamps');
 
 const beforeAuthorityCrash = makeAmendFixture();
 beforeAuthorityCrash.deps.beforeAuthority = () => { throw new Error('crash before authority'); };
@@ -656,6 +741,7 @@ await assert.rejects(() => commandAmendContract({ root: beforeAuthorityCrash.roo
 eq(beforeAuthorityCrash.writes, 0, 'crash before authority leaves no ledger amendment');
 eq(beforeAuthorityCrash.state.cards[AMEND_CARD].deploy_subscriptions, legacyDeployments, 'crash before authority preserves the old contract');
 eq(fs.readFileSync(beforeAuthorityCrash.cardPath, 'utf8'), beforeAuthorityCrash.cardSnapshot, 'crash before authority leaves projection untouched');
+eq(snapshotDirectory(beforeAuthorityCrash.worktree), beforeAuthorityCrash.worktreeSnapshot, 'crash before authority preserves the complete target worktree');
 
 const afterAuthorityCrash = makeAmendFixture();
 afterAuthorityCrash.deps.afterAuthority = () => { throw new Error('crash after authority'); };
@@ -663,6 +749,7 @@ await assert.rejects(() => commandAmendContract({ root: afterAuthorityCrash.root
 eq(afterAuthorityCrash.writes, 1, 'crash after authority preserves exactly one authoritative ledger update');
 eq(afterAuthorityCrash.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments, 'crash after authority preserves the new contract');
 eq(fs.readFileSync(afterAuthorityCrash.cardPath, 'utf8'), afterAuthorityCrash.cardSnapshot, 'crash after authority leaves projection recoverably stale');
+eq(snapshotDirectory(afterAuthorityCrash.worktree), afterAuthorityCrash.worktreeSnapshot, 'crash after authority preserves the complete target worktree');
 ok(projectionMetadataProblem(afterAuthorityCrash.state.cards[AMEND_CARD], afterAuthorityCrash.root), 'status detection exposes the post-authority projection boundary');
 const postAuthorityStatus = commandStatus({ root: afterAuthorityCrash.root }, {
   state: afterAuthorityCrash.state,
@@ -683,7 +770,7 @@ delete afterProjectionCrash.deps.afterProjection;
 const afterProjectionRecovery = await commandReconcile({ root: afterProjectionCrash.root }, { card: AMEND_CARD }, afterProjectionCrash.deps);
 eq(afterProjectionRecovery.results[0].projection_changed, false, 'after-projection recovery does not rewrite an already exact card');
 eq(afterProjectionCrash.state.cards[AMEND_CARD].contract_amendments.length, 1, 'after-projection recovery never duplicates authority');
-eq(fs.readFileSync(path.join(afterProjectionCrash.worktree, 'protected.txt'), 'utf8'), afterProjectionCrash.worktreeSnapshot, 'every crash boundary preserves target worktree bytes');
+eq(snapshotDirectory(afterProjectionCrash.worktree), afterProjectionCrash.worktreeSnapshot, 'every crash boundary preserves the complete target worktree tree and bytes');
 
 const parkRoot = path.join(tmp, 'park');
 fs.mkdirSync(parkRoot, { recursive: true });

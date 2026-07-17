@@ -284,7 +284,9 @@ function normalizeDeploymentMap(value, opts = {}) {
     if (value[vault].some((entry) => typeof entry !== 'string')) {
       throw new Error(`${opts.label || 'deployment map'}.${vault} entries must be strings`);
     }
-    normalized[vault] = [...new Set(value[vault].map((entry) => entry.trim()).filter(Boolean))];
+    normalized[vault] = opts.preserveEntries
+      ? [...value[vault]]
+      : [...new Set(value[vault].map((entry) => entry.trim()).filter(Boolean))];
     if (opts.requireTyped && normalized[vault].some((entry) => !/^(mechanism|blueprint):[a-z0-9._-]+$/i.test(entry))) {
       throw new Error(`${opts.label || 'deployment map'}.${vault} entries must match mechanism:name or blueprint:name`);
     }
@@ -346,6 +348,31 @@ function patchFrontmatterBlocks(raw, fields) {
 
 function ownsAmendedContract(record) {
   return Boolean(record && Array.isArray(record.contract_amendments) && record.contract_amendments.length);
+}
+
+function executionContractProjectionProblem(record, raw) {
+  const projectedTouchZones = listField(raw, 'touch_zones').map(normalizeZone);
+  const authoritativeTouchZones = normalizeStoredTouchZones(record.touch_zones);
+  const projectedDeployments = deploymentField(raw);
+  const authoritativeDeployments = normalizeDeploymentMap(record.deploy_subscriptions, {
+    label: 'tracked contract deployment map', preserveEntries: true,
+  });
+  if (JSON.stringify(projectedTouchZones) !== JSON.stringify(authoritativeTouchZones)) return 'projected touch_zones differ from authority';
+  if (!projectedDeployments || !sameDeploymentMap(
+    normalizeDeploymentMap(projectedDeployments, { label: 'projected deployment map', preserveEntries: true }),
+    authoritativeDeployments,
+  )) return 'projected deployment map differs from authority';
+  if (record.model_profile && scalarField(raw, 'model_profile') !== record.model_profile) return 'projected model_profile differs from authority';
+  if (Array.isArray(record.dependencies)
+    && JSON.stringify(parseDependsOn(raw).map(normalizeCardLink)) !== JSON.stringify(record.dependencies.map(normalizeCardLink))) {
+    return 'projected dependencies differ from authority';
+  }
+  if (record.parent_card && normalizeCardLink(scalarField(raw, 'parent_card')) !== normalizeCardLink(record.parent_card)) {
+    return 'projected parent_card differs from authority';
+  }
+  if (record.slice && scalarField(raw, 'slice') !== String(record.slice)) return 'projected slice differs from authority';
+  if (!scalarField(raw, 'execution_mode')) return 'projected execution_mode is missing';
+  return null;
 }
 
 function parseExecutionMeta(raw) {
@@ -1100,7 +1127,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
   // The expected operand is structurally strict but may spell the legacy value
   // being repaired. Only the desired map can become authoritative, so it alone
   // requires typed mechanism:name / blueprint:name entries.
-  const expectedDeployments = parseDeploymentArgument(args['expected-deployment'], 'expected-deployment');
+  const expectedDeployments = parseDeploymentArgument(args['expected-deployment'], 'expected-deployment', { preserveEntries: true });
   const desiredDeployments = parseDeploymentArgument(args['desired-deployment'], 'desired-deployment', { requireTyped: true });
 
   const loadState = deps.readState || readState;
@@ -1128,7 +1155,9 @@ async function commandAmendContract(ctx, args, deps = {}) {
       throw new Error('tracked contract has malformed receipt invalidation history');
     }
     const oldTouchZones = normalizeStoredTouchZones(record.touch_zones);
-    const oldDeployments = normalizeDeploymentMap(record.deploy_subscriptions, { label: 'tracked contract deployment map' });
+    const oldDeployments = normalizeDeploymentMap(record.deploy_subscriptions, {
+      label: 'tracked contract deployment map', preserveEntries: true,
+    });
     if (!sameDeploymentMap(oldDeployments, expectedDeployments)) {
       throw new Error('stale expected deployment map; authoritative contract differs');
     }
@@ -1148,6 +1177,10 @@ async function commandAmendContract(ctx, args, deps = {}) {
     if (parseBatchPolicy(targetRaw) !== 'supervised_only'
       || (record.batch_policy && record.batch_policy !== 'supervised_only')) {
       throw new Error('amend-contract accepts only a supervised_only target contract');
+    }
+    const executionProjectionProblem = executionContractProjectionProblem(record, targetRaw);
+    if (executionProjectionProblem) {
+      throw new Error(`target execution contract must match authority before amendment: ${executionProjectionProblem}`);
     }
     const metadataProblem = projectionMetadataProblem(record, deps.cardsRoot || CARDS_ROOT);
     if (metadataProblem) throw new Error(`target metadata must be reconciled before amendment: ${metadataProblem.error}`);
