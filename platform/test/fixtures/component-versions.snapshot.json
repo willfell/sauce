@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.242.0",
+  "workshop_version": "0.243.0",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -39,7 +39,7 @@
     "entity-create": "0.9.1",
     "people-rendering": "0.1.0",
     "people-identity": "0.1.0",
-    "styling": "0.2.1",
+    "styling": "0.3.0",
     "convenience": "0.6.0",
     "platform-claude": "0.4.0",
     "smart-connections-bridge": "0.3.0",
