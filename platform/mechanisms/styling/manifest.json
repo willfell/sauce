@@ -10,11 +10,12 @@
     { "name": "Baseline", "src": "assets/themes/Baseline" }
   ],
   "snippets": [
-    { "source": "assets/snippets/sauce-callouts.css", "name": "sauce-callouts" }
+    { "source": "assets/snippets/sauce-callouts.css", "name": "sauce-callouts" },
+    { "source": "assets/snippets/sauce-core.css", "name": "sauce-core" }
   ],
   "appearance": {
     "cssTheme": "Baseline",
-    "enabledCssSnippets": ["customjs-loader", "sauce-callouts"]
+    "enabledCssSnippets": ["customjs-loader", "sauce-callouts", "sauce-core"]
   },
   "style_settings_defaults_src": "data/style-settings-default.json",
   "files": [],
