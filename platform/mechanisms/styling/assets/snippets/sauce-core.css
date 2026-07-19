@@ -1,0 +1,273 @@
+/* sauce-core.css — shared visual tokens and opt-in component classes.
+ * Enabling this pure-add snippet does not migrate any existing consumer.
+ * Blueprint-local selectors retain precedence until their planned adoption.
+ */
+
+body {
+  --sauce-radius-modal: var(--radius-l, 12px);
+  --sauce-radius-btn: var(--radius-s, 6px);
+  --sauce-radius-pill: 999px;
+  --sauce-backdrop: var(--background-modifier-cover, rgba(0, 0, 0, 0.55));
+  --sauce-z-modal: var(--layer-modal, 1000);
+  --sauce-shadow-modal: var(--shadow-l, 0 8px 32px rgba(0, 0, 0, 0.24));
+  --sauce-hairline: var(--background-modifier-border-hover, rgba(127, 127, 127, 0.35));
+  --sauce-section-gap: var(--size-4-3, 12px);
+  --sauce-ease: var(--anim-motion-smooth, cubic-bezier(0.2, 0.9, 0.25, 1));
+  --sauce-spring: var(--anim-motion-swing, cubic-bezier(0.34, 1.56, 0.5, 1));
+  --sauce-dur-fast: var(--anim-duration-fast, 120ms);
+  --sauce-dur-reveal: var(--anim-duration-moderate, 340ms);
+}
+
+/*
+ * Repeating .sauce-btn in the selector deliberately raises specificity above
+ * Baseline's generic, body-mode, phone, and tablet button:where(...) rules without
+ * changing the one-class public API or resorting to !important.
+ */
+body .sauce-btn.sauce-btn.sauce-btn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--size-4-2, 8px);
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid var(--sauce-hairline);
+  border-radius: var(--sauce-radius-btn);
+  background: var(--background-primary, #fff);
+  color: var(--text-normal, #1f1f1f);
+  box-shadow: none;
+  font: inherit;
+  font-size: 0.86em;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    color var(--sauce-dur-fast) var(--sauce-ease),
+    background var(--sauce-dur-fast) var(--sauce-ease),
+    border-color var(--sauce-dur-fast) var(--sauce-ease),
+    box-shadow var(--sauce-dur-fast) var(--sauce-ease),
+    transform var(--sauce-dur-fast) var(--sauce-ease);
+}
+
+@media (hover: hover) {
+  body .sauce-btn.sauce-btn.sauce-btn:hover {
+    border-color: var(--background-modifier-border-hover, rgba(127, 127, 127, 0.35));
+    background: var(--background-modifier-hover, rgba(127, 127, 127, 0.12));
+    color: var(--text-normal, #1f1f1f);
+    box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.12));
+  }
+}
+
+body .sauce-btn.sauce-btn.sauce-btn:active { transform: scale(0.97); }
+body .sauce-btn.sauce-btn.sauce-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent, #7c3aed);
+  outline-offset: 2px;
+}
+body .sauce-btn.sauce-btn.sauce-btn:disabled,
+body .sauce-btn.sauce-btn.sauce-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+body .sauce-btn.sauce-btn.sauce-btn.sauce-btn-accent {
+  border-color: var(--interactive-accent, #7c3aed);
+  background: var(--interactive-accent, #7c3aed);
+  color: var(--text-on-accent, #fff);
+}
+@media (hover: hover) {
+  body .sauce-btn.sauce-btn.sauce-btn.sauce-btn-accent:hover {
+    border-color: var(--interactive-accent-hover, var(--interactive-accent, #7c3aed));
+    background: var(--interactive-accent-hover, var(--interactive-accent, #7c3aed));
+    color: var(--text-on-accent, #fff);
+  }
+}
+
+body .sauce-btn.sauce-btn.sauce-btn.sauce-btn-danger {
+  border-color: var(--color-red, #dc2626);
+  background: var(--color-red, #dc2626);
+  color: var(--text-on-accent, #fff);
+}
+@media (hover: hover) {
+  body .sauce-btn.sauce-btn.sauce-btn.sauce-btn-danger:hover {
+    border-color: var(--color-red, #dc2626);
+    background: var(--color-red, #dc2626);
+    color: var(--text-on-accent, #fff);
+    filter: brightness(0.92);
+  }
+}
+
+/* Pills. The exclusion preserves Daily's legacy local class until GA-C8. */
+.sauce-pill:not(:where(.space-daily-dashboard .sauce-pill)) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 9px;
+  border: 1px solid var(--sauce-hairline);
+  border-radius: var(--sauce-radius-pill);
+  background: var(--background-secondary, #f3f3f3);
+  color: var(--text-muted, #666);
+  font-size: 0.76em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.sauce-pill.sauce-pill-accent {
+  border-color: var(--interactive-accent, #7c3aed);
+  color: var(--interactive-accent, #7c3aed);
+  background: var(--background-primary, #fff);
+}
+.sauce-pill.sauce-pill-danger {
+  border-color: var(--color-red, #dc2626);
+  color: var(--color-red, #dc2626);
+  background: var(--background-primary, #fff);
+}
+
+/* Action rows preserve the established _mobilize two-up grammar. */
+.sauce-action-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--size-4-2, 8px);
+  width: 100%;
+}
+@media (max-width: 480px) {
+  .sauce-action-row > * {
+    flex: 1 1 128px;
+    min-width: 128px;
+  }
+}
+
+/* Modal shell — TaskDialog's surface promoted into shared classes. */
+.sauce-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--sauce-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: var(--size-4-4, 16px);
+  background: var(--sauce-backdrop);
+}
+.sauce-modal {
+  box-sizing: border-box;
+  width: min(100%, 640px);
+  max-height: min(88vh, 760px);
+  overflow: auto;
+  padding: var(--size-4-5, 20px);
+  border: 1px solid var(--sauce-hairline);
+  border-radius: var(--sauce-radius-modal);
+  background: var(--background-primary, #fff);
+  color: var(--text-normal, #1f1f1f);
+  box-shadow: var(--sauce-shadow-modal);
+}
+.sauce-modal-title {
+  margin: 0 0 var(--sauce-section-gap);
+  color: var(--text-normal, #1f1f1f);
+  font-size: 1.1em;
+  font-weight: 700;
+}
+.sauce-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--size-4-2, 8px);
+  margin-top: var(--sauce-section-gap);
+}
+
+/* Motion */
+@keyframes sauce-reveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sauce-pop {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+.sauce-anim-reveal {
+  animation: sauce-reveal var(--sauce-dur-reveal) var(--sauce-ease) both;
+}
+.sauce-anim-pop {
+  animation: sauce-pop var(--sauce-dur-reveal) var(--sauce-spring) both;
+}
+.sauce-stagger > :nth-child(1) { animation-delay: 0ms; }
+.sauce-stagger > :nth-child(2) { animation-delay: 45ms; }
+.sauce-stagger > :nth-child(3) { animation-delay: 90ms; }
+.sauce-stagger > :nth-child(4) { animation-delay: 135ms; }
+.sauce-stagger > :nth-child(n + 5) { animation-delay: 180ms; }
+
+/* Value-reviewed boundary: only newly introduced sauce-core roots stop motion. */
+@media (prefers-reduced-motion: reduce) {
+  .sauce-btn,
+  .sauce-btn::before,
+  .sauce-btn::after,
+  .sauce-btn *,
+  .sauce-btn *::before,
+  .sauce-btn *::after,
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill)),
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))::before,
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))::after,
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill)) *,
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill)) *::before,
+  .sauce-pill:not(:where(.space-daily-dashboard .sauce-pill)) *::after,
+  .sauce-action-row,
+  .sauce-action-row::before,
+  .sauce-action-row::after,
+  .sauce-action-row *,
+  .sauce-action-row *::before,
+  .sauce-action-row *::after,
+  .sauce-modal-backdrop,
+  .sauce-modal-backdrop::before,
+  .sauce-modal-backdrop::after,
+  .sauce-modal-backdrop *,
+  .sauce-modal-backdrop *::before,
+  .sauce-modal-backdrop *::after,
+  .sauce-modal,
+  .sauce-modal::before,
+  .sauce-modal::after,
+  .sauce-modal *,
+  .sauce-modal *::before,
+  .sauce-modal *::after,
+  .sauce-modal-title,
+  .sauce-modal-title::before,
+  .sauce-modal-title::after,
+  .sauce-modal-title *,
+  .sauce-modal-title *::before,
+  .sauce-modal-title *::after,
+  .sauce-modal-footer,
+  .sauce-modal-footer::before,
+  .sauce-modal-footer::after,
+  .sauce-modal-footer *,
+  .sauce-modal-footer *::before,
+  .sauce-modal-footer *::after,
+  .sauce-anim-reveal,
+  .sauce-anim-reveal::before,
+  .sauce-anim-reveal::after,
+  .sauce-anim-reveal *,
+  .sauce-anim-reveal *::before,
+  .sauce-anim-reveal *::after,
+  .sauce-anim-pop,
+  .sauce-anim-pop::before,
+  .sauce-anim-pop::after,
+  .sauce-anim-pop *,
+  .sauce-anim-pop *::before,
+  .sauce-anim-pop *::after,
+  .sauce-stagger,
+  .sauce-stagger::before,
+  .sauce-stagger::after,
+  .sauce-stagger *,
+  .sauce-stagger *::before,
+  .sauce-stagger *::after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    scroll-behavior: auto !important;
+  }
+}
