@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.243.0",
+  "workshop_version": "0.244.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -184,7 +184,7 @@
     },
     {
       "name": "modal",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "mechanisms/modal"
     },
     {
