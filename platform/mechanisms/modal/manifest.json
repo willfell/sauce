@@ -1,0 +1,23 @@
+{
+  "name": "modal",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Shared class-based dialog primitive. customJS.SauceModal.open({ title, body(el), footer|buttons, onSubmit, autofocus }) renders the sauce-core modal skeleton, owns Escape/Enter/backdrop behavior, suppresses opening ghost clicks for 400ms, and tears down its DOM plus document listener through one idempotent close path. Autofocus is explicit so callers opt in only for create flows.",
+  "depends_on": [
+    {
+      "name": "styling",
+      "range": ">=0.3.0"
+    }
+  ],
+  "customjs_classes": [
+    "SauceModal"
+  ],
+  "files": [
+    {
+      "source": "sauce-modal.js",
+      "dest": "{{scripts_path}}/modal/sauce-modal.js"
+    }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
