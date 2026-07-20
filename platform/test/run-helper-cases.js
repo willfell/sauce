@@ -8125,7 +8125,12 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 33, "HC-V0890-VERSION-D: mechanism count = 33 (+code-fence-button +editor-width +agent-embed +Delivery mechanisms)");
+  const mechanisms = Array.isArray(m.mechanisms) ? m.mechanisms
+    : (Array.isArray(m.items) ? m.items.filter(x => x.kind === "mechanism")
+      : (m.catalogue && Array.isArray(m.catalogue.mechanisms) ? m.catalogue.mechanisms : []));
+  assertEqual(mechCount, 34, "HC-V0890-VERSION-D: mechanism count = 34 (includes modal)");
+  assertTrue("HC-V0890-VERSION-D: catalogue includes modal mechanism",
+    mechanisms.some(x => x && x.name === "modal"));
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8678,7 +8683,9 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 33, "HC-V0891-VERSION-D: mechanism count = 33 (+code-fence-button +editor-width +agent-embed +Delivery mechanisms)");
+  assertEqual(mechs.length, 34, "HC-V0891-VERSION-D: mechanism count = 34 (includes modal)");
+  assertTrue("HC-V0891-VERSION-D: catalogue includes modal mechanism",
+    mechs.some(x => x && x.name === "modal"));
 }
 
 // HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref

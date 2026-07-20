@@ -183,6 +183,11 @@
       "path": "mechanisms/task-entity"
     },
     {
+      "name": "modal",
+      "version": "0.1.0",
+      "path": "mechanisms/modal"
+    },
+    {
       "name": "menu-popover",
       "version": "0.3.0",
       "path": "mechanisms/menu-popover"
