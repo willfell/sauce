@@ -2064,6 +2064,7 @@ function metadataCrashHarness(id) {
   let ledgerWrites = 0;
   let cardWrites = 0;
   let barrierCalls = 0;
+  const barrierTargets = [];
   let ledgerFailure = null;
   let cardFailure = null;
   let barrierFailure = null;
@@ -2085,8 +2086,9 @@ function metadataCrashHarness(id) {
       fs.writeFileSync(file, replacement === null ? raw : replacement(raw));
       if (failure && failure.when === 'after') throw new Error(failure.message);
     },
-    durablePathBarrier: () => {
+    durablePathBarrier: (target) => {
       barrierCalls++;
+      barrierTargets.push(target);
       if (barrierFailure && barrierFailure.call === barrierCalls) throw new Error(barrierFailure.message);
     },
     cardsRoot: reconcileRoot,
@@ -2102,7 +2104,7 @@ function metadataCrashHarness(id) {
     name, cardPath, ctx, deps, dryRun, applyArgs,
     state: () => deepCopy(durableState),
     raw: () => fs.readFileSync(cardPath, 'utf8'),
-    counts: () => ({ ledgerWrites, cardWrites, barrierCalls }),
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls, barrierTargets: [...barrierTargets] }),
     failLedger: (call, when, message) => { ledgerFailure = { call, when, message }; },
     failCard: (call, when, message) => { cardFailure = { call, when, message }; },
     failBarrier: (call, message) => { barrierFailure = { call, message }; },
@@ -2227,6 +2229,12 @@ cardBarrierFailure.failBarrier(2, 'injected card durability barrier failure');
 await assert.rejects(() => commandReconcileMetadata(cardBarrierFailure.ctx, cardBarrierArgs, cardBarrierFailure.deps),
   /card durability barrier failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates card barrier failure'); count++;
 ok(cardBarrierFailure.state().cards[cardBarrierFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS leaves no false completed audit after card barrier failure');
+const cardBarrierTargetsBeforeRetry = cardBarrierFailure.counts().barrierTargets.length;
+cardBarrierFailure.clearFailures();
+eq((await commandReconcileMetadata(cardBarrierFailure.ctx, cardBarrierArgs, cardBarrierFailure.deps)).recovered_pending, true,
+  'GA-OPS12A2-METADATA-DURABLE-BARRIERS literal retry recovers ambiguous visible card replacement');
+eq(cardBarrierFailure.counts().barrierTargets.slice(cardBarrierTargetsBeforeRetry), [cardBarrierFailure.cardPath, cardBarrierFailure.ctx.statePath],
+  'GA-OPS12A2-METADATA-DURABLE-BARRIERS reestablishes card durability before final ledger durability');
 
 const hashVerificationFailure = metadataCrashHarness('hash-verification-failure');
 const hashVerificationPlan = await hashVerificationFailure.dryRun();

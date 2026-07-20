@@ -2288,6 +2288,9 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
       } else if (rawSha256 !== pending.next_sha256) {
         throw new Error('reconcile-metadata pending intent found a third card hash; needs-inspection with zero writes');
       } else {
+        barrier(cardPath);
+        const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
+        if (verifiedSha256 !== pending.next_sha256) throw new Error('reconcile-metadata pending next card did not verify after its durability barrier');
         const remaining = projectionMetadataProblemFromRaw(record, raw, { ignoreSavedProjectionError: true });
         if (remaining) throw new Error(`metadata-only pending repair cannot finalize this drift without widening scope: ${remaining.error}`);
       }
