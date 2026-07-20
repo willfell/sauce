@@ -2011,6 +2011,10 @@ const parkedMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...m
 await assert.rejects(() => commandReconcileMetadata(
   { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => parkedMetadataState },
 ), /active and parked cards are out of scope/, 'metadata reconciliation refuses parked cards'); count++;
+const activeMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...metadataState.cards['Metadata drift'], phase: 'implementing' } } };
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => activeMetadataState },
+), /active and parked cards are out of scope/, 'GA-OPS12A2-METADATA-ACTIVE-PHASE-SCOPE-MUTATION-SURVIVES refuses an active implementing card independently of parked refusal'); count++;
 const unsupportedMetadata = historicalMetadataRaw.replace('model_profile: heavy', 'model_profile: standard');
 assert.throws(() => metadataReconciliationPlan(metadataState.cards['Metadata drift'], unsupportedMetadata),
   /without widening scope/, 'metadata-only operation refuses unsupported contract drift'); count++;
