@@ -661,6 +661,7 @@ class TaskDialog {
             return;
         }
         let submitTask = async () => false;
+        let saveBtn = null;
         const modalHandle = sauceModal.open({
             doc,
             title: editPath ? 'Edit Task' : 'New Task',
@@ -669,7 +670,8 @@ class TaskDialog {
             // use Enter as the dialog-level Save gesture. Nested controls such
             // as the note filter and web-link mini-form own their own Enter
             // behavior and must not race a task save before target handlers run.
-            onSubmit: (_handle, event) => event && event.target === titleInput
+            onSubmit: (_handle, event) => event
+                && (event.target === titleInput || event.target === saveBtn)
                 ? submitTask()
                 : false,
             closeOnSubmit: false,
@@ -1140,7 +1142,7 @@ class TaskDialog {
         const cancelBtn = mkBtn(rightGroup, { label: 'Cancel', variant: 'ghost' });
         cancelBtn.onclick = () => closeOverlay();
 
-        const saveBtn = mkBtn(rightGroup, { label: 'Save', icon: ICON.check, variant: 'accent' });
+        saveBtn = mkBtn(rightGroup, { label: 'Save', icon: ICON.check, variant: 'accent' });
         saveBtn.classList.add('mod-cta');
         const buildPayload = () => this._payloadFromState(state);
         const updateSubmit = () => {
@@ -1161,7 +1163,7 @@ class TaskDialog {
                 return false;
             }
         };
-        saveBtn.onclick = submitTask;
+        saveBtn.onclick = (event) => modalHandle.submit(event);
 
         updateSubmit();
     }

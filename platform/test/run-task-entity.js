@@ -2643,7 +2643,7 @@ async function runConfirmDeleteTests() {
   global.Notice = prevNotice;
 }
 
-// ---------- GA-C4a TaskDialog onto SauceModal (TDSM-1..5) ----------
+// ---------- GA-C4a TaskDialog onto SauceModal (TDSM-1..6) ----------
 // Drives the real create/edit renderer against the real SauceModal class. These
 // fixtures distinguish shared lifecycle delegation from a legacy overlay that
 // merely copies SauceModal class names.
@@ -2804,7 +2804,64 @@ async function runTaskDialogSauceModalTests() {
     assert(doc.body.children.length === 0, 'successful submit closes through shared lifecycle');
   });
 
-  await okAsync('TDSM-5 autofocus remains create-only across real create and edit dialogs', async () => {
+  await okAsync('TDSM-5 Save click/click and click/Title-Enter share SauceModal concurrency ownership', async () => {
+    const openDeferredCreate = () => {
+      const doc = makeDocumentStub();
+      const app = makeTaskDialogRenderApp();
+      const customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
+      global.document = doc;
+      global.app = app;
+      global.customJS = customJS;
+      global.window = { app, customJS };
+      let createCalls = 0;
+      let releaseCreate;
+      const createPending = new Promise((resolve) => { releaseCreate = resolve; });
+      const dialog = new TaskDialogClass();
+      dialog._create = async () => { createCalls += 1; await createPending; };
+      dialog.open({ surface: 'daily', today: '2026-07-20' });
+      const body = findByCls(doc.body, 'sauce-modal-body');
+      const titleInput = findInput(body);
+      titleInput.value = 'Concurrency fixture';
+      titleInput.oninput();
+      return {
+        doc,
+        titleInput,
+        save: findByCls(doc.body, 'sauce-btn-accent'),
+        calls: () => createCalls,
+        releaseCreate,
+      };
+    };
+
+    const clicks = openDeferredCreate();
+    const firstClick = fireClick(clicks.save);
+    const secondClick = fireClick(clicks.save);
+    await Promise.resolve();
+    assert(clicks.calls() === 1, 'rapid Save click/click invokes persistence once while the first save is pending');
+    clicks.releaseCreate();
+    await Promise.all([firstClick, secondClick]);
+    assert(clicks.calls() === 1 && clicks.doc.body.children.length === 0,
+      'rapid Save click/click remains single-shot after settlement and closes once');
+
+    const mixed = openDeferredCreate();
+    const clickSubmit = fireClick(mixed.save);
+    let prevented = 0;
+    mixed.doc.dispatch('keydown', {
+      key: 'Enter',
+      target: mixed.titleInput,
+      isComposing: false,
+      preventDefault() { prevented += 1; },
+    });
+    await Promise.resolve();
+    assert(prevented === 1 && mixed.calls() === 1,
+      'Save click followed by Title Enter invokes persistence once while the first save is pending');
+    mixed.releaseCreate();
+    await clickSubmit;
+    await Promise.resolve();
+    assert(mixed.calls() === 1 && mixed.doc.body.children.length === 0,
+      'Save click followed by Title Enter remains single-shot after settlement and closes once');
+  });
+
+  await okAsync('TDSM-6 autofocus remains create-only across real create and edit dialogs', async () => {
     const createDoc = makeDocumentStub();
     const createApp = makeTaskDialogRenderApp();
     let customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
