@@ -82,6 +82,12 @@
         "current": {
           "label": "path:4"
         }
+      },
+      "sticky-hub": {
+        "ancestors": [],
+        "current": {
+          "label": "lit:Sticky Notes"
+        }
       }
     }
   },

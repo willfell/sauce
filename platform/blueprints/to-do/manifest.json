@@ -60,6 +60,36 @@
         "current": {
           "label": "file:basename"
         }
+      },
+      "to-do-hub": {
+        "ancestors": [
+          {
+            "label": "lit:To-Do"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "to-do-recurring-list": {
+        "ancestors": [
+          {
+            "label": "lit:To-Do"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "to-do-recurring": {
+        "ancestors": [
+          {
+            "label": "lit:To-Do"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
       }
     }
   },

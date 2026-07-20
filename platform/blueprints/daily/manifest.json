@@ -8,7 +8,7 @@
   "depends_on": [
     {
       "name": "nav-buttons",
-      "range": ">=2.3.0"
+      "range": ">=2.5.0"
     },
     {
       "name": "customjs-guard",
@@ -90,6 +90,23 @@
         "topic": "Daily",
         "path": "{{module_directory}}",
         "command": "/daily"
+      }
+    }
+  ],
+  "nav_buttons": [
+    {
+      "id": "daily-today",
+      "label": "Daily",
+      "icon": "daily",
+      "order": 100,
+      "action": {
+        "type": "runTemplaterTemplate",
+        "template_source": "Daily Note.md",
+        "folder_prefix": "{{module_directory}}",
+        "folder_date_pattern": "YYYY/MM-MMMM",
+        "filename_prefix": "",
+        "filename_date_pattern": "dddd-YYYY-MM-DD",
+        "filename_suffix": ""
       }
     }
   ],
