@@ -17,7 +17,7 @@ const {
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
-  collectDeployedRecoveryEvidence, formulaTagFromText, DELIVERY_STABLE_FIELDS,
+  collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
@@ -1740,10 +1740,53 @@ eq(formulaTagFromText('url "https://attacker.invalid/archive/refs/tags/v0.245.0.
 eq(formulaTagFromText('url "https://github.com/willfell/sauce/releases/download/source.tar.gz"\n# url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser refuses a Sauce tag URL that exists only in a comment');
 eq(formulaTagFromText('homepage "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser requires the active Homebrew url directive');
 eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"\nurl "https://github.com/willfell/sauce/archive/refs/tags/v0.244.2.tar.gz"'), '', 'tap parser refuses multiple active Sauce tag directives');
+const formulaFor = (tag) => `url "https://github.com/willfell/sauce/archive/refs/tags/${tag}.tar.gz"`;
+eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.245.0')),
+  'v0.245.0', 'tap proof accepts matching active tap and installed formula tags');
+eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.244.2')),
+  '', 'tap proof refuses stale disagreement between active tap and installed formulas');
+const tagAncestryCommands = [];
+ok(tagContainsCommit(tmp, 'v0.245.0', FEATURE_MERGE, (command, args, opts) => {
+  tagAncestryCommands.push([command, args, opts.cwd]);
+  return '';
+}), 'tag ancestry helper accepts only after exact Git proof');
+eq(tagAncestryCommands, [
+  ['git', ['fetch', 'origin', 'main', '--tags', '--quiet'], tmp],
+  ['git', ['merge-base', '--is-ancestor', FEATURE_MERGE, 'v0.245.0'], tmp],
+], 'tag ancestry helper executes exact fetch and tokenized ancestor query');
+eq(tagContainsCommit(tmp, 'v0.245.0-extra', FEATURE_MERGE, () => { throw new Error('must not run'); }), false,
+  'tag ancestry helper rejects a decorated tag before Git');
+eq(tagContainsCommit(tmp, 'v0.245.0', `prefix-${FEATURE_MERGE}`, () => { throw new Error('must not run'); }), false,
+  'tag ancestry helper rejects a decorated commit before Git');
+let tagAncestryFailureCalls = 0;
+eq(tagContainsCommit(tmp, 'v0.245.0', FEATURE_MERGE, () => {
+  tagAncestryFailureCalls++;
+  if (tagAncestryFailureCalls === 2) throw new Error('not ancestor');
+  return '';
+}), false, 'tag ancestry helper fails closed when exact merge-base proof fails');
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, state: 'OPEN' } : releasePr },
+), /feature PR is not merged/, 'unmerged feature PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, mergeCommit: null } : releasePr },
+), /feature PR has no exact merge commit/, 'feature PR without an exact merge SHA refuses recovery'); count++;
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD,
   { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, headRefOid: `0${RECOVERY_HEAD.slice(1)}` } : releasePr },
 ), /feature PR head is not the exact expected/, 'wrong exact feature HEAD refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, { ...recoveryRecord, feature_merge_sha: 'a'.repeat(40) }, RECOVERY_HEAD, recoveryCollectorDeps,
+), /feature merge commit differs from preserved ledger evidence/, 'feature merge SHA differing from preserved ledger evidence refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? featurePr : { ...releasePr, state: 'OPEN' } },
+), /containing release PR is not merged/, 'unmerged containing release PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? featurePr : { ...releasePr, mergeCommit: null } },
+), /release PR has no exact merge commit/, 'release PR without an exact merge SHA refuses recovery'); count++;
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tagContainsCommit: () => false },
 ), /does not contain feature merge/, 'missing tag ancestry refuses recovery'); count++;
@@ -1762,8 +1805,37 @@ assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, releaseContainsCommit: () => false },
 ), /release PR does not contain/, 'unrelated merged release PR refuses recovery'); count++;
 assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, currentTapFormulaTag: () => '' },
+), /tap formula must contain exactly one/, 'missing or ambiguous active Sauce formula tag refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tapPr: () => null },
 ), /tap PR.*not merged/, 'missing tap receipt refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, tapPr: () => ({ number: 91, state: 'OPEN', url: 'https://example.test/tap/91', mergeCommit: { oid: TAP_MERGE } }) },
+), /tap PR.*not merged/, 'unmerged tap PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, tapPr: () => ({ number: 91, state: 'MERGED', url: 'https://example.test/tap/91', mergeCommit: null }) },
+), /tap PR.*no exact merge commit/, 'tap PR without an exact merge SHA refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, bottleVersion: () => '0.244.2' },
+), /installed brew.*is older/, 'older installed Homebrew version refuses recovery'); count++;
+const installedAncestryCalls = [];
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, {
+    ...recoveryCollectorDeps,
+    tagContainsCommit: (_root, tag, commit) => {
+      installedAncestryCalls.push([tag, commit]);
+      return installedAncestryCalls.length < 3;
+    },
+  },
+), /installed brew.*does not contain feature merge/, 'installed Homebrew tag must independently contain the feature merge'); count++;
+eq(installedAncestryCalls, [
+  ['v0.245.0', FEATURE_MERGE],
+  ['v0.245.0', RELEASE_MERGE],
+  ['v0.245.0', FEATURE_MERGE],
+], 'Homebrew ancestry fixture reaches the independent installed-tag edge after both formula-tag edges');
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD,
   { ...recoveryCollectorDeps, vaultLedgerProof: (vault, version) => ({ vault: vault.id, ok: vault.id !== 'ero', installed_version: version }) },
@@ -1772,6 +1844,16 @@ assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, { ...recoveryRecord, deploy_subscriptions: { headspace: ['mechanism:x'], accuris: [], ero: [] } },
   RECOVERY_HEAD, recoveryCollectorDeps,
 ), /non-empty deployment additions require existing green three-vault receipts/, 'subscription additions require prior green deployment receipts'); count++;
+const behindSubscriptionReceipts = Object.fromEntries(['headspace', 'accuris', 'ero'].map((vault) => [vault, {
+  vault, ok: true, installed_version: vault === 'ero' ? '0.244.2' : '0.245.0',
+}]));
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, {
+    ...recoveryRecord,
+    deploy_subscriptions: { headspace: ['mechanism:x'], accuris: [], ero: [] },
+    vault_receipts: behindSubscriptionReceipts,
+  }, RECOVERY_HEAD, recoveryCollectorDeps,
+), /non-empty deployment additions require existing green three-vault receipts/, 'subscription recovery refuses a green receipt behind the recovered version'); count++;
 
 // GA-OPS12-RECOVERY-IDEMPOTENCE: dry-run, apply, projection, and literal replay.
 const recoveryCardPath = path.join(reconcileRoot, 'Stranded shipped card.md');

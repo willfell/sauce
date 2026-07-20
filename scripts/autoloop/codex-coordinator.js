@@ -2281,7 +2281,7 @@ module.exports = {
   normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
-  formulaTagFromText, tagContainsCommit, DELIVERY_STABLE_FIELDS,
+  formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 };
 
 if (require.main === module) {
