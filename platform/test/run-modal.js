@@ -350,12 +350,12 @@ async function main() {
     second.close();
   });
 
-  await test('SM-15 registry, manifest, seed subscription, and preflight registration agree', () => {
+  await test('SM-15-BUMPED-MODAL-VERSION registry, manifest, seed, and preflight agree without a version literal', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'mechanisms', 'modal', 'manifest.json'), 'utf8'));
     const registry = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
     const seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed-vault', 'ranch', 'platform-subscription.json'), 'utf8'));
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'package.json'), 'utf8'));
-    assert(manifest.name === 'modal' && manifest.version === '0.1.0', 'component manifest');
+    assert(manifest.name === 'modal' && /^\d+\.\d+\.\d+$/.test(manifest.version), 'component manifest semver');
     assert(manifest.customjs_classes.join('|') === 'SauceModal', 'CustomJS class registration');
     assert(manifest.depends_on.some((item) => item.name === 'styling' && item.range === '>=0.3.0'), 'styling dependency');
     assert(registry.mechanisms.some((item) => item.name === 'modal' && item.version === manifest.version && item.path === 'mechanisms/modal'), 'platform registry');
