@@ -2833,17 +2833,25 @@ async function runTaskDialogSauceModalTests() {
     };
 
     const clicks = openDeferredCreate();
-    const firstClick = fireClick(clicks.save);
-    const secondClick = fireClick(clicks.save);
+    const clickChild = (fixture, childIndex) => fixture.save.onclick({
+      target: fixture.save.children[childIndex],
+      currentTarget: fixture.save,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+    assert(clicks.save.children.length === 2, 'Save renders distinct icon and label child targets');
+    const firstClick = clickChild(clicks, 0);
+    const secondClick = clickChild(clicks, 1);
     await Promise.resolve();
-    assert(clicks.calls() === 1, 'rapid Save click/click invokes persistence once while the first save is pending');
+    assert(clicks.calls() === 1,
+      'rapid Save icon/label click targets invoke persistence once while the first save is pending');
     clicks.releaseCreate();
     await Promise.all([firstClick, secondClick]);
     assert(clicks.calls() === 1 && clicks.doc.body.children.length === 0,
-      'rapid Save click/click remains single-shot after settlement and closes once');
+      'rapid Save child-target click/click remains single-shot after settlement and closes once');
 
     const mixed = openDeferredCreate();
-    const clickSubmit = fireClick(mixed.save);
+    const clickSubmit = clickChild(mixed, 1);
     let prevented = 0;
     mixed.doc.dispatch('keydown', {
       key: 'Enter',

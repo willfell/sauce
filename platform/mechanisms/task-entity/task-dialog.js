@@ -670,8 +670,10 @@ class TaskDialog {
             // use Enter as the dialog-level Save gesture. Nested controls such
             // as the note filter and web-link mini-form own their own Enter
             // behavior and must not race a task save before target handlers run.
+            // Save itself contains icon/label spans, so its bubbling click is
+            // identified by currentTarget rather than the clicked child target.
             onSubmit: (_handle, event) => event
-                && (event.target === titleInput || event.target === saveBtn)
+                && (event.target === titleInput || event.currentTarget === saveBtn)
                 ? submitTask()
                 : false,
             closeOnSubmit: false,
