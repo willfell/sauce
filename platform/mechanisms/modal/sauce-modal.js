@@ -36,7 +36,7 @@ class SauceModal {
   }
 
   _isSubmitKey(event) {
-    if (!event || event.key !== "Enter" || event.defaultPrevented
+    if (!event || event.key !== "Enter" || event.defaultPrevented || event.isComposing
       || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
     const target = event.target || null;
     const tag = String(target && target.tagName || "").toLowerCase();
@@ -166,7 +166,9 @@ class SauceModal {
       if (event.key === "Escape") {
         if (event.preventDefault) event.preventDefault();
         close("escape");
-      } else if (typeof opts.onSubmit === "function" && this._isSubmitKey(event)) {
+      } else if (typeof opts.onSubmit === "function"
+        && event.target && typeof modal.contains === "function" && modal.contains(event.target)
+        && this._isSubmitKey(event)) {
         if (event.preventDefault) event.preventDefault();
         submit(event);
       }

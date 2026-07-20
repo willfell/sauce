@@ -75,6 +75,7 @@ function makeElement(tagName) {
     },
     getAttribute(name) { return node.attributes[name]; },
     focus() { node._focusCount += 1; },
+    contains(candidate) { return candidate === node || descendants(node).includes(candidate); },
     querySelector(selector) {
       const all = descendants(node);
       if (selector.includes(',')) {
@@ -210,8 +211,13 @@ async function main() {
     const doc = makeDocument();
     let submits = 0;
     let prevented = 0;
-    const handle = new SauceModalClass().open({ doc, onSubmit(api) { submits += 1; assert(api === handle, 'handle passed'); } });
-    doc.dispatch('keydown', { key: 'Enter', target: makeElement('input'), preventDefault() { prevented += 1; } });
+    let input;
+    const handle = new SauceModalClass().open({
+      doc,
+      body(el) { input = doc.createElement('input'); el.appendChild(input); },
+      onSubmit(api) { submits += 1; assert(api === handle, 'handle passed'); },
+    });
+    doc.dispatch('keydown', { key: 'Enter', target: input, preventDefault() { prevented += 1; } });
     await flush();
     assert(submits === 1 && prevented === 1 && !handle.isOpen, 'Enter submit lifecycle');
   });
@@ -219,14 +225,48 @@ async function main() {
   await test('SM-9 multiline, actionable, and modified Enter never submit', async () => {
     const doc = makeDocument();
     let submits = 0;
-    const handle = new SauceModalClass().open({ doc, onSubmit() { submits += 1; } });
-    doc.dispatch('keydown', { key: 'Enter', target: makeElement('textarea') });
-    doc.dispatch('keydown', { key: 'Enter', target: { isContentEditable: true } });
-    doc.dispatch('keydown', { key: 'Enter', target: makeElement('button') });
-    doc.dispatch('keydown', { key: 'Enter', target: makeElement('select') });
-    doc.dispatch('keydown', { key: 'Enter', target: makeElement('input'), shiftKey: true });
+    const targets = {};
+    const handle = new SauceModalClass().open({
+      doc,
+      body(el) {
+        for (const tag of ['textarea', 'button', 'select', 'input']) {
+          targets[tag] = doc.createElement(tag);
+          el.appendChild(targets[tag]);
+        }
+        targets.editable = doc.createElement('div');
+        targets.editable.isContentEditable = true;
+        el.appendChild(targets.editable);
+      },
+      onSubmit() { submits += 1; },
+    });
+    doc.dispatch('keydown', { key: 'Enter', target: targets.textarea });
+    doc.dispatch('keydown', { key: 'Enter', target: targets.editable });
+    doc.dispatch('keydown', { key: 'Enter', target: targets.button });
+    doc.dispatch('keydown', { key: 'Enter', target: targets.select });
+    doc.dispatch('keydown', { key: 'Enter', target: targets.input, shiftKey: true });
     await flush();
     assert(submits === 0 && handle.isOpen, 'multiline/modified Enter ignored');
+  });
+
+  await test('SM-9a Enter ownership and IME composition fail closed', async () => {
+    const doc = makeDocument();
+    const outside = doc.createElement('input');
+    doc.body.appendChild(outside);
+    let inside;
+    let submits = 0;
+    let prevented = 0;
+    const handle = new SauceModalClass().open({
+      doc,
+      body(el) { inside = doc.createElement('input'); el.appendChild(inside); },
+      onSubmit() { submits += 1; },
+    });
+    doc.dispatch('keydown', { key: 'Enter', target: outside, preventDefault() { prevented += 1; } });
+    doc.dispatch('keydown', { key: 'Enter', target: inside, isComposing: true, preventDefault() { prevented += 1; } });
+    await flush();
+    assert(submits === 0 && prevented === 0 && handle.isOpen, 'outside and composing Enter must not submit or prevent');
+    doc.dispatch('keydown', { key: 'Enter', target: inside, preventDefault() { prevented += 1; } });
+    await flush();
+    assert(submits === 1 && prevented === 1 && !handle.isOpen, 'inside non-composing Enter submits');
   });
 
   await test('SM-10 false submit keeps dialog open and concurrent submit is suppressed', async () => {
