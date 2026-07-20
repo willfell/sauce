@@ -1741,6 +1741,7 @@ eq(formulaTagFromText('url "https://github.com/willfell/sauce/releases/download/
 eq(formulaTagFromText('homepage "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser requires the active Homebrew url directive');
 eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"\nurl "https://github.com/willfell/sauce/archive/refs/tags/v0.244.2.tar.gz"'), '', 'tap parser refuses multiple active Sauce tag directives');
 const formulaFor = (tag) => `url "https://github.com/willfell/sauce/archive/refs/tags/${tag}.tar.gz"`;
+eq(formulaTagFromText(`${formulaFor('v0.245.0')} # bottle source\r\n`), 'v0.245.0', 'tap parser accepts an active inline-commented Sauce URL in CRLF formula text');
 const blockCommentedFormula = `=begin\n${formulaFor('v0.245.0')}\n=end`;
 eq(formulaTagFromText(blockCommentedFormula), '', 'Ruby block-commented Sauce URL is inactive');
 eq(formulaTagFromText(`${blockCommentedFormula}\n${formulaFor('v0.245.0')}`), 'v0.245.0', 'active Sauce URL after a closed Ruby block comment is accepted');

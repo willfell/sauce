@@ -1073,7 +1073,8 @@ function formulaTagFromText(raw) {
   const sauceUrl = /^\s*url\s+(["'])https:\/\/github\.com\/willfell\/sauce\/archive\/refs\/tags\/(v\d+\.\d+\.\d+(?:\.\d+)?)\.tar\.gz\1\s*(?:#.*)?$/;
   const matches = [];
   let blockComment = false;
-  for (const line of String(raw || '').split('\n')) {
+  for (const rawLine of String(raw || '').split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
     if (!blockComment && /^=begin(?:\s|$)/.test(line)) {
       blockComment = true;
       continue;
