@@ -822,7 +822,12 @@ function expectedProjectedContract(record, mapping) {
   if (!migrated.ok) throw new Error(`ledger Delivery contract cannot migrate: ${migrated.reason}`);
   const validation = delivery.validateCard(migrated.note, 'historical');
   if (!validation.ok) throw new Error(`ledger Delivery contract is invalid: ${validation.errors.map((item) => item.code).join(', ')}`);
-  return validation.card;
+  const expected = { ...validation.card };
+  // Optional evidence was absent on legitimate historical Delivery cards.
+  // Validation normalizes that omission to [], but projection comparison must
+  // preserve the ledger's historical shape just as prepareDeliveryCard does.
+  if (!Object.prototype.hasOwnProperty.call(raw, 'evidence')) delete expected.evidence;
+  return expected;
 }
 
 function projectionMetadataProblemFromRaw(record, raw) {

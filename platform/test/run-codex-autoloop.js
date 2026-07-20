@@ -1866,6 +1866,15 @@ const historicalLedgerRecord = {
   delivery_contract_version: '1.0.0',
 };
 eq(projectionMetadataProblem(historicalLedgerRecord, reconcileRoot), null, 'compatible historical schema migration no longer creates false metadata projection drift');
+const historicalNoEvidenceRaw = historicalMetadataRaw.replace(/^evidence:.*\n/m, '');
+const historicalNoEvidenceContract = { ...currentMetadata, schema_version: '1.0.0' };
+delete historicalNoEvidenceContract.evidence;
+fs.writeFileSync(metadataCardPath, historicalNoEvidenceRaw);
+eq(projectionMetadataProblem({
+  ...metadataState.cards['Metadata drift'],
+  delivery_contract: historicalNoEvidenceContract,
+  delivery_contract_version: '1.0.0',
+}, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));
