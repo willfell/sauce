@@ -265,10 +265,10 @@ async function caseC14WizardNonInteractiveDefaults() {
                     { name: "nav-buttons", version: "2.5.2" },
                     { name: "cards", version: "0.2.3" },
                     { name: "accent-button", version: "0.1.0" },
-                    { name: "styling", version: "0.1.2" },
                     { name: "convenience", version: "0.1.0" },  // NEW v0.26.0 — must be defaulted
-                    { name: "modal", version: "0.2.0" },
                     { name: "task-entity", version: "0.15.5" },
+                    { name: "modal", version: "0.2.0" },
+                    { name: "styling", version: "0.3.0" },
                     { name: "validator", version: "0.1.1" }     // NOT in default-checked
                 ],
                 blueprints: []
@@ -293,7 +293,46 @@ async function caseC14WizardNonInteractiveDefaults() {
         const modalIndex = orderedNames.indexOf("modal");
         const taskEntityIndex = orderedNames.indexOf("task-entity");
         assertTrue(modalIndex >= 0 && taskEntityIndex >= 0 && modalIndex < taskEntityIndex,
-            "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: released modal default precedes task-entity");
+            "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: non-interactive released modal default precedes task-entity");
+
+        // Interactive checkbox answers follow catalogue order. Mimic accepting
+        // every checked default unchanged and prove serialization restores the
+        // shared dependency-first default authority before building entries.
+        const Module = require("module");
+        const originalLoad = Module._load;
+        Module._load = function (request, parent, isMain) {
+            if (request === "@inquirer/prompts") {
+                return {
+                    input: async ({ message, default: defaultValue }) =>
+                        message.startsWith("Workshop relative path") ? "pantry" : defaultValue,
+                    checkbox: async ({ choices }) => choices.filter((choice) => choice.checked).map((choice) => choice.value),
+                    confirm: async () => true
+                };
+            }
+            return originalLoad.call(this, request, parent, isMain);
+        };
+        try {
+            const interactive = await wizardMod.runFirstRunWizard({
+                vaultPath,
+                workshopManifest: null,
+                nonInteractive: false,
+                defaults: {}
+            });
+            const interactiveNames = interactive.subscription.mechanisms.map((m) => m.name);
+            assertTrue(
+                interactiveNames.indexOf("modal") >= 0 &&
+                interactiveNames.indexOf("modal") < interactiveNames.indexOf("task-entity"),
+                "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: interactive released modal default precedes task-entity"
+            );
+            const changedSelection = ["task-entity", "validator", "modal"];
+            assertEqual(
+                JSON.stringify(wizardMod._orderAcceptedDefaultMechanisms(changedSelection, r.subscription.mechanisms.concat([{ name: "validator" }]))),
+                JSON.stringify(changedSelection),
+                "GA-OPS11-INTERACTIVE-CUSTOM-SELECTION: changed/non-default selection order is preserved"
+            );
+        } finally {
+            Module._load = originalLoad;
+        }
     });
 }
 

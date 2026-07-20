@@ -122,6 +122,22 @@ function _safeArray(v) {
     return Array.isArray(v) ? v : [];
 }
 
+// Interactive checkbox answers are returned in catalogue order, not in the
+// order of their checked defaults. When the user accepts the untouched default
+// set, restore its dependency-first authority before serializing. Any changed
+// selection is returned byte-for-byte so custom and non-default behavior stays
+// under the user's chosen/catalogue order.
+function _orderAcceptedDefaultMechanisms(selected, manifestMechanisms) {
+    const names = _safeArray(selected);
+    const available = new Set(_safeArray(manifestMechanisms).map((item) => item && item.name).filter(Boolean));
+    const availableDefaults = DEFAULT_MECHANISMS_CHECKED.filter((name) => available.has(name));
+    if (names.length !== availableDefaults.length) return names;
+    const selectedSet = new Set(names);
+    if (selectedSet.size !== names.length) return names;
+    if (!availableDefaults.every((name) => selectedSet.has(name))) return names;
+    return availableDefaults;
+}
+
 function _findEntry(list, name) {
     return _safeArray(list).find((x) => x && x.name === name) || null;
 }
@@ -503,6 +519,7 @@ async function runFirstRunWizard(opts) {
                   choices: mechChoices
               })
             : [];
+    selectedMechs = _orderAcceptedDefaultMechanisms(selectedMechs, manifestMechs);
 
     // 5. Blueprints checkbox.
     const blueprintDefaultSet = new Set(
@@ -747,5 +764,6 @@ module.exports = {
     _normalizeSubscriptionFile,
     _coerceSubscriptionEntry,
     _loadFullBlueprintManifests,
-    _autoAddConvenienceIfDvBlueprintsSelected
+    _autoAddConvenienceIfDvBlueprintsSelected,
+    _orderAcceptedDefaultMechanisms
 };
