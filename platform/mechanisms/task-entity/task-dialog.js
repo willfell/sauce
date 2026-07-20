@@ -498,8 +498,14 @@ class TaskDialog {
                 const { app, file } = this._resolveFile(path);
                 if (!app) { done({ ok: false, reason: 'app unavailable' }); return; }
                 const doc = (typeof document !== 'undefined' && document) ? document : null;
-                if (!doc || !doc.body || typeof doc.body.createDiv !== 'function') {
+                if (!doc || !doc.body) {
                     done({ ok: false, reason: 'no document' });
+                    return;
+                }
+                const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
+                    ? globalThis.customJS.SauceModal : null;
+                if (!sauceModal || typeof sauceModal.open !== 'function') {
+                    done({ ok: false, reason: 'SauceModal unavailable' });
                     return;
                 }
 
@@ -517,84 +523,50 @@ class TaskDialog {
                     title = slash >= 0 ? base.slice(slash + 1) : base;
                 }
 
-                // Drop any prior confirm overlay so two taps can't stack modals.
-                try { const prior = doc.querySelector && doc.querySelector('.sauce-task-confirm-overlay'); if (prior) prior.remove(); } catch (_e) {}
-
-                const overlay = doc.body.createDiv({ cls: 'sauce-task-confirm-overlay' });
-                overlay.style.cssText = `
-                    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-                    display: flex; align-items: center; justify-content: center;
-                    z-index: 10000; padding: 16px;
-                `;
-                const modal = overlay.createDiv();
-                modal.style.cssText = `
-                    background: var(--background-primary, #1c1c1c);
-                    color: var(--text-normal, #ddd);
-                    border: 1px solid var(--background-modifier-border, #444);
-                    border-radius: var(--radius-m, 12px);
-                    padding: 20px 22px; box-sizing: border-box;
-                    width: min(380px, 92vw); max-height: 80vh; overflow-y: auto; overflow-x: hidden;
-                    box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
-                `;
-
-                let escListener = null;
-                const close = () => {
-                    try { if (escListener && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', escListener); } catch (_e) {}
-                    try { overlay.remove(); } catch (_e) {}
-                };
-                const cancel = () => { close(); done({ ok: false, cancelled: true }); };
-
-                const heading = modal.createEl('h3', { text: 'Delete task?' });
-                heading.style.cssText = 'margin: 0 0 8px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--text-normal, #ddd);';
-
-                const body = modal.createEl('div');
-                body.style.cssText = 'font-size: 13px; line-height: 1.5; color: var(--text-muted, #999);';
-                body.createSpan({ text: 'This moves ' });
-                const strong = body.createEl('span', { text: '“' + title + '”' });
-                strong.style.cssText = 'color: var(--text-normal, #ddd); font-weight: 600;';
-                body.createSpan({ text: ' to the trash. You can recover it from spice/tasks/_trash.' });
-
-                // Footer — Cancel (quiet ghost) + Delete (solid danger). Right-aligned,
-                // wraps as a unit on a narrow phone. Same button geometry as the editor.
-                const footer = modal.createEl('div');
-                footer.style.cssText = 'margin-top: 20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap;';
-                const BTN_BASE = 'display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 16px; border-radius: var(--radius-s, 6px); font-size: 13px; line-height: 1; cursor: pointer; white-space: nowrap; transition: background 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease;';
-
-                const cancelBtn = footer.createEl('button', { cls: 'sauce-task-confirm-cancel', text: 'Cancel' });
-                cancelBtn.style.cssText = BTN_BASE + 'border: 1px solid var(--background-modifier-border, #444); background: transparent; color: var(--text-normal, #ddd);';
-                try { cancelBtn.setAttribute('type', 'button'); } catch (_e) {}
-                cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background = 'var(--background-modifier-hover, rgba(255,255,255,0.06))'; });
-                cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = 'transparent'; });
-                cancelBtn.addEventListener('focus', () => { cancelBtn.style.outline = '2px solid var(--interactive-accent, #6a6abf)'; cancelBtn.style.outlineOffset = '1px'; });
-                cancelBtn.addEventListener('blur', () => { cancelBtn.style.outline = 'none'; });
-                cancelBtn.addEventListener('click', () => cancel());
-
-                const deleteBtn = footer.createEl('button', { cls: 'sauce-task-confirm-delete', text: 'Delete' });
-                deleteBtn.style.cssText = BTN_BASE + 'border: 1px solid var(--text-error, #e05561); background: var(--text-error, #e05561); color: var(--text-on-accent, #fff); font-weight: 600;';
-                try { deleteBtn.setAttribute('type', 'button'); } catch (_e) {}
-                deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.opacity = '0.9'; });
-                deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.opacity = '1'; });
-                deleteBtn.addEventListener('focus', () => { deleteBtn.style.outline = '2px solid var(--text-error, #e05561)'; deleteBtn.style.outlineOffset = '1px'; });
-                deleteBtn.addEventListener('blur', () => { deleteBtn.style.outline = 'none'; });
-                deleteBtn.addEventListener('click', async () => {
-                    try { deleteBtn.disabled = true; } catch (_e) {}
-                    let res;
-                    try { res = await this.markDeleted(path); }
-                    catch (e) { res = { ok: false, reason: (e && (e.message || String(e))) || 'unknown' }; }
-                    close();
-                    if (res && res.ok) done({ ok: true });
-                    else {
-                        try { new Notice('Could not delete task: ' + ((res && res.reason) || 'unknown'), 6000); } catch (_e) {}
-                        done({ ok: false, reason: (res && res.reason) || 'delete failed' });
-                    }
+                const handle = sauceModal.open({
+                    doc,
+                    title: 'Delete task?',
+                    autofocus: '.sauce-task-confirm-cancel',
+                    body: (body) => {
+                        const copy = body.createEl('div', { cls: 'sauce-task-confirm-copy' });
+                        copy.createSpan({ text: 'This moves ' });
+                        copy.createEl('strong', { text: '“' + title + '”' });
+                        copy.createSpan({ text: ' to the trash. You can recover it from spice/tasks/_trash.' });
+                    },
+                    buttons: [
+                        { label: 'Cancel', action: 'cancel', className: 'sauce-task-confirm-cancel' },
+                        {
+                            label: 'Delete',
+                            tone: 'danger',
+                            close: false,
+                            className: 'sauce-task-confirm-delete',
+                            onClick: async (api, event) => {
+                                const button = event && (event.currentTarget || event.target);
+                                try { if (button) button.disabled = true; } catch (_e) {}
+                                let res;
+                                try { res = await this.markDeleted(path); }
+                                catch (e) { res = { ok: false, reason: (e && (e.message || String(e))) || 'unknown' }; }
+                                if (res && res.ok) {
+                                    done({ ok: true });
+                                    api.close('delete');
+                                } else {
+                                    try { new Notice('Could not delete task: ' + ((res && res.reason) || 'unknown'), 6000); } catch (_e) {}
+                                    done({ ok: false, reason: (res && res.reason) || 'delete failed' });
+                                    api.close('delete-error');
+                                }
+                            },
+                        },
+                    ],
+                    onClose: () => done({ ok: false, cancelled: true }),
                 });
-
-                // Backdrop click + Escape cancel. Autofocus Cancel (the SAFE default,
-                // so a stray Enter dismisses rather than deletes).
-                overlay.addEventListener('click', (e) => { if (e && e.target === overlay) cancel(); });
-                escListener = (ev) => { if (ev && ev.key === 'Escape') cancel(); };
-                try { if (typeof doc.addEventListener === 'function') doc.addEventListener('keydown', escListener); } catch (_e) {}
-                if (typeof cancelBtn.focus === 'function') { try { setTimeout(() => { try { cancelBtn.focus(); } catch (_e) {} }, 30); } catch (_e) {} }
+                if (!handle) done({ ok: false, reason: 'SauceModal open failed' });
+                else {
+                    const cancelBtn = handle.footer && handle.footer.querySelector
+                        ? handle.footer.querySelector('.sauce-btn') : null;
+                    const deleteBtn = handle.footer && handle.footer.children ? handle.footer.children[1] : null;
+                    if (cancelBtn) cancelBtn.className += ' sauce-task-confirm-cancel';
+                    if (deleteBtn) deleteBtn.className += ' sauce-task-confirm-delete';
+                }
             } catch (e) {
                 done({ ok: false, reason: (e && (e.message || String(e))) || 'unknown' });
             }
@@ -680,38 +652,28 @@ class TaskDialog {
             recurrence: fm ? (fm.recurrence || '') : '',
         };
 
-        // ----- Overlay scaffolding (reuses ToDoCreateTask's mobile-capable DOM) -----
-        const prior = document.querySelector('.sauce-todo-create-overlay');
-        if (prior) prior.remove();
-
-        const overlay = document.body.createDiv({ cls: 'sauce-todo-create-overlay' });
-        overlay.style.cssText = `
-            position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 9999; padding: 16px;
-        `;
-        const modal = overlay.createDiv();
-        modal.style.cssText = `
-            background: var(--background-primary, #1c1c1c);
-            color: var(--text-normal, #ddd);
-            border: 1px solid var(--background-modifier-border, #444);
-            border-radius: var(--radius-m, 12px);
-            padding: 20px 22px; box-sizing: border-box;
-            width: min(440px, 92vw); max-height: 80vh; overflow-y: auto; overflow-x: hidden;
-            box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
-        `;
-        const closeOverlay = () => {
-            try { document.removeEventListener('keydown', escListener); } catch (_e) {}
-            overlay.remove();
-        };
-        overlay.onclick = (e) => { if (e.target === overlay) closeOverlay(); };
-        const escListener = (ev) => { if (ev.key === 'Escape') closeOverlay(); };
-        document.addEventListener('keydown', escListener);
-
-        const heading = modal.createEl('h3', { text: editPath ? 'Edit Task' : 'New Task' });
-        heading.style.cssText = 'margin: 0 0 4px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--text-normal, #ddd);';
-
-        const host = modal.createDiv();
+        // ----- Shared SauceModal shell; TaskDialog owns only field internals. -----
+        const doc = (typeof document !== 'undefined' && document) ? document : null;
+        const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
+            ? globalThis.customJS.SauceModal : null;
+        if (!doc || !sauceModal || typeof sauceModal.open !== 'function') {
+            try { new Notice('TaskDialog: SauceModal unavailable'); } catch (_e) {}
+            return;
+        }
+        let submitTask = async () => false;
+        const modalHandle = sauceModal.open({
+            doc,
+            title: editPath ? 'Edit Task' : 'New Task',
+            buttons: [],
+            onSubmit: () => submitTask(),
+            closeOnSubmit: false,
+        });
+        if (!modalHandle) {
+            try { new Notice('TaskDialog: could not open SauceModal'); } catch (_e) {}
+            return;
+        }
+        const closeOverlay = () => modalHandle.close('task-dialog');
+        const host = modalHandle.body;
         const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
         // Native iOS <input type="date"> has an intrinsic min-width and ignores
         // width:100% even with box-sizing+min-width:0 — the boxes overflow the
@@ -1114,13 +1076,13 @@ class TaskDialog {
         // LEFT as quiet ghost buttons, then Cancel + Save (the accent anchor) on the
         // RIGHT. `justify-content: space-between` pushes the groups apart; each group
         // wraps as a unit on a narrow phone so nothing overflows at 360px.
-        const footer = host.createDiv();
-        footer.style.cssText = 'margin-top:22px; padding-top:16px; border-top:1px solid var(--background-modifier-border,#333); display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;';
+        const footer = modalHandle.footer;
 
-        const leftGroup = footer.createDiv();
-        leftGroup.style.cssText = 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;';
+        const leftGroup = editPath ? footer.createDiv() : null;
+        if (leftGroup) leftGroup.style.cssText = 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;';
         const rightGroup = footer.createDiv();
-        rightGroup.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto;';
+        rightGroup.style.cssText = 'display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-left:auto;'
+            + (!editPath ? ' width:100%;' : '');
 
         // Icons: crisp inline Lucide SVGs at 16px, currentColor so they theme with
         // the button's text (matches ToDoLeafActions' icon convention).
@@ -1131,37 +1093,16 @@ class TaskDialog {
             open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
         };
 
-        // Consistent button geometry across the whole footer: same height, radius,
-        // font-size, icon+label gap. `variant` picks the color scheme.
-        //   ghost   → quiet secondary (transparent, muted text) — item actions + Cancel
-        //   accent  → primary anchor (accent bg, on-accent text) — Save
-        //   danger  → ghost by default, red text/border on hover — Delete
-        const BTN_BASE = 'display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:6px 12px; border-radius:var(--radius-s,6px); font-size:13px; line-height:1; cursor:pointer; white-space:nowrap; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
+        // Sauce-core owns button geometry, state, focus, and tone presentation.
         const mkBtn = (parent, opts) => {
-            const b = parent.createEl('button');
             const variant = opts.variant || 'ghost';
-            const isAccent = variant === 'accent';
-            const isDanger = variant === 'danger';
-            const border = isAccent ? 'var(--interactive-accent,#6a6abf)' : 'var(--background-modifier-border,#444)';
-            const bg = isAccent ? 'var(--interactive-accent,#6a6abf)' : 'transparent';
-            const fg = isAccent ? 'var(--text-on-accent,#fff)' : 'var(--text-normal,#ddd)';
-            b.style.cssText = BTN_BASE + `border:1px solid ${border}; background:${bg}; color:${fg};` + (isAccent ? ' font-weight:600;' : '');
+            const cls = 'sauce-btn'
+                + (variant === 'accent' ? ' sauce-btn-accent' : '')
+                + (variant === 'danger' ? ' sauce-btn-danger' : '');
+            const b = parent.createEl('button', { cls });
+            try { b.setAttribute('type', 'button'); } catch (_e) {}
             if (opts.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = opts.icon; }
             if (opts.label) b.createSpan({ text: opts.label });
-            // Hover / active affordances (native feel).
-            b.onmouseenter = () => {
-                if (b.disabled) return;
-                if (isAccent) { b.style.background = 'var(--interactive-accent-hover,#7b7bd0)'; }
-                else if (isDanger) { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; b.style.color = 'var(--text-error,#e05561)'; b.style.borderColor = 'var(--text-error,#e05561)'; }
-                else { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; }
-            };
-            b.onmouseleave = () => {
-                if (isAccent) { b.style.background = b.disabled ? 'var(--interactive-accent,#6a6abf)' : 'var(--interactive-accent,#6a6abf)'; }
-                else if (isDanger) { b.style.background = 'transparent'; b.style.color = 'var(--text-normal,#ddd)'; b.style.borderColor = 'var(--background-modifier-border,#444)'; }
-                else { b.style.background = 'transparent'; }
-            };
-            b.onfocus = () => { b.style.outline = '2px solid var(--interactive-accent,#6a6abf)'; b.style.outlineOffset = '1px'; };
-            b.onblur = () => { b.style.outline = 'none'; };
             return b;
         };
 
@@ -1201,26 +1142,20 @@ class TaskDialog {
             const v = TE ? TE.validatePayload(buildPayload()) : { valid: !!(state.title && state.title.trim()) };
             const valid = v.valid && TaskDialog._recurrencePickerValid(state);
             saveBtn.disabled = !valid;
-            // Mute the accent when Save is unavailable so the disabled state reads.
-            saveBtn.style.opacity = valid ? '1' : '0.45';
-            saveBtn.style.cursor = valid ? 'pointer' : 'not-allowed';
         };
-        saveBtn.onclick = async () => {
+        submitTask = async () => {
+            if (saveBtn.disabled) return false;
             try {
                 if (editPath) await this._saveEdit(app, editFile, buildPayload(), state.notes);
                 else await this._create(app, buildPayload(), state.notes);
                 closeOverlay();
+                return true;
             } catch (e) {
                 try { new Notice('Save failed: ' + (e.message || e), 6000); } catch (_e) {}
+                return false;
             }
         };
-
-        // Enter-in-Title submits (mirrors ToDoCreateTask). Ignore IME composition.
-        titleInput.addEventListener('keydown', (ev) => {
-            if (ev.key !== 'Enter' || ev.isComposing) return;
-            ev.preventDefault();
-            if (!saveBtn.disabled) saveBtn.click();
-        });
+        saveBtn.onclick = submitTask;
 
         updateSubmit();
     }

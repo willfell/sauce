@@ -37,6 +37,7 @@ const TaskEntity = new TaskEntityClass();
 // (undefined on the stored customJS instance) fails loudly.
 const TaskDialogClass = loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog');
 const TaskDialog = new TaskDialogClass();
+const SauceModalClass = loadClass('mechanisms/modal/sauce-modal.js', 'SauceModal');
 
 const TaskChromeBarClass = loadClass('mechanisms/task-entity/task-chrome-bar.js', 'TaskChromeBar');
 const TaskChromeBar = new TaskChromeBarClass();
@@ -2173,13 +2174,17 @@ async function runMarkDoneDeletedTests() {
 function makeTreeNode(tag) {
   const n = {
     tagName: String(tag || 'div').toUpperCase(),
-    style: {}, dataset: {}, attributes: {}, type: '', checked: false, cls: '',
+    style: {}, dataset: {}, attributes: {}, type: '', checked: false, cls: '', className: '',
     _textContent: '', children: [], parentNode: null, _listeners: {},
     get textContent() { return this._textContent; },
     set textContent(v) { this._textContent = String(v == null ? '' : v); this.children = []; },
     createEl(t, opts) {
       const c = makeTreeNode(t);
-      if (opts) { if (opts.cls) c.cls = opts.cls; if (opts.text != null) c.textContent = opts.text; }
+      if (opts) {
+        if (opts.cls) { c.cls = opts.cls; c.className = opts.cls; }
+        if (opts.text != null) c.textContent = opts.text;
+        if (opts.type) c.type = opts.type;
+      }
       this.appendChild(c);
       return c;
     },
@@ -2188,9 +2193,10 @@ function makeTreeNode(tag) {
     appendText(v) { this.children.push({ tagName: '#text', textContent: String(v == null ? '' : v), parentNode: this }); },
     setText(v) { this.textContent = v; this.children = []; },
     empty() { this.children = []; },
-    setAttribute(k, v) { this.attributes[k] = v; this.dataset[k] = v; },
+    setAttribute(k, v) { this.attributes[k] = v; if (k === 'class') { this.cls = String(v); this.className = String(v); } },
+    getAttribute(k) { return this.attributes[k]; },
     addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
-    removeEventListener() {},
+    removeEventListener(ev, fn) { const list = this._listeners[ev] || []; const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); },
     appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
     insertBefore(node, ref) {
       node.parentNode = this;
@@ -2207,8 +2213,53 @@ function makeTreeNode(tag) {
       return (i >= 0 && i + 1 < this.parentNode.children.length) ? this.parentNode.children[i + 1] : null;
     },
     get firstChild() { return this.children[0] || null; },
-    querySelectorAll() { return []; },
+    get options() { return this.children.filter((child) => child.tagName === 'OPTION'); },
+    classList: { add() {} },
+    focus() { this._focusCount = (this._focusCount || 0) + 1; },
+    click() {
+      const event = { target: this, currentTarget: this, preventDefault() {}, stopPropagation() {} };
+      if (typeof this.onclick === 'function') return this.onclick(event);
+      const listeners = this._listeners.click || [];
+      return listeners[0] ? listeners[0](event) : undefined;
+    },
+    contains(candidate) {
+      if (candidate === this) return true;
+      return this.children.some((child) => child && typeof child.contains === 'function' && child.contains(candidate));
+    },
+    querySelector(selector) {
+      const selectors = String(selector || '').split(',').map((value) => value.trim());
+      const match = (node, part) => {
+        if (part.startsWith('.')) return (` ${node.className || node.cls || ''} `).includes(` ${part.slice(1)} `);
+        if (/^(input|select|textarea|button)/.test(part)) return node.tagName === part.match(/^\w+/)[0].toUpperCase() && !node.disabled;
+        return node.tagName === part.toUpperCase();
+      };
+      const stack = this.children.slice();
+      while (stack.length) {
+        const node = stack.shift();
+        if (selectors.some((part) => match(node, part))) return node;
+        if (node && node.children) stack.unshift(...node.children);
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      const out = [];
+      const stack = this.children.slice();
+      while (stack.length) {
+        const node = stack.shift();
+        if (selector.startsWith('.') && (` ${node.className || node.cls || ''} `).includes(` ${selector.slice(1)} `)) out.push(node);
+        if (node && node.children) stack.unshift(...node.children);
+      }
+      return out;
+    },
     closest() { return null; },
+  };
+  n.classList = {
+    add(...names) {
+      const current = String(n.className || n.cls || '').split(/\s+/).filter(Boolean);
+      for (const name of names) if (!current.includes(name)) current.push(name);
+      n.className = current.join(' ');
+      n.cls = n.className;
+    },
   };
   return n;
 }
@@ -2299,12 +2350,18 @@ async function runOptimisticRemovalTests() {
 // faithful tree stub + TD spies (same discipline as RTR-3 / the optimistic RTR-4..7).
 function findByCls(node, cls) {
   if (!node || !node.children) return null;
-  for (const c of node.children) { if (c && c.cls === cls) return c; const d = findByCls(c, cls); if (d) return d; }
+  for (const c of node.children) {
+    const classes = String((c && (c.className || c.cls)) || '').split(/\s+/);
+    if (c && classes.includes(cls)) return c;
+    const d = findByCls(c, cls); if (d) return d;
+  }
   return null;
 }
 function fireClick(el) {
   const fns = (el && el._listeners && el._listeners.click) || [];
-  return fns[0] ? fns[0]({ target: el, preventDefault() {}, stopPropagation() {} }) : undefined;
+  const event = { target: el, currentTarget: el, preventDefault() {}, stopPropagation() {} };
+  if (fns[0]) return fns[0](event);
+  return el && typeof el.onclick === 'function' ? el.onclick(event) : undefined;
 }
 function childIndex(parent, node) { return (parent && parent.children) ? parent.children.indexOf(node) : -1; }
 
@@ -2461,7 +2518,19 @@ async function runDotsMenuTests() {
 // Drives the REAL confirmDelete against a document stub (faithful, not a replica).
 function makeDocumentStub() {
   const body = makeTreeNode('body');
-  return { body, addEventListener() {}, removeEventListener() {}, querySelector() { return null; } };
+  const listeners = [];
+  return {
+    body,
+    listeners,
+    createElement(tag) { return makeTreeNode(tag); },
+    addEventListener(type, fn, capture) { listeners.push({ type, fn, capture }); },
+    removeEventListener(type, fn, capture) {
+      const i = listeners.findIndex((item) => item.type === type && item.fn === fn && item.capture === capture);
+      if (i >= 0) listeners.splice(i, 1);
+    },
+    dispatch(type, event) { for (const item of listeners.filter((entry) => entry.type === type)) item.fn(event); },
+    querySelector(selector) { return body.querySelector(selector); },
+  };
 }
 
 async function runConfirmDeleteTests() {
@@ -2469,6 +2538,7 @@ async function runConfirmDeleteTests() {
   const prevApp = global.app;
   const prevDoc = global.document;
   const prevNotice = global.Notice;
+  const prevCustomJS = global.customJS;
   global.Notice = function () {};
 
   await okAsync('TDCD-1 confirmDelete is a function on the instance', async () => {
@@ -2476,7 +2546,7 @@ async function runConfirmDeleteTests() {
   });
 
   await okAsync('TDCD-2 confirmDelete with no app (cold load) resolves {ok:false}, never touches document / throws', async () => {
-    global.window = {}; delete global.app; global.document = undefined;
+    global.window = {}; delete global.app; delete global.customJS; global.document = undefined;
     let threw = false, res;
     try { res = await new TaskDialogClass().confirmDelete('spice/tasks/x.md'); } catch (_e) { threw = true; }
     assert(!threw, 'never throws');
@@ -2492,6 +2562,7 @@ async function runConfirmDeleteTests() {
       metadataCache: { getFileCache: () => ({ frontmatter: { title: 'go through mail' } }) },
     };
     global.window = { app: global.app };
+    global.customJS = { SauceModal: new SauceModalClass() };
     const dialog = new TaskDialogClass();
     dialog.markDeleted = async (p) => { deleted.push(p); return { ok: true }; };
     const p = dialog.confirmDelete('spice/tasks/go through mail.md');
@@ -2513,6 +2584,7 @@ async function runConfirmDeleteTests() {
       metadataCache: { getFileCache: () => null },
     };
     global.window = { app: global.app };
+    global.customJS = { SauceModal: new SauceModalClass() };
     const dialog = new TaskDialogClass();
     dialog.markDeleted = async (p) => { deleted.push(p); return { ok: true }; };
     const p = dialog.confirmDelete('spice/tasks/x.md');
@@ -2524,9 +2596,192 @@ async function runConfirmDeleteTests() {
     assert(res && res.ok === false && res.cancelled === true, 'resolves cancelled: ' + JSON.stringify(res));
   });
 
+  await okAsync('TDCD-5 missing SauceModal fails closed with zero dialog DOM and recovers on the next call', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    global.app = { vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'x' }) } };
+    global.window = { app: global.app };
+    delete global.customJS;
+    const dialog = new TaskDialogClass();
+    const missing = await Promise.race([
+      dialog.confirmDelete('spice/tasks/x.md'),
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 25)),
+    ]);
+    assert(missing.reason === 'SauceModal unavailable' && doc.body.children.length === 0,
+      'missing modal must fail closed without legacy DOM: ' + JSON.stringify(missing));
+    global.customJS = { SauceModal: new SauceModalClass() };
+    const pending = dialog.confirmDelete('spice/tasks/x.md');
+    const cancel = findByCls(doc.body, 'sauce-task-confirm-cancel');
+    assert(cancel && findByCls(doc.body, 'sauce-modal-backdrop'), 'warm retry mounts real SauceModal');
+    await fireClick(cancel);
+    const recovered = await pending;
+    assert(recovered.cancelled === true, 'warm retry keeps cancellation contract');
+  });
+
+  await okAsync('TDCD-6 real SauceModal owns Escape lifecycle and exact sauce-core button tones', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    global.app = { vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'x' }) } };
+    global.window = { app: global.app };
+    global.customJS = { SauceModal: new SauceModalClass() };
+    const pending = new TaskDialogClass().confirmDelete('spice/tasks/x.md');
+    const cancel = findByCls(doc.body, 'sauce-task-confirm-cancel');
+    const danger = findByCls(doc.body, 'sauce-task-confirm-delete');
+    assert(cancel && String(cancel.className).includes('sauce-btn'), 'Cancel uses sauce-btn');
+    assert(danger && String(danger.className).includes('sauce-btn-danger'), 'Delete uses danger tone');
+    let prevented = 0;
+    doc.dispatch('keydown', { key: 'Escape', preventDefault() { prevented += 1; } });
+    const result = await pending;
+    assert(prevented === 1 && result.cancelled === true && doc.body.children.length === 0,
+      'Escape is owned by SauceModal teardown');
+  });
+
   global.window = prevWindow;
   if (prevApp === undefined) delete global.app; else global.app = prevApp;
+  if (prevCustomJS === undefined) delete global.customJS; else global.customJS = prevCustomJS;
   global.document = prevDoc;
+  global.Notice = prevNotice;
+}
+
+// ---------- GA-C4a TaskDialog onto SauceModal (TDSM-1..5) ----------
+// Drives the real create/edit renderer against the real SauceModal class. These
+// fixtures distinguish shared lifecycle delegation from a legacy overlay that
+// merely copies SauceModal class names.
+function treeText(node) {
+  if (!node) return '';
+  return String(node._textContent || node.textContent || '')
+    + (node.children || []).map(treeText).join('');
+}
+
+function makeTaskDialogRenderApp(editFile) {
+  const file = editFile || null;
+  return {
+    vault: {
+      getAbstractFileByPath(path) { return file && file.path === path ? file : null; },
+      getMarkdownFiles() { return []; },
+      getFiles() { return []; },
+      read: async () => '<!-- TASK_NOTES -->\n',
+    },
+    metadataCache: {
+      getFileCache(target) {
+        return target === file ? { frontmatter: { title: 'Existing task', due: '2026-07-21', links: [] } } : null;
+      },
+    },
+  };
+}
+
+async function runTaskDialogSauceModalTests() {
+  const prevWindow = global.window;
+  const prevApp = global.app;
+  const prevDoc = global.document;
+  const prevNotice = global.Notice;
+  const prevCustomJS = global.customJS;
+  global.Notice = function () {};
+
+  ok('TDSM-1 task-entity declares modal >=0.2.0 and legacy dialog chrome source is absent', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'manifest.json'), 'utf8'));
+    const modalDep = manifest.depends_on.find((item) => item.name === 'modal');
+    assert(modalDep && modalDep.range === '>=0.2.0', 'exact modal dependency required');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-dialog.js'), 'utf8');
+    assert(!source.includes('BTN_BASE'), 'both duplicated BTN_BASE paths must be deleted');
+    assert(!source.includes('sauce-todo-create-overlay') && !source.includes('sauce-task-confirm-overlay'),
+      'legacy overlay identities must be absent');
+    assert((source.match(/globalThis\.customJS\.SauceModal/g) || []).length === 2,
+      'create/edit and confirmDelete each resolve the real global SauceModal instance');
+  });
+
+  await okAsync('TDSM-2 create renderer mounts real SauceModal skeleton and sauce-core footer controls', async () => {
+    const doc = makeDocumentStub();
+    const app = makeTaskDialogRenderApp();
+    const customJS = {
+      SauceModal: new SauceModalClass(),
+      TaskEntity,
+      RecurrenceParser: { describe() { return null; } },
+    };
+    global.document = doc;
+    global.app = app;
+    global.customJS = customJS;
+    global.window = { app, customJS };
+    new TaskDialogClass().open({ surface: 'daily', today: '2026-07-20' });
+    const backdrop = findByCls(doc.body, 'sauce-modal-backdrop');
+    const modal = findByCls(doc.body, 'sauce-modal');
+    const title = findByCls(doc.body, 'sauce-modal-title');
+    const cancel = [...(findByCls(doc.body, 'sauce-modal-footer').children || [])]
+      .flatMap((group) => group.children || []).find((button) => treeText(button) === 'Cancel');
+    const save = findByCls(doc.body, 'sauce-btn-accent');
+    assert(backdrop && modal && title && treeText(title) === 'New Task', 'real shared modal skeleton and title');
+    assert(cancel && String(cancel.className).includes('sauce-btn'), 'Cancel uses sauce-btn');
+    assert(save && String(save.className).includes('sauce-btn-accent'), 'Save uses sauce-btn-accent');
+    assert(!findByCls(doc.body, 'sauce-todo-create-overlay'), 'no legacy create overlay');
+  });
+
+  await okAsync('TDSM-3 missing SauceModal fails closed before mounting and warm retry succeeds', async () => {
+    const doc = makeDocumentStub();
+    const app = makeTaskDialogRenderApp();
+    const customJS = { TaskEntity, RecurrenceParser: { describe() { return null; } } };
+    global.document = doc;
+    global.app = app;
+    global.customJS = customJS;
+    global.window = { app, customJS };
+    const dialog = new TaskDialogClass();
+    dialog.open({ surface: 'daily', today: '2026-07-20' });
+    assert(doc.body.children.length === 0, 'partial CustomJS load leaves no half-mounted dialog');
+    customJS.SauceModal = new SauceModalClass();
+    dialog.open({ surface: 'daily', today: '2026-07-20' });
+    assert(findByCls(doc.body, 'sauce-modal-backdrop'), 'later invocation recovers through SauceModal');
+  });
+
+  await okAsync('TDSM-4 SauceModal owns contained Enter submit while IME Enter is ignored', async () => {
+    const doc = makeDocumentStub();
+    const app = makeTaskDialogRenderApp();
+    const customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
+    global.document = doc;
+    global.app = app;
+    global.customJS = customJS;
+    global.window = { app, customJS };
+    const dialog = new TaskDialogClass();
+    const creates = [];
+    dialog._create = async (_app, payload) => { creates.push(payload); };
+    dialog.open({ surface: 'daily', today: '2026-07-20' });
+    const input = findInput(findByCls(doc.body, 'sauce-modal-body'));
+    input.value = 'Create through Enter';
+    input.oninput();
+    doc.dispatch('keydown', { key: 'Enter', target: input, isComposing: true, preventDefault() {} });
+    await Promise.resolve();
+    assert(creates.length === 0, 'IME composition must not submit');
+    let prevented = 0;
+    doc.dispatch('keydown', { key: 'Enter', target: input, isComposing: false, preventDefault() { prevented += 1; } });
+    await Promise.resolve(); await Promise.resolve();
+    assert(prevented === 1 && creates.length === 1 && creates[0].title === 'Create through Enter',
+      'contained Enter submits exactly once through SauceModal');
+    assert(doc.body.children.length === 0, 'successful submit closes through shared lifecycle');
+  });
+
+  await okAsync('TDSM-5 autofocus remains create-only across real create and edit dialogs', async () => {
+    const createDoc = makeDocumentStub();
+    const createApp = makeTaskDialogRenderApp();
+    let customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
+    global.document = createDoc; global.app = createApp; global.customJS = customJS; global.window = { app: createApp, customJS };
+    new TaskDialogClass().open({ surface: 'daily', today: '2026-07-20' });
+    const createTitle = findInput(findByCls(createDoc.body, 'sauce-modal-body'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert(createTitle._focusCount === 1, 'create title autofocus fires once');
+
+    const editFile = { path: 'spice/tasks/existing.md', basename: 'existing' };
+    const editDoc = makeDocumentStub();
+    const editApp = makeTaskDialogRenderApp(editFile);
+    customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
+    global.document = editDoc; global.app = editApp; global.customJS = customJS; global.window = { app: editApp, customJS };
+    new TaskDialogClass().open({ edit: editFile.path });
+    const editTitle = findInput(findByCls(editDoc.body, 'sauce-modal-body'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert(editTitle.value === 'Existing task' && !editTitle._focusCount, 'edit title is hydrated without autofocus');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevApp === undefined) delete global.app; else global.app = prevApp;
+  if (prevDoc === undefined) delete global.document; else global.document = prevDoc;
+  if (prevCustomJS === undefined) delete global.customJS; else global.customJS = prevCustomJS;
   global.Notice = prevNotice;
 }
 
@@ -2803,6 +3058,7 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
   await runOptimisticRemovalTests();
   await runRowActionTests();
   await runDotsMenuTests();
+  await runTaskDialogSauceModalTests();
   await runConfirmDeleteTests();
   runReconcileTests();
   runTaskDoneTodayListTests();
