@@ -1267,6 +1267,56 @@ async function caseBS13ActivationAtomicAndBackup() {
     });
 }
 
+async function caseBS20DefaultMechanismDependencyClosure() {
+    const label = "GA-OPS11-DEFAULT-MECHANISM-CLOSURE";
+    const wizard = require("../bootstrap-lib/wizard.js");
+    const workshopManifest = readJson(path.join(WORKSHOP_ROOT, "platform/manifest.json"));
+    await withTempVault({}, async (vaultPath) => {
+        const result = await wizard.runFirstRunWizard({
+            vaultPath,
+            workshopManifest,
+            nonInteractive: true,
+            defaults: { workshopRelativePath: WORKSHOP_ROOT }
+        });
+        const defaults = result.subscription.mechanisms || [];
+        const names = defaults.map((item) => item.name);
+        const byName = new Map(defaults.map((item) => [item.name, item]));
+        const failures = [];
+        const satisfies = (version, range) => {
+            if (version === range) return true;
+            const match = String(range || "").match(/^>=(\d+)\.(\d+)\.(\d+)$/);
+            if (!match || !/^\d+\.\d+\.\d+$/.test(String(version || ""))) return false;
+            const expected = match.slice(1).map(Number);
+            const actual = version.split(".").map(Number);
+            for (let index = 0; index < 3; index++) {
+                if (actual[index] > expected[index]) return true;
+                if (actual[index] < expected[index]) return false;
+            }
+            return true;
+        };
+
+        for (let index = 0; index < defaults.length; index++) {
+            const item = defaults[index];
+            const manifestPath = path.join(WORKSHOP_ROOT, "platform/mechanisms", item.name, "manifest.json");
+            const manifest = readJson(manifestPath);
+            for (const dependency of manifest.depends_on || []) {
+                const selected = byName.get(dependency.name);
+                const dependencyIndex = names.indexOf(dependency.name);
+                if (!selected) failures.push(`${item.name}: missing ${dependency.name}`);
+                else if (dependencyIndex >= index) failures.push(`${item.name}: ${dependency.name} is not earlier`);
+                else if (!satisfies(selected.version, dependency.range)) {
+                    failures.push(`${item.name}: ${dependency.name}@${selected.version} does not satisfy ${dependency.range}`);
+                }
+            }
+        }
+
+        assertTrue(failures.length === 0,
+            `${label}: every default mechanism dependency is selected earlier at a satisfying version${failures.length ? ` (${failures.join("; ")})` : ""}`);
+        assertTrue(names.indexOf("modal") >= 0 && names.indexOf("modal") < names.indexOf("task-entity"),
+            `${label}: modal is selected before task-entity`);
+    });
+}
+
 // ============================================================
 // Runner
 // ============================================================
@@ -1286,6 +1336,7 @@ const cases = {
         caseBS11WizardDefaultsPantry,
         caseBS12SiblingFallback,
         caseBS13ActivationAtomicAndBackup,
+        caseBS20DefaultMechanismDependencyClosure,
         // v0.26.1 P1-1: 4 new foundational plugins
         caseBS14FetchesFourNewFoundationalPlugins,
         // v0.26.1 P1-3c: wizard auto-add convenience helper

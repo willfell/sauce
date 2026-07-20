@@ -267,6 +267,8 @@ async function caseC14WizardNonInteractiveDefaults() {
                     { name: "accent-button", version: "0.1.0" },
                     { name: "styling", version: "0.1.2" },
                     { name: "convenience", version: "0.1.0" },  // NEW v0.26.0 — must be defaulted
+                    { name: "modal", version: "0.2.0" },
+                    { name: "task-entity", version: "0.15.5" },
                     { name: "validator", version: "0.1.1" }     // NOT in default-checked
                 ],
                 blueprints: []
@@ -279,14 +281,19 @@ async function caseC14WizardNonInteractiveDefaults() {
             nonInteractive: true,
             defaults: {}               // no overrides — exercise default fallback
         });
-        const subscribedNames = (r.subscription.mechanisms || []).map(m => m.name).sort();
-        const expected = ["accent-button", "cards", "convenience", "customjs-guard", "nav-buttons", "styling"];
+        const orderedNames = (r.subscription.mechanisms || []).map(m => m.name);
+        const subscribedNames = orderedNames.slice().sort();
+        const expected = ["accent-button", "cards", "convenience", "customjs-guard", "modal", "nav-buttons", "styling", "task-entity"];
         assertEqual(JSON.stringify(subscribedNames), JSON.stringify(expected),
-            label + ": 6 default mechs (including convenience; NOT including validator)");
+            label + ": default mechs include modal + task-entity but not validator");
         // v0.26.0 P0-3 explicit regression-guard: convenience MUST be in the default
         // subscription set so DataviewJS + copy-path hotkeys come on by default.
         assertTrue(subscribedNames.includes("convenience"),
             label + ": convenience present in default subscription");
+        const modalIndex = orderedNames.indexOf("modal");
+        const taskEntityIndex = orderedNames.indexOf("task-entity");
+        assertTrue(modalIndex >= 0 && taskEntityIndex >= 0 && modalIndex < taskEntityIndex,
+            "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: released modal default precedes task-entity");
     });
 }
 

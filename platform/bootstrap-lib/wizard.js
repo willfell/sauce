@@ -86,6 +86,12 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // already earlier in this list; nav-buttons + menu-popover
                      // were moved/added directly above. Must precede
                      // task-entity for deps-first install ordering.
+    "styling",       // modal depends on styling >=0.3.0. This was previously
+                     // near the tail of the default list; move it before modal
+                     // so fresh-vault subscriptions are dependency-first.
+    "modal",         // v0.244.1 — task-entity depends on modal >=0.2.0 after
+                     // TaskDialog adopted SauceModal. Must precede task-entity
+                     // or the installer skips task-entity in a fresh vault.
     "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
                      // blueprint set) gains a depends_on task-entity >=0.1.0 in
                      // this release to render the daily surface via TaskTodayList
@@ -95,7 +101,6 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // above.
     "cards",
     "accent-button",
-    "styling",
     "convenience"  // NEW v0.26.0 — DataviewJS + copy-path hotkeys on by default
 ];
 
