@@ -15,6 +15,10 @@
     {
       "name": "breadcrumb",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "modal",
+      "range": ">=0.2.0"
     }
   ],
   "customjs_classes": [
