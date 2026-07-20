@@ -87,7 +87,14 @@ class SauceModal {
       || (typeof document !== "undefined" ? document : null);
     if (!doc || !doc.body || typeof doc.createElement !== "function") return null;
 
+    // Every open frame owns a monotonically increasing identity. Closing the
+    // prior dialog may synchronously call open() again from onClose; that nested
+    // frame wins and the stale outer frame must never mount or replace it.
+    const frame = (Number(this._openFrame) || 0) + 1;
+    this._openFrame = frame;
     if (this._active && this._active.isOpen) this._active.close("replaced");
+    if (this._openFrame !== frame) return this._active || null;
+    if (this._active && !this._active.isOpen) this._active = null;
 
     const backdrop = doc.createElement("div");
     backdrop.className = "sauce-modal-backdrop";
@@ -151,8 +158,11 @@ class SauceModal {
     };
     handle.close = close;
     handle.submit = submit;
+    this._active = handle;
+    const ownsFrame = () => this._openFrame === frame && this._active === handle && isOpen;
 
     try { if (typeof opts.body === "function") opts.body(body, handle); } catch (_e) {}
+    if (!ownsFrame()) return this._active || handle;
 
     if (typeof opts.footer === "function") {
       try { opts.footer(footer, handle); } catch (_e) {}
@@ -160,6 +170,7 @@ class SauceModal {
       const buttons = this._normalizeButtons(opts.buttons, typeof opts.onSubmit === "function", opts.submitLabel);
       for (const spec of buttons) footer.appendChild(this._button(doc, spec, handle));
     }
+    if (!ownsFrame()) return this._active || handle;
 
     keyListener = (event) => {
       if (!event) return;
@@ -179,12 +190,16 @@ class SauceModal {
       close("backdrop");
     };
 
-    if (doc.addEventListener) doc.addEventListener("keydown", keyListener, true);
-    doc.body.appendChild(backdrop);
-    this._active = handle;
+    try {
+      if (doc.addEventListener) doc.addEventListener("keydown", keyListener, true);
+      doc.body.appendChild(backdrop);
+    } catch (_e) {
+      close("mount-error");
+      return null;
+    }
 
     const focus = () => {
-      if (!isOpen) return;
+      if (!ownsFrame()) return;
       const target = this._autofocusTarget(modal, opts.autofocus);
       try { if (target && typeof target.focus === "function") target.focus(); } catch (_e) {}
     };

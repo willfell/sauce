@@ -364,6 +364,40 @@ async function main() {
     assert(pkg.scripts['test:sauce-core-css'].includes('node platform/test/run-modal.js'), 'release preflight path invokes modal harness');
   });
 
+  await test('SM-16 body/footer callback early-close leaves zero DOM, zero listeners, and a null active handle', () => {
+    for (const callback of ['body', 'footer']) {
+      const doc = makeDocument();
+      const instance = new SauceModalClass();
+      const opts = { doc };
+      opts[callback] = (_el, handle) => handle.close(`early-${callback}`);
+      const handle = instance.open(opts);
+      assert(handle && handle.isOpen === false, `${callback} handle closes`);
+      assert(doc.body.children.length === 0, `${callback} must not mount after close`);
+      assert(doc.listeners.length === 0, `${callback} must not register after close`);
+      assert(instance._active == null, `${callback} must clear active handle`);
+    }
+  });
+
+  await test('SM-17 replacement onClose reentrancy leaves exactly one active backdrop/listener', () => {
+    const doc = makeDocument();
+    const instance = new SauceModalClass();
+    let nested = null;
+    const first = instance.open({
+      doc,
+      title: 'first',
+      onClose(reason) {
+        if (reason === 'replaced') nested = instance.open({ doc, title: 'nested' });
+      },
+    });
+    const returned = instance.open({ doc, title: 'stale outer' });
+    assert(!first.isOpen, 'first closes for replacement');
+    assert(nested && nested.isOpen, 'nested reentrant dialog remains open');
+    assert(returned === nested && instance._active === nested, 'stale outer returns and preserves authoritative nested handle');
+    assert(doc.body.children.length === 1 && doc.body.children[0] === nested.backdrop, 'exactly one authoritative backdrop');
+    assert(doc.listeners.length === 1 && doc.listeners[0].type === 'keydown', 'exactly one authoritative listener');
+    nested.close();
+  });
+
   console.log(`\nSauceModal: ${passes} passed, ${fails} failed`);
   if (fails) process.exit(1);
 }
