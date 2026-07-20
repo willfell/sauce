@@ -1747,6 +1747,17 @@ assert.throws(() => collectDeployedRecoveryEvidence(
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tagContainsCommit: () => false },
 ), /does not contain feature merge/, 'missing tag ancestry refuses recovery'); count++;
+const ancestryCalls = [];
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, {
+    ...recoveryCollectorDeps,
+    tagContainsCommit: (_root, _tag, commit) => {
+      ancestryCalls.push(commit);
+      return commit === FEATURE_MERGE;
+    },
+  },
+), /does not contain release merge/, 'formula tag must contain the exact release merge independently of feature ancestry'); count++;
+eq(ancestryCalls, [FEATURE_MERGE, RELEASE_MERGE], 'release-tag fixture proves both independent ancestry edges are evaluated in order');
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, releaseContainsCommit: () => false },
 ), /release PR does not contain/, 'unrelated merged release PR refuses recovery'); count++;
