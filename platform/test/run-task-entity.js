@@ -2653,6 +2653,26 @@ function treeText(node) {
     + (node.children || []).map(treeText).join('');
 }
 
+function findByTagText(node, tag, text) {
+  if (!node) return null;
+  if (node.tagName === String(tag).toUpperCase() && treeText(node) === text) return node;
+  for (const child of node.children || []) {
+    const found = findByTagText(child, tag, text);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findInputByPlaceholder(node, placeholder) {
+  if (!node) return null;
+  if (node.tagName === 'INPUT' && node.placeholder === placeholder) return node;
+  for (const child of node.children || []) {
+    const found = findInputByPlaceholder(child, placeholder);
+    if (found) return found;
+  }
+  return null;
+}
+
 function makeTaskDialogRenderApp(editFile) {
   const file = editFile || null;
   return {
@@ -2731,7 +2751,7 @@ async function runTaskDialogSauceModalTests() {
     assert(findByCls(doc.body, 'sauce-modal-backdrop'), 'later invocation recovers through SauceModal');
   });
 
-  await okAsync('TDSM-4 SauceModal owns contained Enter submit while IME Enter is ignored', async () => {
+  await okAsync('TDSM-4 only Title Enter submits; nested web-link and note-filter Enter retain local behavior', async () => {
     const doc = makeDocumentStub();
     const app = makeTaskDialogRenderApp();
     const customJS = { SauceModal: new SauceModalClass(), TaskEntity, RecurrenceParser: { describe() { return null; } } };
@@ -2743,17 +2763,44 @@ async function runTaskDialogSauceModalTests() {
     const creates = [];
     dialog._create = async (_app, payload) => { creates.push(payload); };
     dialog.open({ surface: 'daily', today: '2026-07-20' });
-    const input = findInput(findByCls(doc.body, 'sauce-modal-body'));
-    input.value = 'Create through Enter';
-    input.oninput();
-    doc.dispatch('keydown', { key: 'Enter', target: input, isComposing: true, preventDefault() {} });
+    const body = findByCls(doc.body, 'sauce-modal-body');
+    const titleInput = findInput(body);
+    titleInput.value = 'Create through Enter';
+    titleInput.oninput();
+    doc.dispatch('keydown', { key: 'Enter', target: titleInput, isComposing: true, preventDefault() {} });
     await Promise.resolve();
     assert(creates.length === 0, 'IME composition must not submit');
+
+    const more = findByTagText(body, 'button', 'More options ▾');
+    await fireClick(more);
+    const webButton = findByTagText(body, 'button', '＋ Web link');
+    await fireClick(webButton);
+    const urlInput = findInputByPlaceholder(body, 'https://…');
+    const labelInput = findInputByPlaceholder(body, 'Link text (optional)');
+    assert(urlInput && labelInput, 'web-link mini-form inputs rendered');
+    urlInput.value = 'https://example.test/path';
+    labelInput.value = 'Example';
+    const webEvent = { key: 'Enter', target: urlInput, isComposing: false, preventDefault() {} };
+    doc.dispatch('keydown', webEvent); // SauceModal capture phase
+    for (const listener of urlInput._listeners.keydown || []) listener(webEvent); // target phase
+    await Promise.resolve();
+    assert(creates.length === 0, 'web-link Enter inserts locally without prematurely saving');
+    assert(treeText(body).includes('[Example](https://example.test/path)'), 'web-link Enter adds the link chip');
+
+    const noteButton = findByTagText(body, 'button', '＋ Link note');
+    await fireClick(noteButton);
+    const filterInput = findInputByPlaceholder(body, 'Filter notes (recent first)…');
+    assert(filterInput, 'note-filter input rendered');
+    doc.dispatch('keydown', { key: 'Enter', target: filterInput, isComposing: false, preventDefault() {} });
+    await Promise.resolve();
+    assert(creates.length === 0, 'note-filter Enter does not submit the task');
+
     let prevented = 0;
-    doc.dispatch('keydown', { key: 'Enter', target: input, isComposing: false, preventDefault() { prevented += 1; } });
+    doc.dispatch('keydown', { key: 'Enter', target: titleInput, isComposing: false, preventDefault() { prevented += 1; } });
     await Promise.resolve(); await Promise.resolve();
     assert(prevented === 1 && creates.length === 1 && creates[0].title === 'Create through Enter',
-      'contained Enter submits exactly once through SauceModal');
+      'Title Enter submits exactly once through SauceModal');
+    assert(creates[0].links[0] === '[Example](https://example.test/path)', 'locally inserted link persists in saved payload');
     assert(doc.body.children.length === 0, 'successful submit closes through shared lifecycle');
   });
 

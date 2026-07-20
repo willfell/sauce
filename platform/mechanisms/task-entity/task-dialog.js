@@ -665,7 +665,13 @@ class TaskDialog {
             doc,
             title: editPath ? 'Edit Task' : 'New Task',
             buttons: [],
-            onSubmit: () => submitTask(),
+            // SauceModal listens in capture phase, so only the title field may
+            // use Enter as the dialog-level Save gesture. Nested controls such
+            // as the note filter and web-link mini-form own their own Enter
+            // behavior and must not race a task save before target handlers run.
+            onSubmit: (_handle, event) => event && event.target === titleInput
+                ? submitTask()
+                : false,
             closeOnSubmit: false,
         });
         if (!modalHandle) {
