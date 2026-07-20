@@ -830,9 +830,9 @@ function expectedProjectedContract(record, mapping) {
   return expected;
 }
 
-function projectionMetadataProblemFromRaw(record, raw) {
+function projectionMetadataProblemFromRaw(record, raw, opts = {}) {
   const mapping = record && projectionMapping(record.phase);
-  if (!mapping || record.projection_error) return null;
+  if (!mapping || (record.projection_error && opts.ignoreSavedProjectionError !== true)) return null;
   try {
     const prepared = prepareDeliveryCard(raw, record.card);
     if (!prepared.ok && (record.delivery_contract || ['current', 'future', 'invalid'].includes(prepared.source))) {
@@ -2155,7 +2155,9 @@ function metadataReconciliationPlan(record, raw, now = () => new Date().toISOStr
   }
   const next = Object.keys(fields).length ? patchFrontmatter(raw, fields) : raw;
   if (!frontmatter(next)) throw new Error(`card ${record.card} frontmatter missing`);
-  const remaining = projectionMetadataProblemFromRaw(record, next);
+  // A saved projection failure is evidence to repair, not authority to bypass
+  // the stable-contract guard on this deliberately narrower operation.
+  const remaining = projectionMetadataProblemFromRaw(record, next, { ignoreSavedProjectionError: true });
   if (remaining) throw new Error(`metadata-only repair cannot resolve this drift without widening scope: ${remaining.error}`);
   return {
     card: record.card,

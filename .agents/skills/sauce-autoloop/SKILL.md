@@ -189,7 +189,9 @@ reconciliation. Run its dry-run, pass the returned `card_sha256` back as
 `--expected-card-sha256` with `--apply`, then replay that successful apply
 literally with the same original hash and reason. The command refuses active
 and parked cards, never writes the board, and fails closed if the mismatch would
-require anything beyond its narrow ledger-owned metadata fields.
+require anything beyond its narrow ledger-owned metadata fields. A saved
+projection error never bypasses that scope check; it is cleared only after the
+bounded repair succeeds.
 
 ```bash
 node scripts/autoloop/codex-coordinator.js reconcile-metadata \

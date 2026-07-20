@@ -1885,6 +1885,41 @@ await assert.rejects(() => commandReconcileMetadata(
 const unsupportedMetadata = historicalMetadataRaw.replace('model_profile: heavy', 'model_profile: standard');
 assert.throws(() => metadataReconciliationPlan(metadataState.cards['Metadata drift'], unsupportedMetadata),
   /without widening scope/, 'metadata-only operation refuses unsupported contract drift'); count++;
+const savedProjectionErrorRecord = {
+  ...deepCopy(metadataState.cards['Metadata drift']),
+  projection_error: 'prior projection write denied',
+  projection_failed_at: '2026-07-20T18:59:00.000Z',
+  metadata_reconciliations: [],
+};
+const savedProjectionErrorState = { ...emptyState(), cards: { 'Metadata drift': savedProjectionErrorRecord } };
+let savedProjectionErrorWrites = 0;
+let savedProjectionErrorCardWrites = 0;
+const savedProjectionErrorDeps = {
+  ...metadataDeps,
+  readState: () => savedProjectionErrorState,
+  writeState: () => { savedProjectionErrorWrites++; },
+  atomicWriteText: (file, raw) => { savedProjectionErrorCardWrites++; fs.writeFileSync(file, raw); },
+};
+fs.writeFileSync(metadataCardPath, unsupportedMetadata);
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, savedProjectionErrorDeps,
+), /without widening scope/, 'GA-OPS12A2 saved projection error cannot suppress unsupported stable-contract drift'); count++;
+eq(savedProjectionErrorRecord.projection_error, 'prior projection write denied', 'refused metadata widening preserves the saved projection error');
+eq(savedProjectionErrorWrites, 0, 'refused saved-error widening performs no ledger write');
+eq(savedProjectionErrorCardWrites, 0, 'refused saved-error widening performs no card write');
+fs.writeFileSync(metadataCardPath, historicalMetadataRaw);
+const savedErrorDryRun = await commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, savedProjectionErrorDeps,
+);
+eq(savedErrorDryRun.changed_fields, ['schema_version'], 'saved projection error still permits a genuinely metadata-only repair plan');
+const savedErrorApplied = await commandReconcileMetadata({ root: reconcileRoot }, {
+  card: 'Metadata drift', apply: true, reason: 'repair supported drift behind saved projection error',
+  'expected-card-sha256': savedErrorDryRun.card_sha256, json: true,
+}, savedProjectionErrorDeps);
+eq(savedErrorApplied.no_op, false, 'supported metadata-only repair applies behind a saved projection error');
+eq(savedProjectionErrorRecord.projection_error, undefined, 'only the supported metadata repair clears the saved projection error');
+eq(savedProjectionErrorWrites, 1, 'supported saved-error repair performs one ledger write');
+eq(savedProjectionErrorCardWrites, 1, 'supported saved-error repair performs one card write');
 
 const historicalLedgerRecord = {
   ...metadataState.cards['Metadata drift'],
