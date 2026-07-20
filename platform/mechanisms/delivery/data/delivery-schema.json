@@ -1,18 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sauce Delivery shared execution contract registry",
+  "title": "Sauce Delivery contract registry",
   "contract": {
     "name": "delivery",
-    "version": "1.0.0",
-    "minimum_compatible_version": "0.0.0",
-    "description": "Registry half of the Delivery contract. The semantic module owns cross-field rules and proof evaluation."
+    "version": "1.1.0",
+    "minimum_compatible_version": "1.0.0",
+    "description": "Registry half of Delivery. v1.1 adds explicit epic, slice, and ratification-receipt record kinds while preserving the v1.0 execution-card contract."
   },
   "enums": {
     "status": ["planning", "in_progress", "blocked", "parked", "completed"],
     "model_profile": ["standard", "heavy"],
     "execution_mode": ["release", "docs_only"],
     "batch_policy": ["continue", "stop_after", "supervised_only"],
-    "posture": ["claimable", "blocked_by_dependencies", "docs_only", "awaiting_user_decision"],
+    "posture": ["claimable", "blocked_by_dependencies", "docs_only", "awaiting_user_decision", "done"],
+    "epic_state": ["planned", "active", "blocked", "done"],
+    "ratification_decision": ["accepted", "provisionally_accepted"],
     "failure_class": ["infra", "code", "mixed", "unknown"],
     "risk_dimension": ["new_mechanism", "schema", "migration", "consumer_subscription", "multi_blueprint_ui", "shared_contract", "control_plane"]
   },
@@ -44,7 +46,7 @@
           "name": "schema_version",
           "type": "string",
           "required": true,
-          "default": "1.0.0",
+          "default": "1.1.0",
           "since_version": "1.0.0",
           "description": "Delivery contract version stamped at authoring time. Newer-than-engine versions fail closed."
         },
@@ -172,6 +174,44 @@
         }
       ]
     },
+    "epic": {
+      "description": "A non-claimable planning atlas whose lifecycle and posture are derived from slice records.",
+      "fields": [
+        { "name": "type", "type": "string", "required": true, "since_version": "1.1.0", "description": "Literal epic record discriminator." },
+        { "name": "schema_version", "type": "string", "required": true, "since_version": "1.1.0", "description": "Delivery registry version." },
+        { "name": "source_board", "type": "string", "required": true, "since_version": "1.1.0", "description": "Workspace-relative parent board path." },
+        { "name": "kanban_board", "type": "string", "required": true, "since_version": "1.1.0", "description": "Same workspace-relative parent board path." },
+        { "name": "status", "type": "string", "required": true, "enum": "epic_state", "since_version": "1.1.0", "description": "Coordinator-painted derived lifecycle projection." },
+        { "name": "epic_board", "type": "string", "required": true, "since_version": "1.1.0", "description": "Workspace-relative board_role: epic board path." },
+        { "name": "posture", "type": "string", "required": true, "enum": "posture", "since_version": "1.1.0", "description": "Coordinator-painted derived posture projection." }
+      ]
+    },
+    "slice": {
+      "description": "An epic-owned execution record. The full execution-card field set remains authoritative and unchanged.",
+      "fields": [
+        { "name": "type", "type": "string", "required": true, "since_version": "1.1.0", "description": "Literal slice record discriminator." },
+        { "name": "task_parent", "type": "string", "required": true, "since_version": "1.1.0", "description": "Workspace-relative epic atlas path resolving to the same identity as epic." },
+        { "name": "source_board", "type": "string", "required": true, "since_version": "1.1.0", "description": "Workspace-relative sibling epic-board path." },
+        { "name": "kanban_board", "type": "string", "required": true, "since_version": "1.1.0", "description": "Same workspace-relative sibling epic-board path." }
+      ]
+    },
+    "ratification-receipt": {
+      "description": "Machine-consumable authority receipt extracted only from one exact accepted Markdown section.",
+      "fields": [
+        { "name": "schema_version", "type": "string", "required": true, "since_version": "1.1.0", "description": "Delivery registry version." },
+        { "name": "receipt_id", "type": "string", "required": true, "since_version": "1.1.0", "description": "Durable ratification identity." },
+        { "name": "decision", "type": "string", "required": true, "enum": "ratification_decision", "since_version": "1.1.0", "description": "Accepted authority class." },
+        { "name": "accepted_at", "type": "string", "required": true, "since_version": "1.1.0", "description": "ISO-8601 timestamp with timezone." },
+        { "name": "authority", "type": "string", "required": true, "since_version": "1.1.0", "description": "Human or policy authority granting the decision." },
+        { "name": "target_card", "type": "string", "required": true, "since_version": "1.1.0", "description": "Exact full canonical target-card identity from the selected section only." },
+        { "name": "target_head", "type": "string", "required": true, "since_version": "1.1.0", "description": "Exact lowercase 40-hex parked HEAD token." },
+        { "name": "scope", "type": "array:string", "required": true, "since_version": "1.1.0", "description": "Explicit bounded authority granted by the decision." },
+        { "name": "artifact_path", "type": "string", "required": true, "since_version": "1.1.0", "description": "Workspace-relative Markdown artifact path." },
+        { "name": "artifact_sha256", "type": "string", "required": true, "since_version": "1.1.0", "description": "Whole-artifact digest for drift detection." },
+        { "name": "section_heading", "type": "string", "required": true, "since_version": "1.1.0", "description": "Exact uniquely selected Markdown heading." },
+        { "name": "section_sha256", "type": "string", "required": true, "since_version": "1.1.0", "description": "Selected-section digest for authority binding." }
+      ]
+    },
     "evidence-claim": {
       "description": "A pinned snapshot supporting one claim about mutable state.",
       "fields": [
@@ -242,7 +282,8 @@
     "exclusive_zones": ["platform/install.js", "package.json", ".github/workflows", "platform/manifest.json", "shared-registries", "homebrew-promotion"],
     "control_plane_zone_prefixes": ["scripts/autoloop", "scripts/release", ".agents/skills/card-intake", "platform/mechanisms/delivery", ".github/workflows"],
     "high_risk_zone_prefixes": ["platform/mechanisms", "platform/install.js", "scripts/autoloop", "scripts/release", ".github/workflows"],
-    "policy_strength": ["continue", "stop_after", "supervised_only"]
+    "policy_strength": ["continue", "stop_after", "supervised_only"],
+    "epic_forbidden_execution_fields": ["touch_zones", "model_profile", "batch_policy", "acceptance_tests", "deploy_subscriptions", "execution_mode", "release_required", "deployment_required"]
   },
   "changelog": [
     {
@@ -257,12 +298,20 @@
         { "field": "release_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } },
         { "field": "deployment_required", "migration": { "type": "derive_from", "expression": "execution_mode === 'release'" } }
       ]
+    },
+    {
+      "version": "1.1.0",
+      "changes": [
+        { "record_kind": "epic", "migration": { "type": "create_only", "reason": "Legacy task hubs are never retyped by a heal." } },
+        { "record_kind": "slice", "migration": { "type": "create_only", "reason": "Legacy execution cards remain valid v1.0 records until explicit intake migration." } },
+        { "record_kind": "ratification-receipt", "migration": { "type": "create_only", "reason": "Prose authority is never inferred; a selected section must carry an explicit receipt block." } }
+      ]
     }
   ],
   "fixtures": {
     "base_execution_card": {
       "card": "A2 shared registry and semantic contract core",
-      "schema_version": "1.0.0",
+      "schema_version": "1.1.0",
       "parent_card": "[[Tranche A — trustworthy substrate]]",
       "slice": "A2",
       "model_profile": "heavy",
@@ -289,6 +338,97 @@
       "release_required": true,
       "deployment_required": true,
       "risk_dimensions": ["shared_contract", "new_mechanism"]
+    },
+    "epic": {
+      "base": {
+        "type": "epic",
+        "schema_version": "1.1.0",
+        "source_board": "spice/projects/example/example-board.md",
+        "kanban_board": "spice/projects/example/example-board.md",
+        "status": "planned",
+        "epic_board": "spice/projects/example/tasks/Delivery bridge/board/Delivery bridge-board.md",
+        "posture": "claimable"
+      },
+      "valid": [
+        { "name": "planned-epic", "patch": {} },
+        { "name": "completed-epic", "patch": { "status": "done", "posture": "done" } }
+      ],
+      "invalid": [
+        { "name": "epic-predates-record-kind", "patch": { "schema_version": "1.0.0" }, "expected_error": "record-kind-version" },
+        { "name": "epic-with-touch-zones", "patch": { "touch_zones": ["platform/example.js"] }, "expected_error": "epic-execution-field" },
+        { "name": "epic-parent-board-mismatch", "patch": { "kanban_board": "spice/projects/other/other-board.md" }, "expected_error": "epic-parent-board-mismatch" },
+        { "name": "epic-board-pointing-nowhere-shape", "patch": { "epic_board": "" }, "expected_error": "invalid-type" }
+      ]
+    },
+    "slice": {
+      "base": {
+        "type": "slice",
+        "card": "Contract registry",
+        "schema_version": "1.1.0",
+        "parent_card": "[[Delivery bridge]]",
+        "slice": "ES1",
+        "model_profile": "heavy",
+        "execution_mode": "release",
+        "batch_policy": "supervised_only",
+        "status": "planning",
+        "touch_zones": ["platform/mechanisms/delivery"],
+        "depends_on": [],
+        "deploy_subscriptions": { "headspace": [], "accuris": [], "ero": [] },
+        "epic": "[[Delivery bridge]]",
+        "task_parent": "spice/projects/example/tasks/Delivery bridge/Delivery bridge.md",
+        "source_board": "spice/projects/example/tasks/Delivery bridge/board/Delivery bridge-board.md",
+        "kanban_board": "spice/projects/example/tasks/Delivery bridge/board/Delivery bridge-board.md",
+        "evidence": [
+          {
+            "source_identity": "fixture",
+            "captured_at": "2026-07-20T09:28:12-05:00",
+            "revision": "fixture-v1.1.0",
+            "locator": "delivery-schema.json:1",
+            "claim": "The slice fixture exercises the full execution contract."
+          }
+        ],
+        "release_required": true,
+        "deployment_required": true,
+        "risk_dimensions": ["schema"]
+      },
+      "valid": [
+        { "name": "conformant-slice", "patch": {} },
+        { "name": "cross-epic-dependency-is-warning", "patch": { "depends_on": ["[[Other epic slice]]"] }, "expected_warning": "cross-epic-dependency" }
+      ],
+      "invalid": [
+        { "name": "slice-predates-record-kind", "patch": { "schema_version": "1.0.0" }, "expected_error": "record-kind-version" },
+        { "name": "slice-without-epic-backlink", "remove": ["epic"], "expected_error": "required-field" },
+        { "name": "slice-epic-backlink-mismatch", "patch": { "task_parent": "spice/projects/example/tasks/Other epic/Other epic.md" }, "expected_error": "slice-epic-backlink-mismatch" },
+        { "name": "shallow-source-board", "patch": { "source_board": "board/Delivery bridge-board.md" }, "expected_error": "slice-board-mismatch" },
+        { "name": "slice-per-directory-path", "patch": { "source_board": "spice/projects/example/tasks/Delivery bridge/board/Contract registry/Delivery bridge-board.md", "kanban_board": "spice/projects/example/tasks/Delivery bridge/board/Contract registry/Delivery bridge-board.md" }, "expected_error": "slice-location-invalid" }
+      ]
+    },
+    "ratification_receipt": {
+      "base": {
+        "schema_version": "1.1.0",
+        "receipt_id": "ratification-es1-1",
+        "decision": "accepted",
+        "accepted_at": "2026-07-20T09:28:12-05:00",
+        "authority": "Will",
+        "target_card": "ES1 Delivery epic-slice contract and ratification receipts",
+        "target_head": "dddddddddddddddddddddddddddddddddddddddd",
+        "scope": ["resume exact target after receipt validation"],
+        "artifact_path": "spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md",
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "section_heading": "Epics and Slices bridge accepted",
+        "section_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "valid": [
+        { "name": "accepted-exact-target", "patch": {} },
+        { "name": "provisional-policy-authority", "patch": { "decision": "provisionally_accepted" } }
+      ],
+      "invalid": [
+        { "name": "ratification-predates-record-kind", "patch": { "schema_version": "1.0.0" }, "expected_error": "record-kind-version" },
+        { "name": "target-card-must-be-canonical", "patch": { "target_card": "[[ES1 Delivery epic-slice contract and ratification receipts]]" }, "expected_error": "noncanonical-target-card" },
+        { "name": "target-head-must-be-exact-40-hex", "patch": { "target_head": "dddddddddddddddddddddddddddddddddddddddd0" }, "expected_error": "invalid-target-head" },
+        { "name": "target-head-substring-is-not-authority", "patch": { "target_head": "prefix-dddddddddddddddddddddddddddddddddddddddd-suffix" }, "expected_error": "invalid-target-head" },
+        { "name": "ratification-scope-is-required", "patch": { "scope": [] }, "expected_error": "invalid-ratification-scope" }
+      ]
     },
     "valid": [
       { "name": "release-supervised-control-plane", "patch": {} },
@@ -340,6 +480,7 @@
           "evidence": [{ "source_identity": "repo", "captured_at": "2026-07-16T17:51:05.123-06:00", "revision": "abc", "locator": "path.md:12", "claim": "A claim" }]
         }
       },
+      { "name": "v1.0-execution-card-remains-current", "patch": { "schema_version": "1.0.0" }, "expected_requires_migration": false },
       { "name": "older-contract-requires-migration", "patch": { "schema_version": "0.9.0" }, "expected_requires_migration": true }
     ],
     "invalid": [
