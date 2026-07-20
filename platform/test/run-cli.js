@@ -330,6 +330,21 @@ async function caseC14WizardNonInteractiveDefaults() {
                 JSON.stringify(changedSelection),
                 "GA-OPS11-INTERACTIVE-CUSTOM-SELECTION: changed/non-default selection order is preserved"
             );
+            const explicitDefaults = r.subscription.mechanisms.map((m) => m.name).reverse();
+            const manifest = JSON.parse(fs.readFileSync(path.join(vaultPath, "pantry/platform/manifest.json"), "utf8"));
+            const explicitSet = new Set(explicitDefaults);
+            const priorManifestOrder = manifest.mechanisms.map((m) => m.name).filter((name) => explicitSet.has(name));
+            const explicitInteractive = await wizardMod.runFirstRunWizard({
+                vaultPath,
+                workshopManifest: null,
+                nonInteractive: false,
+                defaults: { mechanisms: explicitDefaults }
+            });
+            assertEqual(
+                JSON.stringify(explicitInteractive.subscription.mechanisms.map((m) => m.name)),
+                JSON.stringify(priorManifestOrder),
+                "GA-OPS11-INTERACTIVE-EXPLICIT-DEFAULTS: explicit full-set override preserves prior manifest-order behavior"
+            );
         } finally {
             Module._load = originalLoad;
         }

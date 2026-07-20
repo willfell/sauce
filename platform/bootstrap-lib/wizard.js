@@ -502,8 +502,9 @@ async function runFirstRunWizard(opts) {
     });
 
     // 4. Mechanisms checkbox.
+    const hasExplicitMechanismDefaults = Boolean(defaults && Array.isArray(defaults.mechanisms));
     const mechDefaultSet = new Set(
-        Array.isArray(defaults.mechanisms)
+        hasExplicitMechanismDefaults
             ? defaults.mechanisms
             : DEFAULT_MECHANISMS_CHECKED
     );
@@ -519,7 +520,9 @@ async function runFirstRunWizard(opts) {
                   choices: mechChoices
               })
             : [];
-    selectedMechs = _orderAcceptedDefaultMechanisms(selectedMechs, manifestMechs);
+    if (!hasExplicitMechanismDefaults) {
+        selectedMechs = _orderAcceptedDefaultMechanisms(selectedMechs, manifestMechs);
+    }
 
     // 5. Blueprints checkbox.
     const blueprintDefaultSet = new Set(
