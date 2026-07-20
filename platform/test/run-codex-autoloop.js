@@ -1741,6 +1741,12 @@ eq(formulaTagFromText('url "https://github.com/willfell/sauce/releases/download/
 eq(formulaTagFromText('homepage "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser requires the active Homebrew url directive');
 eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"\nurl "https://github.com/willfell/sauce/archive/refs/tags/v0.244.2.tar.gz"'), '', 'tap parser refuses multiple active Sauce tag directives');
 const formulaFor = (tag) => `url "https://github.com/willfell/sauce/archive/refs/tags/${tag}.tar.gz"`;
+const blockCommentedFormula = `=begin\n${formulaFor('v0.245.0')}\n=end`;
+eq(formulaTagFromText(blockCommentedFormula), '', 'Ruby block-commented Sauce URL is inactive');
+eq(formulaTagFromText(`${blockCommentedFormula}\n${formulaFor('v0.245.0')}`), 'v0.245.0', 'active Sauce URL after a closed Ruby block comment is accepted');
+eq(formulaTagFromText(`=begin\n${formulaFor('v0.244.2')}\n=end\n${formulaFor('v0.245.0')}`), 'v0.245.0', 'stale Ruby block-commented tag does not create active ambiguity');
+eq(formulaTagFromText(`=begin\n${formulaFor('v0.245.0')}`), '', 'unterminated Ruby block comment suppresses its Sauce URL');
+eq(currentTapFormulaTag(tmp, () => blockCommentedFormula), '', 'matching block-comment-only tap and installed formulas do not prove active evidence');
 eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.245.0')),
   'v0.245.0', 'tap proof accepts matching active tap and installed formula tags');
 eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.244.2')),

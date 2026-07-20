@@ -1071,10 +1071,20 @@ function tapPr(version, cwd) {
 
 function formulaTagFromText(raw) {
   const sauceUrl = /^\s*url\s+(["'])https:\/\/github\.com\/willfell\/sauce\/archive\/refs\/tags\/(v\d+\.\d+\.\d+(?:\.\d+)?)\.tar\.gz\1\s*(?:#.*)?$/;
-  const matches = String(raw || '').split('\n')
-    .map((line) => line.match(sauceUrl))
-    .filter(Boolean)
-    .map((match) => match[2]);
+  const matches = [];
+  let blockComment = false;
+  for (const line of String(raw || '').split('\n')) {
+    if (!blockComment && /^=begin(?:\s|$)/.test(line)) {
+      blockComment = true;
+      continue;
+    }
+    if (blockComment) {
+      if (/^=end(?:\s|$)/.test(line)) blockComment = false;
+      continue;
+    }
+    const match = line.match(sauceUrl);
+    if (match) matches.push(match[2]);
+  }
   return matches.length === 1 ? matches[0] : '';
 }
 
