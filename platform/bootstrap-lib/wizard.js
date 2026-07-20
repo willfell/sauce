@@ -86,6 +86,12 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // already earlier in this list; nav-buttons + menu-popover
                      // were moved/added directly above. Must precede
                      // task-entity for deps-first install ordering.
+    "styling",       // modal depends on styling >=0.3.0. This was previously
+                     // near the tail of the default list; move it before modal
+                     // so fresh-vault subscriptions are dependency-first.
+    "modal",         // v0.244.1 — task-entity depends on modal >=0.2.0 after
+                     // TaskDialog adopted SauceModal. Must precede task-entity
+                     // or the installer skips task-entity in a fresh vault.
     "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
                      // blueprint set) gains a depends_on task-entity >=0.1.0 in
                      // this release to render the daily surface via TaskTodayList
@@ -95,7 +101,6 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // above.
     "cards",
     "accent-button",
-    "styling",
     "convenience"  // NEW v0.26.0 — DataviewJS + copy-path hotkeys on by default
 ];
 
@@ -115,6 +120,22 @@ const CANONICAL_VARIABLES = {
 
 function _safeArray(v) {
     return Array.isArray(v) ? v : [];
+}
+
+// Interactive checkbox answers are returned in catalogue order, not in the
+// order of their checked defaults. When the user accepts the untouched default
+// set, restore its dependency-first authority before serializing. Any changed
+// selection is returned byte-for-byte so custom and non-default behavior stays
+// under the user's chosen/catalogue order.
+function _orderAcceptedDefaultMechanisms(selected, manifestMechanisms) {
+    const names = _safeArray(selected);
+    const available = new Set(_safeArray(manifestMechanisms).map((item) => item && item.name).filter(Boolean));
+    const availableDefaults = DEFAULT_MECHANISMS_CHECKED.filter((name) => available.has(name));
+    if (names.length !== availableDefaults.length) return names;
+    const selectedSet = new Set(names);
+    if (selectedSet.size !== names.length) return names;
+    if (!availableDefaults.every((name) => selectedSet.has(name))) return names;
+    return availableDefaults;
 }
 
 function _findEntry(list, name) {
@@ -481,8 +502,9 @@ async function runFirstRunWizard(opts) {
     });
 
     // 4. Mechanisms checkbox.
+    const hasExplicitMechanismDefaults = Boolean(defaults && Array.isArray(defaults.mechanisms));
     const mechDefaultSet = new Set(
-        Array.isArray(defaults.mechanisms)
+        hasExplicitMechanismDefaults
             ? defaults.mechanisms
             : DEFAULT_MECHANISMS_CHECKED
     );
@@ -498,6 +520,9 @@ async function runFirstRunWizard(opts) {
                   choices: mechChoices
               })
             : [];
+    if (!hasExplicitMechanismDefaults) {
+        selectedMechs = _orderAcceptedDefaultMechanisms(selectedMechs, manifestMechs);
+    }
 
     // 5. Blueprints checkbox.
     const blueprintDefaultSet = new Set(
@@ -742,5 +767,6 @@ module.exports = {
     _normalizeSubscriptionFile,
     _coerceSubscriptionEntry,
     _loadFullBlueprintManifests,
-    _autoAddConvenienceIfDvBlueprintsSelected
+    _autoAddConvenienceIfDvBlueprintsSelected,
+    _orderAcceptedDefaultMechanisms
 };

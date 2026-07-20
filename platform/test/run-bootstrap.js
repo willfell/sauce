@@ -1267,6 +1267,171 @@ async function caseBS13ActivationAtomicAndBackup() {
     });
 }
 
+async function caseBS20DefaultMechanismDependencyClosure() {
+    const label = "GA-OPS11-DEFAULT-MECHANISM-CLOSURE";
+    const wizard = require("../bootstrap-lib/wizard.js");
+    const workshopManifest = readJson(path.join(WORKSHOP_ROOT, "platform/manifest.json"));
+    await withTempVault({}, async (vaultPath) => {
+        const result = await wizard.runFirstRunWizard({
+            vaultPath,
+            workshopManifest,
+            nonInteractive: true,
+            defaults: { workshopRelativePath: WORKSHOP_ROOT }
+        });
+        const defaults = result.subscription.mechanisms || [];
+        const names = defaults.map((item) => item.name);
+        const byName = new Map(defaults.map((item) => [item.name, item]));
+        const failures = [];
+        const satisfies = (version, range) => {
+            if (version === range) return true;
+            const match = String(range || "").match(/^>=(\d+)\.(\d+)\.(\d+)$/);
+            if (!match || !/^\d+\.\d+\.\d+$/.test(String(version || ""))) return false;
+            const expected = match.slice(1).map(Number);
+            const actual = version.split(".").map(Number);
+            for (let index = 0; index < 3; index++) {
+                if (actual[index] > expected[index]) return true;
+                if (actual[index] < expected[index]) return false;
+            }
+            return true;
+        };
+
+        for (let index = 0; index < defaults.length; index++) {
+            const item = defaults[index];
+            const manifestPath = path.join(WORKSHOP_ROOT, "platform/mechanisms", item.name, "manifest.json");
+            const manifest = readJson(manifestPath);
+            for (const dependency of manifest.depends_on || []) {
+                const selected = byName.get(dependency.name);
+                const dependencyIndex = names.indexOf(dependency.name);
+                if (!selected) failures.push(`${item.name}: missing ${dependency.name}`);
+                else if (dependencyIndex >= index) failures.push(`${item.name}: ${dependency.name} is not earlier`);
+                else if (!satisfies(selected.version, dependency.range)) {
+                    failures.push(`${item.name}: ${dependency.name}@${selected.version} does not satisfy ${dependency.range}`);
+                }
+            }
+        }
+
+        assertTrue(failures.length === 0,
+            `${label}: every default mechanism dependency is selected earlier at a satisfying version${failures.length ? ` (${failures.join("; ")})` : ""}`);
+        assertTrue(names.indexOf("modal") >= 0 && names.indexOf("modal") < names.indexOf("task-entity"),
+            `${label}: modal is selected before task-entity`);
+    });
+}
+
+async function caseBS21FreshVaultInstallerHistory() {
+    const label = "GA-OPS11-FRESH-VAULT-INSTALLER-HISTORY";
+    const workshopManifest = readJson(path.join(WORKSHOP_ROOT, "platform/manifest.json"));
+    const pluginIds = new Set(
+        (workshopManifest.foundational_plugins || []).map((item) => item && item.id).filter(Boolean)
+    );
+    for (const item of workshopManifest.mechanisms || []) {
+        const manifestPath = path.join(WORKSHOP_ROOT, "platform/mechanisms", item.name, "manifest.json");
+        const manifest = readJson(manifestPath);
+        for (const plugin of manifest.external_plugins || []) {
+            if (plugin && plugin.id) pluginIds.add(plugin.id);
+        }
+    }
+    const index = [...pluginIds].map((id) => ({ id, name: id, repo: `sauce-fixture/${id}` }));
+    const routes = { [MOCK_INDEX_URL]: { body: JSON.stringify(index) } };
+    for (const id of pluginIds) Object.assign(routes, pluginRoutes(id, `sauce-fixture/${id}`));
+
+    await withTempVault({}, async (vaultPath) => {
+        const bootstrap = require("../bootstrap.js");
+        const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+        if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+        // runInstall uses a child Node process. Give that child a deterministic
+        // index response and fail any unexpected network request so this
+        // fresh-vault fixture remains fully offline and failure-loud.
+        const preloadPath = path.join(vaultPath, "mock-installer-network.js");
+        fs.writeFileSync(preloadPath, `
+const https = require("https");
+const EventEmitter = require("events");
+const indexUrl = ${JSON.stringify(MOCK_INDEX_URL)};
+https.get = function (url, opts, callback) {
+    if (typeof opts === "function") { callback = opts; opts = {}; }
+    const target = typeof url === "string" ? url : (url.href || String(url));
+    const request = new EventEmitter();
+    request.destroy = () => {};
+    process.nextTick(() => {
+        if (target !== indexUrl) {
+            request.emit("error", new Error("unexpected fixture network request: " + target));
+            return;
+        }
+        const response = new EventEmitter();
+        response.statusCode = 200;
+        response.headers = {};
+        response.resume = () => {};
+        callback(response);
+        response.emit("data", Buffer.from(process.env.GA_OPS11_PLUGIN_INDEX_JSON || "[]"));
+        response.emit("end");
+    });
+    return request;
+};
+`);
+        const priorNodeOptions = process.env.NODE_OPTIONS;
+        const priorPluginIndex = process.env.GA_OPS11_PLUGIN_INDEX_JSON;
+        process.env.NODE_OPTIONS = `${priorNodeOptions ? `${priorNodeOptions} ` : ""}--require=${preloadPath}`;
+        process.env.GA_OPS11_PLUGIN_INDEX_JSON = JSON.stringify(index);
+        let report;
+        try {
+            await withMockedHttps(routes, async () => {
+                report = await bootstrap.runBootstrap({
+                    vaultPath,
+                    nonInteractive: true,
+                    skipInstaller: false,
+                    wizardDefaults: { workshopRelativePath: WORKSHOP_ROOT }
+                });
+            });
+
+            const installedPath = path.join(vaultPath, "ranch/platform-installed.json");
+            const logPath = path.join(vaultPath, "ranch/bootstrap-last-install.log");
+            const installed = readJson(installedPath);
+            const history = installed.history || [];
+            const modalInstall = history.findIndex((item) => item.event === "install" && item.name === "modal" && item.version === "0.2.0");
+            const taskEntityInstall = history.findIndex((item) => item.event === "install" && item.name === "task-entity" && item.version === "0.15.5");
+            const dependencyFailures = history.filter((item) =>
+                (item.event === "error" || item.event === "skip") &&
+                (item.name === "modal" || item.name === "task-entity" || /modal|task-entity/i.test(item.reason || item.message || ""))
+            );
+            const cleanLog = fs.readFileSync(logPath, "utf8");
+            assertTrue(report && report.failed.length === 0,
+                `${label}: deterministic bootstrap plugin fetch has no failures`);
+            assertTrue(modalInstall >= 0 && taskEntityInstall > modalInstall,
+                `${label}: real installer records released modal before task-entity`);
+            assertTrue(dependencyFailures.length === 0,
+                `${label}: real installer history has no modal/task-entity dependency skip or error`);
+            assertTrue(/clean run — exit 0/.test(cleanLog),
+                `${label}: runBootstrap installer log records clean completion`);
+
+            // Mutation proof for the unchanged failure-loud wrapper: remove modal
+            // from the otherwise generated fresh-vault subscription, clear only
+            // installed-state in this disposable vault, and require runInstall to
+            // reject on the resulting task-entity dependency skip.
+            const subscriptionPath = path.join(vaultPath, "ranch/platform-subscription.json");
+            const subscription = readJson(subscriptionPath);
+            subscription.mechanisms = subscription.mechanisms.filter((item) => item.name !== "modal");
+            fs.writeFileSync(subscriptionPath, JSON.stringify(subscription, null, 2));
+            fs.writeFileSync(installedPath, JSON.stringify({ mechanisms: [], blueprints: [], history: [] }, null, 2));
+            const installer = require("../install.js");
+            let failure = null;
+            try {
+                await installer.runInstall(vaultPath);
+            } catch (error) {
+                failure = error;
+            }
+            const failureLog = fs.readFileSync(logPath, "utf8");
+            assertTrue(failure && /runInstall failed with exit 1/.test(failure.message),
+                `${label}: missing-modal mutation remains failure-loud`);
+            assertTrue(/"event":"skip","name":"task-entity"/.test(failureLog) && /modal/.test(failureLog),
+                `${label}: failure log names task-entity skip and missing modal dependency`);
+        } finally {
+            if (priorNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+            else process.env.NODE_OPTIONS = priorNodeOptions;
+            if (priorPluginIndex === undefined) delete process.env.GA_OPS11_PLUGIN_INDEX_JSON;
+            else process.env.GA_OPS11_PLUGIN_INDEX_JSON = priorPluginIndex;
+        }
+    });
+}
+
 // ============================================================
 // Runner
 // ============================================================
@@ -1286,6 +1451,8 @@ const cases = {
         caseBS11WizardDefaultsPantry,
         caseBS12SiblingFallback,
         caseBS13ActivationAtomicAndBackup,
+        caseBS20DefaultMechanismDependencyClosure,
+        caseBS21FreshVaultInstallerHistory,
         // v0.26.1 P1-1: 4 new foundational plugins
         caseBS14FetchesFourNewFoundationalPlugins,
         // v0.26.1 P1-3c: wizard auto-add convenience helper

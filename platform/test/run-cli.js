@@ -265,8 +265,10 @@ async function caseC14WizardNonInteractiveDefaults() {
                     { name: "nav-buttons", version: "2.5.2" },
                     { name: "cards", version: "0.2.3" },
                     { name: "accent-button", version: "0.1.0" },
-                    { name: "styling", version: "0.1.2" },
                     { name: "convenience", version: "0.1.0" },  // NEW v0.26.0 — must be defaulted
+                    { name: "task-entity", version: "0.15.5" },
+                    { name: "modal", version: "0.2.0" },
+                    { name: "styling", version: "0.3.0" },
                     { name: "validator", version: "0.1.1" }     // NOT in default-checked
                 ],
                 blueprints: []
@@ -279,14 +281,73 @@ async function caseC14WizardNonInteractiveDefaults() {
             nonInteractive: true,
             defaults: {}               // no overrides — exercise default fallback
         });
-        const subscribedNames = (r.subscription.mechanisms || []).map(m => m.name).sort();
-        const expected = ["accent-button", "cards", "convenience", "customjs-guard", "nav-buttons", "styling"];
+        const orderedNames = (r.subscription.mechanisms || []).map(m => m.name);
+        const subscribedNames = orderedNames.slice().sort();
+        const expected = ["accent-button", "cards", "convenience", "customjs-guard", "modal", "nav-buttons", "styling", "task-entity"];
         assertEqual(JSON.stringify(subscribedNames), JSON.stringify(expected),
-            label + ": 6 default mechs (including convenience; NOT including validator)");
+            label + ": default mechs include modal + task-entity but not validator");
         // v0.26.0 P0-3 explicit regression-guard: convenience MUST be in the default
         // subscription set so DataviewJS + copy-path hotkeys come on by default.
         assertTrue(subscribedNames.includes("convenience"),
             label + ": convenience present in default subscription");
+        const modalIndex = orderedNames.indexOf("modal");
+        const taskEntityIndex = orderedNames.indexOf("task-entity");
+        assertTrue(modalIndex >= 0 && taskEntityIndex >= 0 && modalIndex < taskEntityIndex,
+            "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: non-interactive released modal default precedes task-entity");
+
+        // Interactive checkbox answers follow catalogue order. Mimic accepting
+        // every checked default unchanged and prove serialization restores the
+        // shared dependency-first default authority before building entries.
+        const Module = require("module");
+        const originalLoad = Module._load;
+        Module._load = function (request, parent, isMain) {
+            if (request === "@inquirer/prompts") {
+                return {
+                    input: async ({ message, default: defaultValue }) =>
+                        message.startsWith("Workshop relative path") ? "pantry" : defaultValue,
+                    checkbox: async ({ choices }) => choices.filter((choice) => choice.checked).map((choice) => choice.value),
+                    confirm: async () => true
+                };
+            }
+            return originalLoad.call(this, request, parent, isMain);
+        };
+        try {
+            const interactive = await wizardMod.runFirstRunWizard({
+                vaultPath,
+                workshopManifest: null,
+                nonInteractive: false,
+                defaults: {}
+            });
+            const interactiveNames = interactive.subscription.mechanisms.map((m) => m.name);
+            assertTrue(
+                interactiveNames.indexOf("modal") >= 0 &&
+                interactiveNames.indexOf("modal") < interactiveNames.indexOf("task-entity"),
+                "GA-OPS11-MODAL-BEFORE-TASK-ENTITY: interactive released modal default precedes task-entity"
+            );
+            const changedSelection = ["task-entity", "validator", "modal"];
+            assertEqual(
+                JSON.stringify(wizardMod._orderAcceptedDefaultMechanisms(changedSelection, r.subscription.mechanisms.concat([{ name: "validator" }]))),
+                JSON.stringify(changedSelection),
+                "GA-OPS11-INTERACTIVE-CUSTOM-SELECTION: changed/non-default selection order is preserved"
+            );
+            const explicitDefaults = r.subscription.mechanisms.map((m) => m.name).reverse();
+            const manifest = JSON.parse(fs.readFileSync(path.join(vaultPath, "pantry/platform/manifest.json"), "utf8"));
+            const explicitSet = new Set(explicitDefaults);
+            const priorManifestOrder = manifest.mechanisms.map((m) => m.name).filter((name) => explicitSet.has(name));
+            const explicitInteractive = await wizardMod.runFirstRunWizard({
+                vaultPath,
+                workshopManifest: null,
+                nonInteractive: false,
+                defaults: { mechanisms: explicitDefaults }
+            });
+            assertEqual(
+                JSON.stringify(explicitInteractive.subscription.mechanisms.map((m) => m.name)),
+                JSON.stringify(priorManifestOrder),
+                "GA-OPS11-INTERACTIVE-EXPLICIT-DEFAULTS: explicit full-set override preserves prior manifest-order behavior"
+            );
+        } finally {
+            Module._load = originalLoad;
+        }
     });
 }
 
