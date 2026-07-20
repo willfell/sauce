@@ -193,6 +193,13 @@ require anything beyond its narrow ledger-owned metadata fields. A saved
 projection error never bypasses that scope check; it is cleared only after the
 bounded repair succeeds.
 
+The apply is a recoverable write-ahead transaction. If it exits after recording
+its pending intent or replacing the card but before returning the audit, rerun
+the exact original `--apply` invocation byte-for-byte. Do not take a new dry-run
+hash or alter the card operand, reason, `--apply`, or `--json`: the pending intent
+accepts only the literal request, recognizes only the original or intended next
+card hash, and finalizes one audit without duplicating the card write.
+
 ```bash
 node scripts/autoloop/codex-coordinator.js reconcile-metadata \
   --card "<card>" --dry-run --json

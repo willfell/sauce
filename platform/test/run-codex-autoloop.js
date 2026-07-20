@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
+  emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
@@ -1961,6 +1961,7 @@ let metadataCardWrites = 0;
 const metadataDeps = {
   readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
   atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
+  durablePathBarrier: () => {},
   cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
 };
 const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
@@ -1978,6 +1979,7 @@ eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw.replace('sch
 eq(metadataState.cards['Metadata drift'].branch, 'untouched-metadata-branch', 'metadata reconcile preserves branch authority');
 eq(metadataState.cards['Metadata drift'].worktree, '/untouched-metadata-worktree', 'metadata reconcile preserves worktree authority');
 eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'metadata reconcile journals one bounded audit');
+eq(metadataWrites, 2, 'metadata apply persists one write-ahead intent and one completed audit');
 eq(metadataCardWrites, 1, 'metadata apply performs exactly one bounded card write');
 const metadataWritesAfterApply = metadataWrites;
 const metadataCardWritesAfterApply = metadataCardWrites;
@@ -2045,8 +2047,211 @@ const savedErrorApplied = await commandReconcileMetadata({ root: reconcileRoot }
 }, savedProjectionErrorDeps);
 eq(savedErrorApplied.no_op, false, 'supported metadata-only repair applies behind a saved projection error');
 eq(savedProjectionErrorRecord.projection_error, undefined, 'only the supported metadata repair clears the saved projection error');
-eq(savedProjectionErrorWrites, 1, 'supported saved-error repair performs one ledger write');
+eq(savedProjectionErrorWrites, 2, 'supported saved-error repair persists intent then completion');
 eq(savedProjectionErrorCardWrites, 1, 'supported saved-error repair performs one card write');
+
+function metadataCrashHarness(id) {
+  const name = 'Metadata drift';
+  const cardPath = path.join(reconcileRoot, `Metadata transaction ${id}.md`);
+  const statePath = path.join(reconcileRoot, `Metadata transaction ${id}.state.json`);
+  fs.writeFileSync(cardPath, historicalMetadataRaw);
+  const record = {
+    ...deepCopy(metadataState.cards['Metadata drift']), card: name, card_path: cardPath,
+    metadata_reconciliations: [],
+  };
+  delete record.metadata_reconciliation_pending;
+  let durableState = { ...emptyState(), cards: { [name]: record } };
+  let ledgerWrites = 0;
+  let cardWrites = 0;
+  let barrierCalls = 0;
+  let ledgerFailure = null;
+  let cardFailure = null;
+  let barrierFailure = null;
+  let replacement = null;
+  const deps = {
+    readState: () => deepCopy(durableState),
+    writeState: (_ctx, _state, changedRecord) => {
+      ledgerWrites++;
+      const failure = ledgerFailure && ledgerFailure.call === ledgerWrites ? ledgerFailure : null;
+      if (failure && failure.when === 'before') throw new Error(failure.message);
+      durableState.cards[changedRecord.card] = deepCopy(changedRecord);
+      if (failure && failure.when === 'after') throw new Error(failure.message);
+    },
+    withLock: immediateCardLock,
+    atomicWriteText: (file, raw) => {
+      cardWrites++;
+      const failure = cardFailure && cardFailure.call === cardWrites ? cardFailure : null;
+      if (failure && failure.when === 'before') throw new Error(failure.message);
+      fs.writeFileSync(file, replacement === null ? raw : replacement(raw));
+      if (failure && failure.when === 'after') throw new Error(failure.message);
+    },
+    durablePathBarrier: () => {
+      barrierCalls++;
+      if (barrierFailure && barrierFailure.call === barrierCalls) throw new Error(barrierFailure.message);
+    },
+    cardsRoot: reconcileRoot,
+    now: () => '2026-07-20T19:03:00.000Z',
+  };
+  const ctx = { root: reconcileRoot, statePath };
+  const dryRun = () => commandReconcileMetadata(ctx, { card: name, 'dry-run': true }, deps);
+  const applyArgs = (sha) => ({
+    card: name, apply: true, reason: 'recover exact metadata transaction',
+    'expected-card-sha256': sha, json: true,
+  });
+  return {
+    name, cardPath, ctx, deps, dryRun, applyArgs,
+    state: () => deepCopy(durableState),
+    raw: () => fs.readFileSync(cardPath, 'utf8'),
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls }),
+    failLedger: (call, when, message) => { ledgerFailure = { call, when, message }; },
+    failCard: (call, when, message) => { cardFailure = { call, when, message }; },
+    failBarrier: (call, message) => { barrierFailure = { call, message }; },
+    clearFailures: () => { ledgerFailure = null; cardFailure = null; barrierFailure = null; replacement = null; },
+    replaceWith: (fn) => { replacement = fn; },
+  };
+}
+
+// GA-OPS12A2-METADATA-INTENT-BEFORE-CARD: no card write precedes durable intent.
+const intentFailure = metadataCrashHarness('intent-before-card');
+const intentFailurePlan = await intentFailure.dryRun();
+const intentFailureArgs = intentFailure.applyArgs(intentFailurePlan.card_sha256);
+intentFailure.failLedger(1, 'before', 'injected intent persist failure');
+await assert.rejects(() => commandReconcileMetadata(intentFailure.ctx, intentFailureArgs, intentFailure.deps),
+  /injected intent persist failure/, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD propagates intent failure'); count++;
+eq(intentFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD preserves original card bytes');
+eq(intentFailure.state().cards[intentFailure.name].metadata_reconciliation_pending, undefined, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD records no false pending intent');
+intentFailure.clearFailures();
+eq((await commandReconcileMetadata(intentFailure.ctx, intentFailureArgs, intentFailure.deps)).no_op, false,
+  'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD literal retry completes normally');
+
+// GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY: prepared intent survives a failed rename/write.
+const cardFailure = metadataCrashHarness('card-write-failure');
+const cardFailurePlan = await cardFailure.dryRun();
+const cardFailureArgs = cardFailure.applyArgs(cardFailurePlan.card_sha256);
+cardFailure.failCard(1, 'before', 'injected atomic replacement failure');
+await assert.rejects(() => commandReconcileMetadata(cardFailure.ctx, cardFailureArgs, cardFailure.deps),
+  /injected atomic replacement failure/, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY propagates card failure'); count++;
+ok(cardFailure.state().cards[cardFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY retains durable prepared intent');
+eq(cardFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY retains original card');
+cardFailure.clearFailures();
+const cardFailureRecovered = await commandReconcileMetadata(cardFailure.ctx, cardFailureArgs, cardFailure.deps);
+eq(cardFailureRecovered.recovered_pending, true, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY literal retry recovers pending transaction');
+eq(cardFailure.state().cards[cardFailure.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY finalizes exactly one audit');
+
+// GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY and recovered literal replay.
+const auditFailure = metadataCrashHarness('card-before-audit');
+const auditFailurePlan = await auditFailure.dryRun();
+const auditFailureArgs = auditFailure.applyArgs(auditFailurePlan.card_sha256);
+auditFailure.failLedger(2, 'before', 'injected final audit persist failure');
+await assert.rejects(() => commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps),
+  /injected final audit persist failure/, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY exposes the exact crash window'); count++;
+ok(auditFailure.state().cards[auditFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY keeps prepared intent authoritative');
+ok(auditFailure.raw() !== historicalMetadataRaw, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY begins from already-replaced card bytes');
+const auditFailureCardWrites = auditFailure.counts().cardWrites;
+auditFailure.clearFailures();
+const auditRecovered = await commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps);
+eq(auditRecovered.recovered_pending, true, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY finalizes from next-card hash');
+eq(auditFailure.counts().cardWrites, auditFailureCardWrites, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY does not rewrite the already-correct card');
+eq(auditFailure.state().cards[auditFailure.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY appends exactly one audit');
+const recoveredCounts = auditFailure.counts();
+const recoveredReplay = await commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps);
+eq(recoveredReplay.no_op, true, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY returns literal no_op true');
+eq(auditFailure.counts().ledgerWrites, recoveredCounts.ledgerWrites, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY performs zero ledger writes');
+eq(auditFailure.counts().cardWrites, recoveredCounts.cardWrites, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY performs zero card writes');
+
+// GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY: ambiguous success is reread, never duplicated.
+const ambiguousFinal = metadataCrashHarness('ambiguous-final-persist');
+const ambiguousFinalPlan = await ambiguousFinal.dryRun();
+const ambiguousFinalArgs = ambiguousFinal.applyArgs(ambiguousFinalPlan.card_sha256);
+ambiguousFinal.failLedger(2, 'after', 'injected ambiguous final persist result');
+await assert.rejects(() => commandReconcileMetadata(ambiguousFinal.ctx, ambiguousFinalArgs, ambiguousFinal.deps),
+  /injected ambiguous final persist result/, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY propagates ambiguous persist result'); count++;
+eq(ambiguousFinal.state().cards[ambiguousFinal.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY observes already-durable single audit');
+ambiguousFinal.clearFailures();
+eq((await commandReconcileMetadata(ambiguousFinal.ctx, ambiguousFinalArgs, ambiguousFinal.deps)).no_op, true,
+  'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY converges through literal replay');
+eq(ambiguousFinal.state().cards[ambiguousFinal.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY never duplicates audit');
+
+// GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING: every literal operand remains authority.
+const requestBinding = metadataCrashHarness('pending-request-binding');
+const requestBindingPlan = await requestBinding.dryRun();
+const requestBindingArgs = requestBinding.applyArgs(requestBindingPlan.card_sha256);
+requestBinding.failCard(1, 'before', 'prepare pending request fixture');
+await assert.rejects(() => commandReconcileMetadata(requestBinding.ctx, requestBindingArgs, requestBinding.deps), /prepare pending request fixture/); count++;
+requestBinding.clearFailures();
+const requestBindingState = JSON.stringify(requestBinding.state());
+const requestBindingRaw = requestBinding.raw();
+for (const altered of [
+  { ...requestBindingArgs, reason: ` ${requestBindingArgs.reason}` },
+  { ...requestBindingArgs, 'expected-card-sha256': 'a'.repeat(64) },
+  { ...requestBindingArgs, json: false },
+  { ...requestBindingArgs, card: `[[${requestBinding.name}]]` },
+  { card: requestBinding.name, 'dry-run': true },
+]) {
+  await assert.rejects(() => commandReconcileMetadata(requestBinding.ctx, altered, requestBinding.deps),
+    /pending intent.*exact|pending intent requires/, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING refuses altered literal operand'); count++;
+}
+eq(JSON.stringify(requestBinding.state()), requestBindingState, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING leaves ledger byte-equivalent');
+eq(requestBinding.raw(), requestBindingRaw, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING leaves card byte-equivalent');
+
+// GA-OPS12A2-METADATA-PENDING-THIRD-HASH: external bytes never inherit the intent.
+const thirdHash = metadataCrashHarness('pending-third-hash');
+const thirdHashPlan = await thirdHash.dryRun();
+const thirdHashArgs = thirdHash.applyArgs(thirdHashPlan.card_sha256);
+thirdHash.failCard(1, 'before', 'prepare third-hash fixture');
+await assert.rejects(() => commandReconcileMetadata(thirdHash.ctx, thirdHashArgs, thirdHash.deps), /prepare third-hash fixture/); count++;
+thirdHash.clearFailures();
+fs.writeFileSync(thirdHash.cardPath, `${thirdHash.raw()}operator drift\n`);
+const thirdHashState = JSON.stringify(thirdHash.state());
+const thirdHashCounts = thirdHash.counts();
+await assert.rejects(() => commandReconcileMetadata(thirdHash.ctx, thirdHashArgs, thirdHash.deps),
+  /third card hash; needs-inspection/, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH refuses unknown card bytes'); count++;
+eq(JSON.stringify(thirdHash.state()), thirdHashState, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH retains intent unchanged');
+eq(thirdHash.counts().ledgerWrites, thirdHashCounts.ledgerWrites, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH performs zero ledger writes');
+eq(thirdHash.counts().cardWrites, thirdHashCounts.cardWrites, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH performs zero coordinator card writes');
+
+// GA-OPS12A2-METADATA-DURABLE-BARRIERS: every uncertain boundary refuses completion and remains recoverable.
+const stateBarrierFailure = metadataCrashHarness('state-barrier-failure');
+const stateBarrierPlan = await stateBarrierFailure.dryRun();
+const stateBarrierArgs = stateBarrierFailure.applyArgs(stateBarrierPlan.card_sha256);
+stateBarrierFailure.failBarrier(1, 'injected ledger durability barrier failure');
+await assert.rejects(() => commandReconcileMetadata(stateBarrierFailure.ctx, stateBarrierArgs, stateBarrierFailure.deps),
+  /ledger durability barrier failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates ledger barrier failure'); count++;
+ok(stateBarrierFailure.state().cards[stateBarrierFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS retains intent after state barrier uncertainty');
+eq(stateBarrierFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS does not write card before state barrier');
+
+const cardBarrierFailure = metadataCrashHarness('card-barrier-failure');
+const cardBarrierPlan = await cardBarrierFailure.dryRun();
+const cardBarrierArgs = cardBarrierFailure.applyArgs(cardBarrierPlan.card_sha256);
+cardBarrierFailure.failBarrier(2, 'injected card durability barrier failure');
+await assert.rejects(() => commandReconcileMetadata(cardBarrierFailure.ctx, cardBarrierArgs, cardBarrierFailure.deps),
+  /card durability barrier failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates card barrier failure'); count++;
+ok(cardBarrierFailure.state().cards[cardBarrierFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS leaves no false completed audit after card barrier failure');
+
+const hashVerificationFailure = metadataCrashHarness('hash-verification-failure');
+const hashVerificationPlan = await hashVerificationFailure.dryRun();
+const hashVerificationArgs = hashVerificationFailure.applyArgs(hashVerificationPlan.card_sha256);
+hashVerificationFailure.replaceWith((raw) => `${raw}corrupt replacement\n`);
+await assert.rejects(() => commandReconcileMetadata(hashVerificationFailure.ctx, hashVerificationArgs, hashVerificationFailure.deps),
+  /did not verify at the intended hash/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS refuses reread hash mismatch'); count++;
+ok(hashVerificationFailure.state().cards[hashVerificationFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS retains intent after reread mismatch');
+
+const barrierProbePath = path.join(reconcileRoot, 'durable-barrier-probe');
+fs.writeFileSync(barrierProbePath, 'probe');
+const fileBarrierCloses = [];
+assert.throws(() => durablePathBarrier(barrierProbePath, {
+  openSync: () => 11,
+  fsyncSync: () => { throw new Error('injected file fsync failure'); },
+  closeSync: (fd) => { fileBarrierCloses.push(fd); },
+}), /file fsync failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates file fsync failure'); count++;
+eq(fileBarrierCloses, [11], 'GA-OPS12A2-METADATA-DURABLE-BARRIERS closes descriptor after file fsync failure');
+const directoryBarrierTargets = [];
+assert.throws(() => durablePathBarrier(barrierProbePath, {
+  openSync: (target) => { directoryBarrierTargets.push(target); return directoryBarrierTargets.length; },
+  fsyncSync: (fd) => { if (fd === 2) throw new Error('injected directory fsync failure'); },
+  closeSync: () => {},
+}), /directory fsync failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates directory fsync failure'); count++;
+eq(directoryBarrierTargets, [barrierProbePath, path.dirname(barrierProbePath)], 'GA-OPS12A2-METADATA-DURABLE-BARRIERS flushes file before containing directory');
 
 const historicalLedgerRecord = {
   ...metadataState.cards['Metadata drift'],

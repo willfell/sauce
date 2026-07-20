@@ -706,6 +706,23 @@ function atomicWriteText(file, value) {
   fs.renameSync(tmp, file);
 }
 
+function durablePathBarrier(file, deps = {}) {
+  const open = deps.openSync || fs.openSync;
+  const sync = deps.fsyncSync || fs.fsyncSync;
+  const close = deps.closeSync || fs.closeSync;
+  const flush = (target) => {
+    let fd;
+    try {
+      fd = open(target, 'r');
+      sync(fd);
+    } finally {
+      if (fd !== undefined) close(fd);
+    }
+  };
+  flush(file);
+  flush(path.dirname(file));
+}
+
 function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
   if (!mapping) return { changed: false, skipped: true };
@@ -2175,9 +2192,54 @@ function metadataReconciliationPlan(record, raw, now = () => new Date().toISOStr
     card_sha256: crypto.createHash('sha256').update(raw).digest('hex'),
     next_sha256: crypto.createHash('sha256').update(next).digest('hex'),
     changed_fields: Object.keys(fields),
+    field_values: fields,
     changed: next !== raw,
     next,
   };
+}
+
+function metadataApplyRequest(card, args) {
+  return {
+    card,
+    card_operand: String(args.card),
+    reason: args.reason,
+    expected_card_sha256: typeof args['expected-card-sha256'] === 'string' ? args['expected-card-sha256'] : null,
+    apply: true,
+    json: args.json === true,
+  };
+}
+
+function validateMetadataPending(record, pending, request) {
+  const hash = /^[0-9a-f]{64}$/;
+  const allowed = new Set(['kanban_column', 'status', 'schema_version', 'batch_policy', 'status_changed_at']);
+  if (!pending || pending.state !== 'prepared' || !pending.request
+    || JSON.stringify(pending.request) !== JSON.stringify(request)
+    || !hash.test(String(pending.card_sha256 || '')) || !hash.test(String(pending.next_sha256 || ''))
+    || !Array.isArray(pending.changed_fields) || !pending.changed_fields.length
+    || !pending.field_values || typeof pending.field_values !== 'object' || Array.isArray(pending.field_values)
+    || pending.changed_fields.some((field) => !allowed.has(field) || typeof pending.field_values[field] !== 'string')
+    || JSON.stringify(Object.keys(pending.field_values)) !== JSON.stringify(pending.changed_fields)
+    || typeof pending.reconciled_at !== 'string' || !pending.reconciled_at) {
+    throw new Error(`reconcile-metadata pending intent is malformed or does not exactly match the literal apply request for ${record.card}`);
+  }
+  return pending;
+}
+
+function finalizeMetadataReconciliation(ctx, state, record, pending, persist, barrier) {
+  const priorAudits = Array.isArray(record.metadata_reconciliations) ? record.metadata_reconciliations : [];
+  const audit = {
+    request: pending.request, reason: pending.request.reason.trim(),
+    card_sha256: pending.card_sha256, next_sha256: pending.next_sha256,
+    changed_fields: pending.changed_fields, reconciled_at: pending.reconciled_at,
+  };
+  record.metadata_reconciliations = [...priorAudits, audit];
+  record.projection_reconciled_at = audit.reconciled_at;
+  delete record.metadata_reconciliation_pending;
+  delete record.projection_error;
+  delete record.projection_failed_at;
+  persist(ctx, state, record);
+  barrier(ctx.statePath);
+  return audit;
 }
 
 async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
@@ -2192,26 +2254,58 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   const lock = deps.withLock || withLock;
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const writeText = deps.atomicWriteText || atomicWriteText;
+  const barrier = deps.durablePathBarrier || durablePathBarrier;
   const now = deps.now || (() => new Date().toISOString());
   return lock(ctx, `gates-${slugify(card)}`, async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
     if (!record) throw new Error('reconcile-metadata requires a tracked card');
+    if (!METADATA_RECONCILE_PHASES.has(record.phase)) {
+      throw new Error(`reconcile-metadata refuses phase ${record.phase || 'missing'}; active and parked cards are out of scope`);
+    }
     const cardPath = resolveCardPath(record.card_path, record.card, cardsRoot);
     const raw = fs.readFileSync(cardPath, 'utf8');
-    const plan = metadataReconciliationPlan(record, raw, now);
+    const rawSha256 = crypto.createHash('sha256').update(raw).digest('hex');
+    const pending = record.metadata_reconciliation_pending || null;
+    if (pending && args.apply !== true) {
+      throw new Error('reconcile-metadata pending intent requires the exact literal --apply request');
+    }
+    const request = args.apply === true ? metadataApplyRequest(card, args) : null;
+    if (pending) {
+      validateMetadataPending(record, pending, request);
+      if (rawSha256 === pending.card_sha256) {
+        const next = patchFrontmatter(raw, pending.field_values);
+        const nextSha256 = crypto.createHash('sha256').update(next).digest('hex');
+        if (nextSha256 !== pending.next_sha256) {
+          throw new Error('reconcile-metadata pending intent does not reproduce its exact intended card hash');
+        }
+        const remaining = projectionMetadataProblemFromRaw(record, next, { ignoreSavedProjectionError: true });
+        if (remaining) throw new Error(`metadata-only pending repair cannot resolve this drift without widening scope: ${remaining.error}`);
+        writeText(cardPath, next);
+        barrier(cardPath);
+        const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
+        if (verifiedSha256 !== pending.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+      } else if (rawSha256 !== pending.next_sha256) {
+        throw new Error('reconcile-metadata pending intent found a third card hash; needs-inspection with zero writes');
+      } else {
+        const remaining = projectionMetadataProblemFromRaw(record, raw, { ignoreSavedProjectionError: true });
+        if (remaining) throw new Error(`metadata-only pending repair cannot finalize this drift without widening scope: ${remaining.error}`);
+      }
+      const audit = finalizeMetadataReconciliation(ctx, state, record, pending, persist, barrier);
+      return {
+        action: 'reconciled-metadata', phase: record.phase, no_op: false, recovered_pending: true,
+        audit, card: record.card, card_sha256: pending.card_sha256, next_sha256: pending.next_sha256,
+        changed_fields: pending.changed_fields, changed: true, request,
+      };
+    }
+    const reconciledAt = now();
+    const plan = metadataReconciliationPlan(record, raw, () => reconciledAt);
     if (args.apply !== true) {
-      const { next, ...receipt } = plan;
+      const receipt = { ...plan };
+      delete receipt.next;
+      delete receipt.field_values;
       return { action: 'reconcile-metadata-plan', phase: record.phase, apply_required: plan.changed, no_op: !plan.changed, ...receipt };
     }
-    const request = {
-      card,
-      card_operand: String(args.card),
-      reason: args.reason,
-      expected_card_sha256: typeof args['expected-card-sha256'] === 'string' ? args['expected-card-sha256'] : null,
-      apply: true,
-      json: args.json === true,
-    };
     const priorAudits = Array.isArray(record.metadata_reconciliations) ? record.metadata_reconciliations : [];
     const priorAudit = priorAudits[priorAudits.length - 1] || null;
     const replay = !plan.changed && priorAudit && priorAudit.request
@@ -2219,7 +2313,10 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
       && priorAudit.card_sha256 === request.expected_card_sha256
       && priorAudit.next_sha256 === plan.card_sha256;
     if (replay) {
-      const { next, ...receipt } = plan;
+      barrier(ctx.statePath);
+      const receipt = { ...plan };
+      delete receipt.next;
+      delete receipt.field_values;
       return { action: 'reconciled-metadata', phase: record.phase, no_op: true, request, ...receipt };
     }
     if (typeof args['expected-card-sha256'] !== 'string' || args['expected-card-sha256'] !== plan.card_sha256) {
@@ -2228,17 +2325,21 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
     if (!plan.changed) {
       throw new Error('reconcile-metadata completed state accepts only a literal replay of the exact successful apply request');
     }
-    writeText(cardPath, plan.next);
-    const audit = {
-      request, reason: request.reason.trim(), card_sha256: plan.card_sha256, next_sha256: plan.next_sha256,
-      changed_fields: plan.changed_fields, reconciled_at: now(),
+    const intent = {
+      state: 'prepared', request, card_sha256: plan.card_sha256, next_sha256: plan.next_sha256,
+      changed_fields: plan.changed_fields, field_values: plan.field_values, reconciled_at: reconciledAt,
     };
-    record.metadata_reconciliations = [...priorAudits, audit];
-    record.projection_reconciled_at = audit.reconciled_at;
-    delete record.projection_error;
-    delete record.projection_failed_at;
+    record.metadata_reconciliation_pending = intent;
     persist(ctx, state, record);
-    const { next, ...receipt } = plan;
+    barrier(ctx.statePath);
+    writeText(cardPath, plan.next);
+    barrier(cardPath);
+    const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
+    if (verifiedSha256 !== plan.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+    const audit = finalizeMetadataReconciliation(ctx, state, record, intent, persist, barrier);
+    const receipt = { ...plan };
+    delete receipt.next;
+    delete receipt.field_values;
     return { action: 'reconciled-metadata', phase: record.phase, no_op: false, audit, ...receipt };
   }, { card });
 }
@@ -2281,7 +2382,7 @@ async function main() {
 }
 
 module.exports = {
-  parseArgs, emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
+  parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
