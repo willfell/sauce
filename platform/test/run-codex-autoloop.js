@@ -1785,6 +1785,33 @@ const recoveryDeps = {
 };
 const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
 const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
+const mismatchedGateHead = deepCopy(recoveryBefore);
+mismatchedGateHead.gate_receipt.head_sha = 'a'.repeat(40);
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: mismatchedGateHead } }) },
+), /does not match preserved gate receipt/, 'valid but different preserved gate HEAD refuses recovery'); count++;
+const failedGateReceipt = deepCopy(recoveryBefore);
+failedGateReceipt.gate_receipt.status = 'fail';
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: failedGateReceipt } }) },
+), /gate receipt did not pass/, 'matching preserved gate HEAD still requires a passing gate receipt'); count++;
+for (const lens of ['correctness', 'regression-risk', 'test-adequacy']) {
+  const mismatchedReviewHead = deepCopy(recoveryBefore);
+  mismatchedReviewHead.reviews[lens].head_sha = 'b'.repeat(40);
+  await assert.rejects(() => commandRecoverDeployed(
+    { root: reconcileRoot }, recoveryArgs,
+    { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: mismatchedReviewHead } }) },
+  ), new RegExp(`preserved ${lens} review`), `valid but different preserved ${lens} review HEAD refuses recovery`); count++;
+}
+const refutedReviewReceipt = deepCopy(recoveryBefore);
+refutedReviewReceipt.reviews.correctness.verdict = 'refute';
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: refutedReviewReceipt } }) },
+), /preserved correctness review/, 'matching review HEAD still requires a passing verdict'); count++;
+eq(recoveryWrites, 0, 'preserved exact-head receipt refusals perform no ledger write');
 const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
 eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
