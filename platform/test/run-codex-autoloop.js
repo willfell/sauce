@@ -6,16 +6,18 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
+  emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
   commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
+  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem, DELIVERY_STABLE_FIELDS,
+  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
@@ -1700,6 +1702,584 @@ eq(failedReconcile.action, 'reconcile-failed', 'projection failure remains expli
 eq(failedProjectionState.cards.Failed.projection_error, 'card note missing', 'latest projection error stays saved');
 eq(failedProjectionWrites, 1, 'failed projection persists its error without touching receipts');
 eq(JSON.stringify(failedProjectionState.cards.Failed.vault_receipts), failedProjectionReceiptsBefore, 'failed reconciliation preserves saved receipt values');
+
+// GA-OPS12-BLOCKED-RELEASE-RECEIPTS: exact-token, release, tap, brew, and vault proof.
+const RECOVERY_HEAD = 'c'.repeat(40);
+const FEATURE_MERGE = 'd'.repeat(40);
+const RELEASE_MERGE = 'e'.repeat(40);
+const TAP_MERGE = 'f'.repeat(40);
+const recoveryRecord = {
+  card: 'Stranded shipped card', phase: 'blocked', batch_policy: 'supervised_only',
+  feature_pr: 570, release_pr: 571, feature_merge_sha: FEATURE_MERGE,
+  deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+};
+const featurePr = {
+  number: 570, state: 'MERGED', url: 'https://example.test/feature/570',
+  headRefOid: RECOVERY_HEAD, mergeCommit: { oid: FEATURE_MERGE },
+};
+const releasePr = {
+  number: 571, state: 'MERGED', url: 'https://example.test/release/571',
+  mergeCommit: { oid: RELEASE_MERGE },
+};
+const recoveryCollectorDeps = {
+  prView: (_repo, number) => number === 570 ? featurePr : releasePr,
+  releaseContainsCommit: () => true,
+  currentTapFormulaTag: () => 'v0.245.0',
+  tagContainsCommit: () => true,
+  tapPr: () => ({ number: 91, state: 'MERGED', url: 'https://example.test/tap/91', mergeCommit: { oid: TAP_MERGE } }),
+  bottleVersion: () => '0.245.0',
+  vaultLedgerProof: (vault, version) => ({ vault: vault.id, ok: true, installed_version: version }),
+  now: () => '2026-07-20T19:00:00.000Z',
+};
+const collectedRecovery = collectDeployedRecoveryEvidence({ root: tmp }, recoveryRecord, RECOVERY_HEAD, recoveryCollectorDeps);
+eq(collectedRecovery.feature_pr.head_sha, RECOVERY_HEAD, 'GA-OPS12 recovery binds the complete exact feature HEAD token');
+eq(collectedRecovery.tag, 'v0.245.0', 'GA-OPS12 recovery binds the exact tap formula tag');
+eq(Object.keys(collectedRecovery.vault_receipts), ['headspace', 'accuris', 'ero'], 'GA-OPS12 recovery collects three read-only vault ledger proofs');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), 'v0.245.0', 'tap parser accepts one exact release tag URL');
+eq(formulaTagFromText('url "https://attacker.invalid/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser refuses an unrelated archive domain');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/releases/download/source.tar.gz"\n# url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser refuses a Sauce tag URL that exists only in a comment');
+eq(formulaTagFromText('homepage "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser requires the active Homebrew url directive');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"\nurl "https://github.com/willfell/sauce/archive/refs/tags/v0.244.2.tar.gz"'), '', 'tap parser refuses multiple active Sauce tag directives');
+const formulaFor = (tag) => `url "https://github.com/willfell/sauce/archive/refs/tags/${tag}.tar.gz"`;
+eq(formulaTagFromText(`${formulaFor('v0.245.0')} # bottle source\r\n`), 'v0.245.0', 'tap parser accepts an active inline-commented Sauce URL in CRLF formula text');
+const blockCommentedFormula = `=begin\n${formulaFor('v0.245.0')}\n=end`;
+eq(formulaTagFromText(blockCommentedFormula), '', 'Ruby block-commented Sauce URL is inactive');
+eq(formulaTagFromText(`${blockCommentedFormula}\n${formulaFor('v0.245.0')}`), 'v0.245.0', 'active Sauce URL after a closed Ruby block comment is accepted');
+eq(formulaTagFromText(`=begin\n${formulaFor('v0.244.2')}\n=end\n${formulaFor('v0.245.0')}`), 'v0.245.0', 'stale Ruby block-commented tag does not create active ambiguity');
+eq(formulaTagFromText(`=begin\n${formulaFor('v0.245.0')}`), '', 'unterminated Ruby block comment suppresses its Sauce URL');
+eq(currentTapFormulaTag(tmp, () => blockCommentedFormula), '', 'matching block-comment-only tap and installed formulas do not prove active evidence');
+eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.245.0')),
+  'v0.245.0', 'tap proof accepts matching active tap and installed formula tags');
+eq(currentTapFormulaTag(tmp, (file) => file.includes('/Library/Taps/') ? formulaFor('v0.245.0') : formulaFor('v0.244.2')),
+  '', 'tap proof refuses stale disagreement between active tap and installed formulas');
+const tagAncestryCommands = [];
+ok(tagContainsCommit(tmp, 'v0.245.0', FEATURE_MERGE, (command, args, opts) => {
+  tagAncestryCommands.push([command, args, opts.cwd]);
+  return '';
+}), 'tag ancestry helper accepts only after exact Git proof');
+eq(tagAncestryCommands, [
+  ['git', ['fetch', 'origin', 'main', '--tags', '--quiet'], tmp],
+  ['git', ['merge-base', '--is-ancestor', FEATURE_MERGE, 'v0.245.0'], tmp],
+], 'tag ancestry helper executes exact fetch and tokenized ancestor query');
+eq(tagContainsCommit(tmp, 'v0.245.0-extra', FEATURE_MERGE, () => { throw new Error('must not run'); }), false,
+  'tag ancestry helper rejects a decorated tag before Git');
+eq(tagContainsCommit(tmp, 'v0.245.0', `prefix-${FEATURE_MERGE}`, () => { throw new Error('must not run'); }), false,
+  'tag ancestry helper rejects a decorated commit before Git');
+let tagAncestryFailureCalls = 0;
+eq(tagContainsCommit(tmp, 'v0.245.0', FEATURE_MERGE, () => {
+  tagAncestryFailureCalls++;
+  if (tagAncestryFailureCalls === 2) throw new Error('not ancestor');
+  return '';
+}), false, 'tag ancestry helper fails closed when exact merge-base proof fails');
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, state: 'OPEN' } : releasePr },
+), /feature PR is not merged/, 'unmerged feature PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, mergeCommit: null } : releasePr },
+), /feature PR has no exact merge commit/, 'feature PR without an exact merge SHA refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, headRefOid: `0${RECOVERY_HEAD.slice(1)}` } : releasePr },
+), /feature PR head is not the exact expected/, 'wrong exact feature HEAD refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, { ...recoveryRecord, feature_merge_sha: 'a'.repeat(40) }, RECOVERY_HEAD, recoveryCollectorDeps,
+), /feature merge commit differs from preserved ledger evidence/, 'feature merge SHA differing from preserved ledger evidence refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? featurePr : { ...releasePr, state: 'OPEN' } },
+), /containing release PR is not merged/, 'unmerged containing release PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? featurePr : { ...releasePr, mergeCommit: null } },
+), /release PR has no exact merge commit/, 'release PR without an exact merge SHA refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tagContainsCommit: () => false },
+), /does not contain feature merge/, 'missing tag ancestry refuses recovery'); count++;
+const ancestryCalls = [];
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, {
+    ...recoveryCollectorDeps,
+    tagContainsCommit: (_root, _tag, commit) => {
+      ancestryCalls.push(commit);
+      return commit === FEATURE_MERGE;
+    },
+  },
+), /does not contain release merge/, 'formula tag must contain the exact release merge independently of feature ancestry'); count++;
+eq(ancestryCalls, [FEATURE_MERGE, RELEASE_MERGE], 'release-tag fixture proves both independent ancestry edges are evaluated in order');
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, releaseContainsCommit: () => false },
+), /release PR does not contain/, 'unrelated merged release PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, currentTapFormulaTag: () => '' },
+), /tap formula must contain exactly one/, 'missing or ambiguous active Sauce formula tag refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tapPr: () => null },
+), /tap PR.*not merged/, 'missing tap receipt refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, tapPr: () => ({ number: 91, state: 'OPEN', url: 'https://example.test/tap/91', mergeCommit: { oid: TAP_MERGE } }) },
+), /tap PR.*not merged/, 'unmerged tap PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, tapPr: () => ({ number: 91, state: 'MERGED', url: 'https://example.test/tap/91', mergeCommit: null }) },
+), /tap PR.*no exact merge commit/, 'tap PR without an exact merge SHA refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, bottleVersion: () => '0.244.2' },
+), /installed brew.*is older/, 'older installed Homebrew version refuses recovery'); count++;
+const installedAncestryCalls = [];
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, {
+    ...recoveryCollectorDeps,
+    tagContainsCommit: (_root, tag, commit) => {
+      installedAncestryCalls.push([tag, commit]);
+      return installedAncestryCalls.length < 3;
+    },
+  },
+), /installed brew.*does not contain feature merge/, 'installed Homebrew tag must independently contain the feature merge'); count++;
+eq(installedAncestryCalls, [
+  ['v0.245.0', FEATURE_MERGE],
+  ['v0.245.0', RELEASE_MERGE],
+  ['v0.245.0', FEATURE_MERGE],
+], 'Homebrew ancestry fixture reaches the independent installed-tag edge after both formula-tag edges');
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, vaultLedgerProof: (vault, version) => ({ vault: vault.id, ok: vault.id !== 'ero', installed_version: version }) },
+), /three-vault ledgers/, 'one missing vault proof refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, { ...recoveryRecord, deploy_subscriptions: { headspace: ['mechanism:x'], accuris: [], ero: [] } },
+  RECOVERY_HEAD, recoveryCollectorDeps,
+), /non-empty deployment additions require existing green three-vault receipts/, 'subscription additions require prior green deployment receipts'); count++;
+const behindSubscriptionReceipts = Object.fromEntries(['headspace', 'accuris', 'ero'].map((vault) => [vault, {
+  vault, ok: true, installed_version: vault === 'ero' ? '0.244.2' : '0.245.0',
+}]));
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, {
+    ...recoveryRecord,
+    deploy_subscriptions: { headspace: ['mechanism:x'], accuris: [], ero: [] },
+    vault_receipts: behindSubscriptionReceipts,
+  }, RECOVERY_HEAD, recoveryCollectorDeps,
+), /non-empty deployment additions require existing green three-vault receipts/, 'subscription recovery refuses a green receipt behind the recovered version'); count++;
+
+// GA-OPS12-RECOVERY-IDEMPOTENCE: dry-run, apply, projection, and literal replay.
+const recoveryCardPath = path.join(reconcileRoot, 'Stranded shipped card.md');
+const recoveryBoardPath = path.join(reconcileRoot, 'recovery-board.md');
+fs.writeFileSync(recoveryCardPath, '---\nkanban_column: Blocked\nstatus: blocked\n---\nPreserved body\n');
+fs.writeFileSync(recoveryBoardPath, liveBoard({ blocked: [['ignored', 'Stranded shipped card']].map((row) => row[1]) }));
+const recoveryState = emptyState();
+recoveryState.cards['Stranded shipped card'] = {
+  ...recoveryRecord, card_path: recoveryCardPath, branch: 'preserved-branch', worktree: '/preserved-worktree',
+  gate_receipt: { status: 'pass', head_sha: RECOVERY_HEAD },
+  reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
+};
+let recoveryWrites = 0;
+const recoveryDeps = {
+  readState: () => recoveryState,
+  writeState: () => { recoveryWrites++; },
+  withLock: immediateCardLock,
+  collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
+  boardPath: recoveryBoardPath,
+  cardsRoot: reconcileRoot,
+  now: () => '2026-07-20T19:01:00.000Z',
+};
+const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
+const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
+const mismatchedGateHead = deepCopy(recoveryBefore);
+mismatchedGateHead.gate_receipt.head_sha = 'a'.repeat(40);
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: mismatchedGateHead } }) },
+), /does not match preserved gate receipt/, 'valid but different preserved gate HEAD refuses recovery'); count++;
+const failedGateReceipt = deepCopy(recoveryBefore);
+failedGateReceipt.gate_receipt.status = 'fail';
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: failedGateReceipt } }) },
+), /gate receipt did not pass/, 'matching preserved gate HEAD still requires a passing gate receipt'); count++;
+for (const lens of ['correctness', 'regression-risk', 'test-adequacy']) {
+  const mismatchedReviewHead = deepCopy(recoveryBefore);
+  mismatchedReviewHead.reviews[lens].head_sha = 'b'.repeat(40);
+  await assert.rejects(() => commandRecoverDeployed(
+    { root: reconcileRoot }, recoveryArgs,
+    { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: mismatchedReviewHead } }) },
+  ), new RegExp(`preserved ${lens} review`), `valid but different preserved ${lens} review HEAD refuses recovery`); count++;
+}
+const refutedReviewReceipt = deepCopy(recoveryBefore);
+refutedReviewReceipt.reviews.correctness.verdict = 'refute';
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs,
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: refutedReviewReceipt } }) },
+), /preserved correctness review/, 'matching review HEAD still requires a passing verdict'); count++;
+eq(recoveryWrites, 0, 'preserved exact-head receipt refusals perform no ledger write');
+const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
+eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
+eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
+const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
+eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
+eq(recoveryState.cards['Stranded shipped card'].phase, 'deployed', 'recovery changes the terminal phase only after every proof passes');
+eq(recoveryState.cards['Stranded shipped card'].branch, 'preserved-branch', 'recovery preserves the branch');
+eq(recoveryState.cards['Stranded shipped card'].worktree, '/preserved-worktree', 'recovery preserves the worktree');
+eq(recoveryState.cards['Stranded shipped card'].gate_receipt, recoveryBefore.gate_receipt, 'recovery preserves the exact gate receipt');
+eq(recoveryState.cards['Stranded shipped card'].reviews, recoveryBefore.reviews, 'recovery preserves all exact-head reviews');
+eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'recovery journals exactly one receipt-bound transition');
+ok(/kanban_column: Completed/.test(fs.readFileSync(recoveryCardPath, 'utf8')), 'recovery projects completed card metadata');
+ok(/## Completed[\s\S]*\[x\] \[\[Stranded shipped card\]\]/.test(fs.readFileSync(recoveryBoardPath, 'utf8')), 'recovery projects a checked Completed board entry');
+const recoveryWritesAfterApply = recoveryWrites;
+const replayedRecovery = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
+eq(replayedRecovery.no_op, true, 'literal receipt-bound recovery replay returns no_op true');
+eq(recoveryWrites, recoveryWritesAfterApply, 'literal recovery replay performs no ledger write');
+eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'literal recovery replay never duplicates its audit');
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, { ...recoveryArgs, 'expected-head': `prefix-${RECOVERY_HEAD}` },
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: deepCopy(recoveryBefore) } }) },
+), /exact lowercase 40-hex SHA token/, 'substring or decorated HEAD refuses before external proof'); count++;
+const parkedRecoveryRefusal = deepCopy(recoveryBefore); parkedRecoveryRefusal.phase = 'parked';
+const parkedRecoveryRefusalState = { ...emptyState(), cards: { [parkedRecoveryRefusal.card]: parkedRecoveryRefusal } };
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs, { ...recoveryDeps, readState: () => parkedRecoveryRefusalState },
+), /parked and pre-PR cards are never recovery targets/, 'parked recovery is unconditionally refused'); count++;
+
+// GA-OPS12-METADATA-ONLY-RECONCILE: card-only CAS, audit, and exact replay.
+const metadataCardPath = path.join(reconcileRoot, 'Metadata drift.md');
+const currentMetadataRaw = card({ name: 'Metadata drift', profile: 'heavy', zones: ['platform/meta'] })
+  .replace('---\n', '---\nkanban_column: Completed\n')
+  .replace('status: planning', 'status: completed');
+const currentMetadata = prepareDeliveryCard(currentMetadataRaw, 'Metadata drift').card;
+const historicalMetadataRaw = currentMetadataRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 1.0.0');
+fs.writeFileSync(metadataCardPath, historicalMetadataRaw);
+const metadataState = emptyState();
+metadataState.cards['Metadata drift'] = {
+  card: 'Metadata drift', phase: 'deployed', card_path: metadataCardPath,
+  delivery_contract: currentMetadata, delivery_contract_version: delivery.CONTRACT_VERSION,
+  dependencies: currentMetadata.depends_on, touch_zones: currentMetadata.touch_zones,
+  deploy_subscriptions: currentMetadata.deploy_subscriptions, batch_policy: currentMetadata.batch_policy,
+  branch: 'untouched-metadata-branch', worktree: '/untouched-metadata-worktree',
+};
+let metadataWrites = 0;
+let metadataCardWrites = 0;
+const metadataDeps = {
+  readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
+  atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
+  durablePathBarrier: () => {},
+  cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
+};
+const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
+eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
+eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
+const metadataApplyArgs = {
+  card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
+  'expected-card-sha256': metadataDryRun.card_sha256,
+  json: true,
+};
+const metadataApplied = await commandReconcileMetadata({ root: reconcileRoot }, metadataApplyArgs, metadataDeps);
+eq(metadataApplied.action, 'reconciled-metadata', 'bounded metadata apply succeeds');
+eq(metadataApplied.no_op, false, 'first metadata apply records a real change');
+eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw.replace('schema_version: 1.0.0', `schema_version: "${delivery.CONTRACT_VERSION}"`), 'metadata apply changes only schema_version bytes');
+eq(metadataState.cards['Metadata drift'].branch, 'untouched-metadata-branch', 'metadata reconcile preserves branch authority');
+eq(metadataState.cards['Metadata drift'].worktree, '/untouched-metadata-worktree', 'metadata reconcile preserves worktree authority');
+eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'metadata reconcile journals one bounded audit');
+eq(metadataWrites, 2, 'metadata apply persists one write-ahead intent and one completed audit');
+eq(metadataCardWrites, 1, 'metadata apply performs exactly one bounded card write');
+const metadataWritesAfterApply = metadataWrites;
+const metadataCardWritesAfterApply = metadataCardWrites;
+const metadataTimestampAfterApply = metadataState.cards['Metadata drift'].projection_reconciled_at;
+const metadataReplay = await commandReconcileMetadata({ root: reconcileRoot }, metadataApplyArgs, metadataDeps);
+eq(metadataReplay.no_op, true, 'literal metadata replay preserves the original dry-run CAS operand and returns no_op true');
+eq(metadataWrites, metadataWritesAfterApply, 'literal metadata replay performs no ledger write');
+eq(metadataCardWrites, metadataCardWritesAfterApply, 'literal metadata replay performs no card write');
+eq(metadataState.cards['Metadata drift'].projection_reconciled_at, metadataTimestampAfterApply, 'literal metadata replay performs no timestamp write');
+eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'literal metadata replay never duplicates its audit');
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, reason: 'changed replay reason',
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'changed replay reason fails closed even with the original CAS operand'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, 'expected-card-sha256': metadataApplied.next_sha256,
+}, metadataDeps), /only a literal replay/, 'substituting the post-apply hash fails closed instead of masquerading as replay'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, json: false,
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'removing the successful request json operand fails closed'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, reason: ` ${metadataApplyArgs.reason}`,
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'even normalization-equivalent reason whitespace is not accepted as literal replay'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, card: '[[Metadata drift]]',
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'normalization-equivalent card syntax is not accepted as literal replay'); count++;
+eq(metadataWrites, metadataWritesAfterApply, 'altered replay attempts perform no ledger write');
+eq(metadataCardWrites, metadataCardWritesAfterApply, 'altered replay attempts perform no card write');
+const parkedMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...metadataState.cards['Metadata drift'], phase: 'parked' } } };
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => parkedMetadataState },
+), /active and parked cards are out of scope/, 'metadata reconciliation refuses parked cards'); count++;
+const activeMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...metadataState.cards['Metadata drift'], phase: 'implementing' } } };
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => activeMetadataState },
+), /active and parked cards are out of scope/, 'GA-OPS12A2-METADATA-ACTIVE-PHASE-SCOPE-MUTATION-SURVIVES refuses an active implementing card independently of parked refusal'); count++;
+const unsupportedMetadata = historicalMetadataRaw.replace('model_profile: heavy', 'model_profile: standard');
+assert.throws(() => metadataReconciliationPlan(metadataState.cards['Metadata drift'], unsupportedMetadata),
+  /without widening scope/, 'metadata-only operation refuses unsupported contract drift'); count++;
+const savedProjectionErrorRecord = {
+  ...deepCopy(metadataState.cards['Metadata drift']),
+  projection_error: 'prior projection write denied',
+  projection_failed_at: '2026-07-20T18:59:00.000Z',
+  metadata_reconciliations: [],
+};
+const savedProjectionErrorState = { ...emptyState(), cards: { 'Metadata drift': savedProjectionErrorRecord } };
+let savedProjectionErrorWrites = 0;
+let savedProjectionErrorCardWrites = 0;
+const savedProjectionErrorDeps = {
+  ...metadataDeps,
+  readState: () => savedProjectionErrorState,
+  writeState: () => { savedProjectionErrorWrites++; },
+  atomicWriteText: (file, raw) => { savedProjectionErrorCardWrites++; fs.writeFileSync(file, raw); },
+};
+fs.writeFileSync(metadataCardPath, unsupportedMetadata);
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, savedProjectionErrorDeps,
+), /without widening scope/, 'GA-OPS12A2 saved projection error cannot suppress unsupported stable-contract drift'); count++;
+eq(savedProjectionErrorRecord.projection_error, 'prior projection write denied', 'refused metadata widening preserves the saved projection error');
+eq(savedProjectionErrorWrites, 0, 'refused saved-error widening performs no ledger write');
+eq(savedProjectionErrorCardWrites, 0, 'refused saved-error widening performs no card write');
+fs.writeFileSync(metadataCardPath, historicalMetadataRaw);
+const savedErrorDryRun = await commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, savedProjectionErrorDeps,
+);
+eq(savedErrorDryRun.changed_fields, ['schema_version'], 'saved projection error still permits a genuinely metadata-only repair plan');
+const savedErrorApplied = await commandReconcileMetadata({ root: reconcileRoot }, {
+  card: 'Metadata drift', apply: true, reason: 'repair supported drift behind saved projection error',
+  'expected-card-sha256': savedErrorDryRun.card_sha256, json: true,
+}, savedProjectionErrorDeps);
+eq(savedErrorApplied.no_op, false, 'supported metadata-only repair applies behind a saved projection error');
+eq(savedProjectionErrorRecord.projection_error, undefined, 'only the supported metadata repair clears the saved projection error');
+eq(savedProjectionErrorWrites, 2, 'supported saved-error repair persists intent then completion');
+eq(savedProjectionErrorCardWrites, 1, 'supported saved-error repair performs one card write');
+
+function metadataCrashHarness(id) {
+  const name = 'Metadata drift';
+  const cardPath = path.join(reconcileRoot, `Metadata transaction ${id}.md`);
+  const statePath = path.join(reconcileRoot, `Metadata transaction ${id}.state.json`);
+  fs.writeFileSync(cardPath, historicalMetadataRaw);
+  const record = {
+    ...deepCopy(metadataState.cards['Metadata drift']), card: name, card_path: cardPath,
+    metadata_reconciliations: [],
+  };
+  delete record.metadata_reconciliation_pending;
+  let durableState = { ...emptyState(), cards: { [name]: record } };
+  let ledgerWrites = 0;
+  let cardWrites = 0;
+  let barrierCalls = 0;
+  const barrierTargets = [];
+  let ledgerFailure = null;
+  let cardFailure = null;
+  let barrierFailure = null;
+  let replacement = null;
+  const deps = {
+    readState: () => deepCopy(durableState),
+    writeState: (_ctx, _state, changedRecord) => {
+      ledgerWrites++;
+      const failure = ledgerFailure && ledgerFailure.call === ledgerWrites ? ledgerFailure : null;
+      if (failure && failure.when === 'before') throw new Error(failure.message);
+      durableState.cards[changedRecord.card] = deepCopy(changedRecord);
+      if (failure && failure.when === 'after') throw new Error(failure.message);
+    },
+    withLock: immediateCardLock,
+    atomicWriteText: (file, raw) => {
+      cardWrites++;
+      const failure = cardFailure && cardFailure.call === cardWrites ? cardFailure : null;
+      if (failure && failure.when === 'before') throw new Error(failure.message);
+      fs.writeFileSync(file, replacement === null ? raw : replacement(raw));
+      if (failure && failure.when === 'after') throw new Error(failure.message);
+    },
+    durablePathBarrier: (target) => {
+      barrierCalls++;
+      barrierTargets.push(target);
+      if (barrierFailure && barrierFailure.call === barrierCalls) throw new Error(barrierFailure.message);
+    },
+    cardsRoot: reconcileRoot,
+    now: () => '2026-07-20T19:03:00.000Z',
+  };
+  const ctx = { root: reconcileRoot, statePath };
+  const dryRun = () => commandReconcileMetadata(ctx, { card: name, 'dry-run': true }, deps);
+  const applyArgs = (sha) => ({
+    card: name, apply: true, reason: 'recover exact metadata transaction',
+    'expected-card-sha256': sha, json: true,
+  });
+  return {
+    name, cardPath, ctx, deps, dryRun, applyArgs,
+    state: () => deepCopy(durableState),
+    raw: () => fs.readFileSync(cardPath, 'utf8'),
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls, barrierTargets: [...barrierTargets] }),
+    failLedger: (call, when, message) => { ledgerFailure = { call, when, message }; },
+    failCard: (call, when, message) => { cardFailure = { call, when, message }; },
+    failBarrier: (call, message) => { barrierFailure = { call, message }; },
+    clearFailures: () => { ledgerFailure = null; cardFailure = null; barrierFailure = null; replacement = null; },
+    replaceWith: (fn) => { replacement = fn; },
+  };
+}
+
+// GA-OPS12A2-METADATA-INTENT-BEFORE-CARD: no card write precedes durable intent.
+const intentFailure = metadataCrashHarness('intent-before-card');
+const intentFailurePlan = await intentFailure.dryRun();
+const intentFailureArgs = intentFailure.applyArgs(intentFailurePlan.card_sha256);
+intentFailure.failLedger(1, 'before', 'injected intent persist failure');
+await assert.rejects(() => commandReconcileMetadata(intentFailure.ctx, intentFailureArgs, intentFailure.deps),
+  /injected intent persist failure/, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD propagates intent failure'); count++;
+eq(intentFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD preserves original card bytes');
+eq(intentFailure.state().cards[intentFailure.name].metadata_reconciliation_pending, undefined, 'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD records no false pending intent');
+intentFailure.clearFailures();
+eq((await commandReconcileMetadata(intentFailure.ctx, intentFailureArgs, intentFailure.deps)).no_op, false,
+  'GA-OPS12A2-METADATA-INTENT-BEFORE-CARD literal retry completes normally');
+
+// GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY: prepared intent survives a failed rename/write.
+const cardFailure = metadataCrashHarness('card-write-failure');
+const cardFailurePlan = await cardFailure.dryRun();
+const cardFailureArgs = cardFailure.applyArgs(cardFailurePlan.card_sha256);
+cardFailure.failCard(1, 'before', 'injected atomic replacement failure');
+await assert.rejects(() => commandReconcileMetadata(cardFailure.ctx, cardFailureArgs, cardFailure.deps),
+  /injected atomic replacement failure/, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY propagates card failure'); count++;
+ok(cardFailure.state().cards[cardFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY retains durable prepared intent');
+eq(cardFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY retains original card');
+cardFailure.clearFailures();
+const cardFailureRecovered = await commandReconcileMetadata(cardFailure.ctx, cardFailureArgs, cardFailure.deps);
+eq(cardFailureRecovered.recovered_pending, true, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY literal retry recovers pending transaction');
+eq(cardFailure.state().cards[cardFailure.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-CARD-WRITE-FAILURE-RECOVERY finalizes exactly one audit');
+
+// GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY and recovered literal replay.
+const auditFailure = metadataCrashHarness('card-before-audit');
+const auditFailurePlan = await auditFailure.dryRun();
+const auditFailureArgs = auditFailure.applyArgs(auditFailurePlan.card_sha256);
+auditFailure.failLedger(2, 'before', 'injected final audit persist failure');
+await assert.rejects(() => commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps),
+  /injected final audit persist failure/, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY exposes the exact crash window'); count++;
+ok(auditFailure.state().cards[auditFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY keeps prepared intent authoritative');
+ok(auditFailure.raw() !== historicalMetadataRaw, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY begins from already-replaced card bytes');
+const auditFailureCardWrites = auditFailure.counts().cardWrites;
+auditFailure.clearFailures();
+const auditRecovered = await commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps);
+eq(auditRecovered.recovered_pending, true, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY finalizes from next-card hash');
+eq(auditFailure.counts().cardWrites, auditFailureCardWrites, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY does not rewrite the already-correct card');
+eq(auditFailure.state().cards[auditFailure.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-CARD-BEFORE-AUDIT-RECOVERY appends exactly one audit');
+const recoveredCounts = auditFailure.counts();
+const recoveredReplay = await commandReconcileMetadata(auditFailure.ctx, auditFailureArgs, auditFailure.deps);
+eq(recoveredReplay.no_op, true, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY returns literal no_op true');
+eq(auditFailure.counts().ledgerWrites, recoveredCounts.ledgerWrites, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY performs zero ledger writes');
+eq(auditFailure.counts().cardWrites, recoveredCounts.cardWrites, 'GA-OPS12A2-METADATA-RECOVERED-LITERAL-REPLAY performs zero card writes');
+
+// GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY: ambiguous success is reread, never duplicated.
+const ambiguousFinal = metadataCrashHarness('ambiguous-final-persist');
+const ambiguousFinalPlan = await ambiguousFinal.dryRun();
+const ambiguousFinalArgs = ambiguousFinal.applyArgs(ambiguousFinalPlan.card_sha256);
+ambiguousFinal.failLedger(2, 'after', 'injected ambiguous final persist result');
+await assert.rejects(() => commandReconcileMetadata(ambiguousFinal.ctx, ambiguousFinalArgs, ambiguousFinal.deps),
+  /injected ambiguous final persist result/, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY propagates ambiguous persist result'); count++;
+eq(ambiguousFinal.state().cards[ambiguousFinal.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY observes already-durable single audit');
+ambiguousFinal.clearFailures();
+eq((await commandReconcileMetadata(ambiguousFinal.ctx, ambiguousFinalArgs, ambiguousFinal.deps)).no_op, true,
+  'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY converges through literal replay');
+eq(ambiguousFinal.state().cards[ambiguousFinal.name].metadata_reconciliations.length, 1, 'GA-OPS12A2-METADATA-FINAL-PERSIST-RETRY never duplicates audit');
+
+// GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING: every literal operand remains authority.
+const requestBinding = metadataCrashHarness('pending-request-binding');
+const requestBindingPlan = await requestBinding.dryRun();
+const requestBindingArgs = requestBinding.applyArgs(requestBindingPlan.card_sha256);
+requestBinding.failCard(1, 'before', 'prepare pending request fixture');
+await assert.rejects(() => commandReconcileMetadata(requestBinding.ctx, requestBindingArgs, requestBinding.deps), /prepare pending request fixture/); count++;
+requestBinding.clearFailures();
+const requestBindingState = JSON.stringify(requestBinding.state());
+const requestBindingRaw = requestBinding.raw();
+for (const altered of [
+  { ...requestBindingArgs, reason: ` ${requestBindingArgs.reason}` },
+  { ...requestBindingArgs, 'expected-card-sha256': 'a'.repeat(64) },
+  { ...requestBindingArgs, json: false },
+  { ...requestBindingArgs, card: `[[${requestBinding.name}]]` },
+  { card: requestBinding.name, 'dry-run': true },
+]) {
+  await assert.rejects(() => commandReconcileMetadata(requestBinding.ctx, altered, requestBinding.deps),
+    /pending intent.*exact|pending intent requires/, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING refuses altered literal operand'); count++;
+}
+eq(JSON.stringify(requestBinding.state()), requestBindingState, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING leaves ledger byte-equivalent');
+eq(requestBinding.raw(), requestBindingRaw, 'GA-OPS12A2-METADATA-PENDING-REQUEST-BINDING leaves card byte-equivalent');
+
+// GA-OPS12A2-METADATA-PENDING-THIRD-HASH: external bytes never inherit the intent.
+const thirdHash = metadataCrashHarness('pending-third-hash');
+const thirdHashPlan = await thirdHash.dryRun();
+const thirdHashArgs = thirdHash.applyArgs(thirdHashPlan.card_sha256);
+thirdHash.failCard(1, 'before', 'prepare third-hash fixture');
+await assert.rejects(() => commandReconcileMetadata(thirdHash.ctx, thirdHashArgs, thirdHash.deps), /prepare third-hash fixture/); count++;
+thirdHash.clearFailures();
+fs.writeFileSync(thirdHash.cardPath, `${thirdHash.raw()}operator drift\n`);
+const thirdHashState = JSON.stringify(thirdHash.state());
+const thirdHashCounts = thirdHash.counts();
+await assert.rejects(() => commandReconcileMetadata(thirdHash.ctx, thirdHashArgs, thirdHash.deps),
+  /third card hash; needs-inspection/, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH refuses unknown card bytes'); count++;
+eq(JSON.stringify(thirdHash.state()), thirdHashState, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH retains intent unchanged');
+eq(thirdHash.counts().ledgerWrites, thirdHashCounts.ledgerWrites, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH performs zero ledger writes');
+eq(thirdHash.counts().cardWrites, thirdHashCounts.cardWrites, 'GA-OPS12A2-METADATA-PENDING-THIRD-HASH performs zero coordinator card writes');
+
+// GA-OPS12A2-METADATA-DURABLE-BARRIERS: every uncertain boundary refuses completion and remains recoverable.
+const stateBarrierFailure = metadataCrashHarness('state-barrier-failure');
+const stateBarrierPlan = await stateBarrierFailure.dryRun();
+const stateBarrierArgs = stateBarrierFailure.applyArgs(stateBarrierPlan.card_sha256);
+stateBarrierFailure.failBarrier(1, 'injected ledger durability barrier failure');
+await assert.rejects(() => commandReconcileMetadata(stateBarrierFailure.ctx, stateBarrierArgs, stateBarrierFailure.deps),
+  /ledger durability barrier failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates ledger barrier failure'); count++;
+ok(stateBarrierFailure.state().cards[stateBarrierFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS retains intent after state barrier uncertainty');
+eq(stateBarrierFailure.raw(), historicalMetadataRaw, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS does not write card before state barrier');
+
+const cardBarrierFailure = metadataCrashHarness('card-barrier-failure');
+const cardBarrierPlan = await cardBarrierFailure.dryRun();
+const cardBarrierArgs = cardBarrierFailure.applyArgs(cardBarrierPlan.card_sha256);
+cardBarrierFailure.failBarrier(2, 'injected card durability barrier failure');
+await assert.rejects(() => commandReconcileMetadata(cardBarrierFailure.ctx, cardBarrierArgs, cardBarrierFailure.deps),
+  /card durability barrier failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates card barrier failure'); count++;
+ok(cardBarrierFailure.state().cards[cardBarrierFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS leaves no false completed audit after card barrier failure');
+const cardBarrierTargetsBeforeRetry = cardBarrierFailure.counts().barrierTargets.length;
+cardBarrierFailure.clearFailures();
+eq((await commandReconcileMetadata(cardBarrierFailure.ctx, cardBarrierArgs, cardBarrierFailure.deps)).recovered_pending, true,
+  'GA-OPS12A2-METADATA-DURABLE-BARRIERS literal retry recovers ambiguous visible card replacement');
+eq(cardBarrierFailure.counts().barrierTargets.slice(cardBarrierTargetsBeforeRetry), [cardBarrierFailure.cardPath, cardBarrierFailure.ctx.statePath],
+  'GA-OPS12A2-METADATA-DURABLE-BARRIERS reestablishes card durability before final ledger durability');
+
+const hashVerificationFailure = metadataCrashHarness('hash-verification-failure');
+const hashVerificationPlan = await hashVerificationFailure.dryRun();
+const hashVerificationArgs = hashVerificationFailure.applyArgs(hashVerificationPlan.card_sha256);
+hashVerificationFailure.replaceWith((raw) => `${raw}corrupt replacement\n`);
+await assert.rejects(() => commandReconcileMetadata(hashVerificationFailure.ctx, hashVerificationArgs, hashVerificationFailure.deps),
+  /did not verify at the intended hash/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS refuses reread hash mismatch'); count++;
+ok(hashVerificationFailure.state().cards[hashVerificationFailure.name].metadata_reconciliation_pending, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS retains intent after reread mismatch');
+
+const barrierProbePath = path.join(reconcileRoot, 'durable-barrier-probe');
+fs.writeFileSync(barrierProbePath, 'probe');
+const fileBarrierCloses = [];
+assert.throws(() => durablePathBarrier(barrierProbePath, {
+  openSync: () => 11,
+  fsyncSync: () => { throw new Error('injected file fsync failure'); },
+  closeSync: (fd) => { fileBarrierCloses.push(fd); },
+}), /file fsync failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates file fsync failure'); count++;
+eq(fileBarrierCloses, [11], 'GA-OPS12A2-METADATA-DURABLE-BARRIERS closes descriptor after file fsync failure');
+const directoryBarrierTargets = [];
+assert.throws(() => durablePathBarrier(barrierProbePath, {
+  openSync: (target) => { directoryBarrierTargets.push(target); return directoryBarrierTargets.length; },
+  fsyncSync: (fd) => { if (fd === 2) throw new Error('injected directory fsync failure'); },
+  closeSync: () => {},
+}), /directory fsync failure/, 'GA-OPS12A2-METADATA-DURABLE-BARRIERS propagates directory fsync failure'); count++;
+eq(directoryBarrierTargets, [barrierProbePath, path.dirname(barrierProbePath)], 'GA-OPS12A2-METADATA-DURABLE-BARRIERS flushes file before containing directory');
+
+const historicalLedgerRecord = {
+  ...metadataState.cards['Metadata drift'],
+  delivery_contract: { ...currentMetadata, schema_version: '1.0.0' },
+  delivery_contract_version: '1.0.0',
+};
+eq(projectionMetadataProblem(historicalLedgerRecord, reconcileRoot), null, 'compatible historical schema migration no longer creates false metadata projection drift');
+const historicalNoEvidenceRaw = historicalMetadataRaw.replace(/^evidence:.*\n/m, '');
+const historicalNoEvidenceContract = { ...currentMetadata, schema_version: '1.0.0' };
+delete historicalNoEvidenceContract.evidence;
+fs.writeFileSync(metadataCardPath, historicalNoEvidenceRaw);
+eq(projectionMetadataProblem({
+  ...metadataState.cards['Metadata drift'],
+  delivery_contract: historicalNoEvidenceContract,
+  delivery_contract_version: '1.0.0',
+}, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));

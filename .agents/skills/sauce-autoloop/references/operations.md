@@ -124,6 +124,13 @@ manual reconciliation share one board-projection lock. Reconciliation also
 rereads each record under that card's gate lock before writing, so it cannot
 overwrite a concurrent phase transition with stale ledger state.
 
+`reconcile-metadata --apply` persists an exact write-ahead intent in the
+existing ledger before replacing the card. Interruption recovery is the same
+literal apply request with the original CAS and reason: the original card hash
+continues the replacement, the intended next hash finalizes the audit without a
+second card write, and any altered request or third hash fails closed with the
+intent retained.
+
 ## Recovery
 
 - Reclaim a lock only when its PID is dead and it is older than the stale threshold.
