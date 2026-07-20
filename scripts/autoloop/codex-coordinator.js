@@ -12,6 +12,7 @@
 'use strict';
 
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { execFileSync, execFile } = require('child_process');
@@ -42,6 +43,12 @@ const AMEND_CONTRACT_OPTIONS = new Set([
   'expected-batch-policy', 'desired-batch-policy',
 ]);
 const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
+const RECOVER_DEPLOYED_PHASES = new Set([
+  'feature_pr', 'feature_merged', 'release_pr', 'release_merged', 'tagged',
+  'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'blocked', 'needs-inspection',
+]);
+const METADATA_RECONCILE_PHASES = new Set(['blocked', 'needs-inspection', 'deployed']);
+const EXACT_SHA = /^[0-9a-f]{40}$/;
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
 const BOARD = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
@@ -802,11 +809,26 @@ function projectionBoardDrift(boardMd, record) {
   return null;
 }
 
-function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
+function expectedProjectedContract(record, mapping) {
+  const raw = {
+    ...record.delivery_contract,
+    status: mapping.status,
+    depends_on: record.dependencies,
+    touch_zones: record.touch_zones,
+    deploy_subscriptions: record.deploy_subscriptions,
+  };
+  const comparison = delivery.compareVersions(raw.schema_version, delivery.CONTRACT_VERSION);
+  const migrated = comparison === -1 ? delivery.migrate(raw, raw.schema_version) : { ok: true, note: raw };
+  if (!migrated.ok) throw new Error(`ledger Delivery contract cannot migrate: ${migrated.reason}`);
+  const validation = delivery.validateCard(migrated.note, 'historical');
+  if (!validation.ok) throw new Error(`ledger Delivery contract is invalid: ${validation.errors.map((item) => item.code).join(', ')}`);
+  return validation.card;
+}
+
+function projectionMetadataProblemFromRaw(record, raw) {
   const mapping = record && projectionMapping(record.phase);
   if (!mapping || record.projection_error) return null;
   try {
-    const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
     const prepared = prepareDeliveryCard(raw, record.card);
     if (!prepared.ok && (record.delivery_contract || ['current', 'future', 'invalid'].includes(prepared.source))) {
       return {
@@ -819,13 +841,7 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
     const actualStatus = prepared.ok ? prepared.card.status : delivery.normalizeStatus(scalarField(raw, 'status'));
     let differs = scalarField(raw, 'kanban_column') !== mapping.column || actualStatus !== mapping.status;
     if (record.delivery_contract) {
-      const expectedContract = delivery.normalizeCard({
-        ...record.delivery_contract,
-        status: mapping.status,
-        depends_on: record.dependencies,
-        touch_zones: record.touch_zones,
-        deploy_subscriptions: record.deploy_subscriptions,
-      });
+      const expectedContract = expectedProjectedContract(record, mapping);
       const actualContract = prepared.card;
       differs = differs || DELIVERY_STABLE_FIELDS.some(
         (field) => JSON.stringify(actualContract[field]) !== JSON.stringify(expectedContract[field]),
@@ -863,6 +879,17 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
     return { card: record.card, phase: record.phase, error: `card metadata is unreadable: ${err.message}` };
   }
   return null;
+}
+
+function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
+  const mapping = record && projectionMapping(record.phase);
+  if (!mapping || record.projection_error) return null;
+  try {
+    const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
+    return projectionMetadataProblemFromRaw(record, raw);
+  } catch (err) {
+    return { card: record.card, phase: record.phase, error: `card metadata is unreadable: ${err.message}` };
+  }
 }
 
 function completionResult(record) {
@@ -1035,6 +1062,126 @@ function tapPr(version, cwd) {
   const prs = ghJson(['pr', 'list', '-R', TAP_REPO, '--state', 'all', '--limit', '20', '--search', `head:bump-v${version}`, '--json',
     'number,state,title,url,headRefName,mergeCommit,createdAt,mergedAt'], cwd) || [];
   return prs.find((pr) => pr.headRefName === `bump-v${version}` || pr.title === `sauce v${version}`) || null;
+}
+
+function formulaTagFromText(raw) {
+  const matches = [...String(raw || '').matchAll(/archive\/refs\/tags\/(v\d+\.\d+\.\d+(?:\.\d+)?)\.tar\.gz/g)]
+    .map((match) => match[1]);
+  return matches.length === 1 ? matches[0] : '';
+}
+
+function currentTapFormulaTag(_cwd, read = fs.readFileSync) {
+  const tapFormula = '/opt/homebrew/Library/Taps/willfell/homebrew-sauce/Formula/sauce.rb';
+  const installedFormula = '/opt/homebrew/opt/sauce/.brew/sauce.rb';
+  const tapTag = formulaTagFromText(read(tapFormula, 'utf8'));
+  const installedTag = formulaTagFromText(read(installedFormula, 'utf8'));
+  return tapTag && tapTag === installedTag ? tapTag : '';
+}
+
+function tagContainsCommit(root, tag, commit, run = sh) {
+  if (!/^v\d+\.\d+\.\d+(?:\.\d+)?$/.test(String(tag || '')) || !EXACT_SHA.test(String(commit || ''))) return false;
+  try {
+    run('git', ['fetch', 'origin', 'main', '--tags', '--quiet'], { cwd: root, stdio: 'pipe' });
+    run('git', ['merge-base', '--is-ancestor', commit, tag], { cwd: root, stdio: 'pipe' });
+    return true;
+  } catch (_) { return false; }
+}
+
+function vaultLedgerProof(vault, requiredVersion, now = () => new Date().toISOString()) {
+  const ledgerPath = path.join(vault.path, 'ranch/platform-installed.json');
+  const ledger = readJson(ledgerPath);
+  const installedVersion = String(ledger.workshop_version || '');
+  return {
+    vault: vault.id, path: vault.path, ledger_path: ledgerPath,
+    ok: Boolean(installedVersion && cmpVersion(installedVersion, requiredVersion) >= 0),
+    required_version: requiredVersion, installed_version: installedVersion,
+    source: 'platform-installed.json', verified_at: now(),
+  };
+}
+
+function hasDeploymentAdditions(record) {
+  return DEPLOYMENT_VAULT_IDS.some((vault) => Array.isArray(record.deploy_subscriptions && record.deploy_subscriptions[vault])
+    && record.deploy_subscriptions[vault].length > 0);
+}
+
+function exactRecoveryHead(record, expectedHead) {
+  if (typeof expectedHead !== 'string' || !EXACT_SHA.test(expectedHead)) {
+    throw new Error('recover-deployed requires --expected-head as one exact lowercase 40-hex SHA token');
+  }
+  const receiptHead = record.gate_receipt && record.gate_receipt.head_sha;
+  if (receiptHead !== expectedHead) throw new Error(`expected HEAD does not match preserved gate receipt (${expectedHead} != ${receiptHead || 'missing'})`);
+  if (record.gate_receipt.status !== 'pass') throw new Error('preserved combined gate receipt did not pass');
+  for (const lens of REVIEW_LENSES) {
+    const review = record.reviews && record.reviews[lens];
+    if (!review || review.head_sha !== expectedHead || review.verdict !== 'pass') {
+      throw new Error(`preserved ${lens} review does not pass at exact expected HEAD`);
+    }
+  }
+  return expectedHead;
+}
+
+function collectDeployedRecoveryEvidence(ctx, record, expectedHead, deps = {}) {
+  const view = deps.prView || prView;
+  const releaseFinder = deps.findContainingRelease || findContainingRelease;
+  const releaseContains = deps.releaseContainsCommit
+    || ((ancestor, descendant) => commitContains(REPO, ancestor, descendant, ctx.root));
+  const formulaTag = deps.currentTapFormulaTag || currentTapFormulaTag;
+  const contains = deps.tagContainsCommit || tagContainsCommit;
+  const findTap = deps.tapPr || tapPr;
+  const installed = deps.bottleVersion || bottleVersion;
+  const vaultProof = deps.vaultLedgerProof || vaultLedgerProof;
+  const now = deps.now || (() => new Date().toISOString());
+  if (!Number.isInteger(record.feature_pr)) throw new Error('recover-deployed requires a recorded feature PR');
+  const feature = view(REPO, record.feature_pr, ctx.root);
+  if (!feature || feature.state !== 'MERGED') throw new Error('feature PR is not merged');
+  if (feature.headRefOid !== expectedHead) throw new Error('feature PR head is not the exact expected 40-hex HEAD');
+  const featureMerge = feature.mergeCommit && feature.mergeCommit.oid;
+  if (!EXACT_SHA.test(String(featureMerge || ''))) throw new Error('feature PR has no exact merge commit receipt');
+  if (record.feature_merge_sha && record.feature_merge_sha !== featureMerge) throw new Error('feature merge commit differs from preserved ledger evidence');
+
+  const release = record.release_pr ? view(REPO, record.release_pr, ctx.root) : releaseFinder(featureMerge, ctx.root);
+  if (!release || release.state !== 'MERGED') throw new Error('containing release PR is not merged');
+  const releaseMerge = release.mergeCommit && release.mergeCommit.oid;
+  if (!EXACT_SHA.test(String(releaseMerge || ''))) throw new Error('release PR has no exact merge commit receipt');
+  if (!releaseContains(featureMerge, releaseMerge)) throw new Error('release PR does not contain the verified feature merge');
+
+  const tag = formulaTag(ctx.root);
+  if (!tag) throw new Error('tap formula must contain exactly one Sauce release tag URL');
+  if (!contains(ctx.root, tag, featureMerge)) throw new Error(`tap formula tag ${tag} does not contain feature merge ${featureMerge}`);
+  if (!contains(ctx.root, tag, releaseMerge)) throw new Error(`tap formula tag ${tag} does not contain release merge ${releaseMerge}`);
+  const version = versionFrom(tag);
+  const tap = findTap(version, ctx.root);
+  if (!tap || tap.state !== 'MERGED') throw new Error(`tap PR for ${tag} is not merged`);
+  const tapMerge = tap.mergeCommit && tap.mergeCommit.oid;
+  if (!EXACT_SHA.test(String(tapMerge || ''))) throw new Error(`tap PR for ${tag} has no exact merge commit receipt`);
+  const brewVersion = installed();
+  if (!brewVersion || cmpVersion(brewVersion, version) < 0) throw new Error(`installed brew ${brewVersion || 'missing'} is older than ${version}`);
+  if (!contains(ctx.root, `v${brewVersion}`, featureMerge)) throw new Error(`installed brew v${brewVersion} does not contain feature merge ${featureMerge}`);
+
+  let vaultReceipts;
+  if (hasDeploymentAdditions(record)) {
+    vaultReceipts = record.vault_receipts;
+    if (!VAULTS.every((vault) => {
+      const receipt = vaultReceipts && vaultReceipts[vault.id];
+      return receipt && receipt.ok === true && receipt.installed_version
+        && cmpVersion(receipt.installed_version, version) >= 0;
+    })) throw new Error('non-empty deployment additions require existing green three-vault receipts at the recovered version');
+  } else {
+    vaultReceipts = Object.fromEntries(VAULTS.map((vault) => [vault.id, vaultProof(vault, version, now)]));
+    if (!VAULTS.every((vault) => vaultReceipts[vault.id] && vaultReceipts[vault.id].ok === true)) {
+      throw new Error('read-only three-vault ledgers do not prove the recovered version');
+    }
+  }
+  return {
+    expected_head: expectedHead,
+    feature_pr: { number: feature.number, url: feature.url, head_sha: feature.headRefOid, merge_sha: featureMerge },
+    release_pr: { number: release.number, url: release.url, merge_sha: releaseMerge },
+    tag, version,
+    tap_pr: { number: tap.number, url: tap.url, merge_sha: tapMerge },
+    brew_version: brewVersion,
+    vault_receipts: vaultReceipts,
+    verified_at: now(),
+  };
 }
 
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -1899,6 +2046,165 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   };
 }
 
+function recoveryRequest(args) {
+  if (!args.card || typeof args.card !== 'string') throw new Error('recover-deployed requires exact --card');
+  if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('recover-deployed requires non-empty --reason');
+  if (args.apply === true && args['dry-run'] === true) throw new Error('recover-deployed accepts only one of --apply or --dry-run');
+  return {
+    card: normalizeCardLink(args.card),
+    expected_head: args['expected-head'],
+    reason: args.reason.trim(),
+  };
+}
+
+function sameRecoveryRequest(audit, request) {
+  return Boolean(audit && sameJson(audit.request, request));
+}
+
+async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
+  const request = recoveryRequest(args);
+  const apply = args.apply === true;
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const collect = deps.collectDeployedRecoveryEvidence || collectDeployedRecoveryEvidence;
+  const project = deps.attemptProjection || attemptProjection;
+  const now = deps.now || (() => new Date().toISOString());
+  return lock(ctx, `gates-${slugify(request.card)}`, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[request.card];
+    if (!record) throw new Error('recover-deployed requires a tracked card');
+    if (record.batch_policy !== 'supervised_only') throw new Error('recover-deployed requires a supervised_only card');
+    const priorAudits = Array.isArray(record.deployed_recoveries) ? record.deployed_recoveries : [];
+    const priorAudit = priorAudits[priorAudits.length - 1] || null;
+    const replay = record.phase === 'deployed' && sameRecoveryRequest(priorAudit, request);
+    if (!replay && !RECOVER_DEPLOYED_PHASES.has(record.phase)) {
+      throw new Error(`recover-deployed refuses phase ${record.phase || 'missing'}; parked and pre-PR cards are never recovery targets`);
+    }
+    const expectedHead = exactRecoveryHead(record, request.expected_head);
+    const evidence = collect(ctx, record, expectedHead, deps);
+    if (!apply) {
+      return {
+        action: 'recover-deployed-plan', card: record.card, phase: record.phase,
+        apply_required: !replay, no_op: replay, request, evidence,
+      };
+    }
+    if (replay) {
+      return { action: 'recovered-deployed', card: record.card, phase: record.phase, no_op: true, request, evidence };
+    }
+    const audit = {
+      request, prior_phase: record.phase, expected_head: expectedHead,
+      evidence, recovered_at: now(),
+    };
+    record.deployed_recoveries = [...priorAudits, audit];
+    record.feature_merge_sha = evidence.feature_pr.merge_sha;
+    record.release_pr = evidence.release_pr.number;
+    record.release_url = evidence.release_pr.url;
+    record.release_merge_sha = evidence.release_pr.merge_sha;
+    record.tag = evidence.tag;
+    record.required_version = evidence.version;
+    record.tap_pr = evidence.tap_pr.number;
+    record.tap_url = evidence.tap_pr.url;
+    record.brew_version = evidence.brew_version;
+    record.vault_receipts = evidence.vault_receipts;
+    record.phase = 'deployed';
+    record.deployed_at = audit.recovered_at;
+    persist(ctx, state, record);
+    const projection = await project(ctx, record, deps.boardPath || BOARD, {
+      projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
+      cardsRoot: deps.cardsRoot, now,
+    });
+    persist(ctx, state, record);
+    return {
+      action: projection.ok ? 'recovered-deployed' : 'recovered-deployed-projection-failed',
+      card: record.card, phase: record.phase, no_op: false, request, evidence, projection,
+    };
+  }, { card: request.card });
+}
+
+function metadataScalar(value) {
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+  return JSON.stringify(String(value));
+}
+
+function metadataReconciliationPlan(record, raw, now = () => new Date().toISOString()) {
+  if (!record || !METADATA_RECONCILE_PHASES.has(record.phase)) {
+    throw new Error(`reconcile-metadata refuses phase ${(record && record.phase) || 'missing'}; active and parked cards are out of scope`);
+  }
+  const mapping = projectionMapping(record.phase);
+  const fields = {};
+  if (scalarField(raw, 'kanban_column') !== mapping.column) fields.kanban_column = metadataScalar(mapping.column);
+  if (delivery.normalizeStatus(scalarField(raw, 'status')) !== mapping.status) fields.status = metadataScalar(mapping.status);
+  if (record.delivery_contract && record.delivery_contract.schema_version
+    && scalarField(raw, 'schema_version') !== record.delivery_contract.schema_version) {
+    fields.schema_version = metadataScalar(record.delivery_contract.schema_version);
+  }
+  if (record.batch_policy && scalarField(raw, 'batch_policy') !== record.batch_policy) {
+    fields.batch_policy = metadataScalar(record.batch_policy);
+  }
+  if (Object.keys(fields).length && (fields.kanban_column || fields.status)) {
+    fields.status_changed_at = metadataScalar(now());
+  }
+  const next = Object.keys(fields).length ? patchFrontmatter(raw, fields) : raw;
+  if (!frontmatter(next)) throw new Error(`card ${record.card} frontmatter missing`);
+  const remaining = projectionMetadataProblemFromRaw(record, next);
+  if (remaining) throw new Error(`metadata-only repair cannot resolve this drift without widening scope: ${remaining.error}`);
+  return {
+    card: record.card,
+    card_sha256: crypto.createHash('sha256').update(raw).digest('hex'),
+    next_sha256: crypto.createHash('sha256').update(next).digest('hex'),
+    changed_fields: Object.keys(fields),
+    changed: next !== raw,
+    next,
+  };
+}
+
+async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
+  const card = normalizeCardLink(args.card);
+  if (!card) throw new Error('reconcile-metadata requires exact --card');
+  if (args.apply === true && args['dry-run'] === true) throw new Error('reconcile-metadata accepts only one of --apply or --dry-run');
+  if (args.apply === true && (typeof args.reason !== 'string' || !args.reason.trim())) {
+    throw new Error('reconcile-metadata --apply requires non-empty --reason');
+  }
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const writeText = deps.atomicWriteText || atomicWriteText;
+  const now = deps.now || (() => new Date().toISOString());
+  return lock(ctx, `gates-${slugify(card)}`, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[card];
+    if (!record) throw new Error('reconcile-metadata requires a tracked card');
+    const cardPath = resolveCardPath(record.card_path, record.card, cardsRoot);
+    const raw = fs.readFileSync(cardPath, 'utf8');
+    const plan = metadataReconciliationPlan(record, raw, now);
+    if (args.apply !== true) {
+      const { next, ...receipt } = plan;
+      return { action: 'reconcile-metadata-plan', phase: record.phase, apply_required: plan.changed, no_op: !plan.changed, ...receipt };
+    }
+    if (typeof args['expected-card-sha256'] !== 'string' || args['expected-card-sha256'] !== plan.card_sha256) {
+      throw new Error('reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run');
+    }
+    if (!plan.changed) {
+      const { next, ...receipt } = plan;
+      return { action: 'reconciled-metadata', phase: record.phase, no_op: true, ...receipt };
+    }
+    writeText(cardPath, plan.next);
+    const audit = {
+      reason: args.reason.trim(), card_sha256: plan.card_sha256, next_sha256: plan.next_sha256,
+      changed_fields: plan.changed_fields, reconciled_at: now(),
+    };
+    record.metadata_reconciliations = [...(record.metadata_reconciliations || []), audit];
+    record.projection_reconciled_at = audit.reconciled_at;
+    delete record.projection_error;
+    delete record.projection_failed_at;
+    persist(ctx, state, record);
+    const { next, ...receipt } = plan;
+    return { action: 'reconciled-metadata', phase: record.phase, no_op: false, audit, ...receipt };
+  }, { card });
+}
+
 function commandRecover(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const inspections = [];
   const run = opts.sh || sh;
@@ -1924,13 +2230,15 @@ async function main() {
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
   else if (command === 'advance') { await commandAdvance(ctx, args); return; }
+  else if (command === 'recover-deployed') result = await commandRecoverDeployed(ctx, args);
+  else if (command === 'reconcile-metadata') result = await commandReconcileMetadata(ctx, args);
   else if (command === 'reconcile') result = await commandReconcile(ctx, args);
   else if (command === 'deploy') {
     const state = readState(ctx); const record = state.cards[args.card];
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|record-review|verify-gates|record-pr|advance|deploy|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -1938,12 +2246,15 @@ module.exports = {
   parseArgs, emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
+  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
-  projectionBoardDrift, projectionMetadataProblem, completionResult, DELIVERY_STABLE_FIELDS,
+  projectionBoardDrift, projectionMetadataProblem, projectionMetadataProblemFromRaw,
+  completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
+  formulaTagFromText, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 };
 
 if (require.main === module) {

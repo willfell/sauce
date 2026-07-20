@@ -161,6 +161,43 @@ node scripts/autoloop/codex-coordinator.js advance --card "<card>" --lease-secon
 
 Let the coordinator poll feature CI/merge, release PR/merge, tag, tap PR/merge, Homebrew, and the three vault receipts. Describe phase changes briefly; do not re-reason about unchanged polling output.
 
+## Receipt-bound deployed recovery
+
+Use `recover-deployed` only for a supervised card stranded in `blocked` or a
+post-PR phase whose code already shipped. It is never a parked-card resume path.
+Dry-run first with the exact preserved feature HEAD, then apply the identical
+request and replay it literally:
+
+```bash
+node scripts/autoloop/codex-coordinator.js recover-deployed \
+  --card "<card>" --expected-head "<40-hex HEAD>" \
+  --reason "<audit reason>" --dry-run --json
+node scripts/autoloop/codex-coordinator.js recover-deployed \
+  --card "<card>" --expected-head "<40-hex HEAD>" \
+  --reason "<audit reason>" --apply --json
+```
+
+The coordinator itself verifies the merged feature PR's exact head, the merged
+release, the current tap formula tag and merged tap PR, installed Homebrew
+ancestry, and three vault ledgers. Non-empty subscription additions additionally
+require existing green deployment receipts. A successful transition is journaled,
+projects `deployed`, preserves branch/worktree/review/gate history, and returns
+`no_op: true` on literal replay.
+
+Historical card-only metadata drift uses `reconcile-metadata`, never whole-card
+reconciliation. Run its dry-run, pass the returned `card_sha256` back as
+`--expected-card-sha256` with `--apply`, then replay. The command refuses active
+and parked cards, never writes the board, and fails closed if the mismatch would
+require anything beyond its narrow ledger-owned metadata fields.
+
+```bash
+node scripts/autoloop/codex-coordinator.js reconcile-metadata \
+  --card "<card>" --dry-run --json
+node scripts/autoloop/codex-coordinator.js reconcile-metadata \
+  --card "<card>" --expected-card-sha256 "<dry-run sha256>" \
+  --reason "<audit reason>" --apply --json
+```
+
 If it returns:
 
 - `parked`: stop. Report dependencies, the exact resume condition, and the

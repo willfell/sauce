@@ -11,11 +11,13 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
   commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
+  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem, DELIVERY_STABLE_FIELDS,
+  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  collectDeployedRecoveryEvidence, formulaTagFromText, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
@@ -1700,6 +1702,170 @@ eq(failedReconcile.action, 'reconcile-failed', 'projection failure remains expli
 eq(failedProjectionState.cards.Failed.projection_error, 'card note missing', 'latest projection error stays saved');
 eq(failedProjectionWrites, 1, 'failed projection persists its error without touching receipts');
 eq(JSON.stringify(failedProjectionState.cards.Failed.vault_receipts), failedProjectionReceiptsBefore, 'failed reconciliation preserves saved receipt values');
+
+// GA-OPS12-BLOCKED-RELEASE-RECEIPTS: exact-token, release, tap, brew, and vault proof.
+const RECOVERY_HEAD = 'c'.repeat(40);
+const FEATURE_MERGE = 'd'.repeat(40);
+const RELEASE_MERGE = 'e'.repeat(40);
+const TAP_MERGE = 'f'.repeat(40);
+const recoveryRecord = {
+  card: 'Stranded shipped card', phase: 'blocked', batch_policy: 'supervised_only',
+  feature_pr: 570, release_pr: 571, feature_merge_sha: FEATURE_MERGE,
+  deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+};
+const featurePr = {
+  number: 570, state: 'MERGED', url: 'https://example.test/feature/570',
+  headRefOid: RECOVERY_HEAD, mergeCommit: { oid: FEATURE_MERGE },
+};
+const releasePr = {
+  number: 571, state: 'MERGED', url: 'https://example.test/release/571',
+  mergeCommit: { oid: RELEASE_MERGE },
+};
+const recoveryCollectorDeps = {
+  prView: (_repo, number) => number === 570 ? featurePr : releasePr,
+  releaseContainsCommit: () => true,
+  currentTapFormulaTag: () => 'v0.245.0',
+  tagContainsCommit: () => true,
+  tapPr: () => ({ number: 91, state: 'MERGED', url: 'https://example.test/tap/91', mergeCommit: { oid: TAP_MERGE } }),
+  bottleVersion: () => '0.245.0',
+  vaultLedgerProof: (vault, version) => ({ vault: vault.id, ok: true, installed_version: version }),
+  now: () => '2026-07-20T19:00:00.000Z',
+};
+const collectedRecovery = collectDeployedRecoveryEvidence({ root: tmp }, recoveryRecord, RECOVERY_HEAD, recoveryCollectorDeps);
+eq(collectedRecovery.feature_pr.head_sha, RECOVERY_HEAD, 'GA-OPS12 recovery binds the complete exact feature HEAD token');
+eq(collectedRecovery.tag, 'v0.245.0', 'GA-OPS12 recovery binds the exact tap formula tag');
+eq(Object.keys(collectedRecovery.vault_receipts), ['headspace', 'accuris', 'ero'], 'GA-OPS12 recovery collects three read-only vault ledger proofs');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), 'v0.245.0', 'tap parser accepts one exact release tag URL');
+eq(formulaTagFromText('url "https://x/archive/refs/tags/v0.1.0.tar.gz"\n# archive/refs/tags/v0.2.0.tar.gz'), '', 'tap parser refuses ambiguous tag tokens');
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, headRefOid: `0${RECOVERY_HEAD.slice(1)}` } : releasePr },
+), /feature PR head is not the exact expected/, 'wrong exact feature HEAD refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tagContainsCommit: () => false },
+), /does not contain feature merge/, 'missing tag ancestry refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, releaseContainsCommit: () => false },
+), /release PR does not contain/, 'unrelated merged release PR refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD, { ...recoveryCollectorDeps, tapPr: () => null },
+), /tap PR.*not merged/, 'missing tap receipt refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, recoveryRecord, RECOVERY_HEAD,
+  { ...recoveryCollectorDeps, vaultLedgerProof: (vault, version) => ({ vault: vault.id, ok: vault.id !== 'ero', installed_version: version }) },
+), /three-vault ledgers/, 'one missing vault proof refuses recovery'); count++;
+assert.throws(() => collectDeployedRecoveryEvidence(
+  { root: tmp }, { ...recoveryRecord, deploy_subscriptions: { headspace: ['mechanism:x'], accuris: [], ero: [] } },
+  RECOVERY_HEAD, recoveryCollectorDeps,
+), /non-empty deployment additions require existing green three-vault receipts/, 'subscription additions require prior green deployment receipts'); count++;
+
+// GA-OPS12-RECOVERY-IDEMPOTENCE: dry-run, apply, projection, and literal replay.
+const recoveryCardPath = path.join(reconcileRoot, 'Stranded shipped card.md');
+const recoveryBoardPath = path.join(reconcileRoot, 'recovery-board.md');
+fs.writeFileSync(recoveryCardPath, '---\nkanban_column: Blocked\nstatus: blocked\n---\nPreserved body\n');
+fs.writeFileSync(recoveryBoardPath, liveBoard({ blocked: [['ignored', 'Stranded shipped card']].map((row) => row[1]) }));
+const recoveryState = emptyState();
+recoveryState.cards['Stranded shipped card'] = {
+  ...recoveryRecord, card_path: recoveryCardPath, branch: 'preserved-branch', worktree: '/preserved-worktree',
+  gate_receipt: { status: 'pass', head_sha: RECOVERY_HEAD },
+  reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
+};
+let recoveryWrites = 0;
+const recoveryDeps = {
+  readState: () => recoveryState,
+  writeState: () => { recoveryWrites++; },
+  withLock: immediateCardLock,
+  collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
+  boardPath: recoveryBoardPath,
+  cardsRoot: reconcileRoot,
+  now: () => '2026-07-20T19:01:00.000Z',
+};
+const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
+const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
+const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
+eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
+eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
+const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
+eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
+eq(recoveryState.cards['Stranded shipped card'].phase, 'deployed', 'recovery changes the terminal phase only after every proof passes');
+eq(recoveryState.cards['Stranded shipped card'].branch, 'preserved-branch', 'recovery preserves the branch');
+eq(recoveryState.cards['Stranded shipped card'].worktree, '/preserved-worktree', 'recovery preserves the worktree');
+eq(recoveryState.cards['Stranded shipped card'].gate_receipt, recoveryBefore.gate_receipt, 'recovery preserves the exact gate receipt');
+eq(recoveryState.cards['Stranded shipped card'].reviews, recoveryBefore.reviews, 'recovery preserves all exact-head reviews');
+eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'recovery journals exactly one receipt-bound transition');
+ok(/kanban_column: Completed/.test(fs.readFileSync(recoveryCardPath, 'utf8')), 'recovery projects completed card metadata');
+ok(/## Completed[\s\S]*\[x\] \[\[Stranded shipped card\]\]/.test(fs.readFileSync(recoveryBoardPath, 'utf8')), 'recovery projects a checked Completed board entry');
+const recoveryWritesAfterApply = recoveryWrites;
+const replayedRecovery = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
+eq(replayedRecovery.no_op, true, 'literal receipt-bound recovery replay returns no_op true');
+eq(recoveryWrites, recoveryWritesAfterApply, 'literal recovery replay performs no ledger write');
+eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'literal recovery replay never duplicates its audit');
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, { ...recoveryArgs, 'expected-head': `prefix-${RECOVERY_HEAD}` },
+  { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: deepCopy(recoveryBefore) } }) },
+), /exact lowercase 40-hex SHA token/, 'substring or decorated HEAD refuses before external proof'); count++;
+const parkedRecoveryRefusal = deepCopy(recoveryBefore); parkedRecoveryRefusal.phase = 'parked';
+const parkedRecoveryRefusalState = { ...emptyState(), cards: { [parkedRecoveryRefusal.card]: parkedRecoveryRefusal } };
+await assert.rejects(() => commandRecoverDeployed(
+  { root: reconcileRoot }, recoveryArgs, { ...recoveryDeps, readState: () => parkedRecoveryRefusalState },
+), /parked and pre-PR cards are never recovery targets/, 'parked recovery is unconditionally refused'); count++;
+
+// GA-OPS12-METADATA-ONLY-RECONCILE: card-only CAS, audit, and exact replay.
+const metadataCardPath = path.join(reconcileRoot, 'Metadata drift.md');
+const currentMetadataRaw = card({ name: 'Metadata drift', profile: 'heavy', zones: ['platform/meta'] })
+  .replace('---\n', '---\nkanban_column: Completed\n')
+  .replace('status: planning', 'status: completed');
+const currentMetadata = prepareDeliveryCard(currentMetadataRaw, 'Metadata drift').card;
+const historicalMetadataRaw = currentMetadataRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 1.0.0');
+fs.writeFileSync(metadataCardPath, historicalMetadataRaw);
+const metadataState = emptyState();
+metadataState.cards['Metadata drift'] = {
+  card: 'Metadata drift', phase: 'deployed', card_path: metadataCardPath,
+  delivery_contract: currentMetadata, delivery_contract_version: delivery.CONTRACT_VERSION,
+  dependencies: currentMetadata.depends_on, touch_zones: currentMetadata.touch_zones,
+  deploy_subscriptions: currentMetadata.deploy_subscriptions, batch_policy: currentMetadata.batch_policy,
+  branch: 'untouched-metadata-branch', worktree: '/untouched-metadata-worktree',
+};
+let metadataWrites = 0;
+const metadataDeps = {
+  readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
+  cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
+};
+const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
+eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
+eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
+const metadataApplied = await commandReconcileMetadata({ root: reconcileRoot }, {
+  card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
+  'expected-card-sha256': metadataDryRun.card_sha256,
+}, metadataDeps);
+eq(metadataApplied.action, 'reconciled-metadata', 'bounded metadata apply succeeds');
+eq(metadataApplied.no_op, false, 'first metadata apply records a real change');
+eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw.replace('schema_version: 1.0.0', `schema_version: "${delivery.CONTRACT_VERSION}"`), 'metadata apply changes only schema_version bytes');
+eq(metadataState.cards['Metadata drift'].branch, 'untouched-metadata-branch', 'metadata reconcile preserves branch authority');
+eq(metadataState.cards['Metadata drift'].worktree, '/untouched-metadata-worktree', 'metadata reconcile preserves worktree authority');
+eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'metadata reconcile journals one bounded audit');
+const metadataReplayHash = metadataApplied.next_sha256;
+const metadataWritesAfterApply = metadataWrites;
+const metadataReplay = await commandReconcileMetadata({ root: reconcileRoot }, {
+  card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
+  'expected-card-sha256': metadataReplayHash,
+}, metadataDeps);
+eq(metadataReplay.no_op, true, 'literal metadata replay returns no_op true');
+eq(metadataWrites, metadataWritesAfterApply, 'literal metadata replay performs no ledger write');
+const parkedMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...metadataState.cards['Metadata drift'], phase: 'parked' } } };
+await assert.rejects(() => commandReconcileMetadata(
+  { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => parkedMetadataState },
+), /active and parked cards are out of scope/, 'metadata reconciliation refuses parked cards'); count++;
+const unsupportedMetadata = historicalMetadataRaw.replace('model_profile: heavy', 'model_profile: standard');
+assert.throws(() => metadataReconciliationPlan(metadataState.cards['Metadata drift'], unsupportedMetadata),
+  /without widening scope/, 'metadata-only operation refuses unsupported contract drift'); count++;
+
+const historicalLedgerRecord = {
+  ...metadataState.cards['Metadata drift'],
+  delivery_contract: { ...currentMetadata, schema_version: '1.0.0' },
+  delivery_contract_version: '1.0.0',
+};
+eq(projectionMetadataProblem(historicalLedgerRecord, reconcileRoot), null, 'compatible historical schema migration no longer creates false metadata projection drift');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));
