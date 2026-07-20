@@ -1736,7 +1736,10 @@ eq(collectedRecovery.feature_pr.head_sha, RECOVERY_HEAD, 'GA-OPS12 recovery bind
 eq(collectedRecovery.tag, 'v0.245.0', 'GA-OPS12 recovery binds the exact tap formula tag');
 eq(Object.keys(collectedRecovery.vault_receipts), ['headspace', 'accuris', 'ero'], 'GA-OPS12 recovery collects three read-only vault ledger proofs');
 eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), 'v0.245.0', 'tap parser accepts one exact release tag URL');
-eq(formulaTagFromText('url "https://x/archive/refs/tags/v0.1.0.tar.gz"\n# archive/refs/tags/v0.2.0.tar.gz'), '', 'tap parser refuses ambiguous tag tokens');
+eq(formulaTagFromText('url "https://attacker.invalid/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser refuses an unrelated archive domain');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/releases/download/source.tar.gz"\n# url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser refuses a Sauce tag URL that exists only in a comment');
+eq(formulaTagFromText('homepage "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"'), '', 'tap parser requires the active Homebrew url directive');
+eq(formulaTagFromText('url "https://github.com/willfell/sauce/archive/refs/tags/v0.245.0.tar.gz"\nurl "https://github.com/willfell/sauce/archive/refs/tags/v0.244.2.tar.gz"'), '', 'tap parser refuses multiple active Sauce tag directives');
 assert.throws(() => collectDeployedRecoveryEvidence(
   { root: tmp }, recoveryRecord, RECOVERY_HEAD,
   { ...recoveryCollectorDeps, prView: (_repo, number) => number === 570 ? { ...featurePr, headRefOid: `0${RECOVERY_HEAD.slice(1)}` } : releasePr },

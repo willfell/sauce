@@ -1070,8 +1070,11 @@ function tapPr(version, cwd) {
 }
 
 function formulaTagFromText(raw) {
-  const matches = [...String(raw || '').matchAll(/archive\/refs\/tags\/(v\d+\.\d+\.\d+(?:\.\d+)?)\.tar\.gz/g)]
-    .map((match) => match[1]);
+  const sauceUrl = /^\s*url\s+(["'])https:\/\/github\.com\/willfell\/sauce\/archive\/refs\/tags\/(v\d+\.\d+\.\d+(?:\.\d+)?)\.tar\.gz\1\s*(?:#.*)?$/;
+  const matches = String(raw || '').split('\n')
+    .map((line) => line.match(sauceUrl))
+    .filter(Boolean)
+    .map((match) => match[2]);
   return matches.length === 1 ? matches[0] : '';
 }
 
