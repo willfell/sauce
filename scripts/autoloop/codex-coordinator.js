@@ -193,6 +193,46 @@ function normalizeCardLink(value) {
   return delivery.normalizeIdentity(value);
 }
 
+function consumeRatificationReceipt(receipt, expected = {}) {
+  const validation = delivery.validateRatificationReceipt(receipt);
+  const errors = [...validation.errors];
+  const targetCard = String(expected.target_card || '').trim();
+  const targetHead = String(expected.target_head || '').trim();
+  const decision = String(expected.decision || 'accepted').trim();
+  if (!targetCard || delivery.normalizeIdentity(targetCard) !== targetCard) {
+    errors.push({ code: 'expected-target-card-invalid', field: 'target_card', message: 'expected target_card must be the exact plain canonical identity' });
+  } else if (validation.receipt.target_card !== targetCard) {
+    errors.push({ code: 'ratification-target-card-mismatch', field: 'target_card', message: 'receipt does not bind the exact expected full target-card identity' });
+  }
+  if (!/^[0-9a-f]{40}$/.test(targetHead)) {
+    errors.push({ code: 'expected-target-head-invalid', field: 'target_head', message: 'expected target_head must be exactly one lowercase 40-hex SHA token' });
+  } else if (validation.receipt.target_head !== targetHead) {
+    errors.push({ code: 'ratification-target-head-mismatch', field: 'target_head', message: 'receipt does not bind the exact expected target HEAD' });
+  }
+  if (!delivery.registry.enums.ratification_decision.includes(decision)) {
+    errors.push({ code: 'expected-decision-invalid', field: 'decision', message: 'expected decision is not a Delivery ratification decision' });
+  } else if (validation.receipt.decision !== decision) {
+    errors.push({ code: 'ratification-decision-mismatch', field: 'decision', message: 'receipt decision does not match the required authority class' });
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    receipt: validation.receipt,
+    contract_version: delivery.CONTRACT_VERSION,
+  };
+}
+
+function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
+  const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
+  if (!parsed.ok) return {
+    ok: false,
+    errors: parsed.errors,
+    receipt: null,
+    contract_version: delivery.CONTRACT_VERSION,
+  };
+  return consumeRatificationReceipt(parsed.receipt, expected);
+}
+
 function sameParentConflict(parentCard, records, excludeCard = '') {
   const parent = normalizeCardLink(parentCard);
   if (!parent) return null;
@@ -1898,6 +1938,7 @@ module.exports = {
   parseArgs, emptyState, atomicWriteJson, writeState, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
+  consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,

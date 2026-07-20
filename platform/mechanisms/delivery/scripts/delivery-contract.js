@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const sourceRegistry = require('../data/delivery-schema.json');
 
 function deepFreeze(value) {
@@ -10,6 +11,7 @@ function deepFreeze(value) {
 
 const registry = deepFreeze(sourceRegistry);
 const CONTRACT_VERSION = registry.contract.version;
+const MINIMUM_COMPATIBLE_VERSION = registry.contract.minimum_compatible_version;
 const REQUIRED_VAULTS = registry.policies.required_vaults;
 
 function clone(value) {
@@ -103,6 +105,10 @@ function evidenceTimestampValid(value) {
     || hour > 23 || minute > 59 || second > 59) return false;
   if (zone !== 'Z' && (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)) return false;
   return !Number.isNaN(Date.parse(value));
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
 }
 
 function pinnedReceiptValid(receipt) {
@@ -234,8 +240,10 @@ function validateCard(card, mode = 'current') {
   }
   const version = raw.schema_version;
   const versionCmp = version == null ? null : compareVersions(version, CONTRACT_VERSION);
+  const minimumCmp = version == null ? null : compareVersions(version, MINIMUM_COMPATIBLE_VERSION);
   if (version != null && versionCmp == null) errors.push(error('invalid-schema-version', 'schema_version', 'schema_version must be semver'));
   else if (versionCmp === 1) errors.push(error('schema-newer-than-engine', 'schema_version', 'card contract is newer than this engine'));
+  else if (minimumCmp === -1) warnings.push(error('contract-migration-required', 'schema_version', 'card contract predates the minimum compatible version'));
 
   const roots = new Set(opts.workspace_roots || registry.policies.workspace_roots);
   if (Array.isArray(raw.touch_zones)) {
@@ -303,9 +311,293 @@ function validateCard(card, mode = 'current') {
     warnings,
     card: normalized,
     contract_version: CONTRACT_VERSION,
-    requires_migration: version == null || versionCmp === -1,
+    requires_migration: version == null || minimumCmp === -1,
     historical_unversioned: version == null,
   };
+}
+
+function validateFields(raw, type) {
+  const definition = registry.types[type];
+  if (!definition) return [error('unknown-record-kind', 'type', `unknown Delivery record kind ${type}`)];
+  const errors = [];
+  for (const field of definition.fields) {
+    const present = Object.prototype.hasOwnProperty.call(raw, field.name);
+    if (field.required && !present) {
+      errors.push(error('required-field', field.name, `${field.name} is required`));
+      continue;
+    }
+    if (!present) continue;
+    if (!fieldTypeValid(raw[field.name], field)) {
+      errors.push(error('invalid-type', field.name, `${field.name} must be ${field.type}`));
+    }
+    if (field.enum && raw[field.name] != null && !registry.enums[field.enum].includes(raw[field.name])) {
+      errors.push(error('invalid-enum', field.name, `${field.name} must be one of ${registry.enums[field.enum].join('|')}`));
+    }
+  }
+  return errors;
+}
+
+function recordVersionErrors(raw) {
+  const errors = [];
+  const comparison = compareVersions(raw.schema_version, CONTRACT_VERSION);
+  if (comparison == null) errors.push(error('invalid-schema-version', 'schema_version', 'schema_version must be semver'));
+  else if (comparison === 1) errors.push(error('schema-newer-than-engine', 'schema_version', 'record contract is newer than this engine'));
+  else if (compareVersions(raw.schema_version, MINIMUM_COMPATIBLE_VERSION) === -1) {
+    errors.push(error('schema-too-old', 'schema_version', 'record contract predates the minimum compatible version'));
+  }
+  return errors;
+}
+
+function recordKindVersionErrors(raw, type) {
+  const definition = registry.types[type];
+  const introduced = definition && definition.fields.length
+    ? definition.fields.map((field) => field.since_version).sort(compareVersions).slice(-1)[0]
+    : CONTRACT_VERSION;
+  return compareVersions(raw.schema_version, introduced) === -1
+    ? [error('record-kind-version', 'schema_version', `${type} records require schema_version ${introduced} or newer`)] : [];
+}
+
+function relativeMarkdownPath(value) {
+  const raw = String(value == null ? '' : value).trim().replace(/\\/g, '/');
+  return Boolean(raw) && !raw.startsWith('/') && !/^[A-Za-z]:\//.test(raw)
+    && raw.endsWith('.md') && !raw.split('/').some((part) => !part || part === '.' || part === '..');
+}
+
+function validateEpic(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? clone(value) : {};
+  const errors = validateFields(raw, 'epic');
+  if (raw.type !== 'epic') errors.push(error('record-kind-mismatch', 'type', 'epic records require type epic'));
+  errors.push(...recordVersionErrors(raw));
+  errors.push(...recordKindVersionErrors(raw, 'epic'));
+  for (const field of registry.policies.epic_forbidden_execution_fields) {
+    if (Object.prototype.hasOwnProperty.call(raw, field)) {
+      errors.push(error('epic-execution-field', field, `epic records are non-claimable and must not carry ${field}`));
+    }
+  }
+  for (const field of ['source_board', 'kanban_board', 'epic_board']) {
+    if (Object.prototype.hasOwnProperty.call(raw, field) && !relativeMarkdownPath(raw[field])) {
+      errors.push(error('invalid-note-path', field, `${field} must be a workspace-relative Markdown path`));
+    }
+  }
+  if (raw.source_board && raw.kanban_board && raw.source_board !== raw.kanban_board) {
+    errors.push(error('epic-parent-board-mismatch', 'kanban_board', 'source_board and kanban_board must name the same parent board'));
+  }
+  return { ok: errors.length === 0, errors, warnings: [], record: raw, contract_version: CONTRACT_VERSION };
+}
+
+function validateSlice(value, options = {}) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? clone(value) : {};
+  const execution = validateCard(raw, options.mode || 'current');
+  const errors = [...execution.errors, ...validateFields(raw, 'slice')];
+  const warnings = [...execution.warnings];
+  if (raw.type !== 'slice') errors.push(error('record-kind-mismatch', 'type', 'slice records require type slice'));
+  errors.push(...recordKindVersionErrors(raw, 'slice'));
+  for (const field of ['task_parent', 'source_board', 'kanban_board']) {
+    if (Object.prototype.hasOwnProperty.call(raw, field) && !relativeMarkdownPath(raw[field])) {
+      errors.push(error('invalid-note-path', field, `${field} must be a workspace-relative Markdown path`));
+    }
+  }
+  if (raw.source_board && raw.kanban_board && raw.source_board !== raw.kanban_board) {
+    errors.push(error('slice-board-mismatch', 'kanban_board', 'source_board and kanban_board must name the same epic board'));
+  }
+  if (raw.source_board) {
+    const boardParts = String(raw.source_board).replace(/\\/g, '/').split('/');
+    if (boardParts.length < 2 || boardParts[boardParts.length - 2] !== 'board') {
+      errors.push(error('slice-location-invalid', 'source_board', 'slice source board must live directly in the epic board directory'));
+    }
+  }
+  const epicIdentity = normalizeIdentity(raw.epic);
+  const parentIdentity = pathIdentity(raw.task_parent);
+  if (epicIdentity && parentIdentity && epicIdentity !== parentIdentity) {
+    errors.push(error('slice-epic-backlink-mismatch', 'task_parent', 'epic and task_parent must resolve to the same atlas identity'));
+  }
+  if (Array.isArray(options.sibling_slices)) {
+    const siblings = new Set(options.sibling_slices.map(normalizeIdentity).filter(Boolean));
+    for (const dependency of execution.card.depends_on) {
+      if (!siblings.has(dependency)) {
+        warnings.push(error('cross-epic-dependency', 'depends_on', `dependency ${dependency} is outside the epic and degrades independent posture`));
+      }
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    record: {
+      ...execution.card,
+      type: raw.type,
+      epic: raw.epic,
+      task_parent: raw.task_parent,
+      source_board: raw.source_board,
+      kanban_board: raw.kanban_board,
+    },
+    contract_version: CONTRACT_VERSION,
+    requires_migration: execution.requires_migration,
+  };
+}
+
+function pathIdentity(value) {
+  const normalized = normalizeIdentity(value).replace(/\\/g, '/').replace(/\.md$/i, '');
+  return normalized.split('/').filter(Boolean).pop() || '';
+}
+
+function sliceStatus(slice) {
+  const raw = slice && (slice.status || slice.phase);
+  if (raw === 'deployed') return 'completed';
+  if (raw === 'implementing' || raw === 'claimed') return 'in_progress';
+  return normalizeStatus(raw) || 'planning';
+}
+
+function deriveEpicLifecycle(slices, options = {}) {
+  const list = Array.isArray(slices) ? slices : [];
+  const normalized = list.map((slice, index) => ({ ...slice, _index: index, _status: sliceStatus(slice) }));
+  const counts = { planned: 0, active: 0, blocked: 0, done: 0, total: normalized.length };
+  for (const slice of normalized) {
+    if (slice._status === 'completed') counts.done += 1;
+    else if (slice._status === 'in_progress' || slice._status === 'parked') counts.active += 1;
+    else if (slice._status === 'blocked') counts.blocked += 1;
+    else counts.planned += 1;
+  }
+  const claimableNames = new Set((options.claimable_slices || []).map(normalizeIdentity));
+  const explicitlyClaimable = normalized.some((slice) => claimableNames.has(normalizeIdentity(slice.card || slice.name || slice.title))
+    || slice.claimable === true
+    || (slice._status === 'planning' && slice.eligible !== false && slice.dependency_eligible !== false));
+  let state = 'planned';
+  if (normalized.length > 0 && counts.done === normalized.length) state = 'done';
+  else if (counts.active > 0) state = 'active';
+  else if (counts.blocked > 0 && !explicitlyClaimable) state = 'blocked';
+  const pending = normalized.filter((slice) => slice._status !== 'completed');
+  const crossEpic = pending.some((slice) => slice.cross_epic_dependency === true)
+    || pending.some((slice) => Array.isArray(slice.validation_warnings)
+      && slice.validation_warnings.some((warning) => warning && warning.code === 'cross-epic-dependency'));
+  let postureValue = 'claimable';
+  if (state === 'done') postureValue = 'done';
+  else if (pending.some((slice) => slice.decision_required === true)) postureValue = 'awaiting_user_decision';
+  else if (crossEpic || state === 'blocked') postureValue = 'blocked_by_dependencies';
+  else if (pending.length > 0 && pending.every((slice) => slice.execution_mode === 'docs_only')) postureValue = 'docs_only';
+  const frontier = pending.find((slice) => slice._status !== 'blocked') || pending[0] || null;
+  return {
+    state,
+    posture: postureValue,
+    counts,
+    frontier: frontier ? normalizeIdentity(frontier.card || frontier.name || frontier.title || frontier.slice) : null,
+  };
+}
+
+function deriveEpicState(slices, options = {}) {
+  return deriveEpicLifecycle(slices, options).state;
+}
+
+function deriveEpicPosture(slices, options = {}) {
+  return deriveEpicLifecycle(slices, options).posture;
+}
+
+function markdownSection(markdown, heading) {
+  const wanted = String(heading || '').trim();
+  if (!wanted) return { ok: false, error: error('ratification-heading-required', 'section_heading', 'an exact section heading is required') };
+  const lines = String(markdown || '').split(/(?<=\n)/);
+  const matches = [];
+  let offset = 0;
+  let fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+      offset += chunk.length;
+      continue;
+    }
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      fence = { character: opening[1][0], length: opening[1].length };
+      offset += chunk.length;
+      continue;
+    }
+    const match = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
+    if (match && match[2].trim() === wanted) matches.push({ start: offset, level: match[1].length });
+    offset += chunk.length;
+  }
+  if (matches.length !== 1) {
+    return { ok: false, error: error('ratification-heading-ambiguous', 'section_heading', 'artifact must contain exactly one exact selected heading') };
+  }
+  const selected = matches[0];
+  let end = String(markdown || '').length;
+  offset = 0;
+  fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+    } else {
+      const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (opening) fence = { character: opening[1][0], length: opening[1].length };
+      else if (offset > selected.start) {
+      const match = line.match(/^(#{1,6})[ \t]+/);
+      if (match && match[1].length <= selected.level) { end = offset; break; }
+      }
+    }
+    offset += chunk.length;
+  }
+  return { ok: true, section: String(markdown || '').slice(selected.start, end) };
+}
+
+function validateRatificationReceipt(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? clone(value) : {};
+  const errors = validateFields(raw, 'ratification-receipt');
+  errors.push(...recordVersionErrors(raw));
+  errors.push(...recordKindVersionErrors(raw, 'ratification-receipt'));
+  if (raw.decision && !registry.enums.ratification_decision.includes(raw.decision)) {
+    errors.push(error('invalid-ratification-decision', 'decision', 'decision must be accepted or provisionally_accepted'));
+  }
+  if (raw.accepted_at && !evidenceTimestampValid(raw.accepted_at)) {
+    errors.push(error('invalid-ratification-timestamp', 'accepted_at', 'accepted_at must be ISO-8601 with timezone'));
+  }
+  if (raw.target_card && (raw.target_card !== raw.target_card.trim() || normalizeIdentity(raw.target_card) !== raw.target_card)) {
+    errors.push(error('noncanonical-target-card', 'target_card', 'target_card must be the exact plain canonical card identity'));
+  }
+  if (raw.target_head && !/^[0-9a-f]{40}$/.test(raw.target_head)) {
+    errors.push(error('invalid-target-head', 'target_head', 'target_head must be exactly one lowercase 40-hex SHA token'));
+  }
+  for (const field of ['artifact_sha256', 'section_sha256']) {
+    if (raw[field] && !/^[0-9a-f]{64}$/.test(raw[field])) errors.push(error('invalid-sha256', field, `${field} must be 64 lowercase hex characters`));
+  }
+  if (raw.artifact_path && !relativeMarkdownPath(raw.artifact_path)) {
+    errors.push(error('invalid-note-path', 'artifact_path', 'artifact_path must be a workspace-relative Markdown path'));
+  }
+  if (Array.isArray(raw.scope) && (raw.scope.length === 0 || raw.scope.some((item) => item !== item.trim()))) {
+    errors.push(error('invalid-ratification-scope', 'scope', 'scope must contain one or more canonical non-empty strings'));
+  }
+  return { ok: errors.length === 0, errors, warnings: [], receipt: raw, contract_version: CONTRACT_VERSION };
+}
+
+function parseRatificationArtifact(markdown, sectionHeading, provenance = {}) {
+  const selected = markdownSection(markdown, sectionHeading);
+  if (!selected.ok) return { ok: false, errors: [selected.error], warnings: [], receipt: null, contract_version: CONTRACT_VERSION };
+  const blocks = [...selected.section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+  if (blocks.length !== 1) {
+    return { ok: false, errors: [error('ratification-block-ambiguous', 'artifact', 'selected section must contain exactly one delivery-ratification JSON block')], warnings: [], receipt: null, contract_version: CONTRACT_VERSION };
+  }
+  let payload;
+  try { payload = JSON.parse(blocks[0][1]); }
+  catch (_) {
+    return { ok: false, errors: [error('ratification-json-invalid', 'artifact', 'delivery-ratification block must contain valid JSON')], warnings: [], receipt: null, contract_version: CONTRACT_VERSION };
+  }
+  const allowed = new Set(['schema_version', 'receipt_id', 'decision', 'accepted_at', 'authority', 'target_card', 'target_head', 'scope']);
+  const unexpected = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? Object.keys(payload).filter((key) => !allowed.has(key)) : ['payload'];
+  if (unexpected.length) {
+    return { ok: false, errors: [error('ratification-field-unexpected', unexpected[0], 'ratification payload contains an unsupported field')], warnings: [], receipt: null, contract_version: CONTRACT_VERSION };
+  }
+  const artifactPath = String(provenance.artifact_path || '').trim();
+  const receipt = {
+    ...payload,
+    artifact_path: artifactPath,
+    artifact_sha256: sha256(Buffer.from(String(markdown || ''), 'utf8')),
+    section_heading: String(sectionHeading || '').trim(),
+    section_sha256: sha256(Buffer.from(selected.section, 'utf8')),
+  };
+  return validateRatificationReceipt(receipt);
 }
 
 function completionProof(record) {
@@ -553,6 +845,7 @@ function describe(type, consumer) {
 
 module.exports = {
   CONTRACT_VERSION,
+  MINIMUM_COMPATIBLE_VERSION,
   registry,
   compareVersions,
   normalizeIdentity,
@@ -561,6 +854,13 @@ module.exports = {
   normalizeEvidenceClaim,
   normalizeCard,
   validateCard,
+  validateEpic,
+  validateSlice,
+  deriveEpicLifecycle,
+  deriveEpicState,
+  deriveEpicPosture,
+  validateRatificationReceipt,
+  parseRatificationArtifact,
   resolveDependencies,
   completionProof,
   zoneConflicts,

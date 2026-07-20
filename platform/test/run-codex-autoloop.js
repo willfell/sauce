@@ -11,6 +11,7 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
   commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
+  consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
@@ -201,6 +202,81 @@ ok(/identity-mismatch/.test(projectionMetadataProblem(currentRecord, driftRoot).
 fs.writeFileSync(driftPath, projectedCurrentRaw.replace('context_pack: "Docs/test-context.md"', 'context_pack: "Docs/different-context.md"'));
 ok(/authoritative ledger/.test(projectionMetadataProblem(currentRecord, driftRoot).error), 'context_pack changes surface as meaningful Delivery contract drift');
 eq(DELIVERY_STABLE_FIELDS, delivery.registry.types['execution-card'].fields.map((field) => field.name), 'lifecycle drift fields derive from all 17 registry fields');
+
+const coordinatorRatificationPayload = {
+  schema_version: delivery.CONTRACT_VERSION,
+  receipt_id: 'coordinator-ratification-fixture',
+  decision: 'accepted',
+  accepted_at: '2026-07-20T09:28:12-05:00',
+  authority: 'Will',
+  target_card: 'Exact full coordinator target card',
+  target_head: 'd'.repeat(40),
+  scope: ['consume the exact receipt without authenticating prose'],
+};
+const coordinatorRatificationHeading = 'Coordinator receipt — accepted 2026-07-20';
+const coordinatorRatificationMarkdown = [
+  '# Final Initial Design', '',
+  'Exact full coordinator target card appears here outside the selected authority section.', '',
+  `## ${coordinatorRatificationHeading}`, '',
+  '```delivery-ratification', JSON.stringify(coordinatorRatificationPayload, null, 2), '```', '',
+].join('\n');
+const coordinatorParsedRatification = delivery.parseRatificationArtifact(
+  coordinatorRatificationMarkdown,
+  coordinatorRatificationHeading,
+  { artifact_path: 'spice/projects/example/Final Initial Design.md' },
+);
+ok(coordinatorParsedRatification.ok, 'ES1-RAT-COORD-1 Delivery emits a valid first-class receipt for the coordinator');
+ok(consumeRatificationArtifact(
+  coordinatorRatificationMarkdown,
+  coordinatorRatificationHeading,
+  { artifact_path: 'spice/projects/example/Final Initial Design.md' },
+  {
+    target_card: coordinatorRatificationPayload.target_card,
+    target_head: coordinatorRatificationPayload.target_head,
+    decision: 'accepted',
+  },
+).ok, 'ES1-RAT-COORD-1b coordinator delegates artifact parsing to the Delivery receipt contract');
+ok(consumeRatificationReceipt(coordinatorParsedRatification.receipt, {
+  target_card: coordinatorRatificationPayload.target_card,
+  target_head: coordinatorRatificationPayload.target_head,
+  decision: 'accepted',
+}).ok, 'ES1-RAT-COORD-2 coordinator consumes the exact target-card, HEAD, and decision receipt');
+const truncatedCoordinatorPayload = {
+  ...coordinatorRatificationPayload,
+  target_card: 'Exact full coordinator target',
+};
+const truncatedCoordinatorMarkdown = coordinatorRatificationMarkdown.replace(
+  JSON.stringify(coordinatorRatificationPayload, null, 2),
+  JSON.stringify(truncatedCoordinatorPayload, null, 2),
+);
+const truncatedCoordinatorReceipt = delivery.parseRatificationArtifact(
+  truncatedCoordinatorMarkdown,
+  coordinatorRatificationHeading,
+  { artifact_path: 'spice/projects/example/Final Initial Design.md' },
+);
+const truncatedCoordinatorVerdict = consumeRatificationReceipt(truncatedCoordinatorReceipt.receipt, {
+  target_card: coordinatorRatificationPayload.target_card,
+  target_head: coordinatorRatificationPayload.target_head,
+});
+ok(!truncatedCoordinatorVerdict.ok
+  && truncatedCoordinatorVerdict.errors.some((issue) => issue.code === 'ratification-target-card-mismatch'),
+'ES1-RAT-COORD-3 whole-file prose cannot complete a truncated selected-section target identity');
+const substringCoordinatorReceipt = {
+  ...coordinatorParsedRatification.receipt,
+  target_head: `prefix-${coordinatorRatificationPayload.target_head}-suffix`,
+};
+const substringCoordinatorVerdict = consumeRatificationReceipt(substringCoordinatorReceipt, {
+  target_card: coordinatorRatificationPayload.target_card,
+  target_head: coordinatorRatificationPayload.target_head,
+});
+ok(!substringCoordinatorVerdict.ok
+  && substringCoordinatorVerdict.errors.some((issue) => issue.code === 'invalid-target-head'),
+'ES1-RAT-COORD-4 a containing parked-HEAD substring is never coordinator authority');
+ok(!consumeRatificationReceipt(coordinatorParsedRatification.receipt, {
+  target_card: coordinatorRatificationPayload.target_card,
+  target_head: coordinatorRatificationPayload.target_head,
+  decision: 'provisionally_accepted',
+}).ok, 'ES1-RAT-COORD-5 coordinator binds the required ratification decision class');
 const ledgerFieldValues = {
   schema_version: '9.0.0', card: 'Different ledger card', parent_card: 'Different parent', slice: 'T2',
   model_profile: 'heavy', execution_mode: 'docs_only', batch_policy: 'stop_after', epic: 'Different epic',

@@ -33,7 +33,8 @@ check('DEL-API-1 public API exposes the semantic surface', [
   'validateCard', 'resolveDependencies', 'completionProof', 'zoneConflicts',
   'derivePolicy', 'classifyFailure', 'posture', 'migrate', 'describe',
   'batchEligibility', 'normalizeCard', 'normalizeStatus', 'parseDependencyField', 'compareVersions',
-  'normalizeEvidenceClaim',
+  'normalizeEvidenceClaim', 'validateEpic', 'validateSlice', 'deriveEpicLifecycle',
+  'deriveEpicState', 'deriveEpicPosture', 'validateRatificationReceipt', 'parseRatificationArtifact',
 ].every((name) => typeof api[name] === 'function'));
 eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSION, api.registry.contract.version);
 check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
@@ -42,6 +43,9 @@ check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
   && Object.isFrozen(api.registry.types['execution-card'])
   && Object.isFrozen(api.registry.types['execution-card'].fields)
   && Object.isFrozen(api.registry.types['execution-card'].fields[0])
+  && Object.isFrozen(api.registry.types.epic)
+  && Object.isFrozen(api.registry.types.slice)
+  && Object.isFrozen(api.registry.types['ratification-receipt'])
   && Object.isFrozen(api.registry.fixtures.base_execution_card)
   && Object.isFrozen(api.registry.fixtures.base_execution_card.deploy_subscriptions.headspace));
 eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults',
@@ -67,6 +71,135 @@ for (const fixture of api.registry.fixtures.invalid) {
   const codes = verdict.errors.map((error) => error.code);
   check(`DEL-FIX-INVALID ${fixture.name}`, !verdict.ok && codes.includes(fixture.expected_error), codes.join(','));
 }
+
+function recordFixture(group, fixture) {
+  const record = JSON.parse(JSON.stringify(group.base));
+  Object.assign(record, fixture.patch || {});
+  for (const key of fixture.remove || []) delete record[key];
+  return record;
+}
+
+for (const fixture of api.registry.fixtures.epic.valid) {
+  const verdict = api.validateEpic(recordFixture(api.registry.fixtures.epic, fixture));
+  check(`DEL-EPIC-VALID ${fixture.name}`, verdict.ok, JSON.stringify(verdict.errors));
+}
+for (const fixture of api.registry.fixtures.epic.invalid) {
+  const verdict = api.validateEpic(recordFixture(api.registry.fixtures.epic, fixture));
+  check(`DEL-EPIC-INVALID ${fixture.name}`, !verdict.ok
+    && verdict.errors.some((issue) => issue.code === fixture.expected_error), JSON.stringify(verdict.errors));
+}
+check('DEL-EPIC-STATE-ENUM atlas status uses the derived epic-state vocabulary',
+  api.registry.types.epic.fields.find((field) => field.name === 'status').enum === 'epic_state'
+    && api.validateEpic({ ...api.registry.fixtures.epic.base, status: 'planning' }).errors
+      .some((issue) => issue.code === 'invalid-enum'));
+for (const fixture of api.registry.fixtures.slice.valid) {
+  const verdict = api.validateSlice(recordFixture(api.registry.fixtures.slice, fixture), {
+    sibling_slices: ['Contract registry'],
+  });
+  check(`DEL-SLICE-VALID ${fixture.name}`, verdict.ok, JSON.stringify(verdict.errors));
+  if (fixture.expected_warning) check(`DEL-SLICE-WARNING ${fixture.name}`,
+    verdict.warnings.some((issue) => issue.code === fixture.expected_warning), JSON.stringify(verdict.warnings));
+}
+for (const fixture of api.registry.fixtures.slice.invalid) {
+  const verdict = api.validateSlice(recordFixture(api.registry.fixtures.slice, fixture));
+  check(`DEL-SLICE-INVALID ${fixture.name}`, !verdict.ok
+    && verdict.errors.some((issue) => issue.code === fixture.expected_error), JSON.stringify(verdict.errors));
+}
+eq('DEL-SLICE-RECORD preserves the epic backlink in normalized output',
+  api.validateSlice(api.registry.fixtures.slice.base).record.epic,
+  api.registry.fixtures.slice.base.epic);
+for (const fixture of api.registry.fixtures.ratification_receipt.valid) {
+  const verdict = api.validateRatificationReceipt(recordFixture(api.registry.fixtures.ratification_receipt, fixture));
+  check(`DEL-RATIFICATION-VALID ${fixture.name}`, verdict.ok, JSON.stringify(verdict.errors));
+}
+for (const fixture of api.registry.fixtures.ratification_receipt.invalid) {
+  const verdict = api.validateRatificationReceipt(recordFixture(api.registry.fixtures.ratification_receipt, fixture));
+  check(`DEL-RATIFICATION-INVALID ${fixture.name}`, !verdict.ok
+    && verdict.errors.some((issue) => issue.code === fixture.expected_error), JSON.stringify(verdict.errors));
+}
+
+const lifecycleCases = [
+  ['empty board is planned', [], 'planned', 'claimable'],
+  ['single planned slice is planned', [{ card: 'A', status: 'planning' }], 'planned', 'claimable'],
+  ['one implementing slice is active', [{ card: 'A', status: 'in_progress' }], 'active', 'claimable'],
+  ['all parked slices remain active', [{ card: 'A', status: 'parked' }, { card: 'B', status: 'parked' }], 'active', 'claimable'],
+  ['blocked frontier with nothing claimable is blocked', [{ card: 'A', status: 'blocked' }], 'blocked', 'blocked_by_dependencies'],
+  ['a claimable planned sibling outranks a blocked slice', [{ card: 'A', status: 'blocked' }, { card: 'B', status: 'planning' }], 'planned', 'claimable'],
+  ['every completed slice is done', [{ card: 'A', status: 'completed' }, { card: 'B', phase: 'deployed' }], 'done', 'done'],
+  ['cross-epic dependency degrades posture', [{ card: 'A', status: 'planning', cross_epic_dependency: true }], 'planned', 'blocked_by_dependencies'],
+  ['decision-required slice degrades posture first', [{ card: 'A', status: 'planning', decision_required: true }], 'planned', 'awaiting_user_decision'],
+  ['all pending docs-only slices use docs posture', [{ card: 'A', status: 'planning', execution_mode: 'docs_only' }], 'planned', 'docs_only'],
+];
+for (const [label, slices, expectedState, expectedPosture] of lifecycleCases) {
+  const lifecycle = api.deriveEpicLifecycle(slices);
+  eq(`DEL-EPIC-STATE ${label}`, lifecycle.state, expectedState);
+  eq(`DEL-EPIC-POSTURE ${label}`, lifecycle.posture, expectedPosture);
+  eq(`DEL-EPIC-STATE-WRAPPER ${label}`, api.deriveEpicState(slices), expectedState);
+  eq(`DEL-EPIC-POSTURE-WRAPPER ${label}`, api.deriveEpicPosture(slices), expectedPosture);
+}
+
+const ratificationPayload = {
+  schema_version: api.CONTRACT_VERSION,
+  receipt_id: 'ratification-es1-artifact',
+  decision: 'accepted',
+  accepted_at: '2026-07-20T09:28:12-05:00',
+  authority: 'Will',
+  target_card: 'ES1 Delivery epic-slice contract and ratification receipts',
+  target_head: 'd'.repeat(40),
+  scope: ['resume only the exact target'],
+};
+const ratificationHeading = 'ES1 receipt — accepted 2026-07-20';
+const ratificationMarkdown = [
+  '# Final Initial Design', '',
+  'A decoy outside the selected section names Different full target and eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.', '',
+  `## ${ratificationHeading}`, '',
+  'The prose is explanatory; the receipt block is authority.', '',
+  '```delivery-ratification', JSON.stringify(ratificationPayload, null, 2), '```', '',
+  '## Later section', '', 'Unrelated.', '',
+].join('\n');
+const parsedRatification = api.parseRatificationArtifact(ratificationMarkdown, ratificationHeading, {
+  artifact_path: 'spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md',
+});
+check('DEL-RATIFICATION-PARSE-1 exact selected receipt parses', parsedRatification.ok, JSON.stringify(parsedRatification.errors));
+eq('DEL-RATIFICATION-PARSE-2 target identity comes from the selected receipt only',
+  parsedRatification.receipt.target_card, ratificationPayload.target_card);
+eq('DEL-RATIFICATION-PARSE-3 target HEAD is one exact structured token',
+  parsedRatification.receipt.target_head, ratificationPayload.target_head);
+check('DEL-RATIFICATION-PARSE-4 parser binds whole artifact and exact section digests',
+  /^[0-9a-f]{64}$/.test(parsedRatification.receipt.artifact_sha256)
+    && /^[0-9a-f]{64}$/.test(parsedRatification.receipt.section_sha256)
+    && parsedRatification.receipt.artifact_sha256 !== parsedRatification.receipt.section_sha256);
+const decoyIdentityPayload = { ...ratificationPayload, target_card: 'ES1 Delivery epic-slice contract' };
+const decoyIdentityMarkdown = ratificationMarkdown.replace(JSON.stringify(ratificationPayload, null, 2), JSON.stringify(decoyIdentityPayload, null, 2));
+const decoyIdentityReceipt = api.parseRatificationArtifact(decoyIdentityMarkdown, ratificationHeading, {
+  artifact_path: 'spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md',
+});
+eq('DEL-RATIFICATION-PARSE-5 full-file prose cannot replace selected-section target identity',
+  decoyIdentityReceipt.receipt.target_card, decoyIdentityPayload.target_card);
+const substringHeadPayload = { ...ratificationPayload, target_head: `prefix-${ratificationPayload.target_head}-suffix` };
+const substringHeadMarkdown = ratificationMarkdown.replace(JSON.stringify(ratificationPayload, null, 2), JSON.stringify(substringHeadPayload, null, 2));
+const substringHeadReceipt = api.parseRatificationArtifact(substringHeadMarkdown, ratificationHeading, {
+  artifact_path: 'spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md',
+});
+check('DEL-RATIFICATION-PARSE-6 a containing HEAD substring is rejected', !substringHeadReceipt.ok
+  && substringHeadReceipt.errors.some((issue) => issue.code === 'invalid-target-head'));
+for (const [label, markdown, heading, code] of [
+  ['duplicate selected heading', `${ratificationMarkdown}\n## ${ratificationHeading}\n`, ratificationHeading, 'ratification-heading-ambiguous'],
+  ['missing selected heading', ratificationMarkdown, 'Missing heading', 'ratification-heading-ambiguous'],
+  ['missing receipt block', ratificationMarkdown.replace('delivery-ratification', 'json'), ratificationHeading, 'ratification-block-ambiguous'],
+  ['duplicate receipt block', ratificationMarkdown.replace('## Later section', `\`\`\`delivery-ratification\n${JSON.stringify(ratificationPayload)}\n\`\`\`\n\n## Later section`), ratificationHeading, 'ratification-block-ambiguous'],
+]) {
+  const verdict = api.parseRatificationArtifact(markdown, heading, { artifact_path: 'docs/ratification.md' });
+  check(`DEL-RATIFICATION-PARSE-REFUSE ${label}`, !verdict.ok && verdict.errors.some((issue) => issue.code === code));
+}
+const fencedHeadingDecoy = ratificationMarkdown.replace(
+  '# Final Initial Design',
+  `# Final Initial Design\n\n\`\`\`text\n## ${ratificationHeading}\n\`\`\``,
+);
+check('DEL-RATIFICATION-PARSE-7 headings inside fenced examples are never selected authority',
+  api.parseRatificationArtifact(fencedHeadingDecoy, ratificationHeading, {
+    artifact_path: 'docs/ratification.md',
+  }).ok);
 
 for (const fixture of api.registry.fixtures.dependency_syntax) {
   eq(`DEL-DEP-SYNTAX ${fixture.name}`, api.parseDependencyField(fixture.input), fixture.expected);
