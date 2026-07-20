@@ -186,7 +186,8 @@ projects `deployed`, preserves branch/worktree/review/gate history, and returns
 
 Historical card-only metadata drift uses `reconcile-metadata`, never whole-card
 reconciliation. Run its dry-run, pass the returned `card_sha256` back as
-`--expected-card-sha256` with `--apply`, then replay. The command refuses active
+`--expected-card-sha256` with `--apply`, then replay that successful apply
+literally with the same original hash and reason. The command refuses active
 and parked cards, never writes the board, and fails closed if the mismatch would
 require anything beyond its narrow ledger-owned metadata fields.
 

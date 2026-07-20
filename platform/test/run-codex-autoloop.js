@@ -1827,31 +1827,54 @@ metadataState.cards['Metadata drift'] = {
   branch: 'untouched-metadata-branch', worktree: '/untouched-metadata-worktree',
 };
 let metadataWrites = 0;
+let metadataCardWrites = 0;
 const metadataDeps = {
   readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
+  atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
   cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
 };
 const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
 eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
 eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
-const metadataApplied = await commandReconcileMetadata({ root: reconcileRoot }, {
+const metadataApplyArgs = {
   card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
   'expected-card-sha256': metadataDryRun.card_sha256,
-}, metadataDeps);
+  json: true,
+};
+const metadataApplied = await commandReconcileMetadata({ root: reconcileRoot }, metadataApplyArgs, metadataDeps);
 eq(metadataApplied.action, 'reconciled-metadata', 'bounded metadata apply succeeds');
 eq(metadataApplied.no_op, false, 'first metadata apply records a real change');
 eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw.replace('schema_version: 1.0.0', `schema_version: "${delivery.CONTRACT_VERSION}"`), 'metadata apply changes only schema_version bytes');
 eq(metadataState.cards['Metadata drift'].branch, 'untouched-metadata-branch', 'metadata reconcile preserves branch authority');
 eq(metadataState.cards['Metadata drift'].worktree, '/untouched-metadata-worktree', 'metadata reconcile preserves worktree authority');
 eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'metadata reconcile journals one bounded audit');
-const metadataReplayHash = metadataApplied.next_sha256;
+eq(metadataCardWrites, 1, 'metadata apply performs exactly one bounded card write');
 const metadataWritesAfterApply = metadataWrites;
-const metadataReplay = await commandReconcileMetadata({ root: reconcileRoot }, {
-  card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
-  'expected-card-sha256': metadataReplayHash,
-}, metadataDeps);
-eq(metadataReplay.no_op, true, 'literal metadata replay returns no_op true');
+const metadataCardWritesAfterApply = metadataCardWrites;
+const metadataTimestampAfterApply = metadataState.cards['Metadata drift'].projection_reconciled_at;
+const metadataReplay = await commandReconcileMetadata({ root: reconcileRoot }, metadataApplyArgs, metadataDeps);
+eq(metadataReplay.no_op, true, 'literal metadata replay preserves the original dry-run CAS operand and returns no_op true');
 eq(metadataWrites, metadataWritesAfterApply, 'literal metadata replay performs no ledger write');
+eq(metadataCardWrites, metadataCardWritesAfterApply, 'literal metadata replay performs no card write');
+eq(metadataState.cards['Metadata drift'].projection_reconciled_at, metadataTimestampAfterApply, 'literal metadata replay performs no timestamp write');
+eq(metadataState.cards['Metadata drift'].metadata_reconciliations.length, 1, 'literal metadata replay never duplicates its audit');
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, reason: 'changed replay reason',
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'changed replay reason fails closed even with the original CAS operand'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, 'expected-card-sha256': metadataApplied.next_sha256,
+}, metadataDeps), /only a literal replay/, 'substituting the post-apply hash fails closed instead of masquerading as replay'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, json: false,
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'removing the successful request json operand fails closed'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, reason: ` ${metadataApplyArgs.reason}`,
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'even normalization-equivalent reason whitespace is not accepted as literal replay'); count++;
+await assert.rejects(() => commandReconcileMetadata({ root: reconcileRoot }, {
+  ...metadataApplyArgs, card: '[[Metadata drift]]',
+}, metadataDeps), /exact --expected-card-sha256 from its dry-run/, 'normalization-equivalent card syntax is not accepted as literal replay'); count++;
+eq(metadataWrites, metadataWritesAfterApply, 'altered replay attempts perform no ledger write');
+eq(metadataCardWrites, metadataCardWritesAfterApply, 'altered replay attempts perform no card write');
 const parkedMetadataState = { ...emptyState(), cards: { 'Metadata drift': { ...metadataState.cards['Metadata drift'], phase: 'parked' } } };
 await assert.rejects(() => commandReconcileMetadata(
   { root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, { ...metadataDeps, readState: () => parkedMetadataState },

@@ -2188,19 +2188,36 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
       const { next, ...receipt } = plan;
       return { action: 'reconcile-metadata-plan', phase: record.phase, apply_required: plan.changed, no_op: !plan.changed, ...receipt };
     }
+    const request = {
+      card,
+      card_operand: String(args.card),
+      reason: args.reason,
+      expected_card_sha256: typeof args['expected-card-sha256'] === 'string' ? args['expected-card-sha256'] : null,
+      apply: true,
+      json: args.json === true,
+    };
+    const priorAudits = Array.isArray(record.metadata_reconciliations) ? record.metadata_reconciliations : [];
+    const priorAudit = priorAudits[priorAudits.length - 1] || null;
+    const replay = !plan.changed && priorAudit && priorAudit.request
+      && JSON.stringify(priorAudit.request) === JSON.stringify(request)
+      && priorAudit.card_sha256 === request.expected_card_sha256
+      && priorAudit.next_sha256 === plan.card_sha256;
+    if (replay) {
+      const { next, ...receipt } = plan;
+      return { action: 'reconciled-metadata', phase: record.phase, no_op: true, request, ...receipt };
+    }
     if (typeof args['expected-card-sha256'] !== 'string' || args['expected-card-sha256'] !== plan.card_sha256) {
       throw new Error('reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run');
     }
     if (!plan.changed) {
-      const { next, ...receipt } = plan;
-      return { action: 'reconciled-metadata', phase: record.phase, no_op: true, ...receipt };
+      throw new Error('reconcile-metadata completed state accepts only a literal replay of the exact successful apply request');
     }
     writeText(cardPath, plan.next);
     const audit = {
-      reason: args.reason.trim(), card_sha256: plan.card_sha256, next_sha256: plan.next_sha256,
+      request, reason: request.reason.trim(), card_sha256: plan.card_sha256, next_sha256: plan.next_sha256,
       changed_fields: plan.changed_fields, reconciled_at: now(),
     };
-    record.metadata_reconciliations = [...(record.metadata_reconciliations || []), audit];
+    record.metadata_reconciliations = [...priorAudits, audit];
     record.projection_reconciled_at = audit.reconciled_at;
     delete record.projection_error;
     delete record.projection_failed_at;
