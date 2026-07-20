@@ -81,17 +81,46 @@ try { todoManifest = JSON.parse(fs.readFileSync(TODO_MAN, 'utf8')); } catch (_e)
 try { stickyManifest = JSON.parse(fs.readFileSync(STICKY_MAN, 'utf8')); } catch (_e) {}
 const TODO_TYPES = todoManifest?.breadcrumb?.types || {};
 const STICKY_TYPES = stickyManifest?.breadcrumb?.types || {};
-const isTodoHubTrail = (entry) => entry
-  && Array.isArray(entry.ancestors)
-  && entry.ancestors.length === 1
-  && entry.ancestors[0].label === 'lit:To-Do'
-  && entry.current?.label === 'file:basename';
-ok('BR32 to-do manifest declares all non-leaf hub types with To-Do ancestor + basename current',
-   ['to-do-hub', 'to-do-recurring-list', 'to-do-recurring'].every((type) => isTodoHubTrail(TODO_TYPES[type])));
-ok('BR33 sticky manifest declares sticky-hub as the canonical root trail',
-   Array.isArray(STICKY_TYPES['sticky-hub']?.ancestors)
-   && STICKY_TYPES['sticky-hub'].ancestors.length === 0
-   && STICKY_TYPES['sticky-hub'].current?.label === 'lit:Sticky Notes');
+const EXPECTED_TODO_TYPES = {
+  'to-do': {
+    ancestors: [{ label: 'lit:To-Do' }, { label: 'path:3' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-hub': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-recurring-list': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-recurring': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  }
+};
+const EXPECTED_STICKY_TYPES = {
+  'sticky-note': {
+    ancestors: [
+      { label: 'lit:Sticky Notes' },
+      { label: 'path:3' },
+      { label: 'path:4', link: 'spice/sticky-notes/{path:2}/{path:3}/{path:4}/Sticky-Day-{path:4}.md' }
+    ],
+    current: { label: 'fm:time|file:basename' }
+  },
+  'sticky-day': {
+    ancestors: [{ label: 'lit:Sticky Notes' }, { label: 'path:3' }],
+    current: { label: 'path:4' }
+  },
+  'sticky-hub': {
+    ancestors: [],
+    current: { label: 'lit:Sticky Notes' }
+  }
+};
+ok('BR32 to-do manifest deep-contract preserves the leaf and all new unlinked hub trails',
+   JSON.stringify(TODO_TYPES) === JSON.stringify(EXPECTED_TODO_TYPES));
+ok('BR33 sticky manifest deep-contract preserves leaf/day trails and adds only the unlinked hub root',
+   JSON.stringify(STICKY_TYPES) === JSON.stringify(EXPECTED_STICKY_TYPES));
 
 // ── Load NEW class ────────────────────────────────────────────────────────
 const NEW_SRC = fs.existsSync(MECH) ? fs.readFileSync(MECH, 'utf8') : '';
