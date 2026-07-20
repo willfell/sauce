@@ -1,6 +1,6 @@
 {
   "name": "delivery",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "mechanism",
   "description": "Shared Delivery execution-contract core. Installs the versioned registry, embedded valid/invalid fixtures, pure semantic API, and schema describer under ranch without creating a standalone blueprint or a second project namespace. Public consumers import delivery/index.js; control-plane adoption and historical-card migration remain owned by A3.",
   "depends_on": [],
