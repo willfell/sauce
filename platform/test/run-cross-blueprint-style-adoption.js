@@ -270,6 +270,7 @@ async function modalContract() {
         "spice/projects/sauce/Links Hub.md",
         "spice/projects/sauce/tasks/Card.md",
         "spice/projects/sauce/docs/knowledge/Old.md",
+        "spice/projects/sauce/docs/collision/Old.md",
     ]);
     h.sandbox.app = {
         vault: {
@@ -346,18 +347,28 @@ async function modalContract() {
     console.log("  workstream single-fire: PASS");
 
     h.sandbox.customJS.DocMove = {
-        sectionTargets: () => [{ label: "Notes", folder: "spice/projects/sauce/docs/notes", section: "Notes", subSection: "" }],
+        sectionTargets: () => [
+            { label: "Collision", folder: "spice/projects/sauce/docs/collision", section: "Collision", subSection: "" },
+            { label: "Notes", folder: "spice/projects/sauce/docs/notes", section: "Notes", subSection: "" },
+        ],
         isSameLocation: () => false,
         targetPath: (folder) => `${folder}/Old.md`,
         rewriteSection: (_fm, section, subSection) => ({ section, sub_section: subSection }),
     };
-    h.leaf._listSectionHubs = () => [{ section: "Notes", file: { path: "spice/projects/sauce/docs/notes/Notes.md" }, depth: 1 }];
+    h.leaf._listSectionHubs = () => [
+        { section: "Collision", file: { path: "spice/projects/sauce/docs/collision/Collision.md" }, depth: 1 },
+        { section: "Notes", file: { path: "spice/projects/sauce/docs/notes/Notes.md" }, depth: 1 },
+    ];
     const moveDv = { current: () => ({ file: { path: "spice/projects/sauce/docs/knowledge/Old.md" } }) };
     h.leaf._onMove(moveDv);
     modal = mounted(h.document);
+    const collision = modal.backdrop.walk().find((node) => node.tagName === "BUTTON" && node.textContent === "Collision");
+    await collision.click();
+    assert.strictEqual(renames.length, 0, "collision rejects before rename");
+    assert.strictEqual(h.document.body.children.length, 1, "collision keeps the shared modal open for recovery");
     const target = modal.backdrop.walk().find((node) => node.tagName === "BUTTON" && node.textContent === "Notes");
     await Promise.all([target.click(), target.click()]);
-    assert.strictEqual(renames.length, 1, "double destination click produces one rename");
+    assert.strictEqual(renames.length, 1, "a post-collision retry works and double destination click produces one rename");
     assert.deepStrictEqual(renames, [["spice/projects/sauce/docs/knowledge/Old.md", "spice/projects/sauce/docs/notes/Old.md"]], "doc destination is unchanged");
     assert.deepStrictEqual(writes.at(-1).fm, { section: "Notes", sub_section: "" }, "doc frontmatter rewrite is unchanged");
     console.log("  doc move: PASS");

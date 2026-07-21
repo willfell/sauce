@@ -173,10 +173,15 @@ class DocLeafActions {
           moving = true;
           try {
             const dest = dm.targetPath(t.folder, docPath);
-            if (!dest) { new Notice("Could not compute the destination path."); return; }
+            if (!dest) {
+              moving = false;
+              new Notice("Could not compute the destination path.");
+              return false;
+            }
             if (app.vault.getAbstractFileByPath(dest)) {
+              moving = false;
               new Notice("A doc with that name already exists in " + t.label + ".", 6000);
-              return;
+              return false;
             }
             await app.fileManager.renameFile(file, dest);
             const moved = app.vault.getAbstractFileByPath(dest) || file;
