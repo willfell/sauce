@@ -29,4 +29,36 @@ function isHostLineage(cardName) {
   return HOST_LINEAGE.some((re) => re.test(s));
 }
 
-module.exports = { isHostLineage };
+// The first whitespace-delimited token is the card id (e.g. "GA-C9a2").
+function idToken(cardName) {
+  return String(cardName || '').trim().split(/\s+/)[0] || '';
+}
+
+// Strip a trailing supersession suffix: a lowercase letter + optional digits
+// ("a", "b", "a2", "c"). "GA-C9a2" → "GA-C9"; "GA-OPS11a" → "GA-OPS11".
+function stemOf(cardName) {
+  const id = idToken(cardName);
+  const m = id.match(/^(.*?)([a-z]\d*)$/);
+  return m ? m[1] : id;
+}
+
+function isDeployed(status) {
+  return status === 'deployed' || status === 'completed';
+}
+
+// A parked card X is a superseded corpse when some OTHER tracked card Y is
+// deployed AND shares X's stem AND its name marks it as the successor
+// ("supersedes" or "final value-review completion").
+function hasDeployedSupersedingSibling(card, tracked) {
+  const stem = stemOf(card.card);
+  if (!stem) return false;
+  const selfId = idToken(card.card);
+  return (tracked || []).some((y) => {
+    if (idToken(y.card) === selfId) return false;
+    if (!isDeployed(y.status)) return false;
+    if (stemOf(y.card) !== stem) return false;
+    return /supersedes|final value-review completion/i.test(y.card);
+  });
+}
+
+module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling };
