@@ -43,7 +43,7 @@ class PaycheckDebtBand {
         if (debtExpenses.length === 0) return; // nothing to render — quiet
 
         const root = dv.container.createEl("div", { cls: "pdb-root" });
-        root.style.cssText = "margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--sauce-hairline); border-radius: 10px; background: var(--background-secondary-alt);";
 
         const totalPlanned = debtExpenses.reduce((s, e) => s + (typeof e.amount === "number" ? e.amount : 0), 0);
         const totalPaid = debtExpenses
@@ -87,7 +87,7 @@ class PaycheckDebtBand {
 
     _renderHeader(parent, count, totalPlanned, totalPaid, paidPct) {
         const header = parent.createEl("div");
-        header.style.cssText = "display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--background-modifier-border);";
+        header.style.cssText = "display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const title = header.createEl("div");
         title.textContent = `Debt Payments (${count})`;
@@ -97,10 +97,10 @@ class PaycheckDebtBand {
         totals.textContent = `${this._fmtMoney(totalPaid)} paid of ${this._fmtMoney(totalPlanned)} planned`;
         totals.style.cssText = "font-size: 0.85em; color: var(--text-normal); font-variant-numeric: tabular-nums;";
 
-        const chip = header.createEl("span");
+        const chip = header.createEl("span", { cls: "pdb-progress-pill sauce-pill" });
         chip.textContent = `${paidPct}%`;
         const tone = paidPct >= 100 ? "green" : paidPct >= 50 ? "amber" : (paidPct === 0 ? "muted" : "red");
-        chip.style.cssText = `margin-left: auto; font-size: 0.78em; padding: 2px 9px; border-radius: 999px; color: ${PaycheckDebtBand.PALETTE[tone]}; background: ${PaycheckDebtBand.PALETTE[`${tone}Bg`]}; border: 1px solid ${PaycheckDebtBand.PALETTE[tone]}33; font-variant-numeric: tabular-nums;`;
+        chip.style.cssText = `margin-left: auto; color: ${PaycheckDebtBand.PALETTE[tone]}; background: ${PaycheckDebtBand.PALETTE[`${tone}Bg`]}; border-color: ${PaycheckDebtBand.PALETTE[tone]}33; font-variant-numeric: tabular-nums;`;
     }
 
     _renderRow(parent, exp) {
@@ -137,9 +137,9 @@ class PaycheckDebtBand {
                 if (!isFinite(lim) || lim <= 0 || !isFinite(bal)) return;
                 const pct = Math.max(0, Math.min(100, Math.round((1 - bal / lim) * 100)));
                 const tone = pct >= 67 ? "green" : pct >= 34 ? "amber" : "red";
-                const chip = row.createEl("span");
+                const chip = row.createEl("span", { cls: "pdb-paydown-pill sauce-pill" });
                 chip.textContent = `${pct}% paid`;
-                chip.style.cssText = `flex: 0 0 auto; font-size: 0.72em; padding: 2px 7px; border-radius: 999px; color: ${PaycheckDebtBand.PALETTE[tone]}; background: ${PaycheckDebtBand.PALETTE[`${tone}Bg`]}; border: 1px solid ${PaycheckDebtBand.PALETTE[tone]}33; font-variant-numeric: tabular-nums;`;
+                chip.style.cssText = `flex: 0 0 auto; color: ${PaycheckDebtBand.PALETTE[tone]}; background: ${PaycheckDebtBand.PALETTE[`${tone}Bg`]}; border-color: ${PaycheckDebtBand.PALETTE[tone]}33; font-variant-numeric: tabular-nums;`;
             });
         }
     }

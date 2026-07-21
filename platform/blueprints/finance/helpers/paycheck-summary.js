@@ -26,7 +26,7 @@ class PaycheckSummary {
         const expenses = Array.isArray(page.expenses) ? page.expenses : [];
 
         const root = dv.container.createEl("div", { cls: "ps-root" });
-        root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--sauce-hairline); border-radius: 10px; background: var(--background-secondary-alt);";
 
         if (expenses.length === 0) {
             const empty = root.createEl("div");
@@ -117,7 +117,7 @@ class PaycheckSummary {
 
     _renderBand1(root, payAmount, paidExpenses, remaining, totalExpenses, status) {
         const band = root.createEl("div");
-        band.style.cssText = "display: flex; gap: 24px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "display: flex; gap: 24px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val, color) => {
             const cell = band.createEl("div");
@@ -143,9 +143,9 @@ class PaycheckSummary {
         }
 
         if (status === "done") {
-            const closed = band.createEl("div");
+            const closed = band.createEl("div", { cls: "ps-closed-pill sauce-pill" });
             closed.textContent = "Closed";
-            closed.style.cssText = "flex: 0 0 auto; align-self: center; font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.04em; padding: 3px 9px; border: 1px solid var(--background-modifier-border); border-radius: 999px; text-transform: uppercase;";
+            closed.style.cssText = "flex: 0 0 auto; align-self: center; color: var(--text-muted); letter-spacing: 0.04em; text-transform: uppercase;";
         }
     }
 
@@ -158,12 +158,12 @@ class PaycheckSummary {
         if (!Array.isArray(rows) || rows.length === 0) return;
 
         const band = root.createEl("div");
-        band.style.cssText = "display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--sauce-hairline);";
 
         for (const r of rows) {
             const leftoverTone = (Number(r.leftover) || 0) >= 0 ? "green" : "red";
             const cell = band.createEl("div");
-            cell.style.cssText = "flex: 1; min-width: 150px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--background-modifier-border); background: var(--background-primary);";
+            cell.style.cssText = "flex: 1; min-width: 150px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--sauce-hairline); background: var(--background-primary);";
 
             const dateEl = cell.createEl("div");
             dateEl.textContent = r.date != null ? String(r.date) : "—";
@@ -183,7 +183,7 @@ class PaycheckSummary {
 
     _renderBand2(root, paidCount, totalCount, paidExpenses, totalExpenses, status) {
         const band = root.createEl("div");
-        band.style.cssText = "padding: 14px 0; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "padding: 14px 0; border-bottom: 1px solid var(--sauce-hairline);";
 
         const pctByCount = totalCount > 0 ? (paidCount / totalCount) * 100 : 0;
         const pctByAmount = totalExpenses > 0 ? (paidExpenses / totalExpenses) * 100 : 0;
@@ -204,9 +204,9 @@ class PaycheckSummary {
 
         const statusWrap = band.createEl("div");
         statusWrap.style.cssText = "margin-top: 10px;";
-        const statusTag = statusWrap.createEl("span");
+        const statusTag = statusWrap.createEl("span", { cls: "ps-status-pill sauce-pill" });
         statusTag.textContent = label;
-        statusTag.style.cssText = `display: inline-block; font-size: 0.82em; padding: 3px 10px; border-radius: 999px; color: ${this._colorFor(paceTone)}; background: ${this._bgFor(paceTone)}; border: 1px solid ${this._colorFor(paceTone)}33;`;
+        statusTag.style.cssText = `color: ${this._colorFor(paceTone)}; background: ${this._bgFor(paceTone)}; border-color: ${this._colorFor(paceTone)}33;`;
     }
 
     _renderBar(parent, label, pct, fillColor) {

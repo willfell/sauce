@@ -32,7 +32,7 @@ class BudgetSummary {
         const groups = Array.isArray(page.groups) ? page.groups : [];
 
         const root = dv.container.createEl("div", { cls: "bs-root" });
-        root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--sauce-hairline); border-radius: 10px; background: var(--background-secondary-alt);";
 
         if (categories.length === 0) {
             const empty = root.createEl("div");
@@ -119,7 +119,7 @@ class BudgetSummary {
 
     _renderBand1(root, planned, actual, diff, diffPct, status) {
         const band = root.createEl("div");
-        band.style.cssText = "display: flex; gap: 24px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "display: flex; gap: 24px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val, valColor) => {
             const cell = band.createEl("div");
@@ -142,9 +142,9 @@ class BudgetSummary {
         mk("Difference", diffStr, this._colorFor(tone));
 
         if (status === "done") {
-            const closed = band.createEl("div");
+            const closed = band.createEl("div", { cls: "bs-closed-pill sauce-pill" });
             closed.textContent = "Closed";
-            closed.style.cssText = "flex: 0 0 auto; align-self: center; font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.04em; padding: 3px 9px; border: 1px solid var(--background-modifier-border); border-radius: 999px; text-transform: uppercase;";
+            closed.style.cssText = "flex: 0 0 auto; align-self: center; color: var(--text-muted); letter-spacing: 0.04em; text-transform: uppercase;";
         }
     }
 
@@ -152,7 +152,7 @@ class BudgetSummary {
 
     _renderBand2(root, planned, actual, monthInfo, status) {
         const band = root.createEl("div");
-        band.style.cssText = "padding: 14px 0; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "padding: 14px 0; border-bottom: 1px solid var(--sauce-hairline);";
 
         const now = window.moment ? window.moment() : null;
         const nowY = now ? now.year() : new Date().getFullYear();
@@ -187,9 +187,9 @@ class BudgetSummary {
 
         const paceWrap = band.createEl("div");
         paceWrap.style.cssText = "margin-top: 10px;";
-        const paceTag = paceWrap.createEl("span");
+        const paceTag = paceWrap.createEl("span", { cls: "bs-pace-pill sauce-pill" });
         paceTag.textContent = label;
-        paceTag.style.cssText = `display: inline-block; font-size: 0.82em; padding: 3px 10px; border-radius: 999px; color: ${this._colorFor(paceTone)}; background: ${this._bgFor(paceTone)}; border: 1px solid ${this._colorFor(paceTone)}33;`;
+        paceTag.style.cssText = `color: ${this._colorFor(paceTone)}; background: ${this._bgFor(paceTone)}; border-color: ${this._colorFor(paceTone)}33;`;
     }
 
     _renderBar(parent, label, pct, fillColor, _ignored) {

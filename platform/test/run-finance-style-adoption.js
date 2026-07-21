@@ -18,6 +18,12 @@ const FILES = {
     debts: "debts-cards.js",
     savings: "savings-cards.js",
     months: "months-cards.js",
+    budgetSummary: "budget-summary.js",
+    paycheckSummary: "paycheck-summary.js",
+    monthlyOverview: "monthly-overview.js",
+    debtBand: "paycheck-debt-band.js",
+    planBand: "plan-band.js",
+    status: "finance-status.js",
 };
 
 function source(name) {
@@ -82,8 +88,9 @@ class FakeElement {
     }
 
     dispatch(type) {
-        for (const listener of this.listeners.get(type) || []) listener({ target: this, currentTarget: this });
-        if (type === "click" && typeof this.onclick === "function") this.onclick({ target: this, currentTarget: this });
+        const event = { target: this, currentTarget: this, preventDefault: () => {} };
+        for (const listener of this.listeners.get(type) || []) listener(event);
+        if (type === "click" && typeof this.onclick === "function") this.onclick(event);
     }
 
     querySelector(selector) {
@@ -96,6 +103,7 @@ class FakeElement {
     }
 
     closest() { return null; }
+    setAttribute(name, value) { this.attrs[name] = String(value); }
     walk() { return this.children.flatMap((child) => [child, ...child.walk()]); }
 }
 
@@ -124,7 +132,7 @@ function sharedChromeViolations(sources) {
     const combined = Object.values(sources).join("\n");
     const failures = [];
     if (/\b(?:btn|button)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius|border:\s*1px)/i.test(combined)) failures.push("hand-rolled-button");
-    if (/\b(?:aprBadge|chip)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius)/i.test(combined)) failures.push("hand-rolled-pill");
+    if (/\b(?:aprBadge|chip|paceTag|statusTag|pill|closed)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius)/i.test(combined)) failures.push("hand-rolled-pill");
     if (/border(?:-top)?:\s*1px\s+solid\s+var\(--background-modifier-border\)/i.test(combined)) failures.push("legacy-hairline-token");
     return failures;
 }
@@ -174,10 +182,18 @@ function staticContract() {
         assert(sources[name].includes("var(--sauce-hairline)"), `${name} cards use the shared hairline token`);
         assert(sources[name].includes("var(--sauce-radius-btn)"), `${name} cards use the shared radius token`);
     }
+    for (const name of ["budgetSummary", "paycheckSummary", "monthlyOverview", "debtBand", "planBand", "status"]) {
+        assert(sources[name].includes("var(--sauce-hairline)"), `${name} summary uses the shared hairline token`);
+    }
+    assert(sources.budgetSummary.includes("bs-closed-pill sauce-pill") && sources.budgetSummary.includes("bs-pace-pill sauce-pill"), "BudgetSummary emits semantic closed and pace pills");
+    assert(sources.paycheckSummary.includes("ps-closed-pill sauce-pill") && sources.paycheckSummary.includes("ps-status-pill sauce-pill"), "PaycheckSummary emits semantic closed and progress pills");
+    assert(sources.monthlyOverview.includes("mo-mom-pill sauce-pill"), "MonthlyOverview emits a semantic month-over-month pill");
+    assert(sources.debtBand.includes("pdb-progress-pill sauce-pill") && sources.debtBand.includes("pdb-paydown-pill sauce-pill"), "PaycheckDebtBand emits semantic progress pills");
+    assert(sources.status.includes("fs-status-pill sauce-pill"), "FinanceStatus emits a semantic status pill");
 
     const buttonMutation = { ...sources, hub: `${sources.hub}\nbtn.style.cssText = "padding: 6px; border-radius: 6px;";` };
     assert(sharedChromeViolations(buttonMutation).includes("hand-rolled-button"), "button mutation turns the source guard red");
-    const pillMutation = { ...sources, savings: `${sources.savings}\nchip.style.cssText = "padding: 2px; border-radius: 999px;";` };
+    const pillMutation = { ...sources, status: `${sources.status}\npill.style.cssText = "padding: 2px; border-radius: 999px;";` };
     assert(sharedChromeViolations(pillMutation).includes("hand-rolled-pill"), "pill mutation turns the source guard red");
     const hairlineMutation = { ...sources, months: sources.months.replace("var(--sauce-hairline)", "var(--background-modifier-border)") };
     assert(sharedChromeViolations(hairlineMutation).includes("legacy-hairline-token"), "legacy hairline mutation turns the source guard red");
@@ -291,10 +307,110 @@ async function behaviorContract() {
     assert.strictEqual(monthCards[0].walk().find((node) => node.textContent === "2026-03")?.textContent, "2026-03", "months remain newest-first");
     monthCards[0].dispatch("click");
     assert.deepStrictEqual(opened.splice(0), ["Month-2026-03"], "month click opens the same entity");
+
+    console.log("--- C6B-BEHAVIOR: summary values, tones, ordering, and envelope boundary ---");
+    const summaryWindow = { moment: () => ({ year: () => 2026, month: () => 6, date: () => 15 }) };
+    const BudgetSummary = loadClass("budgetSummary", "BudgetSummary", { window: summaryWindow });
+    const budgetSummary = new BudgetSummary();
+    const budgetRoot = new FakeElement("div");
+    budgetSummary._renderBand1(budgetRoot, 1000, 1120, 120, 12, "done");
+    budgetSummary._renderBand2(budgetRoot, 1000, 1120, { year: 2026, month: 7, daysInMonth: 31 }, "in-progress");
+    budgetSummary._renderBand3(budgetRoot, [
+        { group: "Essential", planned: 800, actual: 700 },
+        { group: "Optional", planned: 200, actual: 420 },
+    ], ["Essential", "Optional"]);
+    assert(classes(budgetRoot, "bs-closed-pill")[0]?.classList.contains("sauce-pill"), "BudgetSummary closed state uses sauce-pill");
+    assert.strictEqual(classes(budgetRoot, "bs-pace-pill")[0]?.textContent, "Spending ahead of pace by 64 points", "BudgetSummary preserves its data-derived pace label");
+    assert.deepStrictEqual(
+        budgetRoot.walk().filter((node) => ["Essential", "Optional"].includes(node.textContent)).map((node) => node.textContent),
+        ["Essential", "Optional"],
+        "BudgetSummary preserves authored group ordering",
+    );
+    assert(budgetRoot.walk().some((node) => node.textContent === "$120.00 (+12.0%)"), "BudgetSummary preserves exact difference total");
+
+    const PaycheckSummary = loadClass("paycheckSummary", "PaycheckSummary", { customJS: { FinanceMath: { depositTotals: () => [] } } });
+    const paycheckSummary = new PaycheckSummary();
+    const paycheckRoot = new FakeElement("div");
+    paycheckSummary._renderBand1(paycheckRoot, 2000, 2000, 0, 2000, "done");
+    paycheckSummary._renderBand2(paycheckRoot, 2, 2, 2000, 2000, "done");
+    paycheckSummary._renderBand3(paycheckRoot, [
+        { category: "Small", amount: 100, paid: false },
+        { category: "Large", amount: 900, paid: true },
+    ]);
+    assert(classes(paycheckRoot, "ps-closed-pill")[0]?.classList.contains("sauce-pill"), "PaycheckSummary closed state uses sauce-pill");
+    assert.strictEqual(classes(paycheckRoot, "ps-status-pill")[0]?.textContent, "All paid", "PaycheckSummary preserves its closed progress label");
+    assert.deepStrictEqual(
+        paycheckRoot.walk().filter((node) => ["Large", "Small"].includes(node.textContent)).map((node) => node.textContent),
+        ["Large", "Small"],
+        "PaycheckSummary preserves amount-descending category order",
+    );
+    assert(paycheckRoot.walk().some((node) => node.textContent === "$0.00"), "PaycheckSummary preserves the exact remaining total");
+
+    const MonthlyOverview = loadClass("monthlyOverview", "MonthlyOverview", {});
+    const monthlyOverview = new MonthlyOverview();
+    const monthlyRoot = new FakeElement("div");
+    const debts = [{
+        current_balance: 800,
+        balance_history: [{ date: "2026-07-01", balance: 1000 }, { date: "2026-07-31", balance: 800 }],
+    }];
+    monthlyOverview._renderBand1(monthlyRoot, 5000, 3000, 500, 1500, debts);
+    monthlyOverview._renderBand2(monthlyRoot, "2026-07", debts);
+    monthlyOverview._renderBand3(monthlyRoot, [{ paycheck_amount: 5000 }], debts, 5000);
+    assert.strictEqual(classes(monthlyRoot, "mo-mom-pill")[0]?.textContent, "MoM ↓ $200.00", "MonthlyOverview preserves month-over-month direction and amount");
+    assert(monthlyRoot.walk().some((node) => node.textContent === "+$1,500.00"), "MonthlyOverview preserves exact net cashflow");
+    assert(monthlyRoot.walk().some((node) => node.textContent.includes("From 1 paycheck")), "MonthlyOverview preserves audit counts");
+
+    const PaycheckDebtBand = loadClass("debtBand", "PaycheckDebtBand", { app });
+    const debtBand = new PaycheckDebtBand();
+    debtBand._resolveDebt = async () => ({ kind: "credit-card", credit_limit: 1000, current_balance: 250 });
+    const debtBandRoot = new FakeElement("div");
+    debtBand._renderHeader(debtBandRoot, 2, 1000, 750, 75);
+    debtBand._renderRow(debtBandRoot, { item: "Apple", debt: "[[Debt-Apple]]", amount: 750, paid: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.strictEqual(classes(debtBandRoot, "pdb-progress-pill")[0]?.textContent, "75%", "PaycheckDebtBand preserves header progress");
+    assert.strictEqual(classes(debtBandRoot, "pdb-paydown-pill")[0]?.textContent, "75% paid", "PaycheckDebtBand preserves resolved paydown progress");
+    debtBandRoot.walk().find((node) => node.textContent === "Apple")?.dispatch("click");
+    assert.deepStrictEqual(opened.splice(0), ["Debt-Apple"], "PaycheckDebtBand preserves debt link target");
+
+    let planCalls = 0;
+    const planMath = {
+        _coerceMonthString: (value) => value,
+        computePlanState: (_dv, month) => {
+            planCalls += 1;
+            assert.strictEqual(month, "2026-07", "PlanBand passes through the current budget month");
+            return { ok: true, envelope: { governed: true, effective: 900, planned: 1000, left: -100, over: 100, overageCarry: 0, base: 900 } };
+        },
+        fmtMoney: (value) => `$${Number(value).toFixed(2)}`,
+    };
+    const PlanBand = loadClass("planBand", "PlanBand", { customJS: { FinanceMath: planMath } });
+    const planDv = dvFor({}, { type: "budget", month: "2026-07" });
+    await new PlanBand().render(planDv);
+    assert.strictEqual(planCalls, 1, "PlanBand delegates envelope computation exactly once to FinanceMath");
+    assert(planDv.container.walk().some((node) => node.textContent.includes("OVER ENVELOPE by $100.00")), "PlanBand preserves the governed over-envelope warning");
+
+    const today = {
+        startOf() { return this; },
+        isBefore(other, unit) { return unit === "month" ? "2026-07" < other.key : false; },
+    };
+    const FinanceStatus = loadClass("status", "FinanceStatus", { window: { moment: () => today } });
+    const financeStatus = new FinanceStatus();
+    financeStatus._toMoment = (value) => ({
+        key: String(value).slice(0, 7),
+        isValid: () => true,
+        isBefore: (_other, unit) => unit === "month" && String(value).slice(0, 7) < "2026-07",
+        isSame: (_other, unit) => unit === "month" && String(value).slice(0, 7) === "2026-07",
+    });
+    assert.deepStrictEqual(financeStatus.derive({ month: "2026-07" }, "budget"), { label: "In Progress", tone: "warn" }, "FinanceStatus preserves current-budget label and tone");
+    financeStatus.derive = () => ({ label: "In Progress", tone: "warn" });
+    const statusDv = dvFor({}, { type: "budget" });
+    await financeStatus.renderBadge(statusDv, "budget");
+    assert(classes(statusDv.container, "fs-status-pill")[0]?.classList.contains("sauce-pill"), "FinanceStatus emits its unchanged label through sauce-pill");
+    assert(statusDv.container.walk().some((node) => node.textContent === "In Progress"), "FinanceStatus renders the unchanged status label");
 }
 
 function visualContract() {
-    console.log("--- C6A-VISUAL: execute 1024/390 light/dark browser fixture ---");
+    console.log("--- C6AB-VISUAL: execute cards and summaries at 1024/390 light/dark ---");
     const visual = fs.readFileSync(VISUAL_PATH, "utf8");
     assert(/<meta\s+name="viewport"\s+content="width=device-width, initial-scale=1">/.test(visual), "fixture declares responsive viewport");
     assert(visual.includes("../../mechanisms/styling/assets/snippets/sauce-core.css"), "fixture loads shipped sauce-core CSS");
@@ -306,7 +422,7 @@ function visualContract() {
 
     const executable = chromeExecutable();
     assert(executable, "a supported Chrome/Chromium binary is required for the visual contract");
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-c6a-visual-"));
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-c6ab-visual-"));
     try {
         for (const theme of ["light", "dark"]) {
             for (const width of [1024, 390]) {
@@ -330,8 +446,12 @@ function visualContract() {
                 assert.strictEqual(marker["controls-visible"], "true", `${theme}/${width}: controls have rendered geometry`);
                 assert.strictEqual(marker["actions-clicked"], "true", `${theme}/${width}: every action remains clickable`);
                 assert.strictEqual(marker.buttons, "7", `${theme}/${width}: all seven Finance destinations render`);
-                assert.strictEqual(marker.pills, "4", `${theme}/${width}: all semantic status pills render`);
+                assert.strictEqual(marker.pills, "12", `${theme}/${width}: all semantic status pills render`);
                 assert.strictEqual(marker.cards, "5", `${theme}/${width}: debt, savings, and month cards render`);
+                assert.strictEqual(marker.summaries, "4", `${theme}/${width}: all summary and band surfaces render`);
+                assert.strictEqual(marker.progress, "2", `${theme}/${width}: summary progress tracks render`);
+                assert.strictEqual(marker["summaries-fit"], "true", `${theme}/${width}: summaries do not clip or overflow`);
+                assert.strictEqual(marker["tones-visible"], "true", `${theme}/${width}: summary status tones remain visible`);
 
                 const first = path.join(temp, `${theme}-${width}-a.png`);
                 const second = path.join(temp, `${theme}-${width}-b.png`);

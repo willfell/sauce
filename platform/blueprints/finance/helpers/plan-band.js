@@ -31,7 +31,7 @@ class PlanBand {
         const over = e.governed && e.over > 0;
 
         const root = dv.container.createEl("div", { cls: "planband-root" });
-        root.style.cssText = `margin: 10px 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid ${over ? "rgba(220,38,38,0.35)" : "var(--background-modifier-border)"}; background: ${over ? "rgba(220,38,38,0.08)" : "var(--background-secondary-alt)"};`;
+        root.style.cssText = `margin: 10px 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid ${over ? "rgba(220,38,38,0.35)" : "var(--sauce-hairline)"}; background: ${over ? "rgba(220,38,38,0.08)" : "var(--background-secondary-alt)"};`;
 
         const head = root.createEl("div");
         head.style.cssText = "display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 0.86em; font-variant-numeric: tabular-nums;";
