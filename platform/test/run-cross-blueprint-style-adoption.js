@@ -14,6 +14,8 @@ const ROOT = path.resolve(__dirname, "../..");
 const PROJECT = path.join(ROOT, "platform/blueprints/project/helpers");
 const MODAL = path.join(ROOT, "platform/mechanisms/modal/sauce-modal.js");
 const VISUAL = path.join(ROOT, "platform/test/visual/cross-blueprint-style-adoption.html");
+const MUTATION = process.env.C7A_MUTATION || "";
+const MUTATION_CHILD = process.env.C7A_MUTATION_CHILD === "1";
 const FILES = {
     nav: "project-nav-buttons.js",
     docs: "project-docs-index.js",
@@ -23,7 +25,22 @@ const FILES = {
 };
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-function source(name) { return fs.readFileSync(path.join(PROJECT, FILES[name]), "utf8"); }
+function source(name) {
+    const raw = fs.readFileSync(path.join(PROJECT, FILES[name]), "utf8");
+    if (!MUTATION) return raw;
+    const mutations = {
+        "button-adoption": ["nav", 'btn.classList.add("sauce-btn")', 'btn.classList.add("legacy-btn")'],
+        "action-row": ["links", 'const row = c.createEl("div", { cls: "sauce-action-row" });', 'const row = c.createEl("div", { cls: "legacy-action-row" });'],
+        "modal-delegation": ["links", '? globalThis.customJS.SauceModal : null', '? null : null'],
+        "destination": ["nav", 'path: `${projectDir}/docs/Docs.md`', 'path: `${projectDir}/docs/Wrong.md`'],
+        "mutation-delegate": ["leaf", "fm.section = patch.section;", 'fm.section = "wrong";'],
+        "single-fire": ["links", "if (submitting) return false;", "if (false) return false;"],
+    };
+    const [target, before, after] = mutations[MUTATION] || [];
+    if (name !== target) return raw;
+    assert(before && raw.includes(before), `mutation ${MUTATION} must match its production seam`);
+    return raw.replace(before, after);
+}
 function classTokens(node) { return String(node.className || "").split(/\s+/).filter(Boolean); }
 
 class FakeElement {
@@ -196,10 +213,6 @@ function staticContract() {
     }
     assert(sources.links.includes("globalThis.customJS.SauceModal") && sources.leaf.includes("globalThis.customJS.SauceModal"), "link and doc move dialogs resolve real global SauceModal");
 
-    const mutated = `${combined}\n_styleLeafBtn(btn) { btn.style.padding = '9px'; }`;
-    assert(/_mobilize|_styleLeafBtn/.test(mutated), "legacy sizing mutation turns the guard red");
-    const rawModal = `${sources.links}\noverlay.style.cssText = 'position: fixed'`;
-    assert(/position:\s*fixed/i.test(rawModal), "raw modal mutation turns the guard red");
 }
 
 async function actionRowContract() {
@@ -248,6 +261,50 @@ async function actionRowContract() {
     assert(buttons(docsRow).every((button) => classTokens(button).includes("sauce-btn") && button.style.cssText === ""), "Docs normalizes every entity/action button");
     await buttons(docsRow)[2].click();
     assert.deepStrictEqual(creates, ["doc-note", "section-hub"]); assert.strictEqual(bulkMoves, 1);
+
+    const atlas = { path: "spice/projects/sauce/Sauce.md", basename: "Sauce", name: "Sauce" };
+    const map = { path: "spice/projects/sauce/Project Map.md", basename: "Project Map", name: "Project Map" };
+    const doc = { path: "spice/projects/sauce/docs/Decision.md", basename: "Decision", name: "Decision" };
+    const todo = { path: "spice/projects/sauce/Sauce To-Do.md", basename: "Sauce To-Do", name: "Sauce To-Do" };
+    const links = { path: "spice/projects/sauce/Links Hub.md", basename: "Links Hub", name: "Links Hub" };
+    const board = { path: "spice/projects/sauce/sauce-board.md", basename: "sauce-board", name: "sauce-board" };
+    const docsHub = { path: "spice/projects/sauce/docs/Docs.md", basename: "Docs", name: "Docs" };
+    const files = [atlas, map, doc, todo, links, board, docsHub];
+    const fmByPath = new Map([
+        [atlas.path, { type: "project", workstreams: [] }], [map.path, { type: "map" }],
+        [doc.path, { type: "doc-note" }], [todo.path, { type: "project-todo" }], [links.path, { type: "links-hub" }],
+    ]);
+    const renderedOpened = [];
+    h.sandbox.app = {
+        isMobile: false,
+        vault: {
+            getFiles: () => files,
+            getAbstractFileByPath: (target) => files.find((file) => file.path === target) || null,
+        },
+        metadataCache: { getFileCache: (file) => ({ frontmatter: fmByPath.get(file.path) || {} }) },
+        workspace: {
+            getLeaf: () => ({ openFile: (file) => renderedOpened.push(file.path) }),
+            openLinkText: (target) => renderedOpened.push(target),
+        },
+    };
+    const navDv = { container: new FakeElement("div"), current: () => ({ type: "doc-note", file: doc }) };
+    await h.nav.render(navDv);
+    const renderedRow = navDv.container.querySelector(".sauce-action-row");
+    const renderedButtons = buttons(renderedRow);
+    assert.deepStrictEqual(renderedButtons.map((button) => button.textContent), ["Sauce", "Project Board", "Docs", "More"], "actual ProjectNavButtons.render preserves core order and More");
+    for (const button of renderedButtons.slice(0, 3)) await button.click();
+    const more = renderedButtons[3];
+    const overflowLabels = [];
+    for (let index = 0; index < 3; index += 1) {
+        await more.click();
+        const overlay = h.document.body.querySelector(".pnb-more-overlay");
+        assert(overlay, "actual More delegate mounts its production menu");
+        const rows = overlay.querySelectorAll("button");
+        if (index === 0) overflowLabels.push(...rows.map((row) => row.innerHTML.match(/<span[^>]*>([^<]+)<\/span>$/)?.[1] || ""));
+        await rows[index].click();
+    }
+    assert.deepStrictEqual(overflowLabels, ["Map", "To-Do", "Helpful Links"], "actual More menu preserves overflow order");
+    assert.deepStrictEqual(renderedOpened, [atlas.path, board.path, docsHub.path, map.path, todo.path, links.path], "actual render clicks preserve every absolute Project destination");
 
     creates.length = 0;
     const sectionDv = {
@@ -301,6 +358,20 @@ async function modalContract() {
     assert.strictEqual(h.document.body.children.length, 0, "successful submit closes through SauceModal");
     console.log("  link add/save single-fire: PASS");
 
+    writes.length = 0;
+    h.links._openForm({ title: "Keyboard link", url: "", text: "" }, async ({ url, text }) => {
+        writes.push({ url, text }); return true;
+    });
+    modal = mounted(h.document); modal.inputs[0].value = "https://keyboard.example"; modal.inputs[1].value = "Keyboard";
+    h.document.key("Enter", modal.inputs[0]);
+    modal.inputs[0].dispatch("keydown", { key: "Enter", isComposing: false });
+    assert(modal.inputs[1].focused && writes.length === 0 && h.document.body.children.length === 1, "URL Enter stays local and focuses Link text without submitting");
+    h.document.key("Enter", modal.inputs[1]);
+    modal.inputs[1].dispatch("keydown", { key: "Enter", isComposing: false });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepStrictEqual(writes, [{ url: "https://keyboard.example", text: "Keyboard" }], "Link-text Enter submits exactly once through the local guard");
+    assert.strictEqual(h.document.body.children.length, 0, "Link-text Enter closes through SauceModal");
+
     const cancelled = h.links._openForm({ title: "Add link", url: "", text: "" }, async () => true);
     assert(cancelled); modal = mounted(h.document); await modal.buttons[0].click();
     assert.strictEqual(h.document.body.children.length, 0, "Cancel closes once through the shared shell");
@@ -344,6 +415,10 @@ async function modalContract() {
     await Promise.all([two.click(), two.click()]);
     assert.strictEqual(writes.length, 1, "double workstream click produces one write");
     assert.strictEqual(writes[0].fm.workstream, "two", "workstream assignment delegate is unchanged");
+    writes.length = 0;
+    h.nav._openWorkstreamPicker([{ id: "one", name: "One" }], "", "spice/projects/sauce/tasks/Card.md");
+    modal = mounted(h.document); await modal.buttons.find((button) => button.textContent === "Cancel").click();
+    assert.strictEqual(writes.length, 0, "workstream Cancel suppresses every mutation");
     console.log("  workstream single-fire: PASS");
 
     h.sandbox.customJS.DocMove = {
@@ -361,6 +436,9 @@ async function modalContract() {
     ];
     const moveDv = { current: () => ({ file: { path: "spice/projects/sauce/docs/knowledge/Old.md" } }) };
     h.leaf._onMove(moveDv);
+    modal = mounted(h.document); await modal.buttons.find((button) => button.textContent === "Cancel").click();
+    assert.strictEqual(renames.length, 0, "doc-move Cancel suppresses rename and frontmatter mutation");
+    h.leaf._onMove(moveDv);
     modal = mounted(h.document);
     const collision = modal.backdrop.walk().find((node) => node.tagName === "BUTTON" && node.textContent === "Collision");
     await collision.click();
@@ -375,11 +453,17 @@ async function modalContract() {
 
     const realModal = h.sandbox.customJS.SauceModal;
     h.sandbox.customJS.SauceModal = null;
+    const missingTitle = h.nav._promptForTitle("spice/projects/sauce/tasks/T/notes");
     assert.strictEqual(h.links._openModal({ title: "No", build: () => { throw new Error("must not build"); } }), null);
     assert.strictEqual(h.leaf._openModal({ title: "No", build: () => { throw new Error("must not build"); } }), null);
     assert.strictEqual(h.nav._openWorkstreamPicker([], "", "x"), null);
+    assert.strictEqual(await missingTitle, null, "title prompt fails closed with a settled null result");
     assert.strictEqual(h.document.body.children.length, 0, "missing dependency fails closed before any DOM mounts");
     h.sandbox.customJS.SauceModal = realModal;
+    const warmRetry = h.nav._promptForTitle("spice/projects/sauce/tasks/T/notes");
+    modal = mounted(h.document); await modal.buttons[0].click();
+    assert.strictEqual(await warmRetry, null, "a warm retry works after the missing-modal failure");
+    assert.strictEqual(h.document.body.children.length, 0, "warm retry leaves no modal DOM after cancel");
 }
 
 function chromeExecutable() {
@@ -400,6 +484,10 @@ function visualContract() {
     console.log("--- C7A-VISUAL: deterministic 1024/390 light/dark Project fixture ---");
     const html = fs.readFileSync(VISUAL, "utf8");
     assert(html.includes("../../mechanisms/styling/assets/snippets/sauce-core.css"), "fixture loads shipped sauce-core CSS");
+    assert(html.includes("../../mechanisms/modal/sauce-modal.js"), "fixture loads shipped SauceModal");
+    assert(html.includes("../../blueprints/project/helpers/project-nav-buttons.js"), "fixture loads shipped ProjectNavButtons");
+    assert(html.includes("../../blueprints/project/helpers/project-links-manager.js"), "fixture loads shipped ProjectLinksManager");
+    assert(!/<button[^>]+class=["'][^"']*sauce-btn/i.test(html), "fixture does not hand-author shared buttons");
     assert(!/(?:^|\n)\s*\.sauce-(?:btn|action-row|modal)\s*\{/m.test(html), "fixture does not fork shared component CSS");
     const executable = chromeExecutable();
     assert(executable, "Chrome is required for the visual contract");
@@ -409,10 +497,15 @@ function visualContract() {
             const url = `${pathToFileURL(VISUAL).href}?theme=${theme}`;
             const common = ["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files", "--force-prefers-reduced-motion", "--run-all-compositor-stages-before-draw", "--virtual-time-budget=1000", `--window-size=${width},900`];
             const marker = markerData(runChrome(executable, [...common, "--dump-dom", url]));
+            assert(!marker.error, `executed fixture is error-free: ${marker.error || ""}`);
             assert.strictEqual(marker.theme, theme); assert.strictEqual(marker["document-fits"], "true");
             assert.strictEqual(marker["surfaces-fit"], "true"); assert.strictEqual(marker["controls-visible"], "true");
-            assert.strictEqual(marker["actions-clicked"], "true"); assert.strictEqual(marker.rows, "3");
-            assert.strictEqual(marker.buttons, "9"); assert.strictEqual(marker.modals, "2");
+            assert.strictEqual(marker["actual-helpers"], "true"); assert.strictEqual(marker["actions-clicked"], "true");
+            assert.strictEqual(marker["nav-labels"], "Sauce|Project Board|Docs|More");
+            assert.strictEqual(marker["overflow-labels"], "Map|To-Do|Helpful Links");
+            assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
+            assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
+            assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker["modal-title"], "Add link");
             const first = path.join(temp, `${theme}-${width}-a.png`); const second = path.join(temp, `${theme}-${width}-b.png`);
             runChrome(executable, [...common, `--screenshot=${first}`, url]); runChrome(executable, [...common, `--screenshot=${second}`, url]);
             const a = fs.readFileSync(first); const b = fs.readFileSync(second);
@@ -422,10 +515,37 @@ function visualContract() {
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
 
+function behavioralMutationContract() {
+    console.log("--- C7A2-BEHAVIORAL-MUTATIONS: each executable regression turns the suite red ---");
+    const mutations = {
+        "button-adoption": "ProjectNavButtons strips legacy visual state",
+        "action-row": "link actions use shared classes",
+        "modal-delegation": "exactly one shared backdrop mounts",
+        "destination": "actual render clicks preserve every absolute Project destination",
+        "mutation-delegate": "doc frontmatter rewrite is unchanged",
+        "single-fire": "double Save produces one link write",
+    };
+    for (const [mutation, expected] of Object.entries(mutations)) {
+        const result = childProcess.spawnSync(process.execPath, [__filename], {
+            cwd: ROOT,
+            encoding: "utf8",
+            timeout: 30000,
+            maxBuffer: 8 * 1024 * 1024,
+            env: { ...process.env, C7A_MUTATION: mutation, C7A_MUTATION_CHILD: "1" },
+        });
+        const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+        assert.notStrictEqual(result.status, 0, `${mutation} mutation must make the behavioral suite red`);
+        assert(output.includes(expected), `${mutation} must fail its discriminating fixture (${expected})`);
+    }
+}
+
 (async () => {
-    staticContract();
+    if (!MUTATION_CHILD) staticContract();
     await actionRowContract();
     await modalContract();
-    visualContract();
-    console.log("cross-blueprint style adoption C7a: PASS");
+    if (!MUTATION_CHILD) {
+        visualContract();
+        behavioralMutationContract();
+    }
+    console.log(`cross-blueprint style adoption C7a${MUTATION_CHILD ? ` mutation ${MUTATION}` : ""}: PASS`);
 })().catch((error) => { console.error(error && error.stack || error); process.exitCode = 1; });
