@@ -198,6 +198,7 @@ ok('NL-ARROW-4 empty path → no arrows, no throw',
   const composedDailyFormat = `${dailyAction.folder_date_pattern}/${dailyAction.filename_prefix}${dailyAction.filename_date_pattern}${dailyAction.filename_suffix}`;
   ok('NL-DAILY-3 launcher folder+filename composition equals the core Daily Notes format',
     dailySettings?.template === '{{templates_path}}/Daily Note.md'
+    && dailySettings?.folder === dailyAction.folder_prefix
     && composedDailyFormat === dailySettings.format);
   ok('NL-DAILY-4 daily icon resolves through Icons Tier-1',
     typeof iconsInst.resolve(daily?.icon) === 'string' && iconsInst.resolve(daily.icon).length > 0);
