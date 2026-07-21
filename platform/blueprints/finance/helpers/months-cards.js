@@ -49,7 +49,7 @@ class MonthsCards {
             const debtPaid = customJS.FinanceMath.monthDebtPaid(paychecks);
 
             const card = grid.createEl("div", { cls: "fmc-card" });
-            card.style.cssText = "padding: 10px 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer; background: var(--background-secondary);";
+            card.style.cssText = "padding: 10px 12px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-btn); cursor: pointer; background: var(--background-secondary);";
 
             const labelEl = card.createEl("div", { cls: "fmc-month-label" });
             labelEl.textContent = monthKey || "(unknown)";

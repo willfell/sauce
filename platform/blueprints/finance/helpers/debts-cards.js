@@ -37,7 +37,7 @@ class DebtsCards {
             const apr = Number(d.apr) || 0;
 
             const card = grid.createEl("div", { cls: "dbt-card" });
-            card.style.cssText = "padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer; background: var(--background-primary); transition: box-shadow 0.1s;";
+            card.style.cssText = "padding: 12px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-btn); cursor: pointer; background: var(--background-primary); transition: box-shadow 0.1s;";
 
             card.onmouseenter = () => { card.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)"; };
             card.onmouseleave = () => { card.style.boxShadow = ""; };
@@ -50,15 +50,14 @@ class DebtsCards {
             balEl.textContent = `$${bal.toFixed(2)}`;
             balEl.style.cssText = "font-size: 1.05em; font-variant-numeric: tabular-nums; margin-bottom: 4px;";
 
-            const aprBadge = card.createEl("span");
+            const aprBadge = card.createEl("span", { cls: "dbt-apr-pill sauce-pill" });
             aprBadge.textContent = `${apr.toFixed(2)}% APR`;
-            aprBadge.style.cssText = "font-size: 0.75em; padding: 1px 6px; border-radius: 3px; background: var(--background-modifier-border); color: var(--text-muted);";
 
             if (d.kind === "credit-card" && Number(d.credit_limit) > 0) {
                 const paidPct = Math.max(0, Math.min(100, Math.round((1 - bal / Number(d.credit_limit)) * 100)));
-                const chip = card.createEl("span");
+                const chip = card.createEl("span", { cls: "dbt-paid-pill sauce-pill" });
                 chip.textContent = `${paidPct}% paid`;
-                chip.style.cssText = `display: inline-block; margin-left: 6px; font-size: 0.75em; padding: 1px 6px; border-radius: 3px; color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
+                chip.style.cssText = `margin-left: 6px; color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
             }
 
             card.addEventListener("click", () => {

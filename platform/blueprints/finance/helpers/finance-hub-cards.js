@@ -23,8 +23,8 @@ class FinanceHubCards {
             invoices: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>`
         };
 
-        const areaRow = root.createEl("div");
-        areaRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 16px 0 16px 0;";
+        const areaRow = root.createEl("div", { cls: "fhc-area-row sauce-action-row" });
+        areaRow.style.cssText = "justify-content: center; margin: 16px 0;";
 
         const areas = [
             { label: "Budgets",   icon: icons.budgets,   target: "spice/finance/budgets/Budgets.md" },
@@ -32,22 +32,9 @@ class FinanceHubCards {
             { label: "Invoices",  icon: icons.invoices,  target: "spice/finance/invoices/Invoices.md" }
         ];
 
-        const btnStyle = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.85em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; min-height: 40px;";
-
         for (const a of areas) {
-            const btn = areaRow.createEl("button");
+            const btn = areaRow.createEl("button", { cls: "sauce-btn" });
             btn.innerHTML = a.icon + `<span>${a.label}</span>`;
-            btn.style.cssText = btnStyle;
-            btn.onmouseenter = () => {
-                btn.style.background = "var(--interactive-accent)";
-                btn.style.color = "var(--text-on-accent)";
-                btn.style.borderColor = "var(--interactive-accent)";
-            };
-            btn.onmouseleave = () => {
-                btn.style.background = "var(--background-primary)";
-                btn.style.color = "var(--text-muted)";
-                btn.style.borderColor = "var(--background-modifier-border)";
-            };
             btn.onclick = () => app.workspace.openLinkText(a.target, "");
         }
 
