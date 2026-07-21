@@ -61,4 +61,28 @@ function hasDeployedSupersedingSibling(card, tracked) {
   });
 }
 
-module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling };
+// resume_condition names Will's direct approval by name — never actionable.
+function isDirectApproval(resume) {
+  return /Will\b[^.]*\bexplicit(ly)?\b[^.]*\bapprov/i.test(String(resume || ''));
+}
+
+// Order matters: safety buckets (active, host, direct-approval, corpse) win
+// before any "actionable" classification, so a NEVER-list card can never be
+// surfaced as work.
+function classifyCard(card, ctx) {
+  const name = card.card;
+  if (ctx.activeIds && ctx.activeIds.has(name)) return 'active';
+  if (card.status === 'in_progress' || card.status === 'implementing' ||
+      card.status === 'claimed' || card.status === 'feature_pr') return 'active';
+  if (isHostLineage(name)) return 'suspended-evidence';
+  if (isDirectApproval(card.resume_condition)) return 'suspended-evidence';
+  if (hasDeployedSupersedingSibling(card, ctx.tracked)) return 'superseded-corpse';
+  if (card.status === 'blocked') return 'coordinator-deadend';
+  const resume = String(card.resume_condition || '');
+  if (/\bvalue review\b/i.test(resume) && /\bexhaust/i.test(resume)) return 'exhausted-lineage';
+  if (/Resume only after Will\b.*\bauthori/i.test(resume)) return 'single-gate-block';
+  if (/\bvalue review\b/i.test(resume)) return 'exhausted-lineage';
+  return 'single-gate-block';
+}
+
+module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling, classifyCard };

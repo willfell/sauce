@@ -40,5 +40,33 @@ ok('DR-CORPSE-1 C1a is a corpse (C1c deployed)',
 ok('DR-CORPSE-2 C2a NOT a corpse (C2b also parked)',
   T.hasDeployedSupersedingSibling({ card: 'GA-C2a ChromeBar adoption' }, tracked) === false);
 
+// DR-CLASS-1: each card lands in its bucket. ctx carries the tracked list +
+// active id set (built by triage(); here passed directly).
+const ctx = {
+  activeIds: new Set(['ES1 Delivery epic-slice contract']),
+  tracked: [
+    { card: 'GA-C1c Core design tokens (final value-review completion)', status: 'completed' },
+  ],
+};
+function cls(card) { return T.classifyCard(card, ctx); }
+
+ok('DR-CLASS active', cls({ card: 'ES1 Delivery epic-slice contract', status: 'in_progress' }) === 'active');
+ok('DR-CLASS host', cls({ card: 'LH1 launchd job authority', status: 'parked' }) === 'suspended-evidence');
+ok('DR-CLASS direct-approval',
+  cls({ card: 'GA-OPS4b Transactional', status: 'parked',
+        resume_condition: 'Do not resume ... unless Will explicitly approves ...' }) === 'suspended-evidence');
+ok('DR-CLASS corpse',
+  cls({ card: 'GA-C1a Core design tokens', status: 'parked',
+        resume_condition: 'Do not resume exhausted GA-C1a.' }) === 'superseded-corpse');
+ok('DR-CLASS exhausted',
+  cls({ card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked',
+        resume_condition: 'unless Will completes the mandatory human value review after the lineage sole superseding child exhausted its post-repair correctness quorum' }) === 'exhausted-lineage');
+ok('DR-CLASS single-gate',
+  cls({ card: 'ES2 Epic dashboard', status: 'parked',
+        resume_condition: 'Resume only after Will explicitly authorizes adding package.json to ES2 touch zones' }) === 'single-gate-block');
+ok('DR-CLASS deadend blocked',
+  cls({ card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked',
+        resume_condition: '' }) === 'coordinator-deadend');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
