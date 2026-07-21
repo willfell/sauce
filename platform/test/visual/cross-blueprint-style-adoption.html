@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cross-blueprint style adoption C7a2 actual-helper contract</title>
+<link rel="stylesheet" href="../../mechanisms/styling/assets/snippets/sauce-core.css" />
+<style>
+  :root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --size-4-2: 8px;
+    --size-4-4: 16px;
+    --size-4-5: 20px;
+  }
+  body.theme-light {
+    --background-primary: #fff;
+    --background-secondary: #f4f4f6;
+    --background-modifier-border: #dedee3;
+    --background-modifier-border-hover: #c8c8ce;
+    --background-modifier-hover: rgba(0,0,0,.06);
+    --text-normal: #202124;
+    --text-muted: #65666b;
+    --interactive-accent: #6d5ce8;
+    --interactive-accent-hover: #5e4fd0;
+    --text-on-accent: #fff;
+    --color-red: #c93535;
+    --shadow-l: 0 8px 32px rgba(0,0,0,.2);
+  }
+  body.theme-dark {
+    --background-primary: #1d1e20;
+    --background-secondary: #28292c;
+    --background-modifier-border: #3b3c40;
+    --background-modifier-border-hover: #4b4d52;
+    --background-modifier-hover: rgba(255,255,255,.08);
+    --text-normal: #e6e6e8;
+    --text-muted: #a3a4aa;
+    --interactive-accent: #8a7cf0;
+    --interactive-accent-hover: #9c90f5;
+    --text-on-accent: #fff;
+    --color-red: #df5b5b;
+    --shadow-l: 0 8px 32px rgba(0,0,0,.55);
+  }
+  html, body { margin: 0; min-height: 100%; background: var(--background-secondary); color: var(--text-normal); }
+  .fixture-page { box-sizing: border-box; width: min(100%, 980px); margin: 0 auto; padding: 20px 16px 40px; }
+  .fixture-heading { margin: 0 0 14px; font-size: 19px; }
+  .fixture-surface { box-sizing: border-box; margin: 0 0 14px; padding: 14px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-modal); background: var(--background-primary); }
+  .fixture-label { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .fixture-mount { min-width: 0; width: 100%; }
+  @media (max-width: 700px) {
+    .fixture-page { padding: 12px 10px 28px; }
+  }
+</style>
+</head>
+<body>
+<main class="fixture-page">
+  <h1 class="fixture-heading">Actual Project helper and SauceModal surfaces</h1>
+  <section class="fixture-surface">
+    <div class="fixture-label">ProjectNavButtons.render</div>
+    <div id="nav-mount" class="fixture-mount"></div>
+  </section>
+  <section class="fixture-surface">
+    <div class="fixture-label">ProjectLinksManager.render</div>
+    <div id="links-mount" class="fixture-mount"></div>
+  </section>
+</main>
+<script src="../../mechanisms/modal/sauce-modal.js"></script>
+<script src="../../mechanisms/accent-button/accent-button.js"></script>
+<script src="../../mechanisms/section-label/section-label.js"></script>
+<script src="../../mechanisms/render-safe/render-safe.js"></script>
+<script src="../../blueprints/project/helpers/project-nav-buttons.js"></script>
+<script src="../../blueprints/project/helpers/project-links-manager.js"></script>
+<script>
+(async () => {
+  const theme = new URLSearchParams(location.search).get("theme") === "dark" ? "dark" : "light";
+  document.body.className = "theme-" + theme;
+  window.activeDocument = document;
+  window.Notice = function Notice() {};
+  Element.prototype.createEl = function createEl(tag, options = {}) {
+    const element = document.createElement(tag);
+    if (options.cls) element.className = options.cls;
+    if (options.text != null) element.textContent = String(options.text);
+    if (options.attr) for (const [name, value] of Object.entries(options.attr)) element.setAttribute(name, value);
+    this.appendChild(element);
+    return element;
+  };
+  Element.prototype.createDiv = function createDiv(options = {}) { return this.createEl("div", options); };
+  Element.prototype.empty = function empty() { this.replaceChildren(); };
+
+  const atlas = { path: "spice/projects/sauce/Sauce.md", basename: "Sauce", name: "Sauce" };
+  const map = { path: "spice/projects/sauce/Project Map.md", basename: "Project Map", name: "Project Map" };
+  const doc = { path: "spice/projects/sauce/docs/Decision.md", basename: "Decision", name: "Decision" };
+  const todo = { path: "spice/projects/sauce/Sauce To-Do.md", basename: "Sauce To-Do", name: "Sauce To-Do" };
+  const linksFile = { path: "spice/projects/sauce/Links Hub.md", basename: "Links Hub", name: "Links Hub" };
+  const board = { path: "spice/projects/sauce/sauce-board.md", basename: "sauce-board", name: "sauce-board" };
+  const docsHub = { path: "spice/projects/sauce/docs/Docs.md", basename: "Docs", name: "Docs" };
+  const files = [atlas, map, doc, todo, linksFile, board, docsHub];
+  const frontmatter = new Map([
+    [atlas.path, { type: "project", workstreams: [] }], [map.path, { type: "map" }],
+    [doc.path, { type: "doc-note" }], [todo.path, { type: "project-todo" }], [linksFile.path, { type: "links-hub", links: [] }],
+  ]);
+  const opened = [];
+  window.app = {
+    isMobile: window.innerWidth <= 500,
+    vault: {
+      getFiles: () => files,
+      getAbstractFileByPath: (target) => files.find((file) => file.path === target) || null,
+    },
+    metadataCache: { getFileCache: (file) => ({ frontmatter: frontmatter.get(file.path) || {} }) },
+    workspace: {
+      getActiveFile: () => doc,
+      getLeaf: () => ({ openFile: (file) => opened.push(file.path) }),
+      openLinkText: (target) => opened.push(target),
+    },
+    fileManager: { processFrontMatter: async () => {} },
+  };
+  window.customJS = {
+    SauceModal: new SauceModal(),
+    AccentButton: new AccentButton(),
+    SectionLabel: new SectionLabel(),
+    RenderSafe: new RenderSafe(),
+  };
+
+  const nav = new ProjectNavButtons();
+  const navDv = { container: document.getElementById("nav-mount"), current: () => ({ type: "doc-note", file: doc }) };
+  await nav.render(navDv);
+  const navButtons = [...document.querySelectorAll("#nav-mount .sauce-btn")];
+  const navLabels = navButtons.map((button) => button.textContent.trim());
+  navButtons.slice(0, 3).forEach((button) => button.click());
+  const more = navButtons[3];
+  const overflowLabels = [];
+  for (let index = 0; index < 3; index += 1) {
+    more.click();
+    const rows = [...document.querySelectorAll(".pnb-more-overlay button")];
+    if (index === 0) overflowLabels.push(...rows.map((row) => row.textContent.trim()));
+    rows[index].click();
+  }
+
+  const links = new ProjectLinksManager();
+  const linksDv = { container: document.getElementById("links-mount"), current: () => ({ type: "links-hub", file: linksFile, links: [] }) };
+  await links.render(linksDv);
+  const linkButtons = [...document.querySelectorAll("#links-mount .sauce-btn")];
+  linkButtons[1].click();
+  linkButtons[0].click();
+  const modalInputs = [...document.querySelectorAll(".sauce-modal input")];
+  modalInputs[0].value = "https://example.com/a/long-but-valid-project-reference";
+  modalInputs[1].value = "Architecture reference";
+
+  const controls = [...document.querySelectorAll("#nav-mount button, #links-mount button, .sauce-modal button")];
+  const surfaces = [...document.querySelectorAll(".fixture-surface, .sauce-modal")];
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.theme = theme;
+  marker.dataset.actualHelpers = String(nav instanceof ProjectNavButtons && links instanceof ProjectLinksManager && customJS.SauceModal instanceof SauceModal);
+  marker.dataset.documentFits = String(document.documentElement.scrollWidth <= window.innerWidth);
+  marker.dataset.surfacesFit = String(surfaces.every((surface) => surface.scrollWidth <= surface.clientWidth && surface.getBoundingClientRect().right <= window.innerWidth));
+  marker.dataset.controlsVisible = String(controls.every((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; }));
+  marker.dataset.actionsClicked = String(opened.join("|") === [atlas.path, board.path, docsHub.path, map.path, todo.path, linksFile.path].join("|"));
+  marker.dataset.navLabels = navLabels.join("|");
+  marker.dataset.overflowLabels = overflowLabels.join("|");
+  marker.dataset.destinations = opened.join("|");
+  marker.dataset.rows = String(document.querySelectorAll("#nav-mount .sauce-action-row, #links-mount .sauce-action-row").length);
+  marker.dataset.buttons = String(document.querySelectorAll("#nav-mount .sauce-btn, #links-mount .sauce-btn").length);
+  marker.dataset.modals = String(document.querySelectorAll(".sauce-modal").length);
+  marker.dataset.modalTitle = document.querySelector(".sauce-modal-title")?.textContent || "";
+  document.head.appendChild(marker);
+})().catch((error) => {
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.error = String(error && (error.stack || error));
+  document.head.appendChild(marker);
+});
+</script>
+</body>
+</html>

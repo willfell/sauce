@@ -69,10 +69,9 @@ class DocLeafActions {
 
     const moveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 11 15 14"/></svg>`;
 
-    const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
+    const row = c.createEl("div", { cls: "sauce-action-row" });
     const currentPath = page.file.path;
-    customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, flex: true, onClick: () => {
+    const moveButton = customJS.AccentButton.render(row, { label: "Move", icon: moveIcon, onClick: () => {
       // Prefer the shared SectionExplorer collapsible move picker (converged
       // path). Fall back to the wiki-style tree dialog, then the legacy flat
       // DocMove picker, if the newer helpers haven't loaded (cold-load safety).
@@ -83,6 +82,13 @@ class DocLeafActions {
         this._onMove(dv);
       }
     } });
+    if (moveButton) {
+      if (moveButton.classList?.add) moveButton.classList.add("sauce-btn");
+      else moveButton.className = `${moveButton.className || ""} sauce-btn`.trim();
+      if (moveButton.style) moveButton.style.cssText = "";
+      moveButton.onmouseenter = null;
+      moveButton.onmouseleave = null;
+    }
   }
 
   // Open the shared SectionExplorer move picker for the active doc: build the
@@ -153,21 +159,29 @@ class DocLeafActions {
     const targets = dm.sectionTargets(hubs);
     if (!targets.length) { new Notice("No sections found to move into."); return; }
 
+    let moving = false;
     this._openModal({ title: "Move doc to section", build: (panel, close) => {
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin-top:10px; max-height:56vh; overflow:auto;";
       for (const t of targets) {
         const here = dm.isSameLocation(docPath, t.folder);
-        const b = list.createEl("button", { text: here ? t.label + "  (current)" : t.label });
-        b.style.cssText = "text-align:left; padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer;";
-        if (here) { b.disabled = true; b.style.opacity = "0.5"; b.style.cursor = "not-allowed"; continue; }
+        const b = list.createEl("button", { cls: "sauce-btn", text: here ? t.label + "  (current)" : t.label });
+        b.style.textAlign = "left";
+        if (here) { b.disabled = true; continue; }
         b.onclick = async () => {
+          if (moving) return false;
+          moving = true;
           try {
             const dest = dm.targetPath(t.folder, docPath);
-            if (!dest) { new Notice("Could not compute the destination path."); return; }
+            if (!dest) {
+              moving = false;
+              new Notice("Could not compute the destination path.");
+              return false;
+            }
             if (app.vault.getAbstractFileByPath(dest)) {
+              moving = false;
               new Notice("A doc with that name already exists in " + t.label + ".", 6000);
-              return;
+              return false;
             }
             await app.fileManager.renameFile(file, dest);
             const moved = app.vault.getAbstractFileByPath(dest) || file;
@@ -179,25 +193,24 @@ class DocLeafActions {
             new Notice("Moved to " + t.label);
           } catch (e) { new Notice("Could not move: " + (e.message || e), 6000); }
           close();
+          return true;
         };
       }
     }});
   }
 
-  // ── modal overlay (mirrors MeetingLeafActions._openModal) ──────────────────
+  // ── shared modal shell ─────────────────────────────────────────────────────
   _openModal({ title, build }) {
-    const prior = document.querySelector(".sauce-doc-modal-overlay");
-    if (prior) prior.remove();
-    const overlay = document.body.createDiv({ cls: "sauce-doc-modal-overlay" });
-    overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
-    const modal = overlay.createDiv();
-    modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
-    const escListener = (ev) => { if (ev.key === "Escape") close(); };
-    const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    document.addEventListener("keydown", escListener);
-    const h = modal.createEl("div", { text: title });
-    h.style.cssText = "font-weight:600; font-size:1.05em; margin-bottom:4px;";
-    build(modal, close);
+    const modal = (typeof globalThis !== "undefined" && globalThis.customJS)
+      ? globalThis.customJS.SauceModal : null;
+    if (!modal || typeof modal.open !== "function") {
+      try { new Notice("Doc move: SauceModal unavailable — reinstall the project blueprint.", 6000); } catch (_e) {}
+      return null;
+    }
+    return modal.open({
+      title,
+      buttons: [{ label: "Cancel", action: "cancel" }],
+      body: (panel, handle) => build(panel, () => handle.close("cancel")),
+    });
   }
 }
