@@ -68,5 +68,43 @@ ok('DR-CLASS deadend blocked',
   cls({ card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked',
         resume_condition: '' }) === 'coordinator-deadend');
 
+// DR-TRIAGE-1: full status object → actionable queue + no-action summary.
+const status = {
+  active: [{ card: 'ES1 Delivery epic-slice contract', status: 'in_progress' }],
+  // Real coordinator `tracked` includes every projection-mapped card, and the
+  // `parked` phase HAS a projection mapping (codex-coordinator.js projectionMapping),
+  // so tracked always ⊇ the parked cards below. The fixture mirrors that contract.
+  tracked: [
+    { card: 'ES1 Delivery epic-slice contract', status: 'in_progress' },
+    { card: 'LH1 launchd job authority', status: 'parked' },
+    { card: 'GA-C1c Core design tokens (final value-review completion)', status: 'completed' },
+    { card: 'GA-C1a Core design tokens', status: 'parked' },
+    { card: 'ES2 Epic dashboard', status: 'parked' },
+    { card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked' },
+  ],
+  parked: [
+    { card: 'LH1 launchd job authority', status: 'parked', resume_condition: 'do not resume host' },
+    { card: 'GA-C1a Core design tokens', status: 'parked', resume_condition: 'exhausted GA-C1a' },
+    { card: 'ES2 Epic dashboard', status: 'parked',
+      resume_condition: 'Resume only after Will explicitly authorizes adding package.json to ES2 touch zones' },
+    { card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked',
+      resume_condition: 'Will completes the mandatory human value review after the lineage exhausted its post-repair quorum' },
+  ],
+  projection_problems: [],
+};
+const r = T.triage(status, '');
+ok('DR-TRIAGE actionable excludes host+corpse',
+  r.actionable.every((a) => a.bucket !== 'suspended-evidence' && a.bucket !== 'superseded-corpse'));
+ok('DR-TRIAGE single-gate ranked above exhausted',
+  r.actionable.findIndex((a) => a.bucket === 'single-gate-block') <
+  r.actionable.findIndex((a) => a.bucket === 'exhausted-lineage'));
+ok('DR-TRIAGE noAction counts frozen+superseded',
+  r.noAction.frozen === 1 && r.noAction.superseded === 1);
+
+// DR-PROV-1: PROVISIONALLY ACCEPTED headings are surfaced from FID text.
+const fid = '## Foo — accepted 2026-07-20\ntext\n## Bar refresh — PROVISIONALLY ACCEPTED 2026-07-20\nmore\n';
+ok('DR-PROV-1 finds provisional heading',
+  T.parseProvisionalPending(fid).length === 1 && /Bar refresh/.test(T.parseProvisionalPending(fid)[0]));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }

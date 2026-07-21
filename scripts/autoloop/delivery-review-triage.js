@@ -85,4 +85,64 @@ function classifyCard(card, ctx) {
   return 'single-gate-block';
 }
 
-module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling, classifyCard };
+// Rank actionable buckets: ledger-distorting first, then top-priority unblocks,
+// then value reviews.
+const RANK = {
+  'provisional-pending': 0,
+  'coordinator-deadend': 1,
+  'single-gate-block': 2,
+  'exhausted-lineage': 3,
+};
+
+function parseProvisionalPending(fidText) {
+  return String(fidText || '')
+    .split('\n')
+    .filter((line) => /^##\s+.*PROVISIONALLY ACCEPTED/i.test(line))
+    .map((line) => line.replace(/^##\s+/, '').trim());
+}
+
+function triage(status, fidText) {
+  const activeIds = new Set((status.active || []).map((c) => c.card));
+  const tracked = status.tracked || [];
+  // Enrich each tracked card with its parked resume_condition (parked[] carries it).
+  const parkedByName = new Map((status.parked || []).map((p) => [p.card, p]));
+  const ctx = { activeIds, tracked };
+
+  const actionable = [];
+  const noAction = { frozen: 0, superseded: 0, active: 0 };
+
+  for (const t of tracked) {
+    const enriched = { ...(parkedByName.get(t.card) || {}), ...t };
+    const bucket = classifyCard(enriched, ctx);
+    if (bucket === 'active') { noAction.active++; continue; }
+    if (bucket === 'suspended-evidence') { noAction.frozen++; continue; }
+    if (bucket === 'superseded-corpse') { noAction.superseded++; continue; }
+    actionable.push({ card: t.card, bucket, resume_condition: enriched.resume_condition || '' });
+  }
+
+  // Coordinator projection-problem cards are deadends even when their status reads clean.
+  for (const p of status.projection_problems || []) {
+    if (!actionable.some((a) => a.card === p.card)) {
+      actionable.push({ card: p.card, bucket: 'coordinator-deadend', resume_condition: p.error || '' });
+    }
+  }
+
+  // Provisional-pending amendments (from FID) rank first.
+  for (const heading of parseProvisionalPending(fidText)) {
+    actionable.push({ card: heading, bucket: 'provisional-pending', resume_condition: '' });
+  }
+
+  actionable.sort((a, b) => (RANK[a.bucket] ?? 9) - (RANK[b.bucket] ?? 9));
+  return { actionable, noAction };
+}
+
+module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling, classifyCard, triage, parseProvisionalPending };
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const statusPath = args[args.indexOf('--status') + 1];
+  const fidIdx = args.indexOf('--fid');
+  const fidText = fidIdx >= 0 ? fs.readFileSync(args[fidIdx + 1], 'utf8') : '';
+  const status = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+  console.log(JSON.stringify(triage(status, fidText), null, 2));
+}
