@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.245.1",
+  "workshop_version": "0.245.2",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -134,7 +134,7 @@
     },
     {
       "name": "daily",
-      "version": "0.23.1"
+      "version": "0.23.2"
     },
     {
       "name": "meetings",
@@ -142,7 +142,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.11.3"
+      "version": "0.11.4"
     },
     {
       "name": "people",
@@ -154,7 +154,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.26.0"
+      "version": "0.26.1"
     },
     {
       "name": "wiki",

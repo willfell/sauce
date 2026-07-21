@@ -129,7 +129,7 @@
     },
     {
       "name": "daily",
-      "version": "0.23.1"
+      "version": "0.23.2"
     },
     {
       "name": "meetings",
@@ -149,7 +149,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.26.0"
+      "version": "0.26.1"
     },
     {
       "name": "journal",
@@ -165,7 +165,7 @@
     },
     {
       "name": "sticky-notes",
-      "version": "0.11.3"
+      "version": "0.11.4"
     },
     {
       "name": "teams",
