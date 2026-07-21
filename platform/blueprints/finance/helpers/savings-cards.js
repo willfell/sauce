@@ -37,7 +37,7 @@ class SavingsCards {
             const paidPct = target > 0 ? Math.min(100, (bal / target) * 100) : 0;
 
             const card = grid.createEl("div", { cls: "sav-card" });
-            card.style.cssText = "padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer; background: var(--background-primary); transition: box-shadow 0.1s;";
+            card.style.cssText = "padding: 12px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-btn); cursor: pointer; background: var(--background-primary); transition: box-shadow 0.1s;";
 
             card.onmouseenter = () => { card.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)"; };
             card.onmouseleave = () => { card.style.boxShadow = ""; };
@@ -50,9 +50,9 @@ class SavingsCards {
             balEl.textContent = `$${bal.toFixed(2)}`;
             balEl.style.cssText = "font-size: 1.05em; font-variant-numeric: tabular-nums; margin-bottom: 4px;";
 
-            const chip = card.createEl("span");
+            const chip = card.createEl("span", { cls: "sav-progress-pill sauce-pill" });
             chip.textContent = `${paidPct.toFixed(0)}% of $${target}`;
-            chip.style.cssText = `display: inline-block; font-size: 0.75em; padding: 1px 6px; border-radius: 3px; color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
+            chip.style.cssText = `color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
 
             card.addEventListener("click", () => {
                 if (s.file && s.file.name) app.workspace.openLinkText(s.file.name, "");

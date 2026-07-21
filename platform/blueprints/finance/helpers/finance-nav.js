@@ -111,8 +111,8 @@ class FinanceNav {
         // (defaults pages have no "+ New X").
         if (chromePresent) return false;
 
-        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+        const row = root.createEl("div", { cls: "fnav-row fnav-context sauce-action-row" });
+        row.style.cssText = "justify-content: center; margin: 4px 0;";
 
         const config = {
             "defaults-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md" },
@@ -123,7 +123,7 @@ class FinanceNav {
         const cfg = config[mode];
         if (!cfg) return false;
 
-        customJS.AccentButton.render(row, {
+        this._renderButton(row, {
             label: cfg.hubLabel,
             icon: cfg.hubIcon,
             onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
@@ -133,7 +133,8 @@ class FinanceNav {
 
     _hr(root) {
         const hr = root.createEl("hr");
-        hr.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+        hr.className = "fnav-divider";
+        hr.style.cssText = "border: none; border-top: 1px solid var(--sauce-hairline); margin: 8px 0;";
     }
 
     _detectMode(filePath, type) {
@@ -172,9 +173,9 @@ class FinanceNav {
     }
 
     _renderCrossHub(root, mode) {
-        const row = root.createEl("div", { cls: "fnav-row fnav-hubs" });
+        const row = root.createEl("div", { cls: "fnav-row fnav-hubs sauce-action-row" });
         // Centered with even gap; buttons share the row width.
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+        row.style.cssText = "justify-content: center; margin: 4px 0;";
 
         const HUBS = [
             { key: "finance",   label: "Finance",   path: "spice/finance/Finance.md",             icon: this._icon("wallet") },
@@ -190,7 +191,7 @@ class FinanceNav {
 
         for (const hub of HUBS) {
             if (hub.key === here) continue;
-            customJS.AccentButton.render(row, {
+            this._renderButton(row, {
                 label: hub.label,
                 icon: hub.icon,
                 onClick: () => app.workspace.openLinkText(hub.path, "")
@@ -217,8 +218,8 @@ class FinanceNav {
         const showDefaults = !chromePresent && !!(cfg.defaultsPath && cfg.defaultsLabel);
         if (!showNewButton && !showDefaults) return false;
 
-        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+        const row = root.createEl("div", { cls: "fnav-row fnav-context sauce-action-row" });
+        row.style.cssText = "justify-content: center; margin: 4px 0;";
 
         if (showNewButton) {
             // via EntityCreate (poll for cold-load race; carried from v0.110.1/0.110.3)
@@ -239,7 +240,7 @@ class FinanceNav {
 
         // <X> Defaults link
         if (showDefaults) {
-            customJS.AccentButton.render(row, {
+            this._renderButton(row, {
                 label: cfg.defaultsLabel,
                 icon: cfg.defaultsIcon,
                 onClick: () => app.workspace.openLinkText(cfg.defaultsPath, "")
@@ -249,8 +250,8 @@ class FinanceNav {
     }
 
     _renderEntityContext(root, mode, page, chromePresent) {
-        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+        const row = root.createEl("div", { cls: "fnav-row fnav-context sauce-action-row" });
+        row.style.cssText = "justify-content: center; margin: 4px 0;";
 
         const subAreaConfig = {
             "entity-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md",     sub: "budgets",   sortKey: "month",            dir: "ASC"  },
@@ -266,7 +267,7 @@ class FinanceNav {
         // Sub-area hub button — redundant with the chrome bar's Go▾ launcher
         // (already lists this hub) once the note is chrome-bar-migrated.
         if (!chromePresent) {
-            customJS.AccentButton.render(row, {
+            this._renderButton(row, {
                 label: cfg.hubLabel,
                 icon: cfg.hubIcon,
                 onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
@@ -309,20 +310,34 @@ class FinanceNav {
             const prevSib = siblings[idx - 1];
             const nextSib = siblings[idx + 1];
             if (prevSib) {
-                customJS.AccentButton.render(row, {
+                this._renderButton(row, {
                     label: "Prev",
                     icon: this._icon("chevron-left"),
                     onClick: () => app.workspace.openLinkText(prevSib.path, "")
                 });
             }
             if (nextSib) {
-                customJS.AccentButton.render(row, {
+                this._renderButton(row, {
                     label: "Next",
                     icon: this._icon("chevron-right"),
                     onClick: () => app.workspace.openLinkText(nextSib.path, "")
                 });
             }
         } catch (_e) { /* fail-soft — sibling nav is best-effort */ }
+    }
+
+    _renderButton(row, options) {
+        // AccentButton remains the behavior/markup factory for legacy callers.
+        // Finance owns the adoption boundary: remove its old visual dialect and
+        // let the released sauce-core class own rest/hover/active/focus states.
+        const button = customJS.AccentButton.render(row, options);
+        if (!button) return button;
+        if (button.classList?.add) button.classList.add("sauce-btn");
+        else button.className = `${button.className || ""} sauce-btn`.trim();
+        if (button.style) button.style.cssText = "";
+        button.onmouseenter = null;
+        button.onmouseleave = null;
+        return button;
     }
 
     _icon(key) {

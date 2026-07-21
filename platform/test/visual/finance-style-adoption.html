@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finance sauce-core adoption — visual fixture</title>
+<link rel="stylesheet" href="../../mechanisms/styling/assets/snippets/sauce-core.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-width: 0; }
+  body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--background-primary);
+    color: var(--text-normal);
+  }
+  .theme-light {
+    --background-primary: #ffffff;
+    --background-secondary: #f4f4f5;
+    --background-secondary-alt: #fafafa;
+    --background-modifier-border: #d7d7da;
+    --background-modifier-border-hover: #b9bac0;
+    --background-modifier-hover: rgba(0, 0, 0, 0.06);
+    --interactive-accent: #6f5bd3;
+    --interactive-accent-hover: #604dc0;
+    --text-normal: #202124;
+    --text-muted: #686970;
+    --text-on-accent: #ffffff;
+    --radius-s: 6px;
+    --shadow-s: 0 2px 8px rgba(0, 0, 0, 0.12);
+  }
+  .theme-dark {
+    --background-primary: #1e1f22;
+    --background-secondary: #292a2e;
+    --background-secondary-alt: #242529;
+    --background-modifier-border: #3b3d43;
+    --background-modifier-border-hover: #555861;
+    --background-modifier-hover: rgba(255, 255, 255, 0.08);
+    --interactive-accent: #9485f3;
+    --interactive-accent-hover: #a99df8;
+    --text-normal: #e5e7eb;
+    --text-muted: #a3a6ae;
+    --text-on-accent: #17171a;
+    --radius-s: 6px;
+    --shadow-s: 0 2px 8px rgba(0, 0, 0, 0.45);
+  }
+  .fixture-page { min-height: 100vh; padding: 20px; }
+  .fixture-heading {
+    margin: 0 0 14px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .fixture-nav { justify-content: center; margin-bottom: 16px; }
+  .fixture-section {
+    margin: 0 0 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--sauce-hairline);
+  }
+  .fixture-label {
+    margin: 0 0 8px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .fixture-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    min-width: 0;
+  }
+  .fixture-card {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--sauce-hairline);
+    border-radius: var(--sauce-radius-btn);
+    background: var(--background-secondary-alt);
+    color: var(--text-normal);
+    cursor: pointer;
+  }
+  .fixture-card:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+  .fixture-card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+  .fixture-card-value { margin: 5px 0 7px; font-variant-numeric: tabular-nums; }
+  .fixture-card .sauce-pill + .sauce-pill { margin-left: 5px; }
+  .fixture-tone-danger { color: #fff; background: #dc2626; }
+  .fixture-tone-warn { color: #fff; background: #b45309; }
+  .fixture-tone-good { color: #fff; background: #16864a; }
+  @media (max-width: 480px) {
+    .fixture-page { padding: 12px; }
+    .fixture-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<main id="fixture-root"></main>
+<script>
+(function () {
+  "use strict";
+  const requested = new URLSearchParams(location.search).get("theme");
+  const theme = requested === "dark" ? "dark" : "light";
+  const root = document.getElementById("fixture-root");
+  const page = document.createElement("section");
+  page.className = "fixture-page theme-" + theme;
+  const heading = document.createElement("h1");
+  heading.className = "fixture-heading";
+  heading.textContent = "Finance navigation and cards — " + theme;
+  page.appendChild(heading);
+
+  let clicks = 0;
+  const nav = document.createElement("div");
+  nav.className = "sauce-action-row fixture-nav";
+  for (const label of ["Finance", "Budgets", "Paychecks", "Invoices", "Debts", "Months", "Savings"]) {
+    const button = document.createElement("button");
+    button.className = "sauce-btn";
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => { clicks += 1; });
+    nav.appendChild(button);
+  }
+  page.appendChild(nav);
+
+  function section(label) {
+    const wrap = document.createElement("section");
+    wrap.className = "fixture-section";
+    const title = document.createElement("h2");
+    title.className = "fixture-label";
+    title.textContent = label;
+    const grid = document.createElement("div");
+    grid.className = "fixture-grid";
+    wrap.append(title, grid);
+    page.appendChild(wrap);
+    return grid;
+  }
+
+  function card(grid, title, value, pills) {
+    const item = document.createElement("article");
+    item.className = "fixture-card";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.addEventListener("click", () => { clicks += 1; });
+    const titleEl = document.createElement("div");
+    titleEl.className = "fixture-card-title";
+    titleEl.textContent = title;
+    const valueEl = document.createElement("div");
+    valueEl.className = "fixture-card-value";
+    valueEl.textContent = value;
+    item.append(titleEl, valueEl);
+    for (const [text, tone] of pills) {
+      const pill = document.createElement("span");
+      pill.className = "sauce-pill";
+      if (tone) pill.classList.add("fixture-tone-" + tone);
+      pill.textContent = text;
+      item.appendChild(pill);
+    }
+    grid.appendChild(item);
+  }
+
+  const debtGrid = section("Debts");
+  card(debtGrid, "Apple Card", "$14,551.55", [["22.74% APR", ""], ["18% paid", "danger"]]);
+  card(debtGrid, "Discover", "$15,839.84", [["24.74% APR", ""]]);
+  const savingsGrid = section("Savings");
+  card(savingsGrid, "Emergency Fund", "$639.94", [["13% of $5,000", "warn"]]);
+  const monthsGrid = section("Months");
+  card(monthsGrid, "2026-07", "Income $9,000 · Spending $3,120", []);
+  card(monthsGrid, "2026-06", "Income $9,000 · Spending $2,980", []);
+  root.appendChild(page);
+
+  const controls = [...page.querySelectorAll("button, [role=button]")];
+  controls.forEach((control) => control.click());
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.theme = theme;
+  marker.dataset.documentFits = String(document.documentElement.scrollWidth <= window.innerWidth);
+  marker.dataset.controlsEnabled = String(controls.every((control) => !control.disabled && control.getAttribute("aria-disabled") !== "true"));
+  marker.dataset.controlsVisible = String(controls.every((control) => {
+    const rect = control.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }));
+  marker.dataset.actionsClicked = String(clicks === controls.length);
+  marker.dataset.buttons = String(page.querySelectorAll("button.sauce-btn").length);
+  marker.dataset.pills = String(page.querySelectorAll(".sauce-pill").length);
+  marker.dataset.cards = String(page.querySelectorAll(".fixture-card").length);
+  document.head.appendChild(marker);
+})();
+</script>
+</body>
+</html>
