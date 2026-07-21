@@ -106,71 +106,67 @@ class BudgetDefaultsEditor {
 
     _promptForGroup(initial, existingGroups) {
         return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+            const sauceModal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!sauceModal || typeof sauceModal.open !== "function") {
+                resolve(null);
+                return;
+            }
 
-            const heading = document.createElement("div");
-            heading.textContent = initial ? "Edit Group" : "Add Group";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 16px;";
-            dialog.appendChild(heading);
-
-            const wrap = document.createElement("div");
-            wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
-            const lab = document.createElement("label");
-            lab.textContent = "Name";
-            lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
-            wrap.appendChild(lab);
-            const nameInput = document.createElement("input");
-            nameInput.type = "text";
-            nameInput.value = initial || "";
-            nameInput.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em;";
-            wrap.appendChild(nameInput);
-            dialog.appendChild(wrap);
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            let nameInput;
+            let status;
 
             const validate = () => {
                 const v = nameInput.value.trim();
                 if (!v) return "Name required.";
-                const others = (existingGroups || []).filter((g, i) => g !== initial);
+                const others = (existingGroups || []).filter((g) => g !== initial);
                 if (others.includes(v)) return "Name must be unique.";
                 return null;
             };
-            nameInput.addEventListener("input", () => { status.textContent = validate() || ""; });
 
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            const handle = sauceModal.open({
+                doc: document,
+                title: initial ? "Edit Group" : "Add Group",
+                autofocus: !initial,
+                body: (body) => {
+                    const wrap = document.createElement("div");
+                    wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+                    const lab = document.createElement("label");
+                    lab.textContent = "Name";
+                    lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
+                    wrap.appendChild(lab);
+                    nameInput = document.createElement("input");
+                    nameInput.type = "text";
+                    nameInput.value = initial || "";
+                    nameInput.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em;";
+                    wrap.appendChild(nameInput);
+                    body.appendChild(wrap);
 
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Save";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const err = validate();
-                if (err) { status.textContent = err; return; }
-                document.body.removeChild(overlay);
-                resolve(nameInput.value.trim());
-            };
-
-            nameInput.addEventListener("keydown", (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
+                    status = document.createElement("div");
+                    status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em;";
+                    body.appendChild(status);
+                    nameInput.addEventListener("input", () => { status.textContent = validate() || ""; });
+                },
+                onSubmit: () => {
+                    if (!nameInput || !status) return false;
+                    const err = validate();
+                    if (err) { status.textContent = err; return false; }
+                    done(nameInput.value.trim());
+                    return true;
+                },
+                onClose: () => done(null),
+                buttons: [
+                    { label: "Cancel", action: "cancel" },
+                    { label: "Save", action: "submit", tone: "accent" }
+                ]
             });
-
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => nameInput.focus(), 0);
+            if (!handle) done(null);
         });
     }
 
@@ -245,48 +241,52 @@ class BudgetDefaultsEditor {
             // Always offer "Unassigned" as a target.
             if (!otherGroups.includes("Unassigned")) otherGroups.push("Unassigned");
 
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 90vw;";
-
-            const heading = document.createElement("div");
-            heading.textContent = `Delete "${groupName}"`;
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 8px;";
-            dialog.appendChild(heading);
-
-            const explainer = document.createElement("div");
-            explainer.textContent = `${count} categor${count === 1 ? "y" : "ies"} still use this group. Reassign to:`;
-            explainer.style.cssText = "font-size: 0.9em; color: var(--text-muted); margin-bottom: 12px;";
-            dialog.appendChild(explainer);
-
-            const select = document.createElement("select");
-            select.style.cssText = "width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; margin-bottom: 16px;";
-            for (const g of otherGroups) {
-                const opt = document.createElement("option");
-                opt.value = g;
-                opt.textContent = g;
-                select.appendChild(opt);
+            const sauceModal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!sauceModal || typeof sauceModal.open !== "function") {
+                resolve(null);
+                return;
             }
-            dialog.appendChild(select);
 
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            let select;
+            const handle = sauceModal.open({
+                doc: document,
+                title: `Delete "${groupName}"`,
+                autofocus: true,
+                body: (body) => {
+                    const explainer = document.createElement("div");
+                    explainer.textContent = `${count} categor${count === 1 ? "y" : "ies"} still use this group. Reassign to:`;
+                    explainer.style.cssText = "font-size: 0.9em; color: var(--text-muted); margin-bottom: 12px;";
+                    body.appendChild(explainer);
 
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Reassign + Delete";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--text-error); background: var(--text-error); color: var(--text-on-accent);";
-            okBtn.onclick = () => { document.body.removeChild(overlay); resolve(select.value); };
-
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
+                    select = document.createElement("select");
+                    select.style.cssText = "width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em;";
+                    for (const g of otherGroups) {
+                        const opt = document.createElement("option");
+                        opt.value = g;
+                        opt.textContent = g;
+                        select.appendChild(opt);
+                    }
+                    body.appendChild(select);
+                },
+                onSubmit: () => {
+                    if (!select) return false;
+                    done(select.value);
+                    return true;
+                },
+                onClose: () => done(null),
+                buttons: [
+                    { label: "Cancel", action: "cancel" },
+                    { label: "Reassign + Delete", action: "submit", tone: "danger" }
+                ]
+            });
+            if (!handle) done(null);
         });
     }
 
@@ -396,59 +396,23 @@ class BudgetDefaultsEditor {
 
     _promptForCategory(initial, groups) {
         return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+            const sauceModal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!sauceModal || typeof sauceModal.open !== "function") {
+                resolve(null);
+                return;
+            }
 
-            const heading = document.createElement("div");
-            heading.textContent = initial ? "Edit Category" : "Add Category";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-            dialog.appendChild(heading);
-
-            const mkField = (labelText, control) => {
-                const wrap = document.createElement("div");
-                wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
-                const lab = document.createElement("label");
-                lab.textContent = labelText;
-                lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
-                wrap.appendChild(lab);
-                control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
-                wrap.appendChild(control);
-                dialog.appendChild(wrap);
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
             };
-
-            const nameInput = document.createElement("input");
-            nameInput.type = "text";
-            mkField("Name", nameInput);
-
-            const groupSelect = document.createElement("select");
-            for (const g of (groups || [])) {
-                const opt = document.createElement("option");
-                opt.value = g;
-                opt.textContent = g;
-                groupSelect.appendChild(opt);
-            }
-            mkField("Group", groupSelect);
-
-            const plannedInput = document.createElement("input");
-            plannedInput.type = "number";
-            plannedInput.step = "0.01";
-            plannedInput.min = "0";
-            mkField("Planned", plannedInput);
-
-            if (initial) {
-                nameInput.value = initial.name || "";
-                groupSelect.value = initial.group || "";
-                plannedInput.value = String(initial.planned ?? 0);
-            } else {
-                plannedInput.value = "0";
-                if ((groups || []).length > 0) groupSelect.value = groups[0];
-            }
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
+            let nameInput;
+            let groupSelect;
+            let plannedInput;
+            let status;
 
             const validate = () => {
                 if (!nameInput.value.trim()) return "Name required.";
@@ -458,46 +422,78 @@ class BudgetDefaultsEditor {
                 if (Number.isNaN(p) || p < 0) return "Planned must be >= 0.";
                 return null;
             };
-            const refresh = () => { status.textContent = validate() || ""; };
-            nameInput.addEventListener("input", refresh);
-            plannedInput.addEventListener("input", refresh);
-            groupSelect.addEventListener("change", refresh);
 
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            const handle = sauceModal.open({
+                doc: document,
+                title: initial ? "Edit Category" : "Add Category",
+                autofocus: !initial,
+                body: (body) => {
+                    const mkField = (labelText, control) => {
+                        const wrap = document.createElement("div");
+                        wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+                        const lab = document.createElement("label");
+                        lab.textContent = labelText;
+                        lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
+                        wrap.appendChild(lab);
+                        control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+                        wrap.appendChild(control);
+                        body.appendChild(wrap);
+                    };
 
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Save";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const err = validate();
-                if (err) { status.textContent = err; return; }
-                document.body.removeChild(overlay);
-                resolve({
+                    nameInput = document.createElement("input");
+                    nameInput.type = "text";
+                    mkField("Name", nameInput);
+
+                    groupSelect = document.createElement("select");
+                    for (const g of (groups || [])) {
+                        const opt = document.createElement("option");
+                        opt.value = g;
+                        opt.textContent = g;
+                        groupSelect.appendChild(opt);
+                    }
+                    mkField("Group", groupSelect);
+
+                    plannedInput = document.createElement("input");
+                    plannedInput.type = "number";
+                    plannedInput.step = "0.01";
+                    plannedInput.min = "0";
+                    mkField("Planned", plannedInput);
+
+                    if (initial) {
+                        nameInput.value = initial.name || "";
+                        groupSelect.value = initial.group || "";
+                        plannedInput.value = String(initial.planned ?? 0);
+                    } else {
+                        plannedInput.value = "0";
+                        if ((groups || []).length > 0) groupSelect.value = groups[0];
+                    }
+
+                    status = document.createElement("div");
+                    status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em;";
+                    body.appendChild(status);
+                    const refresh = () => { status.textContent = validate() || ""; };
+                    nameInput.addEventListener("input", refresh);
+                    plannedInput.addEventListener("input", refresh);
+                    groupSelect.addEventListener("change", refresh);
+                },
+                onSubmit: () => {
+                    if (!nameInput || !groupSelect || !plannedInput || !status) return false;
+                    const err = validate();
+                    if (err) { status.textContent = err; return false; }
+                    done({
                     name: nameInput.value.trim(),
                     group: groupSelect.value,
                     planned: Number(plannedInput.value)
-                });
-            };
-
-            const onKey = (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
-            };
-            nameInput.addEventListener("keydown", onKey);
-            plannedInput.addEventListener("keydown", onKey);
-
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => nameInput.focus(), 0);
+                    });
+                    return true;
+                },
+                onClose: () => done(null),
+                buttons: [
+                    { label: "Cancel", action: "cancel" },
+                    { label: "Save", action: "submit", tone: "accent" }
+                ]
+            });
+            if (!handle) done(null);
         });
     }
 

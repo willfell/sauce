@@ -32,6 +32,10 @@
     {
       "name": "chrome-bar",
       "range": ">=0.3.0"
+    },
+    {
+      "name": "modal",
+      "range": ">=0.2.0"
     }
   ],
   "customjs_classes": [
