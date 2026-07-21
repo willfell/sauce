@@ -24,6 +24,9 @@ const FILES = {
     debtBand: "paycheck-debt-band.js",
     planBand: "plan-band.js",
     status: "finance-status.js",
+    debtSummary: "debt-summary.js",
+    savingsSummary: "savings-summary.js",
+    debtsHubSummary: "debts-hub-summary.js",
 };
 
 function source(name) {
@@ -131,8 +134,8 @@ function classes(root, name) {
 function sharedChromeViolations(sources) {
     const combined = Object.values(sources).join("\n");
     const failures = [];
-    if (/\b(?:btn|button)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius|border:\s*1px)/i.test(combined)) failures.push("hand-rolled-button");
-    if (/\b(?:aprBadge|chip|paceTag|statusTag|pill|closed)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius)/i.test(combined)) failures.push("hand-rolled-pill");
+    if (/\b(?:btn|button|editBtn)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius|border:\s*1px)/i.test(combined)) failures.push("hand-rolled-button");
+    if (/\b(?:aprBadge|chip|paceTag|statusTag|deltaPill|tierChip|pill|closed)\.style\.cssText\s*=\s*[`"'][^\n]*(?:padding|border-radius)/i.test(combined)) failures.push("hand-rolled-pill");
     if (/border(?:-top)?:\s*1px\s+solid\s+var\(--background-modifier-border\)/i.test(combined)) failures.push("legacy-hairline-token");
     return failures;
 }
@@ -190,6 +193,13 @@ function staticContract() {
     assert(sources.monthlyOverview.includes("mo-mom-pill sauce-pill"), "MonthlyOverview emits a semantic month-over-month pill");
     assert(sources.debtBand.includes("pdb-progress-pill sauce-pill") && sources.debtBand.includes("pdb-paydown-pill sauce-pill"), "PaycheckDebtBand emits semantic progress pills");
     assert(sources.status.includes("fs-status-pill sauce-pill"), "FinanceStatus emits a semantic status pill");
+    for (const name of ["debtSummary", "savingsSummary", "debtsHubSummary"]) {
+        assert(sources[name].includes("var(--sauce-hairline)"), `${name} uses the shared hairline token`);
+    }
+    assert(sources.debtSummary.includes("dbt-edit-btn sauce-btn") && sources.debtSummary.includes("dbt-delta-pill sauce-pill"), "DebtSummary emits semantic edit and delta controls");
+    assert(sources.savingsSummary.includes("sav-edit-btn sauce-btn") && sources.savingsSummary.includes("sav-tier-chip sauce-pill") && sources.savingsSummary.includes("sav-delta-pill sauce-pill"), "SavingsSummary emits semantic edit, tier, and delta controls");
+    assert(sources.debtsHubSummary.includes("dhs-kind-chip sauce-pill") && sources.debtsHubSummary.includes("dhs-card-progress-pill sauce-pill"), "DebtsHubSummary emits semantic kind and paydown pills");
+    assert(!/(?:processFrontMatter|vault\.(?:create|modify|rename|delete)|adapter\.(?:write|remove))/.test([sources.debtSummary, sources.savingsSummary, sources.debtsHubSummary].join("\n")), "C6c summaries remain read-only");
 
     const buttonMutation = { ...sources, hub: `${sources.hub}\nbtn.style.cssText = "padding: 6px; border-radius: 6px;";` };
     assert(sharedChromeViolations(buttonMutation).includes("hand-rolled-button"), "button mutation turns the source guard red");
@@ -407,10 +417,111 @@ async function behaviorContract() {
     await financeStatus.renderBadge(statusDv, "budget");
     assert(classes(statusDv.container, "fs-status-pill")[0]?.classList.contains("sauce-pill"), "FinanceStatus emits its unchanged label through sauce-pill");
     assert(statusDv.container.walk().some((node) => node.textContent === "In Progress"), "FinanceStatus renders the unchanged status label");
+
+    console.log("--- C6C-BEHAVIOR: debt, savings, and hub values, history, and delegation ---");
+    class FixedDate extends Date {
+        constructor(value) { super(value === undefined ? "2026-07-21T00:00:00Z" : value); }
+    }
+    app.vault.getAbstractFileByPath = (filePath) => ({ path: filePath });
+
+    let debtPayoffCalls = 0;
+    let debtEditFile = null;
+    let debtHistory = null;
+    const debtCustomJS = {
+        FinanceMath: {
+            projectedPayoff: () => {
+                debtPayoffCalls += 1;
+                return { killOrder: [{ slug: "Debt-Apple", date: "2026-10-01" }] };
+            },
+        },
+        DebtConfigEditor: { render: async (file) => { debtEditFile = file; } },
+    };
+    const DebtSummary = loadClass("debtSummary", "DebtSummary", { customJS: debtCustomJS, app, Date: FixedDate });
+    const debtSummary = new DebtSummary();
+    debtSummary._renderSparkline = (_parent, values) => { debtHistory = values; };
+    const debtSummaryDv = dvFor({}, {
+        type: "debt",
+        kind: "credit-card",
+        current_balance: 800,
+        credit_limit: 2000,
+        apr: 24,
+        planned_monthly_payment: 200,
+        balance_history: [{ date: "2026-07-20", balance: 900 }, { date: "2026-06-20", balance: 1000 }],
+        file: { name: "Debt-Apple", path: "spice/finance/debts/Debt-Apple.md" },
+    });
+    await debtSummary.render(debtSummaryDv);
+    for (const value of ["$800.00", "24.00%", "$16.00", "$200.00", "3mo (2026-10-01)"]) {
+        assert(debtSummaryDv.container.walk().some((node) => node.textContent === value), `DebtSummary preserves exact value ${value}`);
+    }
+    assert.strictEqual(debtPayoffCalls, 1, "DebtSummary uses FinanceMath projected-payoff precedence exactly once");
+    assert.deepStrictEqual(debtHistory, [1000, 900], "DebtSummary converts newest-first balance history to chronological sparkline order without mutation");
+    assert.strictEqual(classes(debtSummaryDv.container, "dbt-delta-pill")[0]?.textContent, "vs prior: $100.00", "DebtSummary preserves its prior-balance delta output");
+    const debtEditButton = classes(debtSummaryDv.container, "dbt-edit-btn")[0];
+    assert(debtEditButton?.classList.contains("sauce-btn"), "DebtSummary edit action uses sauce-btn");
+    debtEditButton.dispatch("click");
+    await Promise.resolve();
+    assert.strictEqual(debtEditFile?.path, "spice/finance/debts/Debt-Apple.md", "DebtSummary preserves DebtConfigEditor delegation");
+
+    let glideArgs = null;
+    let savingsEditFile = null;
+    let savingsHistory = null;
+    const savingsCustomJS = {
+        FinanceMath: {
+            readPlan: () => ({ savings_glide: [{ tier: 2 }] }),
+            glide: (balance, tiers) => {
+                glideArgs = { balance, tiers };
+                return { tier: 2, contribution: 150 };
+            },
+        },
+        SavingsConfigEditor: { render: async (file) => { savingsEditFile = file; } },
+    };
+    const SavingsSummary = loadClass("savingsSummary", "SavingsSummary", { customJS: savingsCustomJS, app });
+    const savingsSummary = new SavingsSummary();
+    savingsSummary._renderSparkline = (_parent, values) => { savingsHistory = values; };
+    const savingsSummaryDv = dvFor({}, {
+        type: "savings-account",
+        name: "Emergency Fund",
+        current_balance: 600,
+        target: 1000,
+        balance_history: [{ date: "2026-07-20", balance: 550 }, { date: "2026-06-20", balance: 500 }],
+        file: { name: "Savings-Emergency-Fund", path: "spice/finance/savings/Savings-Emergency-Fund.md" },
+    });
+    await savingsSummary.render(savingsSummaryDv);
+    for (const value of ["Emergency Fund", "$600.00", "$1000.00", "Tier 2 · $150/mo", "To target: $400.00"]) {
+        assert(savingsSummaryDv.container.walk().some((node) => node.textContent === value), `SavingsSummary preserves exact value ${value}`);
+    }
+    assert.deepStrictEqual(glideArgs, { balance: 600, tiers: [{ tier: 2 }] }, "SavingsSummary preserves FinanceMath glide inputs");
+    assert.deepStrictEqual(savingsHistory, [500, 550], "SavingsSummary converts newest-first balance history to chronological sparkline order without mutation");
+    assert.strictEqual(classes(savingsSummaryDv.container, "sav-delta-pill")[0]?.textContent, "vs prior: +$50.00", "SavingsSummary preserves its prior-balance delta output");
+    assert(classes(savingsSummaryDv.container, "sav-tier-chip")[0]?.classList.contains("sauce-pill"), "SavingsSummary glide tier uses sauce-pill");
+    const savingsEditButton = classes(savingsSummaryDv.container, "sav-edit-btn")[0];
+    savingsEditButton.dispatch("click");
+    await Promise.resolve();
+    assert.strictEqual(savingsEditFile?.path, "spice/finance/savings/Savings-Emergency-Fund.md", "SavingsSummary preserves SavingsConfigEditor delegation");
+
+    const debtPages = [
+        { type: "debt", name: "Apple", kind: "credit-card", current_balance: 1200, credit_limit: 2000, apr: 20, file: { name: "Debt-Apple" } },
+        { type: "debt", name: "Student", kind: "student-loan", current_balance: 800, apr: 10, file: { name: "Debt-Student" } },
+    ];
+    const hubMath = {
+        projectedPayoff: () => ({ totalBalance: 2000, monthlyInterest: 26.67, plannedAttack: 500, weightedApr: 16, zeroDebtDate: "2027-01" }),
+    };
+    const DebtsHubSummary = loadClass("debtsHubSummary", "DebtsHubSummary", { customJS: { FinanceMath: hubMath }, app });
+    const debtsHubDv = dvFor({ "spice/finance/debts": debtPages });
+    await new DebtsHubSummary().render(debtsHubDv);
+    for (const value of ["$2000.00", "$26.67", "$500.00", "16.00%", "2027-01"]) {
+        assert(debtsHubDv.container.walk().some((node) => node.textContent === value), `DebtsHubSummary preserves exact value ${value}`);
+    }
+    const hubCards = classes(debtsHubDv.container, "dhs-card");
+    assert.deepStrictEqual(hubCards.map((card) => classes(card, "dhs-card-name")[0]?.textContent), ["Apple", "Student"], "DebtsHubSummary preserves balance-descending card order");
+    assert(classes(debtsHubDv.container, "dhs-kind-chip").every((chip) => chip.classList.contains("sauce-pill")), "DebtsHubSummary kind totals use sauce-pill");
+    assert(classes(debtsHubDv.container, "dhs-card-progress-pill")[0]?.classList.contains("sauce-pill"), "DebtsHubSummary card progress uses sauce-pill");
+    hubCards[0].dispatch("click");
+    assert.deepStrictEqual(opened.splice(0), ["Debt-Apple"], "DebtsHubSummary preserves debt-card open behavior");
 }
 
 function visualContract() {
-    console.log("--- C6AB-VISUAL: execute cards and summaries at 1024/390 light/dark ---");
+    console.log("--- C6ABC-VISUAL: execute cards and summaries at 1024/390 light/dark ---");
     const visual = fs.readFileSync(VISUAL_PATH, "utf8");
     assert(/<meta\s+name="viewport"\s+content="width=device-width, initial-scale=1">/.test(visual), "fixture declares responsive viewport");
     assert(visual.includes("../../mechanisms/styling/assets/snippets/sauce-core.css"), "fixture loads shipped sauce-core CSS");
@@ -445,12 +556,13 @@ function visualContract() {
                 assert.strictEqual(marker["controls-enabled"], "true", `${theme}/${width}: controls remain enabled`);
                 assert.strictEqual(marker["controls-visible"], "true", `${theme}/${width}: controls have rendered geometry`);
                 assert.strictEqual(marker["actions-clicked"], "true", `${theme}/${width}: every action remains clickable`);
-                assert.strictEqual(marker.buttons, "7", `${theme}/${width}: all seven Finance destinations render`);
-                assert.strictEqual(marker.pills, "12", `${theme}/${width}: all semantic status pills render`);
+                assert.strictEqual(marker.buttons, "9", `${theme}/${width}: all navigation and summary buttons render`);
+                assert.strictEqual(marker["summary-buttons"], "2", `${theme}/${width}: debt and savings edit actions render`);
+                assert.strictEqual(marker.pills, "17", `${theme}/${width}: all semantic status pills render`);
                 assert.strictEqual(marker.cards, "5", `${theme}/${width}: debt, savings, and month cards render`);
-                assert.strictEqual(marker.summaries, "4", `${theme}/${width}: all summary and band surfaces render`);
-                assert.strictEqual(marker.progress, "2", `${theme}/${width}: summary progress tracks render`);
-                assert.strictEqual(marker["summaries-fit"], "true", `${theme}/${width}: summaries do not clip or overflow`);
+                assert.strictEqual(marker.summaries, "7", `${theme}/${width}: all summary and band surfaces render`);
+                assert.strictEqual(marker.progress, "4", `${theme}/${width}: summary progress tracks render`);
+                assert.strictEqual(marker["summaries-fit"], "true", `${theme}/${width}: summaries do not clip or overflow (${marker["summary-overflow"] || "none"})`);
                 assert.strictEqual(marker["tones-visible"], "true", `${theme}/${width}: summary status tones remain visible`);
 
                 const first = path.join(temp, `${theme}-${width}-a.png`);
