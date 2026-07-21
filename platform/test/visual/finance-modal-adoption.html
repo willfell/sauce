@@ -184,10 +184,12 @@
     cancel.className = "sauce-btn";
     cancel.type = "button";
     cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { cancel.dataset.fixtureClicked = "true"; });
     const save = document.createElement("button");
     save.className = "sauce-btn sauce-btn-accent";
     save.type = "button";
     save.textContent = "Save";
+    save.addEventListener("click", () => { save.dataset.fixtureClicked = "true"; });
     footer.append(cancel, save);
 
     dialog.append(heading, body, footer);
@@ -262,6 +264,25 @@
     page.append(heading, grid);
     root.appendChild(page);
   }
+
+  const surfaces = Array.from(document.querySelectorAll("[data-testid^='paycheck-category-add-'], [data-testid^='trips-add-item-']"));
+  const dialogs = surfaces.map((surface) => surface.querySelector(".sauce-modal"));
+  const controls = dialogs.flatMap((dialog) => Array.from(dialog.querySelectorAll("input, select, button")));
+  const actions = dialogs.flatMap((dialog) => Array.from(dialog.querySelectorAll("button")));
+  actions.forEach((button) => button.click());
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.theme = requested === "dark" || requested === "light" ? requested : "both";
+  marker.dataset.surfaces = String(surfaces.length);
+  marker.dataset.documentFits = String(document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+  marker.dataset.modalsFit = String(dialogs.every((dialog) => dialog && dialog.scrollWidth <= dialog.clientWidth));
+  marker.dataset.controlsEnabled = String(controls.length > 0 && controls.every((control) => !control.disabled));
+  marker.dataset.controlsVisible = String(controls.length > 0 && controls.every((control) => {
+    const rect = control.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }));
+  marker.dataset.actionsClicked = String(actions.length === 4 && actions.every((button) => button.dataset.fixtureClicked === "true"));
+  document.head.appendChild(marker);
 }());
 </script>
 </body>

@@ -524,8 +524,9 @@ class BudgetDefaultsEditor {
         let captured = null;
         await this._mutate(file, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
-            // Merge-on-edit: keep non-dialog fields the modal doesn't surface.
-            next[index] = Object.assign({}, current, result);
+            // Merge onto the render-authoritative row so fields added after the
+            // dialog opened survive; `current` is only a missing-row fallback.
+            next[index] = Object.assign({}, next[index] || current, result);
             fm.categories = next;
             captured = next.slice();
         });
