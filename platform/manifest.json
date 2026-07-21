@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.245.2",
+  "workshop_version": "0.246.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -261,7 +261,7 @@
     },
     {
       "name": "finance",
-      "version": "0.19.2",
+      "version": "0.20.0",
       "path": "blueprints/finance"
     },
     {
