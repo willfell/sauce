@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finance SauceModal adoption — visual fixture</title>
+<!--
+  Maintained Playwright fixture for GA-C5a. It renders the Paycheck Defaults
+  category-bearing Add Expense form beside the Trips Add Item reference in the
+  exact SauceModal class skeleton. Serve the repository root, then capture:
+
+    platform/test/visual/finance-modal-adoption.html?theme=light
+    platform/test/visual/finance-modal-adoption.html?theme=dark
+
+  at 1024px and 390px. The fixture-only positioning rule below puts both modal
+  backdrops into document flow; it does not restyle the modal shell, footer, or
+  buttons. Those remain owned by the shipped sauce-core.css.
+-->
+<link rel="stylesheet" href="../../mechanisms/styling/assets/snippets/sauce-core.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-width: 0; }
+  body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--background-primary);
+    color: var(--text-normal);
+  }
+  .theme-light {
+    --background-primary: #ffffff;
+    --background-secondary: #f4f4f5;
+    --background-modifier-border: #d7d7da;
+    --background-modifier-border-hover: #b9bac0;
+    --background-modifier-hover: rgba(0, 0, 0, 0.06);
+    --background-modifier-cover: rgba(25, 25, 28, 0.52);
+    --interactive-accent: #6f5bd3;
+    --interactive-accent-hover: #604dc0;
+    --text-normal: #202124;
+    --text-muted: #686970;
+    --text-error: #b42318;
+    --text-on-accent: #ffffff;
+    --radius-l: 12px;
+    --radius-s: 6px;
+    --shadow-l: 0 8px 32px rgba(0, 0, 0, 0.24);
+  }
+  .theme-dark {
+    --background-primary: #1e1f22;
+    --background-secondary: #292a2e;
+    --background-modifier-border: #3b3d43;
+    --background-modifier-border-hover: #555861;
+    --background-modifier-hover: rgba(255, 255, 255, 0.08);
+    --background-modifier-cover: rgba(0, 0, 0, 0.68);
+    --interactive-accent: #9485f3;
+    --interactive-accent-hover: #a99df8;
+    --text-normal: #e5e7eb;
+    --text-muted: #a3a6ae;
+    --text-error: #ff8178;
+    --text-on-accent: #17171a;
+    --radius-l: 12px;
+    --radius-s: 6px;
+    --shadow-l: 0 8px 32px rgba(0, 0, 0, 0.52);
+  }
+  .fixture-page { min-height: 100vh; padding: 20px; }
+  .fixture-heading {
+    margin: 0 0 16px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    min-width: 0;
+  }
+  .comparison-cell { min-width: 0; }
+  .comparison-label {
+    margin: 0 0 8px;
+    font-size: 0.75rem;
+    font-weight: 650;
+    color: var(--text-muted);
+  }
+  .fixture-backdrop.sauce-modal-backdrop {
+    position: relative;
+    inset: auto;
+    min-height: 540px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-l);
+  }
+  .finance-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .finance-field label {
+    flex: 0 0 80px;
+    font-size: 0.85em;
+    color: var(--text-muted);
+  }
+  .finance-field input,
+  .trips-field input,
+  .trips-field select {
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    font: inherit;
+  }
+  .finance-field input { flex: 1; }
+  .trips-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+  }
+  .trips-field label { font-size: 0.85em; color: var(--text-muted); }
+  .modal-status {
+    min-height: 1.2em;
+    font-size: 0.8em;
+    color: var(--text-error);
+  }
+  @media (max-width: 700px) {
+    .fixture-page { padding: 12px; }
+    .comparison-grid { grid-template-columns: minmax(0, 1fr); }
+    .fixture-backdrop.sauce-modal-backdrop { min-height: 0; }
+  }
+</style>
+</head>
+<body>
+<main id="fixture-root"></main>
+<script>
+(function () {
+  "use strict";
+
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("theme");
+  const themes = requested === "dark" || requested === "light"
+    ? [requested]
+    : ["light", "dark"];
+  const root = document.getElementById("fixture-root");
+
+  function field(parent, kind, label, type, value, placeholder) {
+    const wrap = document.createElement("div");
+    wrap.className = kind + "-field";
+    const lab = document.createElement("label");
+    lab.textContent = label;
+    const input = document.createElement("input");
+    input.type = type || "text";
+    input.value = value || "";
+    input.placeholder = placeholder || "";
+    wrap.append(lab, input);
+    parent.appendChild(wrap);
+    return input;
+  }
+
+  function modal(title, testId, buildBody) {
+    const backdrop = document.createElement("div");
+    backdrop.className = "fixture-backdrop sauce-modal-backdrop";
+    backdrop.dataset.testid = testId;
+
+    const dialog = document.createElement("section");
+    dialog.className = "sauce-modal sauce-anim-pop";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", testId + "-title");
+
+    const heading = document.createElement("h3");
+    heading.className = "sauce-modal-title";
+    heading.id = testId + "-title";
+    heading.textContent = title;
+
+    const body = document.createElement("div");
+    body.className = "sauce-modal-body";
+    buildBody(body);
+
+    const footer = document.createElement("div");
+    footer.className = "sauce-modal-footer sauce-action-row";
+    const cancel = document.createElement("button");
+    cancel.className = "sauce-btn";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const save = document.createElement("button");
+    save.className = "sauce-btn sauce-btn-accent";
+    save.type = "button";
+    save.textContent = "Save";
+    footer.append(cancel, save);
+
+    dialog.append(heading, body, footer);
+    backdrop.appendChild(dialog);
+    return backdrop;
+  }
+
+  function financeBody(body) {
+    field(body, "finance", "Item", "text", "Groceries");
+    field(body, "finance", "Amount", "number", "175.00");
+    const category = field(body, "finance", "Category", "text", "Food");
+    category.setAttribute("list", "fixture-categories");
+    const datalist = document.createElement("datalist");
+    datalist.id = "fixture-categories";
+    for (const value of ["Bills", "Food", "Housing"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      datalist.appendChild(option);
+    }
+    body.appendChild(datalist);
+    field(body, "finance", "URL", "text", "", "(optional)");
+    const deposit = field(body, "finance", "Deposit", "number", "1");
+    deposit.min = "1";
+    const status = document.createElement("div");
+    status.className = "modal-status";
+    status.setAttribute("aria-live", "polite");
+    body.appendChild(status);
+  }
+
+  function tripsBody(body) {
+    const categoryWrap = document.createElement("div");
+    categoryWrap.className = "trips-field";
+    const categoryLabel = document.createElement("label");
+    categoryLabel.textContent = "Category";
+    const category = document.createElement("select");
+    for (const value of ["Clothing", "Electronics", "Toiletries"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      category.appendChild(option);
+    }
+    categoryWrap.append(categoryLabel, category);
+    body.appendChild(categoryWrap);
+    field(body, "trips", "Item", "text", "Socks", "Socks");
+    const status = document.createElement("div");
+    status.className = "modal-status";
+    status.setAttribute("aria-live", "polite");
+    body.appendChild(status);
+  }
+
+  for (const theme of themes) {
+    const page = document.createElement("section");
+    page.className = "fixture-page theme-" + theme;
+    page.dataset.testid = "theme-" + theme;
+    const heading = document.createElement("h1");
+    heading.className = "fixture-heading";
+    heading.textContent = theme + " theme — shared modal chrome comparison";
+    const grid = document.createElement("div");
+    grid.className = "comparison-grid";
+
+    const financeCell = document.createElement("article");
+    financeCell.className = "comparison-cell";
+    financeCell.innerHTML = '<p class="comparison-label">Paycheck Defaults · Add Expense (category-bearing)</p>';
+    financeCell.appendChild(modal("Add Expense", "paycheck-category-add-" + theme, financeBody));
+
+    const tripsCell = document.createElement("article");
+    tripsCell.className = "comparison-cell";
+    tripsCell.innerHTML = '<p class="comparison-label">Trips · Add Item reference</p>';
+    tripsCell.appendChild(modal("Add item", "trips-add-item-" + theme, tripsBody));
+
+    grid.append(financeCell, tripsCell);
+    page.append(heading, grid);
+    root.appendChild(page);
+  }
+}());
+</script>
+</body>
+</html>

@@ -10,6 +10,7 @@ const ROOT = path.resolve(__dirname, "../..");
 const MODAL_PATH = path.join(ROOT, "platform/mechanisms/modal/sauce-modal.js");
 const BUDGET_PATH = path.join(ROOT, "platform/blueprints/finance/helpers/budget-defaults-editor.js");
 const PAYCHECK_PATH = path.join(ROOT, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js");
+const VISUAL_PATH = path.join(ROOT, "platform/test/visual/finance-modal-adoption.html");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 class FakeElement {
@@ -169,6 +170,23 @@ async function caseStaticContract() {
     assert(manifest.depends_on.some((dep) => dep.name === "modal" && dep.range === ">=0.2.0"), "Finance declares modal >=0.2.0");
 }
 
+async function caseVisualFixtureContract() {
+    console.log("--- C5A-VISUAL: maintained desktop/390 light/dark comparison fixture ---");
+    const visual = fs.readFileSync(VISUAL_PATH, "utf8");
+    assert(/<meta\s+name="viewport"\s+content="width=device-width, initial-scale=1">/.test(visual), "fixture declares responsive viewport");
+    assert(visual.includes("../../mechanisms/styling/assets/snippets/sauce-core.css"), "fixture loads shipped sauce-core CSS");
+    assert(visual.includes('["light", "dark"]'), "fixture renders both accepted theme variants");
+    assert(visual.includes('@media (max-width: 700px)'), "fixture carries a narrow-viewport comparison layout");
+    assert(visual.includes('"paycheck-category-add-" + theme'), "fixture identifies Paycheck category-bearing add surface");
+    assert(visual.includes('"trips-add-item-" + theme'), "fixture identifies Trips add-item reference");
+    assert(visual.includes('dialog.className = "sauce-modal sauce-anim-pop"'), "both comparison surfaces use the shipped modal shell");
+    assert(visual.includes('body.className = "sauce-modal-body"'), "both comparison surfaces use the shipped modal body");
+    assert(visual.includes('footer.className = "sauce-modal-footer sauce-action-row"'), "both comparison surfaces use the responsive shipped footer");
+    assert(visual.includes('save.className = "sauce-btn sauce-btn-accent"'), "both comparison surfaces expose an enabled semantic submit action");
+    assert(!/\.sauce-modal\s*\{/.test(visual), "fixture does not fork modal-shell styling");
+    assert(!/\.sauce-modal-footer\s*\{/.test(visual), "fixture does not fork modal-footer styling");
+}
+
 async function caseGroupSubmitAndConcurrency() {
     console.log("--- C5A-GROUP: Enter submit, validation, semantic buttons, single settlement ---");
     const h = loadHarness();
@@ -253,6 +271,7 @@ async function casePaycheckShapes() {
 
 (async () => {
     await caseStaticContract();
+    await caseVisualFixtureContract();
     await caseGroupSubmitAndConcurrency();
     await caseEscapeAndFailClosed();
     await caseBudgetShapes();
