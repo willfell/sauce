@@ -85,6 +85,23 @@
   .fixture-card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
   .fixture-card-value { margin: 5px 0 7px; font-variant-numeric: tabular-nums; }
   .fixture-card .sauce-pill + .sauce-pill { margin-left: 5px; }
+  .fixture-summary {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--sauce-hairline);
+    border-radius: var(--sauce-radius-btn);
+    background: var(--background-secondary-alt);
+    overflow: hidden;
+  }
+  .fixture-summary-title { margin-bottom: 8px; font-weight: 700; }
+  .fixture-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fixture-metric { min-width: 0; color: var(--text-muted); font-size: 0.76rem; }
+  .fixture-metric b { display: block; overflow: hidden; color: var(--text-normal); font-size: 0.95rem; text-overflow: ellipsis; white-space: nowrap; }
+  .fixture-summary-band { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sauce-hairline); }
+  .fixture-summary-band .sauce-pill + .sauce-pill { margin-left: 5px; }
+  .fixture-progress { height: 7px; margin: 8px 0; border-radius: var(--sauce-radius-pill); background: var(--background-secondary); overflow: hidden; }
+  .fixture-progress-fill { height: 100%; border-radius: inherit; background: #16a34a; }
+  .fixture-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .fixture-tone-danger { color: #fff; background: #dc2626; }
   .fixture-tone-warn { color: #fff; background: #b45309; }
   .fixture-tone-good { color: #fff; background: #16864a; }
@@ -166,6 +183,57 @@
   const monthsGrid = section("Months");
   card(monthsGrid, "2026-07", "Income $9,000 · Spending $3,120", []);
   card(monthsGrid, "2026-06", "Income $9,000 · Spending $2,980", []);
+
+  function summary(grid, title, metrics, progress, pills) {
+    const item = document.createElement("article");
+    item.className = "fixture-summary";
+    const titleEl = document.createElement("div");
+    titleEl.className = "fixture-summary-title";
+    titleEl.textContent = title;
+    const metricsEl = document.createElement("div");
+    metricsEl.className = "fixture-metrics";
+    for (const [label, value] of metrics) {
+      const metric = document.createElement("div");
+      metric.className = "fixture-metric";
+      metric.textContent = label;
+      const strong = document.createElement("b");
+      strong.textContent = value;
+      metric.appendChild(strong);
+      metricsEl.appendChild(metric);
+    }
+    item.append(titleEl, metricsEl);
+    const band = document.createElement("div");
+    band.className = "fixture-summary-band";
+    if (progress != null) {
+      const track = document.createElement("div");
+      track.className = "fixture-progress";
+      const fill = document.createElement("div");
+      fill.className = "fixture-progress-fill";
+      fill.style.width = progress + "%";
+      track.appendChild(fill);
+      band.appendChild(track);
+    }
+    for (const [text, tone, dot] of pills) {
+      const pill = document.createElement("span");
+      pill.className = "sauce-pill";
+      if (tone) pill.classList.add("fixture-tone-" + tone);
+      if (dot) {
+        const dotEl = document.createElement("span");
+        dotEl.className = "fixture-status-dot";
+        pill.appendChild(dotEl);
+      }
+      pill.appendChild(document.createTextNode(text));
+      band.appendChild(pill);
+    }
+    item.appendChild(band);
+    grid.appendChild(item);
+  }
+
+  const summaryGrid = section("Summaries and bands");
+  summary(summaryGrid, "Budget Summary", [["Planned", "$3,500"], ["Actual", "$3,120"]], 61, [["On pace", "good", false], ["Closed", "", false]]);
+  summary(summaryGrid, "Paycheck Summary", [["Pay", "$4,500"], ["Remaining", "$1,380"]], 74, [["All paid", "good", false], ["In Progress", "warn", true]]);
+  summary(summaryGrid, "Monthly + Debt", [["Net cashflow", "+$1,380"], ["Total debt", "$30,391"]], null, [["MoM ↓ $420", "good", false], ["75%", "warn", false], ["75% paid", "good", false]]);
+  summary(summaryGrid, "Plan Band", [["Envelope", "$3,000"], ["Planned", "$3,500"]], null, [["Over by $500", "danger", false]]);
   root.appendChild(page);
 
   const controls = [...page.querySelectorAll("button, [role=button]")];
@@ -183,6 +251,16 @@
   marker.dataset.buttons = String(page.querySelectorAll("button.sauce-btn").length);
   marker.dataset.pills = String(page.querySelectorAll(".sauce-pill").length);
   marker.dataset.cards = String(page.querySelectorAll(".fixture-card").length);
+  marker.dataset.summaries = String(page.querySelectorAll(".fixture-summary").length);
+  marker.dataset.progress = String(page.querySelectorAll(".fixture-progress").length);
+  marker.dataset.summariesFit = String([...page.querySelectorAll(".fixture-summary")].every((item) => {
+    const rect = item.getBoundingClientRect();
+    return item.scrollWidth <= item.clientWidth && rect.left >= 0 && rect.right <= window.innerWidth;
+  }));
+  marker.dataset.tonesVisible = String([...page.querySelectorAll(".fixture-tone-danger, .fixture-tone-warn, .fixture-tone-good")].every((item) => {
+    const style = getComputedStyle(item);
+    return style.backgroundColor !== "rgba(0, 0, 0, 0)" && style.color !== "rgba(0, 0, 0, 0)";
+  }));
   document.head.appendChild(marker);
 })();
 </script>

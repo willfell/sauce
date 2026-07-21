@@ -42,7 +42,7 @@ class MonthlyOverview {
 
         const root = dv.container.createEl("div", { cls: "mo-root" });
         root.setAttribute("data-month", monthKey);
-        root.style.cssText = "margin: 12px 0 16px; padding: 14px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 16px; padding: 14px 18px; border: 1px solid var(--sauce-hairline); border-radius: 10px; background: var(--background-secondary-alt);";
 
         this._renderBand1(root, income, spending, debtPaid, netCash, debts);
         this._renderBand2(root, monthKey, debts);
@@ -248,7 +248,7 @@ class MonthlyOverview {
 
     _renderBand1(root, income, spending, debtPaid, net, debts) {
         const band = root.createEl("div");
-        band.style.cssText = "display: flex; gap: 22px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "display: flex; gap: 22px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val, valColor, muted) => {
             const cell = band.createEl("div");
@@ -280,7 +280,7 @@ class MonthlyOverview {
 
     _renderBand2(root, monthKey, debts) {
         const band = root.createEl("div");
-        band.style.cssText = "padding: 12px 0 10px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--background-modifier-border);";
+        band.style.cssText = "padding: 12px 0 10px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--sauce-hairline);";
 
         if (!debts || debts.length === 0) {
             const empty = band.createEl("div");
@@ -301,10 +301,10 @@ class MonthlyOverview {
 
         const { delta, hasSignal } = this._mom(debts, monthKey);
         const pillWrap = band.createEl("div");
-        const pill = pillWrap.createEl("span");
+        const pill = pillWrap.createEl("span", { cls: "mo-mom-pill sauce-pill" });
         if (!hasSignal) {
             pill.textContent = "No MoM signal yet";
-            pill.style.cssText = `display: inline-block; font-size: 0.78em; padding: 3px 9px; border-radius: 999px; color: ${this._colorFor("muted")}; background: ${this._bgFor("muted")}; border: 1px solid var(--background-modifier-border);`;
+            pill.style.cssText = `color: ${this._colorFor("muted")}; background: ${this._bgFor("muted")};`;
             return;
         }
         let tone;
@@ -312,7 +312,7 @@ class MonthlyOverview {
         else if (delta > 0) tone = "red";
         else tone = "muted";
         pill.textContent = `MoM ${delta <= 0 ? "↓" : "↑"} ${this._fmtMoney(Math.abs(delta))}`;
-        pill.style.cssText = `display: inline-block; font-size: 0.78em; padding: 3px 9px; border-radius: 999px; color: ${this._colorFor(tone)}; background: ${this._bgFor(tone)}; border: 1px solid ${this._colorFor(tone)}33;`;
+        pill.style.cssText = `color: ${this._colorFor(tone)}; background: ${this._bgFor(tone)}; border-color: ${this._colorFor(tone)}33;`;
     }
 
     // ----------------------------------------------------------------- band 3
