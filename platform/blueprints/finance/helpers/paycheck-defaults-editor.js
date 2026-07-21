@@ -184,52 +184,22 @@ class PaycheckDefaultsEditor {
     // Small modal for a deposit-schedule row: { day (1..31), amount }.
     _promptForScheduleRow(initial) {
         return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-
-            const heading = document.createElement("div");
-            heading.textContent = initial ? "Edit Deposit" : "Add Deposit";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-            dialog.appendChild(heading);
-
-            const mkField = (labelText, control) => {
-                const wrap = document.createElement("div");
-                wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
-                const lab = document.createElement("label");
-                lab.textContent = labelText;
-                lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
-                wrap.appendChild(lab);
-                control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
-                wrap.appendChild(control);
-                dialog.appendChild(wrap);
-            };
-
-            const dayInput = document.createElement("input");
-            dayInput.type = "number";
-            dayInput.step = "1";
-            dayInput.min = "1";
-            dayInput.max = "31";
-            mkField("Day", dayInput);
-
-            const amountInput = document.createElement("input");
-            amountInput.type = "number";
-            amountInput.step = "0.01";
-            amountInput.min = "0";
-            mkField("Amount", amountInput);
-
-            if (initial) {
-                dayInput.value = String(initial.day ?? 1);
-                amountInput.value = String(initial.amount ?? 0);
-            } else {
-                dayInput.value = "1";
-                amountInput.value = "0";
+            const sauceModal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!sauceModal || typeof sauceModal.open !== "function") {
+                resolve(null);
+                return;
             }
 
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            let dayInput;
+            let amountInput;
+            let status;
 
             const validate = () => {
                 const d = Math.trunc(Number(dayInput.value));
@@ -238,41 +208,66 @@ class PaycheckDefaultsEditor {
                 if (Number.isNaN(a) || a < 0) return "Amount must be >= 0.";
                 return null;
             };
-            const refresh = () => { status.textContent = validate() || ""; };
-            dayInput.addEventListener("input", refresh);
-            amountInput.addEventListener("input", refresh);
 
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            const handle = sauceModal.open({
+                doc: document,
+                title: initial ? "Edit Deposit" : "Add Deposit",
+                autofocus: !initial,
+                body: (body) => {
+                    const mkField = (labelText, control) => {
+                        const wrap = document.createElement("div");
+                        wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+                        const lab = document.createElement("label");
+                        lab.textContent = labelText;
+                        lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
+                        wrap.appendChild(lab);
+                        control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+                        wrap.appendChild(control);
+                        body.appendChild(wrap);
+                    };
 
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Save";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const err = validate();
-                if (err) { status.textContent = err; return; }
-                document.body.removeChild(overlay);
-                resolve({ day: Math.trunc(Number(dayInput.value)), amount: Number(amountInput.value) });
-            };
+                    dayInput = document.createElement("input");
+                    dayInput.type = "number";
+                    dayInput.step = "1";
+                    dayInput.min = "1";
+                    dayInput.max = "31";
+                    mkField("Day", dayInput);
 
-            const onKey = (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
-            };
-            dayInput.addEventListener("keydown", onKey);
-            amountInput.addEventListener("keydown", onKey);
+                    amountInput = document.createElement("input");
+                    amountInput.type = "number";
+                    amountInput.step = "0.01";
+                    amountInput.min = "0";
+                    mkField("Amount", amountInput);
 
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => dayInput.focus(), 0);
+                    if (initial) {
+                        dayInput.value = String(initial.day ?? 1);
+                        amountInput.value = String(initial.amount ?? 0);
+                    } else {
+                        dayInput.value = "1";
+                        amountInput.value = "0";
+                    }
+
+                    status = document.createElement("div");
+                    status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em;";
+                    body.appendChild(status);
+                    const refresh = () => { status.textContent = validate() || ""; };
+                    dayInput.addEventListener("input", refresh);
+                    amountInput.addEventListener("input", refresh);
+                },
+                onSubmit: () => {
+                    if (!dayInput || !amountInput || !status) return false;
+                    const err = validate();
+                    if (err) { status.textContent = err; return false; }
+                    done({ day: Math.trunc(Number(dayInput.value)), amount: Number(amountInput.value) });
+                    return true;
+                },
+                onClose: () => done(null),
+                buttons: [
+                    { label: "Cancel", action: "cancel" },
+                    { label: "Save", action: "submit", tone: "accent" }
+                ]
+            });
+            if (!handle) done(null);
         });
     }
 
@@ -325,81 +320,25 @@ class PaycheckDefaultsEditor {
 
     _promptForExpense(initial) {
         return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+            const sauceModal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!sauceModal || typeof sauceModal.open !== "function") {
+                resolve(null);
+                return;
+            }
 
-            const heading = document.createElement("div");
-            heading.textContent = initial ? "Edit Expense" : "Add Expense";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-            dialog.appendChild(heading);
-
-            const mkField = (labelText, control) => {
-                const wrap = document.createElement("div");
-                wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
-                const lab = document.createElement("label");
-                lab.textContent = labelText;
-                lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
-                wrap.appendChild(lab);
-                control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
-                wrap.appendChild(control);
-                dialog.appendChild(wrap);
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
             };
-
-            const itemInput = document.createElement("input");
-            itemInput.type = "text";
-            mkField("Item", itemInput);
-
-            const amountInput = document.createElement("input");
-            amountInput.type = "number";
-            amountInput.step = "0.01";
-            amountInput.min = "0";
-            mkField("Amount", amountInput);
-
-            // Category with <datalist> autocomplete from Budget Defaults.md.
-            const categoryInput = document.createElement("input");
-            categoryInput.type = "text";
-            const dlId = `pde-categories-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-            categoryInput.setAttribute("list", dlId);
-            const datalist = document.createElement("datalist");
-            datalist.id = dlId;
-            for (const name of this._readBudgetDefaultCategoryNames()) {
-                const opt = document.createElement("option");
-                opt.value = name;
-                datalist.appendChild(opt);
-            }
-            mkField("Category", categoryInput);
-            // datalist must live in the DOM but is invisible — append to dialog.
-            dialog.appendChild(datalist);
-
-            const urlInput = document.createElement("input");
-            urlInput.type = "text";
-            urlInput.placeholder = "(optional)";
-            mkField("URL", urlInput);
-
-            // Deposit — 1-based index of the check that pays this bill. Small
-            // integer input; defaults to 1 (first check) for new rows.
-            const depositInput = document.createElement("input");
-            depositInput.type = "number";
-            depositInput.step = "1";
-            depositInput.min = "1";
-            mkField("Deposit", depositInput);
-
-            if (initial) {
-                itemInput.value = initial.item || "";
-                amountInput.value = String(initial.amount ?? 0);
-                categoryInput.value = initial.category || "";
-                urlInput.value = initial.url || "";
-                depositInput.value = String((Number(initial.deposit) >= 1 ? Math.trunc(Number(initial.deposit)) : 1));
-            } else {
-                amountInput.value = "0";
-                depositInput.value = "1";
-            }
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
+            let itemInput;
+            let amountInput;
+            let categoryInput;
+            let urlInput;
+            let depositInput;
+            let status;
 
             const validate = () => {
                 if (!itemInput.value.trim()) return "Item required.";
@@ -407,51 +346,98 @@ class PaycheckDefaultsEditor {
                 if (Number.isNaN(a) || a < 0) return "Amount must be >= 0.";
                 return null;
             };
-            const refresh = () => { status.textContent = validate() || ""; };
-            itemInput.addEventListener("input", refresh);
-            amountInput.addEventListener("input", refresh);
 
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            const handle = sauceModal.open({
+                doc: document,
+                title: initial ? "Edit Expense" : "Add Expense",
+                autofocus: !initial,
+                body: (body) => {
+                    const mkField = (labelText, control) => {
+                        const wrap = document.createElement("div");
+                        wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+                        const lab = document.createElement("label");
+                        lab.textContent = labelText;
+                        lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
+                        wrap.appendChild(lab);
+                        control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+                        wrap.appendChild(control);
+                        body.appendChild(wrap);
+                    };
 
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Save";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const err = validate();
-                if (err) { status.textContent = err; return; }
-                document.body.removeChild(overlay);
-                const depN = Math.trunc(Number(depositInput.value));
-                resolve({
-                    item: itemInput.value.trim(),
-                    amount: Number(amountInput.value),
-                    category: categoryInput.value.trim(),
-                    url: urlInput.value.trim(),
-                    deposit: (isFinite(depN) && depN >= 1) ? depN : 1
-                });
-            };
+                    itemInput = document.createElement("input");
+                    itemInput.type = "text";
+                    mkField("Item", itemInput);
 
-            const onKey = (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
-            };
-            itemInput.addEventListener("keydown", onKey);
-            amountInput.addEventListener("keydown", onKey);
-            categoryInput.addEventListener("keydown", onKey);
-            urlInput.addEventListener("keydown", onKey);
-            depositInput.addEventListener("keydown", onKey);
+                    amountInput = document.createElement("input");
+                    amountInput.type = "number";
+                    amountInput.step = "0.01";
+                    amountInput.min = "0";
+                    mkField("Amount", amountInput);
 
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => itemInput.focus(), 0);
+                    categoryInput = document.createElement("input");
+                    categoryInput.type = "text";
+                    const dlId = `pde-categories-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+                    categoryInput.setAttribute("list", dlId);
+                    const datalist = document.createElement("datalist");
+                    datalist.id = dlId;
+                    for (const name of this._readBudgetDefaultCategoryNames()) {
+                        const opt = document.createElement("option");
+                        opt.value = name;
+                        datalist.appendChild(opt);
+                    }
+                    mkField("Category", categoryInput);
+                    body.appendChild(datalist);
+
+                    urlInput = document.createElement("input");
+                    urlInput.type = "text";
+                    urlInput.placeholder = "(optional)";
+                    mkField("URL", urlInput);
+
+                    depositInput = document.createElement("input");
+                    depositInput.type = "number";
+                    depositInput.step = "1";
+                    depositInput.min = "1";
+                    mkField("Deposit", depositInput);
+
+                    if (initial) {
+                        itemInput.value = initial.item || "";
+                        amountInput.value = String(initial.amount ?? 0);
+                        categoryInput.value = initial.category || "";
+                        urlInput.value = initial.url || "";
+                        depositInput.value = String((Number(initial.deposit) >= 1 ? Math.trunc(Number(initial.deposit)) : 1));
+                    } else {
+                        amountInput.value = "0";
+                        depositInput.value = "1";
+                    }
+
+                    status = document.createElement("div");
+                    status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em;";
+                    body.appendChild(status);
+                    const refresh = () => { status.textContent = validate() || ""; };
+                    itemInput.addEventListener("input", refresh);
+                    amountInput.addEventListener("input", refresh);
+                },
+                onSubmit: () => {
+                    if (!itemInput || !amountInput || !categoryInput || !urlInput || !depositInput || !status) return false;
+                    const err = validate();
+                    if (err) { status.textContent = err; return false; }
+                    const depN = Math.trunc(Number(depositInput.value));
+                    done({
+                        item: itemInput.value.trim(),
+                        amount: Number(amountInput.value),
+                        category: categoryInput.value.trim(),
+                        url: urlInput.value.trim(),
+                        deposit: (isFinite(depN) && depN >= 1) ? depN : 1
+                    });
+                    return true;
+                },
+                onClose: () => done(null),
+                buttons: [
+                    { label: "Cancel", action: "cancel" },
+                    { label: "Save", action: "submit", tone: "accent" }
+                ]
+            });
+            if (!handle) done(null);
         });
     }
 
