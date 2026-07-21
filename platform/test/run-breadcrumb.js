@@ -16,6 +16,8 @@ const CAT     = path.join(ROOT, 'platform', 'manifest.json');
 const LEGACY  = path.join(ROOT, 'platform', 'blueprints', 'project', 'helpers', 'breadcrumb.js');
 const SNAPSHOT = path.join(ROOT, 'platform', 'test', 'fixtures', 'breadcrumb-legacy.js');
 const PEOPLE_MAN = path.join(ROOT, 'platform', 'blueprints', 'people', 'manifest.json');
+const TODO_MAN = path.join(ROOT, 'platform', 'blueprints', 'to-do', 'manifest.json');
+const STICKY_MAN = path.join(ROOT, 'platform', 'blueprints', 'sticky-notes', 'manifest.json');
 
 const results = [];
 const ok = (n, c) => { results.push([n, !!c]); console.log(`  ${c ? 'PASS' : 'FAIL'} — ${n}`); };
@@ -72,6 +74,53 @@ ok('BR30 people manifest declares person: People hub ancestor + basename current
    && PERSON_BREADCRUMB.ancestors[0].label === 'lit:People'
    && PERSON_BREADCRUMB.ancestors[0].link === 'spice/people/People.md'
    && PERSON_BREADCRUMB.current && PERSON_BREADCRUMB.current.label === 'file:basename');
+
+let todoManifest = null;
+let stickyManifest = null;
+try { todoManifest = JSON.parse(fs.readFileSync(TODO_MAN, 'utf8')); } catch (_e) {}
+try { stickyManifest = JSON.parse(fs.readFileSync(STICKY_MAN, 'utf8')); } catch (_e) {}
+const TODO_TYPES = todoManifest?.breadcrumb?.types || {};
+const STICKY_TYPES = stickyManifest?.breadcrumb?.types || {};
+const EXPECTED_TODO_TYPES = {
+  'to-do': {
+    ancestors: [{ label: 'lit:To-Do' }, { label: 'path:3' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-hub': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-recurring-list': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  },
+  'to-do-recurring': {
+    ancestors: [{ label: 'lit:To-Do' }],
+    current: { label: 'file:basename' }
+  }
+};
+const EXPECTED_STICKY_TYPES = {
+  'sticky-note': {
+    ancestors: [
+      { label: 'lit:Sticky Notes' },
+      { label: 'path:3' },
+      { label: 'path:4', link: 'spice/sticky-notes/{path:2}/{path:3}/{path:4}/Sticky-Day-{path:4}.md' }
+    ],
+    current: { label: 'fm:time|file:basename' }
+  },
+  'sticky-day': {
+    ancestors: [{ label: 'lit:Sticky Notes' }, { label: 'path:3' }],
+    current: { label: 'path:4' }
+  },
+  'sticky-hub': {
+    ancestors: [],
+    current: { label: 'lit:Sticky Notes' }
+  }
+};
+ok('BR32 to-do manifest deep-contract preserves the leaf and all new unlinked hub trails',
+   JSON.stringify(TODO_TYPES) === JSON.stringify(EXPECTED_TODO_TYPES));
+ok('BR33 sticky manifest deep-contract preserves leaf/day trails and adds only the unlinked hub root',
+   JSON.stringify(STICKY_TYPES) === JSON.stringify(EXPECTED_STICKY_TYPES));
 
 // ── Load NEW class ────────────────────────────────────────────────────────
 const NEW_SRC = fs.existsSync(MECH) ? fs.readFileSync(MECH, 'utf8') : '';
@@ -237,16 +286,6 @@ const SCRATCH_TYPES = {
   }
 };
 
-const TODO_TYPES = {
-  "to-do": {
-    "ancestors": [
-      { "label": "lit:To-Do" },
-      { "label": "path:3" }
-    ],
-    "current": { "label": "file:basename" }
-  }
-};
-
 // ── Wiki types — path_walk entries (BC-WIKI-1 through BC-WIKI-3) ─────────────
 const WIKI_TYPES = {
   "wiki-hub":     { path_walk: { root_label: "Wiki", root_dir: "spice/wiki", root_file: "Wiki.md" } },
@@ -261,6 +300,7 @@ const REGISTRY = {
     meetings: { types: MEETINGS_TYPES },
     scratch:  { types: SCRATCH_TYPES },
     "to-do":  { types: TODO_TYPES },
+    "sticky-notes": { types: STICKY_TYPES },
     wiki:     { types: WIKI_TYPES },
     people:   { types: peopleManifest?.breadcrumb?.types || {} }
   }
@@ -468,6 +508,29 @@ async function runAsync(fn) { return await fn(); }
     const all = fx.expect.every((seg) => html.includes(seg));
     ok(fx.name + ' trail contains ' + fx.expect.join(' / '), !!wrap && all);
     if (!all) console.log(`    HTML: ${html}`);
+  }
+
+  // ── BR34–BR37: every remaining GA-S4 non-leaf hub discriminator ───────
+  const HUB_FIXTURES = [
+    { name: 'BR34 to-do-hub All To-Dos',
+      cur: { type: 'to-do-hub', file: { path: 'spice/to-do/All-ToDos.md', name: 'All-ToDos' } },
+      expect: ['To-Do', 'All-ToDos'] },
+    { name: 'BR35 to-do-recurring-list',
+      cur: { type: 'to-do-recurring-list', file: { path: 'spice/to-do/Recurring.md', name: 'Recurring' } },
+      expect: ['To-Do', 'Recurring'] },
+    { name: 'BR36 to-do-recurring registry',
+      cur: { type: 'to-do-recurring', file: { path: 'spice/to-do/Recurring Tasks.md', name: 'Recurring Tasks' } },
+      expect: ['To-Do', 'Recurring Tasks'] },
+    { name: 'BR37 sticky-hub root',
+      cur: { type: 'sticky-hub', file: { path: 'spice/sticky-notes/Sticky.md', name: 'Sticky' } },
+      expect: ['Sticky Notes'] },
+  ];
+  for (const fx of HUB_FIXTURES) {
+    const dv = makeDv(fx.cur);
+    await new NewBreadcrumb().render(dv);
+    const html = dv._els[0]?.innerHTML || '';
+    ok(fx.name + ' trail contains ' + fx.expect.join(' / '),
+       !!dv._els[0] && fx.expect.every((segment) => html.includes(segment)));
   }
 
   // ── BR31: people manifest contribution renders from the registry shape ───

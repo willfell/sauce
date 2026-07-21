@@ -2,6 +2,7 @@
 // Zero-dep harness for SpaceNavButtons pure logic (entry order + daily split).
 const fs = require('fs');
 const path = require('path');
+const ROOT = path.join(__dirname, '..');
 
 const SRC = fs.readFileSync(
   path.join(__dirname, '..', 'mechanisms', 'nav-buttons', 'space-nav-buttons.js'),
@@ -77,6 +78,37 @@ ok('NL-ARROW-3 daily blueprint absent → no arrows',
 ok('NL-ARROW-4 empty path → no arrows, no throw',
   SpaceNavButtons._shouldShowDayArrows('', { folder: 'spice/daily' }) === false);
 
+// GA-S4A2-DAILY-NAV-BUTTONS-CONTEXTUAL-DATE-FLOOR: bind the behavior whose
+// introduction in nav-buttons 2.5.0 sets Daily's minimum compatible version.
+{
+  const originalWindow = global.window;
+  const today = '2026-07-20';
+  const isStrictIsoDate = (value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!match) return false;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return date.getUTCFullYear() === Number(match[1])
+      && date.getUTCMonth() === Number(match[2]) - 1
+      && date.getUTCDate() === Number(match[3]);
+  };
+  global.window = {
+    moment: (value) => value === undefined
+      ? { format: () => today }
+      : { isValid: () => isStrictIsoDate(value) }
+  };
+  try {
+    ok('GA-S4A2-DAILY-NAV-BUTTONS-CONTEXTUAL-DATE-FLOOR future active-note date wins',
+      inst._resolveActionDate({ current: () => ({ file: { name: 'Friday-2026-08-14' } }) }) === '2026-08-14');
+    ok('GA-S4A2 contextual-date invalid active date falls back to today',
+      inst._resolveActionDate({ current: () => ({ file: { name: 'Sunday-2026-02-29' } }) }) === today);
+    ok('GA-S4A2 contextual-date absent active date falls back to today',
+      inst._resolveActionDate({ current: () => ({ file: { name: 'Daily Notes' } }) }) === today);
+  } finally {
+    if (originalWindow === undefined) delete global.window;
+    else global.window = originalWindow;
+  }
+}
+
 // ── firstEntryPerSource: ONE representative per source, sorted (order, source, id) ──
 {
   const reg = { contributions: {
@@ -105,7 +137,7 @@ ok('NL-ARROW-4 empty path → no arrows, no throw',
 // Go-to launcher never renders two buttons with the same glyph. Regression
 // guard for the wiki/journal/reader collision (all read as "book").
 {
-  const navIcons = []; // { icon, label, manifest }
+  const navIcons = []; // { id, icon, label, order, action, manifest }
   for (const kind of ['blueprints', 'mechanisms']) {
     const base = path.join(__dirname, '..', kind);
     for (const name of fs.readdirSync(base)) {
@@ -114,7 +146,7 @@ ok('NL-ARROW-4 empty path → no arrows, no throw',
       let man;
       try { man = JSON.parse(fs.readFileSync(mf, 'utf8')); } catch (_e) { continue; }
       for (const btn of (man.nav_buttons || [])) {
-        navIcons.push({ icon: btn.icon, label: btn.label, manifest: man.name || name });
+        navIcons.push({ id: btn.id, icon: btn.icon, label: btn.label, order: btn.order, action: btn.action, manifest: man.name || name });
       }
     }
   }
@@ -142,6 +174,90 @@ ok('NL-ARROW-4 empty path → no arrows, no throw',
     ok(`NL-ICON-3 ${nm} icon "${ic}" resolves via Icons Tier-1 (non-empty svg)`,
       typeof svg === 'string' && svg.length > 0);
   }
+
+  const dailyManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'blueprints', 'daily', 'manifest.json'), 'utf8'));
+  const dailyDependency = dailyManifest.depends_on?.find((entry) => entry.name === 'nav-buttons');
+  ok('GA-S4A2-DAILY-NAV-BUTTONS-CONTEXTUAL-DATE-FLOOR dependency requires nav-buttons >=2.5.0',
+    dailyDependency?.range === '>=2.5.0');
+
+  const dailyEntries = navIcons.filter((entry) => entry.manifest === 'daily');
+  const daily = dailyEntries[0];
+  const dailyAction = daily?.action || {};
+  ok('NL-DAILY-1 daily contributes exactly one daily-today launcher entry',
+    dailyEntries.length === 1 && daily.id === 'daily-today' && daily.label === 'Daily'
+    && daily.icon === 'daily' && daily.order === 100);
+  ok('NL-DAILY-2 daily launcher mirrors the canonical Daily Note template route',
+    dailyAction.type === 'runTemplaterTemplate'
+    && dailyAction.template_source === 'Daily Note.md'
+    && dailyAction.folder_prefix === '{{module_directory}}'
+    && dailyAction.folder_date_pattern === 'YYYY/MM-MMMM'
+    && dailyAction.filename_prefix === ''
+    && dailyAction.filename_date_pattern === 'dddd-YYYY-MM-DD'
+    && dailyAction.filename_suffix === '');
+  const dailySettings = dailyManifest.core_plugin_settings?.find((entry) => entry.id === 'daily-notes')?.settings;
+  const composedDailyFormat = `${dailyAction.folder_date_pattern}/${dailyAction.filename_prefix}${dailyAction.filename_date_pattern}${dailyAction.filename_suffix}`;
+  ok('NL-DAILY-3 launcher folder+filename composition equals the core Daily Notes format',
+    dailySettings?.template === '{{templates_path}}/Daily Note.md'
+    && dailySettings?.folder === dailyAction.folder_prefix
+    && composedDailyFormat === dailySettings.format);
+  ok('NL-DAILY-4 daily icon resolves through Icons Tier-1',
+    typeof iconsInst.resolve(daily?.icon) === 'string' && iconsInst.resolve(daily.icon).length > 0);
+
+  const homeEntries = navIcons.filter((entry) => entry.manifest === 'home');
+  const home = homeEntries[0];
+  ok('NL-DAILY-5 Home contribution remains byte-contract unchanged',
+    homeEntries.length === 1 && home.id === 'home-open' && home.label === 'Home'
+    && home.icon === 'home' && home.order === 40
+    && home.action?.type === 'invoke_command'
+    && home.action.command_id === 'homepage:open-homepage'
+    && home.action.read_mode_after === true);
+
+  const expectedPreExisting = [
+    { manifest: 'boards', id: 'boards-board', label: 'Board', icon: 'board', order: 100,
+      action: { type: 'createFromTemplate', target: '{{module_directory}}/To-Do-Board.md', template_source: 'To-Do-Board.md' } },
+    { manifest: 'cowork', id: 'cowork-hub', label: 'Cowork', icon: 'briefcase', order: 51,
+      action: { type: 'openLink', target: '{{module_directory}}/Cowork.md' } },
+    { manifest: 'finance', id: 'finance-hub', label: 'Finance', icon: 'finance', order: 120,
+      action: { type: 'openLink', target: '{{module_directory}}/Finance.md' } },
+    { manifest: 'home', id: 'home-open', label: 'Home', icon: 'home', order: 40,
+      action: { type: 'invoke_command', command_id: 'homepage:open-homepage', read_mode_after: true } },
+    { manifest: 'journal', id: 'journal-today', label: 'Journal', icon: 'notebook', order: 120,
+      action: { type: 'runTemplaterTemplate', template_source: 'Journal Day Hub.md', folder_prefix: '{{module_directory}}', folder_date_pattern: 'YYYY/MM-MMMM/YYYY-MM-DD', filename_prefix: 'Journal-Day-', filename_date_pattern: 'YYYY-MM-DD', filename_suffix: '' } },
+    { manifest: 'meetings', id: 'meetings-hub', label: 'Meetings', icon: 'meetings', order: 120,
+      action: { type: 'openLink', target: '{{module_directory}}/Meetings.md' } },
+    { manifest: 'people', id: 'people-hub', label: 'People', icon: 'people', order: 150,
+      action: { type: 'openLink', target: '{{module_directory}}/People.md' } },
+    { manifest: 'products', id: 'products-hub', label: 'Products', icon: 'package', order: 70,
+      action: { type: 'openLink', target: '{{module_directory}}/Products.md' } },
+    { manifest: 'project', id: 'projects-hub', label: 'Projects', icon: 'projects', order: 100,
+      action: { type: 'openLink', target: '{{module_directory}}/Projects.md' } },
+    { manifest: 'reader', id: 'reader-hub', label: 'Reader', icon: 'book-open', order: 140,
+      action: { type: 'openLink', target: '{{module_directory}}/Reader.md' } },
+    { manifest: 'sticky-notes', id: 'sticky-day-hub', label: 'Sticky Notes', icon: 'sticky-note', order: 130,
+      action: { type: 'runTemplaterTemplate', template_source: 'Sticky Day Hub.md', folder_prefix: '{{module_directory}}', folder_date_pattern: 'YYYY/MM-MMMM/YYYY-MM-DD', filename_prefix: 'Sticky-Day-', filename_date_pattern: 'YYYY-MM-DD', filename_suffix: '' } },
+    { manifest: 'teams', id: 'teams-hub', label: 'Teams', icon: 'users', order: 75,
+      action: { type: 'openLink', target: '{{module_directory}}/Teams.md' } },
+    { manifest: 'to-do', id: 'todo-today', label: 'To Do', icon: 'todo', order: 110,
+      action: { type: 'runTemplaterTemplate', template_source: 'Today To-Do.md', folder_prefix: '{{module_directory}}', folder_date_pattern: 'YYYY/MM-MMMM', filename_prefix: 'ToDo-', filename_date_pattern: 'YYYY-MM-DD', filename_suffix: '' } },
+    { manifest: 'trips', id: 'trips-hub', label: 'Trips', icon: 'trips', order: 110,
+      action: { type: 'openLink', target: '{{module_directory}}/Trips.md' } },
+    { manifest: 'wiki', id: 'wiki-hub', label: 'Wiki', icon: 'library', order: 65,
+      action: { type: 'openLink', target: '{{module_directory}}/Wiki.md' } },
+  ];
+  const actualPreExisting = navIcons
+    .filter((entry) => entry.manifest !== 'daily')
+    .map(({ manifest, id, label, icon, order, action }) => ({ manifest, id, label, icon, order, action }))
+    .sort((a, b) => a.manifest.localeCompare(b.manifest) || a.id.localeCompare(b.id));
+  ok('NL-DAILY-6 every pre-existing launcher contribution is deep-contract unchanged',
+    JSON.stringify(actualPreExisting) === JSON.stringify(expectedPreExisting));
+
+  const realRegistry = { contributions: {} };
+  for (const entry of navIcons) {
+    (realRegistry.contributions[entry.manifest] ||= []).push(entry);
+  }
+  const realDaily = inst.firstEntryPerSource(realRegistry).filter((entry) => entry._source === 'daily');
+  ok('NL-DAILY-7 assembled launcher registry exposes exactly one Daily representative',
+    realDaily.length === 1 && realDaily[0].id === 'daily-today');
 }
 
 // ── _loadRegistry: cache the per-render 2.8KB registry disk-read (session) ──
