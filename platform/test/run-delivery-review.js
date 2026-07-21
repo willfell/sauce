@@ -69,6 +69,20 @@ ok('DR-CLASS deadend blocked',
   cls({ card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked',
         resume_condition: '' }) === 'coordinator-deadend');
 
+// DR-CLASS done: a completed, non-corpse card is finished work, not actionable.
+ok('DR-CLASS done', cls({ card: 'GA-S1a Wire and guard orphan harnesses', status: 'completed' }) === 'done');
+
+// DR-DONE-1: triage() counts completed cards in noAction.done and never in actionable.
+const doneStatus = {
+  active: [],
+  tracked: [{ card: 'GA-S1a Wire and guard orphan harnesses', status: 'completed' }],
+  parked: [],
+  projection_problems: [],
+};
+const dr = T.triage(doneStatus, '');
+ok('DR-DONE-1 completed → noAction.done', dr.noAction.done === 1);
+ok('DR-DONE-1 completed not in actionable', dr.actionable.every((a) => a.card !== 'GA-S1a Wire and guard orphan harnesses'));
+
 // DR-TRIAGE-1: full status object → actionable queue + no-action summary.
 const status = {
   active: [{ card: 'ES1 Delivery epic-slice contract', status: 'in_progress' }],

@@ -74,6 +74,7 @@ function classifyCard(card, ctx) {
   if (ctx.activeIds && ctx.activeIds.has(name)) return 'active';
   if (card.status === 'in_progress' || card.status === 'implementing' ||
       card.status === 'claimed' || card.status === 'feature_pr') return 'active';
+  if (isDeployed(card.status)) return 'done';
   if (isHostLineage(name)) return 'suspended-evidence';
   if (isDirectApproval(card.resume_condition)) return 'suspended-evidence';
   if (hasDeployedSupersedingSibling(card, ctx.tracked)) return 'superseded-corpse';
@@ -109,7 +110,7 @@ function triage(status, fidText) {
   const ctx = { activeIds, tracked };
 
   const actionable = [];
-  const noAction = { frozen: 0, superseded: 0, active: 0 };
+  const noAction = { frozen: 0, superseded: 0, done: 0, active: 0 };
 
   for (const t of tracked) {
     const enriched = { ...(parkedByName.get(t.card) || {}), ...t };
@@ -117,6 +118,7 @@ function triage(status, fidText) {
     if (bucket === 'active') { noAction.active++; continue; }
     if (bucket === 'suspended-evidence') { noAction.frozen++; continue; }
     if (bucket === 'superseded-corpse') { noAction.superseded++; continue; }
+    if (bucket === 'done') { noAction.done++; continue; }
     actionable.push({ card: t.card, bucket, resume_condition: enriched.resume_condition || '' });
   }
 

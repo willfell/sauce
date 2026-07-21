@@ -251,6 +251,9 @@ ok('DR-CLASS single-gate',
 ok('DR-CLASS deadend blocked',
   cls({ card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked',
         resume_condition: '' }) === 'coordinator-deadend');
+
+// DR-CLASS done: a completed, non-corpse card is finished work, not actionable.
+ok('DR-CLASS done', cls({ card: 'GA-S1a Wire and guard orphan harnesses', status: 'completed' }) === 'done');
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -276,6 +279,7 @@ function classifyCard(card, ctx) {
   if (ctx.activeIds && ctx.activeIds.has(name)) return 'active';
   if (card.status === 'in_progress' || card.status === 'implementing' ||
       card.status === 'claimed' || card.status === 'feature_pr') return 'active';
+  if (isDeployed(card.status)) return 'done';
   if (isHostLineage(name)) return 'suspended-evidence';
   if (isDirectApproval(card.resume_condition)) return 'suspended-evidence';
   if (hasDeployedSupersedingSibling(card, ctx.tracked)) return 'superseded-corpse';
@@ -293,7 +297,7 @@ module.exports = { isHostLineage, stemOf, hasDeployedSupersedingSibling, classif
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node platform/test/run-delivery-review.js`
-Expected: PASS — `22 passed, 0 failed`.
+Expected: PASS — `23 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -346,6 +350,17 @@ ok('DR-TRIAGE noAction counts frozen+superseded',
 const fid = '## Foo — accepted 2026-07-20\ntext\n## Bar refresh — PROVISIONALLY ACCEPTED 2026-07-20\nmore\n';
 ok('DR-PROV-1 finds provisional heading',
   T.parseProvisionalPending(fid).length === 1 && /Bar refresh/.test(T.parseProvisionalPending(fid)[0]));
+
+// DR-DONE-1: triage() counts completed cards in noAction.done and never in actionable.
+const doneStatus = {
+  active: [],
+  tracked: [{ card: 'GA-S1a Wire and guard orphan harnesses', status: 'completed' }],
+  parked: [],
+  projection_problems: [],
+};
+const dr = T.triage(doneStatus, '');
+ok('DR-DONE-1 completed → noAction.done', dr.noAction.done === 1);
+ok('DR-DONE-1 completed not in actionable', dr.actionable.every((a) => a.card !== 'GA-S1a Wire and guard orphan harnesses'));
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -382,7 +397,7 @@ function triage(status, fidText) {
   const ctx = { activeIds, tracked };
 
   const actionable = [];
-  const noAction = { frozen: 0, superseded: 0, active: 0 };
+  const noAction = { frozen: 0, superseded: 0, done: 0, active: 0 };
 
   for (const t of tracked) {
     const enriched = { ...(parkedByName.get(t.card) || {}), ...t };
@@ -390,6 +405,7 @@ function triage(status, fidText) {
     if (bucket === 'active') { noAction.active++; continue; }
     if (bucket === 'suspended-evidence') { noAction.frozen++; continue; }
     if (bucket === 'superseded-corpse') { noAction.superseded++; continue; }
+    if (bucket === 'done') { noAction.done++; continue; }
     actionable.push({ card: t.card, bucket, resume_condition: enriched.resume_condition || '' });
   }
 
@@ -428,7 +444,7 @@ if (require.main === module) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node platform/test/run-delivery-review.js`
-Expected: PASS — `27 passed, 0 failed`.
+Expected: PASS — `29 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -541,7 +557,7 @@ if (require.main === module) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node platform/test/run-delivery-review.js`
-Expected: PASS — `32 passed, 0 failed`.
+Expected: PASS — `33 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -574,7 +590,7 @@ Expected: PASS — no orphan reported.
 - [ ] **Step 4: Run the new harness through npm to confirm wiring resolves**
 
 Run: `node platform/test/run-delivery-review.js`
-Expected: PASS — `32 passed, 0 failed`.
+Expected: PASS — `33 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -729,7 +745,7 @@ Expected (as of the 2026-07-20 board state, adjust to current): `noAction.frozen
 - [ ] **Step 3: Run the full new harness once more**
 
 Run: `node platform/test/run-delivery-review.js`
-Expected: PASS — `32 passed, 0 failed`.
+Expected: PASS — `33 passed, 0 failed`.
 
 - [ ] **Step 4: Dry-run the skill end-to-end (no writes)**
 
