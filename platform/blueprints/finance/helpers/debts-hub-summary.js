@@ -22,7 +22,7 @@ class DebtsHubSummary {
 
         const debts = dv.pages('"spice/finance/debts"').where(p => p.type === "debt").array();
         const root = dv.container.createEl("div", { cls: "dhs-root" });
-        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--sauce-hairline); border-radius: 12px; background: var(--background-secondary-alt);";
 
         if (debts.length === 0) {
             const empty = root.createEl("div", { cls: "dhs-empty" });
@@ -43,7 +43,7 @@ class DebtsHubSummary {
 
         // ----- Band 1 — Totals -----
         const b1 = root.createEl("div", { cls: "dhs-band-1" });
-        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border);";
+        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val) => {
             const cell = b1.createEl("div");
@@ -72,12 +72,12 @@ class DebtsHubSummary {
         }
 
         const b2 = root.createEl("div", { cls: "dhs-band-2" });
-        b2.style.cssText = "padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); display: flex; gap: 8px; flex-wrap: wrap;";
+        b2.style.cssText = "padding: 10px 0; border-bottom: 1px solid var(--sauce-hairline); display: flex; gap: 8px; flex-wrap: wrap;";
 
         for (const [k, stats] of Object.entries(byKind)) {
-            const chip = b2.createEl("span", { cls: "dhs-kind-chip" });
+            const chip = b2.createEl("span", { cls: "dhs-kind-chip sauce-pill" });
             chip.textContent = `${k}: $${stats.total.toFixed(0)} across ${stats.count}`;
-            chip.style.cssText = "font-size: 0.82em; padding: 2px 8px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);";
+            chip.style.cssText = "white-space: normal; overflow-wrap: anywhere;";
         }
 
         // ----- Band 3 — Per-debt mini-cards -----
@@ -91,7 +91,7 @@ class DebtsHubSummary {
             const bal = Number(d.current_balance) || 0;
             const apr = Number(d.apr) || 0;
             const card = b3.createEl("div", { cls: "dhs-card" });
-            card.style.cssText = "padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer;";
+            card.style.cssText = "padding: 8px 10px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-btn); cursor: pointer;";
 
             card.createEl("div", { cls: "dhs-card-name", text: d.name || "(unnamed)" }).style.cssText =
                 "font-size: 0.82em; font-weight: 600; margin-bottom: 2px;";
@@ -102,8 +102,8 @@ class DebtsHubSummary {
 
             if (d.kind === "credit-card" && Number(d.credit_limit) > 0) {
                 const paidPct = Math.round((1 - bal / Number(d.credit_limit)) * 100);
-                const chip = card.createEl("span", { cls: "dhs-card-chip", text: `${paidPct}% paid` });
-                chip.style.cssText = `display: inline-block; margin-top: 4px; font-size: 0.75em; padding: 1px 6px; border-radius: 3px; color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
+                const chip = card.createEl("span", { cls: "dhs-card-progress-pill sauce-pill", text: `${paidPct}% paid` });
+                chip.style.cssText = `margin-top: 4px; color: #fff; background: ${paidPct < 33 ? "#dc2626" : paidPct < 66 ? "#b45309" : "#16a34a"};`;
             }
 
             card.addEventListener("click", () => {

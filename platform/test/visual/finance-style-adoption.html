@@ -97,9 +97,10 @@
   .fixture-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .fixture-metric { min-width: 0; color: var(--text-muted); font-size: 0.76rem; }
   .fixture-metric b { display: block; overflow: hidden; color: var(--text-normal); font-size: 0.95rem; text-overflow: ellipsis; white-space: nowrap; }
-  .fixture-summary-band { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sauce-hairline); }
-  .fixture-summary-band .sauce-pill + .sauce-pill { margin-left: 5px; }
-  .fixture-progress { height: 7px; margin: 8px 0; border-radius: var(--sauce-radius-pill); background: var(--background-secondary); overflow: hidden; }
+  .fixture-summary-band { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sauce-hairline); }
+  .fixture-summary-band .fixture-summary-action { margin: 0 6px 6px 0; }
+  .fixture-summary-band .sauce-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .fixture-progress { flex: 1 0 100%; height: 7px; margin: 8px 0; border-radius: var(--sauce-radius-pill); background: var(--background-secondary); overflow: hidden; }
   .fixture-progress-fill { height: 100%; border-radius: inherit; background: #16a34a; }
   .fixture-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .fixture-tone-danger { color: #fff; background: #dc2626; }
@@ -184,7 +185,7 @@
   card(monthsGrid, "2026-07", "Income $9,000 · Spending $3,120", []);
   card(monthsGrid, "2026-06", "Income $9,000 · Spending $2,980", []);
 
-  function summary(grid, title, metrics, progress, pills) {
+  function summary(grid, title, metrics, progress, pills, actionLabel) {
     const item = document.createElement("article");
     item.className = "fixture-summary";
     const titleEl = document.createElement("div");
@@ -213,6 +214,14 @@
       track.appendChild(fill);
       band.appendChild(track);
     }
+    if (actionLabel) {
+      const action = document.createElement("button");
+      action.className = "sauce-btn fixture-summary-action";
+      action.type = "button";
+      action.textContent = actionLabel;
+      action.addEventListener("click", () => { clicks += 1; });
+      band.appendChild(action);
+    }
     for (const [text, tone, dot] of pills) {
       const pill = document.createElement("span");
       pill.className = "sauce-pill";
@@ -234,6 +243,9 @@
   summary(summaryGrid, "Paycheck Summary", [["Pay", "$4,500"], ["Remaining", "$1,380"]], 74, [["All paid", "good", false], ["In Progress", "warn", true]]);
   summary(summaryGrid, "Monthly + Debt", [["Net cashflow", "+$1,380"], ["Total debt", "$30,391"]], null, [["MoM ↓ $420", "good", false], ["75%", "warn", false], ["75% paid", "good", false]]);
   summary(summaryGrid, "Plan Band", [["Envelope", "$3,000"], ["Planned", "$3,500"]], null, [["Over by $500", "danger", false]]);
+  summary(summaryGrid, "Debt Summary", [["Balance", "$800"], ["APR", "24.00%"]], 60, [["vs prior: $100", "good", false]], "Edit balance");
+  summary(summaryGrid, "Savings Summary", [["Balance", "$600"], ["Target", "$1,000"]], 60, [["Tier 2 · $150/mo", "warn", false], ["vs prior: +$50", "good", false]], "Edit balance");
+  summary(summaryGrid, "Debts Hub", [["Total debt", "$2,000"], ["Zero-debt date", "2027-01"]], null, [["credit-card: $1,200 across 1", "", false], ["40% paid", "danger", false]]);
   root.appendChild(page);
 
   const controls = [...page.querySelectorAll("button, [role=button]")];
@@ -249,10 +261,15 @@
   }));
   marker.dataset.actionsClicked = String(clicks === controls.length);
   marker.dataset.buttons = String(page.querySelectorAll("button.sauce-btn").length);
+  marker.dataset.summaryButtons = String(page.querySelectorAll("button.fixture-summary-action").length);
   marker.dataset.pills = String(page.querySelectorAll(".sauce-pill").length);
   marker.dataset.cards = String(page.querySelectorAll(".fixture-card").length);
   marker.dataset.summaries = String(page.querySelectorAll(".fixture-summary").length);
   marker.dataset.progress = String(page.querySelectorAll(".fixture-progress").length);
+  marker.dataset.summaryOverflow = [...page.querySelectorAll(".fixture-summary")]
+    .filter((item) => item.scrollWidth > item.clientWidth || item.getBoundingClientRect().left < 0 || item.getBoundingClientRect().right > window.innerWidth)
+    .map((item) => item.querySelector(".fixture-summary-title").textContent)
+    .join(", ");
   marker.dataset.summariesFit = String([...page.querySelectorAll(".fixture-summary")].every((item) => {
     const rect = item.getBoundingClientRect();
     return item.scrollWidth <= item.clientWidth && rect.left >= 0 && rect.right <= window.innerWidth;

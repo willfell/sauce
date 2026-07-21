@@ -28,7 +28,7 @@ class DebtSummary {
         if (page.type !== "debt") return;
 
         const root = dv.container.createEl("div", { cls: "dbt-sum-root" });
-        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--sauce-hairline); border-radius: 12px; background: var(--background-secondary-alt);";
 
         const balance = Number(page.current_balance) || 0;
         const apr = Number(page.apr) || 0;
@@ -38,7 +38,7 @@ class DebtSummary {
 
         // ----- Band 1 — Numbers -----
         const b1 = root.createEl("div", { cls: "dbt-band-1" });
-        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border);";
+        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val, color) => {
             const cell = b1.createEl("div");
@@ -85,8 +85,8 @@ class DebtSummary {
         }
 
         // Edit balance pill
-        const editBtn = b1.createEl("button", { text: "Edit balance" });
-        editBtn.style.cssText = "cursor: pointer; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-muted); font-size: 0.8em; margin-top: 8px; align-self: flex-start;";
+        const editBtn = b1.createEl("button", { cls: "dbt-edit-btn sauce-btn", text: "Edit balance" });
+        editBtn.style.cssText = "margin-top: 8px; align-self: flex-start;";
         editBtn.addEventListener("click", async () => {
             try {
                 const file = app.vault.getAbstractFileByPath(page.file.path);
@@ -97,7 +97,7 @@ class DebtSummary {
         // ----- Band 2 — Sparkline + delta -----
         const history = Array.isArray(page.balance_history) ? page.balance_history : [];
         const b2 = root.createEl("div", { cls: "dbt-band-2" });
-        b2.style.cssText = "padding: 12px 0; border-bottom: 1px solid var(--background-modifier-border);";
+        b2.style.cssText = "padding: 12px 0; border-bottom: 1px solid var(--sauce-hairline);";
 
         if (history.length < 2) {
             const ph = b2.createEl("div", { cls: "dbt-placeholder" });
@@ -112,9 +112,9 @@ class DebtSummary {
             const prior = Number(history[0].balance) || 0;
             const delta = balance - prior;
             const sign = delta >= 0 ? "+" : "";
-            const deltaPill = b2.createEl("span", { cls: "dbt-delta" });
+            const deltaPill = b2.createEl("span", { cls: "dbt-delta-pill sauce-pill" });
             deltaPill.textContent = `vs prior: ${sign}$${Math.abs(delta).toFixed(2)}`;
-            deltaPill.style.cssText = `font-size: 0.8em; margin-left: 8px; color: ${delta > 0 ? "#dc2626" : "#16a34a"};`;
+            deltaPill.style.cssText = `margin-left: 8px; color: ${delta > 0 ? "#dc2626" : "#16a34a"};`;
         }
 
         // ----- Band 3 — CC paydown progress -----

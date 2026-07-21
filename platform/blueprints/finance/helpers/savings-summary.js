@@ -25,7 +25,7 @@ class SavingsSummary {
         if (page.type !== "savings-account") return;
 
         const root = dv.container.createEl("div", { cls: "sav-sum-root" });
-        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-secondary-alt);";
+        root.style.cssText = "margin: 12px 0 20px; padding: 16px; border: 1px solid var(--sauce-hairline); border-radius: 12px; background: var(--background-secondary-alt);";
 
         const balance = Number(page.current_balance) || 0;
         const target = Number(page.target) || 0;
@@ -33,7 +33,7 @@ class SavingsSummary {
 
         // ----- Band 1 — Numbers -----
         const b1 = root.createEl("div", { cls: "sav-band-1" });
-        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border);";
+        b1.style.cssText = "display: flex; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--sauce-hairline);";
 
         const mk = (label, val, color) => {
             const cell = b1.createEl("div");
@@ -60,14 +60,14 @@ class SavingsSummary {
         const plan = customJS.FinanceMath && customJS.FinanceMath.readPlan ? customJS.FinanceMath.readPlan(dv) : null;
         const g = (plan && customJS.FinanceMath.glide) ? customJS.FinanceMath.glide(Number(page.current_balance) || 0, plan.savings_glide) : null;
         if (g) {
-            const tierChip = b1.createEl("span", { cls: "sav-tier-chip" });
+            const tierChip = b1.createEl("span", { cls: "sav-tier-chip sauce-pill" });
             tierChip.textContent = `Tier ${g.tier} · $${g.contribution}/mo`;
-            tierChip.style.cssText = "display: inline-block; margin-top: 8px; font-size: 0.78em; padding: 2px 8px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);";
+            tierChip.style.cssText = "margin-top: 8px;";
         }
 
         // Edit balance pill
-        const editBtn = b1.createEl("button", { text: "Edit balance" });
-        editBtn.style.cssText = "cursor: pointer; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-muted); font-size: 0.8em; margin-top: 8px; align-self: flex-start;";
+        const editBtn = b1.createEl("button", { cls: "sav-edit-btn sauce-btn", text: "Edit balance" });
+        editBtn.style.cssText = "margin-top: 8px; align-self: flex-start;";
         editBtn.addEventListener("click", async () => {
             try {
                 const file = app.vault.getAbstractFileByPath(page.file.path);
@@ -78,7 +78,7 @@ class SavingsSummary {
         // ----- Band 2 — Sparkline + delta -----
         const history = Array.isArray(page.balance_history) ? page.balance_history : [];
         const b2 = root.createEl("div", { cls: "sav-band-2" });
-        b2.style.cssText = "padding: 12px 0; border-bottom: 1px solid var(--background-modifier-border);";
+        b2.style.cssText = "padding: 12px 0; border-bottom: 1px solid var(--sauce-hairline);";
 
         if (history.length < 2) {
             const ph = b2.createEl("div", { cls: "sav-placeholder" });
@@ -93,10 +93,10 @@ class SavingsSummary {
             const prior = Number(history[0].balance) || 0;
             const delta = balance - prior;
             const sign = delta >= 0 ? "+" : "";
-            const deltaPill = b2.createEl("span", { cls: "sav-delta" });
+            const deltaPill = b2.createEl("span", { cls: "sav-delta-pill sauce-pill" });
             deltaPill.textContent = `vs prior: ${sign}$${Math.abs(delta).toFixed(2)}`;
             // For savings, a RISING balance is GOOD (inverted vs debt).
-            deltaPill.style.cssText = `font-size: 0.8em; margin-left: 8px; color: ${delta > 0 ? "#16a34a" : "#dc2626"};`;
+            deltaPill.style.cssText = `margin-left: 8px; color: ${delta > 0 ? "#16a34a" : "#dc2626"};`;
         }
 
         // ----- Band 3 — To-target remaining -----
