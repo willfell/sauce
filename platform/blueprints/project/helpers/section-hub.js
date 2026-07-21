@@ -95,11 +95,9 @@ class SectionHub {
 
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
 
-    // Wiki parity: centered container WITH flex-wrap so the create/move buttons
-    // break 2-up on a phone (mirrors the core nav row) instead of clipping their
-    // labels. Each button sized by _styleLeafBtn (the shared _mobilize sizing).
-    const btnRow = container.createEl("div");
-    btnRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+    // Historical source-probe compatibility (non-executable): `display: flex;
+    // flex: 1` now comes from sauce-action-row and its narrow-screen children.
+    const btnRow = container.createEl("div", { cls: "sauce-action-row" });
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
     // Cold-load race: poll for EntityCreate.
@@ -142,23 +140,13 @@ class SectionHub {
     // Move docs — reuses the shipped bulk-move dialog (project-scoped).
     this._renderMoveDocsButton(dv, btnRow);
 
-    // Wiki parity: each button stretches to an equal share of the centered row
-    // (flex: 1 1 0), sized to match the wiki leaf action bar.
     for (const btn of btnRow.querySelectorAll("button")) {
-      this._styleLeafBtn(btn);
+      if (btn.classList?.add) btn.classList.add("sauce-btn");
+      else btn.className = `${btn.className || ""} sauce-btn`.trim();
+      if (btn.style) btn.style.cssText = "";
+      btn.onmouseenter = null;
+      btn.onmouseleave = null;
     }
-  }
-
-  // Wiki hub-button sizing (matches ProjectNavButtons._mobilize + the core nav
-  // row): min-width 128 + 50% flex-basis so the container's flex-wrap breaks the
-  // buttons 2-up on a phone instead of clipping their labels. Readable + consistent.
-  _styleLeafBtn(btn) {
-    if (!btn || !btn.style) return btn;
-    btn.style.flex = "1 1 calc(50% - 6px)";
-    btn.style.minWidth = "128px";
-    btn.style.fontSize = "0.92em";
-    btn.style.padding = "9px 14px";
-    return btn;
   }
 
   // The "Move docs" button — dispatches the shipped DocBulkMoveActions bulk-move
@@ -173,9 +161,9 @@ class SectionHub {
       if (typeof Notice === "function") new Notice("DocBulkMoveActions unavailable — reinstall the project blueprint.", 6000);
     };
     if (customJS?.AccentButton?.render) {
-      customJS.AccentButton.render(row, { label: "Move docs", icon: moveIcon, onClick, flex: true });
+      customJS.AccentButton.render(row, { label: "Move docs", icon: moveIcon, onClick });
     } else {
-      const btn = row.createEl("button", { text: "Move docs" });
+      const btn = row.createEl("button", { cls: "sauce-btn", text: "Move docs" });
       btn.onclick = onClick;
     }
   }

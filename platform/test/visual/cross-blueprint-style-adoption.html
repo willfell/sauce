@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cross-blueprint style adoption C7a visual contract</title>
+<link rel="stylesheet" href="../../mechanisms/styling/assets/snippets/sauce-core.css" />
+<style>
+  :root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --size-4-2: 8px;
+    --size-4-4: 16px;
+    --size-4-5: 20px;
+  }
+  body.theme-light {
+    --background-primary: #fff;
+    --background-secondary: #f4f4f6;
+    --background-modifier-border-hover: #c8c8ce;
+    --background-modifier-hover: rgba(0,0,0,.06);
+    --text-normal: #202124;
+    --text-muted: #65666b;
+    --interactive-accent: #6d5ce8;
+    --interactive-accent-hover: #5e4fd0;
+    --text-on-accent: #fff;
+    --color-red: #c93535;
+    --shadow-l: 0 8px 32px rgba(0,0,0,.2);
+  }
+  body.theme-dark {
+    --background-primary: #1d1e20;
+    --background-secondary: #28292c;
+    --background-modifier-border-hover: #4b4d52;
+    --background-modifier-hover: rgba(255,255,255,.08);
+    --text-normal: #e6e6e8;
+    --text-muted: #a3a4aa;
+    --interactive-accent: #8a7cf0;
+    --interactive-accent-hover: #9c90f5;
+    --text-on-accent: #fff;
+    --color-red: #df5b5b;
+    --shadow-l: 0 8px 32px rgba(0,0,0,.55);
+  }
+  html, body { margin: 0; min-height: 100%; background: var(--background-secondary); color: var(--text-normal); }
+  .fixture-page { box-sizing: border-box; width: min(100%, 980px); margin: 0 auto; padding: 20px 16px 40px; }
+  .fixture-heading { margin: 0 0 14px; font-size: 19px; }
+  .fixture-surface { box-sizing: border-box; margin: 0 0 14px; padding: 14px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-modal); background: var(--background-primary); }
+  .fixture-label { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .fixture-actions { width: 100%; }
+  .fixture-modal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .fixture-modal-wrap { min-width: 0; padding: 14px; border-radius: var(--sauce-radius-modal); background: color-mix(in srgb, var(--background-secondary) 70%, transparent); }
+  .fixture-modal-wrap .sauce-modal { width: 100%; max-height: none; }
+  .fixture-field { display: grid; gap: 5px; margin-bottom: 10px; color: var(--text-muted); font-size: 13px; }
+  .fixture-field input { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--sauce-hairline); border-radius: var(--sauce-radius-btn); background: var(--background-primary); color: var(--text-normal); }
+  @media (max-width: 700px) {
+    .fixture-page { padding: 12px 10px 28px; }
+    .fixture-modal-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main class="fixture-page">
+  <h1 class="fixture-heading">Project shared action and modal surfaces</h1>
+  <section class="fixture-surface">
+    <div class="fixture-label">Project navigation</div>
+    <div class="sauce-action-row fixture-actions">
+      <button class="sauce-btn">Project</button>
+      <button class="sauce-btn">Docs</button>
+      <button class="sauce-btn">More</button>
+    </div>
+  </section>
+  <section class="fixture-surface">
+    <div class="fixture-label">Docs hub actions</div>
+    <div class="sauce-action-row fixture-actions">
+      <button class="sauce-btn">New Doc</button>
+      <button class="sauce-btn">New Section</button>
+      <button class="sauce-btn">Move docs</button>
+    </div>
+  </section>
+  <section class="fixture-surface">
+    <div class="fixture-label">Link and leaf actions</div>
+    <div class="sauce-action-row fixture-actions">
+      <button class="sauce-btn">Add link</button>
+      <button class="sauce-btn">Manage links</button>
+      <button class="sauce-btn">Move</button>
+    </div>
+  </section>
+  <div class="fixture-modal-grid">
+    <div class="fixture-modal-wrap">
+      <section class="sauce-modal sauce-anim-pop">
+        <h3 class="sauce-modal-title">New Task Note</h3>
+        <div class="sauce-modal-body">
+          <label class="fixture-field">Note title<input value="Decision record" /></label>
+        </div>
+        <footer class="sauce-modal-footer sauce-action-row">
+          <button class="sauce-btn">Cancel</button>
+          <button class="sauce-btn sauce-btn-accent">Create</button>
+        </footer>
+      </section>
+    </div>
+    <div class="fixture-modal-wrap">
+      <section class="sauce-modal sauce-anim-pop">
+        <h3 class="sauce-modal-title">Edit link</h3>
+        <div class="sauce-modal-body">
+          <label class="fixture-field">URL<input value="https://example.com/a/long-but-valid-project-reference" /></label>
+          <label class="fixture-field">Link text<input value="Architecture reference" /></label>
+        </div>
+        <footer class="sauce-modal-footer sauce-action-row">
+          <button class="sauce-btn">Cancel</button>
+          <button class="sauce-btn sauce-btn-accent">Save</button>
+        </footer>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+(() => {
+  const theme = new URLSearchParams(location.search).get("theme") === "dark" ? "dark" : "light";
+  document.body.className = "theme-" + theme;
+  let clicks = 0;
+  const controls = [...document.querySelectorAll("button")];
+  controls.forEach((button) => { button.addEventListener("click", () => { clicks += 1; }); button.click(); });
+  const surfaces = [...document.querySelectorAll(".fixture-surface, .fixture-modal-wrap")];
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.theme = theme;
+  marker.dataset.documentFits = String(document.documentElement.scrollWidth <= window.innerWidth);
+  marker.dataset.surfacesFit = String(surfaces.every((surface) => surface.scrollWidth <= surface.clientWidth && surface.getBoundingClientRect().right <= window.innerWidth));
+  marker.dataset.controlsVisible = String(controls.every((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; }));
+  marker.dataset.actionsClicked = String(clicks === controls.length);
+  marker.dataset.rows = String(document.querySelectorAll(".fixture-surface > .sauce-action-row").length);
+  marker.dataset.buttons = String(document.querySelectorAll(".fixture-actions > .sauce-btn").length);
+  marker.dataset.modals = String(document.querySelectorAll(".fixture-modal-wrap .sauce-modal").length);
+  document.head.appendChild(marker);
+})();
+</script>
+</body>
+</html>

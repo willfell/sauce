@@ -77,28 +77,17 @@ class ProjectLinksManager {
       customJS.SectionLabel.divider(c);
     }
 
-    // Wiki parity: ONE centered action row WITH flex-wrap — Add link · Manage
-    // links split evenly and break to their own lines on a very narrow phone
-    // instead of clipping (mirrors the nav row). Each button sized by _styleLeafBtn.
-    const row = c.createEl("div");
-    row.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+    const row = c.createEl("div", { cls: "sauce-action-row" });
     const add = customJS.AccentButton.render(row, { label: "Add link", icon: plusIcon, onClick: () => this._onAdd(dv) });
     const manage = customJS.AccentButton.render(row, { label: "Manage links", icon: gearIcon, onClick: () => this._onManage(dv) });
     for (const btn of [add, manage]) {
-      this._styleLeafBtn(btn);
+      if (!btn) continue;
+      if (btn.classList?.add) btn.classList.add("sauce-btn");
+      else btn.className = `${btn.className || ""} sauce-btn`.trim();
+      if (btn.style) btn.style.cssText = "";
+      btn.onmouseenter = null;
+      btn.onmouseleave = null;
     }
-  }
-
-  // Wiki hub-button sizing (matches ProjectNavButtons._mobilize + the nav row):
-  // min-width 128 + 50% flex-basis so the container's flex-wrap breaks the buttons
-  // 2-up on a phone instead of clipping their labels. Readable + consistent.
-  _styleLeafBtn(btn) {
-    if (!btn || !btn.style) return btn;
-    btn.style.flex = "1 1 calc(50% - 6px)";
-    btn.style.minWidth = "128px";
-    btn.style.fontSize = "0.92em";
-    btn.style.padding = "9px 14px";
-    return btn;
   }
 
   // ── data + write ─────────────────────────────────────────────────────────
@@ -133,19 +122,21 @@ class ProjectLinksManager {
   _onManage(dv) {
     const links = this._currentLinks(dv);
     if (!links.length) { new Notice("No links yet — use Add link."); return; }
-    this._openModal({ title: "Manage links", build: (panel, close) => {
+    let acted = false;
+    this._openModal({ title: "Manage links", buttons: [{ label: "Done", action: "cancel" }], build: (panel, close) => {
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:52vh; overflow:auto;";
       links.forEach((link, index) => {
         const rowEl = list.createEl("div");
-        rowEl.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--background-modifier-border); border-radius:6px;";
+        rowEl.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--sauce-hairline); border-radius:var(--sauce-radius-btn);";
         const label = rowEl.createEl("div");
         label.style.cssText = "flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
         label.createEl("div", { text: link.text }).style.cssText = "font-weight:500; font-size:0.9em;";
         label.createEl("div", { text: link.url }).style.cssText = "font-size:0.75em; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;";
-        const editBtn = rowEl.createEl("button", { text: "Edit" });
-        editBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer; font-size:0.8em;";
+        const editBtn = rowEl.createEl("button", { cls: "sauce-btn", text: "Edit" });
         editBtn.onclick = () => {
+          if (acted) return false;
+          acted = true;
           close();
           this._openForm({ title: "Edit link", url: link.url, text: link.text }, async ({ url, text }) => {
             const res = ProjectLinksManager.updateLink(this._currentLinks(dv), index, { url, text });
@@ -154,23 +145,41 @@ class ProjectLinksManager {
             return false;
           });
         };
-        const delBtn = rowEl.createEl("button", { text: "Delete" });
-        delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
+        const delBtn = rowEl.createEl("button", { cls: "sauce-btn sauce-btn-danger", text: "Delete" });
         delBtn.onclick = async () => {
+          if (acted) return false;
+          acted = true;
           const res = ProjectLinksManager.deleteLink(this._currentLinks(dv), index);
           if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
           close();
+          return res.changed;
         };
       });
-      const done = panel.createEl("button", { text: "Done" });
-      done.style.cssText = "margin-top:10px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
-      done.onclick = close;
     }});
   }
 
   // ── modals ─────────────────────────────────────────────────────────────────
   _openForm({ title, url, text }, onSubmit) {
-    this._openModal({ title, build: (panel, close) => {
+    let urlInput = null;
+    let textInput = null;
+    let submitting = false;
+    const submit = async (handle) => {
+      if (submitting) return false;
+      submitting = true;
+      try {
+        const ok = await onSubmit({ url: urlInput.value, text: textInput.value });
+        if (ok) handle.close("submit");
+        return ok;
+      } finally { submitting = false; }
+    };
+    return this._openModal({
+      title,
+      autofocus: true,
+      buttons: [
+        { label: "Cancel", action: "cancel" },
+        { label: "Save", tone: "accent", close: false, onClick: (handle) => submit(handle) },
+      ],
+      build: (panel, close, handle) => {
       const mk = (labelText, value, placeholder) => {
         const wrap = panel.createEl("div");
         wrap.style.cssText = "display:flex; flex-direction:column; gap:4px; margin-top:10px;";
@@ -180,34 +189,25 @@ class ProjectLinksManager {
         input.style.cssText = "padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
         return input;
       };
-      const urlInput = mk("URL", url, "https://example.com");
-      const textInput = mk("Link text (optional)", text, "Display text");
-      const save = panel.createEl("button", { text: "Save" });
-      save.style.cssText = "margin-top:14px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
-      const submit = async () => {
-        const ok = await onSubmit({ url: urlInput.value, text: textInput.value });
-        if (ok) close();
-      };
-      save.onclick = submit;
+      urlInput = mk("URL", url, "https://example.com");
+      textInput = mk("Link text (optional)", text, "Display text");
       urlInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); textInput.focus(); } });
-      textInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); submit(); } });
-      setTimeout(() => urlInput.focus(), 0);
+      textInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); submit(handle); } });
     }});
   }
 
-  _openModal({ title, build }) {
-    const prior = document.querySelector(".sauce-links-modal-overlay");
-    if (prior) prior.remove();
-    const overlay = document.body.createDiv({ cls: "sauce-links-modal-overlay" });
-    overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
-    const modal = overlay.createDiv();
-    modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
-    const escListener = (ev) => { if (ev.key === "Escape") close(); };
-    const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    document.addEventListener("keydown", escListener);
-    const h = modal.createEl("div", { text: title });
-    h.style.cssText = "font-weight:600; font-size:1.05em; margin-bottom:4px;";
-    build(modal, close);
+  _openModal({ title, build, buttons, autofocus = false }) {
+    const modal = (typeof globalThis !== "undefined" && globalThis.customJS)
+      ? globalThis.customJS.SauceModal : null;
+    if (!modal || typeof modal.open !== "function") {
+      try { new Notice("Project links: SauceModal unavailable — reinstall the project blueprint.", 6000); } catch (_e) {}
+      return null;
+    }
+    return modal.open({
+      title,
+      autofocus,
+      buttons,
+      body: (panel, handle) => build(panel, () => handle.close("cancel"), handle),
+    });
   }
 }

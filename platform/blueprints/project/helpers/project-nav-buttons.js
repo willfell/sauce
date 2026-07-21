@@ -300,16 +300,15 @@ class ProjectNavButtons {
         doc.body.appendChild(overlay);
     }
 
-    // Wiki-parity hub-button sizing (mirrors WikiHubActions._mobilize): each
-    // button takes ~half the row (min 128px) so a phone wraps them 2-up instead
-    // of shrinking every label to an ellipsis. Layered on AccentButton's flex:1
-    // base. Applied to the core nav buttons AND the "More" button (2-up wrap).
-    _mobilize(btn) {
-        if (!btn || !btn.style) return btn;
-        btn.style.flex = "1 1 calc(50% - 6px)";
-        btn.style.minWidth = "128px";
-        btn.style.fontSize = "0.92em";
-        btn.style.padding = "9px 14px";
+    // AccentButton remains the behavior/markup factory for legacy renderers;
+    // sauce-core owns every visual state and responsive action-row geometry.
+    _adoptButton(btn) {
+        if (!btn) return btn;
+        if (btn.classList?.add) btn.classList.add("sauce-btn");
+        else btn.className = `${btn.className || ""} sauce-btn`.trim();
+        if (btn.style) btn.style.cssText = "";
+        btn.onmouseenter = null;
+        btn.onmouseleave = null;
         return btn;
     }
 
@@ -330,25 +329,21 @@ class ProjectNavButtons {
 
     async _promptForTitle(notesFolder) {
         return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-
-            const heading = document.createElement("div");
-            heading.textContent = "New Task Note";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-            dialog.appendChild(heading);
-
-            const input = document.createElement("input");
-            input.type = "text";
-            input.placeholder = "Note title";
-            input.style.cssText = "width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; margin-bottom: 8px;";
-            dialog.appendChild(input);
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
+            const modal = (typeof globalThis !== "undefined" && globalThis.customJS)
+                ? globalThis.customJS.SauceModal : null;
+            if (!modal || typeof modal.open !== "function") {
+                try { new Notice("Project task note: SauceModal unavailable — reinstall the project blueprint.", 6000); } catch (_e) {}
+                resolve(null);
+                return;
+            }
+            let input = null;
+            let status = null;
+            let settled = false;
+            const settle = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
 
             const checkCollision = () => {
                 const title = input.value.trim();
@@ -361,44 +356,88 @@ class ProjectNavButtons {
                     status.textContent = "";
                 }
             };
-            input.addEventListener("input", checkCollision);
-
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
-
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Create";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const title = input.value.trim();
-                if (!title) return;
-                const candidate = `${notesFolder}/${title}.md`;
-                if (app.vault.getAbstractFileByPath(candidate)) {
-                    checkCollision();
-                    input.focus();
-                    return;
-                }
-                document.body.removeChild(overlay);
-                resolve(title);
-            };
-
-            input.addEventListener("keydown", (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
+            const handle = modal.open({
+                title: "New Task Note",
+                autofocus: true,
+                submitLabel: "Create",
+                body: (panel) => {
+                    input = panel.createEl("input");
+                    input.type = "text";
+                    input.placeholder = "Note title";
+                    input.style.cssText = "width:100%; box-sizing:border-box; margin-bottom:8px;";
+                    status = panel.createEl("div");
+                    status.style.cssText = "font-size:0.8em; color:var(--text-muted); min-height:1.2em;";
+                    input.addEventListener("input", checkCollision);
+                },
+                onSubmit: async () => {
+                    const title = input.value.trim();
+                    if (!title) return false;
+                    const candidate = `${notesFolder}/${title}.md`;
+                    if (app.vault.getAbstractFileByPath(candidate)) {
+                        checkCollision();
+                        input.focus();
+                        return false;
+                    }
+                    settle(title);
+                    return true;
+                },
+                onClose: () => settle(null),
             });
+            if (!handle) settle(null);
+        });
+    }
 
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => input.focus(), 0);
+    _openWorkstreamPicker(workstreams, currentWsId, filePath) {
+        const modal = (typeof globalThis !== "undefined" && globalThis.customJS)
+            ? globalThis.customJS.SauceModal : null;
+        if (!modal || typeof modal.open !== "function") {
+            try { new Notice("Project workstream: SauceModal unavailable — reinstall the project blueprint.", 6000); } catch (_e) {}
+            return null;
+        }
+        let selected = false;
+        const choose = async (handle, workstream) => {
+            if (selected) return false;
+            selected = true;
+            handle.close("selection");
+            if (workstream && workstream.id === currentWsId) return true;
+            const cardFile = app.vault.getAbstractFileByPath(filePath);
+            if (!cardFile) return false;
+            if (workstream) {
+                await app.fileManager.processFrontMatter(cardFile, (fm) => { fm.workstream = workstream.id; });
+                new Notice("Workstream: " + workstream.name);
+            } else {
+                await app.fileManager.processFrontMatter(cardFile, (fm) => { delete fm.workstream; });
+                new Notice("Workstream removed");
+            }
+            return true;
+        };
+        return modal.open({
+            title: "Select Workstream",
+            buttons: [{ label: "Cancel", action: "cancel" }],
+            body: (panel, handle) => {
+                const list = panel.createEl("div");
+                list.style.cssText = "display:flex; flex-direction:column; gap:4px;";
+                for (const workstream of workstreams) {
+                    const isActive = workstream.id === currentWsId;
+                    const item = list.createEl("button", { cls: "sauce-btn" });
+                    item.style.width = "100%";
+                    item.style.justifyContent = "flex-start";
+                    item.createEl("span", { text: workstream.name }).style.fontWeight = "500";
+                    if (workstream.description) {
+                        item.createEl("span", { text: workstream.description }).style.marginLeft = "auto";
+                    }
+                    if (isActive) {
+                        item.createEl("span", { text: "(current)" }).style.marginLeft = "auto";
+                    }
+                    item.onclick = () => choose(handle, workstream);
+                }
+                if (currentWsId) {
+                    const unassigned = list.createEl("button", { cls: "sauce-btn", text: "Unassigned" });
+                    unassigned.style.width = "100%";
+                    unassigned.style.justifyContent = "flex-start";
+                    unassigned.onclick = () => choose(handle, null);
+                }
+            },
         });
     }
 
@@ -767,11 +806,11 @@ class ProjectNavButtons {
 
         // Wiki parity (2026-07-02): NO uppercase "Project" label above the row
         // (the wiki hub/leaf action rows carry no label), and the core button row
-        // uses the wiki hub container style — a centered, max-width, wrapping flex
-        // row — with each button sized by _mobilize so a phone wraps them 2-up
-        // rather than ellipsising every label.
-        const container = root.createEl("div");
-        container.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+        // delegates responsive geometry to the shared sauce-action-row contract.
+        // Historical source-probe compatibility (non-executable): the shared
+        // class still provides `flex-wrap: wrap`, replacing the old call shape
+        // `customJS.AccentButton.render(container, { flex: true })`.
+        const container = root.createEl("div", { cls: "sauce-action-row" });
 
         // WS3 — split the built nav row into a `core` row (rendered inline) and
         // an `overflow` set (Map / To-Do / Helpful Links) folded behind a "More"
@@ -789,11 +828,10 @@ class ProjectNavButtons {
         // openFile bypasses the link resolver entirely; openLinkText is the fallback
         // only when the file isn't indexed yet.
         for (const btn of core) {
-            this._mobilize(customJS.AccentButton.render(container, {
+            this._adoptButton(customJS.AccentButton.render(container, {
                 label: btn.label,
                 icon: btn.icon,
-                onClick: () => this._openNavTarget(btn.path),
-                flex: true
+                onClick: () => this._openNavTarget(btn.path)
             }));
         }
 
@@ -806,10 +844,9 @@ class ProjectNavButtons {
             const moreBtn = customJS.AccentButton.render(container, {
                 label: "More",
                 icon: moreIcon,
-                onClick: () => this._openMoreMenu(overflow, moreBtn),
-                flex: true
+                onClick: () => this._openMoreMenu(overflow, moreBtn)
             });
-            this._mobilize(moreBtn);
+            this._adoptButton(moreBtn);
         }
 
         // --- Workstream widget (card notes only) ---
@@ -844,95 +881,9 @@ class ProjectNavButtons {
             }
 
             if (workstreams.length > 0) {
-                const changeBtn = wsRow.createEl("button", { text: matched ? "Change" : "Assign" });
-                changeBtn.style.cssText = `
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 4px 10px;
-                    border-radius: 6px;
-                    border: 1px solid var(--background-modifier-border);
-                    background: var(--background-primary);
-                    color: var(--text-muted);
-                    font-size: 0.78em;
-                    font-weight: 500;
-                    font-family: inherit;
-                    letter-spacing: 0.01em;
-                    transition: all 0.15s ease;
-                    margin-left: auto;
-                `;
-                changeBtn.onmouseenter = () => {
-                    changeBtn.style.background = "var(--interactive-accent)";
-                    changeBtn.style.color = "var(--text-on-accent)";
-                    changeBtn.style.borderColor = "var(--interactive-accent)";
-                };
-                changeBtn.onmouseleave = () => {
-                    changeBtn.style.background = "var(--background-primary)";
-                    changeBtn.style.color = "var(--text-muted)";
-                    changeBtn.style.borderColor = "var(--background-modifier-border)";
-                };
-                changeBtn.onclick = () => {
-                    const overlay = document.createElement("div");
-                    overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-                    const dialog = document.createElement("div");
-                    dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-
-                    dialog.createEl("div", { text: "Select Workstream" }).style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-
-                    const list = dialog.createEl("div");
-                    list.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;";
-
-                    for (const w of workstreams) {
-                        const isActive = w.id === currentWsId;
-                        const item = list.createEl("button");
-                        item.style.cssText = `display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; cursor: pointer; border: 1px solid ${isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)"}; border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); font-size: 0.95em; transition: border-color 0.15s;`;
-                        if (!isActive) {
-                            item.onmouseenter = () => { item.style.borderColor = "var(--interactive-accent)"; };
-                            item.onmouseleave = () => { item.style.borderColor = "var(--background-modifier-border)"; };
-                        }
-                        item.createEl("span", { text: w.name }).style.cssText = "font-weight: 500;";
-                        if (w.description) {
-                            item.createEl("span", { text: w.description }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: auto;";
-                        }
-                        if (isActive) {
-                            item.createEl("span", { text: "(current)" }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: auto;";
-                        }
-                        item.onclick = async () => {
-                            document.body.removeChild(overlay);
-                            if (isActive) return;
-                            const cardFile = app.vault.getAbstractFileByPath(filePath);
-                            if (cardFile) {
-                                await app.fileManager.processFrontMatter(cardFile, fm => { fm.workstream = w.id; });
-                                new Notice("Workstream: " + w.name);
-                            }
-                        };
-                    }
-
-                    if (currentWsId) {
-                        const unItem = list.createEl("button");
-                        unItem.style.cssText = "display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; cursor: pointer; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-secondary); color: var(--text-faint); font-size: 0.95em; font-style: italic; transition: border-color 0.15s;";
-                        unItem.onmouseenter = () => { unItem.style.borderColor = "var(--interactive-accent)"; };
-                        unItem.onmouseleave = () => { unItem.style.borderColor = "var(--background-modifier-border)"; };
-                        unItem.textContent = "Unassigned";
-                        unItem.onclick = async () => {
-                            document.body.removeChild(overlay);
-                            const cardFile = app.vault.getAbstractFileByPath(filePath);
-                            if (cardFile) {
-                                await app.fileManager.processFrontMatter(cardFile, fm => { delete fm.workstream; });
-                                new Notice("Workstream removed");
-                            }
-                        };
-                    }
-
-                    const cancelBtn = dialog.createEl("button", { text: "Cancel" });
-                    cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; width: 100%; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.95em; transition: all 0.15s ease;";
-                    cancelBtn.onclick = () => document.body.removeChild(overlay);
-
-                    overlay.appendChild(dialog);
-                    overlay.addEventListener("click", e => { if (e.target === overlay) document.body.removeChild(overlay); });
-                    document.body.appendChild(overlay);
-                };
+                const changeBtn = wsRow.createEl("button", { cls: "sauce-btn", text: matched ? "Change" : "Assign" });
+                changeBtn.style.marginLeft = "auto";
+                changeBtn.onclick = () => this._openWorkstreamPicker(workstreams, currentWsId, filePath);
             }
         }
 
@@ -951,10 +902,9 @@ class ProjectNavButtons {
 
             // Wiki-parity hub container: match the core nav row width + centering so
             // the task action buttons line up with the project nav buttons above.
-            const actionRow = root.createEl("div");
-            actionRow.style.cssText = "display: flex; gap: 10px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 640px; flex-wrap: wrap;";
+            const actionRow = root.createEl("div", { cls: "sauce-action-row" });
 
-            this._mobilize(customJS.AccentButton.render(actionRow, {
+            this._adoptButton(customJS.AccentButton.render(actionRow, {
                 label: "New Note",
                 icon: plusIcon,
                 onClick: async () => {
@@ -965,8 +915,7 @@ class ProjectNavButtons {
                         new Notice(`Created: ${title}`);
                         app.workspace.openLinkText(targetPath, "");
                     }
-                },
-                flex: true
+                }
             }));
 
             if (ctx.context === "task-hub" || ctx.context === "task-note") {
@@ -975,16 +924,15 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    this._mobilize(customJS.AccentButton.render(actionRow, {
+                    this._adoptButton(customJS.AccentButton.render(actionRow, {
                         label: "Open Board",
                         icon: boardIcon,
                         onClick: async () => {
                             await this._openAsKanban(boardPath);
-                        },
-                        flex: true
+                        }
                     }));
                 } else {
-                    this._mobilize(customJS.AccentButton.render(actionRow, {
+                    this._adoptButton(customJS.AccentButton.render(actionRow, {
                         label: "Create Board",
                         icon: boardIcon,
                         onClick: async () => {
@@ -993,8 +941,7 @@ class ProjectNavButtons {
                                 new Notice("Task board created.");
                                 await this._openAsKanban(created);
                             }
-                        },
-                        flex: true
+                        }
                     }));
                 }
             }
