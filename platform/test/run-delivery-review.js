@@ -7,6 +7,7 @@
 'use strict';
 const path = require('path');
 const T = require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'delivery-review-triage.js'));
+const R = require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'delivery-review-ratify.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -105,6 +106,28 @@ ok('DR-TRIAGE noAction counts frozen+superseded',
 const fid = '## Foo — accepted 2026-07-20\ntext\n## Bar refresh — PROVISIONALLY ACCEPTED 2026-07-20\nmore\n';
 ok('DR-PROV-1 finds provisional heading',
   T.parseProvisionalPending(fid).length === 1 && /Bar refresh/.test(T.parseProvisionalPending(fid)[0]));
+
+// DR-RATIFY-1: flip PROPOSED heading + warning callout to accepted + success callout.
+const proposed = [
+  '## ES2 touch-zone authorization — PROPOSED 2026-07-20',
+  '',
+  "> [!warning] PROPOSED — awaiting Will's ratification",
+  '> body',
+  '',
+  '### Basis',
+].join('\n');
+const flipped = R.flipRatification(proposed, 'ES2 touch-zone authorization', '2026-07-21');
+ok('DR-RATIFY-1 heading flipped',
+  /## ES2 touch-zone authorization — accepted 2026-07-21/.test(flipped));
+ok('DR-RATIFY-1 callout flipped',
+  /> \[!success\] Ratified by Will — 2026-07-21/.test(flipped) && !/PROPOSED/.test(flipped));
+// DR-RATIFY-2: an unrelated PROPOSED heading is untouched.
+const two = proposed + '\n## Other — PROPOSED 2026-07-20\n';
+ok('DR-RATIFY-2 only named heading flips',
+  /## Other — PROPOSED 2026-07-20/.test(R.flipRatification(two, 'ES2 touch-zone authorization', '2026-07-21')));
+// DR-RATIFY-3: appendAmendment adds a trailing block with one blank-line separator.
+ok('DR-RATIFY-3 append',
+  R.appendAmendment('# FID\nbody', '## New — PROPOSED 2026-07-21\nx').endsWith('\n\n## New — PROPOSED 2026-07-21\nx'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
