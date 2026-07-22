@@ -14,6 +14,10 @@ const ROOT = path.resolve(__dirname, "../..");
 const PROJECT = path.join(ROOT, "platform/blueprints/project/helpers");
 const MODAL = path.join(ROOT, "platform/mechanisms/modal/sauce-modal.js");
 const SECTION_EXPLORER = path.join(ROOT, "platform/mechanisms/section-explorer/section-explorer.js");
+const PROJECT_CHROME_BAR = path.join(PROJECT, "project-chrome-bar.js");
+const ACCENT_BUTTON = path.join(ROOT, "platform/mechanisms/accent-button/accent-button.js");
+const SECTION_LABEL = path.join(ROOT, "platform/mechanisms/section-label/section-label.js");
+const SAUCE_CORE_CSS = path.join(ROOT, "platform/mechanisms/styling/assets/snippets/sauce-core.css");
 const VISUAL = path.join(ROOT, "platform/test/visual/cross-blueprint-style-adoption.html");
 const MUTATION = process.env.C7A_MUTATION || "";
 const MUTATION_CHILD = process.env.C7A_MUTATION_CHILD === "1";
@@ -213,6 +217,13 @@ function staticContract() {
         assert(!sources[name].includes('createEl("div", { cls: "sauce-action-row" })'), `${name} removes its local action-row shell`);
         assert(!sources[name].includes("for (let i = 0; i < 40"), `${name} removes its local EntityCreate cold-load poll`);
     }
+    console.log("--- R7A-CURRENT-SOURCE: exactly two delegates; ProjectChromeBar stays outside the extraction ---");
+    const actionRowCallers = fs.readdirSync(PROJECT)
+        .filter((name) => name.endsWith(".js"))
+        .filter((name) => fs.readFileSync(path.join(PROJECT, name), "utf8").includes("SectionExplorer.renderActionRow"))
+        .sort();
+    assert.deepStrictEqual(actionRowCallers, ["project-docs-index.js", "section-hub.js"], "current source has exactly the two ratified production callers");
+    assert(!fs.readFileSync(PROJECT_CHROME_BAR, "utf8").includes("SectionExplorer.renderActionRow"), "ProjectChromeBar remains outside the extraction; no stale third caller is recreated");
     for (const name of ["links", "leaf"]) {
         assert(!/position:\s*fixed/i.test(sources[name]), `${name} contains no raw fixed modal shell`);
         assert(!/document\.body\.(?:appendChild|removeChild)/.test(sources[name]), `${name} never mounts hand-rolled modal DOM`);
@@ -514,6 +525,36 @@ function markerData(html) {
     assert(tag, "executed fixture emits results");
     return Object.fromEntries([...tag.matchAll(/data-([a-z0-9-]+)="([^"]*)"/gi)].map((match) => [match[1], match[2]]));
 }
+function actionRowVisualFixture() {
+    const fileUrl = (file) => pathToFileURL(file).href;
+    return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="${fileUrl(SAUCE_CORE_CSS)}">
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--size-4-2:8px}
+body.theme-light{--background-primary:#fff;--background-secondary:#f4f4f6;--background-modifier-border:#dedee3;--background-modifier-border-hover:#c8c8ce;--background-modifier-hover:rgba(0,0,0,.06);--text-normal:#202124;--text-muted:#65666b;--interactive-accent:#6d5ce8;--interactive-accent-hover:#5e4fd0;--text-on-accent:#fff}
+body.theme-dark{--background-primary:#1d1e20;--background-secondary:#28292c;--background-modifier-border:#3b3c40;--background-modifier-border-hover:#4b4d52;--background-modifier-hover:rgba(255,255,255,.08);--text-normal:#e6e6e8;--text-muted:#a3a4aa;--interactive-accent:#8a7cf0;--interactive-accent-hover:#9c90f5;--text-on-accent:#fff}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--background-secondary);color:var(--text-normal)}main{width:min(100%,980px);margin:auto;padding:16px}.surface{min-width:0;width:100%;margin-bottom:14px;padding:14px;border:1px solid var(--background-modifier-border);border-radius:8px;background:var(--background-primary)}.label{margin-bottom:8px;color:var(--text-muted);font-size:12px;font-weight:700}.mount{min-width:0;width:100%}
+@media(max-width:700px){main{padding:10px}}
+</style></head><body><main>
+<section class="surface"><div class="label">ProjectDocsIndex.renderActionRow</div><div id="docs" class="mount"></div></section>
+<section class="surface"><div class="label">SectionHub depth 1</div><div id="section" class="mount"></div></section>
+<section class="surface"><div class="label">SectionHub depth 2</div><div id="subsection" class="mount"></div></section>
+</main>
+<script src="${fileUrl(SECTION_EXPLORER)}"></script><script src="${fileUrl(ACCENT_BUTTON)}"></script><script src="${fileUrl(SECTION_LABEL)}"></script><script src="${fileUrl(path.join(PROJECT, FILES.docs))}"></script><script src="${fileUrl(path.join(PROJECT, FILES.section))}"></script>
+<script>(async()=>{
+const theme=new URLSearchParams(location.search).get("theme")==="dark"?"dark":"light";document.body.className="theme-"+theme;window.Notice=function(){};
+Element.prototype.createEl=function(tag,options={}){const el=document.createElement(tag);if(options.cls)el.className=options.cls;if(options.text!=null)el.textContent=String(options.text);this.appendChild(el);return el};
+let moves=0;const labels={"doc-note":"New Doc","section-hub":"New Section","sub-section-hub":"New Sub-Section"};window.customJS={SectionExplorer:new SectionExplorer(),AccentButton:new AccentButton(),SectionLabel:new SectionLabel(),EntityCreate:{render:async(dv,options)=>{const button=dv.container.createEl("button",{text:labels[options.instance]});button.style.cssText="width:999px";button.onmouseenter=()=>{};button.onmouseleave=()=>{}}},DocBulkMoveActions:{_onBulkMove:()=>{moves+=1}}};
+const docsDv={container:document.getElementById("docs"),current:()=>({file:{folder:"spice/projects/sauce/docs"}})};await new ProjectDocsIndex().renderActionRow(docsDv);
+const sectionDv={container:document.getElementById("section")};const section=new SectionHub();await section._renderActionRow(sectionDv,{},1,"sauce","knowledge","Knowledge");
+const subDv={container:document.getElementById("subsection")};await section._renderActionRow(subDv,{parent_section:"[[Knowledge]]"},2,"sauce","decisions","Decisions");
+const rows=[...document.querySelectorAll(".sauce-action-row")];const buttons=[...document.querySelectorAll(".sauce-action-row .sauce-btn")];buttons.filter((button)=>button.textContent.trim()==="Move docs").forEach((button)=>button.click());
+const inside=(child,parent)=>{const c=child.getBoundingClientRect(),p=parent.getBoundingClientRect();return c.left>=p.left-.5&&c.right<=p.right+.5&&c.width>0&&c.height>0};
+const docsButtons=[...document.querySelectorAll("#docs .sauce-btn")];const narrowWrap=innerWidth>480||new Set(docsButtons.map((button)=>Math.round(button.getBoundingClientRect().top))).size===2;
+const marker=document.createElement("meta");marker.id="fixture-results";marker.dataset.theme=theme;marker.dataset.actualHelpers=String(customJS.SectionExplorer instanceof SectionExplorer&&new ProjectDocsIndex() instanceof ProjectDocsIndex&&section instanceof SectionHub);marker.dataset.documentFits=String(document.documentElement.scrollWidth<=innerWidth);marker.dataset.rowsFit=String(rows.length===3&&rows.every((row)=>row.scrollWidth<=row.clientWidth&&inside(row,row.parentElement)));marker.dataset.buttonsFit=String(buttons.length===8&&buttons.every((button)=>inside(button,button.closest(".sauce-action-row"))));marker.dataset.narrowWrap=String(narrowWrap);marker.dataset.order=buttons.map((button)=>button.textContent.trim()).join("|");marker.dataset.callbacks=String(moves===3);document.head.appendChild(marker);
+})().catch((error)=>{const marker=document.createElement("meta");marker.id="fixture-results";marker.dataset.error=String(error&&error.stack||error);document.head.appendChild(marker)});</script></body></html>`;
+}
 function visualContract() {
     console.log("--- C7A-VISUAL: deterministic 1024/390 light/dark Project fixture ---");
     const html = fs.readFileSync(VISUAL, "utf8");
@@ -527,6 +568,8 @@ function visualContract() {
     assert(executable, "Chrome is required for the visual contract");
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-c7a-visual-"));
     try {
+        const actionFixture = path.join(temp, "actual-action-row-callers.html");
+        fs.writeFileSync(actionFixture, actionRowVisualFixture());
         for (const theme of ["light", "dark"]) for (const width of [1024, 390]) {
             const url = `${pathToFileURL(VISUAL).href}?theme=${theme}`;
             const common = ["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files", "--force-prefers-reduced-motion", "--run-all-compositor-stages-before-draw", "--virtual-time-budget=1000", `--window-size=${width},900`];
@@ -545,6 +588,20 @@ function visualContract() {
             const a = fs.readFileSync(first); const b = fs.readFileSync(second);
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
+
+            const actionUrl = `${pathToFileURL(actionFixture).href}?theme=${theme}`;
+            const actionMarker = markerData(runChrome(executable, [...common, "--dump-dom", actionUrl]));
+            assert(!actionMarker.error, `actual action-row callers are error-free: ${actionMarker.error || ""}`);
+            assert.strictEqual(actionMarker.theme, theme); assert.strictEqual(actionMarker["actual-helpers"], "true");
+            assert.strictEqual(actionMarker["document-fits"], "true"); assert.strictEqual(actionMarker["rows-fit"], "true");
+            assert.strictEqual(actionMarker["buttons-fit"], "true"); assert.strictEqual(actionMarker["narrow-wrap"], "true");
+            assert.strictEqual(actionMarker.order, "New Doc|New Section|Move docs|New Doc|New Sub-Section|Move docs|New Doc|Move docs");
+            assert.strictEqual(actionMarker.callbacks, "true");
+            const actionFirst = path.join(temp, `${theme}-${width}-actions-a.png`); const actionSecond = path.join(temp, `${theme}-${width}-actions-b.png`);
+            runChrome(executable, [...common, `--screenshot=${actionFirst}`, actionUrl]); runChrome(executable, [...common, `--screenshot=${actionSecond}`, actionUrl]);
+            const actionA = fs.readFileSync(actionFirst); const actionB = fs.readFileSync(actionSecond);
+            assert(actionA.length > 1000 && actionA.subarray(1, 4).equals(Buffer.from("PNG")), "actual action-row screenshot is a non-empty PNG");
+            assert.strictEqual(crypto.createHash("sha256").update(actionA).digest("hex"), crypto.createHash("sha256").update(actionB).digest("hex"), `${theme}/${width} actual action-row screenshot is deterministic`);
         }
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
