@@ -160,9 +160,21 @@ async function main() {
   assert.deepStrictEqual(mutations, [], 'native-array and empty-section renders remain read-only');
 
   const coldContainer = element();
+  let coldCurrentTouches = 0;
+  const coldDv = new Proxy({ container: coldContainer }, {
+    get(target, property) {
+      if (property === 'current') {
+        coldCurrentTouches += 1;
+        return () => { coldCurrentTouches += 1; throw new Error('must not call any dv current alias'); };
+      }
+      return target[property];
+    },
+  });
   delete global.customJS.RenderSafe;
-  await new EpicDashboard({ lifecycleApi }).render({ container: coldContainer, current: () => { throw new Error('must not call dv.current'); } });
+  await new EpicDashboard({ lifecycleApi }).render(coldDv);
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
+  assert.strictEqual(coldCurrentTouches, 0,
+    'epic-cold-load-dv-current-alias-mutation-gap: cold load never reads or invokes any Dataview current alias');
 
   global.customJS = { RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder } }) }, SectionLabel: sectionLabel };
 
@@ -194,20 +206,39 @@ async function main() {
     }), 'ranch/content', `epic-delivery-unsafe-content-path-mutation-gap: rejects ${absolutePath}`);
   }
 
-  const presentConsumerVaults = VAULTS.filter((vault) => fs.existsSync(vault.path));
-  if (presentConsumerVaults.length) {
-    assert.strictEqual(presentConsumerVaults.length, 3,
-      'epic-delivery-installed-path-mismatch: live verification requires headspace, Accuris, and ERO together');
-    for (const vault of presentConsumerVaults) {
-      const config = JSON.parse(fs.readFileSync(path.join(vault.path, 'ranch/platform-config.json'), 'utf8'));
+  const verifyInstalledVaults = (vaults, io) => {
+    assert.deepStrictEqual(vaults.map((vault) => vault.name).sort(), ['accuris-sauce', 'ero-sauce', 'headspace-sauce'],
+      'epic-delivery-installed-all-vaults-skip-mutation-gap: verifier receives the complete authoritative vault set');
+    for (const vault of vaults) {
+      assert(io.existsSync(vault.path), `epic-delivery-installed-all-vaults-skip-mutation-gap: ${vault.name} root exists`);
+      const configPath = path.join(vault.path, 'ranch/platform-config.json');
+      assert(io.existsSync(configPath), `${vault.name} has platform-config.json`);
+      const config = JSON.parse(io.readFileSync(configPath, 'utf8'));
       const contentPath = config.variables?.content_path || 'ranch/content';
       for (const mapping of deliveryManifest.files.filter((entry) => [
         'index.js', 'scripts/delivery-contract.js', 'data/delivery-schema.json',
       ].includes(entry.source))) {
         const artifact = path.join(vault.path, mapping.dest.replace('{{content_path}}', contentPath));
-        assert(fs.existsSync(artifact), `epic-delivery-installed-path-mismatch: ${vault.name} has ${mapping.source}`);
+        assert(io.existsSync(artifact), `epic-delivery-installed-path-mismatch: ${vault.name} has ${mapping.source}`);
       }
     }
+  };
+  if (process.env.CI === 'true') {
+    const fixtureVaults = VAULTS.map((vault) => ({ name: vault.name, path: path.join('/portable-vault-fixture', vault.name) }));
+    const fixtureFiles = new Set();
+    for (const vault of fixtureVaults) {
+      fixtureFiles.add(vault.path);
+      fixtureFiles.add(path.join(vault.path, 'ranch/platform-config.json'));
+      for (const installed of [expectedIndexPath, expectedContractPath, expectedRegistryPath]) {
+        fixtureFiles.add(path.join(vault.path, installed));
+      }
+    }
+    verifyInstalledVaults(fixtureVaults, {
+      existsSync: (entry) => fixtureFiles.has(entry),
+      readFileSync: () => JSON.stringify({ variables: {} }),
+    });
+  } else {
+    verifyInstalledVaults(VAULTS, fs);
   }
 
   const priorGlobalRequire = global.require;
@@ -252,7 +283,7 @@ async function main() {
 
   const installedSources = {
     'ranch/platform-config.json': JSON.stringify(workshopConfig),
-    [expectedIndexPath]: read('platform/mechanisms/delivery/index.js'),
+    [expectedIndexPath]: "const contract = require('./scripts/delivery-contract'); module.exports = { ...contract, __epicDashboardPublicIndex: true };",
     [expectedContractPath]: read('platform/mechanisms/delivery/scripts/delivery-contract.js'),
     [expectedRegistryPath]: read('platform/mechanisms/delivery/data/delivery-schema.json'),
   };
@@ -261,6 +292,8 @@ async function main() {
   delete global.customJS.DeliveryContract;
   const mobileApi = await new EpicDashboard()._deliveryApi();
   assert(mobileApi && typeof mobileApi.deriveEpicLifecycle === 'function', 'mobile resolves the installed public Delivery artifact');
+  assert.strictEqual(mobileApi.__epicDashboardPublicIndex, true,
+    'epic-delivery-mobile-public-boundary-mutation-gap: mobile returns the evaluated public index export');
   assert.deepStrictEqual(mobileApi.deriveEpicLifecycle(slices), delivery.deriveEpicLifecycle(slices),
     'mobile adapter delegates to the same lifecycle contract');
 
