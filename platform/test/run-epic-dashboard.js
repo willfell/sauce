@@ -340,7 +340,16 @@ async function main() {
     }), 'ranch/content', `epic-delivery-unsafe-content-path-mutation-gap: rejects ${absolutePath}`);
   }
 
+  const expectedArtifactSources = Object.freeze([
+    'index.js', 'scripts/delivery-contract.js', 'data/delivery-schema.json',
+  ]);
   const artifactSources = ['index.js', 'scripts/delivery-contract.js', 'data/delivery-schema.json'];
+  assert.deepStrictEqual(artifactSources, expectedArtifactSources,
+    'epic-delivery-installed-artifact-source-self-oracle-mutation-gap: verifier source set equals the independently declared exact artifact set');
+  assert.strictEqual(new Set(expectedArtifactSources).size, expectedArtifactSources.length,
+    'epic-delivery-installed-artifact-source-self-oracle-mutation-gap: independently declared artifact set is unique');
+  assert.deepStrictEqual(expectedArtifactSources.map((sourceName) => deliveryManifest.files.find((entry) => entry.source === sourceName)?.source), expectedArtifactSources,
+    'epic-delivery-installed-artifact-source-self-oracle-mutation-gap: independently declared artifact set remains manifest-backed');
   const verifyInstalledVaults = (vaults, io, mode) => {
     assert.deepStrictEqual(vaults.map((vault) => vault.name).sort(), ['accuris-sauce', 'ero-sauce', 'headspace-sauce'],
       'epic-delivery-installed-all-vaults-skip-mutation-gap: verifier receives the complete authoritative vault set');
@@ -381,7 +390,7 @@ async function main() {
     fixtureFiles.add(configPath);
     fixtureConfigs.set(configPath, JSON.stringify({ variables: configured ? { content_path: configured } : {} }));
     const contentPath = configured || 'ranch/content';
-    for (const sourceName of artifactSources) {
+    for (const sourceName of expectedArtifactSources) {
       const mapping = deliveryManifest.files.find((entry) => entry.source === sourceName);
       fixtureFiles.add(path.join(vault.path, mapping.dest.replace('{{content_path}}', contentPath)));
     }
@@ -396,7 +405,7 @@ async function main() {
   const expectedVaultMatrix = fixtureVaults.map((vault) => `${vault.name}|${fixtureContentPaths[vault.name] || 'ranch/content'}`);
   const expectedArtifactMatrix = fixtureVaults.flatMap((vault) => {
     const contentPath = fixtureContentPaths[vault.name] || 'ranch/content';
-    return artifactSources.map((sourceName) => {
+    return expectedArtifactSources.map((sourceName) => {
       const mapping = deliveryManifest.files.find((entry) => entry.source === sourceName);
       return `${vault.name}|${sourceName}|${mapping.dest.replace('{{content_path}}', contentPath)}`;
     });
@@ -483,7 +492,7 @@ async function main() {
     assert.throws(() => verifyInstalledVaults(fixtureVaults, fixtureIo(missingConfig), `missing-config:${vault.name}`), /platform-config\.json/,
       `epic-delivery-installed-verifier-matrix-mutation-gap: missing ${vault.name} config fails closed`);
     const contentPath = fixtureContentPaths[vault.name] || 'ranch/content';
-    for (const sourceName of artifactSources) {
+    for (const sourceName of expectedArtifactSources) {
       const mapping = deliveryManifest.files.find((entry) => entry.source === sourceName);
       const missingArtifact = new Set(fixtureFiles);
       missingArtifact.delete(path.join(vault.path, mapping.dest.replace('{{content_path}}', contentPath)));
