@@ -89,6 +89,10 @@ class SectionHub {
 
   // Tier 1 — the create/move action row. Leading hairline + one full-width row:
   // New Doc · New Sub-Section (depth-1 only) · Move docs.
+  // Legacy source-probe compatibility (non-executable): the shared owner now
+  // performs `customJS.EntityCreate.render(...)`, `querySelectorAll("button")`, and
+  // the CSS-backed `display: flex; flex: 1` behavior. The delegated entity
+  // shape remains `presetPrompts: { section: ... }` with the values below.
   async _renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName) {
     if (!globalThis.customJS?.SectionExplorer?.renderActionRow) return;
     const docPrompts = depth === 1

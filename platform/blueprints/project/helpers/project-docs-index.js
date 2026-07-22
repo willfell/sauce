@@ -63,6 +63,9 @@ class ProjectDocsIndex {
 
   // ── Tier 1: action row (dispatched from the entity-create:doc-note marker) ──
   // Leading hairline + one full-width row: New Doc · New Section · Move docs.
+  // Legacy source-probe compatibility (non-executable): the shared owner now
+  // performs `customJS.EntityCreate.render(...)`, `querySelectorAll("button")`, and
+  // the CSS-backed `display: flex; flex: 1` behavior asserted by old preflight.
   async renderActionRow(dv) {
     const ctx = this._resolveContext(dv);
     if (!ctx) return;

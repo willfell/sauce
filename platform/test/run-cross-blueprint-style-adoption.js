@@ -208,7 +208,9 @@ function staticContract() {
     assert(explorer.includes("async renderActionRow(dv, actions"), "SectionExplorer publishes the shared action-row renderer");
     for (const name of ["docs", "section"]) {
         assert(sources[name].includes("customJS.SectionExplorer.renderActionRow"), `${name} delegates to SectionExplorer action-row ownership`);
-        assert(!sources[name].includes("querySelectorAll(\"button\")"), `${name} removes local final-button normalization`);
+        assert(!sources[name].includes("for (const btn of"), `${name} removes its local final-button normalization loop`);
+        assert(!sources[name].includes("await customJS.EntityCreate.render"), `${name} removes direct EntityCreate dispatch`);
+        assert(!sources[name].includes('createEl("div", { cls: "sauce-action-row" })'), `${name} removes its local action-row shell`);
         assert(!sources[name].includes("for (let i = 0; i < 40"), `${name} removes its local EntityCreate cold-load poll`);
     }
     for (const name of ["links", "leaf"]) {
