@@ -24,6 +24,15 @@ class EpicDashboard {
     try { return typeof app !== "undefined" ? app : globalThis.app; } catch (_e) { return null; }
   }
 
+  async _contentPath(adapter) {
+    try {
+      const config = JSON.parse(await adapter?.read?.("ranch/platform-config.json"));
+      const configured = String(config?.variables?.content_path || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+      if (configured && !configured.startsWith("/") && !configured.split("/").includes("..")) return configured;
+    } catch (_e) {}
+    return "ranch/content";
+  }
+
   _frontmatter(file) {
     try { return this._app()?.metadataCache?.getFileCache(file)?.frontmatter || {}; }
     catch (_e) { return {}; }
@@ -73,8 +82,11 @@ class EpicDashboard {
       if (typeof globalThis.SauceDelivery?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = globalThis.SauceDelivery);
       if (typeof globalThis.customJS?.DeliveryContract?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = globalThis.customJS.DeliveryContract);
       const realApp = this._app();
+      const adapter = realApp?.vault?.adapter;
+      const contentPath = await this._contentPath(adapter);
+      const deliveryRoot = `${contentPath}/delivery`;
       const req = typeof globalThis.require === "function" ? globalThis.require : null;
-      const fullPath = realApp?.vault?.adapter?.getFullPath?.("ranch/delivery/index.js");
+      const fullPath = adapter?.getFullPath?.(`${deliveryRoot}/index.js`);
       if (req && fullPath) {
         const api = req(fullPath);
         if (typeof api?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = api);
@@ -85,12 +97,11 @@ class EpicDashboard {
       // duplicating its lifecycle rules in this view. The stable public index
       // remains the final export boundary; crypto is a lazy stub because the
       // dashboard calls lifecycle derivation only (never hashing APIs).
-      const adapter = realApp?.vault?.adapter;
       if (adapter?.read) {
         const [indexSource, contractSource, registrySource] = await Promise.all([
-          adapter.read("ranch/delivery/index.js"),
-          adapter.read("ranch/delivery/scripts/delivery-contract.js"),
-          adapter.read("ranch/delivery/data/delivery-schema.json"),
+          adapter.read(`${deliveryRoot}/index.js`),
+          adapter.read(`${deliveryRoot}/scripts/delivery-contract.js`),
+          adapter.read(`${deliveryRoot}/data/delivery-schema.json`),
         ]);
         const registry = JSON.parse(registrySource);
         const contractModule = { exports: {} };

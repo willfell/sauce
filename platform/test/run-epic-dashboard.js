@@ -162,19 +162,48 @@ async function main() {
 
   global.customJS = { RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder } }) }, SectionLabel: sectionLabel };
 
+  const deliveryManifest = JSON.parse(read('platform/mechanisms/delivery/manifest.json'));
+  const workshopConfig = JSON.parse(read('ranch/platform-config.json'));
+  const defaultContentPath = workshopConfig.variables.content_path || 'ranch/content';
+  const installedPath = (sourceName) => {
+    const mapping = deliveryManifest.files.find((entry) => entry.source === sourceName);
+    assert(mapping, `Delivery manifest maps ${sourceName}`);
+    return mapping.dest.replace('{{content_path}}', defaultContentPath);
+  };
+  const expectedIndexPath = installedPath('index.js');
+  const expectedContractPath = installedPath('scripts/delivery-contract.js');
+  const expectedRegistryPath = installedPath('data/delivery-schema.json');
+  assert.strictEqual(expectedIndexPath, 'ranch/content/delivery/index.js',
+    'epic-delivery-installed-path-mismatch: manifest plus workshop content_path derives the public index');
+  assert.strictEqual(await new EpicDashboard()._contentPath({
+    read: async () => JSON.stringify({ variables: { content_path: 'custom/content' } }),
+  }), 'custom/content', 'configured consumer content_path overrides the default');
+  assert.strictEqual(await new EpicDashboard()._contentPath({
+    read: async () => JSON.stringify({ variables: { scripts_path: 'ranch/scripts' } }),
+  }), 'ranch/content', 'consumer without content_path uses the installer default');
+  assert.strictEqual(await new EpicDashboard()._contentPath({
+    read: async () => JSON.stringify({ variables: { content_path: '../escape' } }),
+  }), 'ranch/content', 'unsafe content_path fails closed to the installer default');
+
   const priorGlobalRequire = global.require;
   const desktopPaths = [];
   global.require = require;
   global.app = {
-    vault: { adapter: { getFullPath: (entry) => {
-      desktopPaths.push(entry);
-      return path.join(ROOT, 'platform/mechanisms/delivery/index.js');
-    } } },
+    vault: { adapter: {
+      read: async (entry) => {
+        assert.strictEqual(entry, 'ranch/platform-config.json', 'desktop reads the installed path configuration');
+        return JSON.stringify(workshopConfig);
+      },
+      getFullPath: (entry) => {
+        desktopPaths.push(entry);
+        return path.join(ROOT, 'platform/mechanisms/delivery/index.js');
+      },
+    } },
   };
   delete global.SauceDelivery;
   delete global.customJS.DeliveryContract;
   const desktopApi = await new EpicDashboard()._deliveryApi();
-  assert.deepStrictEqual(desktopPaths, ['ranch/delivery/index.js'],
+  assert.deepStrictEqual(desktopPaths, [expectedIndexPath],
     'epic-delivery-desktop-resolution-mutation-gap: desktop resolves the installed public index through getFullPath');
   assert(desktopApi && typeof desktopApi.deriveEpicLifecycle === 'function', 'desktop loads Delivery through Node require');
   assert.deepStrictEqual(desktopApi.deriveEpicLifecycle(slices), delivery.deriveEpicLifecycle(slices),
@@ -197,9 +226,10 @@ async function main() {
   delete global.customJS.DeliveryContract;
 
   const installedSources = {
-    'ranch/delivery/index.js': read('platform/mechanisms/delivery/index.js'),
-    'ranch/delivery/scripts/delivery-contract.js': read('platform/mechanisms/delivery/scripts/delivery-contract.js'),
-    'ranch/delivery/data/delivery-schema.json': read('platform/mechanisms/delivery/data/delivery-schema.json'),
+    'ranch/platform-config.json': JSON.stringify(workshopConfig),
+    [expectedIndexPath]: read('platform/mechanisms/delivery/index.js'),
+    [expectedContractPath]: read('platform/mechanisms/delivery/scripts/delivery-contract.js'),
+    [expectedRegistryPath]: read('platform/mechanisms/delivery/data/delivery-schema.json'),
   };
   global.app = { vault: { adapter: { read: async (entry) => installedSources[entry] } } };
   delete global.SauceDelivery;
@@ -228,7 +258,9 @@ async function main() {
   assert(source.includes('api.deriveEpicLifecycle(slices)'), 'production rendering calls the Delivery public API');
   assert(!/function\s+deriveEpicLifecycle\b/.test(source), 'dashboard contains no copied lifecycle state machine');
   assert(!source.includes('dv.current('), 'dashboard uses RenderSafe instead of raw dv.current');
-  for (const installedPath of Object.keys(installedSources)) assert(source.includes(installedPath), `mobile resolver includes ${installedPath}`);
+  assert(source.includes('ranch/platform-config.json') && source.includes('ranch/content'),
+    'production derives configured content_path with the installer default');
+  assert(!source.includes('ranch/delivery/'), 'production contains no obsolete pre-content-path Delivery location');
 
   const visual = fs.readFileSync(VISUAL, 'utf8');
   assert((visual.match(/<main class="phone/g) || []).length === 2 && visual.includes('class="phone dark"'), 'visual proof includes light and dark phones');
