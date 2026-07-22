@@ -545,10 +545,23 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function stopChild(child) {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
+    if (await Promise.race([exited, wait(5000).then(() => false)])) return;
     child.kill("SIGTERM");
     if (await Promise.race([exited, wait(5000).then(() => false)])) return;
     child.kill("SIGKILL");
     await Promise.race([exited, wait(5000)]);
+}
+async function removeTreeWithRetry(target) {
+    let lastError;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        try { fs.rmSync(target, { recursive: true, force: true }); return; }
+        catch (error) {
+            if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) throw error;
+            lastError = error;
+            await wait(100);
+        }
+    }
+    throw lastError;
 }
 function createCdpTarget(port, url) {
     return new Promise((resolve, reject) => {
@@ -655,6 +668,7 @@ async function exactViewportCapture(executable, url, width, height) {
         "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
     ], { stdio: "ignore" });
     let socket;
+    let sendCommand;
     try {
         const portFile = path.join(profile, "DevToolsActivePort");
         for (let attempt = 0; attempt < 100 && !fs.existsSync(portFile); attempt += 1) await wait(50);
@@ -677,6 +691,7 @@ async function exactViewportCapture(executable, url, width, height) {
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
         });
+        sendCommand = send;
         await send("Page.enable");
         await send("Runtime.enable");
         await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
@@ -695,9 +710,13 @@ async function exactViewportCapture(executable, url, width, height) {
         const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         return { marker, first, second };
     } finally {
+        if (sendCommand) {
+            const gracefulClose = sendCommand("Browser.close").catch(() => {});
+            await Promise.race([gracefulClose, wait(1000)]);
+        }
         if (socket) socket.close();
         await stopChild(chrome);
-        fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        await removeTreeWithRetry(profile);
     }
 }
 function actionRowVisualFixture() {
