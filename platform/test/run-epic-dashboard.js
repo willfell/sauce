@@ -6,6 +6,7 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { fileURLToPath, pathToFileURL } = require('url');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HELPER = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboard.js');
@@ -44,6 +45,7 @@ function sliceRow(root, label) {
   return flatten(root).find((node) => (node.children || []).some((child) => child.tag === 'button' && child.textContent === label));
 }
 function pillOf(row) { return (row.children || []).find((child) => child.className.includes('status-pill')); }
+function visualUrlFor(filePath) { return pathToFileURL(filePath).href; }
 function deploymentHostFor(identity, env, io = fs) {
   return env.SAUCE_DEPLOYMENT_HOST === 'true'
     || (identity.username === 'willfellhoelter'
@@ -600,9 +602,15 @@ async function main() {
   ].filter(Boolean);
   const chrome = chromeCandidates.find((candidate) => fs.existsSync(candidate));
   assert(chrome, 'epic-390px-effective-viewport-mutation-gap: Chrome is required for device-metrics geometry proof');
+  const specialVisualPath = path.join(os.tmpdir(), 'contributor#clone?query', 'epic dashboard.html');
+  const specialVisualUrl = visualUrlFor(specialVisualPath);
+  assert(specialVisualUrl.includes('%23') && specialVisualUrl.includes('%3F') && specialVisualUrl.includes('%20'),
+    'epic-dashboard-geometry-file-url-portability-gap: special checkout characters are URL encoded');
+  assert.strictEqual(fileURLToPath(specialVisualUrl), specialVisualPath,
+    'epic-dashboard-geometry-file-url-portability-gap: encoded visual URL round-trips to the exact checkout path');
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
   try {
-    const browser = await renderGeometry(chrome, profile, `file://${VISUAL}`, 390);
+    const browser = await renderGeometry(chrome, profile, visualUrlFor(VISUAL), 390);
     assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
     }, `epic-390px-effective-viewport-mutation-gap: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
