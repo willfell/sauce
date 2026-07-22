@@ -60,6 +60,28 @@ function verifyDeploymentHost({ identity, env, io, vaults, verify }) {
   const hostVaults = deploymentVaultsFor(identity, vaults);
   return { required, ran: true, vaults: hostVaults, receipt: verify(hostVaults) };
 }
+function createGeometryResources(io = fs) {
+  let specialVisualRoot = null;
+  let profile = null;
+  let specialProfile = null;
+  const cleanup = () => {
+    for (const resource of [specialProfile, profile, specialVisualRoot]) {
+      if (!resource) continue;
+      try { io.rmSync(resource, { recursive: true, force: true }); } catch (_) { /* best-effort cleanup preserves setup failure */ }
+    }
+  };
+  try {
+    specialVisualRoot = io.mkdtempSync(path.join(os.tmpdir(), 'contributor#clone?query-'));
+    const specialVisualPath = path.join(specialVisualRoot, 'epic dashboard.html');
+    io.copyFileSync(VISUAL, specialVisualPath);
+    profile = io.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
+    specialProfile = io.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-special-'));
+    return { specialVisualRoot, specialVisualPath, profile, specialProfile, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
 function deadline(promise, milliseconds, label) {
   let timer;
   return Promise.race([
@@ -604,6 +626,31 @@ async function main() {
     'effectiveViewport.clientWidth !== expectedViewportWidth', 'document.body.dataset.viewportWidth',
   ]) assert(visual.includes(geometryGuard), `rendered geometry proof locks ${geometryGuard}`);
 
+  for (const failure of ['special-root', 'copy', 'normal-profile', 'special-profile']) {
+    const created = [];
+    const removed = [];
+    let mkdtempCall = 0;
+    const setupIo = {
+      mkdtempSync: () => {
+        mkdtempCall += 1;
+        if ((failure === 'special-root' && mkdtempCall === 1)
+          || (failure === 'normal-profile' && mkdtempCall === 2)
+          || (failure === 'special-profile' && mkdtempCall === 3)) throw new Error(`${failure} fault`);
+        const resource = `/tmp/${failure}-${mkdtempCall}`;
+        created.push(resource);
+        return resource;
+      },
+      copyFileSync: () => {
+        if (failure === 'copy') throw new Error('copy fault');
+      },
+      rmSync: (resource) => { removed.push(resource); },
+    };
+    assert.throws(() => createGeometryResources(setupIo), /fault/,
+      `epic-dashboard-special-path-setup-cleanup-gap: ${failure} setup fault propagates`);
+    assert.deepStrictEqual([...removed].sort(), [...created].sort(),
+      `epic-dashboard-special-path-setup-cleanup-gap: ${failure} setup fault leaves no temporary resource`);
+  }
+
   const chromeCandidates = [
     process.env.CHROME_BIN,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -611,16 +658,13 @@ async function main() {
   ].filter(Boolean);
   const chrome = chromeCandidates.find((candidate) => fs.existsSync(candidate));
   assert(chrome, 'epic-390px-effective-viewport-mutation-gap: Chrome is required for device-metrics geometry proof');
-  const specialVisualRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'contributor#clone?query-'));
-  const specialVisualPath = path.join(specialVisualRoot, 'epic dashboard.html');
-  fs.copyFileSync(VISUAL, specialVisualPath);
+  const geometryResources = createGeometryResources();
+  const { specialVisualRoot, specialVisualPath, profile, specialProfile } = geometryResources;
   const specialVisualUrl = visualUrlFor(specialVisualPath);
   assert(specialVisualUrl.includes('%23') && specialVisualUrl.includes('%3F') && specialVisualUrl.includes('%20'),
     'epic-dashboard-geometry-file-url-portability-gap: special checkout characters are URL encoded');
   assert.strictEqual(fileURLToPath(specialVisualUrl), specialVisualPath,
     'epic-dashboard-geometry-file-url-portability-gap: encoded visual URL round-trips to the exact checkout path');
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
-  const specialProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-special-'));
   try {
     const browser = await renderGeometry(chrome, profile, VISUAL, 390);
     assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
@@ -632,9 +676,7 @@ async function main() {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
     }, `epic-dashboard-geometry-file-url-navigation-binding-mutation-gap: encoded special-path navigation renders the exact viewport: ${JSON.stringify(specialBrowser)}`);
   } finally {
-    fs.rmSync(profile, { recursive: true, force: true });
-    fs.rmSync(specialProfile, { recursive: true, force: true });
-    fs.rmSync(specialVisualRoot, { recursive: true, force: true });
+    geometryResources.cleanup();
   }
 
   console.log('epic-dashboard: all checks passed');
