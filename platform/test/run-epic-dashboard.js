@@ -64,14 +64,39 @@ async function main() {
     [`${board}/Not a Slice.md`, { type: 'task', status: 'planning' }],
   ]);
   const opened = [];
+  const mutations = [];
+  const mutator = (name) => () => {
+    mutations.push(name);
+    throw new Error(`read-only fixture invoked ${name}`);
+  };
   global.app = {
-    vault: { getMarkdownFiles: () => markdownFiles },
-    metadataCache: { getFileCache: (entry) => ({ frontmatter: frontmatter.get(entry.path) || {} }) },
+    vault: {
+      getMarkdownFiles: () => markdownFiles,
+      create: mutator('vault.create'), createBinary: mutator('vault.createBinary'),
+      modify: mutator('vault.modify'), modifyBinary: mutator('vault.modifyBinary'),
+      delete: mutator('vault.delete'), rename: mutator('vault.rename'), trash: mutator('vault.trash'),
+      adapter: {
+        write: mutator('adapter.write'), remove: mutator('adapter.remove'),
+        mkdir: mutator('adapter.mkdir'), rmdir: mutator('adapter.rmdir'),
+      },
+    },
+    metadataCache: {
+      getFileCache: (entry) => ({ frontmatter: frontmatter.get(entry.path) || {} }),
+      trigger: mutator('metadataCache.trigger'), save: mutator('metadataCache.save'),
+    },
+    fileManager: {
+      processFrontMatter: mutator('fileManager.processFrontMatter'), renameFile: mutator('fileManager.renameFile'),
+    },
     workspace: { openLinkText: (...args) => opened.push(args) },
   };
+  let currentPage = {
+    file: { path: epicPath, folder: epicFolder },
+    docs: { array: () => ['[[Architecture]]', '[[Runbook|Runbook]]'] },
+  };
+  const sectionLabel = { render: (dv, options) => dv.container.createEl('div', { text: options.text }) };
   global.customJS = {
-    RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder }, docs: { array: () => ['[[Architecture]]', '[[Runbook|Runbook]]'] } }) },
-    SectionLabel: { render: (dv, options) => dv.container.createEl('div', { text: options.text }) },
+    RenderSafe: { page: () => currentPage },
+    SectionLabel: sectionLabel,
   };
 
   let lifecycleCalls = 0;
@@ -103,19 +128,60 @@ async function main() {
   for (const expected of ['active', '1 deployed', '1 in flight', '1 blocked', '1 planned',
     'S1 Planned', 'S2 Active', 'S3 Blocked', 'S4 Done', 'Context pack', 'Run 4', 'Lesson 4',
     'Decision 1', 'Architecture', 'Runbook']) assert(rendered.includes(expected), `render includes ${expected}`);
+  assert(rendered.includes('Architecture') && rendered.includes('Runbook'),
+    'epic-docs-dataarray: Dataview DataArray docs materialize and render');
   const order = indices(rendered, ['Slices', 'Context pack', 'Runs', 'Lessons', 'Decisions', 'Docs']);
   assert(order.every((at, index) => at >= 0 && (!index || at > order[index - 1])), 'sections use canonical order');
   const classes = flatten(container).map((node) => node.className).join(' ');
   assert(classes.includes('status-pill open') && classes.includes('status-pill overdue') && classes.includes('status-pill done'),
     'slice statuses map to canonical pill classes');
-  assert.strictEqual(opened.length, 0, 'render performs no navigation or writes');
+  assert.strictEqual(opened.length, 0, 'render performs no navigation');
+  assert.deepStrictEqual(mutations, [], 'epic-read-only-mutation-gap: render invokes no vault, adapter, frontmatter, or metadata mutator');
+
+  currentPage = { file: { path: epicPath, folder: epicFolder }, docs: ['[[Native Architecture]]', '[[Native Runbook]]'] };
+  const nativeDocsContainer = element();
+  await dashboard.render({ container: nativeDocsContainer });
+  assert(textOf(nativeDocsContainer).includes('Native Architecture') && textOf(nativeDocsContainer).includes('Native Runbook'),
+    'epic-docs-native-array-mutation-gap: native arrays render independently of Dataview DataArrays');
+
+  currentPage = { file: { path: epicPath, folder: epicFolder }, docs: [] };
+  global.app.vault.getMarkdownFiles = () => markdownFiles.filter((entry) => entry.path.startsWith(`${board}/`));
+  const emptyContainer = element();
+  await dashboard.render({ container: emptyContainer });
+  const emptyRendered = textOf(emptyContainer);
+  assert(emptyRendered.includes('Slices'), 'empty optional groups do not suppress the required slice section');
+  for (const absent of ['Context pack', 'Runs', 'Lessons', 'Decisions', 'Docs', 'No context', 'No docs']) {
+    assert(!emptyRendered.includes(absent), `epic-empty-sections-mutation-gap: omits ${absent}`);
+  }
+  assert.deepStrictEqual(mutations, [], 'native-array and empty-section renders remain read-only');
 
   const coldContainer = element();
   delete global.customJS.RenderSafe;
   await new EpicDashboard({ lifecycleApi }).render({ container: coldContainer, current: () => { throw new Error('must not call dv.current'); } });
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
 
-  global.customJS = { RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder } }) }, SectionLabel: global.customJS.SectionLabel };
+  global.customJS = { RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder } }) }, SectionLabel: sectionLabel };
+
+  const priorGlobalRequire = global.require;
+  const desktopPaths = [];
+  global.require = require;
+  global.app = {
+    vault: { adapter: { getFullPath: (entry) => {
+      desktopPaths.push(entry);
+      return path.join(ROOT, 'platform/mechanisms/delivery/index.js');
+    } } },
+  };
+  delete global.SauceDelivery;
+  delete global.customJS.DeliveryContract;
+  const desktopApi = await new EpicDashboard()._deliveryApi();
+  assert.deepStrictEqual(desktopPaths, ['ranch/delivery/index.js'],
+    'epic-delivery-desktop-resolution-mutation-gap: desktop resolves the installed public index through getFullPath');
+  assert(desktopApi && typeof desktopApi.deriveEpicLifecycle === 'function', 'desktop loads Delivery through Node require');
+  assert.deepStrictEqual(desktopApi.deriveEpicLifecycle(slices), delivery.deriveEpicLifecycle(slices),
+    'desktop installed API has exact public-contract parity');
+  if (priorGlobalRequire === undefined) delete global.require;
+  else global.require = priorGlobalRequire;
+
   global.app = { vault: { getMarkdownFiles: () => markdownFiles }, metadataCache: { getFileCache: (entry) => ({ frontmatter: frontmatter.get(entry.path) || {} }) } };
   const unavailable = element();
   await new EpicDashboard().render({ container: unavailable });
@@ -143,7 +209,7 @@ async function main() {
     'the helper has one canonical install mapping');
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
-    'workshop dogfood subscription pins delivery@0.3.0 exactly once');
+    'project-delivery-dependency-closure: workshop dogfood subscription pins delivery@0.3.0 exactly once');
 
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.scripts['test:epic-dashboard'], 'node platform/test/run-epic-dashboard.js', 'focused script is wired');
