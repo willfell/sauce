@@ -16,6 +16,11 @@
 (() => {
   const failures = [];
   const tolerance = 0.5;
+  const expectedViewportWidth = 390;
+  const effectiveViewport = { innerWidth: window.innerWidth, clientWidth: document.documentElement.clientWidth };
+  if (effectiveViewport.innerWidth !== expectedViewportWidth || effectiveViewport.clientWidth !== expectedViewportWidth) {
+    failures.push(`effective-viewport-${effectiveViewport.innerWidth}x${effectiveViewport.clientWidth}`);
+  }
   if (document.documentElement.scrollWidth > document.documentElement.clientWidth + tolerance) failures.push('document-overflow');
   for (const phone of document.querySelectorAll('.phone')) {
     const style = getComputedStyle(phone);
@@ -33,6 +38,7 @@
     }
   }
   const result = document.querySelector('.geometry-result');
+  document.body.dataset.viewportWidth = `${effectiveViewport.innerWidth}:${effectiveViewport.clientWidth}`;
   document.body.dataset.geometry = failures.length ? 'fail' : 'pass';
   result.textContent = failures.length ? failures.join(',') : '390px geometry pass';
   if (failures.length) throw new Error(`epic-390px-rendered-geometry-mutation-gap: ${failures.join(',')}`);

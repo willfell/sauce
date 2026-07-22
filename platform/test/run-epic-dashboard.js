@@ -44,31 +44,95 @@ function sliceRow(root, label) {
   return flatten(root).find((node) => (node.children || []).some((child) => child.tag === 'button' && child.textContent === label));
 }
 function pillOf(row) { return (row.children || []).find((child) => child.className.includes('status-pill')); }
-function renderGeometry(chrome, args) {
-  return new Promise((resolve, reject) => {
-    const child = childProcess.spawn(chrome, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    let passed = false;
-    const deadline = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error(`headless 390px geometry timed out: ${stderr}`));
-    }, 45000);
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-      if (!passed && stdout.includes('data-geometry="pass"') && stdout.includes('390px geometry pass')) {
-        passed = true;
-        child.kill('SIGKILL');
-      }
-    });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { clearTimeout(deadline); reject(error); });
-    child.once('close', () => {
-      clearTimeout(deadline);
-      if (passed) resolve({ stdout, stderr });
-      else reject(new Error(`headless 390px geometry did not pass: ${stderr}\n${stdout}`));
-    });
+function deploymentHostFor(identity, env, io = fs) {
+  return env.SAUCE_DEPLOYMENT_HOST === 'true'
+    || (identity.username === 'willfellhoelter'
+      && io.existsSync(path.join(identity.homedir, 'projects/repos/sauce/.git')));
+}
+function deploymentVaultsFor(identity, vaults) {
+  return vaults.map((vault) => ({ name: vault.name, path: path.join(identity.homedir, 'notes/sauce', vault.name) }));
+}
+function verifyDeploymentHost({ identity, env, io, vaults, verify }) {
+  const required = deploymentHostFor(identity, env, io);
+  if (!required) return { required, ran: false, vaults: [], receipt: null };
+  const hostVaults = deploymentVaultsFor(identity, vaults);
+  return { required, ran: true, vaults: hostVaults, receipt: verify(hostVaults) };
+}
+function deadline(promise, milliseconds, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds); }),
+  ]).finally(() => clearTimeout(timer));
+}
+function cdpPipe(child) {
+  const input = child.stdio[3];
+  const output = child.stdio[4];
+  const pending = new Map();
+  let nextId = 1;
+  let buffer = '';
+  output.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    let boundary;
+    while ((boundary = buffer.indexOf('\0')) >= 0) {
+      const raw = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 1);
+      if (!raw) continue;
+      const message = JSON.parse(raw);
+      if (!message.id || !pending.has(message.id)) continue;
+      const { resolve, reject } = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) reject(new Error(`CDP ${message.error.code}: ${message.error.message}`));
+      else resolve(message.result || {});
+    }
   });
+  const command = (method, params = {}, sessionId = undefined) => {
+    const id = nextId++;
+    const message = { id, method, params };
+    if (sessionId) message.sessionId = sessionId;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      input.write(`${JSON.stringify(message)}\0`);
+    });
+  };
+  return { command };
+}
+async function renderGeometry(chrome, profile, targetUrl, viewportWidth) {
+  const child = childProcess.spawn(chrome, [
+    '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--no-first-run',
+    '--disable-background-networking', '--remote-debugging-pipe', `--user-data-dir=${profile}`,
+  ], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const closed = new Promise((resolve) => child.once('close', resolve));
+  try {
+    const cdp = cdpPipe(child);
+    const send = (method, params = {}, sessionId = undefined) => deadline(
+      cdp.command(method, params, sessionId), 10000, `CDP ${method}`,
+    );
+    const target = await send('Target.createTarget', { url: 'about:blank' });
+    const attached = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+    const session = attached.sessionId;
+    await send('Page.enable', {}, session);
+    await send('Emulation.setDeviceMetricsOverride', {
+      width: viewportWidth, height: 1400, deviceScaleFactor: 1, mobile: false,
+      screenWidth: viewportWidth, screenHeight: 1400,
+    }, session);
+    await send('Page.navigate', { url: targetUrl }, session);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const evaluated = await send('Runtime.evaluate', {
+        expression: `JSON.stringify({readyState:document.readyState,geometry:document.body?.dataset.geometry||null,innerWidth:window.innerWidth,clientWidth:document.documentElement.clientWidth,result:document.querySelector('.geometry-result')?.textContent||''})`,
+        returnByValue: true,
+      }, session);
+      const value = JSON.parse(evaluated.result?.value || '{}');
+      if (value.readyState === 'complete' && value.geometry) return value;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`headless geometry never completed: ${stderr}`);
+  } finally {
+    child.kill('SIGKILL');
+    await deadline(closed, 5000, 'headless Chrome close').catch(() => {});
+  }
 }
 
 async function main() {
@@ -345,19 +409,67 @@ async function main() {
   }
   assert.deepStrictEqual([normalMatrix.mode, ciMatrix.mode], ['portable-normal', 'portable-ci'],
     'epic-delivery-installed-verifier-matrix-mutation-gap: normal and CI complete-verification calls are both mandatory');
-  const deploymentHostFor = (identity, env, io = fs) => env.SAUCE_DEPLOYMENT_HOST === 'true'
-    || (identity.username === 'willfellhoelter'
-      && io.existsSync(path.join(identity.homedir, 'projects/repos/sauce/.git')));
-  assert.strictEqual(deploymentHostFor({ username: 'contributor', homedir: '/portable-home' }, {}, { existsSync: () => false }), false,
-    'epic-dashboard-local-preflight-host-assumption: ordinary local clones use the complete portable matrix');
+  const hostCases = [
+    {
+      name: 'explicit opt-in', identity: { username: 'contributor', homedir: '/explicit-home' },
+      env: { SAUCE_DEPLOYMENT_HOST: 'true', HOME: '/mutable-home' }, marker: false, expected: true, markerReads: 0,
+    },
+    {
+      name: 'canonical identity with checkout marker', identity: { username: 'willfellhoelter', homedir: '/canonical-home' },
+      env: {}, marker: true, expected: true, markerReads: 1,
+    },
+    {
+      name: 'canonical identity missing checkout marker', identity: { username: 'willfellhoelter', homedir: '/canonical-home' },
+      env: {}, marker: false, expected: false, markerReads: 1,
+    },
+    {
+      name: 'wrong identity despite checkout marker', identity: { username: 'contributor', homedir: '/canonical-home' },
+      env: {}, marker: true, expected: false, markerReads: 0,
+    },
+    {
+      name: 'canonical identity ignores mutable HOME', identity: { username: 'willfellhoelter', homedir: '/stable-home' },
+      env: { HOME: '/mutable-home' }, marker: true, expected: true, markerReads: 1,
+    },
+  ];
+  for (const fixture of hostCases) {
+    const marker = path.join(fixture.identity.homedir, 'projects/repos/sauce/.git');
+    const reads = [];
+    let verifierCalls = 0;
+    const decision = verifyDeploymentHost({
+      identity: fixture.identity,
+      env: fixture.env,
+      io: { existsSync: (entry) => { reads.push(entry); return fixture.marker && entry === marker; } },
+      vaults: VAULTS,
+      verify: (hostVaults) => {
+        verifierCalls += 1;
+        return { mode: 'deployment-host', artifacts: Array(9).fill('verified'), vaults: hostVaults.map((vault) => vault.path) };
+      },
+    });
+    assert.deepStrictEqual({ required: decision.required, ran: decision.ran, verifierCalls }, {
+      required: fixture.expected, ran: fixture.expected, verifierCalls: fixture.expected ? 1 : 0,
+    }, `epic-dashboard-local-preflight-host-detection-mutation-gap: ${fixture.name} binds authority and verifier execution`);
+    assert.deepStrictEqual(reads, Array(fixture.markerReads).fill(marker),
+      `${fixture.name} performs the exact expected checkout-marker reads`);
+    const expectedVaultPaths = fixture.expected
+      ? VAULTS.map((vault) => path.join(fixture.identity.homedir, 'notes/sauce', vault.name)) : [];
+    assert.deepStrictEqual(decision.vaults.map((vault) => vault.path), expectedVaultPaths,
+      `${fixture.name} derives vaults only from stable identity homedir, never env.HOME`);
+    assert.deepStrictEqual(decision.receipt?.vaults || [], expectedVaultPaths,
+      `${fixture.name} receipt binds the exact verified vault paths`);
+  }
   const deploymentIdentity = os.userInfo();
-  if (deploymentHostFor(deploymentIdentity, process.env)) {
-    const hostVaults = VAULTS.map((vault) => ({
-      name: vault.name,
-      path: path.join(deploymentIdentity.homedir, 'notes/sauce', vault.name),
-    }));
-    const hostMatrix = verifyInstalledVaults(hostVaults, fs, 'deployment-host');
-    assert.strictEqual(hostMatrix.artifacts.length, 9, 'deployment host verifies all nine real installed artifacts');
+  const hostDecision = verifyDeploymentHost({
+    identity: deploymentIdentity, env: process.env, io: fs, vaults: VAULTS,
+    verify: (hostVaults) => verifyInstalledVaults(hostVaults, fs, 'deployment-host'),
+  });
+  assert.strictEqual(hostDecision.ran, hostDecision.required,
+    'epic-dashboard-local-preflight-host-detection-mutation-gap: runtime host decision and verifier receipt cannot diverge');
+  if (hostDecision.required) {
+    assert.strictEqual(hostDecision.receipt?.artifacts.length, 9,
+      'deployment host records all nine real installed artifacts');
+    assert.deepStrictEqual(hostDecision.vaults.map((vault) => vault.path),
+      VAULTS.map((vault) => path.join(deploymentIdentity.homedir, 'notes/sauce', vault.name)),
+      'deployment host receipt binds the exact stable-homedir vault set');
   }
   for (const vault of fixtureVaults) {
     const missingRoot = new Set(fixtureFiles);
@@ -477,6 +589,8 @@ async function main() {
     'document.documentElement.scrollWidth', 'document.documentElement.clientWidth',
     'phone.scrollWidth', 'phone.clientWidth', 'getBoundingClientRect()',
     "phone.querySelectorAll('.stack,.row,.tiles,.tile')", "document.body.dataset.geometry = failures.length ? 'fail' : 'pass'",
+    'const expectedViewportWidth = 390', 'effectiveViewport.innerWidth !== expectedViewportWidth',
+    'effectiveViewport.clientWidth !== expectedViewportWidth', 'document.body.dataset.viewportWidth',
   ]) assert(visual.includes(geometryGuard), `rendered geometry proof locks ${geometryGuard}`);
 
   const chromeCandidates = [
@@ -485,20 +599,16 @@ async function main() {
     '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
   ].filter(Boolean);
   const chrome = chromeCandidates.find((candidate) => fs.existsSync(candidate));
-  if (chrome) {
-    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
-    try {
-      const browser = await renderGeometry(chrome, [
-        '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--no-first-run',
-        '--disable-background-networking', '--window-size=390,1400', `--user-data-dir=${profile}`,
-        '--dump-dom', `file://${VISUAL}`,
-      ]);
-      assert(browser.stdout.includes('data-geometry="pass"'),
-        `epic-390px-rendered-geometry-mutation-gap: real 390px browser boxes pass: ${browser.stdout}`);
-      assert(browser.stdout.includes('390px geometry pass'), 'light and dark rendered geometry checker completed');
-    } finally {
-      fs.rmSync(profile, { recursive: true, force: true });
-    }
+  assert(chrome, 'epic-390px-effective-viewport-mutation-gap: Chrome is required for device-metrics geometry proof');
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
+  try {
+    const browser = await renderGeometry(chrome, profile, `file://${VISUAL}`, 390);
+    assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
+      geometry: 'pass', innerWidth: 390, clientWidth: 390,
+    }, `epic-390px-effective-viewport-mutation-gap: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
+    assert.strictEqual(browser.result, '390px geometry pass', 'light and dark rendered geometry checker completed');
+  } finally {
+    fs.rmSync(profile, { recursive: true, force: true });
   }
 
   console.log('epic-dashboard: all checks passed');
