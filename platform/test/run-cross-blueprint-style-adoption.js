@@ -40,6 +40,10 @@ function source(name) {
         "destination": ["nav", 'path: `${projectDir}/docs/Docs.md`', 'path: `${projectDir}/docs/Wrong.md`'],
         "mutation-delegate": ["leaf", "fm.section = patch.section;", 'fm.section = "wrong";'],
         "single-fire": ["links", "if (submitting) return false;", "if (false) return false;"],
+        "r7a2-docs-delegate": ["docs", "return customJS.SectionExplorer.renderActionRow(dv, [", "return null && customJS.SectionExplorer.renderActionRow(dv, ["],
+        "r7a2-docs-order": ["docs", '{ kind: "entity", instance: "doc-note" },\n      { kind: "entity", instance: "section-hub" },', '{ kind: "entity", instance: "section-hub" },\n      { kind: "entity", instance: "doc-note" },'],
+        "r7a2-section-presets": ["section", "section: sectionName,", 'section: "Wrong",'],
+        "r7a2-section-callback": ["section", "this._renderMoveDocsButton(dv, row)", "this._renderMoveDocsButton(null, row)"],
     };
     const [target, before, after] = mutations[MUTATION] || [];
     if (name !== target) return raw;
@@ -265,14 +269,14 @@ async function actionRowContract() {
     ], "Docs actions retain exact order");
 
     const creates = [];
-    let bulkMoves = 0;
+    const bulkMoveDvs = [];
     h.sandbox.customJS.EntityCreate = { render: async (dv, opts) => {
         creates.push({ instance: opts.instance, presetPrompts: opts.presetPrompts });
         const button = dv.container.createEl("button", { text: opts.instance });
         button.style.cssText = "legacy entity geometry";
         button.onmouseenter = () => {}; button.onmouseleave = () => {};
     } };
-    h.sandbox.customJS.DocBulkMoveActions = { _onBulkMove: () => { bulkMoves += 1; } };
+    h.sandbox.customJS.DocBulkMoveActions = { _onBulkMove: (receivedDv) => { bulkMoveDvs.push(receivedDv); } };
     const docsDv = {
         container: new FakeElement("div"),
         current: () => ({ file: { folder: "spice/projects/sauce/docs" } }),
@@ -286,7 +290,8 @@ async function actionRowContract() {
     assert.deepStrictEqual(plain(creates), [
         { instance: "doc-note" }, { instance: "section-hub" },
     ], "Docs preserves exact entity order without inventing presets");
-    assert.strictEqual(bulkMoves, 1);
+    assert.strictEqual(bulkMoveDvs.length, 1);
+    assert.strictEqual(bulkMoveDvs[0], docsDv, "Docs Move callback preserves the exact originating dv identity");
 
     const atlas = { path: "spice/projects/sauce/Sauce.md", basename: "Sauce", name: "Sauce" };
     const map = { path: "spice/projects/sauce/Project Map.md", basename: "Project Map", name: "Project Map" };
@@ -345,7 +350,8 @@ async function actionRowContract() {
         { instance: "sub-section-hub", presetPrompts: { parent_slug: "knowledge" } },
     ], "depth-1 SectionHub preserves exact create order and presets");
     await buttons(sectionRow)[2].click();
-    assert.strictEqual(bulkMoves, 2, "depth-1 SectionHub preserves the Move docs callback");
+    assert.strictEqual(bulkMoveDvs.length, 2, "depth-1 SectionHub preserves the Move docs callback");
+    assert.strictEqual(bulkMoveDvs[1], sectionDv, "depth-1 Move callback preserves the exact originating dv identity");
 
     creates.length = 0;
     const subSectionDv = {
@@ -359,7 +365,8 @@ async function actionRowContract() {
     ], "depth-2 SectionHub preserves exact doc presets and hides New Sub-Section");
     assert.deepStrictEqual(buttons(subSectionRow).map((button) => button.textContent), ["doc-note", "Move docs"], "depth-2 action order remains New Doc then Move docs");
     await buttons(subSectionRow)[1].click();
-    assert.strictEqual(bulkMoves, 3, "depth-2 SectionHub preserves the Move docs callback");
+    assert.strictEqual(bulkMoveDvs.length, 3, "depth-2 SectionHub preserves the Move docs callback");
+    assert.strictEqual(bulkMoveDvs[2], subSectionDv, "depth-2 Move callback preserves the exact originating dv identity");
 }
 
 async function modalContract() {
@@ -525,6 +532,71 @@ function markerData(html) {
     assert(tag, "executed fixture emits results");
     return Object.fromEntries([...tag.matchAll(/data-([a-z0-9-]+)="([^"]*)"/gi)].map((match) => [match[1], match[2]]));
 }
+function pngDimensions(buffer) {
+    assert(buffer.length > 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), "capture is a non-empty PNG");
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function exactViewportCapture(executable, url, width, height) {
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-r7a2-cdp-"));
+    const chrome = childProcess.spawn(executable, [
+        "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+        "--allow-file-access-from-files", "--force-prefers-reduced-motion",
+        "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
+    ], { stdio: "ignore" });
+    let socket;
+    try {
+        const portFile = path.join(profile, "DevToolsActivePort");
+        for (let attempt = 0; attempt < 100 && !fs.existsSync(portFile); attempt += 1) await wait(50);
+        assert(fs.existsSync(portFile), "Chrome publishes its DevTools endpoint");
+        const port = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0];
+        const targetResponse = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
+        assert(targetResponse.ok, `Chrome creates a DevTools target (${targetResponse.status})`);
+        const target = await targetResponse.json();
+        socket = new WebSocket(target.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, { once: true });
+            socket.addEventListener("error", reject, { once: true });
+        });
+        let nextId = 0;
+        const pending = new Map();
+        socket.addEventListener("message", (event) => {
+            const message = JSON.parse(String(event.data));
+            if (!message.id || !pending.has(message.id)) return;
+            const { resolve, reject } = pending.get(message.id);
+            pending.delete(message.id);
+            if (message.error) reject(new Error(message.error.message));
+            else resolve(message.result || {});
+        });
+        const send = (method, params = {}) => new Promise((resolve, reject) => {
+            const id = ++nextId;
+            pending.set(id, { resolve, reject });
+            socket.send(JSON.stringify({ id, method, params }));
+        });
+        await send("Page.enable");
+        await send("Runtime.enable");
+        await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+        await send("Page.navigate", { url });
+        let marker = null;
+        for (let attempt = 0; attempt < 200 && !marker; attempt += 1) {
+            const evaluation = await send("Runtime.evaluate", {
+                expression: `(()=>{const m=document.querySelector("#fixture-results");return m?Object.fromEntries(Object.entries(m.dataset)):null})()`,
+                returnByValue: true,
+            });
+            marker = evaluation.result?.value || null;
+            if (!marker) await wait(50);
+        }
+        assert(marker, "exact-viewport fixture emits results");
+        const first = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        return { marker, first, second };
+    } finally {
+        if (socket && socket.readyState < 2) socket.close();
+        chrome.kill("SIGTERM");
+        await wait(50);
+        fs.rmSync(profile, { recursive: true, force: true });
+    }
+}
 function actionRowVisualFixture() {
     const fileUrl = (file) => pathToFileURL(file).href;
     return `<!doctype html>
@@ -545,17 +617,17 @@ body.theme-dark{--background-primary:#1d1e20;--background-secondary:#28292c;--ba
 <script>(async()=>{
 const theme=new URLSearchParams(location.search).get("theme")==="dark"?"dark":"light";document.body.className="theme-"+theme;window.Notice=function(){};
 Element.prototype.createEl=function(tag,options={}){const el=document.createElement(tag);if(options.cls)el.className=options.cls;if(options.text!=null)el.textContent=String(options.text);this.appendChild(el);return el};
-let moves=0;const labels={"doc-note":"New Doc","section-hub":"New Section","sub-section-hub":"New Sub-Section"};window.customJS={SectionExplorer:new SectionExplorer(),AccentButton:new AccentButton(),SectionLabel:new SectionLabel(),EntityCreate:{render:async(dv,options)=>{const button=dv.container.createEl("button",{text:labels[options.instance]});button.style.cssText="width:999px";button.onmouseenter=()=>{};button.onmouseleave=()=>{}}},DocBulkMoveActions:{_onBulkMove:()=>{moves+=1}}};
+let moves=0;const moveDvs=[];const labels={"doc-note":"New Doc","section-hub":"New Section","sub-section-hub":"New Sub-Section"};window.customJS={SectionExplorer:new SectionExplorer(),AccentButton:new AccentButton(),SectionLabel:new SectionLabel(),EntityCreate:{render:async(dv,options)=>{const button=dv.container.createEl("button",{text:labels[options.instance]});button.style.cssText="width:999px";button.onmouseenter=()=>{};button.onmouseleave=()=>{}}},DocBulkMoveActions:{_onBulkMove:(dv)=>{moves+=1;moveDvs.push(dv)}}};
 const docsDv={container:document.getElementById("docs"),current:()=>({file:{folder:"spice/projects/sauce/docs"}})};await new ProjectDocsIndex().renderActionRow(docsDv);
 const sectionDv={container:document.getElementById("section")};const section=new SectionHub();await section._renderActionRow(sectionDv,{},1,"sauce","knowledge","Knowledge");
 const subDv={container:document.getElementById("subsection")};await section._renderActionRow(subDv,{parent_section:"[[Knowledge]]"},2,"sauce","decisions","Decisions");
 const rows=[...document.querySelectorAll(".sauce-action-row")];const buttons=[...document.querySelectorAll(".sauce-action-row .sauce-btn")];buttons.filter((button)=>button.textContent.trim()==="Move docs").forEach((button)=>button.click());
 const inside=(child,parent)=>{const c=child.getBoundingClientRect(),p=parent.getBoundingClientRect();return c.left>=p.left-.5&&c.right<=p.right+.5&&c.width>0&&c.height>0};
-const docsButtons=[...document.querySelectorAll("#docs .sauce-btn")];const narrowWrap=innerWidth>480||new Set(docsButtons.map((button)=>Math.round(button.getBoundingClientRect().top))).size===2;
-const marker=document.createElement("meta");marker.id="fixture-results";marker.dataset.theme=theme;marker.dataset.actualHelpers=String(customJS.SectionExplorer instanceof SectionExplorer&&new ProjectDocsIndex() instanceof ProjectDocsIndex&&section instanceof SectionHub);marker.dataset.documentFits=String(document.documentElement.scrollWidth<=innerWidth);marker.dataset.rowsFit=String(rows.length===3&&rows.every((row)=>row.scrollWidth<=row.clientWidth&&inside(row,row.parentElement)));marker.dataset.buttonsFit=String(buttons.length===8&&buttons.every((button)=>inside(button,button.closest(".sauce-action-row"))));marker.dataset.narrowWrap=String(narrowWrap);marker.dataset.order=buttons.map((button)=>button.textContent.trim()).join("|");marker.dataset.callbacks=String(moves===3);document.head.appendChild(marker);
+const docsButtons=[...document.querySelectorAll("#docs .sauce-btn")];const rowCount=new Set(docsButtons.map((button)=>Math.round(button.getBoundingClientRect().top))).size;const narrowWrap=innerWidth===390&&rowCount===2;
+const marker=document.createElement("meta");marker.id="fixture-results";marker.dataset.theme=theme;marker.dataset.viewportWidth=String(innerWidth);marker.dataset.viewportHeight=String(innerHeight);marker.dataset.actualHelpers=String(customJS.SectionExplorer instanceof SectionExplorer&&new ProjectDocsIndex() instanceof ProjectDocsIndex&&section instanceof SectionHub);marker.dataset.documentFits=String(document.documentElement.scrollWidth<=innerWidth);marker.dataset.rowsFit=String(rows.length===3&&rows.every((row)=>row.scrollWidth<=row.clientWidth&&inside(row,row.parentElement)));marker.dataset.buttonsFit=String(buttons.length===8&&buttons.every((button)=>inside(button,button.closest(".sauce-action-row"))));marker.dataset.narrowWrap=String(narrowWrap);marker.dataset.wideSingleRow=String(innerWidth===1024&&rowCount===1);marker.dataset.order=buttons.map((button)=>button.textContent.trim()).join("|");marker.dataset.callbacks=String(moves===3&&moveDvs[0]===docsDv&&moveDvs[1]===sectionDv&&moveDvs[2]===subDv);document.head.appendChild(marker);
 })().catch((error)=>{const marker=document.createElement("meta");marker.id="fixture-results";marker.dataset.error=String(error&&error.stack||error);document.head.appendChild(marker)});</script></body></html>`;
 }
-function visualContract() {
+async function visualContract() {
     console.log("--- C7A-VISUAL: deterministic 1024/390 light/dark Project fixture ---");
     const html = fs.readFileSync(VISUAL, "utf8");
     assert(html.includes("../../mechanisms/styling/assets/snippets/sauce-core.css"), "fixture loads shipped sauce-core CSS");
@@ -590,18 +662,21 @@ function visualContract() {
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
 
             const actionUrl = `${pathToFileURL(actionFixture).href}?theme=${theme}`;
-            const actionMarker = markerData(runChrome(executable, [...common, "--dump-dom", actionUrl]));
+            const exact = await exactViewportCapture(executable, actionUrl, width, 900);
+            const actionMarker = exact.marker;
             assert(!actionMarker.error, `actual action-row callers are error-free: ${actionMarker.error || ""}`);
-            assert.strictEqual(actionMarker.theme, theme); assert.strictEqual(actionMarker["actual-helpers"], "true");
-            assert.strictEqual(actionMarker["document-fits"], "true"); assert.strictEqual(actionMarker["rows-fit"], "true");
-            assert.strictEqual(actionMarker["buttons-fit"], "true"); assert.strictEqual(actionMarker["narrow-wrap"], "true");
+            assert.strictEqual(actionMarker.theme, theme); assert.strictEqual(actionMarker.actualHelpers, "true");
+            assert.strictEqual(Number(actionMarker.viewportWidth), width, `DevTools viewport is exactly ${width}px`);
+            assert.strictEqual(Number(actionMarker.viewportHeight), 900, "DevTools viewport is exactly 900px tall");
+            assert.strictEqual(actionMarker.documentFits, "true"); assert.strictEqual(actionMarker.rowsFit, "true");
+            assert.strictEqual(actionMarker.buttonsFit, "true");
+            if (width === 390) assert.strictEqual(actionMarker.narrowWrap, "true", "the exact 390px Docs row wraps to two lines");
+            else assert.strictEqual(actionMarker.wideSingleRow, "true", "the exact 1024px Docs row stays on one line");
             assert.strictEqual(actionMarker.order, "New Doc|New Section|Move docs|New Doc|New Sub-Section|Move docs|New Doc|Move docs");
             assert.strictEqual(actionMarker.callbacks, "true");
-            const actionFirst = path.join(temp, `${theme}-${width}-actions-a.png`); const actionSecond = path.join(temp, `${theme}-${width}-actions-b.png`);
-            runChrome(executable, [...common, `--screenshot=${actionFirst}`, actionUrl]); runChrome(executable, [...common, `--screenshot=${actionSecond}`, actionUrl]);
-            const actionA = fs.readFileSync(actionFirst); const actionB = fs.readFileSync(actionSecond);
-            assert(actionA.length > 1000 && actionA.subarray(1, 4).equals(Buffer.from("PNG")), "actual action-row screenshot is a non-empty PNG");
-            assert.strictEqual(crypto.createHash("sha256").update(actionA).digest("hex"), crypto.createHash("sha256").update(actionB).digest("hex"), `${theme}/${width} actual action-row screenshot is deterministic`);
+            assert.deepStrictEqual(pngDimensions(exact.first), { width, height: 900 }, `PNG IHDR is exactly ${width}x900`);
+            assert.deepStrictEqual(pngDimensions(exact.second), { width, height: 900 }, `repeat PNG IHDR is exactly ${width}x900`);
+            assert.strictEqual(crypto.createHash("sha256").update(exact.first).digest("hex"), crypto.createHash("sha256").update(exact.second).digest("hex"), `${theme}/${width} exact-viewport action-row screenshot is deterministic`);
         }
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
@@ -615,6 +690,10 @@ function behavioralMutationContract() {
         "destination": "actual render clicks preserve every absolute Project destination",
         "mutation-delegate": "doc frontmatter rewrite is unchanged",
         "single-fire": "double Save produces one link write",
+        "r7a2-docs-delegate": "Docs renders the shared action row",
+        "r7a2-docs-order": "Docs preserves exact entity order",
+        "r7a2-section-presets": "depth-1 SectionHub preserves exact create order and presets",
+        "r7a2-section-callback": "depth-1 Move callback preserves the exact originating dv identity",
     };
     for (const [mutation, expected] of Object.entries(mutations)) {
         const result = childProcess.spawnSync(process.execPath, [__filename], {
@@ -635,7 +714,7 @@ function behavioralMutationContract() {
     await actionRowContract();
     await modalContract();
     if (!MUTATION_CHILD) {
-        visualContract();
+        await visualContract();
         behavioralMutationContract();
     }
     console.log(`cross-blueprint style adoption C7a${MUTATION_CHILD ? ` mutation ${MUTATION}` : ""}: PASS`);

@@ -2,16 +2,39 @@
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
+const childProcess = require("child_process");
 
-const SRC = fs.readFileSync(
+const RAW_SRC = fs.readFileSync(
   path.join(__dirname, "../mechanisms/section-explorer/section-explorer.js"),
   "utf8"
 );
+const MUTATION = process.env.R7A2_MUTATION || "";
+const MUTATION_CHILD = process.env.R7A2_MUTATION_CHILD === "1";
+
+function sourceUnderTest() {
+  if (!MUTATION) return RAW_SRC;
+  const mutations = {
+    "poll-bound": ["i < 40", "i < 1"],
+    "poll-delay": ["setTimeout(resolve, 50)", "setTimeout(resolve, 5)"],
+    "proxy-inheritance": [
+      "Object.create((dv && typeof dv === \"object\") ? dv : null)",
+      "Object.create(null)",
+    ],
+    "divider-cardinality": [
+      "if (cjs?.SectionLabel?.divider) cjs.SectionLabel.divider(container);",
+      "if (cjs?.SectionLabel?.divider) { cjs.SectionLabel.divider(container); cjs.SectionLabel.divider(container); }",
+    ],
+    normalization: ['btn.classList.add("sauce-btn")', 'btn.classList.add("legacy-btn")'],
+  };
+  const [before, after] = mutations[MUTATION] || [];
+  assert(before && RAW_SRC.includes(before), `mutation ${MUTATION} must match its production seam`);
+  return RAW_SRC.replace(before, after);
+}
 
 function loadClass() {
   const sandbox = {};
   // eslint-disable-next-line no-new-func
-  const factory = new Function("module", "exports", SRC + "\nmodule.exports = SectionExplorer;");
+  const factory = new Function("module", "exports", sourceUnderTest() + "\nmodule.exports = SectionExplorer;");
   const mod = { exports: {} };
   factory(mod, mod.exports);
   return mod.exports;
@@ -92,10 +115,26 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
   const { container } = makeDomStub();
   const rendered = [];
   const previousCustomJS = global.customJS;
+  const inherited = {
+    current: Symbol("current"), pages: Symbol("pages"), el: Symbol("el"),
+    header: Symbol("header"), paragraph: Symbol("paragraph"),
+  };
+  const dv = {
+    container,
+    current: () => inherited.current,
+    pages: () => inherited.pages,
+    el: () => inherited.el,
+    header: () => inherited.header,
+    paragraph: () => inherited.paragraph,
+  };
   global.customJS = {
     SectionLabel: { divider(parent) { parent.createEl("div", { cls: "fixture-divider" }); } },
     EntityCreate: { render: async (proxy, options) => {
-      rendered.push({ instance: options.instance, presetPrompts: options.presetPrompts, container: proxy.container });
+      rendered.push({
+        instance: options.instance, presetPrompts: options.presetPrompts, container: proxy.container,
+        current: proxy.current(), pages: proxy.pages(), el: proxy.el(),
+        header: proxy.header(), paragraph: proxy.paragraph(),
+      });
       const button = proxy.container.createEl("button", { text: options.instance });
       button.style.cssText = "legacy geometry";
       button.onmouseenter = () => {};
@@ -103,7 +142,7 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
     } },
   };
   try {
-    const row = await se.renderActionRow({ container }, [
+    const row = await se.renderActionRow(dv, [
       { kind: "entity", instance: "doc-note", presetPrompts: { section: "Plans" } },
       { kind: "custom", render: (actionRow) => {
         const button = actionRow.createEl("button", { text: "Move docs" });
@@ -114,10 +153,19 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
       { kind: "entity", instance: "section-hub" },
     ]);
     assert.ok(row && row.className === "sauce-action-row", "shared semantic row is returned");
+    assert.strictEqual(container.children.length, 2, "caller container has exactly one divider and one action row");
     assert.strictEqual(container.children[0].className, "fixture-divider", "divider precedes the row");
+    assert.strictEqual(container.children[1], row, "action row is the only node after the divider");
     assert.deepStrictEqual(rendered.map((entry) => entry.instance), ["doc-note", "section-hub"], "entity order surrounds custom action");
     assert.deepStrictEqual(rendered[0].presetPrompts, { section: "Plans" }, "entity presets pass through unchanged");
     assert.ok(rendered.every((entry) => entry.container === row), "EntityCreate receives a row-scoped proxy");
+    for (const entry of rendered) {
+      assert.strictEqual(entry.current, inherited.current, "proxy preserves inherited current identity");
+      assert.strictEqual(entry.pages, inherited.pages, "proxy preserves inherited pages identity");
+      assert.strictEqual(entry.el, inherited.el, "proxy preserves inherited el identity");
+      assert.strictEqual(entry.header, inherited.header, "proxy preserves inherited header identity");
+      assert.strictEqual(entry.paragraph, inherited.paragraph, "proxy preserves inherited paragraph identity");
+    }
     assert.deepStrictEqual(row.children.map((child) => child.textContent), ["doc-note", "Move docs", "section-hub"], "custom actions retain declarative sequence");
     for (const button of row.querySelectorAll("button")) {
       assert.ok(button.classList.contains("sauce-btn"), "every final button adopts sauce-btn");
@@ -131,26 +179,73 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
   }
 }});
 
-ASYNC_TESTS.push({ name: "renderActionRow cold-loads fail closed while preserving dependency-free custom actions", fn: async () => {
+ASYNC_TESTS.push({ name: "renderActionRow polls exactly 40 x 50 ms, recovers warm dependencies, and fails closed", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const { container } = makeDomStub();
   const previousCustomJS = global.customJS;
   const previousSetTimeout = global.setTimeout;
+  const delays = [];
   global.customJS = { SectionLabel: { divider() {} } };
-  global.setTimeout = (callback) => { callback(); return 0; };
+  global.setTimeout = (callback, delay) => { delays.push(delay); callback(); return 0; };
   try {
     const row = await se.renderActionRow({ container }, [
       { kind: "entity", instance: "doc-note" },
       { kind: "custom", render: (actionRow) => actionRow.createEl("button", { text: "Move docs" }) },
     ]);
     assert.ok(row, "missing EntityCreate never rejects or removes the safe row");
+    assert.strictEqual(delays.length, 40, "missing dependency polls exactly 40 times");
+    assert.ok(delays.every((delay) => delay === 50), "every cold-load poll waits exactly 50 ms");
     assert.deepStrictEqual(row.children.map((child) => child.textContent), ["Move docs"], "missing entity dependency is skipped without widening behavior");
     assert.ok(row.children[0].classList.contains("sauce-btn"), "dependency-free custom action is still normalized");
+
+    const recoveredDelays = [];
+    const recovered = [];
+    const { container: warmContainer } = makeDomStub();
+    global.customJS = { SectionLabel: { divider() {} } };
+    global.setTimeout = (callback, delay) => {
+      recoveredDelays.push(delay);
+      if (recoveredDelays.length === 3) {
+        global.customJS.EntityCreate = { render: async (proxy, options) => {
+          recovered.push(options.instance);
+          proxy.container.createEl("button", { text: options.instance });
+        } };
+      }
+      callback();
+      return 0;
+    };
+    const warmRow = await se.renderActionRow({ container: warmContainer }, [
+      { kind: "entity", instance: "doc-note" },
+      { kind: "custom", render: (actionRow) => actionRow.createEl("button", { text: "Move docs" }) },
+    ]);
+    assert.deepStrictEqual(recoveredDelays, [50, 50, 50], "warm recovery occurs after exactly three 50 ms polls");
+    assert.deepStrictEqual(recovered, ["doc-note"], "warm EntityCreate recovery renders the pending entity action");
+    assert.deepStrictEqual(warmRow.children.map((child) => child.textContent), ["doc-note", "Move docs"], "warm recovery preserves declarative action order");
   } finally {
     global.setTimeout = previousSetTimeout;
     if (previousCustomJS === undefined) delete global.customJS;
     else global.customJS = previousCustomJS;
+  }
+}});
+
+ASYNC_TESTS.push({ name: "renderActionRow mutation contract kills each changed mechanism seam", fn: async () => {
+  if (MUTATION_CHILD) return;
+  const mutations = [
+    ["poll-bound", "exactly 40"],
+    ["poll-delay", "50 ms"],
+    ["proxy-inheritance", "shared semantic row is returned"],
+    ["divider-cardinality", "exactly one divider"],
+    ["normalization", "adopts sauce-btn"],
+  ];
+  for (const [mutation, expected] of mutations) {
+    const result = childProcess.spawnSync(process.execPath, [__filename], {
+      cwd: __dirname,
+      encoding: "utf8",
+      env: { ...process.env, R7A2_MUTATION: mutation, R7A2_MUTATION_CHILD: "1" },
+    });
+    const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+    assert.notStrictEqual(result.status, 0, `mutation ${mutation} must be killed`);
+    assert(output.includes(expected), `mutation ${mutation} must fail at its discriminating assertion: ${expected}`);
   }
 }});
 
