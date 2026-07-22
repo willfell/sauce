@@ -223,16 +223,20 @@ async function main() {
       }
     }
   };
-  if (process.env.CI === 'true') {
-    const fixtureVaults = VAULTS.map((vault) => ({ name: vault.name, path: path.join('/portable-vault-fixture', vault.name) }));
-    const fixtureFiles = new Set();
-    for (const vault of fixtureVaults) {
-      fixtureFiles.add(vault.path);
-      fixtureFiles.add(path.join(vault.path, 'ranch/platform-config.json'));
-      for (const installed of [expectedIndexPath, expectedContractPath, expectedRegistryPath]) {
-        fixtureFiles.add(path.join(vault.path, installed));
-      }
+  const fixtureVaults = VAULTS.map((vault) => ({ name: vault.name, path: path.join('/portable-vault-fixture', vault.name) }));
+  const fixtureFiles = new Set();
+  for (const vault of fixtureVaults) {
+    fixtureFiles.add(vault.path);
+    fixtureFiles.add(path.join(vault.path, 'ranch/platform-config.json'));
+    for (const installed of [expectedIndexPath, expectedContractPath, expectedRegistryPath]) {
+      fixtureFiles.add(path.join(vault.path, installed));
     }
+  }
+  const fixtureIo = (files) => ({
+    existsSync: (entry) => files.has(entry),
+    readFileSync: () => JSON.stringify({ variables: {} }),
+  });
+  if (process.env.CI === 'true') {
     verifyInstalledVaults(fixtureVaults, {
       existsSync: (entry) => fixtureFiles.has(entry),
       readFileSync: () => JSON.stringify({ variables: {} }),
@@ -240,6 +244,14 @@ async function main() {
   } else {
     verifyInstalledVaults(VAULTS, fs);
   }
+  const missingRoot = new Set(fixtureFiles);
+  missingRoot.delete(fixtureVaults[0].path);
+  assert.throws(() => verifyInstalledVaults(fixtureVaults, fixtureIo(missingRoot)), /root exists/,
+    'epic-delivery-installed-all-vaults-skip-mutation-gap: a missing vault root fails closed');
+  const missingArtifact = new Set(fixtureFiles);
+  missingArtifact.delete(path.join(fixtureVaults[0].path, expectedIndexPath));
+  assert.throws(() => verifyInstalledVaults(fixtureVaults, fixtureIo(missingArtifact)), /has index\.js/,
+    'epic-delivery-installed-all-vaults-skip-mutation-gap: a missing installed artifact fails closed');
 
   const priorGlobalRequire = global.require;
   const desktopPaths = [];
