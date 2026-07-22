@@ -28,7 +28,8 @@ class EpicDashboard {
     try {
       const config = JSON.parse(await adapter?.read?.("ranch/platform-config.json"));
       const configured = String(config?.variables?.content_path || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
-      if (configured && !configured.startsWith("/") && !configured.split("/").includes("..")) return configured;
+      if (configured && !configured.startsWith("/") && !/^[A-Za-z]:\//.test(configured)
+        && !configured.split("/").includes("..")) return configured;
     } catch (_e) {}
     return "ranch/content";
   }

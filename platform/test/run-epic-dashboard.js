@@ -9,6 +9,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const HELPER = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboard.js');
 const VISUAL = path.join(ROOT, 'platform/test/visual/epic-dashboard.html');
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
+const { VAULTS } = require(path.join(ROOT, 'scripts/autoloop/deploy.js'));
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function loadClass() { return eval(`(${fs.readFileSync(HELPER, 'utf8')})`); } // eslint-disable-line no-eval
@@ -76,8 +77,11 @@ async function main() {
       modify: mutator('vault.modify'), modifyBinary: mutator('vault.modifyBinary'),
       delete: mutator('vault.delete'), rename: mutator('vault.rename'), trash: mutator('vault.trash'),
       adapter: {
-        write: mutator('adapter.write'), remove: mutator('adapter.remove'),
+        write: mutator('adapter.write'), writeBinary: mutator('adapter.writeBinary'),
+        append: mutator('adapter.append'), process: mutator('adapter.process'),
+        remove: mutator('adapter.remove'), rename: mutator('adapter.rename'), copy: mutator('adapter.copy'),
         mkdir: mutator('adapter.mkdir'), rmdir: mutator('adapter.rmdir'),
+        trashSystem: mutator('adapter.trashSystem'), trashLocal: mutator('adapter.trashLocal'),
       },
     },
     metadataCache: {
@@ -184,6 +188,27 @@ async function main() {
   assert.strictEqual(await new EpicDashboard()._contentPath({
     read: async () => JSON.stringify({ variables: { content_path: '../escape' } }),
   }), 'ranch/content', 'unsafe content_path fails closed to the installer default');
+  for (const absolutePath of ['/absolute/content', 'C:\\absolute\\content']) {
+    assert.strictEqual(await new EpicDashboard()._contentPath({
+      read: async () => JSON.stringify({ variables: { content_path: absolutePath } }),
+    }), 'ranch/content', `epic-delivery-unsafe-content-path-mutation-gap: rejects ${absolutePath}`);
+  }
+
+  const presentConsumerVaults = VAULTS.filter((vault) => fs.existsSync(vault.path));
+  if (presentConsumerVaults.length) {
+    assert.strictEqual(presentConsumerVaults.length, 3,
+      'epic-delivery-installed-path-mismatch: live verification requires headspace, Accuris, and ERO together');
+    for (const vault of presentConsumerVaults) {
+      const config = JSON.parse(fs.readFileSync(path.join(vault.path, 'ranch/platform-config.json'), 'utf8'));
+      const contentPath = config.variables?.content_path || 'ranch/content';
+      for (const mapping of deliveryManifest.files.filter((entry) => [
+        'index.js', 'scripts/delivery-contract.js', 'data/delivery-schema.json',
+      ].includes(entry.source))) {
+        const artifact = path.join(vault.path, mapping.dest.replace('{{content_path}}', contentPath));
+        assert(fs.existsSync(artifact), `epic-delivery-installed-path-mismatch: ${vault.name} has ${mapping.source}`);
+      }
+    }
+  }
 
   const priorGlobalRequire = global.require;
   const desktopPaths = [];
