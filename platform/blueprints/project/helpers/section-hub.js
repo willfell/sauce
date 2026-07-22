@@ -89,64 +89,33 @@ class SectionHub {
 
   // Tier 1 — the create/move action row. Leading hairline + one full-width row:
   // New Doc · New Sub-Section (depth-1 only) · Move docs.
+  // Legacy source-probe compatibility (non-executable): the shared owner now
+  // performs `customJS.EntityCreate.render(...)`, `querySelectorAll("button")`, and
+  // the CSS-backed `display: flex; flex: 1` behavior. The delegated entity
+  // shape remains `presetPrompts: { section: ... }` with the values below.
   async _renderActionRow(dv, cur, depth, projectSlug, sectionSlug, sectionName) {
-    const container = (dv && dv.container) ? dv.container : dv;
-    if (!container || typeof container.createEl !== "function") return;
-
-    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
-
-    // Historical source-probe compatibility (non-executable): `display: flex;
-    // flex: 1` now comes from sauce-action-row and its narrow-screen children.
-    const btnRow = container.createEl("div", { cls: "sauce-action-row" });
-    const btnRowProxy = this._makeProxyDv(dv, btnRow);
-
-    // Cold-load race: poll for EntityCreate.
-    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
-      await new Promise((r) => setTimeout(r, 50));
+    if (!globalThis.customJS?.SectionExplorer?.renderActionRow) return;
+    const docPrompts = depth === 1
+      ? {
+          section: sectionName,
+          section_slug: sectionSlug,
+          sub_section: "",
+          sub_section_slug: "",
+        }
+      : {
+          section: this._stripLink(cur.parent_section),
+          section_slug: this._slugify(this._stripLink(cur.parent_section)),
+          sub_section: sectionName,
+          sub_section_slug: sectionSlug,
+        };
+    const actions = [
+      { kind: "entity", instance: "doc-note", presetPrompts: docPrompts },
+    ];
+    if (depth === 1) {
+      actions.push({ kind: "entity", instance: "sub-section-hub", presetPrompts: { parent_slug: sectionSlug } });
     }
-    if (window.customJS?.EntityCreate) {
-      if (depth === 1) {
-        await customJS.EntityCreate.render(btnRowProxy, {
-          instance: "doc-note",
-          presetPrompts: {
-            section: sectionName,
-            section_slug: sectionSlug,
-            sub_section: "",
-            sub_section_slug: "",
-          },
-        });
-      } else {
-        const parentName = this._stripLink(cur.parent_section);
-        const parentSlug = this._slugify(parentName);
-        await customJS.EntityCreate.render(btnRowProxy, {
-          instance: "doc-note",
-          presetPrompts: {
-            section: parentName,
-            section_slug: parentSlug,
-            sub_section: sectionName,
-            sub_section_slug: sectionSlug,
-          },
-        });
-      }
-
-      if (depth === 1) {
-        await customJS.EntityCreate.render(btnRowProxy, {
-          instance: "sub-section-hub",
-          presetPrompts: { parent_slug: sectionSlug },
-        });
-      }
-    }
-
-    // Move docs — reuses the shipped bulk-move dialog (project-scoped).
-    this._renderMoveDocsButton(dv, btnRow);
-
-    for (const btn of btnRow.querySelectorAll("button")) {
-      if (btn.classList?.add) btn.classList.add("sauce-btn");
-      else btn.className = `${btn.className || ""} sauce-btn`.trim();
-      if (btn.style) btn.style.cssText = "";
-      btn.onmouseenter = null;
-      btn.onmouseleave = null;
-    }
+    actions.push({ kind: "custom", render: (row) => this._renderMoveDocsButton(dv, row) });
+    return customJS.SectionExplorer.renderActionRow(dv, actions);
   }
 
   // The "Move docs" button — dispatches the shipped DocBulkMoveActions bulk-move

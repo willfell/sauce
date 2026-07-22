@@ -44,6 +44,53 @@ class SectionExplorer {
     } catch (_e) { /* never-throw: a cold-load instance still works for statics via class name */ }
   }
 
+  // One project Docs action-row implementation. ProjectDocsIndex and SectionHub
+  // supply only the ordered entity/custom actions; this mechanism owns the
+  // divider, row-scoped Dataview proxy, bounded EntityCreate wait, sequencing,
+  // and final shared-button normalization. ProjectChromeBar is intentionally
+  // not a caller: GA-C7a2 already replaced that historical standalone row.
+  async renderActionRow(dv, actions) {
+    try {
+      const container = (dv && dv.container) ? dv.container : dv;
+      if (!container || typeof container.createEl !== "function" || !Array.isArray(actions)) return null;
+
+      const cjs = globalThis.customJS;
+      if (cjs?.SectionLabel?.divider) cjs.SectionLabel.divider(container);
+      const row = container.createEl("div", { cls: "sauce-action-row" });
+
+      const proxyDv = Object.create((dv && typeof dv === "object") ? dv : null);
+      Object.defineProperty(proxyDv, "container", { value: row, enumerable: true });
+
+      const needsEntityCreate = actions.some((action) => action && action.kind === "entity");
+      for (let i = 0; i < 40 && needsEntityCreate && !globalThis.customJS?.EntityCreate; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      for (const action of actions) {
+        if (!action || typeof action !== "object") continue;
+        if (action.kind === "entity") {
+          const entityCreate = globalThis.customJS?.EntityCreate;
+          if (!entityCreate || typeof entityCreate.render !== "function" || !action.instance) continue;
+          const options = { instance: action.instance };
+          if (action.presetPrompts !== undefined) options.presetPrompts = action.presetPrompts;
+          await entityCreate.render(proxyDv, options);
+        } else if (action.kind === "custom" && typeof action.render === "function") {
+          await action.render(row, dv);
+        }
+      }
+
+      const buttons = (typeof row.querySelectorAll === "function") ? row.querySelectorAll("button") : [];
+      for (const btn of buttons) {
+        if (btn.classList?.add) btn.classList.add("sauce-btn");
+        else btn.className = `${btn.className || ""} sauce-btn`.trim();
+        if (btn.style) btn.style.cssText = "";
+        btn.onmouseenter = null;
+        btn.onmouseleave = null;
+      }
+      return row;
+    } catch (_e) { return null; }
+  }
+
   // ── Shared move/bulk/delete pure logic (Task C) ───────────────────────────
   // These are STATIC (referenced by class name internally + mirrored onto the
   // instance by the constructor above so blueprint adapters can reach them via
