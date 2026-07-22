@@ -160,6 +160,9 @@ async function main() {
   for (const guard of ['width:390px', 'name="viewport"', 'overflow:hidden', 'overflow-wrap:anywhere', 'completed', 'in_progress', 'planning']) {
     assert(visual.includes(guard), `visual proof locks ${guard}`);
   }
+  assert(/body\{[^}]*padding:0(?:;|})/.test(visual), '390px viewport adds no body width outside the phone');
+  assert(/\.phone\{[^}]*width:390px;max-width:100%/.test(visual), 'phone is exact at 390px and bounded below it');
+  assert(/body\{[^}]*overflow-x:hidden/.test(visual), 'fixture forbids horizontal viewport scrolling');
 
   console.log('epic-dashboard: all checks passed');
 }
