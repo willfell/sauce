@@ -187,6 +187,15 @@ async function main() {
   await new EpicDashboard().render({ container: unavailable });
   assert(textOf(unavailable).includes('Delivery lifecycle unavailable'), 'missing Delivery fails closed with a visible recovery message');
 
+  global.SauceDelivery = { deriveEpicLifecycle: 'partially initialized' };
+  global.customJS.DeliveryContract = { deriveEpicLifecycle: true };
+  const partial = element();
+  await new EpicDashboard({ lifecycleApi: { deriveEpicLifecycle: {} } }).render({ container: partial });
+  assert(textOf(partial).includes('Delivery lifecycle unavailable'),
+    'epic-delivery-partial-api-mutation-gap: truthy non-functions fail closed with the visible recovery message');
+  delete global.SauceDelivery;
+  delete global.customJS.DeliveryContract;
+
   const installedSources = {
     'ranch/delivery/index.js': read('platform/mechanisms/delivery/index.js'),
     'ranch/delivery/scripts/delivery-contract.js': read('platform/mechanisms/delivery/scripts/delivery-contract.js'),

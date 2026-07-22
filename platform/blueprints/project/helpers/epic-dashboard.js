@@ -67,17 +67,17 @@ class EpicDashboard {
   }
 
   async _deliveryApi() {
-    if (this._injectedLifecycleApi?.deriveEpicLifecycle) return this._injectedLifecycleApi;
-    if (this._resolvedLifecycleApi?.deriveEpicLifecycle) return this._resolvedLifecycleApi;
+    if (typeof this._injectedLifecycleApi?.deriveEpicLifecycle === "function") return this._injectedLifecycleApi;
+    if (typeof this._resolvedLifecycleApi?.deriveEpicLifecycle === "function") return this._resolvedLifecycleApi;
     try {
-      if (globalThis.SauceDelivery?.deriveEpicLifecycle) return (this._resolvedLifecycleApi = globalThis.SauceDelivery);
-      if (globalThis.customJS?.DeliveryContract?.deriveEpicLifecycle) return (this._resolvedLifecycleApi = globalThis.customJS.DeliveryContract);
+      if (typeof globalThis.SauceDelivery?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = globalThis.SauceDelivery);
+      if (typeof globalThis.customJS?.DeliveryContract?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = globalThis.customJS.DeliveryContract);
       const realApp = this._app();
       const req = typeof globalThis.require === "function" ? globalThis.require : null;
       const fullPath = realApp?.vault?.adapter?.getFullPath?.("ranch/delivery/index.js");
       if (req && fullPath) {
         const api = req(fullPath);
-        if (api?.deriveEpicLifecycle) return (this._resolvedLifecycleApi = api);
+        if (typeof api?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = api);
       }
 
       // Obsidian mobile has no Node require(). Evaluate the installed ES1
@@ -109,7 +109,7 @@ class EpicDashboard {
           indexModule,
           indexModule.exports
         );
-        if (indexModule.exports?.deriveEpicLifecycle) return (this._resolvedLifecycleApi = indexModule.exports);
+        if (typeof indexModule.exports?.deriveEpicLifecycle === "function") return (this._resolvedLifecycleApi = indexModule.exports);
       }
     } catch (_e) {}
     return null;
