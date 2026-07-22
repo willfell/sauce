@@ -542,6 +542,14 @@ function pngDimensions(buffer) {
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function stopChild(child) {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
+    child.kill("SIGTERM");
+    if (await Promise.race([exited, wait(5000).then(() => false)])) return;
+    child.kill("SIGKILL");
+    await Promise.race([exited, wait(5000)]);
+}
 function createCdpTarget(port, url) {
     return new Promise((resolve, reject) => {
         const request = http.request({
@@ -688,9 +696,8 @@ async function exactViewportCapture(executable, url, width, height) {
         return { marker, first, second };
     } finally {
         if (socket) socket.close();
-        chrome.kill("SIGTERM");
-        await wait(50);
-        fs.rmSync(profile, { recursive: true, force: true });
+        await stopChild(chrome);
+        fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
 }
 function actionRowVisualFixture() {
