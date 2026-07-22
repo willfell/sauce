@@ -38,7 +38,18 @@ function makeDomStub() {
         return child;
       },
       querySelector() { return null; },
-      querySelectorAll() { return []; },
+      querySelectorAll(selector) {
+        if (selector !== "button") return [];
+        const found = [];
+        const visit = (node) => {
+          for (const child of node.children || []) {
+            if (child.tag === "button") found.push(child);
+            visit(child);
+          }
+        };
+        visit(this);
+        return found;
+      },
       empty() { this.children = []; },
     };
     el.classList = {
@@ -74,6 +85,74 @@ let failures = 0;
 // Async tests register here and run in the async tail before process.exit —
 // everything above stays synchronous `failures += !run(...)`.
 const ASYNC_TESTS = [];
+
+ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and final button normalization", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container } = makeDomStub();
+  const rendered = [];
+  const previousCustomJS = global.customJS;
+  global.customJS = {
+    SectionLabel: { divider(parent) { parent.createEl("div", { cls: "fixture-divider" }); } },
+    EntityCreate: { render: async (proxy, options) => {
+      rendered.push({ instance: options.instance, presetPrompts: options.presetPrompts, container: proxy.container });
+      const button = proxy.container.createEl("button", { text: options.instance });
+      button.style.cssText = "legacy geometry";
+      button.onmouseenter = () => {};
+      button.onmouseleave = () => {};
+    } },
+  };
+  try {
+    const row = await se.renderActionRow({ container }, [
+      { kind: "entity", instance: "doc-note", presetPrompts: { section: "Plans" } },
+      { kind: "custom", render: (actionRow) => {
+        const button = actionRow.createEl("button", { text: "Move docs" });
+        button.style.cssText = "legacy custom geometry";
+        button.onmouseenter = () => {};
+        button.onmouseleave = () => {};
+      } },
+      { kind: "entity", instance: "section-hub" },
+    ]);
+    assert.ok(row && row.className === "sauce-action-row", "shared semantic row is returned");
+    assert.strictEqual(container.children[0].className, "fixture-divider", "divider precedes the row");
+    assert.deepStrictEqual(rendered.map((entry) => entry.instance), ["doc-note", "section-hub"], "entity order surrounds custom action");
+    assert.deepStrictEqual(rendered[0].presetPrompts, { section: "Plans" }, "entity presets pass through unchanged");
+    assert.ok(rendered.every((entry) => entry.container === row), "EntityCreate receives a row-scoped proxy");
+    assert.deepStrictEqual(row.children.map((child) => child.textContent), ["doc-note", "Move docs", "section-hub"], "custom actions retain declarative sequence");
+    for (const button of row.querySelectorAll("button")) {
+      assert.ok(button.classList.contains("sauce-btn"), "every final button adopts sauce-btn");
+      assert.strictEqual(button.style.cssText, "", "legacy inline geometry is cleared");
+      assert.strictEqual(button.onmouseenter, null, "legacy enter handler is cleared");
+      assert.strictEqual(button.onmouseleave, null, "legacy leave handler is cleared");
+    }
+  } finally {
+    if (previousCustomJS === undefined) delete global.customJS;
+    else global.customJS = previousCustomJS;
+  }
+}});
+
+ASYNC_TESTS.push({ name: "renderActionRow cold-loads fail closed while preserving dependency-free custom actions", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const { container } = makeDomStub();
+  const previousCustomJS = global.customJS;
+  const previousSetTimeout = global.setTimeout;
+  global.customJS = { SectionLabel: { divider() {} } };
+  global.setTimeout = (callback) => { callback(); return 0; };
+  try {
+    const row = await se.renderActionRow({ container }, [
+      { kind: "entity", instance: "doc-note" },
+      { kind: "custom", render: (actionRow) => actionRow.createEl("button", { text: "Move docs" }) },
+    ]);
+    assert.ok(row, "missing EntityCreate never rejects or removes the safe row");
+    assert.deepStrictEqual(row.children.map((child) => child.textContent), ["Move docs"], "missing entity dependency is skipped without widening behavior");
+    assert.ok(row.children[0].classList.contains("sauce-btn"), "dependency-free custom action is still normalized");
+  } finally {
+    global.setTimeout = previousSetTimeout;
+    if (previousCustomJS === undefined) delete global.customJS;
+    else global.customJS = previousCustomJS;
+  }
+}});
 
 failures += !run("makeAdapter returns an object exposing render-ready shape", () => {
   const SectionExplorer = loadClass();

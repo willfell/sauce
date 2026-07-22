@@ -13,6 +13,7 @@ const { pathToFileURL } = require("url");
 const ROOT = path.resolve(__dirname, "../..");
 const PROJECT = path.join(ROOT, "platform/blueprints/project/helpers");
 const MODAL = path.join(ROOT, "platform/mechanisms/modal/sauce-modal.js");
+const SECTION_EXPLORER = path.join(ROOT, "platform/mechanisms/section-explorer/section-explorer.js");
 const VISUAL = path.join(ROOT, "platform/test/visual/cross-blueprint-style-adoption.html");
 const MUTATION = process.env.C7A_MUTATION || "";
 const MUTATION_CHILD = process.env.C7A_MUTATION_CHILD === "1";
@@ -166,6 +167,8 @@ function loadHarness() {
         SectionLabel: { divider(parent) { (parent.container || parent).createEl("div", { cls: "fixture-divider" }); } },
         RenderSafe: { page: (dv) => dv.current() },
     };
+    vm.runInContext(`${fs.readFileSync(SECTION_EXPLORER, "utf8")}\nthis.__SectionExplorer = SectionExplorer;`, sandbox);
+    sandbox.customJS.SectionExplorer = new sandbox.__SectionExplorer();
     for (const [name, className] of [
         ["nav", "ProjectNavButtons"], ["docs", "ProjectDocsIndex"], ["section", "SectionHub"],
         ["links", "ProjectLinksManager"], ["leaf", "DocLeafActions"],
@@ -197,9 +200,16 @@ function staticContract() {
     const sources = Object.fromEntries(Object.keys(FILES).map((name) => [name, source(name)]));
     const combined = Object.values(sources).join("\n");
     assert(!/_mobilize|_styleLeafBtn/.test(combined), "all four duplicated responsive sizing helpers are deleted");
-    for (const name of ["nav", "docs", "section", "links", "leaf"]) {
+    for (const name of ["nav", "links", "leaf"]) {
         assert(sources[name].includes("sauce-action-row"), `${name} adopts sauce-action-row`);
         assert(sources[name].includes("sauce-btn"), `${name} adopts sauce-btn`);
+    }
+    const explorer = fs.readFileSync(SECTION_EXPLORER, "utf8");
+    assert(explorer.includes("async renderActionRow(dv, actions"), "SectionExplorer publishes the shared action-row renderer");
+    for (const name of ["docs", "section"]) {
+        assert(sources[name].includes("customJS.SectionExplorer.renderActionRow"), `${name} delegates to SectionExplorer action-row ownership`);
+        assert(!sources[name].includes("querySelectorAll(\"button\")"), `${name} removes local final-button normalization`);
+        assert(!sources[name].includes("for (let i = 0; i < 40"), `${name} removes its local EntityCreate cold-load poll`);
     }
     for (const name of ["links", "leaf"]) {
         assert(!/position:\s*fixed/i.test(sources[name]), `${name} contains no raw fixed modal shell`);
@@ -244,7 +254,7 @@ async function actionRowContract() {
     const creates = [];
     let bulkMoves = 0;
     h.sandbox.customJS.EntityCreate = { render: async (dv, opts) => {
-        creates.push(opts.instance);
+        creates.push({ instance: opts.instance, presetPrompts: opts.presetPrompts });
         const button = dv.container.createEl("button", { text: opts.instance });
         button.style.cssText = "legacy entity geometry";
         button.onmouseenter = () => {}; button.onmouseleave = () => {};
@@ -260,7 +270,10 @@ async function actionRowContract() {
     assert(docsRow, "Docs renders the shared action row");
     assert(buttons(docsRow).every((button) => classTokens(button).includes("sauce-btn") && button.style.cssText === ""), "Docs normalizes every entity/action button");
     await buttons(docsRow)[2].click();
-    assert.deepStrictEqual(creates, ["doc-note", "section-hub"]); assert.strictEqual(bulkMoves, 1);
+    assert.deepStrictEqual(plain(creates), [
+        { instance: "doc-note" }, { instance: "section-hub" },
+    ], "Docs preserves exact entity order without inventing presets");
+    assert.strictEqual(bulkMoves, 1);
 
     const atlas = { path: "spice/projects/sauce/Sauce.md", basename: "Sauce", name: "Sauce" };
     const map = { path: "spice/projects/sauce/Project Map.md", basename: "Project Map", name: "Project Map" };
@@ -314,7 +327,26 @@ async function actionRowContract() {
     await h.section._renderActionRow(sectionDv, {}, 1, "sauce", "knowledge", "Knowledge");
     const sectionRow = sectionDv.container.querySelector(".sauce-action-row");
     assert(buttons(sectionRow).every((button) => classTokens(button).includes("sauce-btn") && button.style.cssText === ""), "SectionHub normalizes every action");
-    assert.deepStrictEqual(creates, ["doc-note", "sub-section-hub"], "SectionHub preserves create ordering");
+    assert.deepStrictEqual(plain(creates), [
+        { instance: "doc-note", presetPrompts: { section: "Knowledge", section_slug: "knowledge", sub_section: "", sub_section_slug: "" } },
+        { instance: "sub-section-hub", presetPrompts: { parent_slug: "knowledge" } },
+    ], "depth-1 SectionHub preserves exact create order and presets");
+    await buttons(sectionRow)[2].click();
+    assert.strictEqual(bulkMoves, 2, "depth-1 SectionHub preserves the Move docs callback");
+
+    creates.length = 0;
+    const subSectionDv = {
+        container: new FakeElement("div"), current: () => ({}),
+        pages: () => [], el: () => {}, header: () => {}, paragraph: () => {},
+    };
+    await h.section._renderActionRow(subSectionDv, { parent_section: "[[Knowledge]]" }, 2, "sauce", "decisions", "Decisions");
+    const subSectionRow = subSectionDv.container.querySelector(".sauce-action-row");
+    assert.deepStrictEqual(plain(creates), [
+        { instance: "doc-note", presetPrompts: { section: "Knowledge", section_slug: "knowledge", sub_section: "Decisions", sub_section_slug: "decisions" } },
+    ], "depth-2 SectionHub preserves exact doc presets and hides New Sub-Section");
+    assert.deepStrictEqual(buttons(subSectionRow).map((button) => button.textContent), ["doc-note", "Move docs"], "depth-2 action order remains New Doc then Move docs");
+    await buttons(subSectionRow)[1].click();
+    assert.strictEqual(bulkMoves, 3, "depth-2 SectionHub preserves the Move docs callback");
 }
 
 async function modalContract() {

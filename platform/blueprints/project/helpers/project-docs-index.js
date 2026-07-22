@@ -66,40 +66,12 @@ class ProjectDocsIndex {
   async renderActionRow(dv) {
     const ctx = this._resolveContext(dv);
     if (!ctx) return;
-    const container = (dv && dv.container) ? dv.container : dv;
-    if (!container || typeof container.createEl !== "function") return;
-
-    if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(container);
-
-    // Historical source-probe compatibility (non-executable): `display: flex;
-    // flex: 1` now comes from sauce-action-row and its narrow-screen children.
-    const row = container.createEl("div", { cls: "sauce-action-row" });
-    const rowProxy = this._makeProxyDv(dv, row);
-
-    // Cold-load race: poll for EntityCreate (mirrors section-hub.js).
-    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-
-    // _actionRowSpec drives the order; render each entry with a LITERAL instance
-    // so the source is greppable + the create buttons are explicit.
-    for (const entry of this._actionRowSpec()) {
-      if (entry.kind === "move") { this._renderMoveDocsButton(dv, row); continue; }
-      if (!window.customJS?.EntityCreate) continue;
-      if (entry.id === "doc-note") {
-        await customJS.EntityCreate.render(rowProxy, { instance: "doc-note" });
-      } else if (entry.id === "section-hub") {
-        await customJS.EntityCreate.render(rowProxy, { instance: "section-hub" });
-      }
-    }
-
-    for (const btn of row.querySelectorAll("button")) {
-      if (btn.classList?.add) btn.classList.add("sauce-btn");
-      else btn.className = `${btn.className || ""} sauce-btn`.trim();
-      if (btn.style) btn.style.cssText = "";
-      btn.onmouseenter = null;
-      btn.onmouseleave = null;
-    }
+    if (!globalThis.customJS?.SectionExplorer?.renderActionRow) return;
+    return customJS.SectionExplorer.renderActionRow(dv, [
+      { kind: "entity", instance: "doc-note" },
+      { kind: "entity", instance: "section-hub" },
+      { kind: "custom", render: (row) => this._renderMoveDocsButton(dv, row) },
+    ]);
   }
 
   // The "Move docs" button — reuses the shipped bulk-move dialog. Rendered via
