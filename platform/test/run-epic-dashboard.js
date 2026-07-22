@@ -64,11 +64,13 @@ function createGeometryResources(io = fs) {
   let specialVisualRoot = null;
   let profile = null;
   let specialProfile = null;
-  const cleanup = () => {
+  const cleanup = ({ suppressErrors = false } = {}) => {
+    let cleanupError = null;
     for (const resource of [specialProfile, profile, specialVisualRoot]) {
       if (!resource) continue;
-      try { io.rmSync(resource, { recursive: true, force: true }); } catch (_) { /* best-effort cleanup preserves setup failure */ }
+      try { io.rmSync(resource, { recursive: true, force: true }); } catch (error) { cleanupError ||= error; }
     }
+    if (cleanupError && !suppressErrors) throw cleanupError;
   };
   try {
     specialVisualRoot = io.mkdtempSync(path.join(os.tmpdir(), 'contributor#clone?query-'));
@@ -78,7 +80,7 @@ function createGeometryResources(io = fs) {
     specialProfile = io.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-special-'));
     return { specialVisualRoot, specialVisualPath, profile, specialProfile, cleanup };
   } catch (error) {
-    cleanup();
+    cleanup({ suppressErrors: true });
     throw error;
   }
 }
@@ -650,6 +652,24 @@ async function main() {
     assert.deepStrictEqual([...removed].sort(), [...created].sort(),
       `epic-dashboard-special-path-setup-cleanup-gap: ${failure} setup fault leaves no temporary resource`);
   }
+  const cleanupCreated = [];
+  const cleanupAttempts = [];
+  const cleanupResources = createGeometryResources({
+    mkdtempSync: () => {
+      const resource = `/tmp/cleanup-${cleanupCreated.length + 1}`;
+      cleanupCreated.push(resource);
+      return resource;
+    },
+    copyFileSync: () => {},
+    rmSync: (resource) => {
+      cleanupAttempts.push(resource);
+      if (resource === '/tmp/cleanup-2') throw new Error('normal cleanup fault');
+    },
+  });
+  assert.throws(() => cleanupResources.cleanup(), /normal cleanup fault/,
+    'epic-dashboard-geometry-cleanup-error-swallow-gap: normal cleanup failure is visible');
+  assert.deepStrictEqual(cleanupAttempts, ['/tmp/cleanup-3', '/tmp/cleanup-2', '/tmp/cleanup-1'],
+    'epic-dashboard-geometry-cleanup-error-swallow-gap: normal cleanup attempts every resource after a failure');
 
   const chromeCandidates = [
     process.env.CHROME_BIN,
@@ -665,6 +685,7 @@ async function main() {
     'epic-dashboard-geometry-file-url-portability-gap: special checkout characters are URL encoded');
   assert.strictEqual(fileURLToPath(specialVisualUrl), specialVisualPath,
     'epic-dashboard-geometry-file-url-portability-gap: encoded visual URL round-trips to the exact checkout path');
+  let geometryFailure = null;
   try {
     const browser = await renderGeometry(chrome, profile, VISUAL, 390);
     assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
@@ -675,8 +696,11 @@ async function main() {
     assert.deepStrictEqual({ geometry: specialBrowser.geometry, innerWidth: specialBrowser.innerWidth, clientWidth: specialBrowser.clientWidth }, {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
     }, `epic-dashboard-geometry-file-url-navigation-binding-mutation-gap: encoded special-path navigation renders the exact viewport: ${JSON.stringify(specialBrowser)}`);
+  } catch (error) {
+    geometryFailure = error;
+    throw error;
   } finally {
-    geometryResources.cleanup();
+    geometryResources.cleanup({ suppressErrors: Boolean(geometryFailure) });
   }
 
   console.log('epic-dashboard: all checks passed');
