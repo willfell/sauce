@@ -345,8 +345,18 @@ async function main() {
   }
   assert.deepStrictEqual([normalMatrix.mode, ciMatrix.mode], ['portable-normal', 'portable-ci'],
     'epic-delivery-installed-verifier-matrix-mutation-gap: normal and CI complete-verification calls are both mandatory');
-  if (process.env.CI !== 'true') {
-    const hostMatrix = verifyInstalledVaults(VAULTS, fs, 'deployment-host');
+  const deploymentHostFor = (identity, env, io = fs) => env.SAUCE_DEPLOYMENT_HOST === 'true'
+    || (identity.username === 'willfellhoelter'
+      && io.existsSync(path.join(identity.homedir, 'projects/repos/sauce/.git')));
+  assert.strictEqual(deploymentHostFor({ username: 'contributor', homedir: '/portable-home' }, {}, { existsSync: () => false }), false,
+    'epic-dashboard-local-preflight-host-assumption: ordinary local clones use the complete portable matrix');
+  const deploymentIdentity = os.userInfo();
+  if (deploymentHostFor(deploymentIdentity, process.env)) {
+    const hostVaults = VAULTS.map((vault) => ({
+      name: vault.name,
+      path: path.join(deploymentIdentity.homedir, 'notes/sauce', vault.name),
+    }));
+    const hostMatrix = verifyInstalledVaults(hostVaults, fs, 'deployment-host');
     assert.strictEqual(hostMatrix.artifacts.length, 9, 'deployment host verifies all nine real installed artifacts');
   }
   for (const vault of fixtureVaults) {
