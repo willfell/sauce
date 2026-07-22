@@ -5,6 +5,8 @@ const assert = require("assert");
 const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
+const http = require("http");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 const vm = require("vm");
@@ -207,6 +209,9 @@ function staticContract() {
     assert(manifest.depends_on.some((dep) => dep.name === "styling" && dep.range === ">=0.3.0"), "Project declares styling >=0.3.0");
     const sources = Object.fromEntries(Object.keys(FILES).map((name) => [name, source(name)]));
     const combined = Object.values(sources).join("\n");
+    const harnessSource = fs.readFileSync(__filename, "utf8");
+    assert(!/\bnew\s+WebSocket\s*\(/.test(harnessSource), "exact viewport proof does not require the Node 21+ global WebSocket API");
+    assert(harnessSource.includes("net.createConnection") && harnessSource.includes("clientFrame"), "exact viewport proof uses only the supported Node built-in CDP transport");
     assert(!/_mobilize|_styleLeafBtn/.test(combined), "all four duplicated responsive sizing helpers are deleted");
     for (const name of ["nav", "links", "leaf"]) {
         assert(sources[name].includes("sauce-action-row"), `${name} adopts sauce-action-row`);
@@ -537,6 +542,103 @@ function pngDimensions(buffer) {
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function createCdpTarget(port, url) {
+    return new Promise((resolve, reject) => {
+        const request = http.request({
+            hostname: "127.0.0.1", port, method: "PUT",
+            path: `/json/new?${encodeURIComponent(url)}`,
+        }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("end", () => {
+                const body = Buffer.concat(chunks).toString("utf8");
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                    reject(new Error(`Chrome creates a DevTools target (${response.statusCode}): ${body}`));
+                    return;
+                }
+                try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+            });
+        });
+        request.on("error", reject);
+        request.end();
+    });
+}
+function clientFrame(text, opcode = 1) {
+    const payload = Buffer.from(text);
+    const mask = crypto.randomBytes(4);
+    let header;
+    if (payload.length < 126) {
+        header = Buffer.from([0x80 | opcode, 0x80 | payload.length]);
+    } else if (payload.length <= 0xffff) {
+        header = Buffer.alloc(4); header[0] = 0x80 | opcode; header[1] = 0x80 | 126; header.writeUInt16BE(payload.length, 2);
+    } else {
+        header = Buffer.alloc(10); header[0] = 0x80 | opcode; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(payload.length), 2);
+    }
+    const masked = Buffer.alloc(payload.length);
+    for (let index = 0; index < payload.length; index += 1) masked[index] = payload[index] ^ mask[index % 4];
+    return Buffer.concat([header, mask, masked]);
+}
+function connectCdpSocket(endpoint) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(endpoint);
+        const key = crypto.randomBytes(16).toString("base64");
+        const expectedAccept = crypto.createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+        const stream = net.createConnection({ host: parsed.hostname, port: Number(parsed.port) });
+        let buffer = Buffer.alloc(0);
+        let handshaken = false;
+        let fragmented = [];
+        const messageListeners = new Set();
+        const client = {
+            send(text) { stream.write(clientFrame(text)); },
+            onMessage(listener) { messageListeners.add(listener); },
+            close() { if (!stream.destroyed) { stream.write(clientFrame("", 8)); stream.end(); } },
+        };
+        const consumeFrames = () => {
+            while (buffer.length >= 2) {
+                const first = buffer[0]; const second = buffer[1];
+                const fin = !!(first & 0x80); const opcode = first & 0x0f; const masked = !!(second & 0x80);
+                let length = second & 0x7f; let offset = 2;
+                if (length === 126) { if (buffer.length < 4) return; length = buffer.readUInt16BE(2); offset = 4; }
+                else if (length === 127) { if (buffer.length < 10) return; length = Number(buffer.readBigUInt64BE(2)); offset = 10; }
+                const maskOffset = masked ? 4 : 0;
+                if (buffer.length < offset + maskOffset + length) return;
+                const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+                const payload = Buffer.from(buffer.subarray(offset + maskOffset, offset + maskOffset + length));
+                buffer = buffer.subarray(offset + maskOffset + length);
+                if (mask) for (let index = 0; index < payload.length; index += 1) payload[index] ^= mask[index % 4];
+                if (opcode === 8) { stream.end(); continue; }
+                if (opcode === 9) { stream.write(clientFrame(payload, 10)); continue; }
+                if (opcode === 1 || opcode === 0) fragmented.push(payload);
+                if (fin && (opcode === 1 || opcode === 0)) {
+                    const message = Buffer.concat(fragmented).toString("utf8"); fragmented = [];
+                    for (const listener of messageListeners) listener(message);
+                }
+            }
+        };
+        stream.on("connect", () => {
+            stream.write([
+                `GET ${parsed.pathname}${parsed.search} HTTP/1.1`,
+                `Host: ${parsed.host}`, "Upgrade: websocket", "Connection: Upgrade",
+                `Sec-WebSocket-Key: ${key}`, "Sec-WebSocket-Version: 13", "", "",
+            ].join("\r\n"));
+        });
+        stream.on("data", (chunk) => {
+            buffer = Buffer.concat([buffer, chunk]);
+            if (!handshaken) {
+                const boundary = buffer.indexOf("\r\n\r\n");
+                if (boundary < 0) return;
+                const header = buffer.subarray(0, boundary).toString("utf8");
+                buffer = buffer.subarray(boundary + 4);
+                if (!/^HTTP\/1\.1 101\b/m.test(header) || !header.toLowerCase().includes(`sec-websocket-accept: ${expectedAccept.toLowerCase()}`)) {
+                    reject(new Error(`Chrome DevTools WebSocket handshake failed: ${header}`)); stream.destroy(); return;
+                }
+                handshaken = true; resolve(client);
+            }
+            consumeFrames();
+        });
+        stream.on("error", reject);
+    });
+}
 async function exactViewportCapture(executable, url, width, height) {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-r7a2-cdp-"));
     const chrome = childProcess.spawn(executable, [
@@ -550,18 +652,12 @@ async function exactViewportCapture(executable, url, width, height) {
         for (let attempt = 0; attempt < 100 && !fs.existsSync(portFile); attempt += 1) await wait(50);
         assert(fs.existsSync(portFile), "Chrome publishes its DevTools endpoint");
         const port = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0];
-        const targetResponse = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
-        assert(targetResponse.ok, `Chrome creates a DevTools target (${targetResponse.status})`);
-        const target = await targetResponse.json();
-        socket = new WebSocket(target.webSocketDebuggerUrl);
-        await new Promise((resolve, reject) => {
-            socket.addEventListener("open", resolve, { once: true });
-            socket.addEventListener("error", reject, { once: true });
-        });
+        const target = await createCdpTarget(port, url);
+        socket = await connectCdpSocket(target.webSocketDebuggerUrl);
         let nextId = 0;
         const pending = new Map();
-        socket.addEventListener("message", (event) => {
-            const message = JSON.parse(String(event.data));
+        socket.onMessage((data) => {
+            const message = JSON.parse(data);
             if (!message.id || !pending.has(message.id)) return;
             const { resolve, reject } = pending.get(message.id);
             pending.delete(message.id);
@@ -591,7 +687,7 @@ async function exactViewportCapture(executable, url, width, height) {
         const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         return { marker, first, second };
     } finally {
-        if (socket && socket.readyState < 2) socket.close();
+        if (socket) socket.close();
         chrome.kill("SIGTERM");
         await wait(50);
         fs.rmSync(profile, { recursive: true, force: true });
