@@ -99,7 +99,7 @@ function cdpPipe(child) {
   };
   return { command };
 }
-async function renderGeometry(chrome, profile, targetUrl, viewportWidth) {
+async function renderGeometry(chrome, profile, visualPath, viewportWidth) {
   const child = childProcess.spawn(chrome, [
     '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--no-first-run',
     '--disable-background-networking', '--remote-debugging-pipe', `--user-data-dir=${profile}`,
@@ -120,7 +120,7 @@ async function renderGeometry(chrome, profile, targetUrl, viewportWidth) {
       width: viewportWidth, height: 1400, deviceScaleFactor: 1, mobile: false,
       screenWidth: viewportWidth, screenHeight: 1400,
     }, session);
-    await send('Page.navigate', { url: targetUrl }, session);
+    await send('Page.navigate', { url: visualUrlFor(visualPath) }, session);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const evaluated = await send('Runtime.evaluate', {
         expression: `JSON.stringify({readyState:document.readyState,geometry:document.body?.dataset.geometry||null,innerWidth:window.innerWidth,clientWidth:document.documentElement.clientWidth,result:document.querySelector('.geometry-result')?.textContent||''})`,
@@ -611,21 +611,30 @@ async function main() {
   ].filter(Boolean);
   const chrome = chromeCandidates.find((candidate) => fs.existsSync(candidate));
   assert(chrome, 'epic-390px-effective-viewport-mutation-gap: Chrome is required for device-metrics geometry proof');
-  const specialVisualPath = path.join(os.tmpdir(), 'contributor#clone?query', 'epic dashboard.html');
+  const specialVisualRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'contributor#clone?query-'));
+  const specialVisualPath = path.join(specialVisualRoot, 'epic dashboard.html');
+  fs.copyFileSync(VISUAL, specialVisualPath);
   const specialVisualUrl = visualUrlFor(specialVisualPath);
   assert(specialVisualUrl.includes('%23') && specialVisualUrl.includes('%3F') && specialVisualUrl.includes('%20'),
     'epic-dashboard-geometry-file-url-portability-gap: special checkout characters are URL encoded');
   assert.strictEqual(fileURLToPath(specialVisualUrl), specialVisualPath,
     'epic-dashboard-geometry-file-url-portability-gap: encoded visual URL round-trips to the exact checkout path');
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-'));
+  const specialProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-dashboard-geometry-special-'));
   try {
-    const browser = await renderGeometry(chrome, profile, visualUrlFor(VISUAL), 390);
+    const browser = await renderGeometry(chrome, profile, VISUAL, 390);
     assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
     }, `epic-390px-effective-viewport-mutation-gap: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
     assert.strictEqual(browser.result, '390px geometry pass', 'light and dark rendered geometry checker completed');
+    const specialBrowser = await renderGeometry(chrome, specialProfile, specialVisualPath, 390);
+    assert.deepStrictEqual({ geometry: specialBrowser.geometry, innerWidth: specialBrowser.innerWidth, clientWidth: specialBrowser.clientWidth }, {
+      geometry: 'pass', innerWidth: 390, clientWidth: 390,
+    }, `epic-dashboard-geometry-file-url-navigation-binding-mutation-gap: encoded special-path navigation renders the exact viewport: ${JSON.stringify(specialBrowser)}`);
   } finally {
     fs.rmSync(profile, { recursive: true, force: true });
+    fs.rmSync(specialProfile, { recursive: true, force: true });
+    fs.rmSync(specialVisualRoot, { recursive: true, force: true });
   }
 
   console.log('epic-dashboard: all checks passed');
