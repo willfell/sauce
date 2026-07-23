@@ -1150,6 +1150,38 @@ assert.throws(() => projectCard(
 eq(rootAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), rootAliasBytes,
   'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS fails before every slice and epic projection write');
 
+const symlinkAliasProjection = makeEpicProjectionFixture('physical-root-symlink-alias');
+const physicalProjectRoot = path.dirname(symlinkAliasProjection.cardsRoot);
+const aliasProjectRoot = path.join(path.dirname(physicalProjectRoot), 'alias');
+fs.symlinkSync(physicalProjectRoot, aliasProjectRoot, 'dir');
+for (const target of [
+  symlinkAliasProjection.atlasPath,
+  symlinkAliasProjection.cardPath,
+  path.join(path.dirname(symlinkAliasProjection.cardPath), 'A2.md'),
+]) {
+  fs.writeFileSync(
+    target,
+    fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'spice/projects/alias/'),
+  );
+}
+const symlinkAliasBytes = symlinkAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+const aliasCardsRoot = path.join(aliasProjectRoot, 'tasks');
+const aliasParentBoard = path.join(aliasProjectRoot, 'project-board.md');
+const symlinkAliasCardPath = path.join(aliasCardsRoot, 'Epic A', 'board', 'A1.md');
+assert.throws(() => projectCard(
+  symlinkAliasCardPath,
+  aliasParentBoard,
+  'A1',
+  'implementing',
+  {
+    record: { ...symlinkAliasProjection.state.cards.A1, card_path: symlinkAliasCardPath },
+    state: symlinkAliasProjection.state,
+    cardsRoot: aliasCardsRoot,
+  },
+), /does not bind its canonical parent board/, 'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS resolves project-directory symlinks to physical identity');
+eq(symlinkAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), symlinkAliasBytes,
+  'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS rejects a symlink alias before every projection write');
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,

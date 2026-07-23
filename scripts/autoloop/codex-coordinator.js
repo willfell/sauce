@@ -893,7 +893,7 @@ function canonicalWorkspacePath(value, expected) {
 }
 
 function physicalProjectPrefix(cardsRoot) {
-  const projectRoot = path.dirname(path.resolve(cardsRoot)).replace(/\\/g, '/');
+  const projectRoot = path.dirname(fs.realpathSync(cardsRoot)).replace(/\\/g, '/');
   const marker = '/spice/projects/';
   const markerAt = projectRoot.lastIndexOf(marker);
   if (markerAt < 0) throw new Error('canonical cards root is outside spice/projects');
@@ -901,7 +901,7 @@ function physicalProjectPrefix(cardsRoot) {
   if (!/^spice\/projects\/[^/]+$/.test(relative)) {
     throw new Error('canonical cards root is not one project directly under spice/projects');
   }
-  return relative;
+  return { prefix: relative, root: projectRoot };
 }
 
 function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
@@ -971,11 +971,12 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   }
   const parentSourceBoard = scalarField(atlasRaw, 'source_board');
   const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
-  const projectPrefix = physicalProjectPrefix(cardsRoot);
+  const physicalProject = physicalProjectPrefix(cardsRoot);
+  const projectPrefix = physicalProject.prefix;
   const expectedParentBoardPath = path.posix.join(projectPrefix, path.basename(parentBoardPath));
   if (parentSourceBoard !== parentKanbanBoard
     || !canonicalWorkspacePath(parentSourceBoard, expectedParentBoardPath)
-    || path.dirname(path.resolve(parentBoardPath)) !== path.dirname(path.resolve(cardsRoot))) {
+    || path.dirname(fs.realpathSync(parentBoardPath)).replace(/\\/g, '/') !== physicalProject.root) {
     throw new Error(`epic atlas ${epic} does not bind its canonical parent board`);
   }
   const expectedAtlasPath = path.posix.join(projectPrefix, 'tasks', epic, `${epic}.md`);
