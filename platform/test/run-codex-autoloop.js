@@ -878,6 +878,7 @@ function makeEpicProjectionFixture(label) {
   const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
   const cardPath = path.join(epicBoardDir, 'A1.md');
   fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(epicRoot, 'context', 'runs'), { recursive: true });
   fs.writeFileSync(parentBoardPath, [
     '## In Planning', '- [ ] [[Epic B]]', '- [ ] [[Epic C]]', '',
     '## In Progress', '', '## Blocked', '',
@@ -956,6 +957,125 @@ eq(secondEpicReconcile.no_op, true, 'ES4-DUAL-NOOP exact-card replay reports no_
 eq(epicProjection.files.map((target) => fs.readFileSync(target, 'utf8')), epicBytesAfterRepair, 'ES4-DUAL-NOOP keeps every projection surface byte-stable');
 eq(JSON.stringify(epicProjection.state), epicStateAfterRepair, 'ES4-DUAL-NOOP keeps ledger state byte-stable');
 eq(epicLedgerWrites, epicWritesAfterRepair, 'ES4-DUAL-NOOP performs no ledger write');
+
+const missingReceiptProjection = makeEpicProjectionFixture('missing-receipts');
+missingReceiptProjection.state.cards.A1.phase = 'deployed';
+assert.throws(() => projectCard(
+  missingReceiptProjection.cardPath,
+  missingReceiptProjection.parentBoardPath,
+  'A1',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A1,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+), /completion lacks successful deployment receipts/, 'ES4-RECEIPT-ROLLUP refuses a deployed phase without three successful vault receipts');
+const successfulReceipts = {
+  headspace: { ok: true, installed_version: '0.257.0' },
+  accuris: { ok: true, installed_version: '0.257.0' },
+  ero: { ok: true, installed_version: '0.257.0' },
+};
+missingReceiptProjection.state.cards.A1.required_version = '0.257.0';
+missingReceiptProjection.state.cards.A1.vault_receipts = successfulReceipts;
+missingReceiptProjection.state.cards.A2 = {
+  card: 'A2',
+  phase: 'deployed',
+  required_version: '0.257.0',
+  vault_receipts: successfulReceipts,
+  card_path: path.join(path.dirname(missingReceiptProjection.cardPath), 'A2.md'),
+};
+projectCard(
+  missingReceiptProjection.cardPath,
+  missingReceiptProjection.parentBoardPath,
+  'A1',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A1,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+);
+ok(/## Completed[\s\S]*- \[x\] \[\[Epic A\]\]/.test(fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8')),
+  'ES4-RECEIPT-ROLLUP paints done only when every slice has successful deployment receipts');
+ok(/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8'))
+  && /posture: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
+'ES4-RECEIPT-ROLLUP paints a receipt-proven done atlas');
+
+const backlinkProjection = makeEpicProjectionFixture('bad-backlink');
+fs.writeFileSync(
+  backlinkProjection.cardPath,
+  fs.readFileSync(backlinkProjection.cardPath, 'utf8')
+    .replace('tasks/Epic A/Epic A.md', 'tasks/Other Epic/Other Epic.md'),
+);
+assert.throws(() => projectCard(
+  backlinkProjection.cardPath,
+  backlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: backlinkProjection.state.cards.A1,
+    state: backlinkProjection.state,
+    cardsRoot: backlinkProjection.cardsRoot,
+  },
+), /mismatched task_parent/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects an epic/task_parent identity mismatch');
+
+const shallowProjection = makeEpicProjectionFixture('shallow-board');
+fs.writeFileSync(
+  shallowProjection.cardPath,
+  fs.readFileSync(shallowProjection.cardPath, 'utf8')
+    .replaceAll('spice/projects/test/tasks/Epic A/board/Epic A-board.md', 'board/Epic A-board.md'),
+);
+assert.throws(() => projectCard(
+  shallowProjection.cardPath,
+  shallowProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: shallowProjection.state.cards.A1,
+    state: shallowProjection.state,
+    cardsRoot: shallowProjection.cardsRoot,
+  },
+), /shallow or mismatched source board/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects shallow source_board and kanban_board paths');
+
+const nestedProjection = makeEpicProjectionFixture('nested-slice');
+const nestedCardPath = path.join(path.dirname(nestedProjection.cardPath), 'A1', 'A1.md');
+fs.mkdirSync(path.dirname(nestedCardPath));
+fs.copyFileSync(nestedProjection.cardPath, nestedCardPath);
+nestedProjection.state.cards.A1.card_path = nestedCardPath;
+assert.throws(() => projectCard(
+  nestedCardPath,
+  nestedProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: nestedProjection.state.cards.A1,
+    state: nestedProjection.state,
+    cardsRoot: nestedProjection.cardsRoot,
+  },
+), /must live flat beside its epic board/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects a slice nested below the canonical board directory');
+
+const crossEpicProjection = makeEpicProjectionFixture('cross-epic-posture');
+const crossEpicSiblingPath = path.join(path.dirname(crossEpicProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  crossEpicSiblingPath,
+  fs.readFileSync(crossEpicSiblingPath, 'utf8')
+    .replace('depends_on: []', 'depends_on:\n  - "[[External Slice]]"'),
+);
+projectCard(
+  crossEpicProjection.cardPath,
+  crossEpicProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: crossEpicProjection.state.cards.A1,
+    state: crossEpicProjection.state,
+    cardsRoot: crossEpicProjection.cardsRoot,
+  },
+);
+ok(/posture: blocked_by_dependencies/.test(fs.readFileSync(crossEpicProjection.atlasPath, 'utf8')),
+  'ES4-DUAL-POSTURE derives a cross-epic dependency posture from canonical sibling contracts');
+
 eq(projectionBoardDrift(
   fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
   epicProjection.state.cards.A1,

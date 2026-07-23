@@ -884,7 +884,15 @@ function atomicWriteText(file, value) {
   fs.renameSync(tmp, file);
 }
 
-function canonicalEpicProjection(cardRaw, parentBoardPath, cardsRoot, opts = {}) {
+function canonicalWorkspacePath(value, suffix) {
+  const raw = String(value || '').trim().replace(/\\/g, '/');
+  const parts = raw.split('/');
+  return Boolean(raw) && !raw.startsWith('/') && !/^[A-Za-z]:\//.test(raw)
+    && !parts.some((part) => !part || part === '.' || part === '..')
+    && (raw === suffix || raw.endsWith(`/${suffix}`));
+}
+
+function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, opts = {}) {
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
   if (!epic) throw new Error('canonical slice is missing its epic backlink');
@@ -895,26 +903,40 @@ function canonicalEpicProjection(cardRaw, parentBoardPath, cardsRoot, opts = {})
   }
   const atlasPath = path.join(epicRoot, `${epic}.md`);
   const boardDir = path.join(epicRoot, 'board');
-  if (!fs.existsSync(atlasPath) || !fs.existsSync(boardDir)) {
+  const runsDir = path.join(epicRoot, 'context', 'runs');
+  if (!fs.existsSync(atlasPath) || !fs.existsSync(boardDir) || !fs.existsSync(runsDir)) {
     throw new Error(`canonical epic ${epic} is missing its atlas or board directory`);
+  }
+  if (path.dirname(path.resolve(cardPath)) !== path.resolve(boardDir)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} must live flat beside its epic board`);
   }
   const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
   if (scalarField(atlasRaw, 'type') !== 'epic') throw new Error(`epic atlas ${epic} has invalid type`);
-  const boards = fs.readdirSync(boardDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-    .map((entry) => path.join(boardDir, entry.name))
-    .filter((file) => scalarField(fs.readFileSync(file, 'utf8'), 'board_role') === 'epic');
-  if (boards.length !== 1) throw new Error(`canonical epic ${epic} has ${boards.length} epic boards`);
-  const expectedSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', path.basename(boards[0])));
-  const backlink = normalizedPath(scalarField(atlasRaw, 'epic_board'));
-  if (!backlink || (!backlink.endsWith(expectedSuffix) && backlink !== expectedSuffix)) {
+  const epicBoardPath = path.join(boardDir, `${epic}-board.md`);
+  if (!fs.existsSync(epicBoardPath)
+    || scalarField(fs.readFileSync(epicBoardPath, 'utf8'), 'board_role') !== 'epic') {
+    throw new Error(`canonical epic ${epic} is missing its exact named epic board`);
+  }
+  const expectedAtlasSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, `${epic}.md`));
+  const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', `${epic}-board.md`));
+  const backlink = scalarField(atlasRaw, 'epic_board');
+  const taskParent = scalarField(cardRaw, 'task_parent');
+  const sourceBoard = scalarField(cardRaw, 'source_board');
+  const kanbanBoard = scalarField(cardRaw, 'kanban_board');
+  if (!canonicalWorkspacePath(backlink, expectedBoardSuffix)) {
     throw new Error(`epic atlas ${epic} does not bind its canonical board`);
+  }
+  if (!canonicalWorkspacePath(taskParent, expectedAtlasSuffix)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} has a mismatched task_parent`);
+  }
+  if (sourceBoard !== kanbanBoard || !canonicalWorkspacePath(sourceBoard, expectedBoardSuffix)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} has a shallow or mismatched source board`);
   }
   const parentRaw = fs.readFileSync(parentBoardPath, 'utf8');
   if (!boardCardLocation(parentRaw, epic)) throw new Error(`epic ${epic} is missing from its parent board`);
   return {
-    epic, atlasPath, atlasRaw, boardPath: boards[0],
-    boardRaw: fs.readFileSync(boards[0], 'utf8'), parentRaw,
+    epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
+    boardRaw: fs.readFileSync(epicBoardPath, 'utf8'), parentRaw,
     cardsRoot: root, state: opts.state || { cards: {} },
   };
 }
@@ -933,14 +955,37 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
   const cards = ['In Planning', 'In Progress', 'Blocked', 'Completed']
     .flatMap((column) => parsed[column] || [])
     .filter((name, index, all) => all.indexOf(name) === index);
+  const siblings = new Set(cards.map(normalizeCardLink));
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
     const trackedMapping = tracked && projectionMapping(tracked.phase);
-    if (name === currentCard) return { card: name, status: currentStatus };
-    if (trackedMapping) return { card: name, status: trackedMapping.status };
     const slicePath = path.join(path.dirname(surface.boardPath), `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
-    return { card: name, status: scalarField(fs.readFileSync(slicePath, 'utf8'), 'status') || 'planning' };
+    const sliceRaw = fs.readFileSync(slicePath, 'utf8');
+    const dependencies = tracked && Array.isArray(tracked.dependencies)
+      ? tracked.dependencies.map(normalizeCardLink) : parseDependsOn(sliceRaw).map(normalizeCardLink);
+    const decorate = (status) => ({
+      card: name,
+      status,
+      cross_epic_dependency: dependencies.some((dependency) => !siblings.has(dependency)),
+    });
+    if (name === currentCard) {
+      if (currentStatus === 'completed' && !successfulDeploymentReceipts(tracked)) {
+        throw new Error(`epic slice ${name} completion lacks successful deployment receipts`);
+      }
+      return decorate(currentStatus);
+    }
+    if (trackedMapping) {
+      if (trackedMapping.status === 'completed' && !successfulDeploymentReceipts(tracked)) {
+        throw new Error(`epic slice ${name} completion lacks successful deployment receipts`);
+      }
+      return decorate(trackedMapping.status);
+    }
+    const status = scalarField(sliceRaw, 'status') || 'planning';
+    if (delivery.normalizeStatus(status) === 'completed') {
+      throw new Error(`epic slice ${name} completion has no tracked deployment receipts`);
+    }
+    return decorate(status);
   });
   return delivery.deriveEpicLifecycle(slices);
 }
@@ -967,7 +1012,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   if (!mapping) return { changed: false, skipped: true };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
-  const epicSurface = canonicalEpicProjection(cardRaw, boardPath, opts.cardsRoot || CARDS_ROOT, opts);
+  const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, opts);
   const sliceBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
   const boardRaw = epicSurface ? epicSurface.boardRaw : fs.readFileSync(boardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
@@ -1090,7 +1135,7 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
     const cardPath = resolveCardPath(record.card_path, record.card, opts.cardsRoot || CARDS_ROOT);
     if (cardPath && fs.existsSync(cardPath)) {
       const raw = fs.readFileSync(cardPath, 'utf8');
-      epicSurface = canonicalEpicProjection(raw, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
+      epicSurface = canonicalEpicProjection(raw, cardPath, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
         state: opts.state,
       });
       if (epicSurface) projectedBoard = epicSurface.boardRaw;
