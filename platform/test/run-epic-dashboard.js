@@ -12,11 +12,16 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const HELPER = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboard.js');
 const VISUAL = path.join(ROOT, 'platform/test/visual/epic-dashboard.html');
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
+const coordinator = require(path.join(ROOT, 'scripts/autoloop/codex-coordinator.js'));
 const { VAULTS } = require(path.join(ROOT, 'scripts/autoloop/deploy.js'));
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const installer = require(path.join(ROOT, 'platform/install.js'));
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
+function scalar(md, key) {
+  const match = String(md).match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, 'm'));
+  return match ? match[1].replace(/^"|"$/g, '') : '';
+}
 function loadClass() { return eval(`(${fs.readFileSync(HELPER, 'utf8')})`); } // eslint-disable-line no-eval
 function loadNamedClass(rel, name) { return new Function(`${read(rel)}\nreturn ${name};`)(); }
 function memoryAdapter(initial) {
@@ -992,6 +997,96 @@ async function main() {
     assert(history.some((entry) => entry.event === 'warning' && entry.step === step),
       `ES2E-CANONICAL-HEAL: ${step} failure leaves an auditable warning`);
   }
+
+  const seedRoot = 'platform/test/seed-vault/spice/projects/epic-fixture';
+  const seedSlices = ['Alpha 1', 'Alpha 2', 'Alpha 3'].map((name) => {
+    const md = read(`${seedRoot}/tasks/Alpha Epic/board/${name}.md`);
+    return { name, md, status: scalar(md, 'status') };
+  });
+  const expectedSeedStatus = new Map([
+    ['Alpha 1', 'completed'], ['Alpha 2', 'in_progress'], ['Alpha 3', 'planning'],
+  ]);
+  for (const seed of seedSlices) {
+    assert.strictEqual(seed.status, expectedSeedStatus.get(seed.name),
+      `seed-canonical-status: ${seed.name} stores a canonical Delivery status`);
+    const verdict = delivery.validateSlice({
+      card: seed.name,
+      parent_card: 'Epics & Slices bridge',
+      slice: seed.name,
+      model_profile: 'heavy',
+      schema_version: '1.1.0',
+      execution_mode: 'release',
+      batch_policy: 'supervised_only',
+      status: seed.status,
+      touch_zones: ['platform/blueprints/project'],
+      depends_on: [],
+      deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+      evidence: [{
+        source_identity: 'portable-seed',
+        captured_at: '2026-07-21T00:00:00Z',
+        revision: 'fixture',
+        locator: `${seed.name}.md:1`,
+        claim: 'Portable epic seed fixture',
+      }],
+      release_required: true,
+      deployment_required: true,
+      risk_dimensions: [],
+      type: 'slice',
+      epic: scalar(seed.md, 'epic'),
+      task_parent: scalar(seed.md, 'task_parent'),
+      source_board: scalar(seed.md, 'source_board'),
+      kanban_board: scalar(seed.md, 'kanban_board'),
+    });
+    assert(!verdict.errors.some((error) => error.code === 'slice-epic-backlink-mismatch'),
+      `seed-canonical-status: ${seed.name} preserves canonical epic basename identity`);
+  }
+  const seedLifecycle = delivery.deriveEpicLifecycle([
+    { card: 'Alpha 1', status: seedSlices[0].status, depends_on: [] },
+    { card: 'Alpha 2', status: seedSlices[1].status, depends_on: ['Alpha 1'] },
+    { card: 'Alpha 3', status: seedSlices[2].status, depends_on: ['Alpha 2'] },
+  ]);
+  assert.deepStrictEqual(
+    { state: seedLifecycle.state, posture: seedLifecycle.posture, counts: seedLifecycle.counts },
+    {
+      state: 'active',
+      posture: 'claimable',
+      counts: { planned: 1, active: 1, blocked: 0, done: 1, total: 3 },
+    },
+    'seed-canonical-status: three-slice fixture derives one closed slice and an active claimable frontier',
+  );
+
+  const seededBoards = [
+    {
+      md: read(`${seedRoot}/epic-fixture-board.md`),
+      lane: 'In Planning',
+      cards: ['Alpha Epic', 'Beta Epic', 'Degenerate Flat Card'],
+    },
+    {
+      md: read(`${seedRoot}/tasks/Alpha Epic/board/Alpha Epic-board.md`),
+      laneByCard: { 'Alpha 1': 'Completed', 'Alpha 2': 'In Progress', 'Alpha 3': 'In Planning' },
+      cards: ['Alpha 1', 'Alpha 2', 'Alpha 3'],
+    },
+  ];
+  for (const boardFixture of seededBoards) {
+    for (const card of boardFixture.cards) {
+      const lane = boardFixture.lane || boardFixture.laneByCard[card];
+      assert.doesNotThrow(
+        () => coordinator.moveBoardCard(boardFixture.md, card, lane, lane === 'Completed'),
+        `coordinator-checklist-board-cards: ${card} remains coordinator-addressable`,
+      );
+    }
+  }
+  const seedFiles = fs.readdirSync(path.join(ROOT, seedRoot, 'tasks', 'Alpha Epic', 'context'));
+  assert(seedFiles.includes('pack.md')
+    && /^[a-f0-9]{64}$/.test(scalar(read(`${seedRoot}/tasks/Alpha Epic/context/pack.md`), 'content_sha256')),
+  'seed-canonical-status: portable context pack carries a deterministic hash');
+  assert(
+    read(`${seedRoot}/tasks/Alpha Epic/context/runs/Run 1.md`).includes('type: run-summary')
+      && read(`${seedRoot}/tasks/Alpha Epic/context/lessons/Lesson 1.md`).includes('type: lesson'),
+    'seed-canonical-status: portable run and lesson context are present',
+  );
+  assert(read(`${seedRoot}/tasks/Degenerate Flat Card.md`).includes('type: task-hub'),
+    'coordinator-checklist-board-cards: degenerate flat card remains legacy work');
 
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
