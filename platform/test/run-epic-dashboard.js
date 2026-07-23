@@ -667,6 +667,12 @@ async function main() {
   const projectBoardTemplate = read('platform/blueprints/project/templates/Project Board.md');
   assert.match(projectBoardTemplate, /class: "EpicCreateAction"/,
     'ES2D-ENTITY-SCAFFOLD: every new project board exposes the New Epic action');
+  assert.match(projectBoardTemplate, /^project_name: "\{\{prompts\.name\}\}"$/m,
+    'ES2D-ENTITYCREATE-PROJECT-IDENTITY-ABSENT: project board preserves the human project name');
+  assert.match(projectBoardTemplate, /^project_slug: "\{\{prompts\.slug\}\}"$/m,
+    'ES2D-ENTITYCREATE-PROJECT-IDENTITY-ABSENT: project board supplies EntityCreate its canonical slug');
+  assert.doesNotMatch(projectBoardTemplate, /^project_name:.*sanitize-filename/m,
+    'ES2D-ENTITYCREATE-PROJECT-IDENTITY-ABSENT: project identity is not replaced by a filename projection');
 
   const EpicCreateAction = loadNamedClass('platform/blueprints/project/helpers/epic-create-action.js', 'EpicCreateAction');
   const actionContainer = element();
