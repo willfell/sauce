@@ -1076,6 +1076,94 @@ projectCard(
 ok(/posture: blocked_by_dependencies/.test(fs.readFileSync(crossEpicProjection.atlasPath, 'utf8')),
   'ES4-DUAL-POSTURE derives a cross-epic dependency posture from canonical sibling contracts');
 
+const malformedSiblingProjection = makeEpicProjectionFixture('malformed-sibling');
+const malformedSiblingPath = path.join(path.dirname(malformedSiblingProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  malformedSiblingPath,
+  fs.readFileSync(malformedSiblingPath, 'utf8')
+    .replace('type: slice', 'type: task-hub')
+    .replace('epic: "[[Epic A]]"', 'epic: "[[Other Epic]]"')
+    .replace('tasks/Epic A/Epic A.md', 'tasks/Other Epic/Other Epic.md')
+    .replaceAll('tasks/Epic A/board/Epic A-board.md', 'tasks/Other Epic/board/Other Epic-board.md'),
+);
+const malformedParentBefore = fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8');
+const malformedAtlasBefore = fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8');
+assert.throws(() => projectCard(
+  malformedSiblingProjection.cardPath,
+  malformedSiblingProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: malformedSiblingProjection.state.cards.A1,
+    state: malformedSiblingProjection.state,
+    cardsRoot: malformedSiblingProjection.cardsRoot,
+  },
+), /epic member A2\.md is not type slice/, 'ES4-CANONICAL-SLICE-FAILOPEN validates every sibling note before roll-up');
+eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malformedParentBefore,
+  'ES4-CANONICAL-SLICE-FAILOPEN leaves the parent board byte-stable after sibling refusal');
+eq(fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8'), malformedAtlasBefore,
+  'ES4-CANONICAL-SLICE-FAILOPEN leaves the atlas byte-stable after sibling refusal');
+
+const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
+fs.writeFileSync(
+  duplicateSiblingProjection.epicBoardPath,
+  fs.readFileSync(duplicateSiblingProjection.epicBoardPath, 'utf8')
+    .replace('## In Progress\n', '## In Progress\n- [ ] [[A2]]\n'),
+);
+assert.throws(() => projectCard(
+  duplicateSiblingProjection.cardPath,
+  duplicateSiblingProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: duplicateSiblingProjection.state.cards.A1,
+    state: duplicateSiblingProjection.state,
+    cardsRoot: duplicateSiblingProjection.cardsRoot,
+  },
+), /duplicate board membership for A2/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects duplicate sibling membership across epic lanes');
+
+const diagnosticProjection = makeEpicProjectionFixture('diagnostic-refusal');
+fs.writeFileSync(
+  diagnosticProjection.epicBoardPath,
+  moveBoardCard(fs.readFileSync(diagnosticProjection.epicBoardPath, 'utf8'), 'A1', 'In Progress'),
+);
+fs.writeFileSync(
+  diagnosticProjection.cardPath,
+  fs.readFileSync(diagnosticProjection.cardPath, 'utf8')
+    .replace('kanban_column: In Planning', 'kanban_column: In Progress')
+    .replace('status: planning', 'status: in_progress'),
+);
+const diagnosticSiblingPath = path.join(path.dirname(diagnosticProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  diagnosticSiblingPath,
+  fs.readFileSync(diagnosticSiblingPath, 'utf8').replace('status: planning', 'status: completed'),
+);
+const diagnosticFinding = projectionBoardDrift(
+  fs.readFileSync(diagnosticProjection.parentBoardPath, 'utf8'),
+  diagnosticProjection.state.cards.A1,
+  {
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    state: diagnosticProjection.state,
+  },
+);
+ok(/canonical epic roll-up refusal: epic slice A2 completion has no tracked deployment receipts/.test(diagnosticFinding.issue),
+  'ES4-DRIFT-DIAGNOSTIC-THROW contains a receipt derivation refusal as an actionable drift finding');
+eq(diagnosticFinding.reconcile, 'reconcile --card A1',
+  'ES4-DRIFT-DIAGNOSTIC-THROW names the exact-card reconcile route');
+const containedStatus = commandStatus(
+  { root: diagnosticProjection.root },
+  {
+    state: diagnosticProjection.state,
+    boardMd: fs.readFileSync(diagnosticProjection.parentBoardPath, 'utf8'),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+ok(containedStatus.board_drift.some((finding) => /canonical epic roll-up refusal/.test(finding.issue)),
+  'ES4-DRIFT-DIAGNOSTIC-THROW keeps coordinator status available with the refusal attached');
+
 eq(projectionBoardDrift(
   fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
   epicProjection.state.cards.A1,

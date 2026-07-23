@@ -892,6 +892,44 @@ function canonicalWorkspacePath(value, suffix) {
     && (raw === suffix || raw.endsWith(`/${suffix}`));
 }
 
+function validateCanonicalSliceTopology(cardRaw, cardPath, epic, cardsRoot, boardPath) {
+  if (scalarField(cardRaw, 'type') !== 'slice') {
+    throw new Error(`canonical epic member ${path.basename(cardPath)} is not type slice`);
+  }
+  if (normalizeCardLink(scalarField(cardRaw, 'epic')) !== epic) {
+    throw new Error(`canonical epic member ${path.basename(cardPath)} has a mismatched epic backlink`);
+  }
+  const boardDir = path.dirname(boardPath);
+  if (path.dirname(path.resolve(cardPath)) !== path.resolve(boardDir)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} must live flat beside its epic board`);
+  }
+  const expectedAtlasSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, `${epic}.md`));
+  const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', `${epic}-board.md`));
+  const taskParent = scalarField(cardRaw, 'task_parent');
+  const sourceBoard = scalarField(cardRaw, 'source_board');
+  const kanbanBoard = scalarField(cardRaw, 'kanban_board');
+  if (!canonicalWorkspacePath(taskParent, expectedAtlasSuffix)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} has a mismatched task_parent`);
+  }
+  if (sourceBoard !== kanbanBoard || !canonicalWorkspacePath(sourceBoard, expectedBoardSuffix)) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} has a shallow or mismatched source board`);
+  }
+}
+
+function canonicalEpicMembers(boardRaw, boardDir, epic, cardsRoot, boardPath) {
+  const parsed = parseBoard(boardRaw);
+  const members = ['In Planning', 'In Progress', 'Blocked', 'Completed']
+    .flatMap((column) => parsed[column] || []);
+  const duplicate = members.find((name, index) => members.indexOf(name) !== index);
+  if (duplicate) throw new Error(`canonical epic ${epic} contains duplicate board membership for ${duplicate}`);
+  for (const name of members) {
+    const slicePath = path.join(boardDir, `${name}.md`);
+    if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
+    validateCanonicalSliceTopology(fs.readFileSync(slicePath, 'utf8'), slicePath, epic, cardsRoot, boardPath);
+  }
+  return members;
+}
+
 function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, opts = {}) {
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
@@ -907,9 +945,6 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   if (!fs.existsSync(atlasPath) || !fs.existsSync(boardDir) || !fs.existsSync(runsDir)) {
     throw new Error(`canonical epic ${epic} is missing its atlas or board directory`);
   }
-  if (path.dirname(path.resolve(cardPath)) !== path.resolve(boardDir)) {
-    throw new Error(`canonical slice ${path.basename(cardPath)} must live flat beside its epic board`);
-  }
   const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
   if (scalarField(atlasRaw, 'type') !== 'epic') throw new Error(`epic atlas ${epic} has invalid type`);
   const epicBoardPath = path.join(boardDir, `${epic}-board.md`);
@@ -917,26 +952,22 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
     || scalarField(fs.readFileSync(epicBoardPath, 'utf8'), 'board_role') !== 'epic') {
     throw new Error(`canonical epic ${epic} is missing its exact named epic board`);
   }
-  const expectedAtlasSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, `${epic}.md`));
   const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', `${epic}-board.md`));
   const backlink = scalarField(atlasRaw, 'epic_board');
-  const taskParent = scalarField(cardRaw, 'task_parent');
-  const sourceBoard = scalarField(cardRaw, 'source_board');
-  const kanbanBoard = scalarField(cardRaw, 'kanban_board');
   if (!canonicalWorkspacePath(backlink, expectedBoardSuffix)) {
     throw new Error(`epic atlas ${epic} does not bind its canonical board`);
   }
-  if (!canonicalWorkspacePath(taskParent, expectedAtlasSuffix)) {
-    throw new Error(`canonical slice ${path.basename(cardPath)} has a mismatched task_parent`);
-  }
-  if (sourceBoard !== kanbanBoard || !canonicalWorkspacePath(sourceBoard, expectedBoardSuffix)) {
-    throw new Error(`canonical slice ${path.basename(cardPath)} has a shallow or mismatched source board`);
+  validateCanonicalSliceTopology(cardRaw, cardPath, epic, cardsRoot, epicBoardPath);
+  const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
+  const members = canonicalEpicMembers(boardRaw, boardDir, epic, cardsRoot, epicBoardPath);
+  if (!members.includes(path.basename(cardPath, '.md'))) {
+    throw new Error(`canonical slice ${path.basename(cardPath)} is missing from its epic board`);
   }
   const parentRaw = fs.readFileSync(parentBoardPath, 'utf8');
   if (!boardCardLocation(parentRaw, epic)) throw new Error(`epic ${epic} is missing from its parent board`);
   return {
     epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
-    boardRaw: fs.readFileSync(epicBoardPath, 'utf8'), parentRaw,
+    boardRaw, parentRaw, members,
     cardsRoot: root, state: opts.state || { cards: {} },
   };
 }
@@ -951,10 +982,13 @@ function epicProjectionMapping(state) {
 }
 
 function deriveEpicProjection(surface, currentCard, currentStatus) {
-  const parsed = parseBoard(surface.boardRaw);
-  const cards = ['In Planning', 'In Progress', 'Blocked', 'Completed']
-    .flatMap((column) => parsed[column] || [])
-    .filter((name, index, all) => all.indexOf(name) === index);
+  const cards = canonicalEpicMembers(
+    surface.boardRaw,
+    path.dirname(surface.boardPath),
+    surface.epic,
+    surface.cardsRoot,
+    surface.boardPath,
+  );
   const siblings = new Set(cards.map(normalizeCardLink));
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
@@ -1153,20 +1187,28 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
     };
   }
   if (epicSurface) {
-    const lifecycle = deriveEpicProjection(epicSurface, record.card, mapping.status);
-    const epicMapping = epicProjectionMapping(lifecycle.state);
-    const epicLocation = boardCardLocation(epicSurface.parentRaw, epicSurface.epic);
-    const atlasStatus = scalarField(epicSurface.atlasRaw, 'status');
-    const atlasPosture = scalarField(epicSurface.atlasRaw, 'posture');
-    if (!epicLocation || epicLocation.column !== epicMapping.column || epicLocation.checked !== epicMapping.complete
-      || atlasStatus !== lifecycle.state || atlasPosture !== lifecycle.posture) {
+    try {
+      const lifecycle = deriveEpicProjection(epicSurface, record.card, mapping.status);
+      const epicMapping = epicProjectionMapping(lifecycle.state);
+      const epicLocation = boardCardLocation(epicSurface.parentRaw, epicSurface.epic);
+      const atlasStatus = scalarField(epicSurface.atlasRaw, 'status');
+      const atlasPosture = scalarField(epicSurface.atlasRaw, 'posture');
+      if (!epicLocation || epicLocation.column !== epicMapping.column || epicLocation.checked !== epicMapping.complete
+        || atlasStatus !== lifecycle.state || atlasPosture !== lifecycle.posture) {
+        return {
+          card: record.card, epic: epicSurface.epic, phase: record.phase,
+          issue: 'epic surface differs from the authoritative slice roll-up',
+          expected_column: epicMapping.column, actual_column: epicLocation ? epicLocation.column : null,
+          expected_checked: epicMapping.complete, actual_checked: epicLocation ? epicLocation.checked : null,
+          expected_status: lifecycle.state, actual_status: atlasStatus,
+          expected_posture: lifecycle.posture, actual_posture: atlasPosture,
+        };
+      }
+    } catch (err) {
       return {
         card: record.card, epic: epicSurface.epic, phase: record.phase,
-        issue: 'epic surface differs from the authoritative slice roll-up',
-        expected_column: epicMapping.column, actual_column: epicLocation ? epicLocation.column : null,
-        expected_checked: epicMapping.complete, actual_checked: epicLocation ? epicLocation.checked : null,
-        expected_status: lifecycle.state, actual_status: atlasStatus,
-        expected_posture: lifecycle.posture, actual_posture: atlasPosture,
+        issue: `canonical epic roll-up refusal: ${err.message}`,
+        reconcile: `reconcile --card ${record.card}`,
       };
     }
   }
