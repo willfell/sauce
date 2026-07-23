@@ -745,20 +745,171 @@ async function main() {
   const templateBlock = sliceTemplate.match(/^---\n<%\*([\s\S]*?)-%>/)?.[1];
   assert(templateBlock, 'ES2D-ENTITY-SCAFFOLD: slice template production block is executable');
   const executeSliceTemplate = new AsyncFunction('tp', 'app', 'Notice',
-    `${templateBlock}\nreturn { sourceBoard, epicName, epicAtlas };`);
+    `${templateBlock}\nreturn { sourceBoard, epicName, epicAtlas, destination: typeof destination === "undefined" ? null : destination };`);
   const canonicalBoard = 'spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md';
-  const targetSlice = { path: 'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md' };
+  const canonicalBoardFile = { path: canonicalBoard, stat: { mtime: 10 } };
+  const targetSlice = { path: 'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md', stat: { ctime: 11 } };
   const templateResult = await executeSliceTemplate({
     config: { target_file: targetSlice },
-    file: { path: () => targetSlice.path, title: 'Slice One' },
+    file: { path: () => targetSlice.path, title: 'Slice One', async move() {} },
   }, {
-    vault: { getAbstractFileByPath: (candidate) => candidate === canonicalBoard ? { path: candidate } : null },
+    vault: {
+      getAbstractFileByPath: (candidate) => candidate === canonicalBoard ? canonicalBoardFile : null,
+      getMarkdownFiles: () => [canonicalBoardFile, targetSlice],
+    },
+    metadataCache: {
+      getFileCache: (file) => file === canonicalBoardFile
+        ? { frontmatter: { 'kanban-plugin': 'board', board_role: 'epic', epic: '[[Alpha Epic]]' } }
+        : { frontmatter: {} },
+    },
   }, class Notice {});
-  assert.deepStrictEqual(templateResult, {
+  assert.deepStrictEqual({
+    sourceBoard: templateResult.sourceBoard,
+    epicName: templateResult.epicName,
+    epicAtlas: templateResult.epicAtlas,
+  }, {
     sourceBoard: canonicalBoard,
     epicName: 'Alpha Epic',
     epicAtlas: 'spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md',
   }, 'slice-epic-backlink-identity: production template binds the exact atlas and board identities');
+
+  const rootPath = 'Root Slice.md';
+  const rootTarget = { path: rootPath, stat: { ctime: 100000, mtime: 100000 } };
+  const sourceCanonical = {
+    path: 'spice/projects/demo/tasks/Root Epic/board/Root Epic-board.md',
+    stat: { mtime: 99995 },
+  };
+  const olderCanonical = {
+    path: 'spice/projects/demo/tasks/Older Epic/board/Older Epic-board.md',
+    stat: { mtime: 100 },
+  };
+  const strayBoard = {
+    path: 'spice/projects/demo/tasks/Root Epic/board/A-stray-board.md',
+    stat: { mtime: 99999 },
+  };
+  const rootStore = new Map([[rootPath, 'user-authored root content']]);
+  const movedRoot = [];
+  const boardFrontmatter = (file) => {
+    const epic = file.path.split('/').at(-3);
+    return file === strayBoard
+      ? { 'kanban-plugin': 'board', board_role: 'epic', epic: '[[Root Epic]]' }
+      : { 'kanban-plugin': 'board', board_role: 'epic', epic: `[[${epic}]]` };
+  };
+  const rootFiles = [rootTarget, sourceCanonical, olderCanonical, strayBoard];
+  const rootByPath = new Map(rootFiles.map((file) => [file.path, file]));
+  const rootResult = await executeSliceTemplate({
+    config: { target_file: rootTarget },
+    file: {
+      path: () => rootPath,
+      title: 'Root Slice',
+      async move(destinationWithoutExtension) {
+        const destinationPath = `${destinationWithoutExtension}.md`;
+        rootStore.set(destinationPath, rootStore.get(rootPath));
+        rootStore.delete(rootPath);
+        movedRoot.push(destinationWithoutExtension);
+      },
+    },
+  }, {
+    vault: {
+      getAbstractFileByPath: (candidate) => rootByPath.get(candidate) || null,
+      getMarkdownFiles: () => rootFiles,
+      async read() { return '## In Planning'; },
+    },
+    metadataCache: {
+      getFileCache: (file) => ({ frontmatter: boardFrontmatter(file) }),
+      getBacklinksForFile: () => ({ data: {} }),
+    },
+  }, class Notice {});
+  const rootDestination = 'spice/projects/demo/tasks/Root Epic/board/Root Slice.md';
+  assert.deepStrictEqual(rootResult, {
+    sourceBoard: sourceCanonical.path,
+    epicName: 'Root Epic',
+    epicAtlas: 'spice/projects/demo/tasks/Root Epic/Root Epic.md',
+    destination: rootDestination,
+  }, 'slice-template-root-placement-breaks-kanban-flow: uniquely recent canonical board recovers exact identity');
+  assert.deepStrictEqual(movedRoot, ['spice/projects/demo/tasks/Root Epic/board/Root Slice'],
+    'slice-template-root-placement-breaks-kanban-flow: root-created slice moves into the flat epic board directory');
+  assert.strictEqual(rootStore.get(rootDestination), 'user-authored root content',
+    'slice-template-root-placement-breaks-kanban-flow: production move preserves existing user content');
+
+  const ambiguousCanonical = {
+    path: 'spice/projects/demo/tasks/Other Epic/board/Other Epic-board.md',
+    stat: { mtime: 99996 },
+  };
+  const ambiguousFiles = [rootTarget, sourceCanonical, ambiguousCanonical];
+  const ambiguousByPath = new Map(ambiguousFiles.map((file) => [file.path, file]));
+  let ambiguousMoves = 0;
+  const recoveryNotices = [];
+  await assert.rejects(() => executeSliceTemplate({
+    config: { target_file: rootTarget },
+    file: { path: () => rootPath, title: 'Root Slice', async move() { ambiguousMoves += 1; } },
+  }, {
+    vault: {
+      getAbstractFileByPath: (candidate) => ambiguousByPath.get(candidate) || null,
+      getMarkdownFiles: () => ambiguousFiles,
+      async read() { return '## In Planning'; },
+    },
+    metadataCache: {
+      getFileCache: (file) => ({ frontmatter: boardFrontmatter(file) }),
+      getBacklinksForFile: () => ({ data: {} }),
+    },
+  }, class Notice {
+    constructor(message) { recoveryNotices.push(message); }
+  }), /Ambiguous canonical epic boards/,
+  'slice-template-root-placement-breaks-kanban-flow: ambiguous recent boards fail closed visibly');
+  assert.strictEqual(ambiguousMoves, 0,
+    'slice-template-root-placement-breaks-kanban-flow: ambiguity performs no move or partial mutation');
+  assert(recoveryNotices.some((message) => /Ambiguous canonical epic boards/.test(message)),
+    'slice-template-root-placement-breaks-kanban-flow: ambiguity provides a visible recovery message');
+
+  let missingMoves = 0;
+  const missingNotices = [];
+  await assert.rejects(() => executeSliceTemplate({
+    config: { target_file: rootTarget },
+    file: { path: () => rootPath, title: 'Root Slice', async move() { missingMoves += 1; } },
+  }, {
+    vault: {
+      getAbstractFileByPath: () => null,
+      getMarkdownFiles: () => [rootTarget],
+      async read() { return ''; },
+    },
+    metadataCache: {
+      getFileCache: () => ({ frontmatter: {} }),
+      getBacklinksForFile: () => ({ data: {} }),
+    },
+  }, class Notice {
+    constructor(message) { missingNotices.push(message); }
+  }), /Cannot recover one canonical source epic board/,
+  'slice-template-root-placement-breaks-kanban-flow: missing source board fails closed');
+  assert.strictEqual(missingMoves, 0,
+    'slice-template-root-placement-breaks-kanban-flow: missing identity performs no move or partial mutation');
+  assert(missingNotices.some((message) => /Cannot recover one canonical source epic board/.test(message)),
+    'slice-template-root-placement-breaks-kanban-flow: missing identity provides a visible recovery message');
+
+  let invalidExpectedMoves = 0;
+  const invalidExpectedBoard = { path: canonicalBoard, stat: { mtime: 100000 } };
+  await assert.rejects(() => executeSliceTemplate({
+    config: { target_file: targetSlice },
+    file: {
+      path: () => targetSlice.path,
+      title: 'Slice One',
+      async move() { invalidExpectedMoves += 1; },
+    },
+  }, {
+    vault: {
+      getAbstractFileByPath: (candidate) => candidate === canonicalBoard ? invalidExpectedBoard : null,
+      getMarkdownFiles: () => [invalidExpectedBoard, sourceCanonical],
+      async read() { return '[[Slice One]]'; },
+    },
+    metadataCache: {
+      getFileCache: (file) => ({ frontmatter: file === invalidExpectedBoard
+        ? { 'kanban-plugin': 'board', board_role: 'project' }
+        : boardFrontmatter(file) }),
+    },
+  }, class Notice {}), /Canonical epic board missing or invalid/,
+  'slice-template-root-placement-breaks-kanban-flow: an invalid exact sibling fails closed without fallback');
+  assert.strictEqual(invalidExpectedMoves, 0,
+    'slice-template-root-placement-breaks-kanban-flow: invalid exact sibling performs no partial move');
 
   const kanbanTemplate = read('platform/blueprints/project/templates/Kanban Card.md');
   for (const binding of [
