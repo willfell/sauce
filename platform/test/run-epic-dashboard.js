@@ -339,6 +339,19 @@ async function main() {
   assert.deepStrictEqual(mutations, [],
     'ES2C10-CORE-READ-ONLY: Delivery exception recovery remains mutation-free');
 
+  for (const nullishLifecycle of [null, undefined]) {
+    const nullishDeliveryContainer = element();
+    await new EpicDashboard({
+      lifecycleApi: {
+        deriveEpicLifecycle() { return nullishLifecycle; },
+      },
+    }).render({ container: nullishDeliveryContainer });
+    assert(textOf(nullishDeliveryContainer).includes('Delivery lifecycle unavailable'),
+      `ES2C10-DELIVERY-NULL-RESULT-BLANK-RECOVERY: ${nullishLifecycle} lifecycle renders visible recovery`);
+  }
+  assert.deepStrictEqual(mutations, [],
+    'ES2C10-CORE-READ-ONLY: nullish Delivery recovery remains mutation-free');
+
   const coldContainer = element();
   let coldCurrentTouches = 0;
   const coldDv = new Proxy({ container: coldContainer }, {
