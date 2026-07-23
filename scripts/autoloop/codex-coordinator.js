@@ -665,13 +665,14 @@ function selectEpicShadowCandidate({
   ];
   const skipped = [];
   const epicBoards = new Map();
-  const globalCompleted = new Set(parent.Completed || []);
+  const globalCompleted = new Set(parseCheckedColumn(boardMd, 'Completed'));
   const load = readFile || ((file) => fs.readFileSync(file, 'utf8'));
   for (const epic of resolved.epics) {
     try {
-      const parsed = parseBoard(load(epic.board_path));
+      const raw = load(epic.board_path);
+      const parsed = parseBoard(raw);
       epicBoards.set(epic.epic, parsed);
-      for (const card of parsed.Completed || []) globalCompleted.add(card);
+      for (const card of parseCheckedColumn(raw, 'Completed')) globalCompleted.add(card);
     } catch (err) {
       skipped.push({ epic: epic.epic, reason: `epic board unreadable: ${err.message}` });
     }
