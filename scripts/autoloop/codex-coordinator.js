@@ -709,7 +709,13 @@ function selectClaimCandidate({
 }) {
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
-  if (active.length >= MAX_ACTIVE) return { action: 'at-capacity', active: active.map((r) => r.card) };
+  if (active.length >= MAX_ACTIVE) {
+    const selected = { action: 'at-capacity', active: active.map((r) => r.card) };
+    if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+    });
+    return selected;
+  }
   const skipped = []; const boardDrift = [];
   for (const card of board['In Planning']) {
     if (state.cards[card] && state.cards[card].phase !== 'cancelled') { skipped.push({ card, reason: `already tracked (${state.cards[card].phase})` }); continue; }

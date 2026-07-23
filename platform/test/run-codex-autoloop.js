@@ -564,6 +564,14 @@ const flagOn = selectClaimCandidate({
 });
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
+const shadowCapacityState = emptyState();
+for (const [index, zone] of ['x', 'y', 'z'].entries()) shadowCapacityState.cards[`Busy${index}`] = { card: `Busy${index}`, phase: 'implementing', touch_zones: [`platform/${zone}`] };
+const shadowAtCapacity = selectClaimCandidate({
+  boardMd: shadowParent(), state: shadowCapacityState, loadCard: shadowIo().loadCard, supervised: true,
+  epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+});
+eq(shadowAtCapacity.action, 'at-capacity', 'ES3-STATE-13 legacy capacity remains authoritative');
+eq(shadowAtCapacity.shadow_selection.action, 'at-capacity', 'ES3-STATE-13 shadow status still reports the same global capacity boundary');
 
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
