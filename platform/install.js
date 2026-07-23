@@ -1266,6 +1266,9 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectLinksManagerBackfill(tp, mech, variables, history, git); // NEW (Project Links Wiring PR4) — injects the ProjectLinksManager Add/Manage-links block into existing type:links-hub notes lacking it (insert-only before the ProjectLinksPanel block, idempotent, .sauce-backup before write)
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
+  await applyEpicScaffoldHeal(tp, mech, variables, history, git); // ES2 — exact project-board identity/action plus canonical epic context/dashboard conformance
+  await applyEpicBoardRoleBackfill(tp, mech, variables, history, git); // ES2 — mark only the exact canonical board adjacent to a type:epic atlas
+  await applySliceSourceBoardHeal(tp, mech, variables, history, git); // ES2 — repair direct type:slice notes to the exact canonical epic board
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocSectionBackfill(tp, mech, variables, history, git);   // PR1 project-doc-updating-wiring — backfill section/sub_section from sibling section-hub (authoritative display name), ungated + idempotent
@@ -5115,6 +5118,184 @@ async function applyProjectDashboardConformanceHeal(tp, manifest, variables, his
   if (history) history.push({ event: "info", step: "project_dashboard_conformance_heal", name: "vault",
     reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
     git_commit: GIT.commit, git_tag: GIT.tag, git_dirty: GIT.dirty, attempted_at: new Date().toISOString() });
+}
+
+async function _epicDirectories(adapter) {
+  const out = [];
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return out;
+  const projects = await adapter.list(root);
+  for (const projectDir of (projects.folders || [])) {
+    const tasksDir = `${projectDir}/tasks`;
+    if (!(await adapter.exists(tasksDir))) continue;
+    const tasks = await adapter.list(tasksDir);
+    for (const epicDir of (tasks.folders || [])) {
+      const name = epicDir.split("/").pop();
+      const atlas = `${epicDir}/${name}.md`;
+      if (!(await adapter.exists(atlas))) continue;
+      const body = await adapter.read(atlas);
+      if (_noteChromeFrontmatterType(body) !== "epic") continue;
+      out.push({ projectDir, tasksDir, epicDir, atlas, name });
+    }
+  }
+  return out;
+}
+
+async function _epicEnsureDirectory(adapter, target) {
+  const segments = String(target || "").split("/").filter(Boolean);
+  let current = "";
+  for (const segment of segments) {
+    current = current ? `${current}/${segment}` : segment;
+    if (!(await adapter.exists(current))) await adapter.mkdir(current);
+  }
+}
+
+async function _epicBackupWrite(adapter, target, before, after, ts) {
+  if (before === after) return false;
+  const backup = `.obsidian/.sauce-heals/backups/${ts}/${target}`;
+  await _epicEnsureDirectory(adapter, backup.substring(0, backup.lastIndexOf("/")));
+  await adapter.write(backup, before);
+  await adapter.write(target, after);
+  return true;
+}
+
+function _epicFrontmatterScalar(body, key) {
+  const match = String(body || "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return "";
+  const escaped = String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const field = match[1].match(new RegExp(`^${escaped}:\\s*(.*?)\\s*$`, "m"));
+  return field ? String(field[1] || "").trim().replace(/^["']|["']$/g, "") : "";
+}
+
+function _epicSetFrontmatter(body, fields) {
+  const match = String(body || "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return body;
+  let yaml = match[1];
+  for (const [key, value] of Object.entries(fields)) {
+    const rx = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:.*$`, "m");
+    if (rx.test(yaml)) yaml = yaml.replace(rx, `${key}: ${value}`);
+    else yaml += `\n${key}: ${value}`;
+  }
+  return body.slice(0, match.index) + `---\n${yaml}\n---` + body.slice(match.index + match[0].length);
+}
+
+async function _canonicalProjectIdentity(adapter, projectDir) {
+  const listing = await adapter.list(projectDir);
+  const atlases = [];
+  for (const candidate of (listing.files || []).filter((entry) => entry.endsWith(".md"))) {
+    const body = await adapter.read(candidate);
+    if (_noteChromeFrontmatterType(body) === "project") atlases.push({ path: candidate, body });
+  }
+  if (atlases.length !== 1) return null;
+  const slug = projectDir.split("/").pop();
+  const atlas = atlases[0];
+  const basename = atlas.path.split("/").pop().replace(/\.md$/, "");
+  const name = _epicFrontmatterScalar(atlas.body, "project_name") || basename;
+  return { slug, name };
+}
+
+async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const dashboardBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```';
+  const createBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicCreateAction" });\n```';
+  try {
+    const projectsRoot = "spice/projects";
+    if (await adapter.exists(projectsRoot)) {
+      const projects = await adapter.list(projectsRoot);
+      for (const projectDir of (projects.folders || [])) {
+        const identity = await _canonicalProjectIdentity(adapter, projectDir);
+        if (!identity) continue;
+        const board = `${projectDir}/${identity.slug}-board.md`;
+        if (!(await adapter.exists(board))) continue;
+        const before = await adapter.read(board);
+        if (!/^kanban-plugin:\s*board\s*$/m.test(before) || /^board_role:\s*epic\s*$/m.test(before)) continue;
+        const fields = {};
+        if (!_epicFrontmatterScalar(before, "project_slug")) fields.project_slug = JSON.stringify(identity.slug);
+        if (!_epicFrontmatterScalar(before, "project_name")) fields.project_name = JSON.stringify(identity.name);
+        let after = Object.keys(fields).length ? _epicSetFrontmatter(before, fields) : before;
+        if (!/class:\s*"EpicCreateAction"/.test(after)) {
+          const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
+          after = chrome.test(after) ? after.replace(chrome, `$1\n\n${createBlock}`) : `${after.trimEnd()}\n\n${createBlock}\n`;
+        }
+        if (await _epicBackupWrite(adapter, board, before, after, ts)) {
+          history?.push({ event: "info", step: "epic_scaffold_heal", target: board, action: "project_board_conformed",
+            git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+        }
+      }
+    }
+    for (const epic of await _epicDirectories(adapter)) {
+      for (const dir of [`${epic.epicDir}/board`, `${epic.epicDir}/context/runs`, `${epic.epicDir}/context/lessons`, `${epic.epicDir}/context/decisions`]) {
+        if (!(await adapter.exists(dir))) {
+          await _epicEnsureDirectory(adapter, dir);
+          history?.push({ event: "info", step: "epic_scaffold_heal", target: dir, action: "directory_created",
+            git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+        }
+      }
+      const before = await adapter.read(epic.atlas);
+      if (before.includes('class: "EpicDashboard"')) continue;
+      const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
+      const after = chrome.test(before)
+        ? before.replace(chrome, `$1\n\n${dashboardBlock}`)
+        : `${before.trimEnd()}\n\n${dashboardBlock}\n`;
+      if (await _epicBackupWrite(adapter, epic.atlas, before, after, ts)) {
+        history?.push({ event: "info", step: "epic_scaffold_heal", target: epic.atlas, action: "dashboard_injected",
+          git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "epic_scaffold_heal", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+async function applyEpicBoardRoleBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    for (const epic of await _epicDirectories(adapter)) {
+      const board = `${epic.epicDir}/board/${epic.name}-board.md`;
+      if (!(await adapter.exists(board))) continue;
+      const before = await adapter.read(board);
+      if (!/^kanban-plugin:\s*board\s*$/m.test(before) || /^board_role:\s*epic\s*$/m.test(before)) continue;
+      const after = _epicSetFrontmatter(before, { board_role: "epic" });
+      if (await _epicBackupWrite(adapter, board, before, after, ts)) {
+        history?.push({ event: "info", step: "epic_board_role_backfill", target: board, action: "board_role_stamped",
+          git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "epic_board_role_backfill", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+async function applySliceSourceBoardHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    for (const epic of await _epicDirectories(adapter)) {
+      const boardDir = `${epic.epicDir}/board`;
+      const board = `${boardDir}/${epic.name}-board.md`;
+      if (!(await adapter.exists(boardDir)) || !(await adapter.exists(board))) continue;
+      const listing = await adapter.list(boardDir);
+      for (const slice of (listing.files || []).filter((entry) => entry.endsWith(".md") && entry !== board)) {
+        const before = await adapter.read(slice);
+        if (_noteChromeFrontmatterType(before) !== "slice") continue;
+        const after = _epicSetFrontmatter(before, { source_board: board, kanban_board: board });
+        if (await _epicBackupWrite(adapter, slice, before, after, ts)) {
+          history?.push({ event: "info", step: "slice_source_board_heal", target: slice, action: "board_paths_repaired",
+            git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+        }
+      }
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "slice_source_board_heal", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
 }
 
 // applyProjectSectionsMigration — v0.102.0 S4 (Task 6). Strategy A auto-migration
@@ -22048,6 +22229,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._injectProjectLinksManagerBody = _injectProjectLinksManagerBody;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
+    module.exports.applyEpicScaffoldHeal = applyEpicScaffoldHeal;
+    module.exports.applyEpicBoardRoleBackfill = applyEpicBoardRoleBackfill;
+    module.exports.applySliceSourceBoardHeal = applySliceSourceBoardHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
     // pure note builders (run-project-links-hub-backfill.js HC-PLHB-*).
     module.exports.applyProjectLinksHubBackfill = applyProjectLinksHubBackfill;

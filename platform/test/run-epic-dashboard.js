@@ -14,10 +14,48 @@ const VISUAL = path.join(ROOT, 'platform/test/visual/epic-dashboard.html');
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
 const { VAULTS } = require(path.join(ROOT, 'scripts/autoloop/deploy.js'));
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const installer = require(path.join(ROOT, 'platform/install.js'));
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function loadClass() { return eval(`(${fs.readFileSync(HELPER, 'utf8')})`); } // eslint-disable-line no-eval
 function loadNamedClass(rel, name) { return new Function(`${read(rel)}\nreturn ${name};`)(); }
+function memoryAdapter(initial) {
+  const store = new Map(Object.entries(initial));
+  const dirs = new Set();
+  const rememberParents = (entry) => {
+    const parts = String(entry).split('/');
+    for (let index = 1; index < parts.length; index += 1) dirs.add(parts.slice(0, index).join('/'));
+  };
+  for (const entry of store.keys()) rememberParents(entry);
+  return {
+    store, dirs, writes: [], mkdirs: [],
+    async exists(entry) { return store.has(entry) || dirs.has(entry); },
+    async list(entry) {
+      return {
+        folders: [...dirs].filter((candidate) => candidate.startsWith(`${entry}/`)
+          && !candidate.slice(entry.length + 1).includes('/')),
+        files: [...store.keys()].filter((candidate) => candidate.startsWith(`${entry}/`)
+          && !candidate.slice(entry.length + 1).includes('/')),
+      };
+    },
+    async read(entry) {
+      if (!store.has(entry)) throw new Error(`ENOENT ${entry}`);
+      return store.get(entry);
+    },
+    async write(entry, body) {
+      const parent = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : '';
+      if (parent && !dirs.has(parent)) throw new Error(`ENOENT parent ${parent}`);
+      store.set(entry, body);
+      this.writes.push({ entry, body });
+    },
+    async mkdir(entry) {
+      const parent = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : '';
+      if (parent && !dirs.has(parent)) throw new Error(`ENOENT parent ${parent}`);
+      dirs.add(entry);
+      this.mkdirs.push(entry);
+    },
+  };
+}
 function file(filePath, mtime = 0) {
   const basename = path.posix.basename(filePath, '.md');
   return { path: filePath, basename, stat: { mtime } };
@@ -815,6 +853,107 @@ async function main() {
       `ES2D-CONTEXT-PARITY: mirrored production classifiers agree for ${fixture.expected}`);
   }
   global.customJS.RenderSafe = priorRenderSafe;
+
+  const projectAtlasBody = [
+    '---', 'type: project', 'project_name: "Demo Project"', '---', '', '# Demo',
+  ].join('\n');
+  const projectBoardBefore = [
+    '---', 'kanban-plugin: board', 'type: kanban', '---', '',
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  ].join('\n');
+  const strayProjectBoard = [
+    '---', 'kanban-plugin: board', 'type: kanban', '---', '', '# preserved stray project board',
+  ].join('\n');
+  const epicAtlasBefore = [
+    '---', 'type: epic', 'schema_version: 1.1.0', '---', '',
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });', '```', '',
+  ].join('\n');
+  const epicBoardBefore = [
+    '---', 'kanban-plugin: board', 'type: kanban', '---', '', '## In Planning', '',
+  ].join('\n');
+  const strayEpicBoard = [
+    '---', 'kanban-plugin: board', 'type: kanban', '---', '', '# preserved stray epic board',
+  ].join('\n');
+  const sliceBefore = [
+    '---', 'type: slice', 'source_board: wrong.md', 'kanban_board: wrong.md', '---', '', '# Slice',
+  ].join('\n');
+  const legacyBefore = [
+    '---', 'type: task-hub', '---', '', '# Legacy',
+  ].join('\n');
+  const mismatchedEpicBefore = [
+    '---', 'type: epic', 'schema_version: 1.1.0', '---', '', '# Wrong basename',
+  ].join('\n');
+  const healAdapter = memoryAdapter({
+    'spice/projects/demo/Demo Project.md': projectAtlasBody,
+    'spice/projects/demo/demo-board.md': projectBoardBefore,
+    'spice/projects/demo/stray-board.md': strayProjectBoard,
+    'spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md': epicAtlasBefore,
+    'spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md': epicBoardBefore,
+    'spice/projects/demo/tasks/Alpha Epic/board/A-stray-board.md': strayEpicBoard,
+    'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md': sliceBefore,
+    'spice/projects/demo/tasks/Alpha Epic/board/Legacy.md': legacyBefore,
+    'spice/projects/demo/tasks/Mismatch/Wrong.md': mismatchedEpicBefore,
+  });
+  const healHistory = [];
+  const healTp = { app: { vault: { adapter: healAdapter } } };
+  const healManifest = { name: 'project' };
+  const healGit = { commit: 'fixture', tag: null, dirty: false };
+  await installer.applyEpicScaffoldHeal(healTp, healManifest, {}, healHistory, healGit);
+  await installer.applyEpicBoardRoleBackfill(healTp, healManifest, {}, healHistory, healGit);
+  await installer.applySliceSourceBoardHeal(healTp, healManifest, {}, healHistory, healGit);
+
+  const healedProjectBoard = healAdapter.store.get('spice/projects/demo/demo-board.md');
+  assert(healedProjectBoard.includes('project_slug: "demo"')
+    && healedProjectBoard.includes('project_name: "Demo Project"')
+    && healedProjectBoard.includes('class: "EpicCreateAction"'),
+  'ES2E-CANONICAL-HEAL: exact project board gains identity and the full-width epic action');
+  assert.strictEqual(healAdapter.store.get('spice/projects/demo/stray-board.md'), strayProjectBoard,
+    'ES2E-CANONICAL-HEAL: stray sibling project board remains byte-identical');
+  const healedAtlas = healAdapter.store.get('spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md');
+  assert(healedAtlas.includes('class: "EpicDashboard"'),
+    'ES2E-CANONICAL-HEAL: exact type:epic atlas gains the dashboard after chrome');
+  for (const folder of [
+    'spice/projects/demo/tasks/Alpha Epic/context/runs',
+    'spice/projects/demo/tasks/Alpha Epic/context/lessons',
+    'spice/projects/demo/tasks/Alpha Epic/context/decisions',
+  ]) assert(healAdapter.dirs.has(folder), `ES2E-CANONICAL-HEAL: creates ${folder}`);
+  assert.match(healAdapter.store.get('spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md'),
+    /^board_role: epic$/m, 'canonical-epic-board-heal: exact board gains board_role');
+  assert.strictEqual(healAdapter.store.get('spice/projects/demo/tasks/Alpha Epic/board/A-stray-board.md'), strayEpicBoard,
+    'canonical-epic-board-heal: stray sibling epic board remains byte-identical');
+  const healedSlice = healAdapter.store.get('spice/projects/demo/tasks/Alpha Epic/board/Slice One.md');
+  assert(healedSlice.includes('source_board: spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md')
+    && healedSlice.includes('kanban_board: spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md'),
+  'canonical-epic-board-heal: type:slice paths bind only the exact canonical board');
+  assert.strictEqual(healAdapter.store.get('spice/projects/demo/tasks/Alpha Epic/board/Legacy.md'), legacyBefore,
+    'ES2E-CANONICAL-HEAL: legacy note types are never retyped or rewritten');
+  assert.strictEqual(healAdapter.store.get('spice/projects/demo/tasks/Mismatch/Wrong.md'), mismatchedEpicBefore,
+    'ES2E-CANONICAL-HEAL: mismatched atlas basename fails closed');
+  const backupWrites = healAdapter.writes.filter(({ entry }) =>
+    entry.startsWith('.obsidian/.sauce-heals/backups/'));
+  assert(backupWrites.length >= 4 && backupWrites.every(({ entry }) => !entry.startsWith('.sauce-backup/')),
+    'ES2E-CANONICAL-HEAL: every content edit is backed up under the approved root first');
+  const firstPassStore = [...healAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const writesAfterFirstPass = healAdapter.writes.length;
+  await installer.applyEpicScaffoldHeal(healTp, healManifest, {}, healHistory, healGit);
+  await installer.applyEpicBoardRoleBackfill(healTp, healManifest, {}, healHistory, healGit);
+  await installer.applySliceSourceBoardHeal(healTp, healManifest, {}, healHistory, healGit);
+  assert.deepStrictEqual(
+    [...healAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    firstPassStore,
+    'ES2E-CANONICAL-HEAL: second pass is byte-identical',
+  );
+  assert.strictEqual(healAdapter.writes.length, writesAfterFirstPass,
+    'ES2E-CANONICAL-HEAL: second pass performs zero writes');
+  assert(!healHistory.some((entry) => entry.event === 'warning'),
+    'ES2E-CANONICAL-HEAL: conformant and legacy fixtures produce no warnings');
+
+  const faultHistory = [];
+  await assert.doesNotReject(() => installer.applyEpicScaffoldHeal({
+    app: { vault: { adapter: { async exists() { throw new Error('adapter fault'); } } } },
+  }, healManifest, {}, faultHistory, healGit), 'ES2E-CANONICAL-HEAL: adapter failures never escape install');
+  assert(faultHistory.some((entry) => entry.event === 'warning' && entry.step === 'epic_scaffold_heal'),
+    'ES2E-CANONICAL-HEAL: adapter failure leaves an auditable warning');
 
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
