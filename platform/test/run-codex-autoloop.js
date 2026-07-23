@@ -9,7 +9,8 @@ const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  normalizeCardLink, sameParentConflict, dependencySatisfied, selectClaimCandidate, summarizeClaimSelection,
+  normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
+  selectClaimCandidate, summarizeClaimSelection,
   commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
@@ -441,6 +442,128 @@ eq(eligibleSummary, {
 }, 'summarizes next eligible card with Delivery contract provenance');
 const blockedSummary = summarizeClaimSelection(selectClaimCandidate({ boardMd: board(['Missing']), state: emptyState(), loadCard }));
 eq(blockedSummary.first_blocker, { card: 'Missing', reason: 'card note missing' }, 'summarizes the first board blocker');
+
+const shadowRoot = '/vault/tasks';
+const shadowParent = (planning = ['Epic A', 'Epic B', 'Flat Card'], progress = []) => [
+  '## In Planning', ...planning.map((name) => `- [ ] [[${name}]]`), '',
+  '## In Progress', ...progress.map((name) => `- [ ] [[${name}]]`), '',
+  '## Blocked', '', '## Completed', '',
+].join('\n');
+const epicBoard = (planning = [], progress = [], completed = []) => [
+  '---', 'board_role: epic', '---', '',
+  '## In Planning', ...planning.map((name) => `- [ ] [[${name}]]`), '',
+  '## In Progress', ...progress.map((name) => `- [ ] [[${name}]]`), '',
+  '## Blocked', '',
+  '## Completed', ...completed.map((name) => `- [x] [[${name}]]`), '',
+].join('\n');
+const shadowFiles = {
+  '/vault/tasks/Epic A/Epic A.md': '---\ntype: epic\nepic_board: tasks/Epic A/board/Epic A-board.md\n---\n',
+  '/vault/tasks/Epic A/board/Epic A-board.md': epicBoard(['A1', 'A2']),
+  '/vault/tasks/Epic B/Epic B.md': '---\ntype: epic\nepic_board: spice/projects/test/tasks/Epic B/board/Epic B-board.md\n---\n',
+  '/vault/tasks/Epic B/board/Epic B-board.md': epicBoard(['B1']),
+};
+const shadowBodies = {
+  A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'] }),
+  A2: card({ name: 'A2', parent: 'Epic A', zones: ['platform/a2'], deps: ['A1'] }),
+  B1: card({ name: 'B1', parent: 'Epic B', zones: ['platform/b1'] }),
+  'Flat Card': card({ name: 'Flat Card', parent: 'Flat parent', zones: ['platform/flat'] }),
+};
+const shadowIo = (overrides = {}) => {
+  const files = { ...shadowFiles, ...(overrides.files || {}) };
+  const dirs = new Set(['/vault/tasks/Epic A/board', '/vault/tasks/Epic B/board', ...(overrides.dirs || [])]);
+  return {
+    files,
+    exists: (target) => Object.prototype.hasOwnProperty.call(files, target) || dirs.has(target),
+    readFile: (target) => {
+      if (!Object.prototype.hasOwnProperty.call(files, target)) throw new Error(`missing ${target}`);
+      return files[target];
+    },
+    readDir: (target) => Object.keys(files)
+      .filter((file) => path.dirname(file) === target)
+      .map((file) => ({ name: path.basename(file), isFile: () => true })),
+    loadCard: (name) => shadowBodies[name] ? { path: `/cards/${name}.md`, raw: shadowBodies[name] } : null,
+  };
+};
+const shadow = (extra = {}) => {
+  const io = extra.io || shadowIo();
+  return selectEpicShadowCandidate({
+    boardMd: extra.boardMd || shadowParent(), state: extra.state || emptyState(),
+    loadCard: extra.loadCard || io.loadCard, supervised: true, cardsRoot: shadowRoot,
+    readFile: io.readFile, readDir: io.readDir, exists: io.exists,
+  });
+};
+
+const resolvedEpics = resolveEpicBoardSet({
+  parentBoardMd: shadowParent(), cardsRoot: shadowRoot,
+  readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+});
+eq(resolvedEpics.epics.map((entry) => [entry.epic, entry.parent_order]), [['Epic A', 0], ['Epic B', 1]], 'ES3-STATE-01 resolver orders board_role epic pairs by parent board');
+eq(resolvedEpics.flat.map((entry) => entry.card), ['Flat Card'], 'ES3-STATE-02 resolver retains flat cards as degenerate epics');
+const seedEpicRoot = path.join(__dirname, 'seed-vault', 'spice', 'projects', 'epic-fixture');
+const seedResolved = resolveEpicBoardSet({
+  parentBoardMd: fs.readFileSync(path.join(seedEpicRoot, 'epic-fixture-board.md'), 'utf8'),
+  cardsRoot: path.join(seedEpicRoot, 'tasks'),
+});
+eq(seedResolved.epics.map((entry) => entry.epic), ['Alpha Epic', 'Beta Epic'], 'ES3-SEED-IO resolves both committed canonical epic pairs through real filesystem reads');
+eq(seedResolved.flat.map((entry) => entry.card), ['Degenerate Flat Card'], 'ES3-SEED-IO preserves the committed legacy flat fixture');
+eq(seedResolved.findings, [], 'ES3-SEED-IO reports no findings for the conformant committed fixture');
+eq(shadow().card, 'A1', 'ES3-STATE-03 parent order selects the first eligible epic slice');
+eq(shadow({ boardMd: shadowParent(['Epic B', 'Epic A', 'Flat Card']) }).card, 'B1', 'ES3-STATE-04 operator priority inversion changes shadow selection deterministically');
+
+const activeEpicState = emptyState();
+activeEpicState.cards.B0 = { card: 'B0', parent_card: 'Epic B', phase: 'parked', touch_zones: [] };
+eq(shadow({ state: activeEpicState }).card, 'B1', 'ES3-STATE-05 a parked slice makes its epic first without consuming capacity');
+
+const blockedA = { ...shadowBodies, A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'], deps: ['Missing'] }) };
+eq(shadow({ loadCard: (name) => blockedA[name] ? { path: `/cards/${name}.md`, raw: blockedA[name] } : null }).card, 'B1', 'ES3-STATE-06 unmet dependency falls through to the next epic');
+const conflictState = emptyState();
+conflictState.cards.Other = { card: 'Other', phase: 'implementing', touch_zones: ['platform/a1'] };
+eq(shadow({ state: conflictState }).card, 'B1', 'ES3-STATE-07 global touch-zone conflict and unchanged dependency ordering fall through to the next epic');
+
+const noEpicBodies = { ...shadowBodies, A1: blockedA.A1, A2: card({ name: 'A2', parent: 'Epic A', zones: ['platform/a2'], deps: ['Missing'] }), B1: card({ name: 'B1', parent: 'Epic B', zones: ['platform/b1'], deps: ['Missing'] }) };
+eq(shadow({ loadCard: (name) => noEpicBodies[name] ? { path: `/cards/${name}.md`, raw: noEpicBodies[name] } : null }).card, 'Flat Card', 'ES3-STATE-08 flat fallback remains selectable after epic fall-through');
+
+const missingAtlasIo = shadowIo({ files: { '/vault/tasks/Epic A/Epic A.md': undefined } });
+delete missingAtlasIo.files['/vault/tasks/Epic A/Epic A.md'];
+missingAtlasIo.exists = (target) => Object.prototype.hasOwnProperty.call(missingAtlasIo.files, target) || ['/vault/tasks/Epic A/board', '/vault/tasks/Epic B/board'].includes(target);
+const missingAtlas = selectEpicShadowCandidate({
+  boardMd: shadowParent(['Epic A']), state: emptyState(), loadCard: missingAtlasIo.loadCard,
+  supervised: true, cardsRoot: shadowRoot, readFile: missingAtlasIo.readFile,
+  readDir: missingAtlasIo.readDir, exists: missingAtlasIo.exists,
+});
+eq(missingAtlas.findings[0].code, 'missing-epic-atlas', 'ES3-STATE-09 unpaired epic board fails closed with a resolver finding');
+const mismatchIo = shadowIo({ files: { '/vault/tasks/Epic A/Epic A.md': '---\ntype: epic\nepic_board: tasks/Epic A/board/Wrong.md\n---\n' } });
+const mismatch = selectEpicShadowCandidate({
+  boardMd: shadowParent(['Epic A']), state: emptyState(), loadCard: mismatchIo.loadCard,
+  supervised: true, cardsRoot: shadowRoot, readFile: mismatchIo.readFile,
+  readDir: mismatchIo.readDir, exists: mismatchIo.exists,
+});
+eq(mismatch.findings[0].code, 'epic-atlas-mismatch', 'ES3-STATE-10 mismatched atlas backlink fails closed');
+eq(shadow({ boardMd: shadowParent([], []) }).action, 'no-work', 'ES3-STATE-11 empty parent board returns no-work');
+const missingBoardIo = shadowIo({ files: { '/vault/tasks/Epic C/Epic C.md': '---\ntype: epic\nepic_board: tasks/Epic C/board/Epic C-board.md\n---\n' } });
+const missingBoard = resolveEpicBoardSet({
+  parentBoardMd: shadowParent(['Epic C']), cardsRoot: shadowRoot,
+  readFile: missingBoardIo.readFile, readDir: missingBoardIo.readDir, exists: missingBoardIo.exists,
+});
+eq(missingBoard.findings[0].code, 'missing-epic-board', 'ES3-STATE-12 typed epic atlas without a board fails closed instead of degrading to flat');
+
+const lifecycleState = emptyState();
+eq(shadow({ boardMd: shadowParent(['Epic A']), state: lifecycleState }).card, 'A1', 'ES3-LIFECYCLE-PLANNED selects the first planned slice');
+lifecycleState.cards.A1 = { card: 'A1', parent_card: 'Epic A', phase: 'deployed', required_version: '1.0.0', touch_zones: ['platform/a1'], vault_receipts: successfulVaultReceipts('1.0.0') };
+eq(shadow({ boardMd: shadowParent(['Epic A']), state: lifecycleState }).card, 'A2', 'ES3-LIFECYCLE-ACTIVE advances after deployed slice receipts');
+lifecycleState.cards.A2 = { card: 'A2', parent_card: 'Epic A', phase: 'deployed', required_version: '1.0.0', touch_zones: ['platform/a2'], vault_receipts: successfulVaultReceipts('1.0.0') };
+eq(shadow({ boardMd: shadowParent(['Epic A']), state: lifecycleState }).action, 'no-work', 'ES3-LIFECYCLE-DONE reaches no-work after the complete epic lifecycle');
+
+const flagOff = selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
+const flagOffAgain = selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard, epicShadow: false });
+eq(flagOffAgain, flagOff, 'ES3-FLAG-OFF keeps legacy selector output byte-for-byte unchanged');
+const fileSnapshot = JSON.stringify(shadowFiles);
+const flagOn = selectClaimCandidate({
+  boardMd: shadowParent(), state: emptyState(), loadCard: shadowIo().loadCard, supervised: true,
+  epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+});
+eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
+eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
 
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');

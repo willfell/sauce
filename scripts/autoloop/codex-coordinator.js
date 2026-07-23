@@ -560,7 +560,153 @@ function dependencySatisfied(dep, board, state, boardMd) {
   return completed.has(dep);
 }
 
-function selectClaimCandidate({ boardMd, state, loadCard, supervised = false }) {
+function normalizedPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+/g, '/');
+}
+
+function resolveEpicBoardSet({
+  parentBoardMd, cardsRoot = CARDS_ROOT,
+  readFile = (file) => fs.readFileSync(file, 'utf8'),
+  readDir = (dir) => fs.readdirSync(dir, { withFileTypes: true }),
+  exists = (target) => fs.existsSync(target),
+} = {}) {
+  const parent = parseBoard(parentBoardMd || '');
+  const ordered = [...(parent['In Progress'] || []), ...(parent['In Planning'] || [])];
+  const epics = [];
+  const findings = [];
+  const flat = [];
+  ordered.forEach((epic, parentOrder) => {
+    const epicRoot = path.join(cardsRoot, epic);
+    const resolvedRoot = path.resolve(epicRoot);
+    const resolvedCardsRoot = path.resolve(cardsRoot);
+    if (resolvedRoot !== resolvedCardsRoot && !resolvedRoot.startsWith(`${resolvedCardsRoot}${path.sep}`)) {
+      findings.push({ epic, code: 'epic-path-escape' });
+      return;
+    }
+    const boardDir = path.join(epicRoot, 'board');
+    if (!exists(boardDir)) {
+      const possibleAtlas = path.join(epicRoot, `${epic}.md`);
+      if (exists(possibleAtlas)) {
+        try {
+          if (scalarField(readFile(possibleAtlas), 'type') === 'epic') {
+            findings.push({ epic, code: 'missing-epic-board', count: 0 });
+            return;
+          }
+        } catch (err) {
+          findings.push({ epic, code: 'epic-atlas-unreadable', detail: err.message });
+          return;
+        }
+      }
+      flat.push({ card: epic, parent_column: (parent['In Progress'] || []).includes(epic) ? 'In Progress' : 'In Planning', parent_order: parentOrder });
+      return;
+    }
+    let candidates;
+    try {
+      candidates = readDir(boardDir)
+        .filter((entry) => entry && (entry.isFile ? entry.isFile() : entry.type === 'file') && entry.name.endsWith('.md'))
+        .map((entry) => {
+          const boardPath = path.join(boardDir, entry.name);
+          return { board_path: boardPath, raw: readFile(boardPath) };
+        })
+        .filter((entry) => scalarField(entry.raw, 'board_role') === 'epic');
+    } catch (err) {
+      findings.push({ epic, code: 'epic-board-unreadable', detail: err.message });
+      return;
+    }
+    if (candidates.length !== 1) {
+      findings.push({ epic, code: candidates.length ? 'multiple-epic-boards' : 'missing-epic-board', count: candidates.length });
+      return;
+    }
+    const atlasPath = path.join(epicRoot, `${epic}.md`);
+    if (!exists(atlasPath)) {
+      findings.push({ epic, code: 'missing-epic-atlas', board_path: candidates[0].board_path });
+      return;
+    }
+    let atlasRaw;
+    try { atlasRaw = readFile(atlasPath); }
+    catch (err) {
+      findings.push({ epic, code: 'epic-atlas-unreadable', detail: err.message });
+      return;
+    }
+    const expectedSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', path.basename(candidates[0].board_path)));
+    const backlink = normalizedPath(scalarField(atlasRaw, 'epic_board'));
+    if (scalarField(atlasRaw, 'type') !== 'epic' || (!backlink.endsWith(expectedSuffix) && backlink !== expectedSuffix)) {
+      findings.push({ epic, code: 'epic-atlas-mismatch', atlas_path: atlasPath, board_path: candidates[0].board_path });
+      return;
+    }
+    epics.push({
+      epic, atlas_path: atlasPath, board_path: candidates[0].board_path,
+      parent_column: (parent['In Progress'] || []).includes(epic) ? 'In Progress' : 'In Planning',
+      parent_order: parentOrder,
+    });
+  });
+  return { epics, flat, findings };
+}
+
+function selectEpicShadowCandidate({
+  boardMd, state, loadCard, supervised = false, cardsRoot = CARDS_ROOT,
+  readFile, readDir, exists,
+} = {}) {
+  const resolved = resolveEpicBoardSet({
+    parentBoardMd: boardMd, cardsRoot, readFile, readDir, exists,
+  });
+  const epicByName = new Map(resolved.epics.map((entry) => [entry.epic, entry]));
+  const flatByName = new Map(resolved.flat.map((entry) => [entry.card, entry]));
+  const parent = parseBoard(boardMd);
+  const parentOrder = [...(parent['In Progress'] || []), ...(parent['In Planning'] || [])];
+  const tracked = Object.values(state.cards || {});
+  const activeEpicNames = new Set(tracked
+    .filter((record) => record && (record.phase === 'parked' || !TERMINAL.has(record.phase)))
+    .map((record) => normalizeCardLink(record.parent_card))
+    .filter((name) => epicByName.has(name)));
+  const orderedNames = [
+    ...parentOrder.filter((name) => activeEpicNames.has(name)),
+    ...parentOrder.filter((name) => !activeEpicNames.has(name)),
+  ];
+  const skipped = [];
+  for (const name of orderedNames) {
+    const epic = epicByName.get(name);
+    const flat = flatByName.get(name);
+    if (!epic && !flat) continue;
+    let candidateBoard;
+    if (epic) {
+      try {
+        const raw = (readFile || ((file) => fs.readFileSync(file, 'utf8')))(epic.board_path);
+        const parsed = parseBoard(raw);
+        candidateBoard = [
+          '## In Planning', ...(parsed['In Planning'] || []).map((card) => `- [ ] [[${card}]]`), '',
+          '## In Progress', ...(parsed['In Progress'] || []).map((card) => `- [ ] [[${card}]]`), '',
+          '## Blocked', ...(parsed.Blocked || []).map((card) => `- [ ] [[${card}]]`), '',
+          '## Completed', ...(parsed.Completed || []).map((card) => `- [x] [[${card}]]`), '',
+        ].join('\n');
+      } catch (err) {
+        skipped.push({ epic: name, reason: `epic board unreadable: ${err.message}` });
+        continue;
+      }
+    } else {
+      candidateBoard = ['## In Planning', `- [ ] [[${name}]]`, '', '## In Progress', '', '## Blocked', '', '## Completed', ''].join('\n');
+    }
+    const selected = selectClaimCandidate({
+      boardMd: candidateBoard, state, loadCard, supervised, epicShadow: false,
+    });
+    if (selected.action === 'claim' || selected.action === 'at-capacity') {
+      return {
+        ...summarizeClaimSelection(selected),
+        source: epic ? 'epic' : 'flat',
+        ...(epic ? { epic: name, board_path: epic.board_path } : {}),
+        findings: resolved.findings,
+        skipped: [...skipped, ...(selected.skipped || [])],
+      };
+    }
+    skipped.push(...(selected.skipped || []).map((item) => ({ ...item, ...(epic ? { epic: name } : {}) })));
+  }
+  return { action: 'no-work', reason: 'no eligible execution card', findings: resolved.findings, skipped };
+}
+
+function selectClaimCandidate({
+  boardMd, state, loadCard, supervised = false, epicShadow = false,
+  cardsRoot = CARDS_ROOT, readFile, readDir, exists,
+}) {
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) return { action: 'at-capacity', active: active.map((r) => r.card) };
@@ -594,15 +740,23 @@ function selectClaimCandidate({ boardMd, state, loadCard, supervised = false }) 
     if (sibling) { skipped.push({ card, reason: `active sibling ${sibling.card} has parent ${normalizeCardLink(meta.parentCard)}` }); continue; }
     const conflict = conflictsWithActive(meta, active);
     if (conflict) { skipped.push({ card, reason: `touch-zone conflict with ${conflict.card}: ${conflict.zone}` }); continue; }
-    return {
+    const selected = {
       action: 'claim', card, cardPath: loaded.path, meta, skipped,
       ...(boardDrift.length ? { board_drift: boardDrift } : {}),
     };
+    if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+    });
+    return selected;
   }
-  return {
+  const selected = {
     action: 'no-work', skipped, reason: 'no eligible execution card',
     ...(boardDrift.length ? { board_drift: boardDrift } : {}),
   };
+  if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
+    boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+  });
+  return selected;
 }
 
 function summarizeClaimSelection(selected) {
@@ -619,6 +773,7 @@ function summarizeClaimSelection(selected) {
     if (selected.meta.status) summary.status = selected.meta.status;
     if (selected.meta.batchPolicy) summary.batch_policy = selected.meta.batchPolicy;
     if (selected.board_drift) summary.board_drift = selected.board_drift;
+    if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
     return summary;
   }
   if (selected.action === 'at-capacity') return { action: 'at-capacity', active: selected.active || [] };
@@ -627,6 +782,7 @@ function summarizeClaimSelection(selected) {
     skipped_count: skipped.length, first_blocker: skipped[0] || null,
   };
   if (selected.board_drift) summary.board_drift = selected.board_drift;
+  if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
   return summary;
 }
 
@@ -1986,7 +2142,12 @@ function commandStatus(ctx, opts = {}) {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
-  const next = summarizeClaimSelection(selectClaimCandidate({ boardMd, state, loadCard, supervised: opts.supervised !== false }));
+  const next = summarizeClaimSelection(selectClaimCandidate({
+    boardMd, state, loadCard, supervised: opts.supervised !== false,
+    epicShadow: opts.epicShadow ?? process.env.SAUCE_EPIC_SELECTION_SHADOW === '1',
+    cardsRoot: opts.cardsRoot || CARDS_ROOT,
+    readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
+  }));
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
@@ -2387,7 +2548,7 @@ async function main() {
 module.exports = {
   parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
-  selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
+  resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
