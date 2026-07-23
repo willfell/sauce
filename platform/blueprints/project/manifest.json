@@ -43,6 +43,10 @@
       "range": ">=0.1.0"
     },
     {
+      "name": "delivery",
+      "range": ">=0.3.0"
+    },
+    {
       "name": "doc-search",
       "range": ">=0.1.0"
     },
@@ -91,7 +95,8 @@
     "WorkstreamSource",
     "ProjectChromeBar",
     "ProjectCommandsInit",
-    "ProjectDashboard"
+    "ProjectDashboard",
+    "EpicDashboard"
   ],
   "pre_install": [
     {
@@ -251,6 +256,10 @@
     {
       "source": "helpers/project-dashboard.js",
       "dest": "{{scripts_path}}/project/project-dashboard.js"
+    },
+    {
+      "source": "helpers/epic-dashboard.js",
+      "dest": "{{scripts_path}}/project/epic-dashboard.js"
     }
   ],
   "customjs_startup_scripts": [
