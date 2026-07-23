@@ -13,16 +13,18 @@ const HELPER = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboa
 const VISUAL = path.join(ROOT, 'platform/test/visual/epic-dashboard.html');
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
 const { VAULTS } = require(path.join(ROOT, 'scripts/autoloop/deploy.js'));
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function loadClass() { return eval(`(${fs.readFileSync(HELPER, 'utf8')})`); } // eslint-disable-line no-eval
+function loadNamedClass(rel, name) { return new Function(`${read(rel)}\nreturn ${name};`)(); }
 function file(filePath, mtime = 0) {
   const basename = path.posix.basename(filePath, '.md');
   return { path: filePath, basename, stat: { mtime } };
 }
 function element(tag = 'div', options = {}) {
   return {
-    tag, className: '', textContent: options.text || '', style: { cssText: '' },
+    tag, className: options.cls || '', textContent: options.text || '', style: { cssText: '' },
     children: [], listeners: {}, removed: false,
     createEl(childTag, childOptions = {}) {
       const child = element(childTag, childOptions);
@@ -625,6 +627,102 @@ async function main() {
     'EpicDashboard is registered exactly once');
   assert.strictEqual(manifest.files.filter((entry) => entry.source === 'helpers/epic-dashboard.js' && entry.dest === '{{scripts_path}}/project/epic-dashboard.js').length, 1,
     'the helper has one canonical install mapping');
+  assert.strictEqual(manifest.customjs_classes.filter((name) => name === 'EpicCreateAction').length, 1,
+    'ES2D-ENTITY-SCAFFOLD: EpicCreateAction is registered exactly once');
+  assert.strictEqual(manifest.files.filter((entry) => entry.source === 'helpers/epic-create-action.js'
+    && entry.dest === '{{scripts_path}}/project/epic-create-action.js').length, 1,
+  'ES2D-ENTITY-SCAFFOLD: the New Epic helper has one canonical install mapping');
+  for (const [sourceName, destination] of [
+    ['templates/Epic.md', '{{templates_path}}/Template, Epic.md'],
+    ['templates/Epic Board.md', '{{templates_path}}/Template, Epic Board.md'],
+    ['templates/Slice Card.md', '{{templates_path}}/Template, Slice Card.md'],
+  ]) {
+    assert.strictEqual(manifest.files.filter((entry) => entry.source === sourceName && entry.dest === destination).length, 1,
+      `ES2D-ENTITY-SCAFFOLD: ${sourceName} has one canonical install mapping`);
+  }
+  const epicEntity = manifest.new_entity_buttons.find((entry) => entry.id === 'epic');
+  assert(epicEntity, 'ES2D-ENTITY-SCAFFOLD: EntityCreate registers New Epic');
+  assert.strictEqual(epicEntity.destination.folder_prefix,
+    '{{current_file.folder}}/tasks/{{prompts.name|sanitize-filename}}',
+    'ES2D-ENTITY-SCAFFOLD: epic atlas materializes under the current project tasks directory');
+  assert.strictEqual(epicEntity.frontmatter_template.type, 'epic',
+    'ES2D-ENTITY-SCAFFOLD: generated atlas owns canonical epic identity');
+  assert.strictEqual(epicEntity.frontmatter_template.epic_board,
+    '{{current_file.folder}}/tasks/{{prompts.name|sanitize-filename}}/board/{{prompts.name|sanitize-filename}}-board.md',
+    'ES2D-ENTITY-SCAFFOLD: atlas binds the exact sibling epic board');
+  const epicBoardSidecar = epicEntity.extra_files.find((entry) =>
+    entry.subfolder === 'board' && entry.filename_pattern === '{{prompts.name|sanitize-filename}}-board.md');
+  assert(epicBoardSidecar && epicBoardSidecar.frontmatter_template.board_role === 'epic',
+    'ES2D-ENTITY-SCAFFOLD: EntityCreate materializes the canonical board-role sidecar');
+  assert.deepStrictEqual(epicEntity.extra_files.filter((entry) => entry.filename_pattern === '.keep').map((entry) => entry.subfolder).sort(), [
+    'context/decisions', 'context/lessons', 'context/runs',
+  ], 'ES2D-ENTITY-SCAFFOLD: EntityCreate materializes the complete context skeleton');
+
+  const epicTemplate = read('platform/blueprints/project/templates/Epic.md');
+  assert(epicTemplate.indexOf('ProjectChromeBar') < epicTemplate.indexOf('EpicDashboard'),
+    'ES2D-ENTITY-SCAFFOLD: epic chrome precedes its dashboard');
+  const epicBoardTemplate = read('platform/blueprints/project/templates/Epic Board.md');
+  assert.match(epicBoardTemplate, /Template, Slice Card\.md/,
+    'ES2D-ENTITY-SCAFFOLD: canonical board creates the generated slice-body template');
+  const projectBoardTemplate = read('platform/blueprints/project/templates/Project Board.md');
+  assert.match(projectBoardTemplate, /class: "EpicCreateAction"/,
+    'ES2D-ENTITY-SCAFFOLD: every new project board exposes the New Epic action');
+
+  const EpicCreateAction = loadNamedClass('platform/blueprints/project/helpers/epic-create-action.js', 'EpicCreateAction');
+  const actionContainer = element();
+  let entityCall = null;
+  const priorEntityCreate = global.customJS.EntityCreate;
+  global.customJS.EntityCreate = {
+    async render(proxy, options) {
+      const button = proxy.container.createEl('button', { text: 'New Epic' });
+      entityCall = { proxy, options, button };
+    },
+  };
+  await new EpicCreateAction().render({ container: actionContainer });
+  global.customJS.EntityCreate = priorEntityCreate;
+  const actionRow = actionContainer.children.find((child) => child.className === 'sauce-action-row');
+  assert(actionRow && entityCall && entityCall.options.instance === 'epic',
+    'ES2D-ENTITY-SCAFFOLD: production helper dispatches the epic EntityCreate entry');
+  assert.match(entityCall.button.style.cssText, /flex:\s*1 1 100%/,
+    'ES2D-ENTITY-SCAFFOLD: New Epic remains full width at desktop and 390px');
+
+  const sliceTemplate = read('platform/blueprints/project/templates/Slice Card.md');
+  assert.match(sliceTemplate, /^epic: "\[\[<% epicName %>\]\]"$/m,
+    'slice-epic-backlink-identity: generated slice identity is the canonical epic basename');
+  assert.match(sliceTemplate, /^task_parent: <% epicAtlas %>$/m,
+    'slice-epic-backlink-identity: generated task_parent resolves the same epic atlas');
+  assert.doesNotMatch(sliceTemplate, /^---[\s\S]*?^---[\s\S]*?^type:/m,
+    'ES2D-ENTITY-SCAFFOLD: generated slice body does not duplicate execution-contract frontmatter');
+  const templateBlock = sliceTemplate.match(/^---\n<%\*([\s\S]*?)-%>/)?.[1];
+  assert(templateBlock, 'ES2D-ENTITY-SCAFFOLD: slice template production block is executable');
+  const executeSliceTemplate = new AsyncFunction('tp', 'app', 'Notice',
+    `${templateBlock}\nreturn { sourceBoard, epicName, epicAtlas };`);
+  const canonicalBoard = 'spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md';
+  const targetSlice = { path: 'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md' };
+  const templateResult = await executeSliceTemplate({
+    config: { target_file: targetSlice },
+    file: { path: () => targetSlice.path, title: 'Slice One' },
+  }, {
+    vault: { getAbstractFileByPath: (candidate) => candidate === canonicalBoard ? { path: candidate } : null },
+  }, class Notice {});
+  assert.deepStrictEqual(templateResult, {
+    sourceBoard: canonicalBoard,
+    epicName: 'Alpha Epic',
+    epicAtlas: 'spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md',
+  }, 'slice-epic-backlink-identity: production template binds the exact atlas and board identities');
+
+  const kanbanTemplate = read('platform/blueprints/project/templates/Kanban Card.md');
+  for (const binding of [
+    'project: "[[${promotionProjectName}]]"',
+    'project_slug: ${promotionProjectSlug}',
+    'project_name: ${JSON.stringify(promotionProjectName)}',
+    'context/runs', 'context/lessons', 'context/decisions',
+  ]) assert(kanbanTemplate.includes(binding), `ES2D-PARENT-PROMOTION: production promotion binds ${binding}`);
+  assert.match(kanbanTemplate, /const boardPath = `\$\{boardDir\}\/\$\{chosenName\}-board\.md`/,
+    'ES2D-PARENT-PROMOTION: promotion materializes only the exact sibling epic board');
+  assert.match(kanbanTemplate, /let chosenName = fileName;[\s\S]*?suffix <= 999/,
+    'ES2D-PARENT-PROMOTION: promotion preserves the bounded collision contract');
+
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
     'project-delivery-dependency-closure: workshop dogfood subscription pins delivery@0.3.0 exactly once');

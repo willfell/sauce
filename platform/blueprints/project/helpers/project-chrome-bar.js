@@ -118,6 +118,12 @@ class ProjectChromeBar {
       const taskFolder = pathParts[tasksIdx + 1];
       const afterTask = pathParts.slice(tasksIdx + 2);
 
+      // Epic atlas: tasks/<Epic>/<Epic>.md. Frontmatter disambiguates it from
+      // the legacy task-hub shape without moving or renaming either note type.
+      if (afterTask.length === 1 && basename === taskFolder && page.type === "epic") {
+        return { context: "epic-hub", pathParts, planningIdx, projectSlug, projectDir, taskFolder };
+      }
+
       // task hub: tasks/<X>/<X>.md
       if (afterTask.length === 1 && basename === taskFolder) {
         return { context: "task-hub", pathParts, planningIdx, projectSlug, projectDir, taskFolder };
@@ -130,7 +136,12 @@ class ProjectChromeBar {
 
       // task-board: tasks/<X>/board/<X>-board.md
       if (afterTask.length === 2 && afterTask[0] === "board" && basename.endsWith("-board")) {
-        return { context: "task-board", pathParts, planningIdx, projectSlug, projectDir, taskFolder };
+        return { context: page.board_role === "epic" ? "epic-board" : "task-board", pathParts, planningIdx, projectSlug, projectDir, taskFolder };
+      }
+
+      // Execution slices remain flat peers of their epic board.
+      if (afterTask.length === 2 && afterTask[0] === "board" && page.type === "slice") {
+        return { context: "slice", pathParts, planningIdx, projectSlug, projectDir, taskFolder };
       }
 
       // task-board-card: tasks/<X>/board/<Y>/<Y>.md
@@ -532,6 +543,10 @@ class ProjectChromeBar {
         }
         case "new-project": {
           this._entityCreate(dv, "project");
+          return;
+        }
+        case "new-epic": {
+          this._entityCreate(dv, "epic");
           return;
         }
         case "move-docs": {
