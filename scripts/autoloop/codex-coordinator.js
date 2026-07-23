@@ -892,6 +892,18 @@ function canonicalWorkspacePath(value, expected) {
     && raw === expected;
 }
 
+function physicalProjectPrefix(cardsRoot) {
+  const projectRoot = path.dirname(path.resolve(cardsRoot)).replace(/\\/g, '/');
+  const marker = '/spice/projects/';
+  const markerAt = projectRoot.lastIndexOf(marker);
+  if (markerAt < 0) throw new Error('canonical cards root is outside spice/projects');
+  const relative = projectRoot.slice(markerAt + 1);
+  if (!/^spice\/projects\/[^/]+$/.test(relative)) {
+    throw new Error('canonical cards root is not one project directly under spice/projects');
+  }
+  return relative;
+}
+
 function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
   if (scalarField(cardRaw, 'type') !== 'slice') {
     throw new Error(`canonical epic member ${path.basename(cardPath)} is not type slice`);
@@ -959,15 +971,13 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   }
   const parentSourceBoard = scalarField(atlasRaw, 'source_board');
   const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
-  const normalizedParentBoard = String(parentSourceBoard || '').trim().replace(/\\/g, '/');
+  const projectPrefix = physicalProjectPrefix(cardsRoot);
+  const expectedParentBoardPath = path.posix.join(projectPrefix, path.basename(parentBoardPath));
   if (parentSourceBoard !== parentKanbanBoard
-    || !canonicalWorkspacePath(parentSourceBoard, normalizedParentBoard)
-    || path.posix.basename(normalizedParentBoard) !== path.basename(parentBoardPath)
-    || path.posix.basename(path.posix.dirname(normalizedParentBoard)) !== path.basename(path.dirname(cardsRoot))
+    || !canonicalWorkspacePath(parentSourceBoard, expectedParentBoardPath)
     || path.dirname(path.resolve(parentBoardPath)) !== path.dirname(path.resolve(cardsRoot))) {
     throw new Error(`epic atlas ${epic} does not bind its canonical parent board`);
   }
-  const projectPrefix = path.posix.dirname(normalizedParentBoard);
   const expectedAtlasPath = path.posix.join(projectPrefix, 'tasks', epic, `${epic}.md`);
   const expectedBoardPath = path.posix.join(projectPrefix, 'tasks', epic, 'board', `${epic}-board.md`);
   const backlink = scalarField(atlasRaw, 'epic_board');

@@ -1124,6 +1124,32 @@ assert.throws(() => projectCard(
   },
 ), /mismatched task_parent/, 'ES4-CANONICAL-SLICE-FAILOPEN binds every sibling to the atlas exact project prefix');
 
+const rootAliasProjection = makeEpicProjectionFixture('physical-root-alias');
+for (const target of [
+  rootAliasProjection.atlasPath,
+  rootAliasProjection.cardPath,
+  path.join(path.dirname(rootAliasProjection.cardPath), 'A2.md'),
+]) {
+  fs.writeFileSync(
+    target,
+    fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'bogus/projects/test/'),
+  );
+}
+const rootAliasBytes = rootAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+assert.throws(() => projectCard(
+  rootAliasProjection.cardPath,
+  rootAliasProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: rootAliasProjection.state.cards.A1,
+    state: rootAliasProjection.state,
+    cardsRoot: rootAliasProjection.cardsRoot,
+  },
+), /does not bind its canonical parent board/, 'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS rejects a consistently bogus metadata prefix');
+eq(rootAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), rootAliasBytes,
+  'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS fails before every slice and epic projection write');
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,
