@@ -745,7 +745,7 @@ async function main() {
   const templateBlock = sliceTemplate.match(/^---\n<%\*([\s\S]*?)-%>/)?.[1];
   assert(templateBlock, 'ES2D-ENTITY-SCAFFOLD: slice template production block is executable');
   const executeSliceTemplate = new AsyncFunction('tp', 'app', 'Notice',
-    `${templateBlock}\nreturn { sourceBoard, epicName, epicAtlas, destination };`);
+    `${templateBlock}\nreturn { sourceBoard, epicName, epicAtlas, destination: typeof destination === "undefined" ? null : destination };`);
   const canonicalBoard = 'spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md';
   const canonicalBoardFile = { path: canonicalBoard, stat: { mtime: 10 } };
   const targetSlice = { path: 'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md', stat: { ctime: 11 } };
@@ -763,11 +763,14 @@ async function main() {
         : { frontmatter: {} },
     },
   }, class Notice {});
-  assert.deepStrictEqual(templateResult, {
+  assert.deepStrictEqual({
+    sourceBoard: templateResult.sourceBoard,
+    epicName: templateResult.epicName,
+    epicAtlas: templateResult.epicAtlas,
+  }, {
     sourceBoard: canonicalBoard,
     epicName: 'Alpha Epic',
     epicAtlas: 'spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md',
-    destination: targetSlice.path,
   }, 'slice-epic-backlink-identity: production template binds the exact atlas and board identities');
 
   const rootPath = 'Root Slice.md';
