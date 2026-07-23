@@ -883,6 +883,12 @@ async function main() {
   const mismatchedEpicBefore = [
     '---', 'type: epic', 'schema_version: 1.1.0', '---', '', '# Wrong basename',
   ].join('\n');
+  const invalidBoardEpicBefore = [
+    '---', 'type: epic', 'schema_version: 1.1.0', '---', '', '# Invalid board epic',
+  ].join('\n');
+  const invalidCanonicalBoard = [
+    '---', 'type: doc-note', '---', '', 'kanban-plugin: board', '',
+  ].join('\n');
   const healAdapter = memoryAdapter({
     'spice/projects/demo/Demo Project.md': projectAtlasBody,
     'spice/projects/demo/demo-board.md': projectBoardBefore,
@@ -893,6 +899,9 @@ async function main() {
     'spice/projects/demo/tasks/Alpha Epic/board/Slice One.md': sliceBefore,
     'spice/projects/demo/tasks/Alpha Epic/board/Legacy.md': legacyBefore,
     'spice/projects/demo/tasks/Mismatch/Wrong.md': mismatchedEpicBefore,
+    'spice/projects/demo/tasks/Invalid Board/Invalid Board.md': invalidBoardEpicBefore,
+    'spice/projects/demo/tasks/Invalid Board/board/Invalid Board-board.md': invalidCanonicalBoard,
+    'spice/projects/demo/tasks/Invalid Board/board/Slice Two.md': sliceBefore,
   });
   const healHistory = [];
   const healTp = { app: { vault: { adapter: healAdapter } } };
@@ -929,6 +938,13 @@ async function main() {
     'ES2E-CANONICAL-HEAL: legacy note types are never retyped or rewritten');
   assert.strictEqual(healAdapter.store.get('spice/projects/demo/tasks/Mismatch/Wrong.md'), mismatchedEpicBefore,
     'ES2E-CANONICAL-HEAL: mismatched atlas basename fails closed');
+  assert.strictEqual(
+    healAdapter.store.get('spice/projects/demo/tasks/Invalid Board/board/Invalid Board-board.md'),
+    invalidCanonicalBoard,
+    'canonical-epic-board-heal: canonical filename with non-board frontmatter remains byte-identical',
+  );
+  assert.strictEqual(healAdapter.store.get('spice/projects/demo/tasks/Invalid Board/board/Slice Two.md'), sliceBefore,
+    'canonical-epic-board-heal: slice paths remain untouched when the canonical filename is not a board');
   const backupWrites = healAdapter.writes.filter(({ entry }) =>
     entry.startsWith('.obsidian/.sauce-heals/backups/'));
   assert(backupWrites.length >= 4 && backupWrites.every(({ entry }) => !entry.startsWith('.sauce-backup/')),

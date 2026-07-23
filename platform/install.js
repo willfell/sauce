@@ -5210,7 +5210,8 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
         const board = `${projectDir}/${identity.slug}-board.md`;
         if (!(await adapter.exists(board))) continue;
         const before = await adapter.read(board);
-        if (!/^kanban-plugin:\s*board\s*$/m.test(before) || /^board_role:\s*epic\s*$/m.test(before)) continue;
+        if (_epicFrontmatterScalar(before, "kanban-plugin") !== "board"
+          || _epicFrontmatterScalar(before, "board_role") === "epic") continue;
         const fields = {};
         if (!_epicFrontmatterScalar(before, "project_slug")) fields.project_slug = JSON.stringify(identity.slug);
         if (!_epicFrontmatterScalar(before, "project_name")) fields.project_name = JSON.stringify(identity.name);
@@ -5259,7 +5260,8 @@ async function applyEpicBoardRoleBackfill(tp, manifest, variables, history, git)
       const board = `${epic.epicDir}/board/${epic.name}-board.md`;
       if (!(await adapter.exists(board))) continue;
       const before = await adapter.read(board);
-      if (!/^kanban-plugin:\s*board\s*$/m.test(before) || /^board_role:\s*epic\s*$/m.test(before)) continue;
+      if (_epicFrontmatterScalar(before, "kanban-plugin") !== "board"
+        || _epicFrontmatterScalar(before, "board_role") === "epic") continue;
       const after = _epicSetFrontmatter(before, { board_role: "epic" });
       if (await _epicBackupWrite(adapter, board, before, after, ts)) {
         history?.push({ event: "info", step: "epic_board_role_backfill", target: board, action: "board_role_stamped",
@@ -5281,6 +5283,8 @@ async function applySliceSourceBoardHeal(tp, manifest, variables, history, git) 
       const boardDir = `${epic.epicDir}/board`;
       const board = `${boardDir}/${epic.name}-board.md`;
       if (!(await adapter.exists(boardDir)) || !(await adapter.exists(board))) continue;
+      const boardBody = await adapter.read(board);
+      if (_epicFrontmatterScalar(boardBody, "kanban-plugin") !== "board") continue;
       const listing = await adapter.list(boardDir);
       for (const slice of (listing.files || []).filter((entry) => entry.endsWith(".md") && entry !== board)) {
         const before = await adapter.read(slice);
