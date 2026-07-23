@@ -728,6 +728,60 @@ async function main() {
     'ES2D-PARENT-PROMOTION: promotion materializes only the exact sibling epic board');
   assert.match(kanbanTemplate, /let chosenName = fileName;[\s\S]*?suffix <= 999/,
     'ES2D-PARENT-PROMOTION: promotion preserves the bounded collision contract');
+  const templaterBlocks = [...kanbanTemplate.matchAll(/<%\*([\s\S]*?)-%>/g)].map((match) => match[1]);
+  assert(templaterBlocks.length >= 2, 'ES2D-PARENT-PROMOTION: production promotion block is executable');
+  const executePromotion = new AsyncFunction(
+    'tp', 'app', 'Notice', 'activePath', 'promoteAsEpic', 'promotionProjectSlug',
+    'promotionProjectName', 'fileName', 'chosenName', templaterBlocks[1],
+  );
+  const promotionFiles = new Map([
+    ['ranch/templates/Template, Epic Board.md', epicBoardTemplate],
+    ['spice/projects/demo/demo-board.md', 'parent board'],
+  ]);
+  const promotionFolders = new Set(['spice', 'spice/projects', 'spice/projects/demo']);
+  const moved = [];
+  const created = [];
+  const promotionApp = {
+    vault: {
+      getAbstractFileByPath(candidate) {
+        if (promotionFiles.has(candidate) || promotionFolders.has(candidate)) return { path: candidate };
+        return null;
+      },
+      async createFolder(candidate) { promotionFolders.add(candidate); },
+      async create(candidate, body) {
+        promotionFiles.set(candidate, body);
+        created.push(candidate);
+        return { path: candidate };
+      },
+      adapter: {
+        async read(candidate) {
+          if (!promotionFiles.has(candidate)) throw new Error(`missing ${candidate}`);
+          return promotionFiles.get(candidate);
+        },
+      },
+    },
+  };
+  await executePromotion({
+    file: {
+      async move(candidate) { moved.push(candidate); },
+    },
+    date: { now: () => '2026-07-23T01:45:00-05:00' },
+  }, promotionApp, class Notice {}, 'spice/projects/demo/demo-board.md', true,
+  'demo', 'Demo Project', 'Alpha Epic', 'Alpha Epic');
+  assert.deepStrictEqual(moved, ['spice/projects/demo/tasks/Alpha Epic/Alpha Epic'],
+    'ES2D-PARENT-PROMOTION: real production block moves the atlas to its canonical path');
+  assert.deepStrictEqual([...promotionFolders].filter((folder) => folder.includes('/context/')).sort(), [
+    'spice/projects/demo/tasks/Alpha Epic/context/decisions',
+    'spice/projects/demo/tasks/Alpha Epic/context/lessons',
+    'spice/projects/demo/tasks/Alpha Epic/context/runs',
+  ], 'ES2D-PARENT-PROMOTION: real production block creates the complete context skeleton');
+  assert.deepStrictEqual(created, ['spice/projects/demo/tasks/Alpha Epic/board/Alpha Epic-board.md'],
+    'ES2D-PARENT-PROMOTION: real production block creates only the exact sibling board');
+  const promotedBoard = promotionFiles.get(created[0]);
+  for (const expected of [
+    'board_role: epic', 'epic: "[[Alpha Epic]]"', 'project_slug: demo',
+    'project_name: "Demo Project"', 'Template, Slice Card.md',
+  ]) assert(promotedBoard.includes(expected), `ES2D-PARENT-PROMOTION: promoted board binds ${expected}`);
 
   const ProjectChromeBar = loadNamedClass('platform/blueprints/project/helpers/project-chrome-bar.js', 'ProjectChromeBar');
   const ProjectNavButtons = loadNamedClass('platform/blueprints/project/helpers/project-nav-buttons.js', 'ProjectNavButtons');
