@@ -327,6 +327,18 @@ async function main() {
   assert.deepStrictEqual(mutations, [],
     'ES2C10-CORE-READ-ONLY: the true empty-state render remains mutation-free');
 
+  currentPage = { file: { path: epicPath, folder: epicFolder }, docs: [] };
+  const throwingDeliveryContainer = element();
+  await new EpicDashboard({
+    lifecycleApi: {
+      deriveEpicLifecycle() { throw new Error('corrupt callable Delivery API'); },
+    },
+  }).render({ container: throwingDeliveryContainer });
+  assert(textOf(throwingDeliveryContainer).includes('Delivery lifecycle unavailable'),
+    'ES2C10-CORE-DELIVERY-RECOVERY: a callable Delivery API failure renders visible recovery');
+  assert.deepStrictEqual(mutations, [],
+    'ES2C10-CORE-READ-ONLY: Delivery exception recovery remains mutation-free');
+
   const coldContainer = element();
   let coldCurrentTouches = 0;
   const coldDv = new Proxy({ container: coldContainer }, {

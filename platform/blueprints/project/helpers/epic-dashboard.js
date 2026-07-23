@@ -241,7 +241,13 @@ class EpicDashboard {
         root.createEl("div", { text: "Delivery lifecycle unavailable — reinstall delivery and project." });
         return;
       }
-      const lifecycle = api.deriveEpicLifecycle(slices);
+      let lifecycle;
+      try {
+        lifecycle = api.deriveEpicLifecycle(slices);
+      } catch (_e) {
+        root.createEl("div", { text: "Delivery lifecycle unavailable — reinstall delivery and project." });
+        return;
+      }
       this._renderLifecycle(root, lifecycle);
       this._renderSlices(dv, root, slices, lifecycle, current.file.path);
       const groups = this._contextGroups(current.file.path, 3, currentFolder);
