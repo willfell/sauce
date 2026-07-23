@@ -640,6 +640,12 @@ async function main() {
   assert(source.includes('ranch/platform-config.json') && source.includes('ranch/content'),
     'production derives configured content_path with the installer default');
   assert(!source.includes('ranch/delivery/'), 'production contains no obsolete pre-content-path Delivery location');
+  assert(/epic-dashboard-link[\s\S]*?min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;/.test(source),
+    'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production links wrap long slice and context labels');
+  assert(/border-bottom:[^"]*?flex-wrap:wrap;min-width:0;/.test(source),
+    'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production slice rows can shrink inside the viewport');
+  assert(/border-radius:8px;padding:9px;min-width:0;overflow-wrap:anywhere;/.test(source),
+    'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production context tiles match the overflow-safe fixture');
 
   const visual = fs.readFileSync(VISUAL, 'utf8');
   assert((visual.match(/<main class="phone/g) || []).length === 2 && visual.includes('class="phone dark"'), 'visual proof includes light and dark phones');

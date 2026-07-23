@@ -153,7 +153,7 @@ class EpicDashboard {
   _link(parent, path, label, source) {
     const button = parent.createEl("button", { text: label });
     button.className = "epic-dashboard-link";
-    button.style.cssText = "appearance:none;background:none;border:0;padding:0;color:var(--link-color);cursor:pointer;text-align:left;";
+    button.style.cssText = "appearance:none;background:none;border:0;padding:0;color:var(--link-color);cursor:pointer;text-align:left;min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;";
     button.addEventListener?.("click", () => this._open(path, source));
     return button;
   }
@@ -196,7 +196,7 @@ class EpicDashboard {
     const frontier = String(lifecycle.frontier || "");
     for (const slice of slices) {
       const row = card.createEl("div");
-      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--background-modifier-border);flex-wrap:wrap;";
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--background-modifier-border);flex-wrap:wrap;min-width:0;";
       this._link(row, slice.file.path, slice.file.name, source).style.cssText += "flex:1;min-width:120px;";
       const kind = this._statusKind(slice.status);
       const pill = row.createEl("span", { text: String(slice.status || "planning") });
@@ -219,7 +219,7 @@ class EpicDashboard {
       const path = typeof entry === "string" ? entry.replace(/^\[\[|\]\]$/g, "").split("|")[0] : entry.path;
       const labelText = typeof entry === "string" ? path.split("/").pop() : (entry.basename || path.split("/").pop());
       const tile = strip.createEl("div");
-      tile.style.cssText = "border:1px solid var(--background-modifier-border);border-radius:8px;padding:9px;";
+      tile.style.cssText = "border:1px solid var(--background-modifier-border);border-radius:8px;padding:9px;min-width:0;overflow-wrap:anywhere;";
       this._link(tile, path, labelText, source);
     }
   }
