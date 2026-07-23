@@ -782,7 +782,12 @@ function summarizeClaimSelection(selected) {
     if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
     return summary;
   }
-  if (selected.action === 'at-capacity') return { action: 'at-capacity', active: selected.active || [] };
+  if (selected.action === 'at-capacity') {
+    return {
+      action: 'at-capacity', active: selected.active || [],
+      ...(selected.shadow_selection ? { shadow_selection: selected.shadow_selection } : {}),
+    };
+  }
   const summary = {
     action: selected.action, reason: selected.reason || null,
     skipped_count: skipped.length, first_blocker: skipped[0] || null,

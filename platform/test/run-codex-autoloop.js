@@ -572,6 +572,7 @@ const shadowAtCapacity = selectClaimCandidate({
 });
 eq(shadowAtCapacity.action, 'at-capacity', 'ES3-STATE-13 legacy capacity remains authoritative');
 eq(shadowAtCapacity.shadow_selection.action, 'at-capacity', 'ES3-STATE-13 shadow status still reports the same global capacity boundary');
+eq(summarizeClaimSelection(shadowAtCapacity).shadow_selection.action, 'at-capacity', 'ES3-STATE-13 summarized status preserves the observational capacity receipt');
 
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
