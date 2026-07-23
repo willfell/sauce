@@ -248,13 +248,13 @@ async function main() {
   const dashboard = new EpicDashboard({ lifecycleApi });
   assert.deepStrictEqual(dashboard._epicPaths(epicPath, epicFolder), {
     epicDir: epicFolder, boardDir: board, contextDir: context,
-  }, 'epic paths are folder-derived');
+  }, 'ES2C10-CORE-FOLDER-TRUTH: epic paths are folder-derived');
   const slices = dashboard._slicePages(epicPath, epicFolder);
   assert.deepStrictEqual(slices.map((slice) => slice.file.name), [
     'S1 Planned', 'S10 Done', 'S2 Active', 'S3 Blocked', 'S4 Done',
     'S5 Active', 'S6 Blocked', 'S7 Blocked', 'S8 Done', 'S9 Done',
   ],
-    'only direct type:slice children of the canonical board are included');
+    'ES2C10-CORE-FOLDER-TRUTH: only direct type:slice children of the canonical board are included');
   const groups = dashboard._contextGroups(epicPath, 3, epicFolder);
   assert.deepStrictEqual(groups.runs.map((entry) => entry.basename), ['Run 4', 'Run 3', 'Run 2'], 'runs are newest-first and capped at three');
   assert.strictEqual(groups.lessons.length, 4, 'lessons remain uncapped');
@@ -298,7 +298,8 @@ async function main() {
   assert.strictEqual(flatten(container).filter((node) => node.textContent === 'frontier').length, 1,
     'epic-slice-render-association-mutation-gap: exactly one rendered row owns the frontier marker');
   assert.strictEqual(opened.length, 0, 'render performs no navigation');
-  assert.deepStrictEqual(mutations, [], 'epic-read-only-mutation-gap: render invokes no vault, adapter, frontmatter, or metadata mutator');
+  assert.deepStrictEqual(mutations, [],
+    'ES2C10-CORE-READ-ONLY: render invokes no vault, adapter, frontmatter, or metadata mutator');
 
   currentPage = { file: { path: epicPath, folder: epicFolder }, docs: ['[[Native Architecture]]', '[[Native Runbook]]'] };
   const nativeDocsContainer = element();
@@ -317,6 +318,15 @@ async function main() {
   }
   assert.deepStrictEqual(mutations, [], 'native-array and empty-section renders remain read-only');
 
+  currentPage = { file: { path: epicPath, folder: epicFolder }, docs: [] };
+  global.app.vault.getMarkdownFiles = () => [];
+  const noSlicesContainer = element();
+  await dashboard.render({ container: noSlicesContainer });
+  assert(textOf(noSlicesContainer).includes('No slices yet'),
+    'ES2C10-CORE-EMPTY-STATE: an epic with no slice or context sections renders a visible empty state');
+  assert.deepStrictEqual(mutations, [],
+    'ES2C10-CORE-READ-ONLY: the true empty-state render remains mutation-free');
+
   const coldContainer = element();
   let coldCurrentTouches = 0;
   const coldDv = new Proxy({ container: coldContainer }, {
@@ -332,7 +342,7 @@ async function main() {
   await new EpicDashboard({ lifecycleApi }).render(coldDv);
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
   assert.strictEqual(coldCurrentTouches, 0,
-    'epic-cold-load-dv-current-alias-mutation-gap: cold load never reads or invokes any Dataview current alias');
+    'ES2C10-CORE-COLD-LOAD: RenderSafe cold load never reads or invokes any Dataview current alias');
 
   global.customJS = { RenderSafe: { page: () => ({ file: { path: epicPath, folder: epicFolder } }) }, SectionLabel: sectionLabel };
 
@@ -348,7 +358,7 @@ async function main() {
   const expectedContractPath = installedPath('scripts/delivery-contract.js');
   const expectedRegistryPath = installedPath('data/delivery-schema.json');
   assert.strictEqual(expectedIndexPath, 'ranch/content/delivery/index.js',
-    'epic-delivery-installed-path-mismatch: manifest plus workshop content_path derives the public index');
+    'ES2C10-CORE-INSTALLED-DELIVERY: manifest plus workshop content_path derives the public index');
   assert.strictEqual(await new EpicDashboard()._contentPath({
     read: async () => JSON.stringify({ variables: { content_path: 'custom/content' } }),
   }), 'custom/content', 'configured consumer content_path overrides the default');
@@ -555,14 +565,15 @@ async function main() {
   global.app = { vault: { getMarkdownFiles: () => markdownFiles }, metadataCache: { getFileCache: (entry) => ({ frontmatter: frontmatter.get(entry.path) || {} }) } };
   const unavailable = element();
   await new EpicDashboard().render({ container: unavailable });
-  assert(textOf(unavailable).includes('Delivery lifecycle unavailable'), 'missing Delivery fails closed with a visible recovery message');
+  assert(textOf(unavailable).includes('Delivery lifecycle unavailable'),
+    'ES2C10-CORE-DELIVERY-RECOVERY: missing Delivery fails closed with a visible recovery message');
 
   global.SauceDelivery = { deriveEpicLifecycle: 'partially initialized' };
   global.customJS.DeliveryContract = { deriveEpicLifecycle: true };
   const partial = element();
   await new EpicDashboard({ lifecycleApi: { deriveEpicLifecycle: {} } }).render({ container: partial });
   assert(textOf(partial).includes('Delivery lifecycle unavailable'),
-    'epic-delivery-partial-api-mutation-gap: truthy non-functions fail closed with the visible recovery message');
+    'ES2C10-CORE-DELIVERY-RECOVERY: partial non-callable APIs fail closed with the visible recovery message');
   delete global.SauceDelivery;
   delete global.customJS.DeliveryContract;
 
@@ -690,7 +701,7 @@ async function main() {
     const browser = await renderGeometry(chrome, profile, VISUAL, 390);
     assert.deepStrictEqual({ geometry: browser.geometry, innerWidth: browser.innerWidth, clientWidth: browser.clientWidth }, {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
-    }, `epic-390px-effective-viewport-mutation-gap: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
+    }, `ES2C10-CORE-390-NO-OVERFLOW: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
     assert.strictEqual(browser.result, '390px geometry pass', 'light and dark rendered geometry checker completed');
     const specialBrowser = await renderGeometry(chrome, specialProfile, specialVisualPath, 390);
     assert.deepStrictEqual({ geometry: specialBrowser.geometry, innerWidth: specialBrowser.innerWidth, clientWidth: specialBrowser.clientWidth }, {

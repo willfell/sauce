@@ -243,7 +243,7 @@ class EpicDashboard {
       }
       const lifecycle = api.deriveEpicLifecycle(slices);
       this._renderLifecycle(root, lifecycle);
-      if (slices.length) this._renderSlices(dv, root, slices, lifecycle, current.file.path);
+      this._renderSlices(dv, root, slices, lifecycle, current.file.path);
       const groups = this._contextGroups(current.file.path, 3, currentFolder);
       this._renderLinkStrip(dv, root, "Context pack", groups.pack, current.file.path);
       this._renderLinkStrip(dv, root, "Runs", groups.runs, current.file.path);
