@@ -500,6 +500,14 @@ const resolvedEpics = resolveEpicBoardSet({
 eq(resolvedEpics.epics.map((entry) => [entry.epic, entry.parent_order]), [['Epic A', 0], ['Epic B', 1]], 'ES3-STATE-01 resolver orders board_role epic pairs by parent board');
 eq(resolvedEpics.flat.map((entry) => entry.card), ['Flat Card'], 'ES3-STATE-02 resolver retains flat cards as degenerate epics');
 const seedEpicRoot = path.join(__dirname, 'seed-vault', 'spice', 'projects', 'epic-fixture');
+const seedReadOnlyPaths = [
+  'epic-fixture-board.md',
+  'tasks/Alpha Epic/Alpha Epic.md',
+  'tasks/Alpha Epic/board/Alpha Epic-board.md',
+  'tasks/Beta Epic/Beta Epic.md',
+  'tasks/Beta Epic/board/Beta Epic-board.md',
+];
+const seedBeforeResolve = seedReadOnlyPaths.map((file) => fs.readFileSync(path.join(seedEpicRoot, file), 'utf8'));
 const seedResolved = resolveEpicBoardSet({
   parentBoardMd: fs.readFileSync(path.join(seedEpicRoot, 'epic-fixture-board.md'), 'utf8'),
   cardsRoot: path.join(seedEpicRoot, 'tasks'),
@@ -507,6 +515,7 @@ const seedResolved = resolveEpicBoardSet({
 eq(seedResolved.epics.map((entry) => entry.epic), ['Alpha Epic', 'Beta Epic'], 'ES3-SEED-IO resolves both committed canonical epic pairs through real filesystem reads');
 eq(seedResolved.flat.map((entry) => entry.card), ['Degenerate Flat Card'], 'ES3-SEED-IO preserves the committed legacy flat fixture');
 eq(seedResolved.findings, [], 'ES3-SEED-IO reports no findings for the conformant committed fixture');
+eq(seedReadOnlyPaths.map((file) => fs.readFileSync(path.join(seedEpicRoot, file), 'utf8')), seedBeforeResolve, 'ES3-SEED-IO real resolver path is byte-for-byte read-only');
 eq(shadow().card, 'A1', 'ES3-STATE-03 parent order selects the first eligible epic slice');
 eq(shadow({ boardMd: shadowParent(['Epic B', 'Epic A', 'Flat Card']) }).card, 'B1', 'ES3-STATE-04 operator priority inversion changes shadow selection deterministically');
 
@@ -575,6 +584,21 @@ const flagOn = selectClaimCandidate({
 });
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
+const priorShadowFlag = process.env.SAUCE_EPIC_SELECTION_SHADOW;
+process.env.SAUCE_EPIC_SELECTION_SHADOW = '1';
+let flaggedStatus;
+try {
+  const statusIo = shadowIo();
+  flaggedStatus = commandStatus({ root: '/tmp/es3-shadow-status', statePath: '/tmp/es3-shadow-state.json' }, {
+    state: emptyState(), boardMd: shadowParent(), loadCard: statusIo.loadCard,
+    cardsRoot: shadowRoot, readFile: statusIo.readFile, readDir: statusIo.readDir, exists: statusIo.exists,
+  });
+} finally {
+  if (priorShadowFlag === undefined) delete process.env.SAUCE_EPIC_SELECTION_SHADOW;
+  else process.env.SAUCE_EPIC_SELECTION_SHADOW = priorShadowFlag;
+}
+eq(flaggedStatus.next.shadow_selection.card, 'A1', 'ES3-STATUS-FLAG invokes the production commandStatus environment-flag wiring');
+eq(flaggedStatus.projection_problems, [], 'ES3-STATUS-FLAG remains observational and creates no tracked projection state');
 const shadowCapacityState = emptyState();
 for (const [index, zone] of ['x', 'y', 'z'].entries()) shadowCapacityState.cards[`Busy${index}`] = { card: `Busy${index}`, phase: 'implementing', touch_zones: [`platform/${zone}`] };
 const shadowAtCapacity = selectClaimCandidate({
