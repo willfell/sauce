@@ -884,15 +884,15 @@ function atomicWriteText(file, value) {
   fs.renameSync(tmp, file);
 }
 
-function canonicalWorkspacePath(value, suffix) {
+function canonicalWorkspacePath(value, expected) {
   const raw = String(value || '').trim().replace(/\\/g, '/');
   const parts = raw.split('/');
   return Boolean(raw) && !raw.startsWith('/') && !/^[A-Za-z]:\//.test(raw)
     && !parts.some((part) => !part || part === '.' || part === '..')
-    && (raw === suffix || raw.endsWith(`/${suffix}`));
+    && raw === expected;
 }
 
-function validateCanonicalSliceTopology(cardRaw, cardPath, epic, cardsRoot, boardPath) {
+function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
   if (scalarField(cardRaw, 'type') !== 'slice') {
     throw new Error(`canonical epic member ${path.basename(cardPath)} is not type slice`);
   }
@@ -903,20 +903,18 @@ function validateCanonicalSliceTopology(cardRaw, cardPath, epic, cardsRoot, boar
   if (path.dirname(path.resolve(cardPath)) !== path.resolve(boardDir)) {
     throw new Error(`canonical slice ${path.basename(cardPath)} must live flat beside its epic board`);
   }
-  const expectedAtlasSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, `${epic}.md`));
-  const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', `${epic}-board.md`));
   const taskParent = scalarField(cardRaw, 'task_parent');
   const sourceBoard = scalarField(cardRaw, 'source_board');
   const kanbanBoard = scalarField(cardRaw, 'kanban_board');
-  if (!canonicalWorkspacePath(taskParent, expectedAtlasSuffix)) {
+  if (!canonicalWorkspacePath(taskParent, expectedAtlasPath)) {
     throw new Error(`canonical slice ${path.basename(cardPath)} has a mismatched task_parent`);
   }
-  if (sourceBoard !== kanbanBoard || !canonicalWorkspacePath(sourceBoard, expectedBoardSuffix)) {
+  if (sourceBoard !== kanbanBoard || !canonicalWorkspacePath(sourceBoard, expectedBoardPath)) {
     throw new Error(`canonical slice ${path.basename(cardPath)} has a shallow or mismatched source board`);
   }
 }
 
-function canonicalEpicMembers(boardRaw, boardDir, epic, cardsRoot, boardPath) {
+function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
   const parsed = parseBoard(boardRaw);
   const members = ['In Planning', 'In Progress', 'Blocked', 'Completed']
     .flatMap((column) => parsed[column] || []);
@@ -925,7 +923,14 @@ function canonicalEpicMembers(boardRaw, boardDir, epic, cardsRoot, boardPath) {
   for (const name of members) {
     const slicePath = path.join(boardDir, `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
-    validateCanonicalSliceTopology(fs.readFileSync(slicePath, 'utf8'), slicePath, epic, cardsRoot, boardPath);
+    validateCanonicalSliceTopology(
+      fs.readFileSync(slicePath, 'utf8'),
+      slicePath,
+      epic,
+      boardPath,
+      expectedAtlasPath,
+      expectedBoardPath,
+    );
   }
   return members;
 }
@@ -952,14 +957,33 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
     || scalarField(fs.readFileSync(epicBoardPath, 'utf8'), 'board_role') !== 'epic') {
     throw new Error(`canonical epic ${epic} is missing its exact named epic board`);
   }
-  const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', `${epic}-board.md`));
+  const parentSourceBoard = scalarField(atlasRaw, 'source_board');
+  const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
+  const normalizedParentBoard = String(parentSourceBoard || '').trim().replace(/\\/g, '/');
+  if (parentSourceBoard !== parentKanbanBoard
+    || !canonicalWorkspacePath(parentSourceBoard, normalizedParentBoard)
+    || path.posix.basename(normalizedParentBoard) !== path.basename(parentBoardPath)
+    || path.posix.basename(path.posix.dirname(normalizedParentBoard)) !== path.basename(path.dirname(cardsRoot))
+    || path.dirname(path.resolve(parentBoardPath)) !== path.dirname(path.resolve(cardsRoot))) {
+    throw new Error(`epic atlas ${epic} does not bind its canonical parent board`);
+  }
+  const projectPrefix = path.posix.dirname(normalizedParentBoard);
+  const expectedAtlasPath = path.posix.join(projectPrefix, 'tasks', epic, `${epic}.md`);
+  const expectedBoardPath = path.posix.join(projectPrefix, 'tasks', epic, 'board', `${epic}-board.md`);
   const backlink = scalarField(atlasRaw, 'epic_board');
-  if (!canonicalWorkspacePath(backlink, expectedBoardSuffix)) {
+  if (!canonicalWorkspacePath(backlink, expectedBoardPath)) {
     throw new Error(`epic atlas ${epic} does not bind its canonical board`);
   }
-  validateCanonicalSliceTopology(cardRaw, cardPath, epic, cardsRoot, epicBoardPath);
+  validateCanonicalSliceTopology(cardRaw, cardPath, epic, epicBoardPath, expectedAtlasPath, expectedBoardPath);
   const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
-  const members = canonicalEpicMembers(boardRaw, boardDir, epic, cardsRoot, epicBoardPath);
+  const members = canonicalEpicMembers(
+    boardRaw,
+    boardDir,
+    epic,
+    epicBoardPath,
+    expectedAtlasPath,
+    expectedBoardPath,
+  );
   if (!members.includes(path.basename(cardPath, '.md'))) {
     throw new Error(`canonical slice ${path.basename(cardPath)} is missing from its epic board`);
   }
@@ -967,7 +991,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   if (!boardCardLocation(parentRaw, epic)) throw new Error(`epic ${epic} is missing from its parent board`);
   return {
     epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
-    boardRaw, parentRaw, members,
+    boardRaw, parentRaw, members, expectedAtlasPath, expectedBoardPath,
     cardsRoot: root, state: opts.state || { cards: {} },
   };
 }
@@ -986,8 +1010,9 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
     surface.boardRaw,
     path.dirname(surface.boardPath),
     surface.epic,
-    surface.cardsRoot,
     surface.boardPath,
+    surface.expectedAtlasPath,
+    surface.expectedBoardPath,
   );
   const siblings = new Set(cards.map(normalizeCardLink));
   const slices = cards.map((name) => {

@@ -870,10 +870,11 @@ ok(!fs.readdirSync(tmp).some((name) => name.endsWith('.tmp')), 'atomic write lea
 
 function makeEpicProjectionFixture(label) {
   const root = path.join(tmp, `es4-${label}`);
-  const cardsRoot = path.join(root, 'tasks');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
   const epicRoot = path.join(cardsRoot, 'Epic A');
   const epicBoardDir = path.join(epicRoot, 'board');
-  const parentBoardPath = path.join(root, 'project-board.md');
+  const parentBoardPath = path.join(projectRoot, 'project-board.md');
   const atlasPath = path.join(epicRoot, 'Epic A.md');
   const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
   const cardPath = path.join(epicBoardDir, 'A1.md');
@@ -1103,6 +1104,25 @@ eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malforme
   'ES4-CANONICAL-SLICE-FAILOPEN leaves the parent board byte-stable after sibling refusal');
 eq(fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8'), malformedAtlasBefore,
   'ES4-CANONICAL-SLICE-FAILOPEN leaves the atlas byte-stable after sibling refusal');
+
+const crossPrefixProjection = makeEpicProjectionFixture('cross-prefix-sibling');
+const crossPrefixSiblingPath = path.join(path.dirname(crossPrefixProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  crossPrefixSiblingPath,
+  fs.readFileSync(crossPrefixSiblingPath, 'utf8')
+    .replaceAll('spice/projects/test/', 'spice/projects/WRONG/'),
+);
+assert.throws(() => projectCard(
+  crossPrefixProjection.cardPath,
+  crossPrefixProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: crossPrefixProjection.state.cards.A1,
+    state: crossPrefixProjection.state,
+    cardsRoot: crossPrefixProjection.cardsRoot,
+  },
+), /mismatched task_parent/, 'ES4-CANONICAL-SLICE-FAILOPEN binds every sibling to the atlas exact project prefix');
 
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
