@@ -144,12 +144,52 @@ const activePath = await _findSourceKanbanBoard(tp.file.title)
     || "";
 const detectPath = activePath || targetPath;
 const sourceBoard = activePath || targetPath;
+const isParentProjectBoard = /^spice\/projects\/[^/]+\/[^/]+-board\.md$/.test(sourceBoard);
+const promoteAsEpic = isParentProjectBoard
+    ? (await tp.system.suggester(["Epic", "Task"], [true, false], false, "Promote this project-board card as")) === true
+    : false;
+const promotionSourceParts = sourceBoard.split("/");
+const promotionProjectsIdx = promotionSourceParts.indexOf("projects");
+const promotionProjectDir = promotionProjectsIdx >= 0
+    ? promotionSourceParts.slice(0, promotionProjectsIdx + 2).join("/")
+    : "";
+const promotionProjectSlug = promotionProjectsIdx >= 0
+    ? promotionSourceParts[promotionProjectsIdx + 1]
+    : "";
+const promotionBoardFile = app.vault.getAbstractFileByPath(sourceBoard);
+const promotionBoardFrontmatter = promotionBoardFile
+    ? app.metadataCache.getFileCache(promotionBoardFile)?.frontmatter || {}
+    : {};
+let promotionProjectName = String(promotionBoardFrontmatter.project_name || "").trim();
+if (!promotionProjectName && promotionProjectDir) {
+    const promotionAtlas = app.vault.getFiles().find((file) => {
+        if (file.extension !== "md" || !file.path.startsWith(promotionProjectDir + "/")) return false;
+        if (file.path.slice(promotionProjectDir.length + 1).includes("/")) return false;
+        return app.metadataCache.getFileCache(file)?.frontmatter?.type === "project";
+    });
+    const promotionAtlasFm = promotionAtlas
+        ? app.metadataCache.getFileCache(promotionAtlas)?.frontmatter || {}
+        : {};
+    promotionProjectName = String(promotionAtlasFm.project_name || promotionAtlasFm.name || promotionAtlas?.basename || "").trim();
+}
+if (!promotionProjectName) promotionProjectName = promotionProjectSlug;
+const fileName = tp.file.title;
+let chosenName = fileName;
+let suffix = 2;
+while (
+    promotionProjectDir
+    && app.vault.getAbstractFileByPath(`${promotionProjectDir}/tasks/${chosenName}/${chosenName}.md`)
+    && suffix <= 999
+) {
+    chosenName = `${fileName}-${suffix}`;
+    suffix++;
+}
 
 // Workstream picker: detect project dir and read atlas note directly
 let workstreamValue = "";
 const parts = detectPath.split("/");
 const planIdx = parts.indexOf("projects");
-if (planIdx >= 0 && planIdx + 1 < parts.length) {
+if (!promoteAsEpic && planIdx >= 0 && planIdx + 1 < parts.length) {
     const projectDir = parts.slice(0, planIdx + 2).join("/");
 
     // Find atlas note: in project root, not tasks/, not board, not map
@@ -258,13 +298,15 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
 }
 -%>
 ---
-type: task-hub
+type: <% promoteAsEpic ? "epic" : "task-hub" %>
+<% promoteAsEpic ? "schema_version: 1.1.0" : "" %>
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 source_board: <% sourceBoard %>
+<% promoteAsEpic ? `project: "[[${promotionProjectName}]]"\nproject_slug: ${promotionProjectSlug}\nproject_name: ${JSON.stringify(promotionProjectName)}\nkanban_board: ${sourceBoard}\nstatus: planned\nepic_board: ${sourceBoard.replace(/\/[^/]+-board\.md$/, `/tasks/${chosenName}/board/${chosenName}-board.md`)}\nposture: claimable\ndocs: []` : "" %>
 workstream: <% workstreamValue %>
 tags:
-  - kanban-card
-  - project-card
+  - <% promoteAsEpic ? "epic" : "kanban-card" %>
+<% promoteAsEpic ? "" : "  - project-card" %>
 ---
 <%*
 // Auto-promote into per-task folder convention.
@@ -289,21 +331,44 @@ const sourceParts = activePath.split("/");
 const projectsIdx = sourceParts.indexOf("projects");
 if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
     const projectDir = sourceParts.slice(0, projectsIdx + 2).join("/");
-    const fileName = tp.file.title;
-    let chosenName = fileName;
-    let suffix = 2;
-    while (
-        app.vault.getAbstractFileByPath(`${projectDir}/tasks/${chosenName}/${chosenName}.md`)
-        && suffix <= 999
-    ) {
-        chosenName = `${fileName}-${suffix}`;
-        suffix++;
-    }
     const newTargetPath = `${projectDir}/tasks/${chosenName}/${chosenName}`;
     if (!app.vault.getAbstractFileByPath(newTargetPath + ".md")) {
         await tp.file.move(newTargetPath);
         if (chosenName !== fileName) {
             new Notice(`Task name "${fileName}" already exists in this project. Saved as "${chosenName}".`, 6000);
+        }
+        if (promoteAsEpic) {
+            const ensureFolder = async (folder) => {
+                const segments = folder.split("/").filter(Boolean);
+                let built = "";
+                for (const segment of segments) {
+                    built = built ? `${built}/${segment}` : segment;
+                    if (!app.vault.getAbstractFileByPath(built)) {
+                        try { await app.vault.createFolder(built); } catch (_) {}
+                    }
+                }
+            };
+            const epicDir = `${projectDir}/tasks/${chosenName}`;
+            const boardDir = `${epicDir}/board`;
+            for (const folder of [boardDir, `${epicDir}/context/runs`, `${epicDir}/context/lessons`, `${epicDir}/context/decisions`]) {
+                await ensureFolder(folder);
+            }
+            const boardPath = `${boardDir}/${chosenName}-board.md`;
+            if (!app.vault.getAbstractFileByPath(boardPath)) {
+                let boardBody = "";
+                try { boardBody = await app.vault.adapter.read("ranch/templates/Template, Epic Board.md"); } catch (_) {}
+                boardBody = boardBody
+                    .replaceAll("{{current_file.folder}}", projectDir)
+                    .replaceAll("{{prompts.name|sanitize-filename}}", chosenName)
+                    .replaceAll("{{templates_path}}", "ranch/templates");
+                const boardFrontmatter = [
+                    "---", "kanban-plugin: board", "type: kanban", "board_role: epic",
+                    `epic: \"[[${chosenName}]]\"`, `project_slug: ${promotionProjectSlug}`,
+                    `project_name: ${JSON.stringify(promotionProjectName)}`,
+                    `created_at: \"${tp.date.now("YYYY-MM-DDTHH:mm:ssZ")}\"`, "tags:", "  - epic-board", "---", ""
+                ].join("\n");
+                await app.vault.create(boardPath, boardFrontmatter + boardBody);
+            }
         }
     }
 }
@@ -312,3 +377,5 @@ if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });
 ```
+
+<% promoteAsEpic ? '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```' : "" %>

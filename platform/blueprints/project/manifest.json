@@ -96,7 +96,8 @@
     "ProjectChromeBar",
     "ProjectCommandsInit",
     "ProjectDashboard",
-    "EpicDashboard"
+    "EpicDashboard",
+    "EpicCreateAction"
   ],
   "pre_install": [
     {
@@ -260,6 +261,22 @@
     {
       "source": "helpers/epic-dashboard.js",
       "dest": "{{scripts_path}}/project/epic-dashboard.js"
+    },
+    {
+      "source": "helpers/epic-create-action.js",
+      "dest": "{{scripts_path}}/project/epic-create-action.js"
+    },
+    {
+      "source": "templates/Epic.md",
+      "dest": "{{templates_path}}/Template, Epic.md"
+    },
+    {
+      "source": "templates/Epic Board.md",
+      "dest": "{{templates_path}}/Template, Epic Board.md"
+    },
+    {
+      "source": "templates/Slice Card.md",
+      "dest": "{{templates_path}}/Template, Slice Card.md"
     }
   ],
   "customjs_startup_scripts": [
@@ -288,6 +305,76 @@
     }
   ],
   "new_entity_buttons": [
+    {
+      "id": "epic",
+      "label": "New Epic",
+      "icon": "folder-plus",
+      "prompts": [
+        {
+          "key": "name",
+          "label": "Epic name",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "{{current_file.folder}}/tasks/{{prompts.name|sanitize-filename}}",
+        "filename_prefix": "{{prompts.name|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "epic",
+        "schema_version": "1.1.0",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "project": "[[{{current_file.frontmatter.project_name}}]]",
+        "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "project_name": "{{current_file.frontmatter.project_name}}",
+        "source_board": "{{current_file.folder}}/{{current_file.frontmatter.project_slug}}-board.md",
+        "kanban_board": "{{current_file.folder}}/{{current_file.frontmatter.project_slug}}-board.md",
+        "status": "planned",
+        "epic_board": "{{current_file.folder}}/tasks/{{prompts.name|sanitize-filename}}/board/{{prompts.name|sanitize-filename}}-board.md",
+        "posture": "claimable",
+        "docs": [],
+        "tags": [
+          "epic"
+        ]
+      },
+      "body_template": "Template, Epic.md",
+      "extra_files": [
+        {
+          "subfolder": "board",
+          "filename_pattern": "{{prompts.name|sanitize-filename}}-board.md",
+          "frontmatter_template": {
+            "kanban-plugin": "board",
+            "type": "kanban",
+            "board_role": "epic",
+            "epic": "[[{{prompts.name}}]]",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "project_name": "{{current_file.frontmatter.project_name}}",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "epic-board"
+            ]
+          },
+          "body_template": "Template, Epic Board.md"
+        },
+        {
+          "subfolder": "context/runs",
+          "filename_pattern": ".keep",
+          "inline_body": ""
+        },
+        {
+          "subfolder": "context/lessons",
+          "filename_pattern": ".keep",
+          "inline_body": ""
+        },
+        {
+          "subfolder": "context/decisions",
+          "filename_pattern": ".keep",
+          "inline_body": ""
+        }
+      ]
+    },
     {
       "id": "project",
       "label": "New Project",
@@ -559,6 +646,32 @@
   ],
   "breadcrumb": {
     "types": {
+      "epic": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
+      "slice": {
+        "ancestors": [
+          {
+            "label": "fm:project_name|path:2",
+            "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+          },
+          {
+            "label": "path:4",
+            "link": "spice/projects/{path:2}/tasks/{path:4}/{path:4}.md"
+          }
+        ],
+        "current": {
+          "label": "file:basename"
+        }
+      },
       "project": {
         "ancestors": [
           {
