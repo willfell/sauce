@@ -933,6 +933,14 @@ async function main() {
     entry.startsWith('.obsidian/.sauce-heals/backups/'));
   assert(backupWrites.length >= 4 && backupWrites.every(({ entry }) => !entry.startsWith('.sauce-backup/')),
     'ES2E-CANONICAL-HEAL: every content edit is backed up under the approved root first');
+  for (const { entry } of healAdapter.writes.filter(({ entry }) =>
+    !entry.startsWith('.obsidian/.sauce-heals/backups/'))) {
+    const liveIndex = healAdapter.writes.findIndex((write) => write.entry === entry);
+    const backupIndex = healAdapter.writes.findIndex((write) =>
+      write.entry.startsWith('.obsidian/.sauce-heals/backups/') && write.entry.endsWith(`/${entry}`));
+    assert(backupIndex >= 0 && backupIndex < liveIndex,
+      `ES2E-CANONICAL-HEAL: backup precedes the live write for ${entry}`);
+  }
   const firstPassStore = [...healAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right));
   const writesAfterFirstPass = healAdapter.writes.length;
   await installer.applyEpicScaffoldHeal(healTp, healManifest, {}, healHistory, healGit);
@@ -954,6 +962,20 @@ async function main() {
   }, healManifest, {}, faultHistory, healGit), 'ES2E-CANONICAL-HEAL: adapter failures never escape install');
   assert(faultHistory.some((entry) => entry.event === 'warning' && entry.step === 'epic_scaffold_heal'),
     'ES2E-CANONICAL-HEAL: adapter failure leaves an auditable warning');
+  for (const [heal, step] of [
+    [installer.applyEpicBoardRoleBackfill, 'epic_board_role_backfill'],
+    [installer.applySliceSourceBoardHeal, 'slice_source_board_heal'],
+  ]) {
+    const history = [];
+    await assert.doesNotReject(() => heal({
+      app: { vault: { adapter: {
+        async exists() { return true; },
+        async list() { throw new Error(`${step} adapter fault`); },
+      } } },
+    }, healManifest, {}, history, healGit), `ES2E-CANONICAL-HEAL: ${step} failures never escape install`);
+    assert(history.some((entry) => entry.event === 'warning' && entry.step === step),
+      `ES2E-CANONICAL-HEAL: ${step} failure leaves an auditable warning`);
+  }
 
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
