@@ -723,6 +723,39 @@ async function main() {
   assert.match(kanbanTemplate, /let chosenName = fileName;[\s\S]*?suffix <= 999/,
     'ES2D-PARENT-PROMOTION: promotion preserves the bounded collision contract');
 
+  const ProjectChromeBar = loadNamedClass('platform/blueprints/project/helpers/project-chrome-bar.js', 'ProjectChromeBar');
+  const ProjectNavButtons = loadNamedClass('platform/blueprints/project/helpers/project-nav-buttons.js', 'ProjectNavButtons');
+  const contextFixtures = [
+    {
+      path: 'spice/projects/demo/tasks/Alpha Epic/Alpha Epic.md',
+      page: { type: 'epic', file: { name: 'Alpha Epic' } },
+      expected: 'epic-hub',
+    },
+    {
+      path: canonicalBoard,
+      page: { type: 'kanban', board_role: 'epic', file: { name: 'Alpha Epic-board' } },
+      expected: 'epic-board',
+    },
+    {
+      path: targetSlice.path,
+      page: { type: 'slice', file: { name: 'Slice One' } },
+      expected: 'slice',
+    },
+  ];
+  const priorRenderSafe = global.customJS.RenderSafe;
+  for (const fixture of contextFixtures) {
+    global.customJS.RenderSafe = { page: () => fixture.page };
+    const chromeContext = new ProjectChromeBar().detectContext(fixture.path, {});
+    const navContext = new ProjectNavButtons().detectContext(fixture.path, {});
+    assert.strictEqual(chromeContext.context, fixture.expected,
+      `ES2D-CONTEXT-PARITY: ProjectChromeBar classifies ${fixture.expected}`);
+    assert.strictEqual(navContext.context, fixture.expected,
+      `ES2D-CONTEXT-PARITY: ProjectNavButtons classifies ${fixture.expected}`);
+    assert.deepStrictEqual(navContext, chromeContext,
+      `ES2D-CONTEXT-PARITY: mirrored production classifiers agree for ${fixture.expected}`);
+  }
+  global.customJS.RenderSafe = priorRenderSafe;
+
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
   assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
     'project-delivery-dependency-closure: workshop dogfood subscription pins delivery@0.3.0 exactly once');
