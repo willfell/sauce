@@ -664,27 +664,37 @@ function selectEpicShadowCandidate({
     ...parentOrder.filter((name) => !activeEpicNames.has(name)),
   ];
   const skipped = [];
+  const epicBoards = new Map();
+  const globalCompleted = new Set(parent.Completed || []);
+  const load = readFile || ((file) => fs.readFileSync(file, 'utf8'));
+  for (const epic of resolved.epics) {
+    try {
+      const parsed = parseBoard(load(epic.board_path));
+      epicBoards.set(epic.epic, parsed);
+      for (const card of parsed.Completed || []) globalCompleted.add(card);
+    } catch (err) {
+      skipped.push({ epic: epic.epic, reason: `epic board unreadable: ${err.message}` });
+    }
+  }
   for (const name of orderedNames) {
     const epic = epicByName.get(name);
     const flat = flatByName.get(name);
     if (!epic && !flat) continue;
     let candidateBoard;
     if (epic) {
-      try {
-        const raw = (readFile || ((file) => fs.readFileSync(file, 'utf8')))(epic.board_path);
-        const parsed = parseBoard(raw);
-        candidateBoard = [
-          '## In Planning', ...(parsed['In Planning'] || []).map((card) => `- [ ] [[${card}]]`), '',
-          '## In Progress', ...(parsed['In Progress'] || []).map((card) => `- [ ] [[${card}]]`), '',
-          '## Blocked', ...(parsed.Blocked || []).map((card) => `- [ ] [[${card}]]`), '',
-          '## Completed', ...(parsed.Completed || []).map((card) => `- [x] [[${card}]]`), '',
-        ].join('\n');
-      } catch (err) {
-        skipped.push({ epic: name, reason: `epic board unreadable: ${err.message}` });
-        continue;
-      }
+      const parsed = epicBoards.get(name);
+      if (!parsed) continue;
+      candidateBoard = [
+        '## In Planning', ...(parsed['In Planning'] || []).map((card) => `- [ ] [[${card}]]`), '',
+        '## In Progress', ...(parsed['In Progress'] || []).map((card) => `- [ ] [[${card}]]`), '',
+        '## Blocked', ...(parsed.Blocked || []).map((card) => `- [ ] [[${card}]]`), '',
+        '## Completed', ...[...globalCompleted].map((card) => `- [x] [[${card}]]`), '',
+      ].join('\n');
     } else {
-      candidateBoard = ['## In Planning', `- [ ] [[${name}]]`, '', '## In Progress', '', '## Blocked', '', '## Completed', ''].join('\n');
+      candidateBoard = [
+        '## In Planning', `- [ ] [[${name}]]`, '', '## In Progress', '', '## Blocked', '',
+        '## Completed', ...[...globalCompleted].map((card) => `- [x] [[${card}]]`), '',
+      ].join('\n');
     }
     const selected = selectClaimCandidate({
       boardMd: candidateBoard, state, loadCard, supervised, epicShadow: false,

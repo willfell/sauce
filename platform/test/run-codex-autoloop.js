@@ -516,6 +516,12 @@ eq(shadow({ state: activeEpicState }).card, 'B1', 'ES3-STATE-05 a parked slice m
 
 const blockedA = { ...shadowBodies, A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'], deps: ['Missing'] }) };
 eq(shadow({ loadCard: (name) => blockedA[name] ? { path: `/cards/${name}.md`, raw: blockedA[name] } : null }).card, 'B1', 'ES3-STATE-06 unmet dependency falls through to the next epic');
+const crossEpicIo = shadowIo({ files: { '/vault/tasks/Epic B/board/Epic B-board.md': epicBoard([], [], ['B0']) } });
+const crossEpicBodies = { ...shadowBodies, A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'], deps: ['B0'] }) };
+eq(shadow({
+  io: crossEpicIo,
+  loadCard: (name) => crossEpicBodies[name] ? { path: `/cards/${name}.md`, raw: crossEpicBodies[name] } : null,
+}).card, 'A1', 'ES3-STATE-06B checked completion on another epic board satisfies the unchanged global dependency rule');
 const conflictState = emptyState();
 conflictState.cards.Other = { card: 'Other', phase: 'implementing', touch_zones: ['platform/a1'] };
 eq(shadow({ state: conflictState }).card, 'B1', 'ES3-STATE-07 global touch-zone conflict and unchanged dependency ordering fall through to the next epic');
