@@ -17,7 +17,7 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
@@ -867,6 +867,179 @@ const file = path.join(tmp, 'state.json');
 atomicWriteJson(file, { schema_version: 1, cards: { A: { phase: 'claimed' } } });
 eq(JSON.parse(fs.readFileSync(file, 'utf8')).cards.A.phase, 'claimed', 'atomic JSON write');
 ok(!fs.readdirSync(tmp).some((name) => name.endsWith('.tmp')), 'atomic write leaves no temp');
+
+function makeEpicProjectionFixture(label) {
+  const root = path.join(tmp, `es4-${label}`);
+  const cardsRoot = path.join(root, 'tasks');
+  const epicRoot = path.join(cardsRoot, 'Epic A');
+  const epicBoardDir = path.join(epicRoot, 'board');
+  const parentBoardPath = path.join(root, 'project-board.md');
+  const atlasPath = path.join(epicRoot, 'Epic A.md');
+  const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
+  const cardPath = path.join(epicBoardDir, 'A1.md');
+  fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.writeFileSync(parentBoardPath, [
+    '## In Planning', '- [ ] [[Epic B]]', '- [ ] [[Epic C]]', '',
+    '## In Progress', '', '## Blocked', '',
+    '## Completed', '- [x] [[Epic A]]', '',
+  ].join('\n'));
+  fs.writeFileSync(atlasPath, [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    'source_board: spice/projects/test/project-board.md',
+    'kanban_board: spice/projects/test/project-board.md',
+    'status: planned',
+    'epic_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(epicBoardPath, [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '- [ ] [[A1]]', '- [ ] [[A2]]', '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  fs.writeFileSync(cardPath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: In Planning', 'status: planning', 'depends_on: []', '---', 'A1 body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicBoardDir, 'A2.md'), [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'status: planning', 'depends_on: []', '---', '',
+  ].join('\n'));
+  const state = emptyState();
+  state.cards.A1 = { card: 'A1', phase: 'implementing', parent_card: 'Epic A', card_path: cardPath };
+  const files = [epicBoardPath, cardPath, parentBoardPath, atlasPath];
+  return { root, cardsRoot, parentBoardPath, atlasPath, epicBoardPath, cardPath, state, files };
+}
+
+function assertEpicProjectionConverged(fixture, label) {
+  ok(/## In Progress[\s\S]*- \[ \] \[\[A1\]\]/.test(fs.readFileSync(fixture.epicBoardPath, 'utf8')), `${label} paints the slice on its epic board`);
+  ok(/kanban_column: In Progress/.test(fs.readFileSync(fixture.cardPath, 'utf8'))
+    && /status: in_progress/.test(fs.readFileSync(fixture.cardPath, 'utf8')), `${label} paints canonical slice metadata`);
+  const parent = fs.readFileSync(fixture.parentBoardPath, 'utf8');
+  ok(/## In Progress[\s\S]*- \[ \] \[\[Epic A\]\]/.test(parent), `${label} repaints the epic from its slice roll-up`);
+  ok(parent.indexOf('[[Epic B]]') < parent.indexOf('[[Epic C]]'), `${label} preserves untouched In Planning priority order`);
+  const atlas = fs.readFileSync(fixture.atlasPath, 'utf8');
+  ok(/status: active/.test(atlas) && /posture: claimable/.test(atlas), `${label} paints the derived epic atlas state`);
+}
+
+const epicProjection = makeEpicProjectionFixture('reconcile');
+let epicLedgerWrites = 0;
+const epicReconcileDeps = {
+  readState: () => epicProjection.state,
+  writeState: () => { epicLedgerWrites += 1; },
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: epicProjection.parentBoardPath,
+  cardsRoot: epicProjection.cardsRoot,
+  now: () => '2026-07-23T14:00:00.000Z',
+};
+const firstEpicReconcile = await commandReconcile(
+  { root: epicProjection.root },
+  { card: 'A1' },
+  epicReconcileDeps,
+);
+eq(firstEpicReconcile.changed, 1, 'ES4-DUAL-RECONCILE repairs all canonical projection surfaces');
+assertEpicProjectionConverged(epicProjection, 'ES4-DUAL-RECONCILE');
+const epicBytesAfterRepair = epicProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+const epicStateAfterRepair = JSON.stringify(epicProjection.state);
+const epicWritesAfterRepair = epicLedgerWrites;
+const secondEpicReconcile = await commandReconcile(
+  { root: epicProjection.root },
+  { card: 'A1' },
+  epicReconcileDeps,
+);
+eq(secondEpicReconcile.no_op, true, 'ES4-DUAL-NOOP exact-card replay reports no_op:true');
+eq(epicProjection.files.map((target) => fs.readFileSync(target, 'utf8')), epicBytesAfterRepair, 'ES4-DUAL-NOOP keeps every projection surface byte-stable');
+eq(JSON.stringify(epicProjection.state), epicStateAfterRepair, 'ES4-DUAL-NOOP keeps ledger state byte-stable');
+eq(epicLedgerWrites, epicWritesAfterRepair, 'ES4-DUAL-NOOP performs no ledger write');
+eq(projectionBoardDrift(
+  fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
+  epicProjection.state.cards.A1,
+  {
+    boardPath: epicProjection.parentBoardPath,
+    cardsRoot: epicProjection.cardsRoot,
+    state: epicProjection.state,
+  },
+), null, 'ES4-DUAL-INVARIANT accepts a converged slice, epic board, atlas, and parent board');
+fs.writeFileSync(
+  epicProjection.parentBoardPath,
+  moveBoardCard(fs.readFileSync(epicProjection.parentBoardPath, 'utf8'), 'Epic A', 'Completed', true),
+);
+ok(/epic surface differs/.test(projectionBoardDrift(
+  fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
+  epicProjection.state.cards.A1,
+  {
+    boardPath: epicProjection.parentBoardPath,
+    cardsRoot: epicProjection.cardsRoot,
+    state: epicProjection.state,
+  },
+).issue), 'ES4-DUAL-INVARIANT detects a hand-moved epic against the authoritative slice roll-up');
+projectCard(
+  epicProjection.cardPath,
+  epicProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: epicProjection.state.cards.A1,
+    state: epicProjection.state,
+    cardsRoot: epicProjection.cardsRoot,
+    now: () => '2026-07-23T14:00:00.000Z',
+  },
+);
+assertEpicProjectionConverged(epicProjection, 'ES4-DUAL-INVARIANT-REPAIR');
+
+for (let boundary = 1; boundary <= 4; boundary++) {
+  const fixture = makeEpicProjectionFixture(`fault-${boundary}`);
+  let writes = 0;
+  assert.throws(() => projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+      writeText: (target, value) => {
+        writes += 1;
+        if (writes === boundary) throw new Error(`ES4-WRITE-${boundary}`);
+        fs.writeFileSync(target, value);
+      },
+    },
+  ), new RegExp(`ES4-WRITE-${boundary}`), `ES4-WRITE-${boundary} injects a crash at its atomic write boundary`);
+  const recovered = projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+    },
+  );
+  ok(recovered.changed, `ES4-WRITE-${boundary} reconcile repairs the interrupted projection`);
+  assertEpicProjectionConverged(fixture, `ES4-WRITE-${boundary}`);
+  eq(projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+    },
+  ).changed, false, `ES4-WRITE-${boundary} converges to a projection no-op`);
+}
+
 const lockDir = path.join(tmp, 'owner-gap.lock');
 fs.mkdirSync(lockDir);
 ok(!lockDirectoryIsStale(lockDir, null, 30_000), 'new lock without owner is not stolen during owner-write gap');

@@ -884,6 +884,67 @@ function atomicWriteText(file, value) {
   fs.renameSync(tmp, file);
 }
 
+function canonicalEpicProjection(cardRaw, parentBoardPath, cardsRoot, opts = {}) {
+  if (scalarField(cardRaw, 'type') !== 'slice') return null;
+  const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
+  if (!epic) throw new Error('canonical slice is missing its epic backlink');
+  const root = path.resolve(cardsRoot);
+  const epicRoot = path.resolve(cardsRoot, epic);
+  if (epicRoot === root || !epicRoot.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`epic ${epic} escapes cards root`);
+  }
+  const atlasPath = path.join(epicRoot, `${epic}.md`);
+  const boardDir = path.join(epicRoot, 'board');
+  if (!fs.existsSync(atlasPath) || !fs.existsSync(boardDir)) {
+    throw new Error(`canonical epic ${epic} is missing its atlas or board directory`);
+  }
+  const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
+  if (scalarField(atlasRaw, 'type') !== 'epic') throw new Error(`epic atlas ${epic} has invalid type`);
+  const boards = fs.readdirSync(boardDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => path.join(boardDir, entry.name))
+    .filter((file) => scalarField(fs.readFileSync(file, 'utf8'), 'board_role') === 'epic');
+  if (boards.length !== 1) throw new Error(`canonical epic ${epic} has ${boards.length} epic boards`);
+  const expectedSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', path.basename(boards[0])));
+  const backlink = normalizedPath(scalarField(atlasRaw, 'epic_board'));
+  if (!backlink || (!backlink.endsWith(expectedSuffix) && backlink !== expectedSuffix)) {
+    throw new Error(`epic atlas ${epic} does not bind its canonical board`);
+  }
+  const parentRaw = fs.readFileSync(parentBoardPath, 'utf8');
+  if (!boardCardLocation(parentRaw, epic)) throw new Error(`epic ${epic} is missing from its parent board`);
+  return {
+    epic, atlasPath, atlasRaw, boardPath: boards[0],
+    boardRaw: fs.readFileSync(boards[0], 'utf8'), parentRaw,
+    cardsRoot: root, state: opts.state || { cards: {} },
+  };
+}
+
+function epicProjectionMapping(state) {
+  return {
+    planned: { column: 'In Planning', complete: false },
+    active: { column: 'In Progress', complete: false },
+    blocked: { column: 'Blocked', complete: false },
+    done: { column: 'Completed', complete: true },
+  }[state];
+}
+
+function deriveEpicProjection(surface, currentCard, currentStatus) {
+  const parsed = parseBoard(surface.boardRaw);
+  const cards = ['In Planning', 'In Progress', 'Blocked', 'Completed']
+    .flatMap((column) => parsed[column] || [])
+    .filter((name, index, all) => all.indexOf(name) === index);
+  const slices = cards.map((name) => {
+    const tracked = surface.state.cards && surface.state.cards[name];
+    const trackedMapping = tracked && projectionMapping(tracked.phase);
+    if (name === currentCard) return { card: name, status: currentStatus };
+    if (trackedMapping) return { card: name, status: trackedMapping.status };
+    const slicePath = path.join(path.dirname(surface.boardPath), `${name}.md`);
+    if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
+    return { card: name, status: scalarField(fs.readFileSync(slicePath, 'utf8'), 'status') || 'planning' };
+  });
+  return delivery.deriveEpicLifecycle(slices);
+}
+
 function durablePathBarrier(file, deps = {}) {
   const open = deps.openSync || fs.openSync;
   const sync = deps.fsyncSync || fs.fsyncSync;
@@ -905,8 +966,10 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
   if (!mapping) return { changed: false, skipped: true };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
-  const boardRaw = fs.readFileSync(boardPath, 'utf8');
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
+  const epicSurface = canonicalEpicProjection(cardRaw, boardPath, opts.cardsRoot || CARDS_ROOT, opts);
+  const sliceBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
+  const boardRaw = epicSurface ? epicSurface.boardRaw : fs.readFileSync(boardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
   const record = opts.record || null;
   const ownsParkMetadata = Boolean(record && Object.prototype.hasOwnProperty.call(record, 'resume_condition'));
@@ -959,13 +1022,39 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   if ((lifecycleMetadataChanged || contractMetadataChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
   }
-  if (boardChanged) atomicWriteText(boardPath, boardNext);
-  if (cardNext !== cardRaw) atomicWriteText(resolvedCardPath, cardNext);
-  return {
-    changed: boardChanged || cardNext !== cardRaw,
+  const writeText = opts.writeText || atomicWriteText;
+  if (boardChanged) writeText(sliceBoardPath, boardNext);
+  if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
+  let epicBoardChanged = false;
+  let epicAtlasChanged = false;
+  let epicState = null;
+  if (epicSurface) {
+    epicSurface.boardRaw = boardNext;
+    const lifecycle = deriveEpicProjection(epicSurface, card, mapping.status);
+    const epicMapping = epicProjectionMapping(lifecycle.state);
+    if (!epicMapping) throw new Error(`unsupported derived epic state ${lifecycle.state}`);
+    const parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
+    const atlasNext = patchFrontmatter(epicSurface.atlasRaw, {
+      status: lifecycle.state,
+      posture: lifecycle.posture,
+    });
+    epicBoardChanged = parentNext !== epicSurface.parentRaw;
+    epicAtlasChanged = atlasNext !== epicSurface.atlasRaw;
+    if (epicBoardChanged) writeText(boardPath, parentNext);
+    if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
+    epicState = lifecycle.state;
+  }
+  const result = {
+    changed: boardChanged || cardNext !== cardRaw || epicBoardChanged || epicAtlasChanged,
     board_changed: boardChanged,
     card_changed: cardNext !== cardRaw,
   };
+  if (epicSurface) Object.assign(result, {
+    epic_board_changed: epicBoardChanged,
+    epic_atlas_changed: epicAtlasChanged,
+    epic_state: epicState,
+  });
+  return result;
 }
 
 async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
@@ -974,8 +1063,11 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const projectionLock = opts.withLock || withLock;
   try {
     return await projectionLock(ctx, 'completion-projection', async () => {
+      const state = opts.state || { cards: {} };
+      state.cards ||= {};
+      state.cards[record.card] = record;
       const result = project(record.card_path, boardPath, record.card, record.phase, {
-        now, record, cardsRoot: opts.cardsRoot,
+        now, record, state, cardsRoot: opts.cardsRoot,
       });
       delete record.projection_error;
       delete record.projection_failed_at;
@@ -989,10 +1081,24 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   }
 }
 
-function projectionBoardDrift(boardMd, record) {
+function projectionBoardDrift(boardMd, record, opts = {}) {
   const mapping = projectionMapping(record.phase);
   if (!mapping) return null;
-  const location = boardCardLocation(boardMd, record.card);
+  let projectedBoard = boardMd;
+  let epicSurface = null;
+  try {
+    const cardPath = resolveCardPath(record.card_path, record.card, opts.cardsRoot || CARDS_ROOT);
+    if (cardPath && fs.existsSync(cardPath)) {
+      const raw = fs.readFileSync(cardPath, 'utf8');
+      epicSurface = canonicalEpicProjection(raw, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
+        state: opts.state,
+      });
+      if (epicSurface) projectedBoard = epicSurface.boardRaw;
+    }
+  } catch (err) {
+    return { card: record.card, phase: record.phase, issue: `canonical epic projection is unreadable: ${err.message}` };
+  }
+  const location = boardCardLocation(projectedBoard, record.card);
   if (!location) return { card: record.card, phase: record.phase, issue: 'card is missing from board' };
   if (location.column !== mapping.column || location.checked !== mapping.complete) {
     return {
@@ -1000,6 +1106,24 @@ function projectionBoardDrift(boardMd, record) {
       expected_column: mapping.column, actual_column: location.column,
       expected_checked: mapping.complete, actual_checked: location.checked,
     };
+  }
+  if (epicSurface) {
+    const lifecycle = deriveEpicProjection(epicSurface, record.card, mapping.status);
+    const epicMapping = epicProjectionMapping(lifecycle.state);
+    const epicLocation = boardCardLocation(epicSurface.parentRaw, epicSurface.epic);
+    const atlasStatus = scalarField(epicSurface.atlasRaw, 'status');
+    const atlasPosture = scalarField(epicSurface.atlasRaw, 'posture');
+    if (!epicLocation || epicLocation.column !== epicMapping.column || epicLocation.checked !== epicMapping.complete
+      || atlasStatus !== lifecycle.state || atlasPosture !== lifecycle.posture) {
+      return {
+        card: record.card, epic: epicSurface.epic, phase: record.phase,
+        issue: 'epic surface differs from the authoritative slice roll-up',
+        expected_column: epicMapping.column, actual_column: epicLocation ? epicLocation.column : null,
+        expected_checked: epicMapping.complete, actual_checked: epicLocation ? epicLocation.checked : null,
+        expected_status: lifecycle.state, actual_status: atlasStatus,
+        expected_posture: lifecycle.posture, actual_posture: atlasPosture,
+      };
+    }
   }
   return null;
 }
@@ -1477,7 +1601,7 @@ async function promoteAndDeploy(ctx, state, record) {
     const allOk = VAULTS.every((vault) => record.vault_receipts[vault.id] && record.vault_receipts[vault.id].ok);
     if (allOk) {
       record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
-      await attemptProjection(ctx, record);
+      await attemptProjection(ctx, record, BOARD, { state });
     }
     writeState(ctx, state, record);
     return allOk
@@ -1788,7 +1912,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
     persist(ctx, state, record);
     if (deps.afterAuthority) await deps.afterAuthority({ state, record, audit });
     const projection = await attemptProjection(ctx, record, boardPath, {
-      withLock: transitionLock, projectCard: project, now, cardsRoot: deps.cardsRoot,
+      withLock: transitionLock, projectCard: project, now, cardsRoot: deps.cardsRoot, state,
     });
     if (isParked) {
       if (priorProjectionReceipt == null) delete record.projection_reconciled_at;
@@ -1840,7 +1964,7 @@ async function commandPark(ctx, args, deps = {}) {
     record.parked_at = now();
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
-      withLock: transitionLock, projectCard: project, now,
+      withLock: transitionLock, projectCard: project, now, state,
     });
     persist(ctx, state, record);
     const result = {
@@ -1944,7 +2068,7 @@ async function commandResume(ctx, args, deps = {}) {
     record.resume_invalidation_reason = invalidation.reason;
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
-      withLock: transitionLock, projectCard: project, now,
+      withLock: transitionLock, projectCard: project, now, state,
     });
     persist(ctx, state, record);
     return {
@@ -1998,7 +2122,7 @@ async function commandClaim(ctx, args) {
       throw err;
     }
     record.phase = 'implementing';
-    await attemptProjection(ctx, record);
+    await attemptProjection(ctx, record, BOARD, { state });
     writeState(ctx, state, record);
     return { action: 'implement', ...record, skipped: selected.skipped };
   });
@@ -2178,7 +2302,9 @@ function commandStatus(ctx, opts = {}) {
     .filter(Boolean);
   const projectionProblems = [...savedProjectionProblems, ...detectedMetadataProblems];
   const boardDrift = Object.values(state.cards || {})
-    .map((record) => projectionBoardDrift(boardMd, record))
+    .map((record) => projectionBoardDrift(boardMd, record, {
+      boardPath: opts.boardPath || BOARD, cardsRoot: opts.cardsRoot || CARDS_ROOT, state,
+    }))
     .filter(Boolean);
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
@@ -2227,7 +2353,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
           const priorFailedAt = record.projection_failed_at || null;
           try {
             const projected = project(record.card_path, boardPath, record.card, record.phase, {
-              now, record, cardsRoot: deps.cardsRoot,
+              now, record, state, cardsRoot: deps.cardsRoot,
             });
             const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
             if (stateChanged) {
