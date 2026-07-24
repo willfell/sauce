@@ -961,6 +961,8 @@ eq(epicLedgerWrites, epicWritesAfterRepair, 'ES4-DUAL-NOOP performs no ledger wr
 
 const missingReceiptProjection = makeEpicProjectionFixture('missing-receipts');
 missingReceiptProjection.state.cards.A1.phase = 'deployed';
+const missingReceiptBytes = missingReceiptProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+let missingReceiptWrites = 0;
 assert.throws(() => projectCard(
   missingReceiptProjection.cardPath,
   missingReceiptProjection.parentBoardPath,
@@ -970,8 +972,13 @@ assert.throws(() => projectCard(
     record: missingReceiptProjection.state.cards.A1,
     state: missingReceiptProjection.state,
     cardsRoot: missingReceiptProjection.cardsRoot,
+    writeText: () => { missingReceiptWrites += 1; },
   },
 ), /completion lacks successful deployment receipts/, 'ES4-RECEIPT-ROLLUP refuses a deployed phase without three successful vault receipts');
+eq(missingReceiptWrites, 0,
+  'ES4-RECEIPT-REFUSAL-PARTIAL-PROJECTION validates receipt authority before every projection write');
+eq(missingReceiptProjection.files.map((target) => fs.readFileSync(target, 'utf8')), missingReceiptBytes,
+  'ES4-RECEIPT-REFUSAL-PARTIAL-PROJECTION leaves every projection surface byte-stable');
 const successfulReceipts = {
   headspace: { ok: true, installed_version: '0.257.0' },
   accuris: { ok: true, installed_version: '0.257.0' },

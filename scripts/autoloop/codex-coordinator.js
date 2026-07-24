@@ -1182,28 +1182,30 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   if ((lifecycleMetadataChanged || contractMetadataChanged) && cardNext === cardRaw && !frontmatter(cardRaw)) {
     throw new Error(`card ${card} frontmatter missing`);
   }
-  const writeText = opts.writeText || atomicWriteText;
-  if (boardChanged) writeText(sliceBoardPath, boardNext);
-  if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
   let epicBoardChanged = false;
   let epicAtlasChanged = false;
   let epicState = null;
+  let parentNext = null;
+  let atlasNext = null;
   if (epicSurface) {
     epicSurface.boardRaw = boardNext;
     const lifecycle = deriveEpicProjection(epicSurface, card, mapping.status);
     const epicMapping = epicProjectionMapping(lifecycle.state);
     if (!epicMapping) throw new Error(`unsupported derived epic state ${lifecycle.state}`);
-    const parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
-    const atlasNext = patchFrontmatter(epicSurface.atlasRaw, {
+    parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
+    atlasNext = patchFrontmatter(epicSurface.atlasRaw, {
       status: lifecycle.state,
       posture: lifecycle.posture,
     });
     epicBoardChanged = parentNext !== epicSurface.parentRaw;
     epicAtlasChanged = atlasNext !== epicSurface.atlasRaw;
-    if (epicBoardChanged) writeText(boardPath, parentNext);
-    if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
     epicState = lifecycle.state;
   }
+  const writeText = opts.writeText || atomicWriteText;
+  if (boardChanged) writeText(sliceBoardPath, boardNext);
+  if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
+  if (epicBoardChanged) writeText(boardPath, parentNext);
+  if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
   const result = {
     changed: boardChanged || cardNext !== cardRaw || epicBoardChanged || epicAtlasChanged,
     board_changed: boardChanged,
