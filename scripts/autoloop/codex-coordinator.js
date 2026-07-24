@@ -1172,18 +1172,21 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     ...opts,
     currentCard: card,
   });
+  const record = opts.record || null;
+  const surfaceMapping = epicSurface && mapping.status === 'completed' && !successfulDeploymentReceipts(record)
+    ? projectionMapping('implementing')
+    : mapping;
   const sliceBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
   const boardRaw = epicSurface ? epicSurface.boardRaw : fs.readFileSync(boardPath, 'utf8');
-  const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
-  const record = opts.record || null;
+  const boardNext = moveBoardCard(boardRaw, card, surfaceMapping.column, surfaceMapping.complete);
   const ownsParkMetadata = Boolean(record && Object.prototype.hasOwnProperty.call(record, 'resume_condition'));
   const expectedDependencies = ownsParkMetadata ? (record.dependencies || []).map(normalizeCardLink) : null;
   const currentDependencies = ownsParkMetadata ? parseDependsOn(cardRaw).map(normalizeCardLink) : null;
   const hasResumeCondition = /^resume_condition:/m.test(frontmatter(cardRaw));
   const expectedResumeCondition = ownsParkMetadata && record.resume_condition != null
     ? String(record.resume_condition).trim() : null;
-  const lifecycleMetadataChanged = scalarField(cardRaw, 'kanban_column') !== mapping.column
-    || parseCardStatus(cardRaw) !== mapping.status
+  const lifecycleMetadataChanged = scalarField(cardRaw, 'kanban_column') !== surfaceMapping.column
+    || parseCardStatus(cardRaw) !== surfaceMapping.status
     || (ownsParkMetadata && JSON.stringify(currentDependencies) !== JSON.stringify(expectedDependencies))
     || (ownsParkMetadata && (expectedResumeCondition == null
       ? hasResumeCondition : scalarField(cardRaw, 'resume_condition') !== expectedResumeCondition));
@@ -1208,8 +1211,8 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const boardChanged = boardNext !== boardRaw;
   const metadataFields = {};
   if (lifecycleMetadataChanged) {
-    metadataFields.kanban_column = mapping.column;
-    metadataFields.status = mapping.status;
+    metadataFields.kanban_column = surfaceMapping.column;
+    metadataFields.status = surfaceMapping.status;
     metadataFields.status_changed_at = (opts.now || (() => new Date().toISOString()))();
   }
   if (ownsParkMetadata) {
@@ -1316,13 +1319,16 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       reconcile: reconcileRoute(record.card),
     };
   }
+  const surfaceMapping = epicSurface && mapping.status === 'completed' && !successfulDeploymentReceipts(record)
+    ? projectionMapping('implementing')
+    : mapping;
   const location = boardCardLocation(projectedBoard, record.card);
   if (!location) return { card: record.card, phase: record.phase, issue: 'card is missing from board' };
-  if (location.column !== mapping.column || location.checked !== mapping.complete) {
+  if (location.column !== surfaceMapping.column || location.checked !== surfaceMapping.complete) {
     return {
       card: record.card, phase: record.phase,
-      expected_column: mapping.column, actual_column: location.column,
-      expected_checked: mapping.complete, actual_checked: location.checked,
+      expected_column: surfaceMapping.column, actual_column: location.column,
+      expected_checked: surfaceMapping.complete, actual_checked: location.checked,
     };
   }
   if (epicSurface) {
@@ -2574,15 +2580,63 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   const initialState = loadState(ctx);
   const cardNames = args.card ? [args.card] : Object.keys(initialState.cards || {});
-  if (args.card && !initialState.cards[args.card]) {
-    throw new Error(`reconcile requires a tracked --card; ${args.card} is not tracked`);
-  }
   const results = [];
   for (const card of cardNames) {
     try {
       const result = await reconcileLock(ctx, `gates-${slugify(card)}`, async () => {
         const state = loadState(ctx);
         const record = state.cards[card];
+        if (!record && args.card) {
+          return reconcileLock(ctx, 'completion-projection', async () => {
+            const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+            const cardPath = findCard(cardsRoot, card);
+            if (!cardPath) {
+              return { card, phase: null, ok: false, changed: false, error: 'exact-card reconciliation target is neither tracked nor a canonical slice' };
+            }
+            const cardRaw = fs.readFileSync(cardPath, 'utf8');
+            const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
+            if (scalarField(cardRaw, 'type') !== 'slice' || !epic
+              || delivery.normalizeStatus(scalarField(cardRaw, 'status')) !== 'completed') {
+              return { card, phase: null, ok: false, changed: false, error: 'untracked exact-card reconciliation is limited to completed canonical epic slices' };
+            }
+            const via = Object.values(state.cards || {}).find((candidate) => {
+              if (!projectionMapping(candidate.phase) || !candidate.card_path) return false;
+              try {
+                const candidatePath = resolveCardPath(candidate.card_path, candidate.card, cardsRoot);
+                const candidateRaw = fs.readFileSync(candidatePath, 'utf8');
+                return scalarField(candidateRaw, 'type') === 'slice'
+                  && normalizeCardLink(scalarField(candidateRaw, 'epic')) === epic;
+              } catch (_) {
+                return false;
+              }
+            });
+            if (!via) {
+              return { card, epic, phase: null, ok: false, changed: false, error: 'legacy exact-card reconciliation requires one tracked canonical sibling' };
+            }
+            const priorError = via.projection_error || null;
+            const priorFailedAt = via.projection_failed_at || null;
+            const projected = project(via.card_path, boardPath, via.card, via.phase, {
+              now, record: via, state, cardsRoot,
+            });
+            const findings = (projected.projection_findings || []).filter((finding) => finding.card === card);
+            if (!findings.length) {
+              return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
+            }
+            const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at || projected.changed);
+            if (stateChanged) {
+              delete via.projection_error;
+              delete via.projection_failed_at;
+              via.projection_reconciled_at = now();
+              persist(ctx, state, via);
+            }
+            return {
+              card, epic, via_card: via.card, phase: null, ok: true,
+              changed: Boolean(projected.changed || stateChanged),
+              projection_changed: Boolean(projected.changed), state_changed: stateChanged,
+              projection_findings: findings,
+            };
+          }, { card });
+        }
         if (!record) return { card, phase: null, ok: false, changed: false, error: 'tracked record disappeared during reconciliation' };
         if (!projectionMapping(record.phase)) {
           return { card: record.card, phase: record.phase, ok: true, changed: false, skipped: 'phase has no board projection' };

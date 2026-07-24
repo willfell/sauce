@@ -978,8 +978,26 @@ eq(missingReceiptResult.projection_findings[0].reconcile, "reconcile --card 'A1'
   'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING gives the receiptless card a shell-safe exact reconcile route');
 ok(!/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
   'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never counts a deployed phase done without successful deployment receipts');
+ok(/## In Progress[\s\S]*- \[ \] \[\[A1\]\]/.test(fs.readFileSync(missingReceiptProjection.epicBoardPath, 'utf8')),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps a receiptless deployed slice unchecked and non-completed');
+ok(/kanban_column: In Progress/.test(fs.readFileSync(missingReceiptProjection.cardPath, 'utf8'))
+  && /status: in_progress/.test(fs.readFileSync(missingReceiptProjection.cardPath, 'utf8')),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps receiptless deployed note metadata non-completed');
 ok(!missingReceiptProjection.state.cards.A1.vault_receipts,
   'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never mints or backfills a deployment receipt');
+const missingReceiptStatus = commandStatus(
+  { root: missingReceiptProjection.root },
+  {
+    state: missingReceiptProjection.state,
+    boardMd: fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8'),
+    boardPath: missingReceiptProjection.parentBoardPath,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+ok(missingReceiptStatus.board_drift.some((finding) => finding.card === 'A1'
+  && /legacy completion lacks successful deployment receipts/.test(finding.issue)),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps status available with one actionable finding');
 const successfulReceipts = {
   headspace: { ok: true, installed_version: '0.257.0' },
   accuris: { ok: true, installed_version: '0.257.0' },
@@ -1514,7 +1532,7 @@ ok(!diagnosticProjection.state.cards.A2,
   'ES4-NO-SYNTHETIC-LEGACY-RECEIPT does not manufacture a tracked record or receipt for a legacy slice');
 const diagnosticReconcile = await commandReconcile(
   { root: diagnosticProjection.root },
-  { card: 'A1' },
+  { card: 'A2' },
   {
     readState: () => diagnosticProjection.state,
     writeState: () => {},
@@ -1525,9 +1543,28 @@ const diagnosticReconcile = await commandReconcile(
   },
 );
 eq(diagnosticReconcile.action, 'reconciled',
-  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING never crashes exact-card reconciliation');
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE makes the emitted untracked exact-card route executable');
 eq(diagnosticReconcile.results[0].projection_findings.map((finding) => finding.card), ['A2'],
-  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING preserves the exact legacy finding in reconcile receipts');
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE preserves the exact legacy finding in reconcile receipts');
+eq(diagnosticReconcile.results[0].via_card, 'A1',
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE projects through the tracked canonical sibling without tracking the legacy card');
+ok(!diagnosticProjection.state.cards.A2,
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE leaves the legacy card untracked after its exact route runs');
+const diagnosticReconcileReplay = await commandReconcile(
+  { root: diagnosticProjection.root },
+  { card: 'A2' },
+  {
+    readState: () => diagnosticProjection.state,
+    writeState: () => {},
+    withLock: async (_ctx, _name, fn) => fn(),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    now: () => '2026-07-24T20:00:00.000Z',
+  },
+);
+ok(diagnosticReconcileReplay.no_op
+  && diagnosticReconcileReplay.results[0].projection_findings[0].reconcile === "reconcile --card 'A2'",
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE exact replay is a byte-stable no-op with the same bounded finding');
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
   {
