@@ -8,7 +8,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
-  cardGateLockName,
+  cardGateLockName, legacyCardGateLockName,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
@@ -737,7 +737,7 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
 }), /gate receipt base is stale/, 'record-pr refuses gates run against an outdated main base');
 
 const events = [];
-let prLock = '';
+const prLocks = [];
 const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
@@ -747,23 +747,25 @@ const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '
     throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
   },
   writeState: () => { events.push('write'); writes++; },
-  withLock: async (_ctx, name, fn) => { prLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { prLocks.push(name); return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
-eq(prLock, cardGateLockName('A'), 'record-pr shares the exact-identity per-card gate lock');
+eq(prLocks, [legacyCardGateLockName('A'), cardGateLockName('A')],
+  'record-pr acquires migration-compatible then exact-identity per-card gates');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
 
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
-let reviewLock = '';
+const reviewLocks = [];
 const review = await commandRecordReview({ root: '/workshop' }, {
   card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
 }, {
   readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
-  withLock: async (_ctx, name, fn) => { reviewLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
-eq(reviewLock, cardGateLockName('Review'), 'review writes share the exact-identity per-card gate lock');
+eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
+  'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 
 reviewState.cards.Review.phase = 'feature_merged';
@@ -798,24 +800,26 @@ const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review
   },
 });
 eq(verified.action, 'gates-passed', 'verify-gates records a passing combined receipt');
-eq(gateCalls, [cardGateLockName('Review'), 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates serializes by exact card identity, fetches main, and owns every deterministic release check');
+eq(gateCalls, [legacyCardGateLockName('Review'), cardGateLockName('Review'), 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'],
+  'verify-gates serializes through migration-compatible and exact card identity, fetches main, and owns every deterministic release check');
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
 
 const advanceState = emptyState();
 advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
-let advanceLock = ''; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+const advanceLocks = []; let insideAdvanceLock = false; let advanceReadInsideLock = false;
 const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
   withLock: async (_ctx, name, fn) => {
-    advanceLock = name; insideAdvanceLock = true;
+    advanceLocks.push(name); insideAdvanceLock = true;
     try { return await fn(); } finally { insideAdvanceLock = false; }
   },
   readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
   emit: () => {},
 });
-eq(advanceLock, cardGateLockName('Advance'), 'advance shares the exact-identity per-card gate lock');
+eq(advanceLocks, [legacyCardGateLockName('Advance'), cardGateLockName('Advance')],
+  'advance acquires migration-compatible then exact-identity per-card gates');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
 const parkedAdvanceState = emptyState();
@@ -1678,8 +1682,11 @@ const viaGateRaceResult = await commandReconcile(
     now: () => viaGateNow,
   },
 );
-eq(viaGateLocks, [cardGateLockName('A2'), cardGateLockName('A1'), 'completion-projection'],
-  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes the legacy route through the tracked sibling gate');
+eq(viaGateLocks, [
+  legacyCardGateLockName('A2'), cardGateLockName('A2'),
+  legacyCardGateLockName('A1'), cardGateLockName('A1'),
+  'completion-projection',
+], 'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes both legacy and tracked sibling identities before projection');
 eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
 ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
@@ -1745,14 +1752,19 @@ ok(cardGateLockName('Lock Alias') !== cardGateLockName('Lock-Alias'),
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION binds the exact full card identity beyond its readable slug');
 ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.repeat(400)).length <= 143,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identities are filesystem-safe and bounded');
-ok(!/`gates-\$\{slugify\(/.test(fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8')),
-  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION routes every per-card gate call site through the shared exact-identity helper');
+const coordinatorLockSource = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
+eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN keeps the shipping slug spelling in one compatibility helper only');
 eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
 ok(collisionReconcile.results[0].projection_findings[0].card === 'Lock Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves the exact bounded legacy finding');
-ok(collisionLockSequence[0] !== collisionLockSequence[1] && collisionLockSequence[2] === 'completion-projection',
-  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION retains gate-to-gate-to-completion serialization without a slug self-collision');
+eq(collisionLockSequence.slice(0, 4), [
+  legacyCardGateLockName('Lock Alias'),
+  cardGateLockName('Lock Alias'),
+  cardGateLockName('Lock-Alias'),
+  'completion-projection',
+], 'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION retains one shared compatibility gate plus two exact gates without a slug self-collision');
 const collisionReplay = await commandReconcile(
   { root: gateSlugCollision.root },
   { card: 'Lock Alias' },
@@ -1760,6 +1772,93 @@ const collisionReplay = await commandReconcile(
 );
 ok(collisionReplay.no_op && collisionReplay.results[0].projection_findings[0].card === 'Lock Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION exact replay is a byte-stable no-op');
+
+const lockNamespaceMigration = makeEpicProjectionFixture('gate-lock-namespace-migration');
+const migrationLegacyLock = legacyCardGateLockName('A1');
+const migrationActiveLocks = new Set([migrationLegacyLock]);
+const migrationLockSequence = [];
+let migrationOldProcessBlocked = false;
+const migrationWithLock = async (ctx, name, fn) => {
+  migrationLockSequence.push(name);
+  if (migrationActiveLocks.has(name)) throw new Error(`lock ${name} held by shipping coordinator`);
+  migrationActiveLocks.add(name);
+  try {
+    if (name === cardGateLockName('A1')) {
+      try {
+        await migrationWithLock(ctx, migrationLegacyLock, async () => {
+          throw new Error('old coordinator entered while new coordinator held compatibility authority');
+        });
+      } catch (error) {
+        migrationOldProcessBlocked = /held by shipping coordinator/.test(error.message);
+      }
+    }
+    return await fn();
+  } finally {
+    migrationActiveLocks.delete(name);
+  }
+};
+const migrationDeps = {
+  readState: () => lockNamespaceMigration.state,
+  writeState: () => {},
+  withLock: migrationWithLock,
+  boardPath: lockNamespaceMigration.parentBoardPath,
+  cardsRoot: lockNamespaceMigration.cardsRoot,
+  now: () => '2026-07-24T22:15:00.000Z',
+};
+const migrationBlocked = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+eq(migrationBlocked.action, 'reconcile-failed',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a new exact-identity operation while a shipping slug-only coordinator holds legacy authority');
+ok(!migrationLockSequence.includes(cardGateLockName('A1')),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN refuses before the new exact-identity authoritative section');
+migrationActiveLocks.delete(migrationLegacyLock);
+migrationLockSequence.length = 0;
+const migrationReleased = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+eq(migrationReleased.action, 'reconciled',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN proceeds after the shipping legacy lock releases');
+eq(migrationLockSequence.slice(0, 4), [
+  migrationLegacyLock, cardGateLockName('A1'), migrationLegacyLock, 'completion-projection',
+], 'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN holds legacy compatibility before exact identity, refuses the simulated old acquisition, then reaches completion projection');
+ok(migrationOldProcessBlocked,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks an old slug-only acquisition throughout the new exact-identity section');
+const migrationReplay = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+ok(migrationReplay.no_op,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN preserves exact-card no-op replay after the compatibility lock releases');
+
+const crossProcessMigrationStateDir = path.join(tmp, 'es4-gate-migration-cross-process');
+const crossProcessMigrationCtx = {
+  root: tmp,
+  stateDir: crossProcessMigrationStateDir,
+  statePath: path.join(crossProcessMigrationStateDir, 'state.json'),
+};
+const crossProcessLegacyPath = path.join(crossProcessMigrationStateDir, 'locks', `${migrationLegacyLock}.lock`);
+fs.mkdirSync(crossProcessLegacyPath, { recursive: true });
+fs.writeFileSync(path.join(crossProcessLegacyPath, 'owner.json'), JSON.stringify({
+  pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(),
+}));
+const migrationChildScript = [
+  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `const ctx = ${JSON.stringify(crossProcessMigrationCtx)};`,
+  `withCardGateLock(ctx, 'A1', async () => 'entered')`,
+  `.then((value) => process.stdout.write(value))`,
+  `.catch((error) => process.stdout.write(error.code || error.message));`,
+].join(' ');
+eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf8' }), 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh process on a live shipping legacy lock directory');
+fs.rmSync(crossProcessLegacyPath, { recursive: true, force: true });
+eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf8' }), 'entered',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN lets the same fresh process enter after the live legacy lock releases');
 
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
@@ -2011,7 +2110,10 @@ const amendPriorInvalidation = deepCopy(amend.state.cards[AMEND_CARD].receipt_in
 const amended = await commandAmendContract({ root: amend.root }, amend.args, amend.deps);
 eq(amended.action, 'contract-amended', 'amend-contract succeeds through the explicit supervised command');
 eq(amended.no_op, false, 'real execution-contract amendment is not a no-op');
-eq(amend.locks, ['selector', cardGateLockName('Protected active contract'), 'completion-projection'], 'amend-contract uses selector, exact-card, then projection lock order');
+eq(amend.locks, [
+  'selector', legacyCardGateLockName('Protected active contract'),
+  cardGateLockName('Protected active contract'), 'completion-projection',
+], 'amend-contract uses selector, migration-compatible card, exact card, then projection lock order');
 eq(amend.state.cards[AMEND_CARD].touch_zones, [
   'platform/mechanisms/delivery', 'platform/schemas-index.json', 'platform/manifest.json',
 ], 'touch-zone amendment is normalized, deduplicated, additive, and preserves existing order');
@@ -2410,7 +2512,9 @@ const parked = await commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
-eq(parkLocks.slice(-3), ['selector', cardGateLockName('Park me'), 'completion-projection'], 'park serializes selector, exact-card transition, and metadata projection');
+eq(parkLocks.slice(-4), [
+  'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
+], 'park serializes selector, migration-compatible card, exact-card transition, and metadata projection');
 eq(parkState.cards['Park me'].phase, 'parked', 'park records the durable parked phase');
 eq(parkState.cards['Park me'].dependencies, ['Prerequisite A', 'Prerequisite B'], 'park records exact prerequisite names');
 eq(parkState.cards['Park me'].resume_condition, 'Both prerequisites deploy cleanly', 'park records exact resume condition');
@@ -2670,7 +2774,9 @@ eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite i
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
 eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
 ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
-eq(parkLocks.slice(resumeLockStart), ['selector', cardGateLockName('Park me'), 'completion-projection'], 'resume serializes selector, exact-card, and projection transitions in one lock order');
+eq(parkLocks.slice(resumeLockStart), [
+  'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
+], 'resume serializes selector, migration-compatible card, exact-card, and projection transitions in one lock order');
 eq(parkState.cards['Park me'].phase, 'implementing', 'successful resume returns to implementing');
 eq(parkState.cards['Park me'].reviews, {}, 'successful resume invalidates all current review receipts');
 eq(parkState.cards['Park me'].gate_receipt, null, 'successful resume invalidates the combined gate receipt');
@@ -2737,7 +2843,9 @@ eq(driftBeforeReconcile.projection_problems, [{
 }], 'status reports card projection problems independently from board drift');
 const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
 eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
-eq(reconcileLocks.slice(0, 2), [cardGateLockName('Tracked deployed'), 'completion-projection'], 'reconciliation serializes exact-card state then shared board projection');
+eq(reconcileLocks.slice(0, 3), [
+  legacyCardGateLockName('Tracked deployed'), cardGateLockName('Tracked deployed'), 'completion-projection',
+], 'reconciliation serializes migration-compatible and exact-card state before shared board projection');
 eq(firstReconcile.changed, 1, 'first reconciliation repairs projection');
 ok(/## Completed[\s\S]*- \[x\] \[\[Tracked deployed\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'deployed execution card moves to checked Completed');
 ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unchecked Archive entry stays untouched');
@@ -3033,11 +3141,11 @@ recoveryState.cards['Stranded shipped card'] = {
   reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
 };
 let recoveryWrites = 0;
-let recoveryLock = '';
+const recoveryLocks = [];
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
-  withLock: async (_ctx, name, fn) => { recoveryLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { recoveryLocks.push(name); return fn(); },
   collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
@@ -3074,8 +3182,9 @@ await assert.rejects(() => commandRecoverDeployed(
 eq(recoveryWrites, 0, 'preserved exact-head receipt refusals perform no ledger write');
 const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
 eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
-eq(recoveryLock, cardGateLockName('Stranded shipped card'),
-  'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves recover-deployed acquires the shared exact-identity card gate');
+eq(recoveryLocks.slice(-2), [
+  legacyCardGateLockName('Stranded shipped card'), cardGateLockName('Stranded shipped card'),
+], 'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves recover-deployed acquires migration-compatible and exact card gates');
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
@@ -3120,18 +3229,19 @@ metadataState.cards['Metadata drift'] = {
 };
 let metadataWrites = 0;
 let metadataCardWrites = 0;
-let metadataLock = '';
+const metadataLocks = [];
 const metadataDeps = {
   readState: () => metadataState, writeState: () => { metadataWrites++; },
-  withLock: async (_ctx, name, fn) => { metadataLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { metadataLocks.push(name); return fn(); },
   atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
   durablePathBarrier: () => {},
   cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
 };
 const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
 eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
-eq(metadataLock, cardGateLockName('Metadata drift'),
-  'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves reconcile-metadata acquires the shared exact-identity card gate');
+eq(metadataLocks.slice(-2), [
+  legacyCardGateLockName('Metadata drift'), cardGateLockName('Metadata drift'),
+], 'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves reconcile-metadata acquires migration-compatible and exact card gates');
 eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
 const metadataApplyArgs = {
   card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
