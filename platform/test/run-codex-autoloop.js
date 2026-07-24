@@ -1201,6 +1201,57 @@ assert.throws(() => projectCard(
 eq(symlinkAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), symlinkAliasBytes,
   'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS rejects a symlink alias before every projection write');
 
+const epicRootEscapeProjection = makeEpicProjectionFixture('epic-root-symlink-escape');
+const escapedEpicRoot = path.join(epicRootEscapeProjection.root, 'outside', 'Epic A');
+const canonicalEpicRoot = path.dirname(epicRootEscapeProjection.atlasPath);
+fs.mkdirSync(path.dirname(escapedEpicRoot), { recursive: true });
+fs.renameSync(canonicalEpicRoot, escapedEpicRoot);
+fs.symlinkSync(escapedEpicRoot, canonicalEpicRoot, 'dir');
+const epicRootEscapeBytes = epicRootEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+let epicRootEscapeWrites = 0;
+assert.throws(() => projectCard(
+  epicRootEscapeProjection.cardPath,
+  epicRootEscapeProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: epicRootEscapeProjection.state.cards.A1,
+    state: epicRootEscapeProjection.state,
+    cardsRoot: epicRootEscapeProjection.cardsRoot,
+    writeText: () => { epicRootEscapeWrites += 1; },
+  },
+), /epic Epic A escapes its physical root/,
+'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects an epic-root symlink outside the physical cards root');
+eq(epicRootEscapeWrites, 0,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE refuses before every projection write');
+eq(epicRootEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8')), epicRootEscapeBytes,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE preserves every inside and outside target byte');
+
+const boardDirEscapeProjection = makeEpicProjectionFixture('board-dir-symlink-escape');
+const canonicalBoardDir = path.dirname(boardDirEscapeProjection.cardPath);
+const escapedBoardDir = path.join(boardDirEscapeProjection.root, 'outside-board');
+fs.renameSync(canonicalBoardDir, escapedBoardDir);
+fs.symlinkSync(escapedBoardDir, canonicalBoardDir, 'dir');
+const boardDirEscapeBytes = boardDirEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+let boardDirEscapeWrites = 0;
+assert.throws(() => projectCard(
+  boardDirEscapeProjection.cardPath,
+  boardDirEscapeProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: boardDirEscapeProjection.state.cards.A1,
+    state: boardDirEscapeProjection.state,
+    cardsRoot: boardDirEscapeProjection.cardsRoot,
+    writeText: () => { boardDirEscapeWrites += 1; },
+  },
+), /epic Epic A board directory escapes its physical root/,
+'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects a board-directory symlink outside the physical epic root');
+eq(boardDirEscapeWrites, 0,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects a board-directory escape before every write');
+eq(boardDirEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8')), boardDirEscapeBytes,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE preserves every board-directory escape target byte');
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,

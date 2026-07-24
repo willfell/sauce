@@ -909,6 +909,15 @@ function physicalProjectPrefix(cardsRoot) {
   return { prefix: relative, root: projectRoot };
 }
 
+function physicalDescendant(root, target, label) {
+  const physicalRoot = fs.realpathSync(root);
+  const physicalTarget = fs.realpathSync(target);
+  if (physicalTarget === physicalRoot || !physicalTarget.startsWith(`${physicalRoot}${path.sep}`)) {
+    throw new Error(`${label} escapes its physical root`);
+  }
+  return physicalTarget;
+}
+
 function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
   if (scalarField(cardRaw, 'type') !== 'slice') {
     throw new Error(`canonical epic member ${path.basename(cardPath)} is not type slice`);
@@ -931,7 +940,7 @@ function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expe
   }
 }
 
-function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
+function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlasPath, expectedBoardPath, physicalBoardDir = null) {
   const parsed = parseBoard(boardRaw);
   const members = ['In Planning', 'In Progress', 'Blocked', 'Completed']
     .flatMap((column) => parsed[column] || []);
@@ -940,6 +949,7 @@ function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlas
   for (const name of members) {
     const slicePath = path.join(boardDir, `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
+    if (physicalBoardDir) physicalDescendant(physicalBoardDir, slicePath, `epic slice ${name}`);
     validateCanonicalSliceTopology(
       fs.readFileSync(slicePath, 'utf8'),
       slicePath,
@@ -956,9 +966,9 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
   if (!epic) throw new Error('canonical slice is missing its epic backlink');
-  const root = path.resolve(cardsRoot);
+  const root = fs.realpathSync(cardsRoot);
   const epicRoot = path.resolve(cardsRoot, epic);
-  if (epicRoot === root || !epicRoot.startsWith(`${root}${path.sep}`)) {
+  if (epicRoot === path.resolve(cardsRoot) || !epicRoot.startsWith(`${path.resolve(cardsRoot)}${path.sep}`)) {
     throw new Error(`epic ${epic} escapes cards root`);
   }
   const atlasPath = path.join(epicRoot, `${epic}.md`);
@@ -967,6 +977,10 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   if (!fs.existsSync(atlasPath) || !fs.existsSync(boardDir) || !fs.existsSync(runsDir)) {
     throw new Error(`canonical epic ${epic} is missing its atlas or board directory`);
   }
+  const physicalEpicRoot = physicalDescendant(root, epicRoot, `epic ${epic}`);
+  const physicalBoardDir = physicalDescendant(physicalEpicRoot, boardDir, `epic ${epic} board directory`);
+  physicalDescendant(physicalEpicRoot, runsDir, `epic ${epic} context runs directory`);
+  physicalDescendant(physicalEpicRoot, atlasPath, `epic ${epic} atlas`);
   const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
   if (scalarField(atlasRaw, 'type') !== 'epic') throw new Error(`epic atlas ${epic} has invalid type`);
   const epicBoardPath = path.join(boardDir, `${epic}-board.md`);
@@ -974,6 +988,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
     || scalarField(fs.readFileSync(epicBoardPath, 'utf8'), 'board_role') !== 'epic') {
     throw new Error(`canonical epic ${epic} is missing its exact named epic board`);
   }
+  physicalDescendant(physicalBoardDir, epicBoardPath, `epic ${epic} board`);
   const parentSourceBoard = scalarField(atlasRaw, 'source_board');
   const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
   const physicalProject = physicalProjectPrefix(cardsRoot);
@@ -999,6 +1014,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
     epicBoardPath,
     expectedAtlasPath,
     expectedBoardPath,
+    physicalBoardDir,
   );
   if (!members.includes(path.basename(cardPath, '.md'))) {
     throw new Error(`canonical slice ${path.basename(cardPath)} is missing from its epic board`);
@@ -1008,7 +1024,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   return {
     epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
     boardRaw, parentRaw, members, expectedAtlasPath, expectedBoardPath,
-    cardsRoot: root, state: opts.state || { cards: {} },
+    cardsRoot: root, physicalBoardDir, state: opts.state || { cards: {} },
   };
 }
 
@@ -1029,6 +1045,7 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
     surface.boardPath,
     surface.expectedAtlasPath,
     surface.expectedBoardPath,
+    surface.physicalBoardDir,
   );
   const siblings = new Set(cards.map(normalizeCardLink));
   const slices = cards.map((name) => {
