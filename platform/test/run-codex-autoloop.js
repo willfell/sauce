@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
@@ -1741,11 +1741,44 @@ eq(collisionReconcile.action, 'reconciled',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION assigns distinct gate identities to exact legacy and tracked sibling names');
 eq(cardGateLockName('Lock Alias'), cardGateLockName('Lock Alias'),
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identity is deterministic across independent calls');
+const fixtureChildPids = new Set();
+const reapedFixtureChildPids = new Set();
+const spawnFixtureChild = (script) => {
+  const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  fixtureChildPids.add(child.pid);
+  return child;
+};
+const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 } = {}) => new Promise((resolve, reject) => {
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let forceKillTimer = null;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+    forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 100);
+  }, timeoutMs);
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', reject);
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    reapedFixtureChildPids.add(child.pid);
+    if (timedOut) reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    else if (code === 0) resolve(stdout);
+    else reject(new Error(`${label} exited ${code}: ${stderr}`));
+  });
+});
+const runFixtureProcess = async (script, options = {}) => {
+  const child = spawnFixtureChild(script);
+  return collectFixtureChild(child, options);
+};
 const coordinatorModulePath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
-const crossProcessGateName = execFileSync(process.execPath, ['-e', [
+const crossProcessGateName = await runFixtureProcess([
   `const { cardGateLockName } = require(${JSON.stringify(coordinatorModulePath)});`,
   `process.stdout.write(cardGateLockName(${JSON.stringify('Lock Alias')}));`,
-].join(' ')], { encoding: 'utf8' });
+].join(' '), { label: 'exact gate identity probe', timeoutMs: 2000 });
 eq(crossProcessGateName, cardGateLockName('Lock Alias'),
   'ES4-GATE-IDENTITY-CROSS-PROCESS-FIXTURE-MISSING proves exact gate identity is stable in a fresh child process');
 ok(cardGateLockName('Lock Alias') !== cardGateLockName('Lock-Alias'),
@@ -1857,10 +1890,16 @@ const migrationChildScript = [
   `.then((value) => process.stdout.write(value))`,
   `.catch((error) => process.stdout.write(error.code || error.message));`,
 ].join(' ');
-eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf8' }), 'LOCKED',
+eq(await runFixtureProcess(migrationChildScript, {
+  label: 'legacy-held migration probe',
+  timeoutMs: 2000,
+}), 'LOCKED',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh process on a live shipping legacy lock directory');
 fs.rmSync(crossProcessLegacyPath, { recursive: true, force: true });
-eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf8' }), 'entered',
+eq(await runFixtureProcess(migrationChildScript, {
+  label: 'legacy-released migration probe',
+  timeoutMs: 2000,
+}), 'entered',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN lets the same fresh process enter after the live legacy lock releases');
 
 const installedShippingCoordinatorPath = '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js';
@@ -1905,39 +1944,6 @@ const shippingModuleLoaderLines = [
   "const shippingSlugify = shippingModule.exports.__fixtureSlugify;",
   "const shippingWithCardGateLock = (ctx, card, fn) => shippingWithLock(ctx, 'gates-' + shippingSlugify(card), fn, { card });",
 ];
-const fixtureChildPids = new Set();
-const reapedFixtureChildPids = new Set();
-const spawnFixtureChild = (script) => {
-  const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
-  fixtureChildPids.add(child.pid);
-  return child;
-};
-const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 } = {}) => new Promise((resolve, reject) => {
-  let stdout = '';
-  let stderr = '';
-  let timedOut = false;
-  let forceKillTimer = null;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGTERM');
-    forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 100);
-  }, timeoutMs);
-  child.stdout.on('data', (chunk) => { stdout += chunk; });
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.on('error', reject);
-  child.on('close', (code) => {
-    clearTimeout(timer);
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-    reapedFixtureChildPids.add(child.pid);
-    if (timedOut) reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    else if (code === 0) resolve(stdout);
-    else reject(new Error(`${label} exited ${code}: ${stderr}`));
-  });
-});
-const runFixtureProcess = async (script, options = {}) => {
-  const child = spawnFixtureChild(script);
-  return collectFixtureChild(child, options);
-};
 const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000) => {
   const readiness = (async () => {
     const deadline = Date.now() + timeoutMs;
@@ -2054,25 +2060,36 @@ eq(liveNewResult.result, 'LOCKED',
 eq(liveNewResult.holderOutput, 'released',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live new process cleanly after the old-side exclusion proof');
 
+const shippingFaultScript = (faultSource) => [
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "const Module = require('module');",
+  `const shippingPath = ${JSON.stringify(shippingCoordinatorFixturePath)};`,
+  "const shippingSource = fs.readFileSync(shippingPath, 'utf8');",
+  "const shippingModule = new Module(shippingPath);",
+  "shippingModule.filename = shippingPath;",
+  "shippingModule.paths = Module._nodeModulePaths(path.dirname(shippingPath));",
+  `shippingModule._compile(shippingSource + ${JSON.stringify(`\n${faultSource}`)}, shippingPath);`,
+].join('\n');
 const lifecycleFaults = [
   {
     name: 'compilation',
-    script: 'this is not valid JavaScript {',
-    pattern: /exited [^:]+:/,
+    script: shippingFaultScript('this is not valid JavaScript {'),
+    pattern: /SyntaxError/,
   },
   {
     name: 'resolution',
-    script: "require('es4-live-migration-definitely-missing');",
+    script: shippingFaultScript("require('./es4-live-migration-definitely-missing');"),
     pattern: /Cannot find module/,
   },
   {
     name: 'execution',
-    script: "throw new Error('probe-execution-failure');",
+    script: shippingFaultScript("throw new Error('probe-execution-failure');"),
     pattern: /probe-execution-failure/,
   },
   {
     name: 'timeout',
-    script: 'setInterval(() => {}, 1000);',
+    script: shippingFaultScript('setInterval(() => {}, 1000);'),
     pattern: /timed out/,
     timeoutMs: 50,
   },
