@@ -854,6 +854,28 @@ function projectionMapping(phase) {
   }[phase] || null;
 }
 
+function effectiveProjectionMapping(record, raw = '') {
+  const mapping = record && projectionMapping(record.phase);
+  const canonicalSlice = scalarField(raw, 'type') === 'slice'
+    && Boolean(normalizeCardLink(scalarField(raw, 'epic')));
+  if (mapping && canonicalSlice && mapping.status === 'completed'
+    && !successfulDeploymentReceipts(record)) {
+    return projectionMapping('implementing');
+  }
+  return mapping;
+}
+
+function projectedRecordMapping(record, cardsRoot = CARDS_ROOT) {
+  const mapping = record && projectionMapping(record.phase);
+  if (!mapping || mapping.status !== 'completed' || successfulDeploymentReceipts(record)) return mapping;
+  try {
+    const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
+    return effectiveProjectionMapping(record, raw);
+  } catch (_) {
+    return mapping;
+  }
+}
+
 function boardCardLocation(md, card) {
   const escaped = card.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let section = null;
@@ -1173,9 +1195,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     currentCard: card,
   });
   const record = opts.record || null;
-  const surfaceMapping = epicSurface && mapping.status === 'completed' && !successfulDeploymentReceipts(record)
-    ? projectionMapping('implementing')
-    : mapping;
+  const surfaceMapping = epicSurface ? effectiveProjectionMapping(record, cardRaw) : mapping;
   const sliceBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
   const boardRaw = epicSurface ? epicSurface.boardRaw : fs.readFileSync(boardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, surfaceMapping.column, surfaceMapping.complete);
@@ -1299,12 +1319,13 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
   let projectedBoard = boardMd;
   let epicSurface = null;
   let epic = null;
+  let cardRaw = '';
   try {
     const cardPath = resolveCardPath(record.card_path, record.card, opts.cardsRoot || CARDS_ROOT);
     if (cardPath && fs.existsSync(cardPath)) {
-      const raw = fs.readFileSync(cardPath, 'utf8');
-      epic = normalizeCardLink(scalarField(raw, 'epic')) || null;
-      epicSurface = canonicalEpicProjection(raw, cardPath, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
+      cardRaw = fs.readFileSync(cardPath, 'utf8');
+      epic = normalizeCardLink(scalarField(cardRaw, 'epic')) || null;
+      epicSurface = canonicalEpicProjection(cardRaw, cardPath, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
         state: opts.state,
         currentCard: record.card,
       });
@@ -1319,9 +1340,7 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       reconcile: reconcileRoute(record.card),
     };
   }
-  const surfaceMapping = epicSurface && mapping.status === 'completed' && !successfulDeploymentReceipts(record)
-    ? projectionMapping('implementing')
-    : mapping;
+  const surfaceMapping = epicSurface ? effectiveProjectionMapping(record, cardRaw) : mapping;
   const location = boardCardLocation(projectedBoard, record.card);
   if (!location) return { card: record.card, phase: record.phase, issue: 'card is missing from board' };
   if (location.column !== surfaceMapping.column || location.checked !== surfaceMapping.complete) {
@@ -1385,7 +1404,7 @@ function expectedProjectedContract(record, mapping) {
 }
 
 function projectionMetadataProblemFromRaw(record, raw, opts = {}) {
-  const mapping = record && projectionMapping(record.phase);
+  const mapping = effectiveProjectionMapping(record, raw);
   if (!mapping || (record.projection_error && opts.ignoreSavedProjectionError !== true)) return null;
   try {
     const prepared = prepareDeliveryCard(raw, record.card);
@@ -2518,6 +2537,7 @@ function commandStatus(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const active = activeRecords(state);
   const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
+  const cardsRoot = opts.cardsRoot || CARDS_ROOT;
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
@@ -2526,21 +2546,21 @@ function commandStatus(ctx, opts = {}) {
   const next = summarizeClaimSelection(selectClaimCandidate({
     boardMd, state, loadCard, supervised: opts.supervised !== false,
     epicShadow: opts.epicShadow ?? process.env.SAUCE_EPIC_SELECTION_SHADOW === '1',
-    cardsRoot: opts.cardsRoot || CARDS_ROOT,
+    cardsRoot,
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
   }));
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
   const detectedMetadataProblems = Object.values(state.cards || {})
-    .map((record) => projectionMetadataProblem(record, opts.cardsRoot || CARDS_ROOT))
+    .map((record) => projectionMetadataProblem(record, cardsRoot))
     .filter(Boolean);
   const projectionProblems = [...savedProjectionProblems, ...detectedMetadataProblems];
   const boardDrift = [];
   const boardDriftKeys = new Set();
   for (const record of Object.values(state.cards || {})) {
     const detected = projectionBoardDrift(boardMd, record, {
-      boardPath: opts.boardPath || BOARD, cardsRoot: opts.cardsRoot || CARDS_ROOT, state,
+      boardPath: opts.boardPath || BOARD, cardsRoot, state,
       allFindings: true,
     });
     for (const finding of Array.isArray(detected) ? detected : [detected]) {
@@ -2554,7 +2574,7 @@ function commandStatus(ctx, opts = {}) {
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
     active: active.map((r) => ({
-      card: r.card, phase: r.phase, status: (projectionMapping(r.phase) || {}).status || null,
+      card: r.card, phase: r.phase, status: (projectedRecordMapping(r, cardsRoot) || {}).status || null,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null, branch: r.branch, pr: r.feature_pr || null,
     })),
     parked: parked.map((r) => ({
@@ -2563,7 +2583,7 @@ function commandStatus(ctx, opts = {}) {
       parked_at: r.parked_at || null, projection_error: r.projection_error || null,
     })),
     tracked: tracked.map((r) => ({
-      card: r.card, phase: r.phase, status: projectionMapping(r.phase).status,
+      card: r.card, phase: r.phase, status: projectedRecordMapping(r, cardsRoot).status,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null,
     })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
@@ -2770,7 +2790,7 @@ function metadataReconciliationPlan(record, raw, now = () => new Date().toISOStr
   if (!record || !METADATA_RECONCILE_PHASES.has(record.phase)) {
     throw new Error(`reconcile-metadata refuses phase ${(record && record.phase) || 'missing'}; active and parked cards are out of scope`);
   }
-  const mapping = projectionMapping(record.phase);
+  const mapping = effectiveProjectionMapping(record, raw);
   const fields = {};
   if (scalarField(raw, 'kanban_column') !== mapping.column) fields.kanban_column = metadataScalar(mapping.column);
   if (delivery.normalizeStatus(scalarField(raw, 'status')) !== mapping.status) fields.status = metadataScalar(mapping.status);

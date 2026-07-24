@@ -998,6 +998,55 @@ const missingReceiptStatus = commandStatus(
 ok(missingReceiptStatus.board_drift.some((finding) => finding.card === 'A1'
   && /legacy completion lacks successful deployment receipts/.test(finding.issue)),
   'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps status available with one actionable finding');
+
+const statusMetadataProjection = makeEpicProjectionFixture('status-metadata-convergence');
+fs.writeFileSync(
+  statusMetadataProjection.cardPath,
+  fs.readFileSync(statusMetadataProjection.cardPath, 'utf8').replace('schema_version: 1.1.0\n', ''),
+);
+statusMetadataProjection.state.cards.A1.phase = 'deployed';
+const statusMetadataReconcileDeps = {
+  readState: () => statusMetadataProjection.state,
+  writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: statusMetadataProjection.parentBoardPath,
+  cardsRoot: statusMetadataProjection.cardsRoot,
+  now: () => '2026-07-24T21:00:00.000Z',
+};
+const statusMetadataReconcile = await commandReconcile(
+  { root: statusMetadataProjection.root },
+  { card: 'A1' },
+  statusMetadataReconcileDeps,
+);
+ok(statusMetadataReconcile.action === 'reconciled'
+  && statusMetadataReconcile.results[0].projection_findings[0].card === 'A1',
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE exact reconcile returns the one receiptless finding');
+const statusMetadataReplay = await commandReconcile(
+  { root: statusMetadataProjection.root },
+  { card: 'A1' },
+  statusMetadataReconcileDeps,
+);
+ok(statusMetadataReplay.no_op,
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE exact replay is a literal no-op');
+const statusMetadataStatus = commandStatus(
+  { root: statusMetadataProjection.root },
+  {
+    state: statusMetadataProjection.state,
+    boardMd: fs.readFileSync(statusMetadataProjection.parentBoardPath, 'utf8'),
+    boardPath: statusMetadataProjection.parentBoardPath,
+    cardsRoot: statusMetadataProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+eq(statusMetadataStatus.tracked.find((record) => record.card === 'A1').status, 'in_progress',
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE summarizes receiptless deployed state as non-completed');
+eq(statusMetadataStatus.projection_problems, [],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE has zero contradictory metadata projection problems');
+eq(statusMetadataStatus.board_drift.map((finding) => finding.card), ['A1'],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE emits exactly one bounded legacy finding');
+ok(!statusMetadataProjection.state.cards.A1.vault_receipts && !statusMetadataProjection.state.cards.A2,
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE synthesizes neither receipts nor legacy records');
+
 const successfulReceipts = {
   headspace: { ok: true, installed_version: '0.257.0' },
   accuris: { ok: true, installed_version: '0.257.0' },
@@ -1028,6 +1077,32 @@ ok(/## Completed[\s\S]*- \[x\] \[\[Epic A\]\]/.test(fs.readFileSync(missingRecei
 ok(/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8'))
   && /posture: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
 'ES4-RECEIPT-ROLLUP paints a receipt-proven done atlas');
+projectCard(
+  missingReceiptProjection.state.cards.A2.card_path,
+  missingReceiptProjection.parentBoardPath,
+  'A2',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A2,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+);
+const successfulReceiptStatus = commandStatus(
+  { root: missingReceiptProjection.root },
+  {
+    state: missingReceiptProjection.state,
+    boardMd: fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8'),
+    boardPath: missingReceiptProjection.parentBoardPath,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+eq(successfulReceiptStatus.tracked.filter((record) => ['A1', 'A2'].includes(record.card))
+  .map((record) => record.status), ['completed', 'completed'],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE permits completed status only after every required receipt succeeds');
+ok(!successfulReceiptStatus.board_drift.some((finding) => /legacy completion lacks/.test(finding.issue)),
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE clears legacy findings after receipt-proven deployment');
 
 const backlinkProjection = makeEpicProjectionFixture('bad-backlink');
 fs.writeFileSync(
