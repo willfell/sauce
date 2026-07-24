@@ -5,6 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName,
@@ -1733,6 +1734,13 @@ eq(collisionReconcile.action, 'reconciled',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION assigns distinct gate identities to exact legacy and tracked sibling names');
 eq(cardGateLockName('Lock Alias'), cardGateLockName('Lock Alias'),
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identity is deterministic across independent calls');
+const coordinatorModulePath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+const crossProcessGateName = execFileSync(process.execPath, ['-e', [
+  `const { cardGateLockName } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `process.stdout.write(cardGateLockName(${JSON.stringify('Lock Alias')}));`,
+].join(' ')], { encoding: 'utf8' });
+eq(crossProcessGateName, cardGateLockName('Lock Alias'),
+  'ES4-GATE-IDENTITY-CROSS-PROCESS-FIXTURE-MISSING proves exact gate identity is stable in a fresh child process');
 ok(cardGateLockName('Lock Alias') !== cardGateLockName('Lock-Alias'),
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION binds the exact full card identity beyond its readable slug');
 ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.repeat(400)).length <= 143,
@@ -3025,10 +3033,11 @@ recoveryState.cards['Stranded shipped card'] = {
   reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
 };
 let recoveryWrites = 0;
+let recoveryLock = '';
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
-  withLock: immediateCardLock,
+  withLock: async (_ctx, name, fn) => { recoveryLock = name; return fn(); },
   collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
@@ -3065,6 +3074,8 @@ await assert.rejects(() => commandRecoverDeployed(
 eq(recoveryWrites, 0, 'preserved exact-head receipt refusals perform no ledger write');
 const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
 eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
+eq(recoveryLock, cardGateLockName('Stranded shipped card'),
+  'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves recover-deployed acquires the shared exact-identity card gate');
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
@@ -3109,14 +3120,18 @@ metadataState.cards['Metadata drift'] = {
 };
 let metadataWrites = 0;
 let metadataCardWrites = 0;
+let metadataLock = '';
 const metadataDeps = {
-  readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
+  readState: () => metadataState, writeState: () => { metadataWrites++; },
+  withLock: async (_ctx, name, fn) => { metadataLock = name; return fn(); },
   atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
   durablePathBarrier: () => {},
   cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
 };
 const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
 eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
+eq(metadataLock, cardGateLockName('Metadata drift'),
+  'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves reconcile-metadata acquires the shared exact-identity card gate');
 eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
 const metadataApplyArgs = {
   card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
