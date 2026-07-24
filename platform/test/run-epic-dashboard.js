@@ -1149,6 +1149,81 @@ async function main() {
       `ES2E-CANONICAL-HEAL: ${step} failure leaves an auditable warning`);
   }
 
+  // ES4 hotfix regression — `%% kanban:settings %%` MUST stay the terminal block or
+  // obsidian-kanban JSON.parses the trailing dataviewjs fence and the board fails to
+  // load ("Unexpected token 'd', \"dataviewjs\"..."). Two paths: (1) the EpicCreateAction
+  // injector must place its block ABOVE the settings comment on a chrome-less board,
+  // and (2) applyKanbanSettingsTerminalHeal must RELOCATE a block already stranded
+  // after the settings comment on a board broken in the wild.
+  const settingsIsTerminal = (body) => {
+    const s = body.indexOf('%% kanban:settings');
+    const dv = body.lastIndexOf('```dataviewjs');
+    return s !== -1 && dv !== -1 && dv < s && body.trimEnd().endsWith('%%');
+  };
+  const kanbanSettingsBlock = ['%% kanban:settings', '```',
+    '{"kanban-plugin":"board","list-collapse":[false],"mark-cards-complete":true}', '```', '%%'];
+  const epicCreateFence = ['```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "EpicCreateAction" });', '```'];
+  const chromelessAtlas = ['---', 'type: project', 'project_name: "Chromeless"', '---', '', '# Chromeless'].join('\n');
+  const chromelessBoard = ['---', 'kanban-plugin: board', 'type: kanban', 'project_slug: "chromeless"',
+    'project_name: "Chromeless"', '---', '', '## In Planning', '', '- [ ] [[Some Task]]', '',
+    ...kanbanSettingsBlock, ''].join('\n');
+  const brokenAtlas = ['---', 'type: project', 'project_name: "Broken"', '---', '', '# Broken'].join('\n');
+  const brokenBoard = ['---', 'kanban-plugin: board', 'type: kanban', 'project_slug: "broken"',
+    'project_name: "Broken"', '---', '', '## In Planning', '',
+    ...kanbanSettingsBlock, '', ...epicCreateFence, ''].join('\n');
+
+  // Pure-function contracts.
+  assert.strictEqual(installer._relocateTrailingKanbanBlocks(chromelessBoard), chromelessBoard,
+    'ES4-KANBAN-TERMINAL: a board with no trailing fence is returned byte-identical');
+  const relocatedBroken = installer._relocateTrailingKanbanBlocks(brokenBoard);
+  assert(settingsIsTerminal(relocatedBroken) && relocatedBroken.includes('class: "EpicCreateAction"'),
+    'ES4-KANBAN-TERMINAL: a stranded dataviewjs fence is moved back above the settings comment');
+  assert.strictEqual(installer._relocateTrailingKanbanBlocks(relocatedBroken), relocatedBroken,
+    'ES4-KANBAN-TERMINAL: relocation is idempotent');
+  const inserted = installer._insertProjectBoardDataviewBlock(chromelessBoard, '```dataviewjs\nMARK\n```');
+  assert(inserted.indexOf('MARK') < inserted.indexOf('%% kanban:settings') && settingsIsTerminal(inserted),
+    'ES4-KANBAN-TERMINAL: chrome-less injection lands above the settings comment');
+
+  // End-to-end heal over a fresh vault.
+  const terminalAdapter = memoryAdapter({
+    'spice/projects/chromeless/Chromeless.md': chromelessAtlas,
+    'spice/projects/chromeless/chromeless-board.md': chromelessBoard,
+    'spice/projects/broken/Broken.md': brokenAtlas,
+    'spice/projects/broken/broken-board.md': brokenBoard,
+  });
+  const terminalHistory = [];
+  const terminalTp = { app: { vault: { adapter: terminalAdapter } } };
+  const terminalManifest = { name: 'project' };
+  const terminalGit = { commit: 'fixture', tag: null, dirty: false };
+  await installer.applyEpicScaffoldHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  const healedChromeless = terminalAdapter.store.get('spice/projects/chromeless/chromeless-board.md');
+  assert(healedChromeless.includes('class: "EpicCreateAction"') && settingsIsTerminal(healedChromeless),
+    'ES4-KANBAN-TERMINAL: chrome-less board gains EpicCreateAction with the settings comment still terminal');
+  const healedBroken = terminalAdapter.store.get('spice/projects/broken/broken-board.md');
+  assert(settingsIsTerminal(healedBroken),
+    'ES4-KANBAN-TERMINAL: wild-broken board is repaired to a terminal settings comment');
+  assert.strictEqual((healedBroken.match(/class: "EpicCreateAction"/g) || []).length, 1,
+    'ES4-KANBAN-TERMINAL: repair never duplicates the action block');
+  const terminalBackups = terminalAdapter.writes.filter(({ entry }) => entry.startsWith('.obsidian/.sauce-heals/backups/'));
+  assert(terminalBackups.length >= 1 && terminalBackups.every(({ entry }) => !entry.startsWith('.sauce-backup/')),
+    'ES4-KANBAN-TERMINAL: every board edit is backed up under the approved root first');
+  const terminalSnapshot = [...terminalAdapter.store.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const terminalWrites = terminalAdapter.writes.length;
+  await installer.applyEpicScaffoldHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  assert.deepStrictEqual([...terminalAdapter.store.entries()].sort(([a], [b]) => a.localeCompare(b)), terminalSnapshot,
+    'ES4-KANBAN-TERMINAL: second pass is byte-identical');
+  assert.strictEqual(terminalAdapter.writes.length, terminalWrites,
+    'ES4-KANBAN-TERMINAL: second pass performs zero writes');
+  const terminalFault = [];
+  await assert.doesNotReject(() => installer.applyKanbanSettingsTerminalHeal({
+    app: { vault: { adapter: { async exists() { throw new Error('adapter fault'); } } } },
+  }, terminalManifest, {}, terminalFault, terminalGit), 'ES4-KANBAN-TERMINAL: adapter failures never escape install');
+  assert(terminalFault.some((entry) => entry.event === 'warning' && entry.step === 'kanban_settings_terminal_heal'),
+    'ES4-KANBAN-TERMINAL: adapter failure leaves an auditable warning');
+
   const seedRoot = 'platform/test/seed-vault/spice/projects/epic-fixture';
   const seedSlices = ['Alpha 1', 'Alpha 2', 'Alpha 3'].map((name) => {
     const md = read(`${seedRoot}/tasks/Alpha Epic/board/${name}.md`);

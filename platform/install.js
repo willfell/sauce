@@ -1267,6 +1267,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
   await applyEpicScaffoldHeal(tp, mech, variables, history, git); // ES2 — exact project-board identity/action plus canonical epic context/dashboard conformance
+  await applyKanbanSettingsTerminalHeal(tp, mech, variables, history, git); // ES4 hotfix — relocate any dataviewjs fence left after %% kanban:settings %% so the settings comment stays terminal (repairs boards broken by the earlier EpicCreateAction EOF append). MUST run after applyEpicScaffoldHeal.
   await applyEpicBoardRoleBackfill(tp, mech, variables, history, git); // ES2 — mark only the exact canonical board adjacent to a type:epic atlas
   await applySliceSourceBoardHeal(tp, mech, variables, history, git); // ES2 — repair direct type:slice notes to the exact canonical epic board
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
@@ -5194,6 +5195,85 @@ async function _canonicalProjectIdentity(adapter, projectDir) {
   return { slug, name };
 }
 
+// obsidian-kanban requires the `%% kanban:settings %%` comment to be the TERMINAL
+// block of a board file — it feeds any trailing content into JSON.parse, so a
+// dataviewjs fence placed after it breaks the whole board with
+// `SyntaxError: Unexpected token 'd', "dataviewjs"... is not valid JSON`.
+// Insert a dataviewjs block for a project board so the settings comment stays last:
+// anchor after the ProjectChromeBar block when present, else immediately BEFORE the
+// settings comment, else (non-board note) append at EOF.
+function _insertProjectBoardDataviewBlock(body, block) {
+  const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
+  if (chrome.test(body)) return body.replace(chrome, `$1\n\n${block}`);
+  const marker = body.indexOf("\n%% kanban:settings");
+  if (marker !== -1) {
+    const head = body.slice(0, marker).trimEnd();
+    const settings = body.slice(marker).replace(/^\n+/, "");
+    return `${head}\n\n${block}\n\n${settings}`;
+  }
+  return `${body.trimEnd()}\n\n${block}\n`;
+}
+
+// Relocate any dataviewjs fence that sits AFTER a board's `%% kanban:settings %%`
+// comment back to just above it, restoring the settings comment as the terminal
+// block. Repairs boards broken in the wild by the earlier EpicCreateAction
+// injection (which appended at EOF on boards lacking a ProjectChromeBar anchor).
+// Returns the body unchanged when the settings comment is already terminal.
+function _relocateTrailingKanbanBlocks(body) {
+  const marker = body.indexOf("\n%% kanban:settings");
+  if (marker === -1) return body;
+  const close = body.indexOf("\n%%", marker + "\n%% kanban:settings".length);
+  if (close === -1) return body;
+  const settingsEnd = close + "\n%%".length;
+  const trailing = body.slice(settingsEnd);
+  const dvBlocks = trailing.match(/```dataviewjs[\s\S]*?```/g);
+  if (!dvBlocks) return body;
+  let remainder = trailing;
+  for (const dv of dvBlocks) remainder = remainder.replace(dv, "");
+  remainder = remainder.replace(/\n{3,}/g, "\n\n").replace(/^\s+/, "").trimEnd();
+  const head = body.slice(0, marker).trimEnd();
+  const settings = body.slice(marker, settingsEnd).replace(/^\n+/, "");
+  const moved = dvBlocks.join("\n\n");
+  return `${head}\n\n${moved}\n\n${settings}\n${remainder ? `${remainder}\n` : ""}`;
+}
+
+// ES4 hotfix — ensure every project/epic Kanban board keeps `%% kanban:settings %%`
+// terminal. Project-gated; idempotent; backs up under the approved heal root before
+// any live write. Scans the exact project board plus each canonical epic board.
+async function applyKanbanSettingsTerminalHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const conform = async (board) => {
+    if (!(await adapter.exists(board))) return;
+    const before = await adapter.read(board);
+    if (_epicFrontmatterScalar(before, "kanban-plugin") !== "board") return;
+    const after = _relocateTrailingKanbanBlocks(before);
+    if (after === before) return;
+    if (await _epicBackupWrite(adapter, board, before, after, ts)) {
+      history?.push({ event: "info", step: "kanban_settings_terminal_heal", target: board, action: "settings_comment_made_terminal",
+        git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+    }
+  };
+  try {
+    const projectsRoot = "spice/projects";
+    if (await adapter.exists(projectsRoot)) {
+      const projects = await adapter.list(projectsRoot);
+      for (const projectDir of (projects.folders || [])) {
+        const identity = await _canonicalProjectIdentity(adapter, projectDir);
+        if (!identity) continue;
+        await conform(`${projectDir}/${identity.slug}-board.md`);
+      }
+    }
+    for (const epic of await _epicDirectories(adapter)) {
+      await conform(`${epic.epicDir}/board/${epic.name}-board.md`);
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "kanban_settings_terminal_heal", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
 async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -5217,8 +5297,7 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
         if (!_epicFrontmatterScalar(before, "project_name")) fields.project_name = JSON.stringify(identity.name);
         let after = Object.keys(fields).length ? _epicSetFrontmatter(before, fields) : before;
         if (!/class:\s*"EpicCreateAction"/.test(after)) {
-          const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
-          after = chrome.test(after) ? after.replace(chrome, `$1\n\n${createBlock}`) : `${after.trimEnd()}\n\n${createBlock}\n`;
+          after = _insertProjectBoardDataviewBlock(after, createBlock);
         }
         if (await _epicBackupWrite(adapter, board, before, after, ts)) {
           history?.push({ event: "info", step: "epic_scaffold_heal", target: board, action: "project_board_conformed",
@@ -22234,6 +22313,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
     module.exports.applyEpicScaffoldHeal = applyEpicScaffoldHeal;
+    module.exports.applyKanbanSettingsTerminalHeal = applyKanbanSettingsTerminalHeal;
+    module.exports._relocateTrailingKanbanBlocks = _relocateTrailingKanbanBlocks;
+    module.exports._insertProjectBoardDataviewBlock = _insertProjectBoardDataviewBlock;
     module.exports.applyEpicBoardRoleBackfill = applyEpicBoardRoleBackfill;
     module.exports.applySliceSourceBoardHeal = applySliceSourceBoardHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its
