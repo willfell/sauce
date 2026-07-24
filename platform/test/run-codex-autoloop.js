@@ -5,10 +5,10 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
-  cardGateLockName, legacyCardGateLockName,
+  cardGateLockName, legacyCardGateLockName, withCardGateLock,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
@@ -1775,6 +1775,9 @@ ok(collisionReplay.no_op && collisionReplay.results[0].projection_findings[0].ca
 
 const lockNamespaceMigration = makeEpicProjectionFixture('gate-lock-namespace-migration');
 const migrationLegacyLock = legacyCardGateLockName('A1');
+const frozenShippingLegacyLock = 'gates-a1';
+eq(migrationLegacyLock, frozenShippingLegacyLock,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN matches the frozen shipping lock spelling without deriving the expected value from production code');
 const migrationActiveLocks = new Set([migrationLegacyLock]);
 const migrationLockSequence = [];
 let migrationOldProcessBlocked = false;
@@ -1859,6 +1862,156 @@ eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf
 fs.rmSync(crossProcessLegacyPath, { recursive: true, force: true });
 eq(execFileSync(process.execPath, ['-e', migrationChildScript], { encoding: 'utf8' }), 'entered',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN lets the same fresh process enter after the live legacy lock releases');
+
+const installedShippingCoordinatorPath = '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js';
+const shippingCoordinatorFixturePath = fs.existsSync(installedShippingCoordinatorPath)
+  ? installedShippingCoordinatorPath
+  : path.join(tmp, 'frozen-shipping-codex-coordinator.js');
+if (!fs.existsSync(shippingCoordinatorFixturePath)) {
+  fs.writeFileSync(shippingCoordinatorFixturePath, [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const os = require('os');",
+    "const path = require('path');",
+    "function slugify(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 72); }",
+    "async function withLock(ctx, name, fn) {",
+    "  const lockPath = path.join(ctx.stateDir, 'locks', `${name}.lock`);",
+    "  fs.mkdirSync(path.dirname(lockPath), { recursive: true });",
+    "  try { fs.mkdirSync(lockPath); } catch (error) {",
+    "    if (error.code !== 'EEXIST') throw error;",
+    "    const held = new Error(`lock ${name} held`); held.code = 'LOCKED'; throw held;",
+    "  }",
+    "  fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), started_at: new Date().toISOString() }));",
+    "  try { return await fn(); } finally { fs.rmSync(lockPath, { recursive: true, force: true }); }",
+    "}",
+    "async function withShippingCardGateLock(ctx, card, fn) { return withLock(ctx, `gates-${slugify(card)}`, fn, { card }); }",
+    "module.exports = {};",
+  ].join('\n'));
+}
+const shippingCoordinatorSource = fs.readFileSync(shippingCoordinatorFixturePath, 'utf8');
+ok(shippingCoordinatorSource.includes('`gates-${slugify(card)}`'),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN binds the installed shipping artifact direct slug-only namespace when Homebrew is present');
+const shippingModuleLoaderLines = [
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "const Module = require('module');",
+  `const shippingPath = ${JSON.stringify(shippingCoordinatorFixturePath)};`,
+  "const shippingSource = fs.readFileSync(shippingPath, 'utf8');",
+  "const shippingModule = new Module(shippingPath);",
+  "shippingModule.filename = shippingPath;",
+  "shippingModule.paths = Module._nodeModulePaths(path.dirname(shippingPath));",
+  "shippingModule._compile(shippingSource + '\\nmodule.exports.__fixtureWithLock = withLock; module.exports.__fixtureSlugify = slugify;', shippingPath);",
+  "const shippingWithLock = shippingModule.exports.__fixtureWithLock;",
+  "const shippingSlugify = shippingModule.exports.__fixtureSlugify;",
+  "const shippingWithCardGateLock = (ctx, card, fn) => shippingWithLock(ctx, 'gates-' + shippingSlugify(card), fn, { card });",
+];
+const waitForFixturePath = async (targetPath) => {
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(targetPath)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${targetPath}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+const collectFixtureChild = (child) => new Promise((resolve, reject) => {
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', reject);
+  child.on('close', (code) => {
+    if (code === 0) resolve(stdout);
+    else reject(new Error(`fixture child exited ${code}: ${stderr}`));
+  });
+});
+
+const liveOldHeldDir = path.join(tmp, 'es4-gate-live-old-held');
+const liveOldReady = path.join(liveOldHeldDir, 'old-ready');
+const liveOldRelease = path.join(liveOldHeldDir, 'old-release');
+fs.mkdirSync(liveOldHeldDir, { recursive: true });
+const liveOldCtx = {
+  root: tmp,
+  stateDir: path.join(liveOldHeldDir, 'state'),
+  statePath: path.join(liveOldHeldDir, 'state', 'state.json'),
+};
+const liveOldHolder = spawn(process.execPath, ['-e', [
+  ...shippingModuleLoaderLines,
+  `const ctx = ${JSON.stringify(liveOldCtx)};`,
+  `shippingWithCardGateLock(ctx, 'A1', async () => {`,
+  `  fs.writeFileSync(${JSON.stringify(liveOldReady)}, 'ready');`,
+  `  while (!fs.existsSync(${JSON.stringify(liveOldRelease)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
+  "  return 'released';",
+  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
+].join('\n')], { stdio: ['ignore', 'pipe', 'pipe'] });
+const liveOldHolderResult = collectFixtureChild(liveOldHolder);
+await waitForFixturePath(liveOldReady);
+let newBlockedByLiveOld = '';
+try {
+  await withCardGateLock(liveOldCtx, 'A1', async () => 'incorrectly-entered');
+} catch (error) {
+  newBlockedByLiveOld = error.code || error.message;
+} finally {
+  fs.writeFileSync(liveOldRelease, 'release');
+}
+eq(newBlockedByLiveOld, 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks the new coordinator behind a live installed shipping process');
+eq(await liveOldHolderResult, 'released',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live shipping process cleanly after the new-side exclusion proof');
+
+const liveNewHeldDir = path.join(tmp, 'es4-gate-live-new-held');
+const liveNewReady = path.join(liveNewHeldDir, 'new-ready');
+const liveNewRelease = path.join(liveNewHeldDir, 'new-release');
+fs.mkdirSync(liveNewHeldDir, { recursive: true });
+const liveNewCtx = {
+  root: tmp,
+  stateDir: path.join(liveNewHeldDir, 'state'),
+  statePath: path.join(liveNewHeldDir, 'state', 'state.json'),
+};
+const liveNewHolder = spawn(process.execPath, ['-e', [
+  "const fs = require('fs');",
+  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `const ctx = ${JSON.stringify(liveNewCtx)};`,
+  `withCardGateLock(ctx, 'A1', async () => {`,
+  `  fs.writeFileSync(${JSON.stringify(liveNewReady)}, 'ready');`,
+  `  while (!fs.existsSync(${JSON.stringify(liveNewRelease)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
+  "  return 'released';",
+  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
+].join('\n')], { stdio: ['ignore', 'pipe', 'pipe'] });
+const liveNewHolderResult = collectFixtureChild(liveNewHolder);
+await waitForFixturePath(liveNewReady);
+const liveShippingProbe = execFileSync(process.execPath, ['-e', [
+  ...shippingModuleLoaderLines,
+  `const ctx = ${JSON.stringify(liveNewCtx)};`,
+  "shippingWithCardGateLock(ctx, 'A1', async () => 'incorrectly-entered')",
+  ".then((value) => process.stdout.write(value))",
+  ".catch((error) => process.stdout.write(error.code || error.message));",
+].join('\n')], { encoding: 'utf8' });
+fs.writeFileSync(liveNewRelease, 'release');
+eq(liveShippingProbe, 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh installed shipping process behind the live new coordinator');
+eq(await liveNewHolderResult, 'released',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live new process cleanly after the old-side exclusion proof');
+
+const exceptionReleaseDir = path.join(tmp, 'es4-gate-exception-release');
+const exceptionReleaseCtx = {
+  root: tmp,
+  stateDir: exceptionReleaseDir,
+  statePath: path.join(exceptionReleaseDir, 'state.json'),
+};
+let exceptionReleaseFinding = '';
+try {
+  await withCardGateLock(exceptionReleaseCtx, 'A1', async () => {
+    throw new Error('fixture-authoritative-section-failed');
+  });
+} catch (error) {
+  exceptionReleaseFinding = error.message;
+}
+eq(exceptionReleaseFinding, 'fixture-authoritative-section-failed',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN propagates an authoritative-section failure through production locks');
+ok(!fs.existsSync(path.join(exceptionReleaseDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(exceptionReleaseDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases both production legacy and exact directories after an exception');
+eq(await withCardGateLock(exceptionReleaseCtx, 'A1', async () => 'reacquired'), 'reacquired',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN reacquires both production lock namespaces after exception cleanup');
 
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
