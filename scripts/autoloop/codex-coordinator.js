@@ -817,6 +817,13 @@ function slugify(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 72);
 }
 
+function cardGateLockName(card) {
+  const exactIdentity = String(card);
+  const readable = slugify(exactIdentity) || 'card';
+  const digest = crypto.createHash('sha256').update(exactIdentity).digest('hex');
+  return `gates-${readable}-${digest}`;
+}
+
 function patchFrontmatter(raw, fields) {
   return String(raw).replace(/^---\n([\s\S]*?)\n---/, (_, body) => {
     const lines = body.split('\n');
@@ -2027,7 +2034,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
-  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
     if (!record) throw new Error(`amend-contract requires a tracked --card; ${card} is not tracked`);
@@ -2203,7 +2210,7 @@ async function commandPark(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
-  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (!['claimed', 'implementing'].includes(record.phase)) {
@@ -2246,7 +2253,7 @@ async function commandResume(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
   const worktreeExists = deps.worktreeExists || fs.existsSync;
-  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, `gates-${slugify(card)}`, async () => {
+  return transitionLock(ctx, 'selector', async () => transitionLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (record.phase !== 'parked') return resumeRefused(record, `card is ${record.phase}, not parked`);
@@ -2392,7 +2399,7 @@ async function commandRecordReview(ctx, args, deps = {}) {
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
-  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+  return gateLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
@@ -2417,7 +2424,7 @@ async function commandVerifyGates(ctx, args, deps = {}) {
   const persist = deps.writeState || writeState;
   const runSelfInstall = deps.runIsolatedWorkshopSelfInstall || runIsolatedWorkshopSelfInstall;
   const gateLock = deps.withLock || withLock;
-  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+  return gateLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
@@ -2483,7 +2490,7 @@ async function commandRecordPr(ctx, args, deps = {}) {
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
-  return gateLock(ctx, `gates-${slugify(card)}`, async () => {
+  return gateLock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
     const pr = viewPr(REPO, number, ctx.root);
@@ -2517,7 +2524,7 @@ async function commandAdvance(ctx, args, deps = {}) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
       emit(halted); return halted;
     }
-    const result = await gateLock(ctx, `gates-${slugify(card)}`, async () => {
+    const result = await gateLock(ctx, cardGateLockName(card), async () => {
       const state = loadState(ctx); const record = state.cards[card];
       if (!record) throw new Error(`card ${card} not in state`);
       return step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
@@ -2603,7 +2610,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   const results = [];
   for (const card of cardNames) {
     try {
-      const result = await reconcileLock(ctx, `gates-${slugify(card)}`, async () => {
+      const result = await reconcileLock(ctx, cardGateLockName(card), async () => {
         const state = loadState(ctx);
         const record = state.cards[card];
         if (!record && args.card) {
@@ -2632,7 +2639,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
           if (!viaCandidate) {
             return { card, epic, phase: null, ok: false, changed: false, error: 'legacy exact-card reconciliation requires one tracked canonical sibling' };
           }
-          return reconcileLock(ctx, `gates-${slugify(viaCandidate.card)}`, async () => {
+          return reconcileLock(ctx, cardGateLockName(viaCandidate.card), async () => {
             const lockedState = loadState(ctx);
             const via = lockedState.cards[viaCandidate.card];
             if (!via || !projectionMapping(via.phase) || !via.card_path) {
@@ -2746,7 +2753,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
   const collect = deps.collectDeployedRecoveryEvidence || collectDeployedRecoveryEvidence;
   const project = deps.attemptProjection || attemptProjection;
   const now = deps.now || (() => new Date().toISOString());
-  return lock(ctx, `gates-${slugify(request.card)}`, async () => {
+  return lock(ctx, cardGateLockName(request.card), async () => {
     const state = loadState(ctx);
     const record = state.cards[request.card];
     if (!record) throw new Error('recover-deployed requires a tracked card');
@@ -2896,7 +2903,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const now = deps.now || (() => new Date().toISOString());
-  return lock(ctx, `gates-${slugify(card)}`, async () => {
+  return lock(ctx, cardGateLockName(card), async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
     if (!record) throw new Error('reconcile-metadata requires a tracked card');
@@ -3026,6 +3033,7 @@ async function main() {
 
 module.exports = {
   parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
+  cardGateLockName,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,

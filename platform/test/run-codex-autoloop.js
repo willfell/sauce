@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
+  cardGateLockName,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
@@ -748,7 +749,7 @@ const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '
   withLock: async (_ctx, name, fn) => { prLock = name; return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
-eq(prLock, 'gates-a', 'record-pr shares the per-card gate lock');
+eq(prLock, cardGateLockName('A'), 'record-pr shares the exact-identity per-card gate lock');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
 
 const reviewState = emptyState();
@@ -761,7 +762,7 @@ const review = await commandRecordReview({ root: '/workshop' }, {
   withLock: async (_ctx, name, fn) => { reviewLock = name; return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
-eq(reviewLock, 'gates-review', 'review writes share the per-card gate lock');
+eq(reviewLock, cardGateLockName('Review'), 'review writes share the exact-identity per-card gate lock');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 
 reviewState.cards.Review.phase = 'feature_merged';
@@ -796,7 +797,7 @@ const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review
   },
 });
 eq(verified.action, 'gates-passed', 'verify-gates records a passing combined receipt');
-eq(gateCalls, ['gates-review', 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates serializes, fetches main, and owns every deterministic release check');
+eq(gateCalls, [cardGateLockName('Review'), 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates serializes by exact card identity, fetches main, and owns every deterministic release check');
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
@@ -813,7 +814,7 @@ const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advan
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
   emit: () => {},
 });
-eq(advanceLock, 'gates-advance', 'advance shares the per-card gate lock');
+eq(advanceLock, cardGateLockName('Advance'), 'advance shares the exact-identity per-card gate lock');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
 const parkedAdvanceState = emptyState();
@@ -1659,7 +1660,7 @@ const viaGateRaceResult = await commandReconcile(
     writeState: (_ctx, next) => { viaGateRaceState = next; },
     withLock: async (_ctx, name, fn) => {
       viaGateLocks.push(name);
-      if (name === 'gates-a1' && !viaGateTransitionSnapshot) {
+      if (name === cardGateLockName('A1') && !viaGateTransitionSnapshot) {
         viaGateRaceState = JSON.parse(JSON.stringify(viaGateRaceState));
         Object.assign(viaGateRaceState.cards.A1, {
           phase: 'deployed',
@@ -1676,12 +1677,81 @@ const viaGateRaceResult = await commandReconcile(
     now: () => viaGateNow,
   },
 );
-eq(viaGateLocks, ['gates-a2', 'gates-a1', 'completion-projection'],
+eq(viaGateLocks, [cardGateLockName('A2'), cardGateLockName('A1'), 'completion-projection'],
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes the legacy route through the tracked sibling gate');
 eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
 ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
+
+const gateSlugCollision = makeEpicProjectionFixture('legacy-via-gate-slug-collision');
+const collisionTrackedPath = path.join(path.dirname(gateSlugCollision.cardPath), 'Lock-Alias.md');
+const collisionLegacyPath = path.join(path.dirname(gateSlugCollision.cardPath), 'Lock Alias.md');
+fs.renameSync(gateSlugCollision.cardPath, collisionTrackedPath);
+fs.renameSync(path.join(path.dirname(gateSlugCollision.cardPath), 'A2.md'), collisionLegacyPath);
+fs.writeFileSync(
+  gateSlugCollision.epicBoardPath,
+  fs.readFileSync(gateSlugCollision.epicBoardPath, 'utf8')
+    .replace('[[A1]]', '[[Lock-Alias]]')
+    .replace('[[A2]]', '[[Lock Alias]]'),
+);
+fs.writeFileSync(
+  collisionLegacyPath,
+  fs.readFileSync(collisionLegacyPath, 'utf8').replace('status: planning', 'status: completed'),
+);
+gateSlugCollision.state.cards['Lock-Alias'] = {
+  ...gateSlugCollision.state.cards.A1,
+  card: 'Lock-Alias',
+  card_path: collisionTrackedPath,
+};
+delete gateSlugCollision.state.cards.A1;
+const collisionActiveLocks = new Set();
+const collisionLockSequence = [];
+const collisionDeps = {
+  readState: () => gateSlugCollision.state,
+  writeState: () => {},
+  withLock: async (_ctx, name, fn) => {
+    if (collisionActiveLocks.has(name)) throw new Error(`self-colliding lock ${name}`);
+    collisionActiveLocks.add(name);
+    collisionLockSequence.push(name);
+    try {
+      return await fn();
+    } finally {
+      collisionActiveLocks.delete(name);
+    }
+  },
+  boardPath: gateSlugCollision.parentBoardPath,
+  cardsRoot: gateSlugCollision.cardsRoot,
+  now: () => '2026-07-24T21:45:00.000Z',
+};
+const collisionReconcile = await commandReconcile(
+  { root: gateSlugCollision.root },
+  { card: 'Lock Alias' },
+  collisionDeps,
+);
+eq(collisionReconcile.action, 'reconciled',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION assigns distinct gate identities to exact legacy and tracked sibling names');
+eq(cardGateLockName('Lock Alias'), cardGateLockName('Lock Alias'),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identity is deterministic across independent calls');
+ok(cardGateLockName('Lock Alias') !== cardGateLockName('Lock-Alias'),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION binds the exact full card identity beyond its readable slug');
+ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.repeat(400)).length <= 143,
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identities are filesystem-safe and bounded');
+ok(!/`gates-\$\{slugify\(/.test(fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8')),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION routes every per-card gate call site through the shared exact-identity helper');
+eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
+ok(collisionReconcile.results[0].projection_findings[0].card === 'Lock Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves the exact bounded legacy finding');
+ok(collisionLockSequence[0] !== collisionLockSequence[1] && collisionLockSequence[2] === 'completion-projection',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION retains gate-to-gate-to-completion serialization without a slug self-collision');
+const collisionReplay = await commandReconcile(
+  { root: gateSlugCollision.root },
+  { card: 'Lock Alias' },
+  collisionDeps,
+);
+ok(collisionReplay.no_op && collisionReplay.results[0].projection_findings[0].card === 'Lock Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION exact replay is a byte-stable no-op');
 
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
@@ -1933,7 +2003,7 @@ const amendPriorInvalidation = deepCopy(amend.state.cards[AMEND_CARD].receipt_in
 const amended = await commandAmendContract({ root: amend.root }, amend.args, amend.deps);
 eq(amended.action, 'contract-amended', 'amend-contract succeeds through the explicit supervised command');
 eq(amended.no_op, false, 'real execution-contract amendment is not a no-op');
-eq(amend.locks, ['selector', `gates-protected-active-contract`, 'completion-projection'], 'amend-contract uses selector, card, then projection lock order');
+eq(amend.locks, ['selector', cardGateLockName('Protected active contract'), 'completion-projection'], 'amend-contract uses selector, exact-card, then projection lock order');
 eq(amend.state.cards[AMEND_CARD].touch_zones, [
   'platform/mechanisms/delivery', 'platform/schemas-index.json', 'platform/manifest.json',
 ], 'touch-zone amendment is normalized, deduplicated, additive, and preserves existing order');
@@ -2332,7 +2402,7 @@ const parked = await commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
-eq(parkLocks.slice(-3), ['selector', 'gates-park-me', 'completion-projection'], 'park serializes selector, card transition, and metadata projection');
+eq(parkLocks.slice(-3), ['selector', cardGateLockName('Park me'), 'completion-projection'], 'park serializes selector, exact-card transition, and metadata projection');
 eq(parkState.cards['Park me'].phase, 'parked', 'park records the durable parked phase');
 eq(parkState.cards['Park me'].dependencies, ['Prerequisite A', 'Prerequisite B'], 'park records exact prerequisite names');
 eq(parkState.cards['Park me'].resume_condition, 'Both prerequisites deploy cleanly', 'park records exact resume condition');
@@ -2592,7 +2662,7 @@ eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite i
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
 eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
 ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
-eq(parkLocks.slice(resumeLockStart), ['selector', 'gates-park-me', 'completion-projection'], 'resume serializes selector, card, and projection transitions in one lock order');
+eq(parkLocks.slice(resumeLockStart), ['selector', cardGateLockName('Park me'), 'completion-projection'], 'resume serializes selector, exact-card, and projection transitions in one lock order');
 eq(parkState.cards['Park me'].phase, 'implementing', 'successful resume returns to implementing');
 eq(parkState.cards['Park me'].reviews, {}, 'successful resume invalidates all current review receipts');
 eq(parkState.cards['Park me'].gate_receipt, null, 'successful resume invalidates the combined gate receipt');
@@ -2659,7 +2729,7 @@ eq(driftBeforeReconcile.projection_problems, [{
 }], 'status reports card projection problems independently from board drift');
 const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
 eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
-eq(reconcileLocks.slice(0, 2), ['gates-tracked-deployed', 'completion-projection'], 'reconciliation serializes card state then shared board projection');
+eq(reconcileLocks.slice(0, 2), [cardGateLockName('Tracked deployed'), 'completion-projection'], 'reconciliation serializes exact-card state then shared board projection');
 eq(firstReconcile.changed, 1, 'first reconciliation repairs projection');
 ok(/## Completed[\s\S]*- \[x\] \[\[Tracked deployed\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'deployed execution card moves to checked Completed');
 ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unchecked Archive entry stays untouched');
