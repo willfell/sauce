@@ -961,9 +961,7 @@ eq(epicLedgerWrites, epicWritesAfterRepair, 'ES4-DUAL-NOOP performs no ledger wr
 
 const missingReceiptProjection = makeEpicProjectionFixture('missing-receipts');
 missingReceiptProjection.state.cards.A1.phase = 'deployed';
-const missingReceiptBytes = missingReceiptProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
-let missingReceiptWrites = 0;
-assert.throws(() => projectCard(
+const missingReceiptResult = projectCard(
   missingReceiptProjection.cardPath,
   missingReceiptProjection.parentBoardPath,
   'A1',
@@ -972,13 +970,16 @@ assert.throws(() => projectCard(
     record: missingReceiptProjection.state.cards.A1,
     state: missingReceiptProjection.state,
     cardsRoot: missingReceiptProjection.cardsRoot,
-    writeText: () => { missingReceiptWrites += 1; },
   },
-), /completion lacks successful deployment receipts/, 'ES4-RECEIPT-ROLLUP refuses a deployed phase without three successful vault receipts');
-eq(missingReceiptWrites, 0,
-  'ES4-RECEIPT-REFUSAL-PARTIAL-PROJECTION validates receipt authority before every projection write');
-eq(missingReceiptProjection.files.map((target) => fs.readFileSync(target, 'utf8')), missingReceiptBytes,
-  'ES4-RECEIPT-REFUSAL-PARTIAL-PROJECTION leaves every projection surface byte-stable');
+);
+eq(missingReceiptResult.projection_findings.map((finding) => finding.card), ['A1'],
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING contains a receiptless deployed phase per exact card');
+eq(missingReceiptResult.projection_findings[0].reconcile, "reconcile --card 'A1'",
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING gives the receiptless card a shell-safe exact reconcile route');
+ok(!/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never counts a deployed phase done without successful deployment receipts');
+ok(!missingReceiptProjection.state.cards.A1.vault_receipts,
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never mints or backfills a deployment receipt');
 const successfulReceipts = {
   headspace: { ok: true, installed_version: '0.257.0' },
   accuris: { ok: true, installed_version: '0.257.0' },
@@ -1332,6 +1333,121 @@ eq(siblingHardlinkWrites, 0,
 eq(siblingHardlinkFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingHardlinkBytes,
   'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND leaves hard-linked siblings and every epic surface byte-stable');
 
+const containmentMatrix = [
+  {
+    name: 'symlink-write-root',
+    pattern: /epic Epic A escapes its physical root/,
+    setup: (fixture) => {
+      const canonical = path.dirname(fixture.atlasPath);
+      const escaped = path.join(fixture.root, 'matrix-outside', 'Epic A');
+      fs.mkdirSync(path.dirname(escaped), { recursive: true });
+      fs.renameSync(canonical, escaped);
+      fs.symlinkSync(escaped, canonical, 'dir');
+    },
+  },
+  {
+    name: 'hardlink-sibling-alias',
+    pattern: /shares physical file identity/,
+    setup: (fixture) => {
+      const sibling = path.join(path.dirname(fixture.cardPath), 'A2.md');
+      fs.unlinkSync(fixture.cardPath);
+      fs.linkSync(sibling, fixture.cardPath);
+    },
+  },
+  {
+    name: 'dot-dot-traversal',
+    pattern: /escapes cards root/,
+    setup: (fixture) => {
+      fs.writeFileSync(
+        fixture.cardPath,
+        fs.readFileSync(fixture.cardPath, 'utf8').replace('epic: "[[Epic A]]"', 'epic: "[[../../outside]]"'),
+      );
+    },
+  },
+  {
+    name: 'project-root-prefix-alias',
+    pattern: /does not bind its canonical parent board/,
+    setup: (fixture) => {
+      for (const target of [
+        fixture.atlasPath,
+        fixture.cardPath,
+        path.join(path.dirname(fixture.cardPath), 'A2.md'),
+      ]) {
+        fs.writeFileSync(
+          target,
+          fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'bogus/projects/test/'),
+        );
+      }
+    },
+  },
+  {
+    name: 'physical-device-inode-collision',
+    pattern: /shares physical file identity/,
+    setup: (fixture) => {
+      const originalStat = fs.statSync;
+      const firstPath = fs.realpathSync(fixture.cardPath);
+      const siblingPath = fs.realpathSync(path.join(path.dirname(fixture.cardPath), 'A2.md'));
+      const firstIdentity = originalStat(firstPath);
+      fs.statSync = (target, ...args) => {
+        const stat = originalStat(target, ...args);
+        return fs.realpathSync(target) === siblingPath
+          ? { ...stat, dev: firstIdentity.dev, ino: firstIdentity.ino }
+          : stat;
+      };
+      return () => { fs.statSync = originalStat; };
+    },
+  },
+];
+
+for (const matrixCase of containmentMatrix) {
+  const fault = makeEpicProjectionFixture(`matrix-red-${matrixCase.name}`);
+  const restore = matrixCase.setup(fault) || (() => {});
+  const faultSurfaces = [...new Set([
+    ...fault.files,
+    path.join(path.dirname(fault.cardPath), 'A2.md'),
+  ])];
+  const before = faultSurfaces.map((target) => fs.readFileSync(target, 'utf8'));
+  let writes = 0;
+  try {
+    assert.throws(() => projectCard(
+      fault.cardPath,
+      fault.parentBoardPath,
+      'A1',
+      'implementing',
+      {
+        record: fault.state.cards.A1,
+        state: fault.state,
+        cardsRoot: fault.cardsRoot,
+        writeText: () => { writes += 1; },
+      },
+    ), matrixCase.pattern,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is red with the enumerated escape fault`);
+  } finally {
+    restore();
+  }
+  eq(writes, 0,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is refused before the first projection write`);
+  eq(faultSurfaces.map((target) => fs.readFileSync(target, 'utf8')), before,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} keeps every inside and outside surface byte-stable`);
+
+  const valid = makeEpicProjectionFixture(`matrix-green-${matrixCase.name}`);
+  let validWrites = 0;
+  const validResult = projectCard(
+    valid.cardPath,
+    valid.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: valid.state.cards.A1,
+      state: valid.state,
+      cardsRoot: valid.cardsRoot,
+      writeText: () => { validWrites += 1; },
+    },
+  );
+  ok(validResult.changed && validWrites > 0,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is green with a canonical contained projection`);
+}
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,
@@ -1375,12 +1491,43 @@ const diagnosticFinding = projectionBoardDrift(
     state: diagnosticProjection.state,
   },
 );
-ok(/canonical epic roll-up refusal: epic slice A2 completion has no tracked deployment receipts/.test(diagnosticFinding.issue),
-  'ES4-DRIFT-DIAGNOSTIC-THROW contains a receipt derivation refusal as an actionable drift finding');
-eq(diagnosticFinding.reconcile, "reconcile --card 'A1'",
-  'ES4-DRIFT-DIAGNOSTIC-THROW names the exact-card reconcile route');
-eq(Object.keys(topologyDiagnostic).sort(), Object.keys(diagnosticFinding).sort(),
-  'ES4-CANONICAL-DIAGNOSTIC-SHAPE-PARITY keeps topology and roll-up refusals structurally identical');
+ok(/legacy completion lacks successful deployment receipts/.test(diagnosticFinding.issue),
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING reports receiptless note completion without throwing');
+eq(diagnosticFinding.card, 'A2',
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING binds the finding to the exact legacy slice');
+eq(diagnosticFinding.reconcile, "reconcile --card 'A2'",
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING routes reconciliation to the exact legacy slice');
+const diagnosticProjectionResult = projectCard(
+  diagnosticProjection.cardPath,
+  diagnosticProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: diagnosticProjection.state.cards.A1,
+    state: diagnosticProjection.state,
+    cardsRoot: diagnosticProjection.cardsRoot,
+  },
+);
+eq(diagnosticProjectionResult.projection_findings.map((finding) => finding.card), ['A2'],
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING lets the rest of the epic project');
+ok(!diagnosticProjection.state.cards.A2,
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT does not manufacture a tracked record or receipt for a legacy slice');
+const diagnosticReconcile = await commandReconcile(
+  { root: diagnosticProjection.root },
+  { card: 'A1' },
+  {
+    readState: () => diagnosticProjection.state,
+    writeState: () => {},
+    withLock: async (_ctx, _name, fn) => fn(),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    now: () => '2026-07-24T20:00:00.000Z',
+  },
+);
+eq(diagnosticReconcile.action, 'reconciled',
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING never crashes exact-card reconciliation');
+eq(diagnosticReconcile.results[0].projection_findings.map((finding) => finding.card), ['A2'],
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING preserves the exact legacy finding in reconcile receipts');
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
   {
@@ -1391,8 +1538,9 @@ const containedStatus = commandStatus(
     loadCard: () => null,
   },
 );
-ok(containedStatus.board_drift.some((finding) => /canonical epic roll-up refusal/.test(finding.issue)),
-  'ES4-DRIFT-DIAGNOSTIC-THROW keeps coordinator status available with the refusal attached');
+ok(containedStatus.board_drift.some((finding) => finding.card === 'A2'
+  && /legacy completion lacks successful deployment receipts/.test(finding.issue)),
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING keeps coordinator status available with the bounded finding');
 
 eq(projectionBoardDrift(
   fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),

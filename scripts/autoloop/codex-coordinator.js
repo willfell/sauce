@@ -918,6 +918,26 @@ function physicalDescendant(root, target, label) {
   return physicalTarget;
 }
 
+function validatePhysicalProjectionMembers(entries) {
+  const paths = new Map();
+  const files = new Map();
+  for (const { root, target, label } of entries) {
+    const entry = fs.lstatSync(target);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`${label} must be one regular non-symlink file`);
+    }
+    const physicalPath = physicalDescendant(root, target, label);
+    const priorPath = paths.get(physicalPath);
+    if (priorPath) throw new Error(`${label} physically aliases ${priorPath}`);
+    paths.set(physicalPath, label);
+    const stat = fs.statSync(physicalPath);
+    const physicalFile = `${stat.dev}:${stat.ino}`;
+    const priorFile = files.get(physicalFile);
+    if (priorFile) throw new Error(`${label} shares physical file identity with ${priorFile}`);
+    files.set(physicalFile, label);
+  }
+}
+
 function validateCanonicalSliceTopology(cardRaw, cardPath, epic, boardPath, expectedAtlasPath, expectedBoardPath) {
   if (scalarField(cardRaw, 'type') !== 'slice') {
     throw new Error(`canonical epic member ${path.basename(cardPath)} is not type slice`);
@@ -1036,6 +1056,16 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
     expectedBoardPath,
     physicalBoardDir,
   );
+  validatePhysicalProjectionMembers([
+    { root: physicalProject.root, target: parentBoardPath, label: `epic ${epic} parent board` },
+    { root, target: atlasPath, label: `epic ${epic} atlas` },
+    { root, target: epicBoardPath, label: `epic ${epic} board` },
+    ...members.map((name) => ({
+      root,
+      target: path.join(boardDir, `${name}.md`),
+      label: `epic slice ${name}`,
+    })),
+  ]);
   if (!members.includes(path.basename(cardPath, '.md'))) {
     throw new Error(`canonical slice ${path.basename(cardPath)} is missing from its epic board`);
   }
@@ -1057,6 +1087,16 @@ function epicProjectionMapping(state) {
   }[state];
 }
 
+function legacyCompletionFinding(surface, card, record = null) {
+  return {
+    card,
+    epic: surface.epic,
+    phase: record ? record.phase || null : null,
+    issue: 'legacy completion lacks successful deployment receipts and is not counted done',
+    reconcile: reconcileRoute(card),
+  };
+}
+
 function deriveEpicProjection(surface, currentCard, currentStatus) {
   const cards = canonicalEpicMembers(
     surface.boardRaw,
@@ -1068,6 +1108,7 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
     surface.physicalBoardDir,
   );
   const siblings = new Set(cards.map(normalizeCardLink));
+  const findings = [];
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
     const trackedMapping = tracked && projectionMapping(tracked.phase);
@@ -1083,23 +1124,26 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
     });
     if (name === currentCard) {
       if (currentStatus === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        throw new Error(`epic slice ${name} completion lacks successful deployment receipts`);
+        findings.push(legacyCompletionFinding(surface, name, tracked));
+        return decorate('in_progress');
       }
       return decorate(currentStatus);
     }
     if (trackedMapping) {
       if (trackedMapping.status === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        throw new Error(`epic slice ${name} completion lacks successful deployment receipts`);
+        findings.push(legacyCompletionFinding(surface, name, tracked));
+        return decorate('in_progress');
       }
       return decorate(trackedMapping.status);
     }
     const status = scalarField(sliceRaw, 'status') || 'planning';
     if (delivery.normalizeStatus(status) === 'completed') {
-      throw new Error(`epic slice ${name} completion has no tracked deployment receipts`);
+      findings.push(legacyCompletionFinding(surface, name));
+      return decorate('in_progress');
     }
     return decorate(status);
   });
-  return delivery.deriveEpicLifecycle(slices);
+  return { ...delivery.deriveEpicLifecycle(slices), findings };
 }
 
 function durablePathBarrier(file, deps = {}) {
@@ -1185,6 +1229,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   let epicBoardChanged = false;
   let epicAtlasChanged = false;
   let epicState = null;
+  let projectionFindings = [];
   let parentNext = null;
   let atlasNext = null;
   if (epicSurface) {
@@ -1200,6 +1245,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     epicBoardChanged = parentNext !== epicSurface.parentRaw;
     epicAtlasChanged = atlasNext !== epicSurface.atlasRaw;
     epicState = lifecycle.state;
+    projectionFindings = lifecycle.findings;
   }
   const writeText = opts.writeText || atomicWriteText;
   if (boardChanged) writeText(sliceBoardPath, boardNext);
@@ -1215,6 +1261,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
     epic_board_changed: epicBoardChanged,
     epic_atlas_changed: epicAtlasChanged,
     epic_state: epicState,
+    projection_findings: projectionFindings,
   });
   return result;
 }
@@ -1285,6 +1332,9 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       const epicLocation = boardCardLocation(epicSurface.parentRaw, epicSurface.epic);
       const atlasStatus = scalarField(epicSurface.atlasRaw, 'status');
       const atlasPosture = scalarField(epicSurface.atlasRaw, 'posture');
+      if (lifecycle.findings.length) {
+        return opts.allFindings === true ? lifecycle.findings : lifecycle.findings[0];
+      }
       if (!epicLocation || epicLocation.column !== epicMapping.column || epicLocation.checked !== epicMapping.complete
         || atlasStatus !== lifecycle.state || atlasPosture !== lifecycle.posture) {
         return {
@@ -2480,11 +2530,21 @@ function commandStatus(ctx, opts = {}) {
     .map((record) => projectionMetadataProblem(record, opts.cardsRoot || CARDS_ROOT))
     .filter(Boolean);
   const projectionProblems = [...savedProjectionProblems, ...detectedMetadataProblems];
-  const boardDrift = Object.values(state.cards || {})
-    .map((record) => projectionBoardDrift(boardMd, record, {
+  const boardDrift = [];
+  const boardDriftKeys = new Set();
+  for (const record of Object.values(state.cards || {})) {
+    const detected = projectionBoardDrift(boardMd, record, {
       boardPath: opts.boardPath || BOARD, cardsRoot: opts.cardsRoot || CARDS_ROOT, state,
-    }))
-    .filter(Boolean);
+      allFindings: true,
+    });
+    for (const finding of Array.isArray(detected) ? detected : [detected]) {
+      if (!finding) continue;
+      const key = JSON.stringify([finding.card, finding.epic, finding.phase, finding.issue, finding.reconcile]);
+      if (boardDriftKeys.has(key)) continue;
+      boardDriftKeys.add(key);
+      boardDrift.push(finding);
+    }
+  }
   return {
     action: 'status', halted: fs.existsSync(path.join(ctx.root, '.autoloop-halt')),
     active: active.map((r) => ({
@@ -2545,6 +2605,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               card: record.card, phase: record.phase, ok: true,
               changed: Boolean(projected.changed || stateChanged),
               projection_changed: Boolean(projected.changed), state_changed: stateChanged,
+              projection_findings: projected.projection_findings || [],
             };
           } catch (err) {
             const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
