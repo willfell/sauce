@@ -1252,6 +1252,29 @@ eq(boardDirEscapeWrites, 0,
 eq(boardDirEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8')), boardDirEscapeBytes,
   'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE preserves every board-directory escape target byte');
 
+const siblingMisbindProjection = makeEpicProjectionFixture('exact-card-sibling-misbind');
+const siblingMisbindPath = path.join(path.dirname(siblingMisbindProjection.cardPath), 'A2.md');
+const siblingMisbindFiles = [...siblingMisbindProjection.files, siblingMisbindPath];
+const siblingMisbindBytes = siblingMisbindFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingMisbindWrites = 0;
+assert.throws(() => projectCard(
+  siblingMisbindPath,
+  siblingMisbindProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: { ...siblingMisbindProjection.state.cards.A1, card_path: siblingMisbindPath },
+    state: siblingMisbindProjection.state,
+    cardsRoot: siblingMisbindProjection.cardsRoot,
+    writeText: () => { siblingMisbindWrites += 1; },
+  },
+), /canonical slice path A2\.md does not bind exact card A1/,
+'ES4-EXACT-CARD-PATH-SIBLING-MISBIND rejects a valid sibling path for the exact card operand');
+eq(siblingMisbindWrites, 0,
+  'ES4-EXACT-CARD-PATH-SIBLING-MISBIND refuses before every projection write');
+eq(siblingMisbindFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingMisbindBytes,
+  'ES4-EXACT-CARD-PATH-SIBLING-MISBIND preserves both sibling notes and all epic surfaces');
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,

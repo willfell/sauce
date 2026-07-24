@@ -966,6 +966,10 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
   if (!epic) throw new Error('canonical slice is missing its epic backlink');
+  const currentCard = normalizeCardLink(opts.currentCard);
+  if (currentCard && path.basename(cardPath, '.md') !== currentCard) {
+    throw new Error(`canonical slice path ${path.basename(cardPath)} does not bind exact card ${currentCard}`);
+  }
   const root = fs.realpathSync(cardsRoot);
   const epicRoot = path.resolve(cardsRoot, epic);
   if (epicRoot === path.resolve(cardsRoot) || !epicRoot.startsWith(`${path.resolve(cardsRoot)}${path.sep}`)) {
@@ -1104,7 +1108,10 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   if (!mapping) return { changed: false, skipped: true };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
-  const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, opts);
+  const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
+    ...opts,
+    currentCard: card,
+  });
   const sliceBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
   const boardRaw = epicSurface ? epicSurface.boardRaw : fs.readFileSync(boardPath, 'utf8');
   const boardNext = moveBoardCard(boardRaw, card, mapping.column, mapping.complete);
@@ -1231,6 +1238,7 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       epic = normalizeCardLink(scalarField(raw, 'epic')) || null;
       epicSurface = canonicalEpicProjection(raw, cardPath, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
         state: opts.state,
+        currentCard: record.card,
       });
       if (epicSurface) projectedBoard = epicSurface.boardRaw;
     }
