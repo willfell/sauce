@@ -946,10 +946,26 @@ function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlas
     .flatMap((column) => parsed[column] || []);
   const duplicate = members.find((name, index) => members.indexOf(name) !== index);
   if (duplicate) throw new Error(`canonical epic ${epic} contains duplicate board membership for ${duplicate}`);
+  const physicalPaths = new Map();
+  const physicalFiles = new Map();
   for (const name of members) {
     const slicePath = path.join(boardDir, `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
-    if (physicalBoardDir) physicalDescendant(physicalBoardDir, slicePath, `epic slice ${name}`);
+    const entry = fs.lstatSync(slicePath);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`canonical epic slice ${name} must be one regular non-symlink file`);
+    }
+    if (physicalBoardDir) {
+      const physicalPath = physicalDescendant(physicalBoardDir, slicePath, `epic slice ${name}`);
+      const priorPath = physicalPaths.get(physicalPath);
+      if (priorPath) throw new Error(`epic slice ${name} physically aliases sibling ${priorPath}`);
+      physicalPaths.set(physicalPath, name);
+      const stat = fs.statSync(physicalPath);
+      const physicalFile = `${stat.dev}:${stat.ino}`;
+      const priorFile = physicalFiles.get(physicalFile);
+      if (priorFile) throw new Error(`epic slice ${name} shares physical file identity with sibling ${priorFile}`);
+      physicalFiles.set(physicalFile, name);
+    }
     validateCanonicalSliceTopology(
       fs.readFileSync(slicePath, 'utf8'),
       slicePath,

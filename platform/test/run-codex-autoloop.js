@@ -1275,6 +1275,56 @@ eq(siblingMisbindWrites, 0,
 eq(siblingMisbindFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingMisbindBytes,
   'ES4-EXACT-CARD-PATH-SIBLING-MISBIND preserves both sibling notes and all epic surfaces');
 
+const siblingSymlinkProjection = makeEpicProjectionFixture('exact-card-sibling-symlink');
+const siblingSymlinkPath = path.join(path.dirname(siblingSymlinkProjection.cardPath), 'A2.md');
+fs.unlinkSync(siblingSymlinkProjection.cardPath);
+fs.symlinkSync(siblingSymlinkPath, siblingSymlinkProjection.cardPath);
+const siblingSymlinkFiles = [...siblingSymlinkProjection.files, siblingSymlinkPath];
+const siblingSymlinkBytes = siblingSymlinkFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingSymlinkWrites = 0;
+assert.throws(() => projectCard(
+  siblingSymlinkProjection.cardPath,
+  siblingSymlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: siblingSymlinkProjection.state.cards.A1,
+    state: siblingSymlinkProjection.state,
+    cardsRoot: siblingSymlinkProjection.cardsRoot,
+    writeText: () => { siblingSymlinkWrites += 1; },
+  },
+), /canonical epic slice A1 must be one regular non-symlink file/,
+'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects A1.md physically resolving to sibling A2.md');
+eq(siblingSymlinkWrites, 0,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects a sibling symlink before every projection write');
+eq(siblingSymlinkFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingSymlinkBytes,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND leaves both sibling aliases and all epic surfaces byte-stable');
+
+const siblingHardlinkProjection = makeEpicProjectionFixture('exact-card-sibling-hardlink');
+const siblingHardlinkPath = path.join(path.dirname(siblingHardlinkProjection.cardPath), 'A2.md');
+fs.unlinkSync(siblingHardlinkProjection.cardPath);
+fs.linkSync(siblingHardlinkPath, siblingHardlinkProjection.cardPath);
+const siblingHardlinkFiles = [...siblingHardlinkProjection.files, siblingHardlinkPath];
+const siblingHardlinkBytes = siblingHardlinkFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingHardlinkWrites = 0;
+assert.throws(() => projectCard(
+  siblingHardlinkProjection.cardPath,
+  siblingHardlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: siblingHardlinkProjection.state.cards.A1,
+    state: siblingHardlinkProjection.state,
+    cardsRoot: siblingHardlinkProjection.cardsRoot,
+    writeText: () => { siblingHardlinkWrites += 1; },
+  },
+), /epic slice A2 shares physical file identity with sibling A1/,
+'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects hard-linked sibling slice identities');
+eq(siblingHardlinkWrites, 0,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects a sibling hard link before every projection write');
+eq(siblingHardlinkFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingHardlinkBytes,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND leaves hard-linked siblings and every epic surface byte-stable');
+
 const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
 fs.writeFileSync(
   duplicateSiblingProjection.epicBoardPath,
