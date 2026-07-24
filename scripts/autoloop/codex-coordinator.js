@@ -196,6 +196,11 @@ function normalizeZone(zone) {
   return String(zone || '').trim().replace(/^\.\//, '').replace(/\/+$/, '');
 }
 
+function reconcileRoute(card) {
+  const operand = `'${String(card).replaceAll("'", "'\"'\"'")}'`;
+  return `reconcile --card ${operand}`;
+}
+
 function normalizeCardLink(value) {
   return delivery.normalizeIdentity(value);
 }
@@ -1201,10 +1206,12 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
   if (!mapping) return null;
   let projectedBoard = boardMd;
   let epicSurface = null;
+  let epic = null;
   try {
     const cardPath = resolveCardPath(record.card_path, record.card, opts.cardsRoot || CARDS_ROOT);
     if (cardPath && fs.existsSync(cardPath)) {
       const raw = fs.readFileSync(cardPath, 'utf8');
+      epic = normalizeCardLink(scalarField(raw, 'epic')) || null;
       epicSurface = canonicalEpicProjection(raw, cardPath, opts.boardPath || BOARD, opts.cardsRoot || CARDS_ROOT, {
         state: opts.state,
       });
@@ -1213,9 +1220,10 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
   } catch (err) {
     return {
       card: record.card,
+      epic,
       phase: record.phase,
       issue: `canonical epic projection is unreadable: ${err.message}`,
-      reconcile: `reconcile --card ${record.card}`,
+      reconcile: reconcileRoute(record.card),
     };
   }
   const location = boardCardLocation(projectedBoard, record.card);
@@ -1249,7 +1257,7 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       return {
         card: record.card, epic: epicSurface.epic, phase: record.phase,
         issue: `canonical epic roll-up refusal: ${err.message}`,
-        reconcile: `reconcile --card ${record.card}`,
+        reconcile: reconcileRoute(record.card),
       };
     }
   }

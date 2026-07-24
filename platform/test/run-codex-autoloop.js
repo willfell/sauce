@@ -1106,7 +1106,10 @@ eq(fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8'), malformedAtlas
   'ES4-CANONICAL-SLICE-FAILOPEN leaves the atlas byte-stable after sibling refusal');
 const topologyDiagnostic = projectionBoardDrift(
   fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'),
-  malformedSiblingProjection.state.cards.A1,
+  {
+    ...malformedSiblingProjection.state.cards.A1,
+    card: 'ES4a4 Dual projection and exact-card reconciliation (value-review completion)',
+  },
   {
     boardPath: malformedSiblingProjection.parentBoardPath,
     cardsRoot: malformedSiblingProjection.cardsRoot,
@@ -1115,8 +1118,9 @@ const topologyDiagnostic = projectionBoardDrift(
 );
 ok(/canonical epic projection is unreadable:/.test(topologyDiagnostic.issue),
   'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE contains a topology refusal as an actionable drift finding');
-eq(topologyDiagnostic.reconcile, 'reconcile --card A1',
-  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE names the exact-card reconcile route');
+eq(topologyDiagnostic.reconcile,
+  "reconcile --card 'ES4a4 Dual projection and exact-card reconciliation (value-review completion)'",
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-EXACT-CARD-QUOTING preserves a spaced exact-card operand');
 eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malformedParentBefore,
   'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE leaves projection surfaces byte-stable');
 
@@ -1242,8 +1246,10 @@ const diagnosticFinding = projectionBoardDrift(
 );
 ok(/canonical epic roll-up refusal: epic slice A2 completion has no tracked deployment receipts/.test(diagnosticFinding.issue),
   'ES4-DRIFT-DIAGNOSTIC-THROW contains a receipt derivation refusal as an actionable drift finding');
-eq(diagnosticFinding.reconcile, 'reconcile --card A1',
+eq(diagnosticFinding.reconcile, "reconcile --card 'A1'",
   'ES4-DRIFT-DIAGNOSTIC-THROW names the exact-card reconcile route');
+eq(Object.keys(topologyDiagnostic).sort(), Object.keys(diagnosticFinding).sort(),
+  'ES4-CANONICAL-DIAGNOSTIC-SHAPE-PARITY keeps topology and roll-up refusals structurally identical');
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
   {
