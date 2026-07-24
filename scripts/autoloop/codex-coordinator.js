@@ -2607,55 +2607,72 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
         const state = loadState(ctx);
         const record = state.cards[card];
         if (!record && args.card) {
-          return reconcileLock(ctx, 'completion-projection', async () => {
-            const cardsRoot = deps.cardsRoot || CARDS_ROOT;
-            const cardPath = findCard(cardsRoot, card);
-            if (!cardPath) {
-              return { card, phase: null, ok: false, changed: false, error: 'exact-card reconciliation target is neither tracked nor a canonical slice' };
+          const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+          const cardPath = findCard(cardsRoot, card);
+          if (!cardPath) {
+            return { card, phase: null, ok: false, changed: false, error: 'exact-card reconciliation target is neither tracked nor a canonical slice' };
+          }
+          const cardRaw = fs.readFileSync(cardPath, 'utf8');
+          const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
+          if (scalarField(cardRaw, 'type') !== 'slice' || !epic
+            || delivery.normalizeStatus(scalarField(cardRaw, 'status')) !== 'completed') {
+            return { card, phase: null, ok: false, changed: false, error: 'untracked exact-card reconciliation is limited to completed canonical epic slices' };
+          }
+          const viaCandidate = Object.values(state.cards || {}).find((candidate) => {
+            if (!projectionMapping(candidate.phase) || !candidate.card_path) return false;
+            try {
+              const candidatePath = resolveCardPath(candidate.card_path, candidate.card, cardsRoot);
+              const candidateRaw = fs.readFileSync(candidatePath, 'utf8');
+              return scalarField(candidateRaw, 'type') === 'slice'
+                && normalizeCardLink(scalarField(candidateRaw, 'epic')) === epic;
+            } catch (_) {
+              return false;
             }
-            const cardRaw = fs.readFileSync(cardPath, 'utf8');
-            const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
-            if (scalarField(cardRaw, 'type') !== 'slice' || !epic
-              || delivery.normalizeStatus(scalarField(cardRaw, 'status')) !== 'completed') {
-              return { card, phase: null, ok: false, changed: false, error: 'untracked exact-card reconciliation is limited to completed canonical epic slices' };
+          });
+          if (!viaCandidate) {
+            return { card, epic, phase: null, ok: false, changed: false, error: 'legacy exact-card reconciliation requires one tracked canonical sibling' };
+          }
+          return reconcileLock(ctx, `gates-${slugify(viaCandidate.card)}`, async () => {
+            const lockedState = loadState(ctx);
+            const via = lockedState.cards[viaCandidate.card];
+            if (!via || !projectionMapping(via.phase) || !via.card_path) {
+              return { card, epic, via_card: viaCandidate.card, phase: null, ok: false, changed: false, error: 'tracked canonical sibling changed before legacy reconciliation acquired its gate' };
             }
-            const via = Object.values(state.cards || {}).find((candidate) => {
-              if (!projectionMapping(candidate.phase) || !candidate.card_path) return false;
-              try {
-                const candidatePath = resolveCardPath(candidate.card_path, candidate.card, cardsRoot);
-                const candidateRaw = fs.readFileSync(candidatePath, 'utf8');
-                return scalarField(candidateRaw, 'type') === 'slice'
-                  && normalizeCardLink(scalarField(candidateRaw, 'epic')) === epic;
-              } catch (_) {
-                return false;
+            try {
+              const lockedViaPath = resolveCardPath(via.card_path, via.card, cardsRoot);
+              const lockedViaRaw = fs.readFileSync(lockedViaPath, 'utf8');
+              if (scalarField(lockedViaRaw, 'type') !== 'slice'
+                || normalizeCardLink(scalarField(lockedViaRaw, 'epic')) !== epic) {
+                return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'tracked reconciliation sibling no longer belongs to the target canonical epic' };
               }
-            });
-            if (!via) {
-              return { card, epic, phase: null, ok: false, changed: false, error: 'legacy exact-card reconciliation requires one tracked canonical sibling' };
+            } catch (err) {
+              return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: `tracked reconciliation sibling is unreadable: ${err.message}` };
             }
-            const priorError = via.projection_error || null;
-            const priorFailedAt = via.projection_failed_at || null;
-            const projected = project(via.card_path, boardPath, via.card, via.phase, {
-              now, record: via, state, cardsRoot,
-            });
-            const findings = (projected.projection_findings || []).filter((finding) => finding.card === card);
-            if (!findings.length) {
-              return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
-            }
-            const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at || projected.changed);
-            if (stateChanged) {
-              delete via.projection_error;
-              delete via.projection_failed_at;
-              via.projection_reconciled_at = now();
-              persist(ctx, state, via);
-            }
-            return {
-              card, epic, via_card: via.card, phase: null, ok: true,
-              changed: Boolean(projected.changed || stateChanged),
-              projection_changed: Boolean(projected.changed), state_changed: stateChanged,
-              projection_findings: findings,
-            };
-          }, { card });
+            return reconcileLock(ctx, 'completion-projection', async () => {
+              const priorError = via.projection_error || null;
+              const priorFailedAt = via.projection_failed_at || null;
+              const projected = project(via.card_path, boardPath, via.card, via.phase, {
+                now, record: via, state: lockedState, cardsRoot,
+              });
+              const findings = (projected.projection_findings || []).filter((finding) => finding.card === card);
+              if (!findings.length) {
+                return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
+              }
+              const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at || projected.changed);
+              if (stateChanged) {
+                delete via.projection_error;
+                delete via.projection_failed_at;
+                via.projection_reconciled_at = now();
+                persist(ctx, lockedState, via);
+              }
+              return {
+                card, epic, via_card: via.card, phase: null, ok: true,
+                changed: Boolean(projected.changed || stateChanged),
+                projection_changed: Boolean(projected.changed), state_changed: stateChanged,
+                projection_findings: findings,
+              };
+            }, { card: via.card });
+          }, { card: viaCandidate.card });
         }
         if (!record) return { card, phase: null, ok: false, changed: false, error: 'tracked record disappeared during reconciliation' };
         if (!projectionMapping(record.phase)) {

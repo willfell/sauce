@@ -1640,6 +1640,49 @@ const diagnosticReconcileReplay = await commandReconcile(
 ok(diagnosticReconcileReplay.no_op
   && diagnosticReconcileReplay.results[0].projection_findings[0].reconcile === "reconcile --card 'A2'",
   'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE exact replay is a byte-stable no-op with the same bounded finding');
+
+const viaGateRace = makeEpicProjectionFixture('legacy-via-gate-race');
+const viaGateRaceSibling = path.join(path.dirname(viaGateRace.cardPath), 'A2.md');
+fs.writeFileSync(
+  viaGateRaceSibling,
+  fs.readFileSync(viaGateRaceSibling, 'utf8').replace('status: planning', 'status: completed'),
+);
+let viaGateRaceState = viaGateRace.state;
+let viaGateTransitionSnapshot = null;
+const viaGateLocks = [];
+const viaGateNow = '2026-07-24T21:30:00.000Z';
+const viaGateRaceResult = await commandReconcile(
+  { root: viaGateRace.root },
+  { card: 'A2' },
+  {
+    readState: () => viaGateRaceState,
+    writeState: (_ctx, next) => { viaGateRaceState = next; },
+    withLock: async (_ctx, name, fn) => {
+      viaGateLocks.push(name);
+      if (name === 'gates-a1' && !viaGateTransitionSnapshot) {
+        viaGateRaceState = JSON.parse(JSON.stringify(viaGateRaceState));
+        Object.assign(viaGateRaceState.cards.A1, {
+          phase: 'deployed',
+          required_version: '0.257.0',
+          vault_receipts: successfulVaultReceipts('0.257.0'),
+          projection_reconciled_at: viaGateNow,
+        });
+        viaGateTransitionSnapshot = JSON.stringify(viaGateRaceState.cards.A1);
+      }
+      return fn();
+    },
+    boardPath: viaGateRace.parentBoardPath,
+    cardsRoot: viaGateRace.cardsRoot,
+    now: () => viaGateNow,
+  },
+);
+eq(viaGateLocks, ['gates-a2', 'gates-a1', 'completion-projection'],
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes the legacy route through the tracked sibling gate');
+eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
+ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
+
 const containedStatus = commandStatus(
   { root: diagnosticProjection.root },
   {
