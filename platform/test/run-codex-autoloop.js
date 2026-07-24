@@ -1104,6 +1104,21 @@ eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malforme
   'ES4-CANONICAL-SLICE-FAILOPEN leaves the parent board byte-stable after sibling refusal');
 eq(fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8'), malformedAtlasBefore,
   'ES4-CANONICAL-SLICE-FAILOPEN leaves the atlas byte-stable after sibling refusal');
+const topologyDiagnostic = projectionBoardDrift(
+  fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'),
+  malformedSiblingProjection.state.cards.A1,
+  {
+    boardPath: malformedSiblingProjection.parentBoardPath,
+    cardsRoot: malformedSiblingProjection.cardsRoot,
+    state: malformedSiblingProjection.state,
+  },
+);
+ok(/canonical epic projection is unreadable:/.test(topologyDiagnostic.issue),
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE contains a topology refusal as an actionable drift finding');
+eq(topologyDiagnostic.reconcile, 'reconcile --card A1',
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE names the exact-card reconcile route');
+eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malformedParentBefore,
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE leaves projection surfaces byte-stable');
 
 const crossPrefixProjection = makeEpicProjectionFixture('cross-prefix-sibling');
 const crossPrefixSiblingPath = path.join(path.dirname(crossPrefixProjection.cardPath), 'A2.md');

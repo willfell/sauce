@@ -1211,7 +1211,12 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
       if (epicSurface) projectedBoard = epicSurface.boardRaw;
     }
   } catch (err) {
-    return { card: record.card, phase: record.phase, issue: `canonical epic projection is unreadable: ${err.message}` };
+    return {
+      card: record.card,
+      phase: record.phase,
+      issue: `canonical epic projection is unreadable: ${err.message}`,
+      reconcile: `reconcile --card ${record.card}`,
+    };
   }
   const location = boardCardLocation(projectedBoard, record.card);
   if (!location) return { card: record.card, phase: record.phase, issue: 'card is missing from board' };
