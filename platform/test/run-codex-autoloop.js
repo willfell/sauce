@@ -1905,24 +1905,91 @@ const shippingModuleLoaderLines = [
   "const shippingSlugify = shippingModule.exports.__fixtureSlugify;",
   "const shippingWithCardGateLock = (ctx, card, fn) => shippingWithLock(ctx, 'gates-' + shippingSlugify(card), fn, { card });",
 ];
-const waitForFixturePath = async (targetPath) => {
-  const deadline = Date.now() + 5000;
-  while (!fs.existsSync(targetPath)) {
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${targetPath}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+const fixtureChildPids = new Set();
+const reapedFixtureChildPids = new Set();
+const spawnFixtureChild = (script) => {
+  const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  fixtureChildPids.add(child.pid);
+  return child;
 };
-const collectFixtureChild = (child) => new Promise((resolve, reject) => {
+const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 } = {}) => new Promise((resolve, reject) => {
   let stdout = '';
   let stderr = '';
+  let timedOut = false;
+  let forceKillTimer = null;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+    forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 100);
+  }, timeoutMs);
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   child.on('error', reject);
   child.on('close', (code) => {
-    if (code === 0) resolve(stdout);
-    else reject(new Error(`fixture child exited ${code}: ${stderr}`));
+    clearTimeout(timer);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    reapedFixtureChildPids.add(child.pid);
+    if (timedOut) reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    else if (code === 0) resolve(stdout);
+    else reject(new Error(`${label} exited ${code}: ${stderr}`));
   });
 });
+const runFixtureProcess = async (script, options = {}) => {
+  const child = spawnFixtureChild(script);
+  return collectFixtureChild(child, options);
+};
+const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000) => {
+  const readiness = (async () => {
+    const deadline = Date.now() + timeoutMs;
+    while (!fs.existsSync(targetPath)) {
+      if (Date.now() >= deadline) throw new Error(`fixture readiness timed out after ${timeoutMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  })();
+  await Promise.race([
+    readiness,
+    childResult.then(() => { throw new Error('fixture holder exited before readiness'); }),
+  ]);
+};
+const withFixtureHolder = async ({
+  holderScript, readyPath, releasePath, probe, readinessMs = 5000, holderMs = 5000, label,
+}) => {
+  const holder = spawnFixtureChild(holderScript);
+  const holderResult = collectFixtureChild(holder, { label: `${label} holder`, timeoutMs: holderMs });
+  let result;
+  let primaryError = null;
+  let holderOutput = '';
+  try {
+    await waitForFixturePath(readyPath, holderResult, readinessMs);
+    result = await probe();
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    try {
+      fs.mkdirSync(path.dirname(releasePath), { recursive: true });
+      fs.writeFileSync(releasePath, 'release');
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+    try {
+      holderOutput = await holderResult;
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+  }
+  if (primaryError) throw primaryError;
+  return { result, holderOutput, pid: holder.pid };
+};
+const newCoordinatorHolderScript = (ctx, readyPath, releasePath, writeReady = true) => [
+  "const fs = require('fs');",
+  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `const ctx = ${JSON.stringify(ctx)};`,
+  `withCardGateLock(ctx, 'A1', async () => {`,
+  ...(writeReady ? [`  fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');`] : []),
+  `  while (!fs.existsSync(${JSON.stringify(releasePath)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
+  "  return 'released';",
+  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
+].join('\n');
 
 const liveOldHeldDir = path.join(tmp, 'es4-gate-live-old-held');
 const liveOldReady = path.join(liveOldHeldDir, 'old-ready');
@@ -1933,7 +2000,8 @@ const liveOldCtx = {
   stateDir: path.join(liveOldHeldDir, 'state'),
   statePath: path.join(liveOldHeldDir, 'state', 'state.json'),
 };
-const liveOldHolder = spawn(process.execPath, ['-e', [
+const liveOldResult = await withFixtureHolder({
+  holderScript: [
   ...shippingModuleLoaderLines,
   `const ctx = ${JSON.stringify(liveOldCtx)};`,
   `shippingWithCardGateLock(ctx, 'A1', async () => {`,
@@ -1941,20 +2009,22 @@ const liveOldHolder = spawn(process.execPath, ['-e', [
   `  while (!fs.existsSync(${JSON.stringify(liveOldRelease)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
   "  return 'released';",
   "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
-].join('\n')], { stdio: ['ignore', 'pipe', 'pipe'] });
-const liveOldHolderResult = collectFixtureChild(liveOldHolder);
-await waitForFixturePath(liveOldReady);
-let newBlockedByLiveOld = '';
-try {
-  await withCardGateLock(liveOldCtx, 'A1', async () => 'incorrectly-entered');
-} catch (error) {
-  newBlockedByLiveOld = error.code || error.message;
-} finally {
-  fs.writeFileSync(liveOldRelease, 'release');
-}
-eq(newBlockedByLiveOld, 'LOCKED',
+  ].join('\n'),
+  readyPath: liveOldReady,
+  releasePath: liveOldRelease,
+  label: 'live shipping-old',
+  probe: async () => {
+    try {
+      await withCardGateLock(liveOldCtx, 'A1', async () => 'incorrectly-entered');
+      return 'incorrectly-entered';
+    } catch (error) {
+      return error.code || error.message;
+    }
+  },
+});
+eq(liveOldResult.result, 'LOCKED',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks the new coordinator behind a live installed shipping process');
-eq(await liveOldHolderResult, 'released',
+eq(liveOldResult.holderOutput, 'released',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live shipping process cleanly after the new-side exclusion proof');
 
 const liveNewHeldDir = path.join(tmp, 'es4-gate-live-new-held');
@@ -1966,30 +2036,130 @@ const liveNewCtx = {
   stateDir: path.join(liveNewHeldDir, 'state'),
   statePath: path.join(liveNewHeldDir, 'state', 'state.json'),
 };
-const liveNewHolder = spawn(process.execPath, ['-e', [
-  "const fs = require('fs');",
-  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
-  `const ctx = ${JSON.stringify(liveNewCtx)};`,
-  `withCardGateLock(ctx, 'A1', async () => {`,
-  `  fs.writeFileSync(${JSON.stringify(liveNewReady)}, 'ready');`,
-  `  while (!fs.existsSync(${JSON.stringify(liveNewRelease)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
-  "  return 'released';",
-  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
-].join('\n')], { stdio: ['ignore', 'pipe', 'pipe'] });
-const liveNewHolderResult = collectFixtureChild(liveNewHolder);
-await waitForFixturePath(liveNewReady);
-const liveShippingProbe = execFileSync(process.execPath, ['-e', [
-  ...shippingModuleLoaderLines,
-  `const ctx = ${JSON.stringify(liveNewCtx)};`,
-  "shippingWithCardGateLock(ctx, 'A1', async () => 'incorrectly-entered')",
-  ".then((value) => process.stdout.write(value))",
-  ".catch((error) => process.stdout.write(error.code || error.message));",
-].join('\n')], { encoding: 'utf8' });
-fs.writeFileSync(liveNewRelease, 'release');
-eq(liveShippingProbe, 'LOCKED',
+const liveNewResult = await withFixtureHolder({
+  holderScript: newCoordinatorHolderScript(liveNewCtx, liveNewReady, liveNewRelease),
+  readyPath: liveNewReady,
+  releasePath: liveNewRelease,
+  label: 'live new',
+  probe: () => runFixtureProcess([
+    ...shippingModuleLoaderLines,
+    `const ctx = ${JSON.stringify(liveNewCtx)};`,
+    "shippingWithCardGateLock(ctx, 'A1', async () => 'incorrectly-entered')",
+    ".then((value) => process.stdout.write(value))",
+    ".catch((error) => process.stdout.write(error.code || error.message));",
+  ].join('\n'), { label: 'live shipping probe', timeoutMs: 2000 }),
+});
+eq(liveNewResult.result, 'LOCKED',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh installed shipping process behind the live new coordinator');
-eq(await liveNewHolderResult, 'released',
+eq(liveNewResult.holderOutput, 'released',
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live new process cleanly after the old-side exclusion proof');
+
+const lifecycleFaults = [
+  {
+    name: 'compilation',
+    script: 'this is not valid JavaScript {',
+    pattern: /exited [^:]+:/,
+  },
+  {
+    name: 'resolution',
+    script: "require('es4-live-migration-definitely-missing');",
+    pattern: /Cannot find module/,
+  },
+  {
+    name: 'execution',
+    script: "throw new Error('probe-execution-failure');",
+    pattern: /probe-execution-failure/,
+  },
+  {
+    name: 'timeout',
+    script: 'setInterval(() => {}, 1000);',
+    pattern: /timed out/,
+    timeoutMs: 50,
+  },
+];
+for (const fault of lifecycleFaults) {
+  const faultDir = path.join(tmp, `es4-live-migration-${fault.name}`);
+  const faultReady = path.join(faultDir, 'ready');
+  const faultRelease = path.join(faultDir, 'release');
+  const faultCtx = {
+    root: tmp,
+    stateDir: path.join(faultDir, 'state'),
+    statePath: path.join(faultDir, 'state', 'state.json'),
+  };
+  let finding = '';
+  try {
+    await withFixtureHolder({
+      holderScript: newCoordinatorHolderScript(faultCtx, faultReady, faultRelease),
+      readyPath: faultReady,
+      releasePath: faultRelease,
+      label: `${fault.name} failure`,
+      probe: () => runFixtureProcess(fault.script, {
+        label: `${fault.name} probe`,
+        timeoutMs: fault.timeoutMs || 1000,
+      }),
+    });
+  } catch (error) {
+    finding = error.message;
+  }
+  ok(fault.pattern.test(finding)
+      && !fs.existsSync(path.join(faultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+      && !fs.existsSync(path.join(faultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+  `ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK ${fault.name} failure releases its peer, reaps children, and removes both lock namespaces`);
+}
+
+const readinessFaultDir = path.join(tmp, 'es4-live-migration-readiness');
+const readinessFaultReady = path.join(readinessFaultDir, 'never-ready');
+const readinessFaultRelease = path.join(readinessFaultDir, 'release');
+const readinessFaultCtx = {
+  root: tmp,
+  stateDir: path.join(readinessFaultDir, 'state'),
+  statePath: path.join(readinessFaultDir, 'state', 'state.json'),
+};
+let readinessFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(readinessFaultCtx, readinessFaultReady, readinessFaultRelease, false),
+    readyPath: readinessFaultReady,
+    releasePath: readinessFaultRelease,
+    readinessMs: 50,
+    label: 'readiness failure',
+    probe: async () => 'unreachable',
+  });
+} catch (error) {
+  readinessFinding = error.message;
+}
+ok(/readiness timed out/.test(readinessFinding)
+    && !fs.existsSync(path.join(readinessFaultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(readinessFaultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK readiness timeout releases and reaps the holder before continuing');
+
+const assertionFaultDir = path.join(tmp, 'es4-live-migration-assertion');
+const assertionFaultReady = path.join(assertionFaultDir, 'ready');
+const assertionFaultRelease = path.join(assertionFaultDir, 'release');
+const assertionFaultCtx = {
+  root: tmp,
+  stateDir: path.join(assertionFaultDir, 'state'),
+  statePath: path.join(assertionFaultDir, 'state', 'state.json'),
+};
+let assertionFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(assertionFaultCtx, assertionFaultReady, assertionFaultRelease),
+    readyPath: assertionFaultReady,
+    releasePath: assertionFaultRelease,
+    label: 'assertion failure',
+    probe: async () => { throw new Error('probe-assertion-failure'); },
+  });
+} catch (error) {
+  assertionFinding = error.message;
+}
+ok(/probe-assertion-failure/.test(assertionFinding)
+    && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK assertion failure releases and reaps the holder before propagating');
+ok([...fixtureChildPids].every((pid) => reapedFixtureChildPids.has(pid) && (() => {
+  try { process.kill(pid, 0); return false; } catch (_) { return true; }
+})()), 'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK every holder and probe PID reaches close and is no longer alive');
 
 const exceptionReleaseDir = path.join(tmp, 'es4-gate-exception-release');
 const exceptionReleaseCtx = {
