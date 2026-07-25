@@ -6,6 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { EventEmitter } = require('events');
+const { PassThrough } = require('stream');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
@@ -1741,39 +1743,155 @@ eq(collisionReconcile.action, 'reconciled',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION assigns distinct gate identities to exact legacy and tracked sibling names');
 eq(cardGateLockName('Lock Alias'), cardGateLockName('Lock Alias'),
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identity is deterministic across independent calls');
-const fixtureChildPids = new Set();
-const reapedFixtureChildPids = new Set();
-const spawnFixtureChild = (script) => {
-  const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
-  fixtureChildPids.add(child.pid);
+const fixtureChildren = new Set();
+const closedFixtureChildren = new Set();
+const trackFixtureChild = (child) => {
+  fixtureChildren.add(child);
   return child;
+};
+const spawnFixtureChild = (script) => {
+  return trackFixtureChild(spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] }));
 };
 const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 } = {}) => new Promise((resolve, reject) => {
   let stdout = '';
   let stderr = '';
   let timedOut = false;
+  let primaryError = null;
   let forceKillTimer = null;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGTERM');
-    forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 100);
-  }, timeoutMs);
-  child.stdout.on('data', (chunk) => { stdout += chunk; });
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.on('error', reject);
-  child.on('close', (code) => {
+  let terminalTimer = null;
+  let settled = false;
+  const clearLifecycleTimers = () => {
     clearTimeout(timer);
     if (forceKillTimer) clearTimeout(forceKillTimer);
-    reapedFixtureChildPids.add(child.pid);
-    if (timedOut) reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    else if (code === 0) resolve(stdout);
-    else reject(new Error(`${label} exited ${code}: ${stderr}`));
+    if (terminalTimer) clearTimeout(terminalTimer);
+  };
+  const settle = (error, value) => {
+    if (settled) return;
+    settled = true;
+    clearLifecycleTimers();
+    if (error) reject(error);
+    else resolve(value);
+  };
+  const attemptKill = (signal) => {
+    try {
+      child.kill(signal);
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    attemptKill('SIGTERM');
+    forceKillTimer = setTimeout(() => {
+      attemptKill('SIGKILL');
+      terminalTimer = setTimeout(() => {
+        const terminalError = new Error(`${label} failed closed without an exact-child close barrier after ${timeoutMs}ms`);
+        if (primaryError) terminalError.cause = primaryError;
+        settle(terminalError);
+      }, 250);
+    }, 100);
+  }, timeoutMs);
+  if (child.stdout && typeof child.stdout.on === 'function') {
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+  }
+  if (child.stderr && typeof child.stderr.on === 'function') {
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+  }
+  child.on('error', (error) => {
+    if (!primaryError) primaryError = error;
+  });
+  child.once('close', (code) => {
+    closedFixtureChildren.add(child);
+    if (primaryError) settle(primaryError);
+    else if (timedOut) settle(new Error(`${label} timed out after ${timeoutMs}ms`));
+    else if (code === 0) settle(null, stdout);
+    else settle(new Error(`${label} exited ${code}: ${stderr}`));
   });
 });
 const runFixtureProcess = async (script, options = {}) => {
   const child = spawnFixtureChild(script);
   return collectFixtureChild(child, options);
 };
+const makeFixtureChild = ({ pid = 4242, kill } = {}) => {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = kill || (() => true);
+  return trackFixtureChild(child);
+};
+
+const errorCloseOrder = [];
+const errorBeforeCloseChild = makeFixtureChild({ pid: 61001 });
+let errorBeforeCloseSettled = false;
+const errorBeforeCloseResult = collectFixtureChild(errorBeforeCloseChild, {
+  label: 'spawn error close barrier',
+  timeoutMs: 1000,
+}).catch((error) => {
+  errorCloseOrder.push('settled');
+  errorBeforeCloseSettled = true;
+  return error;
+});
+const exactSpawnError = new Error('fixture-spawn-error');
+errorBeforeCloseChild.emit('error', exactSpawnError);
+await new Promise((resolve) => setImmediate(resolve));
+ok(!errorBeforeCloseSettled,
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER ChildProcess error cannot settle before the exact child close event');
+errorCloseOrder.push('close');
+errorBeforeCloseChild.emit('close', -1);
+const observedSpawnError = await errorBeforeCloseResult;
+ok(observedSpawnError === exactSpawnError && errorCloseOrder.join('>') === 'close>settled'
+    && closedFixtureChildren.has(errorBeforeCloseChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER preserves the primary spawn error only after exact-child close');
+
+const missingExecutable = path.join(tmp, 'es4-missing-child-executable');
+const actualSpawnErrorChild = trackFixtureChild(spawn(missingExecutable, [], {
+  stdio: ['ignore', 'pipe', 'pipe'],
+}));
+const actualSpawnErrorFinding = await collectFixtureChild(actualSpawnErrorChild, {
+  label: 'actual spawn error close barrier',
+  timeoutMs: 1000,
+}).catch((error) => error);
+ok(actualSpawnErrorFinding.code === 'ENOENT' && closedFixtureChildren.has(actualSpawnErrorChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER real spawn ENOENT preserves its error through the later exact-child close');
+
+const killFalseSignals = [];
+let killFalseChild;
+killFalseChild = makeFixtureChild({
+  pid: 61002,
+  kill: (signal) => {
+    killFalseSignals.push(signal);
+    if (signal === 'SIGKILL') setImmediate(() => killFalseChild.emit('close', null));
+    return false;
+  },
+});
+const killFalseFinding = await collectFixtureChild(killFalseChild, {
+  label: 'kill false close barrier',
+  timeoutMs: 20,
+}).catch((error) => error);
+ok(/timed out/.test(killFalseFinding.message)
+    && killFalseSignals.join('>') === 'SIGTERM>SIGKILL'
+    && closedFixtureChildren.has(killFalseChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER kill returning false still escalates and awaits exact-child close');
+
+const killThrowSignals = [];
+let killThrowChild;
+killThrowChild = makeFixtureChild({
+  pid: 61003,
+  kill: (signal) => {
+    killThrowSignals.push(signal);
+    if (signal === 'SIGKILL') setImmediate(() => killThrowChild.emit('close', null));
+    throw new Error(`fixture-${signal}-throw`);
+  },
+});
+const killThrowFinding = await collectFixtureChild(killThrowChild, {
+  label: 'kill throw close barrier',
+  timeoutMs: 20,
+}).catch((error) => error);
+ok(killThrowFinding.message === 'fixture-SIGTERM-throw'
+    && killThrowSignals.join('>') === 'SIGTERM>SIGKILL'
+    && closedFixtureChildren.has(killThrowChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER kill exceptions preserve the first error while awaiting exact-child close');
 const coordinatorModulePath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
 const crossProcessGateName = await runFixtureProcess([
   `const { cardGateLockName } = require(${JSON.stringify(coordinatorModulePath)});`,
@@ -2174,9 +2292,43 @@ ok(/probe-assertion-failure/.test(assertionFinding)
     && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
     && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
 'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK assertion failure releases and reaps the holder before propagating');
-ok([...fixtureChildPids].every((pid) => reapedFixtureChildPids.has(pid) && (() => {
-  try { process.kill(pid, 0); return false; } catch (_) { return true; }
-})()), 'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK every holder and probe PID reaches close and is no longer alive');
+
+const reusedPidOriginal = makeFixtureChild({ pid: 62000 });
+const reusedPidOriginalResult = collectFixtureChild(reusedPidOriginal, {
+  label: 'reused PID original',
+  timeoutMs: 1000,
+});
+reusedPidOriginal.emit('close', 0);
+await reusedPidOriginalResult;
+const reusedPidReplacement = makeFixtureChild({ pid: 62000 });
+const reusedPidReplacementResult = collectFixtureChild(reusedPidReplacement, {
+  label: 'reused PID replacement',
+  timeoutMs: 1000,
+});
+ok(closedFixtureChildren.has(reusedPidOriginal) && !closedFixtureChildren.has(reusedPidReplacement),
+  'ES4-PID-REUSE-LIVENESS-ORACLE close authority binds the exact child object even when another child reuses its numeric PID');
+reusedPidReplacement.emit('close', 0);
+await reusedPidReplacementResult;
+
+const originalProcessKill = process.kill;
+let forbiddenPidProbeCalls = 0;
+process.kill = () => {
+  forbiddenPidProbeCalls += 1;
+  const error = new Error('fixture EPERM ambiguity');
+  error.code = 'EPERM';
+  throw error;
+};
+try {
+  ok([...fixtureChildren].every((child) => closedFixtureChildren.has(child)),
+    'ES4-PID-REUSE-LIVENESS-ORACLE every holder and probe is reaped by the close event of its exact captured child object');
+  eq(forbiddenPidProbeCalls, 0,
+    'ES4-PID-REUSE-LIVENESS-ORACLE EPERM and PID-reuse observations cannot participate in the reaping verdict');
+} finally {
+  process.kill = originalProcessKill;
+}
+const lifecycleHarnessSource = fs.readFileSync(__filename, 'utf8');
+ok(!/process\.kill\(pid,\s*0\)/.test(lifecycleHarnessSource),
+  'ES4-PID-REUSE-LIVENESS-ORACLE removes the numeric PID liveness inference from the migration harness');
 
 const exceptionReleaseDir = path.join(tmp, 'es4-gate-exception-release');
 const exceptionReleaseCtx = {
