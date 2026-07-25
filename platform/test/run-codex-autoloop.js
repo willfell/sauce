@@ -1785,9 +1785,13 @@ const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 
     forceKillTimer = setTimeout(() => {
       attemptKill('SIGKILL');
       terminalTimer = setTimeout(() => {
-        const terminalError = new Error(`${label} failed closed without an exact-child close barrier after ${timeoutMs}ms`);
-        if (primaryError) terminalError.cause = primaryError;
-        settle(terminalError);
+        if (primaryError) {
+          primaryError.close_barrier_observed = false;
+          primaryError.lifecycle_terminal = true;
+          settle(primaryError);
+        } else {
+          settle(new Error(`${label} failed closed without an exact-child close barrier after ${timeoutMs}ms`));
+        }
       }, 250);
     }, 100);
   }, timeoutMs);
@@ -1812,13 +1816,13 @@ const runFixtureProcess = async (script, options = {}) => {
   const child = spawnFixtureChild(script);
   return collectFixtureChild(child, options);
 };
-const makeFixtureChild = ({ pid = 4242, kill } = {}) => {
+const makeFixtureChild = ({ pid = 4242, kill, track = true } = {}) => {
   const child = new EventEmitter();
   child.pid = pid;
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = kill || (() => true);
-  return trackFixtureChild(child);
+  return track ? trackFixtureChild(child) : child;
 };
 
 const errorCloseOrder = [];
@@ -1892,6 +1896,32 @@ ok(killThrowFinding.message === 'fixture-SIGTERM-throw'
     && killThrowSignals.join('>') === 'SIGTERM>SIGKILL'
     && closedFixtureChildren.has(killThrowChild),
   'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER kill exceptions preserve the first error while awaiting exact-child close');
+
+const terminalNoCloseSignals = [];
+const terminalNoClosePrimary = new Error('fixture-terminal-primary-error');
+const terminalNoCloseChild = makeFixtureChild({
+  pid: 61004,
+  track: false,
+  kill: (signal) => {
+    terminalNoCloseSignals.push(signal);
+    return false;
+  },
+});
+const terminalNoCloseResult = collectFixtureChild(terminalNoCloseChild, {
+  label: 'terminal no-close barrier',
+  timeoutMs: 10,
+}).catch((error) => error);
+terminalNoCloseChild.emit('error', terminalNoClosePrimary);
+const terminalNoCloseFinding = await terminalNoCloseResult;
+const terminalSignalsAtSettlement = terminalNoCloseSignals.join('>');
+await new Promise((resolve) => setTimeout(resolve, 300));
+ok(terminalNoCloseFinding === terminalNoClosePrimary
+    && terminalNoCloseFinding.lifecycle_terminal === true
+    && terminalNoCloseFinding.close_barrier_observed === false
+    && terminalSignalsAtSettlement === 'SIGTERM>SIGKILL'
+    && terminalNoCloseSignals.join('>') === terminalSignalsAtSettlement
+    && !closedFixtureChildren.has(terminalNoCloseChild),
+  'ES4-TERMINAL-NO-CLOSE-PRIMARY-ERROR-PRECEDENCE returns the exact first error, reports no close authority, and clears every lifecycle timer');
 const coordinatorModulePath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
 const crossProcessGateName = await runFixtureProcess([
   `const { cardGateLockName } = require(${JSON.stringify(coordinatorModulePath)});`,
