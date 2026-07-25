@@ -1,6 +1,6 @@
 {
   "name": "sauce",
-  "version": "0.257.1",
+  "version": "0.259.0",
   "private": true,
   "description": "Sauce vault platform workshop (canonical source). bootstrap.js requires @inquirer/prompts; harnesses (run-helper-cases/run-renderer/run-bootstrap) stay zero-dep.",
   "engines": {
@@ -12,7 +12,7 @@
     "test:helpers": "node platform/test/run-helper-cases.js",
     "test:renderer": "node platform/test/run-renderer.js",
     "test:bootstrap": "node platform/test/run-bootstrap.js",
-    "test:registry": "node platform/test/run-registry.js",
+    "test:registry": "node platform/test/run-registry.js && node platform/test/run-audit-delivery.js",
     "test:nav-launcher": "node platform/test/run-nav-launcher.js",
     "test:migrate-layout": "node platform/test/run-migrate-layout.js",
     "test:seed": "node platform/test/run-seed.js",
@@ -61,6 +61,7 @@
     "test:project-dashboard": "node platform/test/run-project-dashboard.js",
     "test:project-dashboard-heal": "node platform/test/run-project-dashboard-heal.js",
     "test:epic-dashboard": "node platform/test/run-epic-dashboard.js",
+    "test:audit-delivery": "node platform/test/run-audit-delivery.js",
     "test:projects-hub": "node platform/test/run-projects-hub-cards.js",
     "test:chrome-bar": "node platform/test/run-chrome-bar.js",
     "test:sauce-core-css": "node platform/test/run-sauce-core-css.js && node platform/test/run-modal.js",
