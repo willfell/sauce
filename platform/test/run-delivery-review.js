@@ -15,7 +15,7 @@ function ok(label, cond, detail) {
   else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; }
 }
 
-// DR-HOST-1: the ratified NEVER-list ids are host lineage.
+// DR-HOST-1: the constitutional host-suspension ids are host lineage.
 for (const id of ['LH1', 'LH3b', 'A5 durable host, readiness', 'GA-OPS10a Consume', 'GA-OPS10b x', 'GA-OPS4b Transactional']) {
   ok(`DR-HOST-1 host lineage: ${id}`, T.isHostLineage(id) === true);
 }
@@ -24,25 +24,28 @@ for (const id of ['GA-C1a Core design', 'ES2 Epic dashboard', 'GA-OPS11a Fresh-v
   ok(`DR-HOST-2 not host: ${id}`, T.isHostLineage(id) === false);
 }
 
-// DR-STEM-1: stemOf strips the trailing supersession suffix from the id token.
-ok('DR-STEM-1 GA-C1a', T.stemOf('GA-C1a Core design tokens') === 'GA-C1');
-ok('DR-STEM-1 GA-C9a2', T.stemOf('GA-C9a2 Icons (supersedes GA-C9a)') === 'GA-C9');
-ok('DR-STEM-1 GA-OPS11a', T.stemOf('GA-OPS11a Fresh-vault bootstrap') === 'GA-OPS11');
+// ---------------------------------------------------------------------------
+// BGR-TRIAGE-NO-CORPSES — the superseded-corpse bucket is gone. The coordinator
+// owns corpse inference (reap/discard-at-mint); tombstones never appear in
+// status.tracked/parked, so the triage copy is dead code and must not exist.
+// ---------------------------------------------------------------------------
+ok('BGR-TRIAGE-NO-CORPSES dead inference deleted (stemOf)', T.stemOf === undefined);
+ok('BGR-TRIAGE-NO-CORPSES dead inference deleted (hasDeployedSupersedingSibling)',
+  T.hasDeployedSupersedingSibling === undefined);
 
-// DR-CORPSE-1: a parked card whose deployed sibling supersedes it → corpse.
-const tracked = [
-  { card: 'GA-C1a Core design tokens', status: 'parked' },
-  { card: 'GA-C1c Core design tokens (final value-review completion)', status: 'completed' },
-  { card: 'GA-C2a ChromeBar adoption', status: 'parked' },
-  { card: 'GA-C2b ChromeBar adoption (supersedes GA-C2a)', status: 'parked' },
-];
-ok('DR-CORPSE-1 C1a is a corpse (C1c deployed)',
-  T.hasDeployedSupersedingSibling({ card: 'GA-C1a Core design tokens' }, tracked) === true);
-ok('DR-CORPSE-2 C2a NOT a corpse (C2b also parked)',
-  T.hasDeployedSupersedingSibling({ card: 'GA-C2a ChromeBar adoption' }, tracked) === false);
+// A parked card that LOOKS like a pre-reap corpse (deployed superseding sibling
+// present in tracked) is never classified superseded-corpse — post-reap that
+// shape is a ledger bug, and the review surfaces it instead of hiding it.
+const corpseCtx = {
+  activeIds: new Set(),
+  tracked: [{ card: 'GA-C1c Core design tokens (final value-review completion)', status: 'completed' }],
+};
+ok('BGR-TRIAGE-NO-CORPSES corpse-shaped parked card is not silently buried',
+  T.classifyCard({ card: 'GA-C1a Core design tokens', status: 'parked',
+    resume_condition: 'Do not resume exhausted GA-C1a.' }, corpseCtx) !== 'superseded-corpse');
 
-// DR-CLASS-1: each card lands in its bucket. ctx carries the tracked list +
-// active id set (built by triage(); here passed directly).
+// DR-CLASS: parked cards classify only as genuine waits (concurrency/deploy)
+// or escalations; safety buckets (active/host/done) still win first.
 const ctx = {
   activeIds: new Set(['ES1 Delivery epic-slice contract']),
   tracked: [
@@ -53,23 +56,39 @@ function cls(card) { return T.classifyCard(card, ctx); }
 
 ok('DR-CLASS active', cls({ card: 'ES1 Delivery epic-slice contract', status: 'in_progress' }) === 'active');
 ok('DR-CLASS host', cls({ card: 'LH1 launchd job authority', status: 'parked' }) === 'suspended-evidence');
-ok('DR-CLASS direct-approval',
-  cls({ card: 'GA-OPS4b Transactional', status: 'parked',
-        resume_condition: 'Do not resume ... unless Will explicitly approves ...' }) === 'suspended-evidence');
-ok('DR-CLASS corpse',
-  cls({ card: 'GA-C1a Core design tokens', status: 'parked',
-        resume_condition: 'Do not resume exhausted GA-C1a.' }) === 'superseded-corpse');
-ok('DR-CLASS exhausted',
-  cls({ card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked',
-        resume_condition: 'unless Will completes the mandatory human value review after the lineage sole superseding child exhausted its post-repair correctness quorum' }) === 'exhausted-lineage');
-ok('DR-CLASS single-gate',
+ok('DR-CLASS concurrency wait',
+  cls({ card: 'GA-R5 dedup pass', status: 'parked',
+        resume_condition: 'auto-resume after the touch-zone concurrency conflict with GA-R2b2 clears' }) === 'concurrency-wait');
+ok('DR-CLASS deploy wait',
+  cls({ card: 'GA-M2 row actions', status: 'parked',
+        resume_condition: 'resume after GA-M1 deploys to the workshop via brew' }) === 'deploy-wait');
+ok('DR-CLASS escalation (outside loop authority)',
+  cls({ card: 'ES3 gate', status: 'parked',
+        resume_condition: 'needs a Director decision on publishing outside the perimeter' }) === 'escalation');
+ok('DR-CLASS escalation (legacy Will-gate text)',
   cls({ card: 'ES2 Epic dashboard', status: 'parked',
-        resume_condition: 'Resume only after Will explicitly authorizes adding package.json to ES2 touch zones' }) === 'single-gate-block');
+        resume_condition: 'Resume only after Will explicitly authorizes adding package.json to ES2 touch zones' }) === 'escalation');
+// Explicit-approval precedence: naming Will/the Director or approval phrasing
+// escalates even when the sentence uses deploy/release vocabulary — Will-gate
+// subjects overlap that vocabulary heavily, and burying them in noAction.waiting
+// would invert the fail-open property.
+ok('DR-CLASS escalation beats deploy vocabulary (Will ratifies)',
+  cls({ card: 'GA-OPS12b Release cadence', status: 'parked',
+        resume_condition: 'Resume only after Will ratifies the release-cadence amendment' }) === 'escalation');
+ok('DR-CLASS escalation beats deploy vocabulary (explicit approval)',
+  cls({ card: 'GA-P3 Deploy plan', status: 'parked',
+        resume_condition: 'Do not resume unless Will explicitly approves the deploy plan' }) === 'escalation');
+ok('DR-CLASS genuine deploy-wait survives the guard',
+  cls({ card: 'GA-M3 Receipts wait', status: 'parked',
+        resume_condition: 'Resume when v0.260.0 reaches brew and the three vault receipts land' }) === 'deploy-wait');
+ok('DR-CLASS auxiliary "will" does not trip the approval guard',
+  cls({ card: 'GA-R7 Zone wait', status: 'parked',
+        resume_condition: 'the coordinator will auto-resume after the touch-zone conflict clears' }) === 'concurrency-wait');
 ok('DR-CLASS deadend blocked',
   cls({ card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked',
         resume_condition: '' }) === 'coordinator-deadend');
 
-// DR-CLASS done: a completed, non-corpse card is finished work, not actionable.
+// DR-CLASS done: a completed card is finished work, not actionable.
 ok('DR-CLASS done', cls({ card: 'GA-S1a Wire and guard orphan harnesses', status: 'completed' }) === 'done');
 
 // DR-DONE-1: triage() counts completed cards in noAction.done and never in actionable.
@@ -83,7 +102,9 @@ const dr = T.triage(doneStatus, '');
 ok('DR-DONE-1 completed → noAction.done', dr.noAction.done === 1);
 ok('DR-DONE-1 completed not in actionable', dr.actionable.every((a) => a.card !== 'GA-S1a Wire and guard orphan harnesses'));
 
-// DR-TRIAGE-1: full status object → actionable queue + no-action summary.
+// DR-TRIAGE-1: post-reap status object → actionable queue + no-action summary.
+// No superseded corpses exist in parked[] (the coordinator reaps them); parked
+// cards are genuine waits or escalations only.
 const status = {
   active: [{ card: 'ES1 Delivery epic-slice contract', status: 'in_progress' }],
   // Real coordinator `tracked` includes every projection-mapped card, and the
@@ -93,28 +114,33 @@ const status = {
     { card: 'ES1 Delivery epic-slice contract', status: 'in_progress' },
     { card: 'LH1 launchd job authority', status: 'parked' },
     { card: 'GA-C1c Core design tokens (final value-review completion)', status: 'completed' },
-    { card: 'GA-C1a Core design tokens', status: 'parked' },
-    { card: 'ES2 Epic dashboard', status: 'parked' },
-    { card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked' },
+    { card: 'GA-R5 dedup pass', status: 'parked' },
+    { card: 'GA-M2 row actions', status: 'parked' },
+    { card: 'ES3 gate', status: 'parked' },
+    { card: 'GA-OPS11a2 Fresh-vault bootstrap', status: 'blocked' },
   ],
   parked: [
     { card: 'LH1 launchd job authority', status: 'parked', resume_condition: 'do not resume host' },
-    { card: 'GA-C1a Core design tokens', status: 'parked', resume_condition: 'exhausted GA-C1a' },
-    { card: 'ES2 Epic dashboard', status: 'parked',
-      resume_condition: 'Resume only after Will explicitly authorizes adding package.json to ES2 touch zones' },
-    { card: 'GA-C2b ChromeBar (supersedes GA-C2a)', status: 'parked',
-      resume_condition: 'Will completes the mandatory human value review after the lineage exhausted its post-repair quorum' },
+    { card: 'GA-R5 dedup pass', status: 'parked',
+      resume_condition: 'auto-resume after the touch-zone concurrency conflict with GA-R2b2 clears' },
+    { card: 'GA-M2 row actions', status: 'parked',
+      resume_condition: 'resume after GA-M1 deploys to the workshop via brew' },
+    { card: 'ES3 gate', status: 'parked',
+      resume_condition: 'needs a Director decision on publishing outside the perimeter' },
   ],
   projection_problems: [],
 };
 const r = T.triage(status, '');
-ok('DR-TRIAGE actionable excludes host+corpse',
-  r.actionable.every((a) => a.bucket !== 'suspended-evidence' && a.bucket !== 'superseded-corpse'));
-ok('DR-TRIAGE single-gate ranked above exhausted',
-  r.actionable.findIndex((a) => a.bucket === 'single-gate-block') <
-  r.actionable.findIndex((a) => a.bucket === 'exhausted-lineage'));
-ok('DR-TRIAGE noAction counts frozen+superseded',
-  r.noAction.frozen === 1 && r.noAction.superseded === 1);
+ok('DR-TRIAGE actionable excludes host + waits',
+  r.actionable.every((a) => a.bucket !== 'suspended-evidence' && a.bucket !== 'concurrency-wait' && a.bucket !== 'deploy-wait'));
+ok('DR-TRIAGE noAction counts frozen/waiting/done/active',
+  r.noAction.frozen === 1 && r.noAction.waiting === 2 && r.noAction.done === 1 && r.noAction.active === 1);
+ok('DR-TRIAGE noAction has no superseded key', !('superseded' in r.noAction));
+ok('DR-TRIAGE deadend ranked above escalation',
+  r.actionable.findIndex((a) => a.bucket === 'coordinator-deadend') <
+  r.actionable.findIndex((a) => a.bucket === 'escalation'));
+ok('DR-TRIAGE escalation surfaced',
+  r.actionable.some((a) => a.card === 'ES3 gate' && a.bucket === 'escalation'));
 
 // DR-PROV-1: PROVISIONALLY ACCEPTED headings are surfaced from FID text.
 const fid = '## Foo — accepted 2026-07-20\ntext\n## Bar refresh — PROVISIONALLY ACCEPTED 2026-07-20\nmore\n';
