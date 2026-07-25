@@ -298,6 +298,49 @@ function missingEvidenceAndRefusals() {
   });
 }
 
+function supersedeGovernance() {
+  console.log('\n--- BGR fixtures: supersede finding-coverage + discard-at-mint ---');
+  tempCase((dir) => {
+    const successor = (extra = {}) => execution('SUP-1 Successor card', { supersedes: 'X Legacy card', carried_findings: ['F1', 'F2'], binding_fixtures: [{ name: 'replay F1 crash', description: 'binds finding F1 as a regression fixture' }, 'F2 guard stays enforced'], ...extra });
+
+    const uncovered = successor({ binding_fixtures: [{ name: 'replay F1 crash', description: 'binds finding F1 only' }] });
+    const refused = run(base(dir, { cards: [uncovered] }), true);
+    ok(!refused.ok && (refused.errors || []).some((error) => error.includes('supersede_coverage_missing') && /(^|[^A-Za-z0-9_])F2([^A-Za-z0-9_]|$)/.test(error)), 'BGR-INTAKE-SUPERSEDE-COVERAGE: uncovered carried finding refuses with machine-readable error naming F2');
+    ok((refused.errors || []).every((error) => !error.includes('supersede_coverage_missing') || !error.endsWith(': F1')), 'BGR-INTAKE-SUPERSEDE-COVERAGE: covered finding F1 is not reported uncovered');
+    ok(!fs.existsSync(path.join(dir, 'tasks', uncovered.title)) && !fs.readFileSync(path.join(dir, 'board.md'), 'utf8').includes(uncovered.title), 'BGR-INTAKE-SUPERSEDE-COVERAGE: refusal happens before any write');
+
+    const spec = base(dir, { cards: [successor()] });
+    const applied = run(spec, true);
+    ok(applied.ok && applied.applied === true, 'BGR-INTAKE-SUPERSEDE-DISCARDS: valid superseding spec applies');
+    eq(applied.post_apply_instructions, [{ discard: { card: 'X Legacy card', superseded_by: 'SUP-1 Successor card' } }], 'BGR-INTAKE-SUPERSEDE-DISCARDS: apply receipt instructs predecessor discard without touching coordinator state');
+    const raw = fs.readFileSync(findTaskFile(dir, 'SUP-1 Successor card') || path.join(dir, 'missing.md'), 'utf8');
+    ok(raw.includes('supersedes: "X Legacy card"') && raw.includes('carried_findings: ["F1","F2"]') && raw.includes('binding_fixtures:'), 'BGR-INTAKE-SUPERSEDE-DISCARDS: supersede metadata materializes on the card note');
+
+    const replay = run(spec, true);
+    ok(replay.ok && replay.no_op === true, 'BGR-INTAKE-SUPERSEDE-NOOP: literal replay of the applied superseding spec is a no_op');
+    const changed = run(base(dir, { cards: [successor({ carried_findings: ['F1'], binding_fixtures: ['replay F1 crash fixture'] })] }), true);
+    ok(changed.ok === false && changed.no_op !== true, 'BGR-INTAKE-SUPERSEDE-NOOP: changed carried_findings list is NOT a no_op');
+
+    const noFindings = successor({ title: 'SUP-2 No findings' });
+    delete noFindings.carried_findings;
+    const noFindingsResult = run(base(dir, { cards: [noFindings] }), false);
+    ok(!noFindingsResult.ok && (noFindingsResult.errors || []).some((error) => error.includes('supersede_missing_fields') && error.includes('carried_findings')), 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: supersedes without carried_findings is refused machine-readably');
+    const emptyFindingsResult = run(base(dir, { cards: [successor({ title: 'SUP-3 Empty findings', carried_findings: [] })] }), false);
+    ok(!emptyFindingsResult.ok && (emptyFindingsResult.errors || []).some((error) => error.includes('supersede_missing_fields') && error.includes('carried_findings')), 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: carried_findings: [] is refused (superseding with zero findings is a contradiction)');
+    const noFixtures = successor({ title: 'SUP-4 No fixtures' });
+    delete noFixtures.binding_fixtures;
+    const noFixturesResult = run(base(dir, { cards: [noFixtures] }), false);
+    ok(!noFixturesResult.ok && (noFixturesResult.errors || []).some((error) => error.includes('supersede_missing_fields') && error.includes('binding_fixtures')), 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: supersedes without binding_fixtures is refused machine-readably');
+    const emptyFixturesResult = run(base(dir, { cards: [successor({ title: 'SUP-5 Empty fixtures', binding_fixtures: [] })] }), false);
+    ok(!emptyFixturesResult.ok && (emptyFixturesResult.errors || []).some((error) => error.includes('supersede_missing_fields') && error.includes('binding_fixtures')), 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: binding_fixtures: [] is refused machine-readably');
+    const danglingFindings = execution('SUP-7 Findings without supersedes', { carried_findings: ['F1'] });
+    const danglingResult = run(base(dir, { cards: [danglingFindings] }), false);
+    ok(!danglingResult.ok && (danglingResult.errors || []).some((error) => error.includes('supersede_invalid')), 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: carried_findings without supersedes refuses with supersede_invalid');
+    const supersedingParent = { title: 'SUP-6 Parent supersede', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [], supersedes: 'X Legacy card' };
+    ok(!run(base(dir, { classification: 'parent_children', cards: [supersedingParent, execution('SUP-6a Child', { parent_title: supersedingParent.title, slice: 'SUP-6a' })] }), false).ok, 'BGR-INTAKE-SUPERSEDE-MISSING-FIELDS: a parent card cannot silently declare supersedes');
+  });
+}
+
 function tpStub(dir) {
   return { app: { vault: { adapter: {
     async exists(rel) { return fs.existsSync(path.join(dir, rel)); },
@@ -329,7 +372,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); await exactHeadMaterialization();
+  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

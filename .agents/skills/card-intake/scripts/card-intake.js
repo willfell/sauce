@@ -163,6 +163,40 @@ function artifactEvidence(markdown) {
     .map((match) => ({ path: match[1], line: Number(match[2]) }));
 }
 
+function bindingFixtureText(fixture) {
+  if (typeof fixture === 'string') return fixture;
+  if (fixture && typeof fixture === 'object' && !Array.isArray(fixture)) return [fixture.name, fixture.description].filter(Boolean).map(String).join(' ');
+  return null;
+}
+
+function fixtureCoversFinding(text, finding) {
+  return new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(finding)}([^A-Za-z0-9_]|$)`).test(text);
+}
+
+function validateSupersede(card, errors) {
+  if (typeof card.supersedes !== 'string' || !safeTitle(card.supersedes)) {
+    errors.push(`${card.title}: supersede_invalid: supersedes must be a safe card title, and carried_findings/binding_fixtures require supersedes`);
+    return;
+  }
+  const findings = Array.isArray(card.carried_findings) ? card.carried_findings : null;
+  const fixtures = Array.isArray(card.binding_fixtures) ? card.binding_fixtures : null;
+  if (!findings || !findings.length) errors.push(`${card.title}: supersede_missing_fields: carried_findings must be a non-empty array of finding names`);
+  if (!fixtures || !fixtures.length) errors.push(`${card.title}: supersede_missing_fields: binding_fixtures must be a non-empty array of fixture strings or {name, description}`);
+  if (!findings || !findings.length || !fixtures || !fixtures.length) return;
+  if (findings.some((finding) => typeof finding !== 'string' || !finding.trim())) {
+    errors.push(`${card.title}: supersede_invalid: carried_findings entries must be non-empty strings`);
+    return;
+  }
+  const texts = fixtures.map(bindingFixtureText);
+  if (texts.some((text) => text == null || !text.trim())) {
+    errors.push(`${card.title}: supersede_invalid: binding_fixtures entries must be non-empty strings or {name, description}`);
+    return;
+  }
+  for (const finding of findings) {
+    if (!texts.some((text) => fixtureCoversFinding(text, finding))) errors.push(`${card.title}: supersede_coverage_missing: carried finding not covered by any binding fixture: ${finding}`);
+  }
+}
+
 function validateCard(card, spec, errors) {
   const role = card.role || 'execution';
   if (!safeTitle(card.title)) errors.push('every card needs a safe one-line title without path separators');
@@ -176,8 +210,10 @@ function validateCard(card, spec, errors) {
     for (const key of ['model_profile', 'touch_zones', 'deploy_subscriptions']) {
       if (card[key] != null) errors.push(`${card.title}: parent must remain non-claimable; remove ${key}`);
     }
+    if (card.supersedes != null || card.carried_findings != null || card.binding_fixtures != null) errors.push(`${card.title}: supersede_invalid: only execution cards may supersede`);
     return;
   }
+  if (card.supersedes != null || card.carried_findings != null || card.binding_fixtures != null) validateSupersede(card, errors);
   for (const field of ['touch_zones', 'acceptance_tests', 'applicable_guides', 'trap_warnings']) {
     if (!Array.isArray(card[field]) || !card[field].length) errors.push(`${card.title}: ${field} must be non-empty`);
   }
@@ -315,6 +351,9 @@ function renderCard(card, spec) {
     for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);
   }
   if (role === 'execution') lines.push(`evidence: ${JSON.stringify(contract.evidence)}`, `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`);
+  if (role === 'execution' && card.supersedes) {
+    lines.push(`supersedes: ${quoted(card.supersedes)}`, `carried_findings: ${JSON.stringify(card.carried_findings)}`, `binding_fixtures: ${JSON.stringify(card.binding_fixtures)}`);
+  }
   lines.push('tags:', '  - kanban-card', '  - project-card', '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
   for (const item of spec.evidence || []) lines.push(`- \`${item.path}:${item.line}\`${item.note ? ` — ${item.note}` : ''}`);
   if (spec.reproduction) lines.push(`- Reproduction: ${spec.reproduction}`);
@@ -464,7 +503,10 @@ function run(spec, apply = false) {
   const changed = planned.filter((item) => item.changed);
   if (apply) for (const item of changed) atomicWrite(item.path, item.content);
   const finalBoard = apply && fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : nextBoard;
-  return { ok: true, applied: apply, no_op: changed.length === 0, plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(spec)).digest('hex'), changed_paths: changed.map((item) => item.path), ...posture(spec, validation, finalBoard) };
+  const discardInstructions = validation.cards
+    .filter((card) => (card.role || 'execution') === 'execution' && card.supersedes)
+    .map((card) => ({ discard: { card: card.supersedes, superseded_by: card.title } }));
+  return { ok: true, applied: apply, no_op: changed.length === 0, plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(spec)).digest('hex'), changed_paths: changed.map((item) => item.path), ...(discardInstructions.length ? { post_apply_instructions: discardInstructions } : {}), ...posture(spec, validation, finalBoard) };
 }
 
 module.exports = { validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath };
