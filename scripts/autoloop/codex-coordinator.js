@@ -42,7 +42,7 @@ const AMEND_CONTRACT_OPTIONS = new Set([
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
   'expected-batch-policy', 'desired-batch-policy',
 ]);
-const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
+const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled', 'discarded']);
 const RECOVER_DEPLOYED_PHASES = new Set([
   'feature_pr', 'feature_merged', 'release_pr', 'release_merged', 'tagged',
   'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'blocked', 'needs-inspection',
@@ -558,11 +558,21 @@ function successfulDeploymentReceipts(record) {
 
 function dependencySatisfied(dep, board, state, boardMd) {
   const record = state.cards[dep];
+  // A tombstoned dependency will never deploy; it must fail loudly and can
+  // never fall through to the Completed-checkbox fallback below.
+  if (record && record.phase === 'discarded') return false;
   if (record) return successfulDeploymentReceipts(record);
   const completed = boardMd == null
     ? new Set(board.Completed || [])
     : parseCheckedColumn(boardMd, 'Completed');
   return completed.has(dep);
+}
+
+function discardedDependencyProblem(dep, state) {
+  const record = state.cards && state.cards[dep];
+  if (!record || record.phase !== 'discarded') return null;
+  const successor = record.superseded_by ? ` (superseded by ${record.superseded_by})` : '';
+  return `depends on discarded card ${dep}${successor}`;
 }
 
 function normalizedPath(value) {
@@ -742,13 +752,16 @@ function selectClaimCandidate({
     if (errors.length) { skipped.push({ card, reason: errors.join('; ') }); continue; }
     // Keep the unmet set explicit so recovery diagnostics can name each gate.
     const unmet = [];
+    let discardedDependency = null;
     for (const dep of meta.dependencies) {
+      discardedDependency ||= discardedDependencyProblem(dep, state);
       if (!dependencySatisfied(dep, board, state, boardMd)) unmet.push(dep);
       else if (state.cards[dep] && !parseCheckedColumn(boardMd, 'Completed').has(dep)
         && !boardDrift.some((item) => item.card === dep)) {
         boardDrift.push({ card: dep, issue: 'deployed dependency is not checked in Completed' });
       }
     }
+    if (discardedDependency) { skipped.push({ card, reason: discardedDependency }); continue; }
     if (unmet.length) { skipped.push({ card, reason: `dependencies not deployed: ${unmet.join(', ')}` }); continue; }
     const eligibility = delivery.batchEligibility(meta.contract, {
       mode: meta.contractSource === 'historical' ? 'historical' : 'current',
@@ -920,6 +933,15 @@ function moveBoardCard(md, card, target, complete = false) {
   const header = lines.findIndex((line) => line.trim() === `## ${target}`);
   if (header < 0) throw new Error(`board column ${target} missing`);
   lines.splice(header + 1, 0, '', `- [${complete ? 'x' : ' '}] [[${card}]]`);
+  return lines.join('\n');
+}
+
+function removeBoardCard(md, card) {
+  const location = boardCardLocation(md, card);
+  // Absence is already-removed: the discard caller treats this as idempotent.
+  if (!location) return String(md);
+  const lines = String(md).split('\n');
+  lines.splice(location.line, 1);
   return lines.join('\n');
 }
 
@@ -2312,6 +2334,10 @@ async function commandResume(ctx, args, deps = {}) {
     if (sibling) return resumeRefused(record, `active sibling ${sibling.card} has parent ${normalizeCardLink(record.parent_card)}`);
     const conflict = conflictsWithActive({ touchZones: record.touch_zones || [] }, active);
     if (conflict) return resumeRefused(record, `touch-zone conflict with ${conflict.card}: ${conflict.zone}`);
+    const discardedDependency = record.dependencies
+      .map((dependency) => discardedDependencyProblem(normalizeCardLink(dependency), state))
+      .find(Boolean);
+    if (discardedDependency) return resumeRefused(record, discardedDependency);
     const boardMd = fs.readFileSync(boardPath, 'utf8');
     const unmet = record.dependencies.filter((dependency) => !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd));
     if (unmet.length) return resumeRefused(record, `dependencies not deployed: ${unmet.join(', ')}`, { unmet });
@@ -2351,6 +2377,181 @@ async function commandResume(ctx, args, deps = {}) {
       head_sha: headSha, origin_main_sha: originMainSha,
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
+    };
+  }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
+}
+
+function discardReplayMatches(record, reason, supersededBy, carriedFixtures) {
+  return record.discard_reason === reason
+    && (record.superseded_by || null) === supersededBy
+    && JSON.stringify(record.carried_fixtures || []) === JSON.stringify(carriedFixtures);
+}
+
+async function commandDiscard(ctx, args, deps = {}) {
+  // GA-OPS10 F2 precedent: the machine-readable contract is required before
+  // any read or write, so refusal here precedes every lock and state load.
+  if (args.json !== true) throw new Error('discard requires --json for a machine-readable receipt');
+  const card = String(args.card || '').trim();
+  const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
+  const supersededBy = args['superseded-by'] == null
+    ? null : (Array.isArray(args['superseded-by']) ? '' : String(args['superseded-by']).trim());
+  const carriedFixtures = args['carried-fixture'] == null
+    ? [] : (Array.isArray(args['carried-fixture']) ? [...args['carried-fixture']] : [args['carried-fixture']]);
+  if (!card) throw new Error('discard requires --card');
+  if (!reason) throw new Error('discard requires a non-empty --reason');
+  if (supersededBy === '') throw new Error('discard requires --superseded-by to be one exact card name when present');
+  if (carriedFixtures.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new Error('--carried-fixture values must be non-empty strings');
+  }
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const run = deps.sh || sh;
+  const worktreeExists = deps.worktreeExists || fs.existsSync;
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const writeText = deps.writeText || atomicWriteText;
+  const now = deps.now || (() => new Date().toISOString());
+  return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[card];
+    if (record && record.phase === 'discarded') {
+      if (discardReplayMatches(record, reason, supersededBy, carriedFixtures)) {
+        return {
+          action: 'discarded', card, phase: 'discarded', no_op: true, tracked: true,
+          tombstone: {
+            discarded_at: record.discarded_at || null, discard_reason: record.discard_reason || null,
+            superseded_by: record.superseded_by || null, final_head: record.final_head || null,
+            carried_fixtures: record.carried_fixtures || [],
+          },
+        };
+      }
+      throw new Error(`card ${card} is already discarded with different operands; replay must be literal`);
+    }
+    if (record && record.phase !== 'parked' && !['blocked', 'failed', 'cancelled'].includes(record.phase)) {
+      throw new Error(`discard refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${card} is ${record.phase}`);
+    }
+    const cardPath = resolveCardPath(record ? record.card_path : null, card, cardsRoot);
+    const noteExists = Boolean(cardPath && fs.existsSync(cardPath));
+    let cardRaw = '';
+    let epicSurface = null;
+    let epicSurfaceError = null;
+    if (noteExists) {
+      cardRaw = fs.readFileSync(cardPath, 'utf8');
+      // ES4a canonicalization: refuse to unlink anything but one regular
+      // non-symlink file physically inside the project tasks root.
+      const entry = fs.lstatSync(cardPath);
+      if (entry.isSymbolicLink() || !entry.isFile()) {
+        throw new Error(`discard target note for ${card} must be one regular non-symlink file`);
+      }
+      physicalDescendant(cardsRoot, cardPath, `discard target note ${card}`);
+      try {
+        epicSurface = canonicalEpicProjection(cardRaw, cardPath, boardPath, cardsRoot, { state, currentCard: card });
+      } catch (err) { epicSurfaceError = err.message; }
+    }
+    const targetBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
+    let boardRaw;
+    try { boardRaw = fs.readFileSync(targetBoardPath, 'utf8'); }
+    catch (err) { throw new Error(`discard target board is unreadable: ${err.message}`); }
+    const boardLine = boardCardLocation(boardRaw, card);
+    if (!record && !noteExists && !boardLine) {
+      throw new Error(`discard requires a tracked record, card note, or board line for ${card}; none exist`);
+    }
+
+    // Ledger first: the tombstone is authoritative before any projection removal.
+    const preservedHead = record && record.gate_receipt && record.gate_receipt.head_sha;
+    const tombstone = {
+      discarded_at: now(), discard_reason: reason, superseded_by: supersededBy,
+      // A tombstone's final_head must be canonical: exactly one 40-hex SHA or null.
+      final_head: typeof preservedHead === 'string' && EXACT_SHA.test(preservedHead) ? preservedHead : null,
+      carried_fixtures: carriedFixtures,
+    };
+    const target = record || { card, card_path: noteExists ? cardPath : null };
+    target.phase = 'discarded';
+    Object.assign(target, tombstone);
+    state.cards[card] = target;
+    persist(ctx, state, target);
+
+    const boardNext = removeBoardCard(boardRaw, card);
+    const boardChanged = boardNext !== boardRaw;
+    if (boardChanged) writeText(targetBoardPath, boardNext);
+    let noteDeleted = false;
+    if (noteExists) {
+      fs.unlinkSync(cardPath);
+      noteDeleted = true;
+    }
+    let epicReceipt = null;
+    if (epicSurface) {
+      try {
+        epicSurface.boardRaw = boardNext;
+        const lifecycle = deriveEpicProjection(epicSurface, null, null);
+        const epicMapping = epicProjectionMapping(lifecycle.state);
+        if (!epicMapping) throw new Error(`unsupported derived epic state ${lifecycle.state}`);
+        const parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
+        const atlasNext = patchFrontmatter(epicSurface.atlasRaw, { status: lifecycle.state, posture: lifecycle.posture });
+        if (parentNext !== epicSurface.parentRaw) writeText(boardPath, parentNext);
+        if (atlasNext !== epicSurface.atlasRaw) writeText(epicSurface.atlasPath, atlasNext);
+        epicReceipt = {
+          epic: epicSurface.epic, state: lifecycle.state, posture: lifecycle.posture,
+          findings: lifecycle.findings,
+        };
+      } catch (err) {
+        target.projection_error = err.message;
+        target.projection_failed_at = now();
+        persist(ctx, state, target);
+        epicReceipt = { epic: epicSurface.epic, error: err.message, reconcile: reconcileRoute(card) };
+      }
+    }
+
+    let worktreeRemoved = false;
+    let worktreeError = null;
+    if (record && record.worktree && worktreeExists(record.worktree)) {
+      try {
+        run('git', ['worktree', 'remove', '--force', record.worktree], { cwd: ctx.root, stdio: 'pipe' });
+        worktreeRemoved = true;
+      } catch (err) { worktreeError = err.message; }
+    }
+    let branchReceipt = null;
+    if (record && record.branch) {
+      if (record.feature_pr != null) {
+        branchReceipt = {
+          branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
+          reason: `record has feature PR #${record.feature_pr} recorded; branch deletion not verified safe`,
+        };
+      } else {
+        try {
+          const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
+          if (String(listed).split('\n').some((line) => line.trim() === `branch refs/heads/${record.branch}`)) {
+            branchReceipt = {
+              branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
+              reason: 'branch is checked out in a worktree',
+            };
+          }
+        } catch (err) {
+          branchReceipt = {
+            branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
+            reason: `could not inspect worktree checkouts: ${err.message}`,
+          };
+        }
+        if (!branchReceipt) {
+          try {
+            run('git', ['branch', '-D', record.branch], { cwd: ctx.root, stdio: 'pipe' });
+            branchReceipt = { branch: record.branch, deleted: true };
+          } catch (err) {
+            branchReceipt = { branch: record.branch, deleted: false, reason: `branch deletion failed: ${err.message}` };
+          }
+        }
+      }
+    }
+    return {
+      action: 'discarded', card, phase: 'discarded', no_op: false,
+      tracked: Boolean(record), tombstone,
+      board_path: targetBoardPath, board_line_removed: boardChanged, note_deleted: noteDeleted,
+      worktree_removed: worktreeRemoved,
+      ...(worktreeError ? { worktree_error: worktreeError } : {}),
+      ...(branchReceipt ? { branch: branchReceipt } : {}),
+      ...(epicReceipt ? { epic: epicReceipt } : {}),
+      ...(epicSurfaceError ? { epic_surface_error: epicSurfaceError } : {}),
     };
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
 }
@@ -2555,6 +2756,7 @@ function commandStatus(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const active = activeRecords(state);
   const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
+  const discarded = Object.values(state.cards || {}).filter((record) => record.phase === 'discarded');
   const cardsRoot = opts.cardsRoot || CARDS_ROOT;
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
@@ -2604,6 +2806,14 @@ function commandStatus(ctx, opts = {}) {
       card: r.card, phase: r.phase, status: projectedRecordMapping(r, cardsRoot).status,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null,
     })),
+    discarded_total: discarded.length,
+    discarded_recent: [...discarded]
+      .sort((a, b) => String(a.discarded_at || '').localeCompare(String(b.discarded_at || '')))
+      .slice(-10).reverse()
+      .map((record) => ({
+        name: record.card, discarded_at: record.discarded_at || null,
+        superseded_by: record.superseded_by || null, reason: record.discard_reason || null,
+      })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
@@ -3027,6 +3237,7 @@ async function main() {
   else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
+  else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
@@ -3039,7 +3250,7 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -3047,13 +3258,14 @@ module.exports = {
   parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
+  discardedDependencyProblem,
   resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
+  commandAmendContract, commandPark, commandResume, commandDiscard, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,

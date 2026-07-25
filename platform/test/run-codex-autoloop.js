@@ -16,7 +16,8 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
   selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
+  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReconcile, commandRecover,
+  removeBoardCard, discardedDependencyProblem,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
@@ -4321,6 +4322,279 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+// --- BGR redesign: discarded terminal phase with tombstones ---
+
+// removeBoardCard: exact mirror of moveBoardCard's location grammar.
+const removalBoard = liveBoard({ progress: ['Doomed card'], planning: ['Survivor'] });
+const removedBoard = removeBoardCard(removalBoard, 'Doomed card');
+ok(!/\[\[Doomed card\]\]/.test(removedBoard), 'removeBoardCard splices the exact card line out of its lane');
+ok(/\[\[Survivor\]\]/.test(removedBoard) && /\[\[Unrelated discovery\]\]/.test(removedBoard), 'removeBoardCard preserves every unrelated board line');
+eq(removeBoardCard(removedBoard, 'Doomed card'), removedBoard, 'removeBoardCard treats absence as already-removed (idempotent)');
+
+// BGR-DISCARD-HAPPY: parked tracked card → tombstone, board line removed, note deleted.
+const DISCARD_HEAD = 'f'.repeat(40);
+const discardRoot = path.join(tmp, 'bgr-discard');
+const discardCardsRoot = path.join(discardRoot, 'spice', 'projects', 'test', 'tasks');
+fs.mkdirSync(discardCardsRoot, { recursive: true });
+const discardBoardPath = path.join(discardRoot, 'spice', 'projects', 'test', 'project-board.md');
+const discardCardPath = path.join(discardCardsRoot, 'Stale slice.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ progress: ['Stale slice'] }));
+fs.writeFileSync(discardCardPath, [
+  '---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'stale body',
+].join('\n'));
+const discardState = emptyState();
+discardState.cards['Stale slice'] = {
+  card: 'Stale slice', phase: 'parked', card_path: discardCardPath,
+  branch: 'codex-autoloop/stale-slice', worktree: '/missing/stale-slice',
+  dependencies: ['Prerequisite A'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(DISCARD_HEAD),
+};
+let discardWrites = 0;
+const discardLocks = [];
+const discardShCalls = [];
+const discardBoardAtPersist = [];
+const discardDeps = {
+  readState: () => discardState,
+  writeState: () => { discardWrites++; discardBoardAtPersist.push(fs.readFileSync(discardBoardPath, 'utf8')); },
+  withLock: async (_ctx, name, fn) => { discardLocks.push(name); return fn(); },
+  boardPath: discardBoardPath,
+  cardsRoot: discardCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, args) => { discardShCalls.push([cmd, ...args]); return ''; },
+  now: () => '2026-07-25T12:00:00.000Z',
+};
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR',
+}, discardDeps), /requires --json/, 'BGR-DISCARD-HAPPY discard refuses without --json before any read or write');
+eq(discardLocks, [], 'BGR-DISCARD-HAPPY missing --json refusal precedes every lock');
+eq(discardWrites, 0, 'BGR-DISCARD-HAPPY missing --json refusal performs zero writes');
+const discardArgs = {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR', json: true,
+};
+const discarded = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discarded.action, 'discarded', 'BGR-DISCARD-HAPPY discard succeeds with a machine-readable receipt');
+eq(discarded.no_op, false, 'BGR-DISCARD-HAPPY first discard is not a no-op');
+eq(discarded.tombstone, {
+  discarded_at: '2026-07-25T12:00:00.000Z', discard_reason: 'redesigned under BGR',
+  superseded_by: 'Stale slice v2', final_head: DISCARD_HEAD, carried_fixtures: [],
+}, 'BGR-DISCARD-HAPPY receipt carries the exact tombstone fields');
+eq(discardState.cards['Stale slice'].phase, 'discarded', 'BGR-DISCARD-HAPPY ledger phase becomes discarded');
+eq(discardState.cards['Stale slice'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY ledger records discarded_at');
+eq(discardState.cards['Stale slice'].discard_reason, 'redesigned under BGR', 'BGR-DISCARD-HAPPY ledger records the discard reason');
+eq(discardState.cards['Stale slice'].superseded_by, 'Stale slice v2', 'BGR-DISCARD-HAPPY ledger records the superseding card');
+eq(discardState.cards['Stale slice'].final_head, DISCARD_HEAD, 'BGR-DISCARD-HAPPY final_head preserves the record gate-receipt HEAD');
+eq(discardState.cards['Stale slice'].carried_fixtures, [], 'BGR-DISCARD-HAPPY ledger records carried fixtures');
+ok(!/\[\[Stale slice\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY board line is removed from its lane');
+ok(!fs.existsSync(discardCardPath), 'BGR-DISCARD-HAPPY card note file is deleted');
+ok(discardWrites >= 1, 'BGR-DISCARD-HAPPY ledger write happens first');
+ok(/\[\[Stale slice\]\]/.test(discardBoardAtPersist[0]),
+  'BGR-DISCARD-HAPPY the board line is still present at tombstone-persist time (ledger-first ordering)');
+eq(discardShCalls, [
+  ['git', 'worktree', 'list', '--porcelain'],
+  ['git', 'branch', '-D', 'codex-autoloop/stale-slice'],
+], 'BGR-DISCARD-HAPPY deletes the unguarded branch after checking checkouts');
+eq(discarded.branch, { branch: 'codex-autoloop/stale-slice', deleted: true }, 'BGR-DISCARD-HAPPY receipt reports the deleted branch');
+
+// Untracked never-claimed corpse: minimal tombstone, line + note removed.
+const corpsePath = path.join(discardCardsRoot, 'Never claimed.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ planning: ['Never claimed'] }));
+fs.writeFileSync(corpsePath, '---\nstatus: planning\n---\ncorpse body\n');
+const corpse = await commandDiscard({ root: discardRoot }, {
+  card: 'Never claimed', reason: 'never-claimed corpse', json: true,
+}, discardDeps);
+eq(corpse.action, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse discard succeeds');
+eq(corpse.tracked, false, 'BGR-DISCARD-HAPPY untracked corpse is reported untracked');
+eq(discardState.cards['Never claimed'].phase, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse gains a minimal tombstone record');
+eq(discardState.cards['Never claimed'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY corpse tombstone records discarded_at');
+eq(discardState.cards['Never claimed'].discard_reason, 'never-claimed corpse', 'BGR-DISCARD-HAPPY corpse tombstone records the reason');
+eq(discardState.cards['Never claimed'].final_head, null, 'BGR-DISCARD-HAPPY corpse tombstone has no preserved HEAD');
+ok(!fs.existsSync(corpsePath), 'BGR-DISCARD-HAPPY corpse note file is deleted');
+ok(!/\[\[Never claimed\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY corpse board line is removed');
+
+// Status surfaces tombstones without consuming capacity.
+const discardStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(discardBoardPath, 'utf8'), loadCard: () => null, state: discardState,
+  cardsRoot: discardCardsRoot,
+});
+eq(discardStatus.discarded_total, 2, 'status reports the total tombstone count');
+eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
+  name: 'Stale slice', discarded_at: '2026-07-25T12:00:00.000Z',
+  superseded_by: 'Stale slice v2', reason: 'redesigned under BGR',
+}, 'status lists recent tombstones with name, time, supersession, and reason');
+eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
+eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
+
+// BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
+const replayWritesBefore = discardWrites;
+const replayShBefore = discardShCalls.length;
+const replayBoardBytes = fs.readFileSync(discardBoardPath, 'utf8');
+const replayStateBytes = JSON.stringify(discardState);
+const discardReplay = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discardReplay.action, 'discarded', 'BGR-DISCARD-REPLAY-NOOP literal replay reports discarded');
+eq(discardReplay.no_op, true, 'BGR-DISCARD-REPLAY-NOOP literal replay is an explicit no-op');
+eq(discardWrites, replayWritesBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero ledger writes');
+eq(discardShCalls.length, replayShBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero git operations');
+eq(fs.readFileSync(discardBoardPath, 'utf8'), replayBoardBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(discardState), replayStateBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps ledger state byte-stable');
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  ...discardArgs, reason: 'a different reason',
+}, discardDeps), /already discarded/, 'BGR-DISCARD-REPLAY-NOOP non-literal replay of a tombstone refuses');
+
+// BGR-DISCARD-ACTIVE-REFUSED: active claim and every in-flight phase refuse with zero writes.
+for (const phase of ['claimed', 'implementing', 'feature_pr', 'feature_merged', 'release_pr',
+  'release_merged', 'tagged', 'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'needs-inspection', 'deployed']) {
+  const activeState = emptyState();
+  activeState.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
+  let activeWrites = 0;
+  await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+    card: 'Active', reason: 'attempted discard of live work', json: true,
+  }, {
+    ...discardDeps, readState: () => activeState, writeState: () => { activeWrites++; },
+  }), /discard refuses/, `BGR-DISCARD-ACTIVE-REFUSED refuses phase ${phase}`);
+  eq(activeWrites, 0, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal performs zero writes`);
+  eq(activeState.cards.Active.phase, phase, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal preserves the record`);
+}
+
+// BGR-DISCARD-TOMBSTONE-UNCLAIMABLE: a hand-added board line with a tombstoned name is never claimed.
+const unclaimableSelection = selectClaimCandidate({
+  boardMd: board(['Stale slice']), state: discardState,
+  loadCard: () => { throw new Error('claim must never load a tombstoned card'); },
+});
+eq(unclaimableSelection.action, 'no-work', 'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE tombstoned board line yields no work');
+ok(unclaimableSelection.skipped.some((item) => item.card === 'Stale slice' && /already tracked \(discarded\)/.test(item.reason)),
+  'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE claim guard skips the tombstoned name explicitly');
+
+// BGR-DISCARD-DEP-FAILS-LOUD: a dependency on a tombstone is never satisfied and never checkbox-satisfied.
+const depState = emptyState();
+depState.cards['Dead dep'] = {
+  card: 'Dead dep', phase: 'discarded', discarded_at: '2026-07-25T12:00:00.000Z',
+  discard_reason: 'redesigned', superseded_by: 'Dead dep v2',
+};
+const depBoard = board(['Dependent'], ['Dead dep']);
+eq(dependencySatisfied('Dead dep', null, depState, depBoard), false,
+  'BGR-DISCARD-DEP-FAILS-LOUD a tombstoned dependency is never satisfied even with a checked Completed checkbox');
+eq(discardedDependencyProblem('Dead dep', depState), 'depends on discarded card Dead dep (superseded by Dead dep v2)',
+  'BGR-DISCARD-DEP-FAILS-LOUD the discarded-dependency finding names the tombstone and its successor');
+eq(discardedDependencyProblem('Alive dep', depState), null,
+  'BGR-DISCARD-DEP-FAILS-LOUD non-tombstoned dependencies produce no discarded finding');
+const depSelection = selectClaimCandidate({
+  boardMd: depBoard, state: depState,
+  loadCard: (name) => name === 'Dependent'
+    ? { path: '/cards/Dependent.md', raw: card({ name: 'Dependent', deps: ['Dead dep'], zones: ['platform/dependent'] }) } : null,
+});
+eq(depSelection.action, 'no-work', 'BGR-DISCARD-DEP-FAILS-LOUD a dependent card is not claimable');
+ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
+  'BGR-DISCARD-DEP-FAILS-LOUD claim skip reason is the explicit discarded-dependency error, not the checkbox fallback');
+
+// BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
+eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');
+const tombstoneReconcileWritesBefore = discardWrites;
+const tombstoneReconcile = await commandReconcile({ root: discardRoot }, { card: 'Stale slice' }, {
+  readState: () => discardState, writeState: () => { discardWrites++; },
+  withLock: immediateCardLock, boardPath: discardBoardPath, cardsRoot: discardCardsRoot,
+});
+eq(tombstoneReconcile.action, 'reconciled', 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone succeeds');
+eq(tombstoneReconcile.no_op, true, 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone is a no-op');
+eq(tombstoneReconcile.results[0].skipped, 'phase has no board projection',
+  'BGR-DISCARD-PROJECTION-NULL tombstone reconcile skips projection entirely');
+eq(discardWrites, tombstoneReconcileWritesBefore, 'BGR-DISCARD-PROJECTION-NULL tombstone reconcile performs zero writes');
+ok(!discardState.cards['Stale slice'].projection_error,
+  'BGR-DISCARD-PROJECTION-NULL absence of the board line is the correct projection, never a projection_error');
+
+// BGR-DISCARD-BRANCH-GUARD: open PR or checked-out branch refuses deletion; discard still completes.
+const guardedPath = path.join(discardCardsRoot, 'Guarded.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Guarded'] }));
+fs.writeFileSync(guardedPath, '---\nstatus: blocked\n---\nguarded body\n');
+const guardState = emptyState();
+guardState.cards.Guarded = {
+  card: 'Guarded', phase: 'blocked', reason: 'feature PR CLOSED', feature_pr: 321,
+  branch: 'codex-autoloop/guarded', worktree: path.join(discardRoot, 'guarded-worktree'), card_path: guardedPath,
+};
+const guardShCalls = [];
+const guarded = await commandDiscard({ root: discardRoot }, {
+  card: 'Guarded', reason: 'abandoned closed PR', json: true,
+}, {
+  ...discardDeps, readState: () => guardState, writeState: () => {},
+  worktreeExists: () => true,
+  sh: (cmd, args) => { guardShCalls.push([cmd, ...args]); return ''; },
+});
+eq(guarded.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD the discard itself still completes');
+eq(guardState.cards.Guarded.phase, 'discarded', 'BGR-DISCARD-BRANCH-GUARD ledger still becomes discarded');
+eq(guarded.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD recorded-PR branch is flagged retained_unsafe_to_delete');
+ok(/record has feature PR #321 recorded; branch deletion not verified safe/.test(guarded.branch.reason),
+  'BGR-DISCARD-BRANCH-GUARD recorded-PR retention names its reason without claiming the PR is open');
+ok(guardShCalls.some((call) => call[1] === 'worktree' && call[2] === 'remove'),
+  'BGR-DISCARD-BRANCH-GUARD the record worktree is still removed');
+ok(!guardShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion is attempted with a recorded PR');
+const checkedPath = path.join(discardCardsRoot, 'Checked out.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Checked out'] }));
+fs.writeFileSync(checkedPath, '---\nstatus: blocked\n---\nchecked body\n');
+const checkedState = emptyState();
+checkedState.cards['Checked out'] = {
+  card: 'Checked out', phase: 'blocked', reason: 'stuck', branch: 'codex-autoloop/checked-out', card_path: checkedPath,
+  gate_receipt: passingReceipt('not-a-canonical-sha'),
+};
+const checkedShCalls = [];
+const checkedOut = await commandDiscard({ root: discardRoot }, {
+  card: 'Checked out', reason: 'superseded while checked out', json: true,
+}, {
+  ...discardDeps, readState: () => checkedState, writeState: () => {},
+  worktreeExists: () => false,
+  sh: (cmd, args) => {
+    checkedShCalls.push([cmd, ...args]);
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return ['worktree /elsewhere', 'HEAD ' + 'a'.repeat(40), 'branch refs/heads/codex-autoloop/checked-out', ''].join('\n');
+    }
+    return '';
+  },
+});
+eq(checkedOut.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD checked-out branch discard still completes');
+eq(checkedOut.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD checked-out branch is retained');
+ok(/checked out/.test(checkedOut.branch.reason), 'BGR-DISCARD-BRANCH-GUARD checked-out retention names its reason');
+ok(!checkedShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion when a worktree holds the branch');
+eq(checkedState.cards['Checked out'].final_head, null,
+  'a malformed preserved gate-receipt HEAD never becomes a tombstone final_head (canonical 40-hex or null)');
+
+// BGR-DISCARD-EPIC-ROLLUP: discarding a canonical epic slice reprojects the epic without it.
+const rollup = makeEpicProjectionFixture('bgr-discard-rollup');
+rollup.state.cards.A1.phase = 'parked';
+rollup.state.cards.A1.branch = 'codex-autoloop/a1';
+const rollupResult = await commandDiscard({ root: rollup.root }, {
+  card: 'A1', 'superseded-by': 'A1b', reason: 'resliced under BGR', json: true,
+}, {
+  readState: () => rollup.state, writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: rollup.parentBoardPath, cardsRoot: rollup.cardsRoot,
+  worktreeExists: () => false, sh: () => '', now: () => '2026-07-25T13:00:00.000Z',
+});
+eq(rollupResult.action, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP canonical slice discard succeeds');
+eq(rollup.state.cards.A1.phase, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP slice ledger becomes a tombstone');
+ok(!/\[\[A1\]\]/.test(fs.readFileSync(rollup.epicBoardPath, 'utf8')), 'BGR-DISCARD-EPIC-ROLLUP discarded slice disappears from the epic board');
+ok(!fs.existsSync(rollup.cardPath), 'BGR-DISCARD-EPIC-ROLLUP discarded slice note is deleted');
+const rollupParent = fs.readFileSync(rollup.parentBoardPath, 'utf8');
+const rollupPlanningIdx = rollupParent.indexOf('## In Planning');
+const rollupProgressIdx = rollupParent.indexOf('## In Progress');
+const rollupEpicIdx = rollupParent.indexOf('- [ ] [[Epic A]]');
+ok(rollupEpicIdx > rollupPlanningIdx && rollupEpicIdx < rollupProgressIdx,
+  'BGR-DISCARD-EPIC-ROLLUP the parent rollup recomputes the epic from surviving slices');
+ok(!/- \[x\] \[\[Epic A\]\]/.test(rollupParent), 'BGR-DISCARD-EPIC-ROLLUP the epic is no longer checked Completed');
+const rollupAtlas = fs.readFileSync(rollup.atlasPath, 'utf8');
+ok(/status: planned/.test(rollupAtlas) && /posture: claimable/.test(rollupAtlas),
+  'BGR-DISCARD-EPIC-ROLLUP the atlas recomputes without the tombstone');
+eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports the recomputed epic state');
+
+// CLI wiring: the discard command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI discard without --json refuses with a machine-parseable error before any read or write');
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));
