@@ -2092,19 +2092,170 @@ const shippingModuleLoaderLines = [
   "const shippingSlugify = shippingModule.exports.__fixtureSlugify;",
   "const shippingWithCardGateLock = (ctx, card, fn) => shippingWithLock(ctx, 'gates-' + shippingSlugify(card), fn, { card });",
 ];
-const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000) => {
+const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000, lifecycle = {}) => {
+  let cancelled = false;
+  let pendingTimer = null;
+  let wakePendingTimer = null;
+  lifecycle.poll_count = 0;
+  lifecycle.timer_count = 0;
+  lifecycle.cancelled = false;
+  lifecycle.joined = false;
+  lifecycle.settled = false;
+  lifecycle.pending_timer = false;
+  const waitForNextPoll = () => new Promise((resolve) => {
+    const wake = () => {
+      if (wakePendingTimer !== wake) return;
+      pendingTimer = null;
+      wakePendingTimer = null;
+      lifecycle.pending_timer = false;
+      resolve();
+    };
+    wakePendingTimer = wake;
+    pendingTimer = setTimeout(wake, 10);
+    lifecycle.timer_count += 1;
+    lifecycle.pending_timer = true;
+  });
+  const cancelReadiness = () => {
+    cancelled = true;
+    lifecycle.cancelled = true;
+    if (pendingTimer) clearTimeout(pendingTimer);
+    const wake = wakePendingTimer;
+    if (wake) wake();
+    else {
+      pendingTimer = null;
+      lifecycle.pending_timer = false;
+    }
+  };
   const readiness = (async () => {
-    const deadline = Date.now() + timeoutMs;
-    while (!fs.existsSync(targetPath)) {
-      if (Date.now() >= deadline) throw new Error(`fixture readiness timed out after ${timeoutMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    try {
+      const deadline = Date.now() + timeoutMs;
+      while (!fs.existsSync(targetPath)) {
+        if (cancelled) return 'cancelled';
+        if (Date.now() >= deadline) throw new Error(`fixture readiness timed out after ${timeoutMs}ms`);
+        lifecycle.poll_count += 1;
+        await waitForNextPoll();
+      }
+      return 'ready';
+    } finally {
+      if (pendingTimer) clearTimeout(pendingTimer);
+      pendingTimer = null;
+      wakePendingTimer = null;
+      lifecycle.pending_timer = false;
+      lifecycle.settled = true;
     }
   })();
-  await Promise.race([
-    readiness,
-    childResult.then(() => { throw new Error('fixture holder exited before readiness'); }),
+  const winner = await Promise.race([
+    readiness.then(() => ({ source: 'readiness' })),
+    childResult.then(
+      () => ({ source: 'holder', error: new Error('fixture holder exited before readiness') }),
+      (error) => ({ source: 'holder', error }),
+    ),
   ]);
+  if (winner.source === 'holder') {
+    cancelReadiness();
+    await readiness;
+    lifecycle.joined = true;
+    throw winner.error;
+  }
 };
+
+const readinessRaceDir = path.join(tmp, 'es4-readiness-early-exit');
+fs.mkdirSync(readinessRaceDir, { recursive: true });
+const readinessRaceMissing = path.join(readinessRaceDir, 'missing');
+const readinessUnhandled = [];
+const recordReadinessUnhandled = (reason) => readinessUnhandled.push(reason);
+process.on('unhandledRejection', recordReadinessUnhandled);
+try {
+  const cleanExitLifecycle = {};
+  let cleanExitFinding = '';
+  try {
+    await waitForFixturePath(readinessRaceMissing, Promise.resolve('clean exit'), 1000, cleanExitLifecycle);
+  } catch (error) {
+    cleanExitFinding = error.message;
+  }
+  const cleanExitPolls = cleanExitLifecycle.poll_count;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  ok(/holder exited before readiness/.test(cleanExitFinding)
+      && cleanExitLifecycle.cancelled
+      && cleanExitLifecycle.joined
+      && cleanExitLifecycle.settled
+      && !cleanExitLifecycle.pending_timer
+      && cleanExitLifecycle.poll_count === cleanExitPolls,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK clean holder exit cancels and joins readiness with no surviving poll timer');
+
+  const earlyError = new Error('fixture holder early error');
+  const errorExitLifecycle = {};
+  let errorExitFinding = null;
+  try {
+    await waitForFixturePath(readinessRaceMissing, Promise.reject(earlyError), 1000, errorExitLifecycle);
+  } catch (error) {
+    errorExitFinding = error;
+  }
+  eq(errorExitFinding, earlyError,
+    'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK early holder error remains the exact primary error');
+  ok(errorExitLifecycle.cancelled
+      && errorExitLifecycle.joined
+      && errorExitLifecycle.settled
+      && !errorExitLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK early holder error leaves the readiness loser fully settled');
+
+  const successPath = path.join(readinessRaceDir, 'ready');
+  fs.writeFileSync(successPath, 'ready');
+  let resolveSuccessHolder;
+  const successHolder = new Promise((resolve) => { resolveSuccessHolder = resolve; });
+  const successLifecycle = {};
+  await waitForFixturePath(successPath, successHolder, 1000, successLifecycle);
+  resolveSuccessHolder('released');
+  await successHolder;
+  ok(successLifecycle.settled
+      && !successLifecycle.cancelled
+      && !successLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK successful readiness settles without manufacturing cancellation or a timer');
+
+  let resolveTimeoutHolder;
+  const timeoutHolder = new Promise((resolve) => { resolveTimeoutHolder = resolve; });
+  const timeoutLifecycle = {};
+  let timeoutFinding = '';
+  try {
+    await waitForFixturePath(readinessRaceMissing, timeoutHolder, 20, timeoutLifecycle);
+  } catch (error) {
+    timeoutFinding = error.message;
+  }
+  resolveTimeoutHolder('released');
+  await timeoutHolder;
+  ok(/readiness timed out/.test(timeoutFinding)
+      && timeoutLifecycle.settled
+      && !timeoutLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK readiness timeout settles its own final timer before propagation');
+
+  const finalTickPath = path.join(readinessRaceDir, 'final-tick');
+  let resolveFinalTickHolder;
+  const finalTickHolder = new Promise((resolve) => { resolveFinalTickHolder = resolve; });
+  const finalTickLifecycle = {};
+  const finalTick = setTimeout(() => {
+    fs.writeFileSync(finalTickPath, 'ready');
+    resolveFinalTickHolder('exited');
+  }, 10);
+  let finalTickFinding = '';
+  try {
+    await waitForFixturePath(finalTickPath, finalTickHolder, 1000, finalTickLifecycle);
+  } catch (error) {
+    finalTickFinding = error.message;
+  } finally {
+    clearTimeout(finalTick);
+  }
+  await finalTickHolder;
+  ok((!finalTickFinding || /holder exited before readiness/.test(finalTickFinding))
+      && finalTickLifecycle.settled
+      && !finalTickLifecycle.pending_timer
+      && (!finalTickLifecycle.cancelled || finalTickLifecycle.joined),
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK final-tick race reports a valid winner and leaves no readiness timer');
+  await new Promise((resolve) => setImmediate(resolve));
+  eq(readinessUnhandled.length, 0,
+    'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK clean, error, success, timeout, and final-tick paths emit zero unhandled rejections');
+} finally {
+  process.off('unhandledRejection', recordReadinessUnhandled);
+}
 const withFixtureHolder = async ({
   holderScript, readyPath, releasePath, probe, readinessMs = 5000, holderMs = 5000, label,
 }) => {
