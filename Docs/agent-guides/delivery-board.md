@@ -1,0 +1,60 @@
+---
+purpose: The epic-centric delivery board topology and its discard governance — two-level boards, the `discarded` terminal state with tombstones, supersession at mint time, and the coordinator's reap / restructure / cutover operations plus the retroactive digest.
+load_when: Touching the sauce delivery board, coordinator lifecycle code, card-intake supersession, the triage/digest skills, or reasoning about why a card/branch/worktree disappeared.
+---
+
+# Delivery board & discard governance
+
+> Authoritative sources: `Docs/superpowers/specs/2026-07-25-board-governance-redesign-design.md` (design spec) and `Docs/superpowers/plans/2026-07-25-board-governance-redesign.md` (implementation plan). This guide orients; read those for rationale and full clause text. Code of record: `scripts/autoloop/codex-coordinator.js`, `platform/mechanisms/delivery/scripts/delivery-contract.js`, `scripts/autoloop/delivery-status-digest.js`, `scripts/autoloop/delivery-review-triage.js`.
+
+## Two-level board topology
+
+The parent board (`sauce-board.md`) holds **only epics** plus triage and history:
+
+- **In Planning** — drag-ordered epic priority queue; drag order is the Director's one standing input.
+- **In Progress / Blocked** — *derived*: the coordinator paints the epic's line from its slice rollup (`epicProjectionMapping`). Never hand-maintain these lanes.
+- **Discovered** — triage inbox of one-line findings.
+- **Post-GA / Completed / Archive** — deliberately frozen work and history.
+
+Each epic owns the canonical scaffold `tasks/<Epic>/{<Epic>.md (atlas, type: epic), board/<Epic>-board.md, context/}`. Slices live flat in the epic's `board/` with `type: slice` and `epic`/`task_parent` backlinks plus the Delivery execution contract fields. The claim path is two-level: the frontier slice of the top In-Planning epic, read from that epic's board (`resolveEpicBoardSet`).
+
+The epic atlas renders an **EpicDashboard** rollup fed by `deriveEpicLifecycle` (delivery-contract.js). Bucket semantics: `completed→done`, `in_progress→active`, `parked→waiting`, `blocked→blocked`, `discarded→excluded entirely`, else `planned`. **Waiting rolls up like blocked** — a parked slice is a short-lived concurrency/deploy wait, never progress, and a claimable sibling must not hide it.
+
+## The `discarded` terminal state
+
+Dead work is **removed, not curated**: board line and card note deleted, worktree pruned, `codex-autoloop/*` branch deleted (guarded — never a branch with a recorded feature PR or a live worktree checkout). What survives is a **tombstone** in the coordinator ledger: `{discarded_at, discard_reason, superseded_by, final_head (40-hex or null), carried_fixtures[]}`.
+
+Tombstones are invisible machine state — never projected to a board, never counted in a rollup, retained forever. They guarantee:
+
+1. The name can never be reused or re-claimed (`selectClaimCandidate` checks the ledger).
+2. A `depends_on` pointing at a discarded card **fails loudly** — never silently satisfied.
+3. `status --json` can answer "what happened to X".
+
+**Deletion of a card note or board line is sanctioned ONLY through coordinator `discard`/`reap`.** Hand-deleting produces drift the reconciler will flag. Discard refuses deployed or active in-flight work — only parked/blocked/failed/cancelled (or untracked residue) is discardable. Replays must be literal: identical operands return `no_op: true`; different operands throw.
+
+## Supersession = discard at mint
+
+When a superseding sibling X2 is minted, the predecessor X is discarded at mint time — no park-as-evidence, no rename-in-lane. The learning-preservation guarantee moved to intake: **card-intake refuses a superseding spec whose `binding_fixtures` do not cover every name in `carried_findings`** (each finding name must appear as an exact, case-sensitive token in at least one fixture's name or description; refusal codes `supersede_coverage_missing` / `supersede_missing_fields`). The valid-spec receipt carries `post_apply_instructions: [{discard: …}]` — intake never touches coordinator state; the loop executes the instruction via `coordinator discard --superseded-by <successor> --carried-fixture <fixture>`. Learning's canonical homes: committed fixtures in the successor, FID policy tables, epic `context/` notes, git history.
+
+## Coordinator operations
+
+All four require `--json` (refused before any read or write) and run under the selector lock.
+
+**`discard --card <name> --reason <why> [--superseded-by <successor>] [--carried-fixture <f>]... --json`** — the per-card path described above. Receipt: tombstone fields plus `board_line_removed`, `note_deleted`, `worktree_removed`, branch receipt (`deleted` or `retained_unsafe_to_delete` with reason), and an epic-projection receipt when the card sat on an epic board.
+
+**`reap --json [--also <name>]...`** — idempotent bulk backstop. Discards superseded corpses inferred from the ledger (settled card whose deployed stem-sibling names itself the successor — the inference now lives in the coordinator; the triage skill's old copy is gone), discards settled planning containers ("(decomposed → …)" stubs whose children are all tombstoned/completed), strips surviving stub annotations, removes duplicate card lines and tombstone residue lines/notes across the parent board and every epic board. `--also` names ride the same discard core and are validated up front so a typo never aborts mid-batch. On a settled board the receipt is `no_op: true` — replay is free.
+
+**`restructure --spec <map.json> --json`** — the sanctioned flat→epic migration. The spec is `{project_root, board, epics: [{epic, members[]}]}` with duplicate/unsafe-name refusals. A durable intent journal is written **before** the first mutation; every write is content-addressed (preimage hash + intended bytes), so a crashed pass resumes forward only where targets match the recorded preimage or intended result and fails closed on any third state. Member notes move into the epic's `board/`, frontmatter is rewritten to the slice binding (body byte-identical), and the parent board's member lines collapse to one epic line. Completed replay: `no_op: true`, zero vault writes.
+
+**`cutover --json [--require-card <name>]... [--chain-prefix <prefix>]` / `cutover --off --reason <why> --json`** — receipt-gated, reversible epic-intake flag. Enable requires three deterministic receipts: the declared ES chain terminal-complete in the ledger (a prefix matching zero cards fails — no vacuous pass), the migration harness still registered in `package.json`, and ≥3 consecutive clean full reconciles. Any red returns `cutover-refused` listing every unmet criterion, zero writes. Every flip appends to `cutover_history` (bounded to 20) so digests can report flips between reads. Consumers must read `status --json` → `cutover.enabled` **fresh** — absent or `false` both mean pre-cutover.
+
+## The retroactive digest
+
+Nothing waits on a human; instead `delivery:status` reports what happened **since you last looked**: discards (with reasons/successors), cutover flips, and `SELF-RATIFIED <date>` FID amendment headings. `scripts/autoloop/delivery-status-digest.js` keeps its own marker file `.delivery-digest-last-seen` beside the coordinator state file; a normal read updates the marker after a successful render, `--peek` renders without updating it. Over-inclusion is the deliberate safe side (timestamp-less discards and same-day amendments always show). Known gap: ceilings-hit and decompositions are specced digest feeds but `status --json` does not expose them yet. `delivery:review` walks the digest and surfaces perimeter items; its triage classifier (`delivery-review-triage.js`) has no superseded-corpse bucket anymore — parked classifies only as genuine concurrency/deploy waits or Director-visible escalations.
+
+## Read these next
+
+- Governance clauses, constitution, perimeter rule → the design spec (§3) named at the top.
+- Cleanup pass ordering (reconcile → reap → restructure → cutover → reconcile) → spec §4.
+- Intake mechanics for supersede/epic-native routing → `.agents/skills/card-intake/SKILL.md`.
+- Release/deploy chain the slices ride → [build-test-verify.md](build-test-verify.md).
