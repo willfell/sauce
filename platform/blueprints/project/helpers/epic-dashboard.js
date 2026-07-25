@@ -176,7 +176,7 @@ class EpicDashboard {
     const chip = header.createEl("span", { text: String(lifecycle.state || "planned") });
     chip.className = "epic-dashboard-state";
     chip.style.cssText = "border-radius:999px;padding:2px 8px;background:var(--background-modifier-hover);font-size:var(--font-ui-smaller);font-weight:600;";
-    const total = Number(counts.total ?? (Number(counts.done || 0) + Number(counts.active || 0) + Number(counts.blocked || 0) + Number(counts.planned || 0)));
+    const total = Number(counts.total ?? (Number(counts.done || 0) + Number(counts.active || 0) + Number(counts.waiting || 0) + Number(counts.blocked || 0) + Number(counts.planned || 0)));
     const done = Number(counts.done || 0);
     const progress = card.createEl("div");
     progress.style.cssText = "height:6px;border-radius:999px;background:var(--background-modifier-border);overflow:hidden;";
@@ -184,7 +184,7 @@ class EpicDashboard {
     fill.style.cssText = `height:100%;width:${total ? Math.round(done / total * 100) : 0}%;background:var(--interactive-accent);`;
     const metrics = card.createEl("div");
     metrics.style.cssText = "display:flex;gap:12px;flex-wrap:wrap;color:var(--text-muted);font-size:var(--font-ui-smaller);";
-    for (const [value, label] of [[done, "deployed"], [counts.active || 0, "in flight"], [counts.blocked || 0, "blocked"], [counts.planned || 0, "planned"]]) {
+    for (const [value, label] of [[done, "deployed"], [counts.active || 0, "in flight"], [counts.waiting || 0, "waiting"], [counts.blocked || 0, "blocked"], [counts.planned || 0, "planned"]]) {
       metrics.createEl("span", { text: `${value} ${label}` });
     }
   }
