@@ -1242,8 +1242,11 @@ async function main() {
     'coordinator-checklist-board-cards: degenerate flat card remains legacy work');
 
   const subscription = JSON.parse(read('ranch/platform-subscription.json'));
-  assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === '0.3.0').length, 1,
-    'project-delivery-dependency-closure: workshop dogfood subscription pins delivery@0.3.0 exactly once');
+  // Version comes from the mechanism manifest (the bumper sweeps manifest + pin together),
+  // never a literal — a hardcoded pin fails only in the release job's bumped preflight.
+  const deliveryVersion = JSON.parse(read('platform/mechanisms/delivery/manifest.json')).version;
+  assert.strictEqual(subscription.mechanisms.filter((entry) => entry.name === 'delivery' && entry.version === deliveryVersion).length, 1,
+    `project-delivery-dependency-closure: workshop dogfood subscription pins delivery@${deliveryVersion} exactly once`);
 
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.scripts['test:epic-dashboard'], 'node platform/test/run-epic-dashboard.js', 'focused script is wired');
