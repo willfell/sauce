@@ -3613,6 +3613,8 @@ function commandStatus(ctx, opts = {}) {
         superseded_by: record.superseded_by || null, reason: record.discard_reason || null,
       })),
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
+    cutover: state.cutover || null,
+    cutover_history: state.cutover_history || [],
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
 }
@@ -3741,12 +3743,160 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   }
   const failed = results.filter((result) => !result.ok);
   const changed = results.filter((result) => result.changed).length;
-  return {
+  const receipt = {
     action: failed.length ? 'reconcile-failed' : 'reconciled',
     scope: args.card ? 'card' : 'all-tracked', checked: results.length,
     changed, failed: failed.length, no_op: changed === 0 && failed.length === 0,
     results,
   };
+  if (!args.card) {
+    // ES5 cutover evidence: count consecutive FULL passes that found zero
+    // drift and zero projection problems (i.e. nothing to change and nothing
+    // failed). Any full pass that repaired or failed anything resets the
+    // streak. Single-card passes never touch the counter.
+    // Read-modify-write is unguarded; safe under the single-flight autoloop turn lock.
+    const finalState = loadState(ctx);
+    const prior = Number.isInteger(finalState.reconcile_clean_streak) ? finalState.reconcile_clean_streak : 0;
+    const streak = receipt.no_op ? prior + 1 : 0;
+    if (streak !== prior) {
+      finalState.reconcile_clean_streak = streak;
+      persist(ctx, finalState);
+    }
+    receipt.reconcile_clean_streak = streak;
+  }
+  return receipt;
+}
+
+// --- ES5 cutover: receipt-gated, reversible epic-intake flag (BGR §3.4).
+//
+// Usage:
+//   cutover --json [--require-card '<exact name>']... [--chain-prefix <prefix>]
+//   cutover --off --reason '<why>' --json
+//
+// Enable path: three deterministic criteria, each returning {ok, evidence|missing}:
+//   1. es_chain_complete — every declared chain card is terminal-complete in
+//      the ledger: phase 'deployed', or tombstoned 'discarded' (superseded ES
+//      siblings are discarded under the reap law and never block cutover).
+//      Declare the chain with repeatable --require-card '<exact name>' and/or
+//      --chain-prefix <prefix>, which sweeps every ledger card whose id token
+//      (first whitespace-delimited token, see cardIdToken) starts with the
+//      prefix. A prefix matching zero ledger cards FAILS the criterion — a
+//      typo must never pass vacuously. At least one operand is required.
+//   2. migration_harness_registered — the repo package.json scripts still
+//      invoke platform/test/run-codex-autoloop.js; de-registration breaks
+//      cutover (running green is CI's job; registration is the local check).
+//   3. reconcile_clean_streak — coordinator state records >= 3 consecutive
+//      clean full reconciles (see commandReconcile's full-pass counter).
+// All green: writes cutover {enabled:true, enabled_at, receipts} into
+// coordinator state. Any red: returns action 'cutover-refused' listing EVERY
+// unmet criterion, zero writes. Replay while enabled: {no_op:true}, zero
+// writes. --off flips to {enabled:false, disabled_at, reason}; --off replay
+// while disabled is a no_op; a later enable call re-evaluates the criteria.
+// Every flip (enable and disable — never a no_op replay) also appends
+// {enabled, at, reason?} to cutover_history, bounded to the 20 most recent
+// entries, so digests can report flips between reads without latest-only loss.
+const CUTOVER_HARNESS_PATH = 'platform/test/run-codex-autoloop.js';
+const CUTOVER_STREAK_REQUIRED = 3;
+const CUTOVER_HISTORY_CAP = 20;
+
+function appendCutoverHistory(state, entry) {
+  state.cutover_history = [...(state.cutover_history || []), entry].slice(-CUTOVER_HISTORY_CAP);
+}
+
+async function commandCutover(ctx, args, deps = {}) {
+  // Same contract as discard/reap/restructure: the machine-readable receipt
+  // is required before any read or write, so refusal precedes every lock.
+  if (args.json !== true) throw new Error('cutover requires --json for a machine-readable receipt');
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const now = deps.now || (() => new Date().toISOString());
+  if (args.off === true) {
+    if (typeof args.reason !== 'string' || !args.reason.trim()) throw new Error('cutover --off requires a non-empty --reason');
+    if (args['require-card'] != null || args['chain-prefix'] != null) {
+      throw new Error('cutover --off never evaluates criteria; drop --require-card/--chain-prefix');
+    }
+    const reason = args.reason.trim();
+    return transitionLock(ctx, 'selector', async () => {
+      const state = loadState(ctx);
+      if (!state.cutover || state.cutover.enabled !== true) {
+        return { action: 'cutover', enabled: false, no_op: true, cutover: state.cutover || null };
+      }
+      const disabledAt = now();
+      state.cutover = { enabled: false, disabled_at: disabledAt, reason };
+      appendCutoverHistory(state, { enabled: false, at: disabledAt, reason });
+      persist(ctx, state);
+      return { action: 'cutover', enabled: false, no_op: false, cutover: state.cutover };
+    });
+  }
+  const requiredCards = args['require-card'] == null ? [] : argumentValues(args['require-card']);
+  if (args['require-card'] != null && !requiredCards.length) throw new Error('--require-card values must be non-empty card names');
+  const chainPrefix = typeof args['chain-prefix'] === 'string' && args['chain-prefix'].trim() ? args['chain-prefix'].trim() : null;
+  if (args['chain-prefix'] != null && !chainPrefix) throw new Error('--chain-prefix requires a non-empty id-token prefix');
+  if (!requiredCards.length && !chainPrefix) {
+    throw new Error('cutover requires an explicit chain declaration: repeatable --require-card <exact name> and/or --chain-prefix <prefix>');
+  }
+  const readPackageJson = deps.readPackageJson
+    || (() => JSON.parse(fs.readFileSync(path.join(ctx.root, 'package.json'), 'utf8')));
+  return transitionLock(ctx, 'selector', async () => {
+    const state = loadState(ctx);
+    if (state.cutover && state.cutover.enabled === true) {
+      return { action: 'cutover', enabled: true, no_op: true, cutover: state.cutover };
+    }
+    const criteria = {};
+    {
+      const cards = state.cards || {};
+      const declared = new Map();
+      for (const name of requiredCards) declared.set(name, cards[name] || null);
+      const chainMatches = [];
+      if (chainPrefix) {
+        for (const record of Object.values(cards)) {
+          if (!cardIdToken(record.card).startsWith(chainPrefix)) continue;
+          chainMatches.push(record.card);
+          if (!declared.has(record.card)) declared.set(record.card, record);
+        }
+      }
+      const missing = [];
+      const satisfied = [];
+      for (const [name, record] of declared) {
+        if (!record) missing.push({ card: name, problem: 'not tracked in the coordinator ledger' });
+        // Ledger PHASES only — 'completed' is a card status vocabulary word, never a ledger phase, hence not listed.
+        else if (record.phase === 'deployed' || record.phase === 'discarded') satisfied.push({ card: name, phase: record.phase });
+        else missing.push({ card: name, phase: record.phase, problem: "phase is neither 'deployed' nor tombstoned 'discarded'" });
+      }
+      if (chainPrefix && !chainMatches.length) {
+        missing.push({ chain_prefix: chainPrefix, problem: 'matches no ledger cards; refusing a vacuously-true chain criterion' });
+      }
+      criteria.es_chain_complete = missing.length
+        ? { ok: false, missing }
+        : { ok: true, evidence: { required_cards: requiredCards, chain_prefix: chainPrefix, chain_matches: chainMatches, satisfied } };
+    }
+    {
+      let scripts = {};
+      let problem = null;
+      try { scripts = readPackageJson().scripts || {}; }
+      catch (err) { problem = `package.json unreadable: ${err.message}`; }
+      const entry = Object.entries(scripts).find(([, cmd]) => typeof cmd === 'string' && cmd.includes(CUTOVER_HARNESS_PATH));
+      criteria.migration_harness_registered = entry
+        ? { ok: true, evidence: { script: entry[0], harness: CUTOVER_HARNESS_PATH } }
+        : { ok: false, missing: problem || `no package.json script invokes ${CUTOVER_HARNESS_PATH}` };
+    }
+    {
+      const streak = Number.isInteger(state.reconcile_clean_streak) ? state.reconcile_clean_streak : 0;
+      criteria.reconcile_clean_streak = streak >= CUTOVER_STREAK_REQUIRED
+        ? { ok: true, evidence: { streak, required: CUTOVER_STREAK_REQUIRED } }
+        : { ok: false, missing: `reconcile_clean_streak ${streak} < ${CUTOVER_STREAK_REQUIRED} consecutive clean full reconciles` };
+    }
+    const unmet = Object.entries(criteria).filter(([, criterion]) => !criterion.ok).map(([name]) => name);
+    if (unmet.length) return { action: 'cutover-refused', enabled: false, unmet, criteria };
+    const receipts = {};
+    for (const [name, criterion] of Object.entries(criteria)) receipts[name] = criterion.evidence;
+    const enabledAt = now();
+    state.cutover = { enabled: true, enabled_at: enabledAt, receipts };
+    appendCutoverHistory(state, { enabled: true, at: enabledAt });
+    persist(ctx, state);
+    return { action: 'cutover', enabled: true, no_op: false, cutover: state.cutover };
+  });
 }
 
 function recoveryRequest(args) {
@@ -4045,12 +4195,13 @@ async function main() {
   else if (command === 'recover-deployed') result = await commandRecoverDeployed(ctx, args);
   else if (command === 'reconcile-metadata') result = await commandReconcileMetadata(ctx, args);
   else if (command === 'reconcile') result = await commandReconcile(ctx, args);
+  else if (command === 'cutover') result = await commandCutover(ctx, args);
   else if (command === 'deploy') {
     const state = readState(ctx); const record = state.cards[args.card];
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -4059,7 +4210,7 @@ module.exports = {
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem,
-  resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandRecover,
+  resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandCutover, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,

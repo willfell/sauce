@@ -69,6 +69,8 @@ The receipt for a valid superseding spec includes `post_apply_instructions: [{di
 
 Epic-native default: post-cutover (`coordinator status --json` reports `cutover.enabled` true), new medium/heavy work MUST target an epic board; flat creation is reserved for Discovered-lane one-liners.
 
+The cutover flag is receipt-gated and reversible (`coordinator cutover`), so never cache it: read `coordinator status --json` → `cutover.enabled` fresh at planning time (absent or `enabled: false` both mean pre-cutover).
+
 ## Finish
 
 1. Resolve every emitted wikilink to a file.

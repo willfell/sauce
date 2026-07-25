@@ -16,7 +16,7 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
   selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover,
+  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
@@ -5305,6 +5305,214 @@ eq(e2eResolved.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
 eq(e2eResolved.findings, [], 'BGR-RESTRUCTURE-E2E the epic resolver reports no findings');
 const e2eReplay = await commandRestructure({ root: e2eRoot }, { spec: e2eSpecPath, json: true }, e2eDeps);
 eq(e2eReplay.no_op, true, 'BGR-RESTRUCTURE-E2E the literal replay after reconcile is still a no-op');
+
+// --- BGR-CUTOVER: receipt-gated, reversible ES5 epic-intake cutover flag ---
+const cutRoot = path.join(tmp, 'bgr-cutover');
+fs.mkdirSync(cutRoot, { recursive: true });
+const cutBoardPath = path.join(cutRoot, 'board.md');
+const cutCardPath = path.join(cutRoot, 'Cut card.md');
+fs.writeFileSync(cutCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
+fs.writeFileSync(cutBoardPath, liveBoard({ progress: ['Cut card'] }));
+const cutState = emptyState();
+cutState.cards['Cut card'] = {
+  card: 'Cut card', phase: 'implementing', card_path: cutCardPath,
+  projection_reconciled_at: '2026-07-25T00:00:00.000Z',
+};
+let cutWrites = 0;
+const cutLocks = [];
+const cutDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  boardPath: cutBoardPath,
+  now: () => '2026-07-25T18:00:00.000Z',
+};
+
+// Status before any cutover call: the object is absent (null), not fabricated.
+const cutStatusBefore = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusBefore.cutover, null, 'BGR-CUTOVER-REVERSIBLE status exposes cutover as null before any cutover write');
+eq(cutStatusBefore.cutover_history, [], 'BGR-CUTOVER-REVERSIBLE status exposes an empty cutover_history before any flip');
+
+// BGR-CUTOVER-STREAK: only clean FULL reconciles advance the counter.
+const cutClean1 = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq(cutClean1.no_op, true, 'BGR-CUTOVER-STREAK the fixture starts converged (clean full pass)');
+eq(cutClean1.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK first clean full reconcile reports streak 1');
+eq(cutState.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK the streak persists in top-level coordinator state');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 2, 'BGR-CUTOVER-STREAK second clean full reconcile reports streak 2');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK third clean full reconcile reports streak 3');
+const cutSingle = await commandReconcile({ root: cutRoot }, { card: 'Cut card' }, cutDeps);
+eq(cutSingle.no_op, true, 'BGR-CUTOVER-STREAK the single-card pass is itself clean');
+ok(!('reconcile_clean_streak' in cutSingle), 'BGR-CUTOVER-STREAK single-card receipts never carry the streak');
+eq(cutState.reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK single-card reconciles leave the streak untouched');
+fs.writeFileSync(cutBoardPath, liveBoard({ planning: ['Cut card'] }));
+const cutDrift = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+ok(cutDrift.changed >= 1, 'BGR-CUTOVER-STREAK the moved board line registers as drift on the full pass');
+eq(cutDrift.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK a drift-finding full reconcile resets the streak to 0');
+eq(cutState.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK the reset persists in coordinator state');
+
+// BGR-CUTOVER-CRITERIA: --json first, operands required, every unmet criterion listed.
+const cutoverBaseDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  now: () => '2026-07-25T19:00:00.000Z',
+};
+cutLocks.length = 0;
+const cutWritesBeforeRefusals = cutWrites;
+await assert.rejects(() => commandCutover({ root: cutRoot }, { 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /requires --json/, 'BGR-CUTOVER-CRITERIA cutover refuses without --json before any read or write');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing --json refusal precedes every lock');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true }, cutoverBaseDeps),
+  /--require-card|--chain-prefix/, 'BGR-CUTOVER-CRITERIA cutover requires an explicit chain declaration operand');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing-operand refusal precedes every lock');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA usage refusals perform zero writes');
+// All three criteria red: streak is 0, the ES chain is undeclared/incomplete,
+// and the injected package.json has no registered harness.
+const cutRefused = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutRefused.action, 'cutover-refused', 'BGR-CUTOVER-CRITERIA unmet criteria refuse with a machine-readable receipt');
+eq(cutRefused.enabled, false, 'BGR-CUTOVER-CRITERIA a refused cutover never enables');
+eq(cutRefused.unmet, ['es_chain_complete', 'migration_harness_registered', 'reconcile_clean_streak'],
+  'BGR-CUTOVER-CRITERIA the refusal lists EVERY unmet criterion');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.card === 'ES1 Alpha'),
+  'BGR-CUTOVER-CRITERIA the chain criterion names the untracked required card');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.chain_prefix === 'ES'),
+  'BGR-CUTOVER-CRITERIA a chain prefix matching zero ledger cards fails rather than passing vacuously');
+ok(/reconcile_clean_streak 0 < 3/.test(cutRefused.criteria.reconcile_clean_streak.missing),
+  'BGR-CUTOVER-CRITERIA the streak criterion reports the exact shortfall');
+ok(typeof cutRefused.criteria.migration_harness_registered.missing === 'string',
+  'BGR-CUTOVER-CRITERIA the harness criterion reports a machine-readable missing reason');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA a refused cutover performs zero writes');
+ok(!cutState.cutover, 'BGR-CUTOVER-CRITERIA a refused cutover leaves no cutover object in state');
+
+// Rebuild the streak to 3, then complete the ES chain in the ledger.
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3,
+  'BGR-CUTOVER-STREAK three clean full reconciles after a reset rebuild streak 3');
+cutState.cards['ES1 Alpha'] = { card: 'ES1 Alpha', phase: 'deployed' };
+cutState.cards['ES2 Beta'] = { card: 'ES2 Beta', phase: 'deployed' };
+cutState.cards['ES3a Gamma'] = {
+  card: 'ES3a Gamma', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: 'ES3a2 Gamma rework (supersedes ES3a)', final_head: null, carried_fixtures: [],
+};
+cutState.cards['ES3a2 Gamma rework (supersedes ES3a)'] = { card: 'ES3a2 Gamma rework (supersedes ES3a)', phase: 'deployed' };
+// The real repo package.json is the harness registry: de-registering
+// run-codex-autoloop there must break this fixture (criterion 2 is live).
+const realPackageJson = () => JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+// Harness de-registration alone blocks cutover even with chain + streak green.
+const cutHarnessOnly = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutHarnessOnly.unmet, ['migration_harness_registered'],
+  'BGR-CUTOVER-CRITERIA harness de-registration alone blocks an otherwise-green cutover');
+// A tracked-but-parked chain card blocks completeness until it turns terminal.
+cutState.cards['ES9 Parked'] = { card: 'ES9 Parked', phase: 'parked' };
+const cutParked = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutParked.unmet, ['es_chain_complete'], 'BGR-CUTOVER-CRITERIA a parked chain card alone blocks cutover');
+eq(cutParked.criteria.es_chain_complete.missing,
+  [{ card: 'ES9 Parked', phase: 'parked', problem: "phase is neither 'deployed' nor tombstoned 'discarded'" }],
+  'BGR-CUTOVER-CRITERIA the refusal names the parked card and its ledger phase');
+cutState.cards['ES9 Parked'].phase = 'deployed'; // flipping it terminal unblocks the enable below
+cutLocks.length = 0;
+const cutWritesBeforeEnable = cutWrites;
+const cutEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutEnabled.action, 'cutover', 'BGR-CUTOVER-CRITERIA all-green cutover emits the cutover receipt');
+eq(cutEnabled.enabled, true, 'BGR-CUTOVER-CRITERIA all-green cutover enables the flag');
+eq(cutEnabled.no_op, false, 'BGR-CUTOVER-CRITERIA first enable is not a no-op');
+ok(cutLocks.includes('selector'), 'BGR-CUTOVER-CRITERIA cutover evaluates under the selector lock');
+eq(cutWrites, cutWritesBeforeEnable + 1, 'BGR-CUTOVER-CRITERIA enabling writes coordinator state exactly once');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-CRITERIA the enabled flag persists in coordinator state');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-CRITERIA the receipt records when cutover enabled');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES3a Gamma' && entry.phase === 'discarded'),
+  'BGR-CUTOVER-CRITERIA a tombstoned superseded ES sibling satisfies (never blocks) the chain criterion');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES1 Alpha' && entry.phase === 'deployed'),
+  'BGR-CUTOVER-CRITERIA the receipt lists each deployed chain card as evidence');
+ok(typeof cutState.cutover.receipts.migration_harness_registered.script === 'string',
+  'BGR-CUTOVER-CRITERIA the receipt names the package.json script that registers the harness');
+eq(cutState.cutover.receipts.reconcile_clean_streak.streak, 3,
+  'BGR-CUTOVER-CRITERIA the receipt carries the clean-reconcile streak evidence');
+eq(cutState.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE the enable flip appends one cutover_history entry');
+
+// BGR-CUTOVER-NOOP: replay when already enabled → no_op, zero writes.
+const cutWritesBeforeReplay = cutWrites;
+const cutReplay = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReplay.no_op, true, 'BGR-CUTOVER-NOOP replay while enabled reports no_op:true');
+eq(cutReplay.enabled, true, 'BGR-CUTOVER-NOOP replay reports the enabled flag');
+eq(cutWrites, cutWritesBeforeReplay, 'BGR-CUTOVER-NOOP replay performs zero writes');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-NOOP replay never restamps enabled_at');
+eq(cutState.cutover_history.length, 1, 'BGR-CUTOVER-NOOP replay appends no cutover_history entry');
+
+// BGR-CUTOVER-REVERSIBLE: --off flips it back; status exposes both ways; re-enable works.
+const cutStatusEnabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusEnabled.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE status --json exposes the enabled cutover object');
+ok(cutStatusEnabled.cutover.receipts, 'BGR-CUTOVER-REVERSIBLE status carries the cutover receipts');
+eq(cutStatusEnabled.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while enabled');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true }, cutoverBaseDeps),
+  /--reason/, 'BGR-CUTOVER-REVERSIBLE --off requires a non-empty --reason');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'x', 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /never evaluates criteria/, 'BGR-CUTOVER-REVERSIBLE --off refuses criteria operands rather than silently ignoring them');
+const cutOff = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOff.enabled, false, 'BGR-CUTOVER-REVERSIBLE --off disables the flag');
+eq(cutOff.no_op, false, 'BGR-CUTOVER-REVERSIBLE first --off is not a no-op');
+eq(cutState.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE the disable receipt records disabled_at and reason');
+eq(cutState.cutover_history, [
+  { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+], 'BGR-CUTOVER-REVERSIBLE the disable flip appends a history entry carrying the reason');
+const cutWritesBeforeOffReplay = cutWrites;
+const cutOffReplay = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOffReplay.no_op, true, 'BGR-CUTOVER-REVERSIBLE --off replay while disabled is a no_op');
+eq(cutWrites, cutWritesBeforeOffReplay, 'BGR-CUTOVER-REVERSIBLE --off replay performs zero writes');
+eq(cutState.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE --off replay appends no cutover_history entry');
+const cutStatusDisabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusDisabled.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE status --json exposes the disabled cutover object');
+eq(cutStatusDisabled.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while disabled');
+const cutReEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReEnabled.enabled, true, 'BGR-CUTOVER-REVERSIBLE a subsequent cutover with criteria green re-enables');
+eq(cutReEnabled.no_op, false, 'BGR-CUTOVER-REVERSIBLE re-enable after --off is a fresh enable, not a replay');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE the re-enabled flag persists with fresh receipts');
+eq(cutState.cutover_history.length, 3, 'BGR-CUTOVER-REVERSIBLE the re-enable flip appends a third history entry');
+eq(cutState.cutover_history[2], { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  'BGR-CUTOVER-REVERSIBLE the newest history entry is the re-enable flip');
+// History is bounded: seed past the cap, flip once, oldest entries drop.
+cutState.cutover_history = Array.from({ length: 22 }, (_, i) => ({ enabled: i % 2 === 0, at: `seed-${i}` }));
+await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'cap check' }, cutoverBaseDeps);
+eq(cutState.cutover_history.length, 20, 'BGR-CUTOVER-REVERSIBLE cutover_history is capped at the 20 most recent entries');
+eq(cutState.cutover_history[0].at, 'seed-3', 'BGR-CUTOVER-REVERSIBLE the cap drops the oldest entries first');
+eq(cutState.cutover_history[19], { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'cap check' },
+  'BGR-CUTOVER-REVERSIBLE the newest capped entry is the latest flip');
+
+// CLI wiring: the cutover command exists and refuses without --json.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI cutover without --json refuses with a machine-parseable error before any read or write');
+}
 
 // CLI wiring: the restructure command exists and refuses without --json.
 {
