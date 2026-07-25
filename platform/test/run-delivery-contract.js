@@ -122,7 +122,8 @@ const lifecycleCases = [
   ['empty board is planned', [], 'planned', 'claimable'],
   ['single planned slice is planned', [{ card: 'A', status: 'planning' }], 'planned', 'claimable'],
   ['one implementing slice is active', [{ card: 'A', status: 'in_progress' }], 'active', 'claimable'],
-  ['all parked slices remain active', [{ card: 'A', status: 'parked' }, { card: 'B', status: 'parked' }], 'active', 'claimable'],
+  // BGR redesign 2026-07-25: parked slices count as waiting and roll up like blocked, never active.
+  ['all parked slices wait as blocked', [{ card: 'A', status: 'parked' }, { card: 'B', status: 'parked' }], 'blocked', 'blocked_by_dependencies'],
   ['blocked frontier with nothing claimable is blocked', [{ card: 'A', status: 'blocked' }], 'blocked', 'blocked_by_dependencies'],
   ['a claimable planned sibling outranks a blocked slice', [{ card: 'A', status: 'blocked' }, { card: 'B', status: 'planning' }], 'planned', 'claimable'],
   ['every completed slice is done', [{ card: 'A', status: 'completed' }, { card: 'B', phase: 'deployed' }], 'done', 'done'],
@@ -137,6 +138,28 @@ for (const [label, slices, expectedState, expectedPosture] of lifecycleCases) {
   eq(`DEL-EPIC-STATE-WRAPPER ${label}`, api.deriveEpicState(slices), expectedState);
   eq(`DEL-EPIC-POSTURE-WRAPPER ${label}`, api.deriveEpicPosture(slices), expectedPosture);
 }
+
+// BGR redesign 2026-07-25 — discarded slices are tombstones (excluded from the rollup
+// entirely) and parked slices wait on a decision (waiting bucket, rolls up like blocked).
+const discardedLifecycle = api.deriveEpicLifecycle([
+  { card: 'A', status: 'completed' }, { card: 'B', status: 'discarded' }, { card: 'C', status: 'discarded' },
+]);
+eq('BGR-CONTRACT-DISCARDED-EXCLUDED discarded slices vanish from the rollup entirely', {
+  state: discardedLifecycle.state,
+  done: discardedLifecycle.counts.done,
+  has_discarded_bucket: Object.prototype.hasOwnProperty.call(discardedLifecycle.counts, 'discarded'),
+}, { state: 'done', done: 1, has_discarded_bucket: false });
+const waitingLifecycle = api.deriveEpicLifecycle([{ status: 'parked' }, { status: 'planning' }]);
+eq('BGR-CONTRACT-PARKED-IS-WAITING parked counts as waiting and rolls up like blocked', {
+  waiting: waitingLifecycle.counts.waiting,
+  active: waitingLifecycle.counts.active,
+  state: waitingLifecycle.state,
+}, { waiting: 1, active: 0, state: 'blocked' });
+eq('BGR-CONTRACT-ALL-DISCARDED-IS-PLANNED an epic emptied by discards is planned, not done',
+  api.deriveEpicLifecycle([{ status: 'discarded' }]).state, 'planned');
+const discardedSliceVerdict = api.validateSlice({ ...api.registry.fixtures.slice.base, status: 'discarded' });
+check('BGR-CONTRACT-STATUS-ENUM the contract accepts a discarded slice as valid',
+  discardedSliceVerdict.ok, JSON.stringify(discardedSliceVerdict.errors));
 
 const ratificationPayload = {
   schema_version: api.CONTRACT_VERSION,

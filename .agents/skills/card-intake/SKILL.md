@@ -55,6 +55,22 @@ Before `--apply`, inspect the dry-run plan. Refuse any plan that:
 
 The validator stamps `schema_version`, derives a policy that cannot weaken `supervised_only`, and validates through the Delivery public API. Use its atomic/idempotent apply only after validation. Never hand-edit a generated marker region. Re-run the same spec and require `no_op: true`. Remove the temporary spec afterward.
 
+## Supersede a predecessor card
+
+Supersession discards the predecessor at mint time (board line + note deleted; tombstone only), so its learning must be carried by the successor or the successor is unmintable. On an execution card, set:
+
+- `supersedes`: the predecessor card title (execution cards only).
+- `carried_findings`: non-empty array of finding names carried forward from the predecessor.
+- `binding_fixtures`: non-empty array of fixtures binding those findings — plain strings (same shape as `acceptance_tests`) or `{name, description}` objects.
+
+Coverage rule: every carried finding name must appear as an exact token in at least one binding fixture's name or description (names match case-sensitively), else the spec is refused before any write (`supersede_coverage_missing`, naming each uncovered finding). Missing or empty `carried_findings`/`binding_fixtures` refuse with `supersede_missing_fields` — superseding with zero findings is a contradiction; supersession exists to carry findings forward.
+
+The receipt for a valid superseding spec includes `post_apply_instructions: [{discard: {card, superseded_by}}]`. Intake NEVER touches coordinator state — it only instructs; the run-loose flow / discard runbook executes the instruction via `coordinator discard --superseded-by <successor> --carried-fixture <fixture>`.
+
+Epic-native default: post-cutover (`coordinator status --json` reports `cutover.enabled` true), new medium/heavy work MUST target an epic board; flat creation is reserved for Discovered-lane one-liners.
+
+The cutover flag is receipt-gated and reversible (`coordinator cutover`), so never cache it: read `coordinator status --json` → `cutover.enabled` fresh at planning time (absent or `enabled: false` both mean pre-cutover).
+
 ## Finish
 
 1. Resolve every emitted wikilink to a file.

@@ -16,7 +16,8 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
   selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
+  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
+  removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
@@ -27,6 +28,7 @@ const {
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
+  parseBoard, parseDependsOn,
   delivery, prepareDeliveryCard, prepareDeliveryObject,
 } = require('../../scripts/autoloop/select-card');
 
@@ -4321,6 +4323,1209 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+// --- BGR redesign: discarded terminal phase with tombstones ---
+
+// removeBoardCard: exact mirror of moveBoardCard's location grammar.
+const removalBoard = liveBoard({ progress: ['Doomed card'], planning: ['Survivor'] });
+const removedBoard = removeBoardCard(removalBoard, 'Doomed card');
+ok(!/\[\[Doomed card\]\]/.test(removedBoard), 'removeBoardCard splices the exact card line out of its lane');
+ok(/\[\[Survivor\]\]/.test(removedBoard) && /\[\[Unrelated discovery\]\]/.test(removedBoard), 'removeBoardCard preserves every unrelated board line');
+eq(removeBoardCard(removedBoard, 'Doomed card'), removedBoard, 'removeBoardCard treats absence as already-removed (idempotent)');
+
+// BGR-DISCARD-HAPPY: parked tracked card → tombstone, board line removed, note deleted.
+const DISCARD_HEAD = 'f'.repeat(40);
+const discardRoot = path.join(tmp, 'bgr-discard');
+const discardCardsRoot = path.join(discardRoot, 'spice', 'projects', 'test', 'tasks');
+fs.mkdirSync(discardCardsRoot, { recursive: true });
+const discardBoardPath = path.join(discardRoot, 'spice', 'projects', 'test', 'project-board.md');
+const discardCardPath = path.join(discardCardsRoot, 'Stale slice.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ progress: ['Stale slice'] }));
+fs.writeFileSync(discardCardPath, [
+  '---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'stale body',
+].join('\n'));
+const discardState = emptyState();
+discardState.cards['Stale slice'] = {
+  card: 'Stale slice', phase: 'parked', card_path: discardCardPath,
+  branch: 'codex-autoloop/stale-slice', worktree: '/missing/stale-slice',
+  dependencies: ['Prerequisite A'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(DISCARD_HEAD),
+};
+let discardWrites = 0;
+const discardLocks = [];
+const discardShCalls = [];
+const discardBoardAtPersist = [];
+const discardDeps = {
+  readState: () => discardState,
+  writeState: () => { discardWrites++; discardBoardAtPersist.push(fs.readFileSync(discardBoardPath, 'utf8')); },
+  withLock: async (_ctx, name, fn) => { discardLocks.push(name); return fn(); },
+  boardPath: discardBoardPath,
+  cardsRoot: discardCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, args) => { discardShCalls.push([cmd, ...args]); return ''; },
+  now: () => '2026-07-25T12:00:00.000Z',
+};
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR',
+}, discardDeps), /requires --json/, 'BGR-DISCARD-HAPPY discard refuses without --json before any read or write');
+eq(discardLocks, [], 'BGR-DISCARD-HAPPY missing --json refusal precedes every lock');
+eq(discardWrites, 0, 'BGR-DISCARD-HAPPY missing --json refusal performs zero writes');
+const discardArgs = {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR', json: true,
+};
+const discarded = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discarded.action, 'discarded', 'BGR-DISCARD-HAPPY discard succeeds with a machine-readable receipt');
+eq(discarded.no_op, false, 'BGR-DISCARD-HAPPY first discard is not a no-op');
+eq(discarded.tombstone, {
+  discarded_at: '2026-07-25T12:00:00.000Z', discard_reason: 'redesigned under BGR',
+  superseded_by: 'Stale slice v2', final_head: DISCARD_HEAD, carried_fixtures: [],
+}, 'BGR-DISCARD-HAPPY receipt carries the exact tombstone fields');
+eq(discardState.cards['Stale slice'].phase, 'discarded', 'BGR-DISCARD-HAPPY ledger phase becomes discarded');
+eq(discardState.cards['Stale slice'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY ledger records discarded_at');
+eq(discardState.cards['Stale slice'].discard_reason, 'redesigned under BGR', 'BGR-DISCARD-HAPPY ledger records the discard reason');
+eq(discardState.cards['Stale slice'].superseded_by, 'Stale slice v2', 'BGR-DISCARD-HAPPY ledger records the superseding card');
+eq(discardState.cards['Stale slice'].final_head, DISCARD_HEAD, 'BGR-DISCARD-HAPPY final_head preserves the record gate-receipt HEAD');
+eq(discardState.cards['Stale slice'].carried_fixtures, [], 'BGR-DISCARD-HAPPY ledger records carried fixtures');
+ok(!/\[\[Stale slice\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY board line is removed from its lane');
+ok(!fs.existsSync(discardCardPath), 'BGR-DISCARD-HAPPY card note file is deleted');
+ok(discardWrites >= 1, 'BGR-DISCARD-HAPPY ledger write happens first');
+ok(/\[\[Stale slice\]\]/.test(discardBoardAtPersist[0]),
+  'BGR-DISCARD-HAPPY the board line is still present at tombstone-persist time (ledger-first ordering)');
+eq(discardShCalls, [
+  ['git', 'worktree', 'list', '--porcelain'],
+  ['git', 'branch', '-D', 'codex-autoloop/stale-slice'],
+], 'BGR-DISCARD-HAPPY deletes the unguarded branch after checking checkouts');
+eq(discarded.branch, { branch: 'codex-autoloop/stale-slice', deleted: true }, 'BGR-DISCARD-HAPPY receipt reports the deleted branch');
+
+// Untracked never-claimed corpse: minimal tombstone, line + note removed.
+const corpsePath = path.join(discardCardsRoot, 'Never claimed.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ planning: ['Never claimed'] }));
+fs.writeFileSync(corpsePath, '---\nstatus: planning\n---\ncorpse body\n');
+const corpse = await commandDiscard({ root: discardRoot }, {
+  card: 'Never claimed', reason: 'never-claimed corpse', json: true,
+}, discardDeps);
+eq(corpse.action, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse discard succeeds');
+eq(corpse.tracked, false, 'BGR-DISCARD-HAPPY untracked corpse is reported untracked');
+eq(discardState.cards['Never claimed'].phase, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse gains a minimal tombstone record');
+eq(discardState.cards['Never claimed'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY corpse tombstone records discarded_at');
+eq(discardState.cards['Never claimed'].discard_reason, 'never-claimed corpse', 'BGR-DISCARD-HAPPY corpse tombstone records the reason');
+eq(discardState.cards['Never claimed'].final_head, null, 'BGR-DISCARD-HAPPY corpse tombstone has no preserved HEAD');
+ok(!fs.existsSync(corpsePath), 'BGR-DISCARD-HAPPY corpse note file is deleted');
+ok(!/\[\[Never claimed\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY corpse board line is removed');
+
+// Status surfaces tombstones without consuming capacity.
+const discardStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(discardBoardPath, 'utf8'), loadCard: () => null, state: discardState,
+  cardsRoot: discardCardsRoot,
+});
+eq(discardStatus.discarded_total, 2, 'status reports the total tombstone count');
+eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
+  name: 'Stale slice', discarded_at: '2026-07-25T12:00:00.000Z',
+  superseded_by: 'Stale slice v2', reason: 'redesigned under BGR',
+}, 'status lists recent tombstones with name, time, supersession, and reason');
+eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
+eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
+
+// BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
+const replayWritesBefore = discardWrites;
+const replayShBefore = discardShCalls.length;
+const replayBoardBytes = fs.readFileSync(discardBoardPath, 'utf8');
+const replayStateBytes = JSON.stringify(discardState);
+const discardReplay = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discardReplay.action, 'discarded', 'BGR-DISCARD-REPLAY-NOOP literal replay reports discarded');
+eq(discardReplay.no_op, true, 'BGR-DISCARD-REPLAY-NOOP literal replay is an explicit no-op');
+eq(discardWrites, replayWritesBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero ledger writes');
+eq(discardShCalls.length, replayShBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero git operations');
+eq(fs.readFileSync(discardBoardPath, 'utf8'), replayBoardBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(discardState), replayStateBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps ledger state byte-stable');
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  ...discardArgs, reason: 'a different reason',
+}, discardDeps), /already discarded/, 'BGR-DISCARD-REPLAY-NOOP non-literal replay of a tombstone refuses');
+
+// BGR-DISCARD-ACTIVE-REFUSED: active claim and every in-flight phase refuse with zero writes.
+for (const phase of ['claimed', 'implementing', 'feature_pr', 'feature_merged', 'release_pr',
+  'release_merged', 'tagged', 'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'needs-inspection', 'deployed']) {
+  const activeState = emptyState();
+  activeState.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
+  let activeWrites = 0;
+  await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+    card: 'Active', reason: 'attempted discard of live work', json: true,
+  }, {
+    ...discardDeps, readState: () => activeState, writeState: () => { activeWrites++; },
+  }), /discard refuses/, `BGR-DISCARD-ACTIVE-REFUSED refuses phase ${phase}`);
+  eq(activeWrites, 0, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal performs zero writes`);
+  eq(activeState.cards.Active.phase, phase, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal preserves the record`);
+}
+
+// BGR-DISCARD-TOMBSTONE-UNCLAIMABLE: a hand-added board line with a tombstoned name is never claimed.
+const unclaimableSelection = selectClaimCandidate({
+  boardMd: board(['Stale slice']), state: discardState,
+  loadCard: () => { throw new Error('claim must never load a tombstoned card'); },
+});
+eq(unclaimableSelection.action, 'no-work', 'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE tombstoned board line yields no work');
+ok(unclaimableSelection.skipped.some((item) => item.card === 'Stale slice' && /already tracked \(discarded\)/.test(item.reason)),
+  'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE claim guard skips the tombstoned name explicitly');
+
+// BGR-DISCARD-DEP-FAILS-LOUD: a dependency on a tombstone is never satisfied and never checkbox-satisfied.
+const depState = emptyState();
+depState.cards['Dead dep'] = {
+  card: 'Dead dep', phase: 'discarded', discarded_at: '2026-07-25T12:00:00.000Z',
+  discard_reason: 'redesigned', superseded_by: 'Dead dep v2',
+};
+const depBoard = board(['Dependent'], ['Dead dep']);
+eq(dependencySatisfied('Dead dep', null, depState, depBoard), false,
+  'BGR-DISCARD-DEP-FAILS-LOUD a tombstoned dependency is never satisfied even with a checked Completed checkbox');
+eq(discardedDependencyProblem('Dead dep', depState), 'depends on discarded card Dead dep (superseded by Dead dep v2)',
+  'BGR-DISCARD-DEP-FAILS-LOUD the discarded-dependency finding names the tombstone and its successor');
+eq(discardedDependencyProblem('Alive dep', depState), null,
+  'BGR-DISCARD-DEP-FAILS-LOUD non-tombstoned dependencies produce no discarded finding');
+const depSelection = selectClaimCandidate({
+  boardMd: depBoard, state: depState,
+  loadCard: (name) => name === 'Dependent'
+    ? { path: '/cards/Dependent.md', raw: card({ name: 'Dependent', deps: ['Dead dep'], zones: ['platform/dependent'] }) } : null,
+});
+eq(depSelection.action, 'no-work', 'BGR-DISCARD-DEP-FAILS-LOUD a dependent card is not claimable');
+ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
+  'BGR-DISCARD-DEP-FAILS-LOUD claim skip reason is the explicit discarded-dependency error, not the checkbox fallback');
+
+// BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
+eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');
+const tombstoneReconcileWritesBefore = discardWrites;
+const tombstoneReconcile = await commandReconcile({ root: discardRoot }, { card: 'Stale slice' }, {
+  readState: () => discardState, writeState: () => { discardWrites++; },
+  withLock: immediateCardLock, boardPath: discardBoardPath, cardsRoot: discardCardsRoot,
+});
+eq(tombstoneReconcile.action, 'reconciled', 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone succeeds');
+eq(tombstoneReconcile.no_op, true, 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone is a no-op');
+eq(tombstoneReconcile.results[0].skipped, 'phase has no board projection',
+  'BGR-DISCARD-PROJECTION-NULL tombstone reconcile skips projection entirely');
+eq(discardWrites, tombstoneReconcileWritesBefore, 'BGR-DISCARD-PROJECTION-NULL tombstone reconcile performs zero writes');
+ok(!discardState.cards['Stale slice'].projection_error,
+  'BGR-DISCARD-PROJECTION-NULL absence of the board line is the correct projection, never a projection_error');
+
+// BGR-DISCARD-BRANCH-GUARD: open PR or checked-out branch refuses deletion; discard still completes.
+const guardedPath = path.join(discardCardsRoot, 'Guarded.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Guarded'] }));
+fs.writeFileSync(guardedPath, '---\nstatus: blocked\n---\nguarded body\n');
+const guardState = emptyState();
+guardState.cards.Guarded = {
+  card: 'Guarded', phase: 'blocked', reason: 'feature PR CLOSED', feature_pr: 321,
+  branch: 'codex-autoloop/guarded', worktree: path.join(discardRoot, 'guarded-worktree'), card_path: guardedPath,
+};
+const guardShCalls = [];
+const guarded = await commandDiscard({ root: discardRoot }, {
+  card: 'Guarded', reason: 'abandoned closed PR', json: true,
+}, {
+  ...discardDeps, readState: () => guardState, writeState: () => {},
+  worktreeExists: () => true,
+  sh: (cmd, args) => { guardShCalls.push([cmd, ...args]); return ''; },
+});
+eq(guarded.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD the discard itself still completes');
+eq(guardState.cards.Guarded.phase, 'discarded', 'BGR-DISCARD-BRANCH-GUARD ledger still becomes discarded');
+eq(guarded.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD recorded-PR branch is flagged retained_unsafe_to_delete');
+ok(/record has feature PR #321 recorded; branch deletion not verified safe/.test(guarded.branch.reason),
+  'BGR-DISCARD-BRANCH-GUARD recorded-PR retention names its reason without claiming the PR is open');
+ok(guardShCalls.some((call) => call[1] === 'worktree' && call[2] === 'remove'),
+  'BGR-DISCARD-BRANCH-GUARD the record worktree is still removed');
+ok(!guardShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion is attempted with a recorded PR');
+const checkedPath = path.join(discardCardsRoot, 'Checked out.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Checked out'] }));
+fs.writeFileSync(checkedPath, '---\nstatus: blocked\n---\nchecked body\n');
+const checkedState = emptyState();
+checkedState.cards['Checked out'] = {
+  card: 'Checked out', phase: 'blocked', reason: 'stuck', branch: 'codex-autoloop/checked-out', card_path: checkedPath,
+  gate_receipt: passingReceipt('not-a-canonical-sha'),
+};
+const checkedShCalls = [];
+const checkedOut = await commandDiscard({ root: discardRoot }, {
+  card: 'Checked out', reason: 'superseded while checked out', json: true,
+}, {
+  ...discardDeps, readState: () => checkedState, writeState: () => {},
+  worktreeExists: () => false,
+  sh: (cmd, args) => {
+    checkedShCalls.push([cmd, ...args]);
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return ['worktree /elsewhere', 'HEAD ' + 'a'.repeat(40), 'branch refs/heads/codex-autoloop/checked-out', ''].join('\n');
+    }
+    return '';
+  },
+});
+eq(checkedOut.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD checked-out branch discard still completes');
+eq(checkedOut.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD checked-out branch is retained');
+ok(/checked out/.test(checkedOut.branch.reason), 'BGR-DISCARD-BRANCH-GUARD checked-out retention names its reason');
+ok(!checkedShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion when a worktree holds the branch');
+eq(checkedState.cards['Checked out'].final_head, null,
+  'a malformed preserved gate-receipt HEAD never becomes a tombstone final_head (canonical 40-hex or null)');
+
+// BGR-DISCARD-EPIC-ROLLUP: discarding a canonical epic slice reprojects the epic without it.
+const rollup = makeEpicProjectionFixture('bgr-discard-rollup');
+rollup.state.cards.A1.phase = 'parked';
+rollup.state.cards.A1.branch = 'codex-autoloop/a1';
+const rollupResult = await commandDiscard({ root: rollup.root }, {
+  card: 'A1', 'superseded-by': 'A1b', reason: 'resliced under BGR', json: true,
+}, {
+  readState: () => rollup.state, writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: rollup.parentBoardPath, cardsRoot: rollup.cardsRoot,
+  worktreeExists: () => false, sh: () => '', now: () => '2026-07-25T13:00:00.000Z',
+});
+eq(rollupResult.action, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP canonical slice discard succeeds');
+eq(rollup.state.cards.A1.phase, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP slice ledger becomes a tombstone');
+ok(!/\[\[A1\]\]/.test(fs.readFileSync(rollup.epicBoardPath, 'utf8')), 'BGR-DISCARD-EPIC-ROLLUP discarded slice disappears from the epic board');
+ok(!fs.existsSync(rollup.cardPath), 'BGR-DISCARD-EPIC-ROLLUP discarded slice note is deleted');
+const rollupParent = fs.readFileSync(rollup.parentBoardPath, 'utf8');
+const rollupPlanningIdx = rollupParent.indexOf('## In Planning');
+const rollupProgressIdx = rollupParent.indexOf('## In Progress');
+const rollupEpicIdx = rollupParent.indexOf('- [ ] [[Epic A]]');
+ok(rollupEpicIdx > rollupPlanningIdx && rollupEpicIdx < rollupProgressIdx,
+  'BGR-DISCARD-EPIC-ROLLUP the parent rollup recomputes the epic from surviving slices');
+ok(!/- \[x\] \[\[Epic A\]\]/.test(rollupParent), 'BGR-DISCARD-EPIC-ROLLUP the epic is no longer checked Completed');
+const rollupAtlas = fs.readFileSync(rollup.atlasPath, 'utf8');
+ok(/status: planned/.test(rollupAtlas) && /posture: claimable/.test(rollupAtlas),
+  'BGR-DISCARD-EPIC-ROLLUP the atlas recomputes without the tombstone');
+eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports the recomputed epic state');
+
+// CLI wiring: the discard command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI discard without --json refuses with a machine-parseable error before any read or write');
+}
+
+// --- BGR redesign: idempotent reap ---
+
+// BGR-REAP-STEM-EXACT: the ported triage inference is token-exact.
+eq(stemOf('ES4a Something bounded'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a single lowercase supersession suffix');
+eq(stemOf('ES4a2 Something rebuilt'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a lowercase letter + digits suffix');
+eq(stemOf('ES41 No suffix here'), 'ES41', 'BGR-REAP-STEM-EXACT ids without a lowercase suffix are their own stem');
+eq(stemOf('GA-C9a2'), 'GA-C9', 'BGR-REAP-STEM-EXACT stem handles hyphenated card ids');
+const stemTracked = [
+  { card: 'ES4a2 Rebuilt renderer (supersedes ES4a)', status: 'deployed' },
+  { card: 'ES5a2 Rebuilt without marker', status: 'deployed' },
+  { card: 'ES6a2 Pending successor (supersedes ES6a)', status: 'parked' },
+];
+eq(hasDeployedSupersedingSibling({ card: 'ES4a Original renderer' }, stemTracked), true,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling with a supersession marker is a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES5a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling without the marker is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES6a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a non-deployed successor is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES4a2 Rebuilt renderer (supersedes ES4a)' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a card is never its own superseding sibling (id tokens are exact)');
+eq(hasDeployedSupersedingSibling({ card: 'ES40a Widened scope' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT stem matching is token-exact, never substring: ES40a does not match the ES4 stem');
+eq(hasDeployedSupersedingSibling({ card: 'ES7a Legacy pass' },
+  [{ card: 'ES7a2 Wrap-up (final value-review completion)', status: 'completed' }]), true,
+  'BGR-REAP-STEM-EXACT completed final value-review successors also mark corpses');
+
+// BGR-REAP-CORPSES / STUBS / DUPES / RESIDUE-HEAL: one sweep over a live board.
+const reapRoot = path.join(tmp, 'bgr-reap');
+const reapProjectRoot = path.join(reapRoot, 'spice', 'projects', 'test');
+const reapCardsRoot = path.join(reapProjectRoot, 'tasks');
+fs.mkdirSync(reapCardsRoot, { recursive: true });
+const reapBoardPath = path.join(reapProjectRoot, 'project-board.md');
+fs.writeFileSync(reapBoardPath, [
+  '---', 'kanban-plugin: board', '---', '',
+  '## In Planning',
+  '- [ ] [[Decomposed parent]] (decomposed → [[Child one]] → [[Child two]])',
+  '- [ ] [[Settled container]] (decomposed → [[Done child]] → [[Dead child]])',
+  '- [ ] [[Docs $$ parent]] (docs-only → [[Some doc]])',
+  '- [ ] [[Dupe card]]',
+  '- [ ] [[Dupe card]]',
+  '',
+  '## In Progress',
+  '- [ ] [[ES9a Old renderer]]',
+  '- [ ] [[Keeper parked]]',
+  '- [ ] [[Ghost residue]]',
+  '',
+  '## Blocked', '',
+  '## Completed',
+  '- [x] [[Done child]]',
+  '- [x] [[ES9a2 Renderer rework (supersedes ES9a)]]',
+  '',
+].join('\n'));
+const reapCorpsePath = path.join(reapCardsRoot, 'ES9a Old renderer.md');
+const reapKeeperPath = path.join(reapCardsRoot, 'Keeper parked.md');
+const reapGhostPath = path.join(reapCardsRoot, 'Ghost residue.md');
+fs.writeFileSync(reapCorpsePath, '---\nstatus: parked\n---\nold renderer body\n');
+fs.writeFileSync(reapKeeperPath, '---\nstatus: parked\n---\nkeeper body\n');
+fs.writeFileSync(reapGhostPath, '---\nstatus: parked\n---\nghost body\n');
+const REAP_HEAD = 'e'.repeat(40);
+const reapState = emptyState();
+reapState.cards['ES9a Old renderer'] = {
+  card: 'ES9a Old renderer', phase: 'parked', card_path: reapCorpsePath,
+  branch: 'codex-autoloop/es9a', dependencies: ['ES9 base'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(REAP_HEAD),
+};
+reapState.cards['ES9a2 Renderer rework (supersedes ES9a)'] = {
+  card: 'ES9a2 Renderer rework (supersedes ES9a)', phase: 'deployed',
+};
+reapState.cards['Keeper parked'] = {
+  card: 'Keeper parked', phase: 'parked', card_path: reapKeeperPath,
+  dependencies: ['Something real'], resume_condition: 'still real',
+};
+reapState.cards['Dead child'] = {
+  card: 'Dead child', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+reapState.cards['Ghost residue'] = {
+  card: 'Ghost residue', phase: 'discarded', card_path: reapGhostPath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crashed mid-discard',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+let reapWrites = 0;
+const reapLocks = [];
+const reapShCalls = [];
+const reapDeps = {
+  readState: () => reapState,
+  writeState: () => { reapWrites++; },
+  withLock: async (_ctx, name, fn) => { reapLocks.push(name); return fn(); },
+  boardPath: reapBoardPath, cardsRoot: reapCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, cmdArgs) => { reapShCalls.push([cmd, ...cmdArgs]); return ''; },
+  now: () => '2026-07-25T14:00:00.000Z',
+};
+await assert.rejects(() => commandReap({ root: reapRoot }, {}, reapDeps), /requires --json/,
+  'BGR-REAP refuses without --json before any read or write');
+eq(reapLocks, [], 'BGR-REAP missing --json refusal precedes every lock');
+eq(reapWrites, 0, 'BGR-REAP missing --json refusal performs zero writes');
+const reaped = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reaped.action, 'reaped', 'BGR-REAP emits one machine-readable reap receipt');
+eq(reaped.no_op, false, 'BGR-REAP first sweep is not a no-op');
+ok(reapLocks.includes('selector'), 'BGR-REAP the sweep runs under the selector lock');
+
+// BGR-REAP-CORPSES: parked stem-sibling with a deployed successor is discarded.
+eq(reaped.corpses.length, 1, 'BGR-REAP-CORPSES exactly one superseded corpse is discovered');
+eq(reaped.corpses[0].card, 'ES9a Old renderer', 'BGR-REAP-CORPSES the parked stem-sibling is the corpse');
+eq(reaped.corpses[0].tombstone.superseded_by, 'ES9a2 Renderer rework (supersedes ES9a)',
+  'BGR-REAP-CORPSES the tombstone names the exact deployed successor card');
+eq(reapState.cards['ES9a Old renderer'].phase, 'discarded', 'BGR-REAP-CORPSES the corpse ledger record becomes a tombstone');
+eq(reapState.cards['ES9a Old renderer'].final_head, REAP_HEAD, 'BGR-REAP-CORPSES the tombstone preserves the corpse gate-receipt HEAD');
+ok(!fs.existsSync(reapCorpsePath), 'BGR-REAP-CORPSES the corpse note is deleted');
+const sweptBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[ES9a Old renderer\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the corpse board line is removed');
+eq(reapState.cards['Keeper parked'].phase, 'parked', 'BGR-REAP-CORPSES a parked card with no deployed successor is untouched');
+ok(fs.existsSync(reapKeeperPath), 'BGR-REAP-CORPSES the untouched parked note survives');
+ok(/- \[ \] \[\[Keeper parked\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the untouched parked board line survives');
+
+// BGR-REAP-STUBS: annotations stripped; fully settled containers discarded outright.
+ok(sweptBoard.includes('- [ ] [[Decomposed parent]]') && !/Decomposed parent\]\] \(decomposed/.test(sweptBoard),
+  'BGR-REAP-STUBS the decomposition annotation is stripped, checkbox state and wikilink preserved exactly');
+ok(sweptBoard.includes('- [ ] [[Docs $$ parent]]') && !/\(docs-only/.test(sweptBoard),
+  'BGR-REAP-STUBS the docs-only variant strips safely for names containing $');
+ok(!/\[\[Settled container\]\]/.test(sweptBoard),
+  'BGR-REAP-STUBS a planning container whose children are all tombstoned or completed is discarded outright');
+eq(reapState.cards['Settled container'].phase, 'discarded', 'BGR-REAP-STUBS the settled container gains a tombstone');
+eq(reaped.stub_parents.length, 1, 'BGR-REAP-STUBS the receipt lists exactly one settled-container discard');
+eq(reaped.stub_parents[0].card, 'Settled container', 'BGR-REAP-STUBS the receipt names the discarded container');
+eq(reaped.annotations_stripped.map((item) => item.card).sort(), ['Decomposed parent', 'Docs $$ parent'],
+  'BGR-REAP-STUBS the receipt lists every stripped annotation');
+
+// BGR-REAP-DUPES: two lines targeting the same wikilink → first kept, second removed.
+eq((sweptBoard.match(/\[\[Dupe card\]\]/g) || []).length, 1, 'BGR-REAP-DUPES only the first duplicate line survives');
+eq(reaped.duplicates_removed, [{ board: reapBoardPath, card: 'Dupe card' }],
+  'BGR-REAP-DUPES the receipt lists the removed duplicate line');
+
+// BGR-REAP-RESIDUE-HEAL: tombstone residue (line + note) is healed.
+ok(!/\[\[Ghost residue\]\]/.test(sweptBoard), 'BGR-REAP-RESIDUE-HEAL the residual tombstone board line is removed');
+eq(reaped.residue_lines_removed, [{ board: reapBoardPath, card: 'Ghost residue' }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual line');
+ok(!fs.existsSync(reapGhostPath), 'BGR-REAP-RESIDUE-HEAL the residual tombstone note is deleted');
+eq(reaped.residue_notes_deleted, [{ card: 'Ghost residue', path: reapGhostPath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual note');
+
+// BGR-REAP-NOOP: replay on the settled board is a no-op with zero writes.
+const noopWritesBefore = reapWrites;
+const noopShBefore = reapShCalls.length;
+const noopBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const noopStateBytes = JSON.stringify(reapState);
+const reapReplay = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reapReplay.action, 'reaped', 'BGR-REAP-NOOP replay still emits the reap receipt');
+eq(reapReplay.no_op, true, 'BGR-REAP-NOOP replay on a settled board is an explicit no-op');
+eq(reapWrites, noopWritesBefore, 'BGR-REAP-NOOP replay performs zero ledger writes');
+eq(reapShCalls.length, noopShBefore, 'BGR-REAP-NOOP replay performs zero git operations');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), noopBoardBytes, 'BGR-REAP-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(reapState), noopStateBytes, 'BGR-REAP-NOOP replay keeps ledger state byte-stable');
+
+// BGR-REAP-EXPLICIT-LIST: --also discards named settled work, refuses active phases.
+const explicitPath = path.join(reapCardsRoot, 'Explicit corpse.md');
+const untrackedStubPath = path.join(reapCardsRoot, 'Untracked stub.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ blocked: ['Explicit corpse'], planning: ['Untracked stub'], progress: ['Busy card'] }));
+fs.writeFileSync(explicitPath, '---\nstatus: blocked\n---\nexplicit body\n');
+fs.writeFileSync(untrackedStubPath, '---\nstatus: planning\n---\nstub body\n');
+const alsoState = emptyState();
+alsoState.cards['Explicit corpse'] = { card: 'Explicit corpse', phase: 'blocked', card_path: explicitPath };
+alsoState.cards['Busy card'] = { card: 'Busy card', phase: 'implementing' };
+let alsoWrites = 0;
+const alsoDeps = { ...reapDeps, readState: () => alsoState, writeState: () => { alsoWrites++; } };
+const alsoReap = await commandReap({ root: reapRoot }, { json: true, also: ['Explicit corpse', 'Untracked stub'] }, alsoDeps);
+eq(alsoReap.also.map((item) => item.card), ['Explicit corpse', 'Untracked stub'],
+  'BGR-REAP-EXPLICIT-LIST discards every explicitly listed card');
+eq(alsoState.cards['Explicit corpse'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST a blocked listed card becomes a tombstone');
+eq(alsoState.cards['Untracked stub'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST an untracked listed card gains a minimal tombstone');
+ok(!fs.existsSync(explicitPath) && !fs.existsSync(untrackedStubPath), 'BGR-REAP-EXPLICIT-LIST listed card notes are deleted');
+const alsoBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[Explicit corpse\]\]/.test(alsoBoard) && !/\[\[Untracked stub\]\]/.test(alsoBoard),
+  'BGR-REAP-EXPLICIT-LIST listed board lines are removed');
+ok(/\[\[Busy card\]\]/.test(alsoBoard), 'BGR-REAP-EXPLICIT-LIST the active board line survives');
+const refuseWritesBefore = alsoWrites;
+const refuseBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'Busy card' }, alsoDeps),
+  /refuses active in-flight work/, 'BGR-REAP-EXPLICIT-LIST refuses names with active in-flight phases');
+eq(alsoWrites, refuseWritesBefore, 'BGR-REAP-EXPLICIT-LIST active-name refusal performs zero writes');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), refuseBoardBytes, 'BGR-REAP-EXPLICIT-LIST active-name refusal keeps board bytes stable');
+eq(alsoState.cards['Busy card'].phase, 'implementing', 'BGR-REAP-EXPLICIT-LIST the active record is preserved');
+
+// BGR-REAP-EXPLICIT-LIST overlap: --also naming a corpse-set member (or any
+// already-tombstoned card) records a skip entry; the identical re-run stays no_op.
+const overlapCorpsePath = path.join(reapCardsRoot, 'ES8a Old pass.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ progress: ['ES8a Old pass'] }));
+fs.writeFileSync(overlapCorpsePath, '---\nstatus: parked\n---\nold pass body\n');
+const overlapState = emptyState();
+overlapState.cards['ES8a Old pass'] = { card: 'ES8a Old pass', phase: 'parked', card_path: overlapCorpsePath };
+overlapState.cards['ES8a2 New pass (supersedes ES8a)'] = { card: 'ES8a2 New pass (supersedes ES8a)', phase: 'deployed' };
+overlapState.cards['Manual tombstone'] = {
+  card: 'Manual tombstone', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'hand discarded with its own reason', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+const overlapDeps = { ...reapDeps, readState: () => overlapState, writeState: () => {} };
+const overlapArgs = { json: true, also: ['ES8a Old pass', 'Manual tombstone'] };
+
+// BGR-REAP-EXPLICIT-LIST typo: an unresolvable --also name refuses up-front,
+// before the corpse pass performs any write, and names the offender.
+const typoBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'No Such Card' }, overlapDeps),
+  /cannot resolve --also card No Such Card/,
+  'BGR-REAP-EXPLICIT-LIST typo: an unresolvable listed name refuses up-front and names the offender');
+eq(overlapState.cards['ES8a Old pass'].phase, 'parked',
+  'BGR-REAP-EXPLICIT-LIST typo: the refusal precedes the corpse pass, so the corpse record is untouched');
+ok(fs.existsSync(overlapCorpsePath), 'BGR-REAP-EXPLICIT-LIST typo: the refused run performs zero note deletions');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), typoBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST typo: the refused run keeps board bytes stable');
+
+const overlapReap = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReap.corpses.map((item) => item.card), ['ES8a Old pass'],
+  'BGR-REAP-EXPLICIT-LIST overlap: the corpse pass discards the listed card first');
+eq(overlapReap.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: already-tombstoned listed names record skip entries, never a throw');
+eq(overlapReap.no_op, false, 'BGR-REAP-EXPLICIT-LIST overlap: the first run still reports its corpse work');
+const overlapBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const overlapReplay = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReplay.no_op, true, 'BGR-REAP-EXPLICIT-LIST overlap: the identical re-run is an explicit no-op');
+eq(overlapReplay.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps the skip entries');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), overlapBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps board bytes stable');
+
+// BGR-REAP-RESIDUE-HEAL guard: a symlinked residue note is refused per-item and
+// reported in the receipt; the rest of the reap completes.
+const symTargetPath = path.join(reapRoot, 'outside-note.md');
+const symNotePath = path.join(reapCardsRoot, 'Symlinked residue.md');
+const healthyResiduePath = path.join(reapCardsRoot, 'Healthy residue.md');
+fs.writeFileSync(symTargetPath, 'outside body\n');
+fs.symlinkSync(symTargetPath, symNotePath);
+fs.writeFileSync(healthyResiduePath, '---\nstatus: parked\n---\nhealthy residue body\n');
+const symState = emptyState();
+symState.cards['Symlinked residue'] = {
+  card: 'Symlinked residue', phase: 'discarded', card_path: symNotePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+symState.cards['Healthy residue'] = {
+  card: 'Healthy residue', phase: 'discarded', card_path: healthyResiduePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+fs.writeFileSync(reapBoardPath, liveBoard({}));
+const symDeps = { ...reapDeps, readState: () => symState, writeState: () => {} };
+const symReap = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReap.action, 'reaped', 'BGR-REAP-RESIDUE-HEAL a corrupt residue entry never aborts the batch');
+eq(symReap.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL exactly one residue refusal is reported');
+eq(symReap.residue_notes_refused[0].card, 'Symlinked residue', 'BGR-REAP-RESIDUE-HEAL the refusal names the corrupt entry');
+eq(symReap.residue_notes_refused[0].residue_note, 'refused', 'BGR-REAP-RESIDUE-HEAL the refusal is marked refused');
+ok(/regular non-symlink file/.test(symReap.residue_notes_refused[0].reason),
+  'BGR-REAP-RESIDUE-HEAL the refusal carries the guard reason');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink in place');
+ok(fs.existsSync(symTargetPath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink target untouched');
+ok(!fs.existsSync(healthyResiduePath), 'BGR-REAP-RESIDUE-HEAL the rest of the residue pass still completes');
+eq(symReap.residue_notes_deleted, [{ card: 'Healthy residue', path: healthyResiduePath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt still lists the healed healthy residue');
+const symReplay = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReplay.no_op, true, 'BGR-REAP-RESIDUE-HEAL a persistent refused entry keeps the replay an explicit zero-write no-op');
+eq(symReplay.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL the replay still reports the persistent refusal');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the replay still leaves the symlink in place');
+
+// CLI wiring: the reap command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI reap without --json refuses with a machine-parseable error before any read or write');
+}
+
+// --- BGR redesign: restructure — sanctioned flat-to-epic board migration ---
+
+const noteBody = (raw) => String(raw).replace(/^---\n[\s\S]*?\n---/, '');
+let restructureFixtureId = 0;
+function makeRestructureFixture(opts = {}) {
+  const root = path.join(tmp, `bgr-restructure-${++restructureFixtureId}`);
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, [
+    '---', 'kanban-plugin: board', 'type: kanban', 'project_name: Test', 'project_slug: test', '---', '',
+    '## In Planning',
+    '- [ ] [[Card A1]]',
+    '- [ ] [[Card A2]]',
+    '- [ ] [[Bystander card]]',
+    '- [ ] [[Card B1]]',
+    '- [ ] [[Card B2]]',
+    '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const bodies = {
+    'Card A1': '\n\nA1 body line one.\n\nA1 body line two.\n',
+    'Card A2': '\n\nA2 body with $& and $$ and $1 dollar specials.\n',
+    'Card B1': '\n\nB1 body.\n',
+    'Card B2': '\n\nB2 body.\n',
+    'Bystander card': '\n\nBystander body.\n',
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    fs.writeFileSync(path.join(cardsRoot, `${name}.md`), [
+      '---', 'type: task-hub',
+      'source_board: spice/projects/test/project-board.md',
+      `status: ${(opts.statuses || {})[name] || 'planning'}`,
+      name === 'Card A2' ? 'depends_on: "[[Card A1]]"' : 'depends_on: []',
+      '---',
+    ].join('\n') + body);
+  }
+  const spec = {
+    project_root: projectRoot,
+    board: boardPath,
+    epics: [
+      { epic: 'Family A', members: ['Card A1', 'Card A2'] },
+      { epic: 'Family B', members: ['Card B1', 'Card B2'] },
+    ],
+  };
+  const specPath = path.join(root, 'map.json');
+  fs.writeFileSync(specPath, JSON.stringify(spec, null, 2));
+  const state = emptyState();
+  const counters = { writes: 0, locks: [] };
+  const deps = {
+    readState: () => state,
+    writeState: () => { counters.writes++; },
+    withLock: async (_ctx, name, fn) => { counters.locks.push(name); return fn(); },
+    now: () => '2026-07-25T15:00:00.000Z',
+    journalPath: path.join(root, 'restructure-journal.json'),
+  };
+  return { root, projectRoot, cardsRoot, boardPath, spec, specPath, state, bodies, counters, deps };
+}
+const writeSpec = (fixture, spec) => fs.writeFileSync(fixture.specPath, JSON.stringify(spec, null, 2));
+
+// BGR-RESTRUCTURE-HAPPY: the spec'd flat cards become two canonical epics.
+const happy = makeRestructureFixture();
+const happySources = Object.fromEntries(Object.keys(happy.bodies)
+  .map((name) => [name, fs.readFileSync(path.join(happy.cardsRoot, `${name}.md`), 'utf8')]));
+await assert.rejects(() => commandRestructure({ root: happy.root }, { spec: happy.specPath }, happy.deps),
+  /requires --json/, 'BGR-RESTRUCTURE-HAPPY restructure refuses without --json before any read or write');
+eq(happy.counters.locks, [], 'BGR-RESTRUCTURE-HAPPY missing --json refusal precedes every lock');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY missing --json refusal performs zero ledger writes');
+const restructured = await commandRestructure({ root: happy.root }, { spec: happy.specPath, json: true }, happy.deps);
+eq(restructured.action, 'restructured', 'BGR-RESTRUCTURE-HAPPY emits one machine-readable receipt');
+eq(restructured.no_op, false, 'BGR-RESTRUCTURE-HAPPY first run is not a no-op');
+ok(happy.counters.locks.includes('selector'), 'BGR-RESTRUCTURE-HAPPY the pass runs under the selector lock');
+eq(restructured.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY receipt reports every epic in spec order');
+eq(restructured.epics[0].members.map((entry) => entry.card), ['Card A1', 'Card A2'],
+  'BGR-RESTRUCTURE-HAPPY receipt reports every member move');
+const happyAtlasPath = path.join(happy.cardsRoot, 'Family A', 'Family A.md');
+const happyEpicBoardPath = path.join(happy.cardsRoot, 'Family A', 'board', 'Family A-board.md');
+const happyAtlas = fs.readFileSync(happyAtlasPath, 'utf8');
+ok(/^type: epic$/m.test(happyAtlas), 'BGR-RESTRUCTURE-HAPPY atlas is type epic');
+ok(/^status: planned$/m.test(happyAtlas) && /^posture: claimable$/m.test(happyAtlas),
+  'BGR-RESTRUCTURE-HAPPY atlas derives planned/claimable from all-planning members');
+ok(happyAtlas.includes('source_board: spice/projects/test/project-board.md')
+  && happyAtlas.includes('kanban_board: spice/projects/test/project-board.md'),
+  'BGR-RESTRUCTURE-HAPPY atlas binds its canonical parent board');
+ok(happyAtlas.includes('epic_board: spice/projects/test/tasks/Family A/board/Family A-board.md'),
+  'BGR-RESTRUCTURE-HAPPY atlas binds its canonical epic board');
+const happyEpicBoard = fs.readFileSync(happyEpicBoardPath, 'utf8');
+ok(/^board_role: epic$/m.test(happyEpicBoard), 'BGR-RESTRUCTURE-HAPPY epic board carries board_role epic');
+ok(/## In Planning\n\n- \[ \] \[\[Card A1\]\]\n- \[ \] \[\[Card A2\]\]/.test(happyEpicBoard),
+  'BGR-RESTRUCTURE-HAPPY member lines land in the epic In Planning lane in original relative order');
+ok(/## In Progress/.test(happyEpicBoard) && /## Blocked/.test(happyEpicBoard) && /## Completed/.test(happyEpicBoard),
+  'BGR-RESTRUCTURE-HAPPY epic board carries all four canonical lanes');
+for (const keepDir of ['runs', 'lessons', 'decisions']) {
+  ok(fs.existsSync(path.join(happy.cardsRoot, 'Family A', 'context', keepDir, '.keep')),
+    `BGR-RESTRUCTURE-HAPPY epic context/${keepDir}/.keep scaffold exists`);
+}
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family A', 'Card A2'], ['Family B', 'Card B1'], ['Family B', 'Card B2']]) {
+  const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
+  ok(!fs.existsSync(path.join(happy.cardsRoot, `${member}.md`)), `BGR-RESTRUCTURE-HAPPY ${member} source note is gone`);
+  ok(fs.existsSync(target), `BGR-RESTRUCTURE-HAPPY ${member} note moved into the epic board directory`);
+  const raw = fs.readFileSync(target, 'utf8');
+  ok(/^type: slice$/m.test(raw), `BGR-RESTRUCTURE-HAPPY ${member} is rewritten to type slice`);
+  ok(raw.includes(`epic: "[[${epic}]]"`), `BGR-RESTRUCTURE-HAPPY ${member} carries its epic backlink`);
+  ok(raw.includes(`task_parent: spice/projects/test/tasks/${epic}/${epic}.md`),
+    `BGR-RESTRUCTURE-HAPPY ${member} binds its canonical task_parent`);
+  ok(raw.includes(`source_board: spice/projects/test/tasks/${epic}/board/${epic}-board.md`)
+    && raw.includes(`kanban_board: spice/projects/test/tasks/${epic}/board/${epic}-board.md`),
+    `BGR-RESTRUCTURE-HAPPY ${member} binds its canonical epic board`);
+  ok(/^status: planning$/m.test(raw), `BGR-RESTRUCTURE-HAPPY ${member} preserves its flat status`);
+  eq(noteBody(raw), happy.bodies[member], `BGR-RESTRUCTURE-HAPPY ${member} body below frontmatter is byte-preserved`);
+}
+eq(parseDependsOn(fs.readFileSync(path.join(happy.cardsRoot, 'Family A', 'board', 'Card A2.md'), 'utf8')), ['Card A1'],
+  'BGR-RESTRUCTURE-HAPPY depends_on is preserved through the slice rewrite');
+ok(/^schema_version: 1\.1\.0$/m.test(fs.readFileSync(path.join(happy.cardsRoot, 'Family A', 'board', 'Card A1.md'), 'utf8'))
+  && /^schema_version: 1\.1\.0$/m.test(happyAtlas),
+  'BGR-RESTRUCTURE-HAPPY slices and atlas stamp the project-blueprint note schema (1.1.0, not the Delivery contract version)');
+const happyParent = fs.readFileSync(happy.boardPath, 'utf8');
+for (const member of ['Card A1', 'Card A2', 'Card B1', 'Card B2']) {
+  ok(!new RegExp(`\\[\\[${member.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`).test(happyParent),
+    `BGR-RESTRUCTURE-HAPPY parent board member line for ${member} is removed`);
+}
+eq(parseBoard(happyParent)['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY one unchecked epic line replaces its first member position; bystanders stay put');
+eq(noteBody(fs.readFileSync(path.join(happy.cardsRoot, 'Bystander card.md'), 'utf8')), happy.bodies['Bystander card'],
+  'BGR-RESTRUCTURE-HAPPY the bystander note is untouched');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY untracked flat cards trigger zero ledger writes');
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family B', 'Card B2']]) {
+  const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
+  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member });
+  eq(surface.epic, epic, `BGR-RESTRUCTURE-HAPPY canonicalEpicProjection accepts the built ${epic} surface`);
+}
+const happyResolved = resolveEpicBoardSet({ parentBoardMd: happyParent, cardsRoot: happy.cardsRoot });
+eq(happyResolved.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY the epic resolver sees both built epics');
+eq(happyResolved.findings, [], 'BGR-RESTRUCTURE-HAPPY the epic resolver reports no findings');
+
+// BGR-RESTRUCTURE-NOOP: literal replay of the applied spec is a zero-write no-op.
+const happySnapshot = snapshotDirectory(happy.projectRoot);
+const happyLocksBefore = happy.counters.locks.length;
+const replayRestructure = await commandRestructure({ root: happy.root }, { spec: happy.specPath, json: true }, happy.deps);
+eq(replayRestructure.action, 'restructured', 'BGR-RESTRUCTURE-NOOP literal replay still emits the receipt');
+eq(replayRestructure.no_op, true, 'BGR-RESTRUCTURE-NOOP literal replay is an explicit no-op');
+eq(snapshotDirectory(happy.projectRoot), happySnapshot, 'BGR-RESTRUCTURE-NOOP replay keeps every project byte stable');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-NOOP replay performs zero ledger writes');
+ok(happy.counters.locks.length > happyLocksBefore, 'BGR-RESTRUCTURE-NOOP replay still runs under the selector lock');
+
+// BGR-RESTRUCTURE-TRACKED: a tracked member keeps its exact ledger key and phase.
+const tracked = makeRestructureFixture({ statuses: { 'Card A2': 'parked' } });
+const trackedOldPath = path.join(tracked.cardsRoot, 'Card A2.md');
+tracked.state.cards['Card A2'] = {
+  card: 'Card A2', phase: 'parked', card_path: trackedOldPath,
+  dependencies: ['Card A1'], resume_condition: 'restructure lands',
+};
+let trackedPersists = 0;
+tracked.deps.writeState = (_ctx, _state, record) => { trackedPersists++; if (record) tracked.state.cards[record.card] = record; };
+const trackedReceipt = await commandRestructure({ root: tracked.root }, { spec: tracked.specPath, json: true }, tracked.deps);
+eq(trackedReceipt.no_op, false, 'BGR-RESTRUCTURE-TRACKED restructure applies');
+const trackedNewPath = path.join(tracked.cardsRoot, 'Family A', 'board', 'Card A2.md');
+eq(Object.keys(tracked.state.cards), ['Card A2'], 'BGR-RESTRUCTURE-TRACKED the ledger key set is unchanged');
+eq(tracked.state.cards['Card A2'].phase, 'parked', 'BGR-RESTRUCTURE-TRACKED the tracked phase is unchanged');
+eq(tracked.state.cards['Card A2'].card_path, trackedNewPath,
+  'BGR-RESTRUCTURE-TRACKED the ledger card_path is rebound to the epic-board location with the move');
+ok(trackedPersists >= 1, 'BGR-RESTRUCTURE-TRACKED the card_path rebind is persisted');
+ok(trackedReceipt.epics[0].members.find((entry) => entry.card === 'Card A2').tracked === true,
+  'BGR-RESTRUCTURE-TRACKED the receipt marks the tracked member');
+ok(/^status: parked$/m.test(fs.readFileSync(trackedNewPath, 'utf8')),
+  'BGR-RESTRUCTURE-TRACKED the tracked member status is preserved from the flat card');
+const trackedReconcileDeps = {
+  readState: () => tracked.state,
+  writeState: tracked.deps.writeState,
+  withLock: immediateCardLock,
+  boardPath: tracked.boardPath, cardsRoot: tracked.cardsRoot,
+  now: () => '2026-07-25T15:30:00.000Z',
+};
+const trackedReconcile = await commandReconcile({ root: tracked.root }, { card: 'Card A2' }, trackedReconcileDeps);
+eq(trackedReconcile.action, 'reconciled', 'BGR-RESTRUCTURE-TRACKED reconcile succeeds against the new epic-board location');
+eq(trackedReconcile.results[0].ok, true, 'BGR-RESTRUCTURE-TRACKED reconcile reports zero projection errors');
+ok(!tracked.state.cards['Card A2'].projection_error,
+  'BGR-RESTRUCTURE-TRACKED the tracked record carries no projection error after reconcile');
+const trackedReplay = await commandReconcile({ root: tracked.root }, { card: 'Card A2' }, trackedReconcileDeps);
+eq(trackedReplay.no_op, true, 'BGR-RESTRUCTURE-TRACKED the second reconcile is an explicit no-op');
+eq(projectionBoardDrift(fs.readFileSync(tracked.boardPath, 'utf8'), tracked.state.cards['Card A2'], {
+  boardPath: tracked.boardPath, cardsRoot: tracked.cardsRoot, state: tracked.state,
+}), null, 'BGR-RESTRUCTURE-TRACKED the epic drift audit reports clean after reconcile');
+
+// BGR-RESTRUCTURE-REFUSES: every refusal precedes the first write.
+const refuseChecks = [
+  [{ epics: [{ epic: 'Family A', members: ['Card A1', 'No Such Card'] }] }, /absent from the parent board/, 'a member name absent from the parent board'],
+  [{ epics: [{ epic: 'Family A', members: ['Card A1', 'Card A1'] }] }, /listed more than once/, 'a member present twice in one epic'],
+  [{ epics: [{ epic: 'Family A', members: ['Card A1'] }, { epic: 'Family B', members: ['Card A1'] }] }, /listed more than once/, 'a member present twice across epics'],
+  [{ epics: [{ epic: 'Bystander card', members: ['Card A1'] }] }, /collides with an existing note/, 'an epic name colliding with an existing note path'],
+  [{ epics: [{ epic: 'Bad/Name', members: ['Card A1'] }] }, /epic name/, 'an unsafe epic name'],
+];
+for (const [partial, pattern, label] of refuseChecks) {
+  const refuse = makeRestructureFixture();
+  writeSpec(refuse, { ...refuse.spec, ...partial });
+  const before = snapshotDirectory(refuse.projectRoot);
+  await assert.rejects(() => commandRestructure({ root: refuse.root }, { spec: refuse.specPath, json: true }, refuse.deps),
+    pattern, `BGR-RESTRUCTURE-REFUSES ${label} refuses with a machine-readable error`);
+  eq(snapshotDirectory(refuse.projectRoot), before, `BGR-RESTRUCTURE-REFUSES ${label} performs zero writes`);
+  eq(refuse.counters.writes, 0, `BGR-RESTRUCTURE-REFUSES ${label} performs zero ledger writes`);
+  ok(!fs.existsSync(refuse.deps.journalPath), `BGR-RESTRUCTURE-REFUSES ${label} records no intent journal`);
+}
+
+// BGR-RESTRUCTURE-RESUME: a crash mid-pass resumes forward from the durable intent journal.
+const resume = makeRestructureFixture();
+const crashingWriteText = (file, value) => {
+  if (file.endsWith('Family B-board.md')) throw new Error('injected crash before the Family B board write');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, value);
+};
+await assert.rejects(
+  () => commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, { ...resume.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-RESUME the injected crash propagates');
+ok(fs.existsSync(resume.deps.journalPath), 'BGR-RESTRUCTURE-RESUME the durable intent journal survives the crash');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Family A', 'board', 'Card A1.md')),
+  'BGR-RESTRUCTURE-RESUME the first epic completed before the crash');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the second epic members are still at their preimage locations');
+const resumedRestructure = await commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, resume.deps);
+eq(resumedRestructure.action, 'restructured', 'BGR-RESTRUCTURE-RESUME the rerun completes the pass');
+eq(resumedRestructure.no_op, false, 'BGR-RESTRUCTURE-RESUME the completing rerun is not a no-op');
+eq(resumedRestructure.resumed, true, 'BGR-RESTRUCTURE-RESUME the rerun reports that it resumed the recorded intent');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Family B', 'board', 'Card B1.md'))
+  && !fs.existsSync(path.join(resume.cardsRoot, 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the rerun finishes the interrupted moves');
+eq(parseBoard(fs.readFileSync(resume.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-RESUME the parent board converges to the intended shape');
+const resumeReplay = await commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, resume.deps);
+eq(resumeReplay.no_op, true, 'BGR-RESTRUCTURE-RESUME the post-resume literal replay is a no-op');
+
+// BGR-RESTRUCTURE-RESUME third state: a mutated preimage fails closed and deletes nothing.
+const thirdState = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, { ...thirdState.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-RESUME third-state setup crash propagates');
+const mutatedPath = path.join(thirdState.cardsRoot, 'Card B1.md');
+fs.appendFileSync(mutatedPath, 'operator edit after the crash\n');
+const mutatedRaw = fs.readFileSync(mutatedPath, 'utf8');
+await assert.rejects(
+  () => commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps),
+  /neither the recorded preimage nor the intended result/,
+  'BGR-RESTRUCTURE-RESUME a target in a third state fails closed with a machine-readable error');
+eq(fs.readFileSync(mutatedPath, 'utf8'), mutatedRaw,
+  'BGR-RESTRUCTURE-RESUME the fail-closed rerun never deletes or rewrites the mutated note');
+ok(!fs.existsSync(path.join(thirdState.cardsRoot, 'Family B', 'board', 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the fail-closed rerun writes no target for the mutated member');
+
+// BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL: a partially applied spec with no intent
+// journal is a third state for the whole pass — refuse before any write.
+const partialNoJournal = makeRestructureFixture();
+await commandRestructure({ root: partialNoJournal.root }, { spec: partialNoJournal.specPath, json: true }, partialNoJournal.deps);
+fs.rmSync(partialNoJournal.deps.journalPath);
+const partialParentRaw = fs.readFileSync(partialNoJournal.boardPath, 'utf8');
+fs.writeFileSync(partialNoJournal.boardPath,
+  partialParentRaw.replace('## In Planning\n', '## In Planning\n\n- [ ] [[Card B1]]\n'));
+const partialSnapshot = snapshotDirectory(partialNoJournal.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: partialNoJournal.root }, { spec: partialNoJournal.specPath, json: true }, partialNoJournal.deps),
+  /partially applied without a matching intent journal/,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL a converged-except-one-detail state without a journal fails closed');
+eq(snapshotDirectory(partialNoJournal.projectRoot), partialSnapshot,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal performs zero writes');
+eq(partialNoJournal.counters.writes, 0,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal performs zero ledger writes');
+ok(!fs.existsSync(partialNoJournal.deps.journalPath),
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal records no new intent journal');
+
+// BGR-RESTRUCTURE-FOREIGN-JOURNAL: an uncompleted journal from a DIFFERENT
+// spec refuses a new pass and is left byte-untouched for inspection.
+const foreignJournal = makeRestructureFixture();
+const foreignJournalBytes = `${JSON.stringify({ schema_version: 1, spec_digest: 'deadbeef', completed: false }, null, 2)}\n`;
+fs.writeFileSync(foreignJournal.deps.journalPath, foreignJournalBytes);
+const foreignSnapshot = snapshotDirectory(foreignJournal.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: foreignJournal.root }, { spec: foreignJournal.specPath, json: true }, foreignJournal.deps),
+  /a different restructure intent journal is mid-flight/,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL a mid-flight journal for a different spec fails closed');
+eq(snapshotDirectory(foreignJournal.projectRoot), foreignSnapshot,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the refusal performs zero writes');
+eq(foreignJournal.counters.writes, 0,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the refusal performs zero ledger writes');
+eq(fs.readFileSync(foreignJournal.deps.journalPath, 'utf8'), foreignJournalBytes,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the foreign journal is left byte-untouched for inspection');
+
+// BGR-RESTRUCTURE-HALF-MOVE: crash landed between the target write and the
+// source unlink — resume unlinks ONLY the source and never rewrites the target.
+const halfMove = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: halfMove.root }, { spec: halfMove.specPath, json: true }, { ...halfMove.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-HALF-MOVE setup crash propagates');
+const halfJournal = JSON.parse(fs.readFileSync(halfMove.deps.journalPath, 'utf8'));
+const halfB1 = halfJournal.epics[1].moves.find((move) => move.card === 'Card B1');
+fs.mkdirSync(path.dirname(halfB1.to), { recursive: true });
+fs.writeFileSync(halfB1.to, halfB1.content);
+ok(fs.existsSync(halfB1.from), 'BGR-RESTRUCTURE-HALF-MOVE the hand-staged half-move keeps the source present');
+const halfResume = await commandRestructure({ root: halfMove.root }, { spec: halfMove.specPath, json: true }, halfMove.deps);
+eq(halfResume.resumed, true, 'BGR-RESTRUCTURE-HALF-MOVE the rerun resumes the recorded intent');
+eq(halfResume.no_op, false, 'BGR-RESTRUCTURE-HALF-MOVE the completing rerun is not a no-op');
+ok(!fs.existsSync(halfB1.from), 'BGR-RESTRUCTURE-HALF-MOVE resume unlinks only the source of the half-completed move');
+eq(fs.readFileSync(halfB1.to, 'utf8'), halfB1.content,
+  'BGR-RESTRUCTURE-HALF-MOVE the already-intended target bytes are untouched');
+eq(parseBoard(fs.readFileSync(halfMove.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-HALF-MOVE the pass completes to the intended parent shape');
+
+// BGR-RESTRUCTURE-REENTRANT: a crash during the RESUMED pass still converges
+// on a third invocation.
+const reentrant = makeRestructureFixture();
+const crashFamilyA = (file, value) => {
+  if (file.endsWith('Family A-board.md')) throw new Error('injected crash before the Family A board write');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, value);
+};
+await assert.rejects(
+  () => commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, { ...reentrant.deps, writeText: crashFamilyA }),
+  /injected crash/, 'BGR-RESTRUCTURE-REENTRANT the first crash propagates');
+await assert.rejects(
+  () => commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, { ...reentrant.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-REENTRANT the second crash during the resumed pass propagates');
+const reentrantFinal = await commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, reentrant.deps);
+eq(reentrantFinal.action, 'restructured', 'BGR-RESTRUCTURE-REENTRANT the third invocation completes cleanly');
+eq(reentrantFinal.resumed, true, 'BGR-RESTRUCTURE-REENTRANT the third invocation resumes the same recorded intent');
+eq(parseBoard(fs.readFileSync(reentrant.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-REENTRANT the parent board converges to the intended shape');
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family A', 'Card A2'], ['Family B', 'Card B1'], ['Family B', 'Card B2']]) {
+  ok(fs.existsSync(path.join(reentrant.cardsRoot, epic, 'board', `${member}.md`))
+    && !fs.existsSync(path.join(reentrant.cardsRoot, `${member}.md`)),
+    `BGR-RESTRUCTURE-REENTRANT ${member} converged into ${epic}`);
+}
+const reentrantReplay = await commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, reentrant.deps);
+eq(reentrantReplay.no_op, true, 'BGR-RESTRUCTURE-REENTRANT the post-convergence literal replay is a no-op');
+
+// BGR-RESTRUCTURE-DONE-CHECKBOX: the parent epic line derives its checkbox
+// from the derived lifecycle, checked only when the epic rolls up done.
+const doneEpic = makeRestructureFixture({ statuses: { 'Card A1': 'completed', 'Card A2': 'completed' } });
+writeSpec(doneEpic, { ...doneEpic.spec, epics: [{ epic: 'Family A', members: ['Card A1', 'Card A2'] }] });
+const doneReceipt = await commandRestructure({ root: doneEpic.root }, { spec: doneEpic.specPath, json: true }, doneEpic.deps);
+eq(doneReceipt.epics[0].state, 'done', 'BGR-RESTRUCTURE-DONE-CHECKBOX all-completed members derive a done epic');
+ok(/- \[x\] \[\[Family A\]\]/.test(fs.readFileSync(doneEpic.boardPath, 'utf8')),
+  'BGR-RESTRUCTURE-DONE-CHECKBOX a done epic paints a checked parent line');
+
+// BGR-RESTRUCTURE-ESCAPING-TARGET: a tampered journal target outside the cards
+// root fails closed before any write (symmetric with the source guard).
+const escapeTarget = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: escapeTarget.root }, { spec: escapeTarget.specPath, json: true }, { ...escapeTarget.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-ESCAPING-TARGET setup crash propagates');
+const escapeJournal = JSON.parse(fs.readFileSync(escapeTarget.deps.journalPath, 'utf8'));
+const escapedPath = path.join(escapeTarget.root, 'escaped-outside.md');
+escapeJournal.epics[1].scaffolds.find((scaffold) => scaffold.path.endsWith('Family B-board.md')).path = escapedPath;
+fs.writeFileSync(escapeTarget.deps.journalPath, JSON.stringify(escapeJournal, null, 2));
+const escapeSnapshot = snapshotDirectory(escapeTarget.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: escapeTarget.root }, { spec: escapeTarget.specPath, json: true }, escapeTarget.deps),
+  /escapes its physical root/,
+  'BGR-RESTRUCTURE-ESCAPING-TARGET a journal-supplied target outside the cards root fails closed');
+ok(!fs.existsSync(escapedPath), 'BGR-RESTRUCTURE-ESCAPING-TARGET the escaping target is never written');
+eq(snapshotDirectory(escapeTarget.projectRoot), escapeSnapshot,
+  'BGR-RESTRUCTURE-ESCAPING-TARGET the fail-closed rerun performs zero project writes');
+
+// BGR-RESTRUCTURE-E2E: seed fixture → reap → restructure → double reconcile → clean audit.
+const seedFlatSource = path.join(__dirname, 'seed-vault', 'spice', 'projects', 'flat-fixture');
+const e2eRoot = path.join(tmp, 'bgr-restructure-e2e');
+const e2eProjectRoot = path.join(e2eRoot, 'spice', 'projects', 'flat-fixture');
+fs.cpSync(seedFlatSource, e2eProjectRoot, { recursive: true });
+const e2eBoardPath = path.join(e2eProjectRoot, 'flat-fixture-board.md');
+const e2eCardsRoot = path.join(e2eProjectRoot, 'tasks');
+const e2eState = emptyState();
+e2eState.cards['FF4a Corpse pass'] = {
+  card: 'FF4a Corpse pass', phase: 'parked',
+  card_path: path.join(e2eCardsRoot, 'FF4a Corpse pass.md'),
+};
+e2eState.cards['FF4a2 Corpse rework (supersedes FF4a)'] = {
+  card: 'FF4a2 Corpse rework (supersedes FF4a)', phase: 'deployed',
+  card_path: path.join(e2eCardsRoot, 'FF4a2 Corpse rework (supersedes FF4a).md'),
+};
+const e2eDeps = {
+  readState: () => e2eState,
+  writeState: (_ctx, _state, record) => { if (record) e2eState.cards[record.card] = record; },
+  withLock: immediateCardLock,
+  boardPath: e2eBoardPath, cardsRoot: e2eCardsRoot,
+  worktreeExists: () => false, sh: () => '',
+  now: () => '2026-07-25T16:00:00.000Z',
+  journalPath: path.join(e2eRoot, 'restructure-journal.json'),
+};
+const e2eReap = await commandReap({ root: e2eRoot }, { json: true }, e2eDeps);
+eq(e2eReap.corpses.map((entry) => entry.card), ['FF4a Corpse pass'],
+  'BGR-RESTRUCTURE-E2E reap discards the corpse-pair member');
+eq(e2eReap.corpses[0].tombstone.superseded_by, 'FF4a2 Corpse rework (supersedes FF4a)',
+  'BGR-RESTRUCTURE-E2E the corpse tombstone names its deployed successor');
+eq(e2eReap.annotations_stripped.map((entry) => entry.card), ['FF Stub Parent'],
+  'BGR-RESTRUCTURE-E2E reap strips the stub annotation');
+ok(!fs.existsSync(path.join(e2eCardsRoot, 'FF4a Corpse pass.md')), 'BGR-RESTRUCTURE-E2E the corpse note is deleted');
+const e2eSpecPath = path.join(e2eRoot, 'map.json');
+fs.writeFileSync(e2eSpecPath, JSON.stringify({
+  project_root: e2eProjectRoot,
+  board: e2eBoardPath,
+  epics: [
+    { epic: 'Family A', members: ['FA1 Alpha intake', 'FA2 Alpha engine', 'FA3 Alpha polish'] },
+    { epic: 'Family B', members: ['FB1 Beta capture', 'FB2 Beta render', 'FB3 Beta ship'] },
+  ],
+}, null, 2));
+const e2eRestructure = await commandRestructure({ root: e2eRoot }, { spec: e2eSpecPath, json: true }, e2eDeps);
+eq(e2eRestructure.no_op, false, 'BGR-RESTRUCTURE-E2E restructure applies against the reaped board');
+eq(e2eRestructure.epics.map((entry) => [entry.epic, entry.members.length]), [['Family A', 3], ['Family B', 3]],
+  'BGR-RESTRUCTURE-E2E both family epics absorb their three members');
+const e2eParent = fs.readFileSync(e2eBoardPath, 'utf8');
+eq(parseBoard(e2eParent)['In Planning'], ['FF Stub Parent', 'Family A', 'Family B'],
+  'BGR-RESTRUCTURE-E2E the parent In Planning lane holds the stripped stub and both epic lines');
+ok(/- \[x\] \[\[FF4a2 Corpse rework \(supersedes FF4a\)\]\]/.test(e2eParent),
+  'BGR-RESTRUCTURE-E2E the deployed successor line survives untouched');
+const e2eFirstReconcile = await commandReconcile({ root: e2eRoot }, {}, e2eDeps);
+eq(e2eFirstReconcile.failed, 0, 'BGR-RESTRUCTURE-E2E the first full reconcile reports zero failures');
+const e2eSecondReconcile = await commandReconcile({ root: e2eRoot }, {}, e2eDeps);
+eq(e2eSecondReconcile.no_op, true, 'BGR-RESTRUCTURE-E2E the second full reconcile reports zero drift and no_op');
+eq(e2eSecondReconcile.failed, 0, 'BGR-RESTRUCTURE-E2E the second full reconcile reports zero failures');
+const e2eStatus = commandStatus({ root: e2eRoot, statePath: path.join(e2eRoot, 'state.json') }, {
+  state: e2eState, boardMd: fs.readFileSync(e2eBoardPath, 'utf8'),
+  loadCard: () => null, cardsRoot: e2eCardsRoot, boardPath: e2eBoardPath,
+});
+eq(e2eStatus.board_drift, [], 'BGR-RESTRUCTURE-E2E the epic drift audit reports clean');
+eq(e2eStatus.projection_problems, [], 'BGR-RESTRUCTURE-E2E status reports zero projection problems');
+eq(e2eStatus.discarded_total, 1, 'BGR-RESTRUCTURE-E2E the corpse tombstone is the only discard');
+const e2eResolved = resolveEpicBoardSet({ parentBoardMd: e2eParent, cardsRoot: e2eCardsRoot });
+eq(e2eResolved.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-E2E the epic resolver sees both migrated family epics');
+eq(e2eResolved.findings, [], 'BGR-RESTRUCTURE-E2E the epic resolver reports no findings');
+const e2eReplay = await commandRestructure({ root: e2eRoot }, { spec: e2eSpecPath, json: true }, e2eDeps);
+eq(e2eReplay.no_op, true, 'BGR-RESTRUCTURE-E2E the literal replay after reconcile is still a no-op');
+
+// --- BGR-CUTOVER: receipt-gated, reversible ES5 epic-intake cutover flag ---
+const cutRoot = path.join(tmp, 'bgr-cutover');
+fs.mkdirSync(cutRoot, { recursive: true });
+const cutBoardPath = path.join(cutRoot, 'board.md');
+const cutCardPath = path.join(cutRoot, 'Cut card.md');
+fs.writeFileSync(cutCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
+fs.writeFileSync(cutBoardPath, liveBoard({ progress: ['Cut card'] }));
+const cutState = emptyState();
+cutState.cards['Cut card'] = {
+  card: 'Cut card', phase: 'implementing', card_path: cutCardPath,
+  projection_reconciled_at: '2026-07-25T00:00:00.000Z',
+};
+let cutWrites = 0;
+const cutLocks = [];
+const cutDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  boardPath: cutBoardPath,
+  now: () => '2026-07-25T18:00:00.000Z',
+};
+
+// Status before any cutover call: the object is absent (null), not fabricated.
+const cutStatusBefore = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusBefore.cutover, null, 'BGR-CUTOVER-REVERSIBLE status exposes cutover as null before any cutover write');
+eq(cutStatusBefore.cutover_history, [], 'BGR-CUTOVER-REVERSIBLE status exposes an empty cutover_history before any flip');
+
+// BGR-CUTOVER-STREAK: only clean FULL reconciles advance the counter.
+const cutClean1 = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq(cutClean1.no_op, true, 'BGR-CUTOVER-STREAK the fixture starts converged (clean full pass)');
+eq(cutClean1.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK first clean full reconcile reports streak 1');
+eq(cutState.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK the streak persists in top-level coordinator state');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 2, 'BGR-CUTOVER-STREAK second clean full reconcile reports streak 2');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK third clean full reconcile reports streak 3');
+const cutSingle = await commandReconcile({ root: cutRoot }, { card: 'Cut card' }, cutDeps);
+eq(cutSingle.no_op, true, 'BGR-CUTOVER-STREAK the single-card pass is itself clean');
+ok(!('reconcile_clean_streak' in cutSingle), 'BGR-CUTOVER-STREAK single-card receipts never carry the streak');
+eq(cutState.reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK single-card reconciles leave the streak untouched');
+fs.writeFileSync(cutBoardPath, liveBoard({ planning: ['Cut card'] }));
+const cutDrift = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+ok(cutDrift.changed >= 1, 'BGR-CUTOVER-STREAK the moved board line registers as drift on the full pass');
+eq(cutDrift.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK a drift-finding full reconcile resets the streak to 0');
+eq(cutState.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK the reset persists in coordinator state');
+
+// BGR-CUTOVER-CRITERIA: --json first, operands required, every unmet criterion listed.
+const cutoverBaseDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  now: () => '2026-07-25T19:00:00.000Z',
+};
+cutLocks.length = 0;
+const cutWritesBeforeRefusals = cutWrites;
+await assert.rejects(() => commandCutover({ root: cutRoot }, { 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /requires --json/, 'BGR-CUTOVER-CRITERIA cutover refuses without --json before any read or write');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing --json refusal precedes every lock');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true }, cutoverBaseDeps),
+  /--require-card|--chain-prefix/, 'BGR-CUTOVER-CRITERIA cutover requires an explicit chain declaration operand');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing-operand refusal precedes every lock');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA usage refusals perform zero writes');
+// All three criteria red: streak is 0, the ES chain is undeclared/incomplete,
+// and the injected package.json has no registered harness.
+const cutRefused = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutRefused.action, 'cutover-refused', 'BGR-CUTOVER-CRITERIA unmet criteria refuse with a machine-readable receipt');
+eq(cutRefused.enabled, false, 'BGR-CUTOVER-CRITERIA a refused cutover never enables');
+eq(cutRefused.unmet, ['es_chain_complete', 'migration_harness_registered', 'reconcile_clean_streak'],
+  'BGR-CUTOVER-CRITERIA the refusal lists EVERY unmet criterion');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.card === 'ES1 Alpha'),
+  'BGR-CUTOVER-CRITERIA the chain criterion names the untracked required card');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.chain_prefix === 'ES'),
+  'BGR-CUTOVER-CRITERIA a chain prefix matching zero ledger cards fails rather than passing vacuously');
+ok(/reconcile_clean_streak 0 < 3/.test(cutRefused.criteria.reconcile_clean_streak.missing),
+  'BGR-CUTOVER-CRITERIA the streak criterion reports the exact shortfall');
+ok(typeof cutRefused.criteria.migration_harness_registered.missing === 'string',
+  'BGR-CUTOVER-CRITERIA the harness criterion reports a machine-readable missing reason');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA a refused cutover performs zero writes');
+ok(!cutState.cutover, 'BGR-CUTOVER-CRITERIA a refused cutover leaves no cutover object in state');
+
+// Rebuild the streak to 3, then complete the ES chain in the ledger.
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3,
+  'BGR-CUTOVER-STREAK three clean full reconciles after a reset rebuild streak 3');
+cutState.cards['ES1 Alpha'] = { card: 'ES1 Alpha', phase: 'deployed' };
+cutState.cards['ES2 Beta'] = { card: 'ES2 Beta', phase: 'deployed' };
+cutState.cards['ES3a Gamma'] = {
+  card: 'ES3a Gamma', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: 'ES3a2 Gamma rework (supersedes ES3a)', final_head: null, carried_fixtures: [],
+};
+cutState.cards['ES3a2 Gamma rework (supersedes ES3a)'] = { card: 'ES3a2 Gamma rework (supersedes ES3a)', phase: 'deployed' };
+// The real repo package.json is the harness registry: de-registering
+// run-codex-autoloop there must break this fixture (criterion 2 is live).
+const realPackageJson = () => JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+// Harness de-registration alone blocks cutover even with chain + streak green.
+const cutHarnessOnly = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutHarnessOnly.unmet, ['migration_harness_registered'],
+  'BGR-CUTOVER-CRITERIA harness de-registration alone blocks an otherwise-green cutover');
+// A tracked-but-parked chain card blocks completeness until it turns terminal.
+cutState.cards['ES9 Parked'] = { card: 'ES9 Parked', phase: 'parked' };
+const cutParked = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutParked.unmet, ['es_chain_complete'], 'BGR-CUTOVER-CRITERIA a parked chain card alone blocks cutover');
+eq(cutParked.criteria.es_chain_complete.missing,
+  [{ card: 'ES9 Parked', phase: 'parked', problem: "phase is neither 'deployed' nor tombstoned 'discarded'" }],
+  'BGR-CUTOVER-CRITERIA the refusal names the parked card and its ledger phase');
+cutState.cards['ES9 Parked'].phase = 'deployed'; // flipping it terminal unblocks the enable below
+cutLocks.length = 0;
+const cutWritesBeforeEnable = cutWrites;
+const cutEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutEnabled.action, 'cutover', 'BGR-CUTOVER-CRITERIA all-green cutover emits the cutover receipt');
+eq(cutEnabled.enabled, true, 'BGR-CUTOVER-CRITERIA all-green cutover enables the flag');
+eq(cutEnabled.no_op, false, 'BGR-CUTOVER-CRITERIA first enable is not a no-op');
+ok(cutLocks.includes('selector'), 'BGR-CUTOVER-CRITERIA cutover evaluates under the selector lock');
+eq(cutWrites, cutWritesBeforeEnable + 1, 'BGR-CUTOVER-CRITERIA enabling writes coordinator state exactly once');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-CRITERIA the enabled flag persists in coordinator state');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-CRITERIA the receipt records when cutover enabled');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES3a Gamma' && entry.phase === 'discarded'),
+  'BGR-CUTOVER-CRITERIA a tombstoned superseded ES sibling satisfies (never blocks) the chain criterion');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES1 Alpha' && entry.phase === 'deployed'),
+  'BGR-CUTOVER-CRITERIA the receipt lists each deployed chain card as evidence');
+ok(typeof cutState.cutover.receipts.migration_harness_registered.script === 'string',
+  'BGR-CUTOVER-CRITERIA the receipt names the package.json script that registers the harness');
+eq(cutState.cutover.receipts.reconcile_clean_streak.streak, 3,
+  'BGR-CUTOVER-CRITERIA the receipt carries the clean-reconcile streak evidence');
+eq(cutState.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE the enable flip appends one cutover_history entry');
+
+// BGR-CUTOVER-NOOP: replay when already enabled → no_op, zero writes.
+const cutWritesBeforeReplay = cutWrites;
+const cutReplay = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReplay.no_op, true, 'BGR-CUTOVER-NOOP replay while enabled reports no_op:true');
+eq(cutReplay.enabled, true, 'BGR-CUTOVER-NOOP replay reports the enabled flag');
+eq(cutWrites, cutWritesBeforeReplay, 'BGR-CUTOVER-NOOP replay performs zero writes');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-NOOP replay never restamps enabled_at');
+eq(cutState.cutover_history.length, 1, 'BGR-CUTOVER-NOOP replay appends no cutover_history entry');
+
+// BGR-CUTOVER-REVERSIBLE: --off flips it back; status exposes both ways; re-enable works.
+const cutStatusEnabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusEnabled.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE status --json exposes the enabled cutover object');
+ok(cutStatusEnabled.cutover.receipts, 'BGR-CUTOVER-REVERSIBLE status carries the cutover receipts');
+eq(cutStatusEnabled.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while enabled');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true }, cutoverBaseDeps),
+  /--reason/, 'BGR-CUTOVER-REVERSIBLE --off requires a non-empty --reason');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'x', 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /never evaluates criteria/, 'BGR-CUTOVER-REVERSIBLE --off refuses criteria operands rather than silently ignoring them');
+const cutOff = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOff.enabled, false, 'BGR-CUTOVER-REVERSIBLE --off disables the flag');
+eq(cutOff.no_op, false, 'BGR-CUTOVER-REVERSIBLE first --off is not a no-op');
+eq(cutState.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE the disable receipt records disabled_at and reason');
+eq(cutState.cutover_history, [
+  { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+], 'BGR-CUTOVER-REVERSIBLE the disable flip appends a history entry carrying the reason');
+const cutWritesBeforeOffReplay = cutWrites;
+const cutOffReplay = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOffReplay.no_op, true, 'BGR-CUTOVER-REVERSIBLE --off replay while disabled is a no_op');
+eq(cutWrites, cutWritesBeforeOffReplay, 'BGR-CUTOVER-REVERSIBLE --off replay performs zero writes');
+eq(cutState.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE --off replay appends no cutover_history entry');
+const cutStatusDisabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusDisabled.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE status --json exposes the disabled cutover object');
+eq(cutStatusDisabled.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while disabled');
+const cutReEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReEnabled.enabled, true, 'BGR-CUTOVER-REVERSIBLE a subsequent cutover with criteria green re-enables');
+eq(cutReEnabled.no_op, false, 'BGR-CUTOVER-REVERSIBLE re-enable after --off is a fresh enable, not a replay');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE the re-enabled flag persists with fresh receipts');
+eq(cutState.cutover_history.length, 3, 'BGR-CUTOVER-REVERSIBLE the re-enable flip appends a third history entry');
+eq(cutState.cutover_history[2], { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  'BGR-CUTOVER-REVERSIBLE the newest history entry is the re-enable flip');
+// History is bounded: seed past the cap, flip once, oldest entries drop.
+cutState.cutover_history = Array.from({ length: 22 }, (_, i) => ({ enabled: i % 2 === 0, at: `seed-${i}` }));
+await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'cap check' }, cutoverBaseDeps);
+eq(cutState.cutover_history.length, 20, 'BGR-CUTOVER-REVERSIBLE cutover_history is capped at the 20 most recent entries');
+eq(cutState.cutover_history[0].at, 'seed-3', 'BGR-CUTOVER-REVERSIBLE the cap drops the oldest entries first');
+eq(cutState.cutover_history[19], { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'cap check' },
+  'BGR-CUTOVER-REVERSIBLE the newest capped entry is the latest flip');
+
+// CLI wiring: the cutover command exists and refuses without --json.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI cutover without --json refuses with a machine-parseable error before any read or write');
+}
+
+// CLI wiring: the restructure command exists and refuses without --json.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI restructure without --json refuses with a machine-parseable error before any read or write');
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));

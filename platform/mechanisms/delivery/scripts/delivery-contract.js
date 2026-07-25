@@ -450,11 +450,15 @@ function sliceStatus(slice) {
 
 function deriveEpicLifecycle(slices, options = {}) {
   const list = Array.isArray(slices) ? slices : [];
-  const normalized = list.map((slice, index) => ({ ...slice, _index: index, _status: sliceStatus(slice) }));
-  const counts = { planned: 0, active: 0, blocked: 0, done: 0, total: normalized.length };
+  // BGR redesign 2026-07-25: discarded slices are tombstones — excluded from the rollup entirely.
+  const normalized = list.map((slice, index) => ({ ...slice, _index: index, _status: sliceStatus(slice) }))
+    .filter((slice) => slice._status !== 'discarded');
+  const counts = { planned: 0, active: 0, waiting: 0, blocked: 0, done: 0, total: normalized.length };
   for (const slice of normalized) {
     if (slice._status === 'completed') counts.done += 1;
-    else if (slice._status === 'in_progress' || slice._status === 'parked') counts.active += 1;
+    else if (slice._status === 'in_progress') counts.active += 1;
+    // BGR redesign 2026-07-25: a parked slice is a wait (concurrency/deploy), not progress — it never counts as active.
+    else if (slice._status === 'parked') counts.waiting += 1;
     else if (slice._status === 'blocked') counts.blocked += 1;
     else counts.planned += 1;
   }
@@ -465,6 +469,9 @@ function deriveEpicLifecycle(slices, options = {}) {
   let state = 'planned';
   if (normalized.length > 0 && counts.done === normalized.length) state = 'done';
   else if (counts.active > 0) state = 'active';
+  // BGR redesign 2026-07-25: waiting rolls up like blocked — a parked slice is a
+  // wait (concurrency/deploy), not progress, and a claimable sibling must not hide it.
+  else if (counts.waiting > 0) state = 'blocked';
   else if (counts.blocked > 0 && !explicitlyClaimable) state = 'blocked';
   const pending = normalized.filter((slice) => slice._status !== 'completed');
   const crossEpic = pending.some((slice) => slice.cross_epic_dependency === true)

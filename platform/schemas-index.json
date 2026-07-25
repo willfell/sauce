@@ -375,7 +375,7 @@
       "kind": "contract",
       "owner": { "type": "mechanism", "name": "delivery" },
       "source": "platform/mechanisms/delivery/data/delivery-schema.json",
-      "accepted_versions": ["1.0.0", "1.1.0"],
+      "accepted_versions": ["1.0.0", "1.1.0", "1.2.0"],
       "validator": "platform/mechanisms/delivery/scripts/delivery-contract.js",
       "consumers": [
         "platform/mechanisms/delivery/index.js",
@@ -383,7 +383,7 @@
         "scripts/autoloop/codex-coordinator.js",
         "platform/test/run-delivery-contract.js"
       ],
-      "notes": "Delivery contract v1.1.0. The v1.0 execution-card field set remains backward-compatible. Explicit validateEpic and validateSlice APIs add non-claimable epic atlases and epic-owned execution slices; deriveEpicLifecycle is the single source for planned/active/blocked/done state and posture. Ratification is a first-class receipt extracted from one exact selected section: canonical full target-card identity and an exact lowercase 40-hex target HEAD are structural fields, never prose substring checks."
+      "notes": "Delivery contract v1.2.0 (BGR redesign 2026-07-25): terminal discarded status excluded from epic rollups entirely; parked slices count in a new waiting bucket that rolls up like blocked, never active. v1.1 added explicit validateEpic/validateSlice APIs and ratification receipts; the v1.0 execution-card field set remains backward-compatible. deriveEpicLifecycle stays the single source for planned/active/blocked/done state and posture."
     },
     {
       "id": "autoloop-durable-batch-ledger",

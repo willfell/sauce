@@ -55,6 +55,14 @@ node <workshop>/.agents/skills/card-intake/scripts/card-intake.js --spec <tempor
 
 The validator stamps the current `schema_version`, derives a policy that cannot weaken `supervised_only`, and validates through the Delivery public contract. Inspect the plan before apply. Re-run the same spec and require `no_op: true`; then remove it. If the validator is unavailable, stop rather than inventing a second contract implementation.
 
+## Supersede a predecessor
+
+Supersession discards the predecessor at mint time (tombstone only), so the successor must carry its learning. On an execution card set `supersedes` (predecessor title), `carried_findings` (non-empty finding names), and `binding_fixtures` (non-empty; strings or `{name, description}`). Coverage rule: every carried finding name must appear as an exact, case-sensitive token in at least one fixture's name or description, else the spec is refused before any write (`supersede_coverage_missing`; missing/empty fields refuse with `supersede_missing_fields`). A valid superseding receipt includes `post_apply_instructions: [{discard: …}]` — intake never touches coordinator state; the coordinator executes the discard, never intake.
+
+## Epic-native routing
+
+Post-cutover, new medium/heavy work targets an epic board (new themes mint a new epic); flat creation is reserved for Discovered-lane one-liners. The cutover flag is receipt-gated and reversible — never cache it: read `coordinator status --json` → `cutover.enabled` fresh at planning time (absent or `false` both mean pre-cutover).
+
 ## Finish
 
 Resolve every emitted wikilink. Run coordinator status and its eligibility dry-run after apply, treating that result—not the planner candidate—as authoritative. Do not claim. Report exactly one posture: `claimable`, `blocked_by_dependencies`, `docs_only`, or `awaiting_user_decision`. When claimable, name the exact card and `standard`/`heavy` profile; for roadmaps, name later parents intentionally left undecomposed.

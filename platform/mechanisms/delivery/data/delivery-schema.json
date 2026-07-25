@@ -3,12 +3,12 @@
   "title": "Sauce Delivery contract registry",
   "contract": {
     "name": "delivery",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "minimum_compatible_version": "1.0.0",
-    "description": "Registry half of Delivery. v1.1 adds explicit epic, slice, and ratification-receipt record kinds while preserving the v1.0 execution-card contract."
+    "description": "Registry half of Delivery. v1.2 adds the terminal discarded status (excluded from epic rollups) and the waiting rollup bucket for parked slices; v1.1 added explicit epic, slice, and ratification-receipt record kinds while preserving the v1.0 execution-card contract."
   },
   "enums": {
-    "status": ["planning", "in_progress", "blocked", "parked", "completed"],
+    "status": ["planning", "in_progress", "blocked", "parked", "completed", "discarded"],
     "model_profile": ["standard", "heavy"],
     "execution_mode": ["release", "docs_only"],
     "batch_policy": ["continue", "stop_after", "supervised_only"],
@@ -25,7 +25,8 @@
     "in-progress": "in_progress",
     "blocked": "blocked",
     "parked": "parked",
-    "completed": "completed"
+    "completed": "completed",
+    "discarded": "discarded"
   },
   "types": {
     "execution-card": {
@@ -46,7 +47,7 @@
           "name": "schema_version",
           "type": "string",
           "required": true,
-          "default": "1.1.0",
+          "default": "1.2.0",
           "since_version": "1.0.0",
           "description": "Delivery contract version stamped at authoring time. Newer-than-engine versions fail closed."
         },
@@ -306,12 +307,18 @@
         { "record_kind": "slice", "migration": { "type": "create_only", "reason": "Legacy execution cards remain valid v1.0 records until explicit intake migration." } },
         { "record_kind": "ratification-receipt", "migration": { "type": "create_only", "reason": "Prose authority is never inferred; a selected section must carry an explicit receipt block." } }
       ]
+    },
+    {
+      "version": "1.2.0",
+      "changes": [
+        { "field": "status", "migration": { "type": "enum_extension", "reason": "BGR redesign 2026-07-25: discarded is a new terminal status for permanently removed work. Rollups exclude discarded slices entirely, and parked slices count in a new waiting bucket that rolls up like blocked instead of active." } }
+      ]
     }
   ],
   "fixtures": {
     "base_execution_card": {
       "card": "A2 shared registry and semantic contract core",
-      "schema_version": "1.1.0",
+      "schema_version": "1.2.0",
       "parent_card": "[[Tranche A — trustworthy substrate]]",
       "slice": "A2",
       "model_profile": "heavy",
@@ -342,7 +349,7 @@
     "epic": {
       "base": {
         "type": "epic",
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "source_board": "spice/projects/example/example-board.md",
         "kanban_board": "spice/projects/example/example-board.md",
         "status": "planned",
@@ -364,7 +371,7 @@
       "base": {
         "type": "slice",
         "card": "Contract registry",
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "parent_card": "[[Delivery bridge]]",
         "slice": "ES1",
         "model_profile": "heavy",
@@ -405,7 +412,7 @@
     },
     "ratification_receipt": {
       "base": {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "receipt_id": "ratification-es1-1",
         "decision": "accepted",
         "accepted_at": "2026-07-20T09:28:12-05:00",

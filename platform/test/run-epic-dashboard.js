@@ -309,7 +309,8 @@ async function main() {
   assert.strictEqual(lifecycleCalls, 1, 'lifecycle is delegated exactly once');
   assert.deepStrictEqual(lifecycleInput.map((slice) => slice.file.name), slices.map((slice) => slice.file.name),
     'Delivery receives the complete canonical slice set');
-  assert.deepStrictEqual(lifecycleOutput.counts, { planned: 1, active: 2, blocked: 3, done: 4, total: 10 },
+  // BGR redesign 2026-07-25: lifecycle counts carry a waiting bucket (parked slices).
+  assert.deepStrictEqual(lifecycleOutput.counts, { planned: 1, active: 2, waiting: 0, blocked: 3, done: 4, total: 10 },
     'epic-lifecycle-metric-association-mutation-gap: asymmetric statuses bind each lifecycle count to its source');
   assert.strictEqual(lifecycleOutput.frontier, 'S1 Planned',
     'epic-slice-render-association-mutation-gap: Delivery identifies the exact first non-blocked pending slice');
@@ -1201,7 +1202,8 @@ async function main() {
     {
       state: 'active',
       posture: 'claimable',
-      counts: { planned: 1, active: 1, blocked: 0, done: 1, total: 3 },
+      // BGR redesign 2026-07-25: lifecycle counts carry a waiting bucket (parked slices).
+      counts: { planned: 1, active: 1, waiting: 0, blocked: 0, done: 1, total: 3 },
     },
     'seed-canonical-status: three-slice fixture derives one closed slice and an active claimable frontier',
   );
