@@ -5,8 +5,13 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { AsyncLocalStorage, createHook } = require('async_hooks');
+const { spawn } = require('child_process');
+const { EventEmitter } = require('events');
+const { PassThrough } = require('stream');
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
+  cardGateLockName, legacyCardGateLockName, withCardGateLock,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
@@ -17,7 +22,7 @@ const {
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
-  attemptProjection, completionResult, projectionMapping, projectionMetadataProblem,
+  projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
 const {
@@ -735,7 +740,7 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
 }), /gate receipt base is stale/, 'record-pr refuses gates run against an outdated main base');
 
 const events = [];
-let prLock = '';
+const prLocks = [];
 const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
@@ -745,23 +750,25 @@ const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '
     throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
   },
   writeState: () => { events.push('write'); writes++; },
-  withLock: async (_ctx, name, fn) => { prLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { prLocks.push(name); return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
-eq(prLock, 'gates-a', 'record-pr shares the per-card gate lock');
+eq(prLocks, [legacyCardGateLockName('A'), cardGateLockName('A')],
+  'record-pr acquires migration-compatible then exact-identity per-card gates');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
 
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
-let reviewLock = '';
+const reviewLocks = [];
 const review = await commandRecordReview({ root: '/workshop' }, {
   card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
 }, {
   readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
-  withLock: async (_ctx, name, fn) => { reviewLock = name; return fn(); },
+  withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
-eq(reviewLock, 'gates-review', 'review writes share the per-card gate lock');
+eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
+  'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 
 reviewState.cards.Review.phase = 'feature_merged';
@@ -796,24 +803,26 @@ const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review
   },
 });
 eq(verified.action, 'gates-passed', 'verify-gates records a passing combined receipt');
-eq(gateCalls, ['gates-review', 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'], 'verify-gates serializes, fetches main, and owns every deterministic release check');
+eq(gateCalls, [legacyCardGateLockName('Review'), cardGateLockName('Review'), 'fetch-main', 'release:preflight', 'self-install', 'release:preflight-bumped'],
+  'verify-gates serializes through migration-compatible and exact card identity, fetches main, and owns every deterministic release check');
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
 
 const advanceState = emptyState();
 advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
-let advanceLock = ''; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+const advanceLocks = []; let insideAdvanceLock = false; let advanceReadInsideLock = false;
 const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
   withLock: async (_ctx, name, fn) => {
-    advanceLock = name; insideAdvanceLock = true;
+    advanceLocks.push(name); insideAdvanceLock = true;
     try { return await fn(); } finally { insideAdvanceLock = false; }
   },
   readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
   emit: () => {},
 });
-eq(advanceLock, 'gates-advance', 'advance shares the per-card gate lock');
+eq(advanceLocks, [legacyCardGateLockName('Advance'), cardGateLockName('Advance')],
+  'advance acquires migration-compatible then exact-identity per-card gates');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
 const parkedAdvanceState = emptyState();
@@ -867,6 +876,1853 @@ const file = path.join(tmp, 'state.json');
 atomicWriteJson(file, { schema_version: 1, cards: { A: { phase: 'claimed' } } });
 eq(JSON.parse(fs.readFileSync(file, 'utf8')).cards.A.phase, 'claimed', 'atomic JSON write');
 ok(!fs.readdirSync(tmp).some((name) => name.endsWith('.tmp')), 'atomic write leaves no temp');
+
+function makeEpicProjectionFixture(label) {
+  const root = path.join(tmp, `es4-${label}`);
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const epicRoot = path.join(cardsRoot, 'Epic A');
+  const epicBoardDir = path.join(epicRoot, 'board');
+  const parentBoardPath = path.join(projectRoot, 'project-board.md');
+  const atlasPath = path.join(epicRoot, 'Epic A.md');
+  const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
+  const cardPath = path.join(epicBoardDir, 'A1.md');
+  fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(epicRoot, 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(parentBoardPath, [
+    '## In Planning', '- [ ] [[Epic B]]', '- [ ] [[Epic C]]', '',
+    '## In Progress', '', '## Blocked', '',
+    '## Completed', '- [x] [[Epic A]]', '',
+  ].join('\n'));
+  fs.writeFileSync(atlasPath, [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    'source_board: spice/projects/test/project-board.md',
+    'kanban_board: spice/projects/test/project-board.md',
+    'status: planned',
+    'epic_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(epicBoardPath, [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '- [ ] [[A1]]', '- [ ] [[A2]]', '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  fs.writeFileSync(cardPath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: In Planning', 'status: planning', 'depends_on: []', '---', 'A1 body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicBoardDir, 'A2.md'), [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'status: planning', 'depends_on: []', '---', '',
+  ].join('\n'));
+  const state = emptyState();
+  state.cards.A1 = { card: 'A1', phase: 'implementing', parent_card: 'Epic A', card_path: cardPath };
+  const files = [epicBoardPath, cardPath, parentBoardPath, atlasPath];
+  return { root, cardsRoot, parentBoardPath, atlasPath, epicBoardPath, cardPath, state, files };
+}
+
+function assertEpicProjectionConverged(fixture, label) {
+  ok(/## In Progress[\s\S]*- \[ \] \[\[A1\]\]/.test(fs.readFileSync(fixture.epicBoardPath, 'utf8')), `${label} paints the slice on its epic board`);
+  ok(/kanban_column: In Progress/.test(fs.readFileSync(fixture.cardPath, 'utf8'))
+    && /status: in_progress/.test(fs.readFileSync(fixture.cardPath, 'utf8')), `${label} paints canonical slice metadata`);
+  const parent = fs.readFileSync(fixture.parentBoardPath, 'utf8');
+  ok(/## In Progress[\s\S]*- \[ \] \[\[Epic A\]\]/.test(parent), `${label} repaints the epic from its slice roll-up`);
+  ok(parent.indexOf('[[Epic B]]') < parent.indexOf('[[Epic C]]'), `${label} preserves untouched In Planning priority order`);
+  const atlas = fs.readFileSync(fixture.atlasPath, 'utf8');
+  ok(/status: active/.test(atlas) && /posture: claimable/.test(atlas), `${label} paints the derived epic atlas state`);
+}
+
+const epicProjection = makeEpicProjectionFixture('reconcile');
+let epicLedgerWrites = 0;
+const epicReconcileDeps = {
+  readState: () => epicProjection.state,
+  writeState: () => { epicLedgerWrites += 1; },
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: epicProjection.parentBoardPath,
+  cardsRoot: epicProjection.cardsRoot,
+  now: () => '2026-07-23T14:00:00.000Z',
+};
+const firstEpicReconcile = await commandReconcile(
+  { root: epicProjection.root },
+  { card: 'A1' },
+  epicReconcileDeps,
+);
+eq(firstEpicReconcile.changed, 1, 'ES4-DUAL-RECONCILE repairs all canonical projection surfaces');
+assertEpicProjectionConverged(epicProjection, 'ES4-DUAL-RECONCILE');
+const epicBytesAfterRepair = epicProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+const epicStateAfterRepair = JSON.stringify(epicProjection.state);
+const epicWritesAfterRepair = epicLedgerWrites;
+const secondEpicReconcile = await commandReconcile(
+  { root: epicProjection.root },
+  { card: 'A1' },
+  epicReconcileDeps,
+);
+eq(secondEpicReconcile.no_op, true, 'ES4-DUAL-NOOP exact-card replay reports no_op:true');
+eq(epicProjection.files.map((target) => fs.readFileSync(target, 'utf8')), epicBytesAfterRepair, 'ES4-DUAL-NOOP keeps every projection surface byte-stable');
+eq(JSON.stringify(epicProjection.state), epicStateAfterRepair, 'ES4-DUAL-NOOP keeps ledger state byte-stable');
+eq(epicLedgerWrites, epicWritesAfterRepair, 'ES4-DUAL-NOOP performs no ledger write');
+
+const missingReceiptProjection = makeEpicProjectionFixture('missing-receipts');
+missingReceiptProjection.state.cards.A1.phase = 'deployed';
+const missingReceiptResult = projectCard(
+  missingReceiptProjection.cardPath,
+  missingReceiptProjection.parentBoardPath,
+  'A1',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A1,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+);
+eq(missingReceiptResult.projection_findings.map((finding) => finding.card), ['A1'],
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING contains a receiptless deployed phase per exact card');
+eq(missingReceiptResult.projection_findings[0].reconcile, "reconcile --card 'A1'",
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING gives the receiptless card a shell-safe exact reconcile route');
+ok(!/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never counts a deployed phase done without successful deployment receipts');
+ok(/## In Progress[\s\S]*- \[ \] \[\[A1\]\]/.test(fs.readFileSync(missingReceiptProjection.epicBoardPath, 'utf8')),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps a receiptless deployed slice unchecked and non-completed');
+ok(/kanban_column: In Progress/.test(fs.readFileSync(missingReceiptProjection.cardPath, 'utf8'))
+  && /status: in_progress/.test(fs.readFileSync(missingReceiptProjection.cardPath, 'utf8')),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps receiptless deployed note metadata non-completed');
+ok(!missingReceiptProjection.state.cards.A1.vault_receipts,
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT never mints or backfills a deployment receipt');
+const missingReceiptStatus = commandStatus(
+  { root: missingReceiptProjection.root },
+  {
+    state: missingReceiptProjection.state,
+    boardMd: fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8'),
+    boardPath: missingReceiptProjection.parentBoardPath,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+ok(missingReceiptStatus.board_drift.some((finding) => finding.card === 'A1'
+  && /legacy completion lacks successful deployment receipts/.test(finding.issue)),
+  'ES4-PHASE-ONLY-SLICE-COMPLETION-PROJECTION keeps status available with one actionable finding');
+
+const statusMetadataProjection = makeEpicProjectionFixture('status-metadata-convergence');
+fs.writeFileSync(
+  statusMetadataProjection.cardPath,
+  fs.readFileSync(statusMetadataProjection.cardPath, 'utf8').replace('schema_version: 1.1.0\n', ''),
+);
+statusMetadataProjection.state.cards.A1.phase = 'deployed';
+const statusMetadataReconcileDeps = {
+  readState: () => statusMetadataProjection.state,
+  writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: statusMetadataProjection.parentBoardPath,
+  cardsRoot: statusMetadataProjection.cardsRoot,
+  now: () => '2026-07-24T21:00:00.000Z',
+};
+const statusMetadataReconcile = await commandReconcile(
+  { root: statusMetadataProjection.root },
+  { card: 'A1' },
+  statusMetadataReconcileDeps,
+);
+ok(statusMetadataReconcile.action === 'reconciled'
+  && statusMetadataReconcile.results[0].projection_findings[0].card === 'A1',
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE exact reconcile returns the one receiptless finding');
+const statusMetadataReplay = await commandReconcile(
+  { root: statusMetadataProjection.root },
+  { card: 'A1' },
+  statusMetadataReconcileDeps,
+);
+ok(statusMetadataReplay.no_op,
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE exact replay is a literal no-op');
+const statusMetadataStatus = commandStatus(
+  { root: statusMetadataProjection.root },
+  {
+    state: statusMetadataProjection.state,
+    boardMd: fs.readFileSync(statusMetadataProjection.parentBoardPath, 'utf8'),
+    boardPath: statusMetadataProjection.parentBoardPath,
+    cardsRoot: statusMetadataProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+eq(statusMetadataStatus.tracked.find((record) => record.card === 'A1').status, 'in_progress',
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE summarizes receiptless deployed state as non-completed');
+eq(statusMetadataStatus.projection_problems, [],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE has zero contradictory metadata projection problems');
+eq(statusMetadataStatus.board_drift.map((finding) => finding.card), ['A1'],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE emits exactly one bounded legacy finding');
+ok(!statusMetadataProjection.state.cards.A1.vault_receipts && !statusMetadataProjection.state.cards.A2,
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE synthesizes neither receipts nor legacy records');
+
+const successfulReceipts = {
+  headspace: { ok: true, installed_version: '0.257.0' },
+  accuris: { ok: true, installed_version: '0.257.0' },
+  ero: { ok: true, installed_version: '0.257.0' },
+};
+missingReceiptProjection.state.cards.A1.required_version = '0.257.0';
+missingReceiptProjection.state.cards.A1.vault_receipts = successfulReceipts;
+missingReceiptProjection.state.cards.A2 = {
+  card: 'A2',
+  phase: 'deployed',
+  required_version: '0.257.0',
+  vault_receipts: successfulReceipts,
+  card_path: path.join(path.dirname(missingReceiptProjection.cardPath), 'A2.md'),
+};
+projectCard(
+  missingReceiptProjection.cardPath,
+  missingReceiptProjection.parentBoardPath,
+  'A1',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A1,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+);
+ok(/## Completed[\s\S]*- \[x\] \[\[Epic A\]\]/.test(fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8')),
+  'ES4-RECEIPT-ROLLUP paints done only when every slice has successful deployment receipts');
+ok(/status: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8'))
+  && /posture: done/.test(fs.readFileSync(missingReceiptProjection.atlasPath, 'utf8')),
+'ES4-RECEIPT-ROLLUP paints a receipt-proven done atlas');
+projectCard(
+  missingReceiptProjection.state.cards.A2.card_path,
+  missingReceiptProjection.parentBoardPath,
+  'A2',
+  'deployed',
+  {
+    record: missingReceiptProjection.state.cards.A2,
+    state: missingReceiptProjection.state,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+  },
+);
+const successfulReceiptStatus = commandStatus(
+  { root: missingReceiptProjection.root },
+  {
+    state: missingReceiptProjection.state,
+    boardMd: fs.readFileSync(missingReceiptProjection.parentBoardPath, 'utf8'),
+    boardPath: missingReceiptProjection.parentBoardPath,
+    cardsRoot: missingReceiptProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+eq(successfulReceiptStatus.tracked.filter((record) => ['A1', 'A2'].includes(record.card))
+  .map((record) => record.status), ['completed', 'completed'],
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE permits completed status only after every required receipt succeeds');
+ok(!successfulReceiptStatus.board_drift.some((finding) => /legacy completion lacks/.test(finding.issue)),
+  'ES4-PHASE-ONLY-STATUS-METADATA-CONVERGENCE clears legacy findings after receipt-proven deployment');
+
+const backlinkProjection = makeEpicProjectionFixture('bad-backlink');
+fs.writeFileSync(
+  backlinkProjection.cardPath,
+  fs.readFileSync(backlinkProjection.cardPath, 'utf8')
+    .replace('tasks/Epic A/Epic A.md', 'tasks/Other Epic/Other Epic.md'),
+);
+assert.throws(() => projectCard(
+  backlinkProjection.cardPath,
+  backlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: backlinkProjection.state.cards.A1,
+    state: backlinkProjection.state,
+    cardsRoot: backlinkProjection.cardsRoot,
+  },
+), /mismatched task_parent/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects an epic/task_parent identity mismatch');
+
+const shallowProjection = makeEpicProjectionFixture('shallow-board');
+fs.writeFileSync(
+  shallowProjection.cardPath,
+  fs.readFileSync(shallowProjection.cardPath, 'utf8')
+    .replaceAll('spice/projects/test/tasks/Epic A/board/Epic A-board.md', 'board/Epic A-board.md'),
+);
+assert.throws(() => projectCard(
+  shallowProjection.cardPath,
+  shallowProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: shallowProjection.state.cards.A1,
+    state: shallowProjection.state,
+    cardsRoot: shallowProjection.cardsRoot,
+  },
+), /shallow or mismatched source board/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects shallow source_board and kanban_board paths');
+
+const nestedProjection = makeEpicProjectionFixture('nested-slice');
+const nestedCardPath = path.join(path.dirname(nestedProjection.cardPath), 'A1', 'A1.md');
+fs.mkdirSync(path.dirname(nestedCardPath));
+fs.copyFileSync(nestedProjection.cardPath, nestedCardPath);
+nestedProjection.state.cards.A1.card_path = nestedCardPath;
+assert.throws(() => projectCard(
+  nestedCardPath,
+  nestedProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: nestedProjection.state.cards.A1,
+    state: nestedProjection.state,
+    cardsRoot: nestedProjection.cardsRoot,
+  },
+), /must live flat beside its epic board/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects a slice nested below the canonical board directory');
+
+const crossEpicProjection = makeEpicProjectionFixture('cross-epic-posture');
+const crossEpicSiblingPath = path.join(path.dirname(crossEpicProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  crossEpicSiblingPath,
+  fs.readFileSync(crossEpicSiblingPath, 'utf8')
+    .replace('depends_on: []', 'depends_on:\n  - "[[External Slice]]"'),
+);
+projectCard(
+  crossEpicProjection.cardPath,
+  crossEpicProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: crossEpicProjection.state.cards.A1,
+    state: crossEpicProjection.state,
+    cardsRoot: crossEpicProjection.cardsRoot,
+  },
+);
+ok(/posture: blocked_by_dependencies/.test(fs.readFileSync(crossEpicProjection.atlasPath, 'utf8')),
+  'ES4-DUAL-POSTURE derives a cross-epic dependency posture from canonical sibling contracts');
+
+const malformedSiblingProjection = makeEpicProjectionFixture('malformed-sibling');
+const malformedSiblingPath = path.join(path.dirname(malformedSiblingProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  malformedSiblingPath,
+  fs.readFileSync(malformedSiblingPath, 'utf8')
+    .replace('type: slice', 'type: task-hub')
+    .replace('epic: "[[Epic A]]"', 'epic: "[[Other Epic]]"')
+    .replace('tasks/Epic A/Epic A.md', 'tasks/Other Epic/Other Epic.md')
+    .replaceAll('tasks/Epic A/board/Epic A-board.md', 'tasks/Other Epic/board/Other Epic-board.md'),
+);
+const malformedParentBefore = fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8');
+const malformedAtlasBefore = fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8');
+assert.throws(() => projectCard(
+  malformedSiblingProjection.cardPath,
+  malformedSiblingProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: malformedSiblingProjection.state.cards.A1,
+    state: malformedSiblingProjection.state,
+    cardsRoot: malformedSiblingProjection.cardsRoot,
+  },
+), /epic member A2\.md is not type slice/, 'ES4-CANONICAL-SLICE-FAILOPEN validates every sibling note before roll-up');
+eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malformedParentBefore,
+  'ES4-CANONICAL-SLICE-FAILOPEN leaves the parent board byte-stable after sibling refusal');
+eq(fs.readFileSync(malformedSiblingProjection.atlasPath, 'utf8'), malformedAtlasBefore,
+  'ES4-CANONICAL-SLICE-FAILOPEN leaves the atlas byte-stable after sibling refusal');
+const topologyDiagnostic = projectionBoardDrift(
+  fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'),
+  {
+    ...malformedSiblingProjection.state.cards.A1,
+    card: 'ES4a4 Dual projection and exact-card reconciliation (value-review completion)',
+  },
+  {
+    boardPath: malformedSiblingProjection.parentBoardPath,
+    cardsRoot: malformedSiblingProjection.cardsRoot,
+    state: malformedSiblingProjection.state,
+  },
+);
+ok(/canonical epic projection is unreadable:/.test(topologyDiagnostic.issue),
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE contains a topology refusal as an actionable drift finding');
+eq(topologyDiagnostic.reconcile,
+  "reconcile --card 'ES4a4 Dual projection and exact-card reconciliation (value-review completion)'",
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-EXACT-CARD-QUOTING preserves a spaced exact-card operand');
+eq(fs.readFileSync(malformedSiblingProjection.parentBoardPath, 'utf8'), malformedParentBefore,
+  'ES4-CANONICAL-TOPOLOGY-DIAGNOSTIC-ROUTE leaves projection surfaces byte-stable');
+
+const crossPrefixProjection = makeEpicProjectionFixture('cross-prefix-sibling');
+const crossPrefixSiblingPath = path.join(path.dirname(crossPrefixProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  crossPrefixSiblingPath,
+  fs.readFileSync(crossPrefixSiblingPath, 'utf8')
+    .replaceAll('spice/projects/test/', 'spice/projects/WRONG/'),
+);
+assert.throws(() => projectCard(
+  crossPrefixProjection.cardPath,
+  crossPrefixProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: crossPrefixProjection.state.cards.A1,
+    state: crossPrefixProjection.state,
+    cardsRoot: crossPrefixProjection.cardsRoot,
+  },
+), /mismatched task_parent/, 'ES4-CANONICAL-SLICE-FAILOPEN binds every sibling to the atlas exact project prefix');
+
+const rootAliasProjection = makeEpicProjectionFixture('physical-root-alias');
+for (const target of [
+  rootAliasProjection.atlasPath,
+  rootAliasProjection.cardPath,
+  path.join(path.dirname(rootAliasProjection.cardPath), 'A2.md'),
+]) {
+  fs.writeFileSync(
+    target,
+    fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'bogus/projects/test/'),
+  );
+}
+const rootAliasBytes = rootAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+assert.throws(() => projectCard(
+  rootAliasProjection.cardPath,
+  rootAliasProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: rootAliasProjection.state.cards.A1,
+    state: rootAliasProjection.state,
+    cardsRoot: rootAliasProjection.cardsRoot,
+  },
+), /does not bind its canonical parent board/, 'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS rejects a consistently bogus metadata prefix');
+eq(rootAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), rootAliasBytes,
+  'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS fails before every slice and epic projection write');
+
+const symlinkAliasProjection = makeEpicProjectionFixture('physical-root-symlink-alias');
+const physicalProjectRoot = path.dirname(symlinkAliasProjection.cardsRoot);
+const aliasProjectRoot = path.join(path.dirname(physicalProjectRoot), 'alias');
+fs.symlinkSync(physicalProjectRoot, aliasProjectRoot, 'dir');
+for (const target of [
+  symlinkAliasProjection.atlasPath,
+  symlinkAliasProjection.cardPath,
+  path.join(path.dirname(symlinkAliasProjection.cardPath), 'A2.md'),
+]) {
+  fs.writeFileSync(
+    target,
+    fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'spice/projects/alias/'),
+  );
+}
+const symlinkAliasBytes = symlinkAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+const aliasCardsRoot = path.join(aliasProjectRoot, 'tasks');
+const aliasParentBoard = path.join(aliasProjectRoot, 'project-board.md');
+const symlinkAliasCardPath = path.join(aliasCardsRoot, 'Epic A', 'board', 'A1.md');
+assert.throws(() => projectCard(
+  symlinkAliasCardPath,
+  aliasParentBoard,
+  'A1',
+  'implementing',
+  {
+    record: { ...symlinkAliasProjection.state.cards.A1, card_path: symlinkAliasCardPath },
+    state: symlinkAliasProjection.state,
+    cardsRoot: aliasCardsRoot,
+  },
+), /does not bind its canonical parent board/, 'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS resolves project-directory symlinks to physical identity');
+eq(symlinkAliasProjection.files.map((target) => fs.readFileSync(target, 'utf8')), symlinkAliasBytes,
+  'ES4-CANONICAL-SLICE-PROJECT-PREFIX-ROOT-ALIAS rejects a symlink alias before every projection write');
+
+const epicRootEscapeProjection = makeEpicProjectionFixture('epic-root-symlink-escape');
+const escapedEpicRoot = path.join(epicRootEscapeProjection.root, 'outside', 'Epic A');
+const canonicalEpicRoot = path.dirname(epicRootEscapeProjection.atlasPath);
+fs.mkdirSync(path.dirname(escapedEpicRoot), { recursive: true });
+fs.renameSync(canonicalEpicRoot, escapedEpicRoot);
+fs.symlinkSync(escapedEpicRoot, canonicalEpicRoot, 'dir');
+const epicRootEscapeBytes = epicRootEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+let epicRootEscapeWrites = 0;
+assert.throws(() => projectCard(
+  epicRootEscapeProjection.cardPath,
+  epicRootEscapeProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: epicRootEscapeProjection.state.cards.A1,
+    state: epicRootEscapeProjection.state,
+    cardsRoot: epicRootEscapeProjection.cardsRoot,
+    writeText: () => { epicRootEscapeWrites += 1; },
+  },
+), /epic Epic A escapes its physical root/,
+'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects an epic-root symlink outside the physical cards root');
+eq(epicRootEscapeWrites, 0,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE refuses before every projection write');
+eq(epicRootEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8')), epicRootEscapeBytes,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE preserves every inside and outside target byte');
+
+const boardDirEscapeProjection = makeEpicProjectionFixture('board-dir-symlink-escape');
+const canonicalBoardDir = path.dirname(boardDirEscapeProjection.cardPath);
+const escapedBoardDir = path.join(boardDirEscapeProjection.root, 'outside-board');
+fs.renameSync(canonicalBoardDir, escapedBoardDir);
+fs.symlinkSync(escapedBoardDir, canonicalBoardDir, 'dir');
+const boardDirEscapeBytes = boardDirEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8'));
+let boardDirEscapeWrites = 0;
+assert.throws(() => projectCard(
+  boardDirEscapeProjection.cardPath,
+  boardDirEscapeProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: boardDirEscapeProjection.state.cards.A1,
+    state: boardDirEscapeProjection.state,
+    cardsRoot: boardDirEscapeProjection.cardsRoot,
+    writeText: () => { boardDirEscapeWrites += 1; },
+  },
+), /epic Epic A board directory escapes its physical root/,
+'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects a board-directory symlink outside the physical epic root');
+eq(boardDirEscapeWrites, 0,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE rejects a board-directory escape before every write');
+eq(boardDirEscapeProjection.files.map((target) => fs.readFileSync(target, 'utf8')), boardDirEscapeBytes,
+  'ES4-CANONICAL-EPIC-ROOT-SYMLINK-ESCAPE preserves every board-directory escape target byte');
+
+const siblingMisbindProjection = makeEpicProjectionFixture('exact-card-sibling-misbind');
+const siblingMisbindPath = path.join(path.dirname(siblingMisbindProjection.cardPath), 'A2.md');
+const siblingMisbindFiles = [...siblingMisbindProjection.files, siblingMisbindPath];
+const siblingMisbindBytes = siblingMisbindFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingMisbindWrites = 0;
+assert.throws(() => projectCard(
+  siblingMisbindPath,
+  siblingMisbindProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: { ...siblingMisbindProjection.state.cards.A1, card_path: siblingMisbindPath },
+    state: siblingMisbindProjection.state,
+    cardsRoot: siblingMisbindProjection.cardsRoot,
+    writeText: () => { siblingMisbindWrites += 1; },
+  },
+), /canonical slice path A2\.md does not bind exact card A1/,
+'ES4-EXACT-CARD-PATH-SIBLING-MISBIND rejects a valid sibling path for the exact card operand');
+eq(siblingMisbindWrites, 0,
+  'ES4-EXACT-CARD-PATH-SIBLING-MISBIND refuses before every projection write');
+eq(siblingMisbindFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingMisbindBytes,
+  'ES4-EXACT-CARD-PATH-SIBLING-MISBIND preserves both sibling notes and all epic surfaces');
+
+const siblingSymlinkProjection = makeEpicProjectionFixture('exact-card-sibling-symlink');
+const siblingSymlinkPath = path.join(path.dirname(siblingSymlinkProjection.cardPath), 'A2.md');
+fs.unlinkSync(siblingSymlinkProjection.cardPath);
+fs.symlinkSync(siblingSymlinkPath, siblingSymlinkProjection.cardPath);
+const siblingSymlinkFiles = [...siblingSymlinkProjection.files, siblingSymlinkPath];
+const siblingSymlinkBytes = siblingSymlinkFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingSymlinkWrites = 0;
+assert.throws(() => projectCard(
+  siblingSymlinkProjection.cardPath,
+  siblingSymlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: siblingSymlinkProjection.state.cards.A1,
+    state: siblingSymlinkProjection.state,
+    cardsRoot: siblingSymlinkProjection.cardsRoot,
+    writeText: () => { siblingSymlinkWrites += 1; },
+  },
+), /canonical epic slice A1 must be one regular non-symlink file/,
+'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects A1.md physically resolving to sibling A2.md');
+eq(siblingSymlinkWrites, 0,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects a sibling symlink before every projection write');
+eq(siblingSymlinkFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingSymlinkBytes,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND leaves both sibling aliases and all epic surfaces byte-stable');
+
+const siblingHardlinkProjection = makeEpicProjectionFixture('exact-card-sibling-hardlink');
+const siblingHardlinkPath = path.join(path.dirname(siblingHardlinkProjection.cardPath), 'A2.md');
+fs.unlinkSync(siblingHardlinkProjection.cardPath);
+fs.linkSync(siblingHardlinkPath, siblingHardlinkProjection.cardPath);
+const siblingHardlinkFiles = [...siblingHardlinkProjection.files, siblingHardlinkPath];
+const siblingHardlinkBytes = siblingHardlinkFiles.map((target) => fs.readFileSync(target, 'utf8'));
+let siblingHardlinkWrites = 0;
+assert.throws(() => projectCard(
+  siblingHardlinkProjection.cardPath,
+  siblingHardlinkProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: siblingHardlinkProjection.state.cards.A1,
+    state: siblingHardlinkProjection.state,
+    cardsRoot: siblingHardlinkProjection.cardsRoot,
+    writeText: () => { siblingHardlinkWrites += 1; },
+  },
+), /epic slice A2 shares physical file identity with sibling A1/,
+'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects hard-linked sibling slice identities');
+eq(siblingHardlinkWrites, 0,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND rejects a sibling hard link before every projection write');
+eq(siblingHardlinkFiles.map((target) => fs.readFileSync(target, 'utf8')), siblingHardlinkBytes,
+  'ES4-EXACT-CARD-PATH-SYMLINK-MISBIND leaves hard-linked siblings and every epic surface byte-stable');
+
+const containmentMatrix = [
+  {
+    name: 'symlink-write-root',
+    pattern: /epic Epic A escapes its physical root/,
+    setup: (fixture) => {
+      const canonical = path.dirname(fixture.atlasPath);
+      const escaped = path.join(fixture.root, 'matrix-outside', 'Epic A');
+      fs.mkdirSync(path.dirname(escaped), { recursive: true });
+      fs.renameSync(canonical, escaped);
+      fs.symlinkSync(escaped, canonical, 'dir');
+    },
+  },
+  {
+    name: 'hardlink-sibling-alias',
+    pattern: /shares physical file identity/,
+    setup: (fixture) => {
+      const sibling = path.join(path.dirname(fixture.cardPath), 'A2.md');
+      fs.unlinkSync(fixture.cardPath);
+      fs.linkSync(sibling, fixture.cardPath);
+    },
+  },
+  {
+    name: 'dot-dot-traversal',
+    pattern: /escapes cards root/,
+    setup: (fixture) => {
+      fs.writeFileSync(
+        fixture.cardPath,
+        fs.readFileSync(fixture.cardPath, 'utf8').replace('epic: "[[Epic A]]"', 'epic: "[[../../outside]]"'),
+      );
+    },
+  },
+  {
+    name: 'project-root-prefix-alias',
+    pattern: /does not bind its canonical parent board/,
+    setup: (fixture) => {
+      for (const target of [
+        fixture.atlasPath,
+        fixture.cardPath,
+        path.join(path.dirname(fixture.cardPath), 'A2.md'),
+      ]) {
+        fs.writeFileSync(
+          target,
+          fs.readFileSync(target, 'utf8').replaceAll('spice/projects/test/', 'bogus/projects/test/'),
+        );
+      }
+    },
+  },
+  {
+    name: 'physical-device-inode-collision',
+    pattern: /shares physical file identity/,
+    setup: (fixture) => {
+      const originalStat = fs.statSync;
+      const firstPath = fs.realpathSync(fixture.cardPath);
+      const siblingPath = fs.realpathSync(path.join(path.dirname(fixture.cardPath), 'A2.md'));
+      const firstIdentity = originalStat(firstPath);
+      fs.statSync = (target, ...args) => {
+        const stat = originalStat(target, ...args);
+        return fs.realpathSync(target) === siblingPath
+          ? { ...stat, dev: firstIdentity.dev, ino: firstIdentity.ino }
+          : stat;
+      };
+      return () => { fs.statSync = originalStat; };
+    },
+  },
+];
+
+for (const matrixCase of containmentMatrix) {
+  const fault = makeEpicProjectionFixture(`matrix-red-${matrixCase.name}`);
+  const restore = matrixCase.setup(fault) || (() => {});
+  const faultSurfaces = [...new Set([
+    ...fault.files,
+    path.join(path.dirname(fault.cardPath), 'A2.md'),
+  ])];
+  const before = faultSurfaces.map((target) => fs.readFileSync(target, 'utf8'));
+  let writes = 0;
+  try {
+    assert.throws(() => projectCard(
+      fault.cardPath,
+      fault.parentBoardPath,
+      'A1',
+      'implementing',
+      {
+        record: fault.state.cards.A1,
+        state: fault.state,
+        cardsRoot: fault.cardsRoot,
+        writeText: () => { writes += 1; },
+      },
+    ), matrixCase.pattern,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is red with the enumerated escape fault`);
+  } finally {
+    restore();
+  }
+  eq(writes, 0,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is refused before the first projection write`);
+  eq(faultSurfaces.map((target) => fs.readFileSync(target, 'utf8')), before,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} keeps every inside and outside surface byte-stable`);
+
+  const valid = makeEpicProjectionFixture(`matrix-green-${matrixCase.name}`);
+  let validWrites = 0;
+  const validResult = projectCard(
+    valid.cardPath,
+    valid.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: valid.state.cards.A1,
+      state: valid.state,
+      cardsRoot: valid.cardsRoot,
+      writeText: () => { validWrites += 1; },
+    },
+  );
+  ok(validResult.changed && validWrites > 0,
+    `ES4-CONTAINMENT-MATRIX ${matrixCase.name} is green with a canonical contained projection`);
+}
+
+const duplicateSiblingProjection = makeEpicProjectionFixture('duplicate-sibling');
+fs.writeFileSync(
+  duplicateSiblingProjection.epicBoardPath,
+  fs.readFileSync(duplicateSiblingProjection.epicBoardPath, 'utf8')
+    .replace('## In Progress\n', '## In Progress\n- [ ] [[A2]]\n'),
+);
+assert.throws(() => projectCard(
+  duplicateSiblingProjection.cardPath,
+  duplicateSiblingProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: duplicateSiblingProjection.state.cards.A1,
+    state: duplicateSiblingProjection.state,
+    cardsRoot: duplicateSiblingProjection.cardsRoot,
+  },
+), /duplicate board membership for A2/, 'ES4-CANONICAL-SLICE-FAILOPEN rejects duplicate sibling membership across epic lanes');
+
+const diagnosticProjection = makeEpicProjectionFixture('diagnostic-refusal');
+fs.writeFileSync(
+  diagnosticProjection.epicBoardPath,
+  moveBoardCard(fs.readFileSync(diagnosticProjection.epicBoardPath, 'utf8'), 'A1', 'In Progress'),
+);
+fs.writeFileSync(
+  diagnosticProjection.cardPath,
+  fs.readFileSync(diagnosticProjection.cardPath, 'utf8')
+    .replace('kanban_column: In Planning', 'kanban_column: In Progress')
+    .replace('status: planning', 'status: in_progress'),
+);
+const diagnosticSiblingPath = path.join(path.dirname(diagnosticProjection.cardPath), 'A2.md');
+fs.writeFileSync(
+  diagnosticSiblingPath,
+  fs.readFileSync(diagnosticSiblingPath, 'utf8').replace('status: planning', 'status: completed'),
+);
+const diagnosticFinding = projectionBoardDrift(
+  fs.readFileSync(diagnosticProjection.parentBoardPath, 'utf8'),
+  diagnosticProjection.state.cards.A1,
+  {
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    state: diagnosticProjection.state,
+  },
+);
+ok(/legacy completion lacks successful deployment receipts/.test(diagnosticFinding.issue),
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING reports receiptless note completion without throwing');
+eq(diagnosticFinding.card, 'A2',
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING binds the finding to the exact legacy slice');
+eq(diagnosticFinding.reconcile, "reconcile --card 'A2'",
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING routes reconciliation to the exact legacy slice');
+const diagnosticProjectionResult = projectCard(
+  diagnosticProjection.cardPath,
+  diagnosticProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: diagnosticProjection.state.cards.A1,
+    state: diagnosticProjection.state,
+    cardsRoot: diagnosticProjection.cardsRoot,
+  },
+);
+eq(diagnosticProjectionResult.projection_findings.map((finding) => finding.card), ['A2'],
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING lets the rest of the epic project');
+ok(!diagnosticProjection.state.cards.A2,
+  'ES4-NO-SYNTHETIC-LEGACY-RECEIPT does not manufacture a tracked record or receipt for a legacy slice');
+const diagnosticReconcile = await commandReconcile(
+  { root: diagnosticProjection.root },
+  { card: 'A2' },
+  {
+    readState: () => diagnosticProjection.state,
+    writeState: () => {},
+    withLock: async (_ctx, _name, fn) => fn(),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    now: () => '2026-07-24T20:00:00.000Z',
+  },
+);
+eq(diagnosticReconcile.action, 'reconciled',
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE makes the emitted untracked exact-card route executable');
+eq(diagnosticReconcile.results[0].projection_findings.map((finding) => finding.card), ['A2'],
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE preserves the exact legacy finding in reconcile receipts');
+eq(diagnosticReconcile.results[0].via_card, 'A1',
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE projects through the tracked canonical sibling without tracking the legacy card');
+ok(!diagnosticProjection.state.cards.A2,
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE leaves the legacy card untracked after its exact route runs');
+const diagnosticReconcileReplay = await commandReconcile(
+  { root: diagnosticProjection.root },
+  { card: 'A2' },
+  {
+    readState: () => diagnosticProjection.state,
+    writeState: () => {},
+    withLock: async (_ctx, _name, fn) => fn(),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    now: () => '2026-07-24T20:00:00.000Z',
+  },
+);
+ok(diagnosticReconcileReplay.no_op
+  && diagnosticReconcileReplay.results[0].projection_findings[0].reconcile === "reconcile --card 'A2'",
+  'ES4-LEGACY-EXACT-RECONCILE-ROUTE-UNEXECUTABLE exact replay is a byte-stable no-op with the same bounded finding');
+
+const viaGateRace = makeEpicProjectionFixture('legacy-via-gate-race');
+const viaGateRaceSibling = path.join(path.dirname(viaGateRace.cardPath), 'A2.md');
+fs.writeFileSync(
+  viaGateRaceSibling,
+  fs.readFileSync(viaGateRaceSibling, 'utf8').replace('status: planning', 'status: completed'),
+);
+let viaGateRaceState = viaGateRace.state;
+let viaGateTransitionSnapshot = null;
+const viaGateLocks = [];
+const viaGateNow = '2026-07-24T21:30:00.000Z';
+const viaGateRaceResult = await commandReconcile(
+  { root: viaGateRace.root },
+  { card: 'A2' },
+  {
+    readState: () => viaGateRaceState,
+    writeState: (_ctx, next) => { viaGateRaceState = next; },
+    withLock: async (_ctx, name, fn) => {
+      viaGateLocks.push(name);
+      if (name === cardGateLockName('A1') && !viaGateTransitionSnapshot) {
+        viaGateRaceState = JSON.parse(JSON.stringify(viaGateRaceState));
+        Object.assign(viaGateRaceState.cards.A1, {
+          phase: 'deployed',
+          required_version: '0.257.0',
+          vault_receipts: successfulVaultReceipts('0.257.0'),
+          projection_reconciled_at: viaGateNow,
+        });
+        viaGateTransitionSnapshot = JSON.stringify(viaGateRaceState.cards.A1);
+      }
+      return fn();
+    },
+    boardPath: viaGateRace.parentBoardPath,
+    cardsRoot: viaGateRace.cardsRoot,
+    now: () => viaGateNow,
+  },
+);
+eq(viaGateLocks, [
+  legacyCardGateLockName('A2'), cardGateLockName('A2'),
+  legacyCardGateLockName('A1'), cardGateLockName('A1'),
+  'completion-projection',
+], 'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes both legacy and tracked sibling identities before projection');
+eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
+ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
+
+const gateSlugCollision = makeEpicProjectionFixture('legacy-via-gate-slug-collision');
+const collisionTrackedPath = path.join(path.dirname(gateSlugCollision.cardPath), 'Lock-Alias.md');
+const collisionLegacyPath = path.join(path.dirname(gateSlugCollision.cardPath), 'Lock Alias.md');
+fs.renameSync(gateSlugCollision.cardPath, collisionTrackedPath);
+fs.renameSync(path.join(path.dirname(gateSlugCollision.cardPath), 'A2.md'), collisionLegacyPath);
+fs.writeFileSync(
+  gateSlugCollision.epicBoardPath,
+  fs.readFileSync(gateSlugCollision.epicBoardPath, 'utf8')
+    .replace('[[A1]]', '[[Lock-Alias]]')
+    .replace('[[A2]]', '[[Lock Alias]]'),
+);
+fs.writeFileSync(
+  collisionLegacyPath,
+  fs.readFileSync(collisionLegacyPath, 'utf8').replace('status: planning', 'status: completed'),
+);
+gateSlugCollision.state.cards['Lock-Alias'] = {
+  ...gateSlugCollision.state.cards.A1,
+  card: 'Lock-Alias',
+  card_path: collisionTrackedPath,
+};
+delete gateSlugCollision.state.cards.A1;
+const collisionActiveLocks = new Set();
+const collisionLockSequence = [];
+const collisionDeps = {
+  readState: () => gateSlugCollision.state,
+  writeState: () => {},
+  withLock: async (_ctx, name, fn) => {
+    if (collisionActiveLocks.has(name)) throw new Error(`self-colliding lock ${name}`);
+    collisionActiveLocks.add(name);
+    collisionLockSequence.push(name);
+    try {
+      return await fn();
+    } finally {
+      collisionActiveLocks.delete(name);
+    }
+  },
+  boardPath: gateSlugCollision.parentBoardPath,
+  cardsRoot: gateSlugCollision.cardsRoot,
+  now: () => '2026-07-24T21:45:00.000Z',
+};
+const collisionReconcile = await commandReconcile(
+  { root: gateSlugCollision.root },
+  { card: 'Lock Alias' },
+  collisionDeps,
+);
+eq(collisionReconcile.action, 'reconciled',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION assigns distinct gate identities to exact legacy and tracked sibling names');
+eq(cardGateLockName('Lock Alias'), cardGateLockName('Lock Alias'),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identity is deterministic across independent calls');
+const fixtureChildren = new Set();
+const closedFixtureChildren = new Set();
+const trackFixtureChild = (child) => {
+  fixtureChildren.add(child);
+  return child;
+};
+const spawnFixtureChild = (script) => {
+  return trackFixtureChild(spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] }));
+};
+const collectFixtureChild = (child, { label = 'fixture child', timeoutMs = 5000 } = {}) => new Promise((resolve, reject) => {
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let primaryError = null;
+  let forceKillTimer = null;
+  let terminalTimer = null;
+  let settled = false;
+  const clearLifecycleTimers = () => {
+    clearTimeout(timer);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    if (terminalTimer) clearTimeout(terminalTimer);
+  };
+  const settle = (error, value) => {
+    if (settled) return;
+    settled = true;
+    clearLifecycleTimers();
+    if (error) reject(error);
+    else resolve(value);
+  };
+  const attemptKill = (signal) => {
+    try {
+      child.kill(signal);
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    attemptKill('SIGTERM');
+    forceKillTimer = setTimeout(() => {
+      attemptKill('SIGKILL');
+      terminalTimer = setTimeout(() => {
+        if (primaryError) {
+          primaryError.close_barrier_observed = false;
+          primaryError.lifecycle_terminal = true;
+          settle(primaryError);
+        } else {
+          settle(new Error(`${label} failed closed without an exact-child close barrier after ${timeoutMs}ms`));
+        }
+      }, 250);
+    }, 100);
+  }, timeoutMs);
+  if (child.stdout && typeof child.stdout.on === 'function') {
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+  }
+  if (child.stderr && typeof child.stderr.on === 'function') {
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+  }
+  child.on('error', (error) => {
+    if (!primaryError) primaryError = error;
+  });
+  child.once('close', (code) => {
+    closedFixtureChildren.add(child);
+    if (primaryError) settle(primaryError);
+    else if (timedOut) settle(new Error(`${label} timed out after ${timeoutMs}ms`));
+    else if (code === 0) settle(null, stdout);
+    else settle(new Error(`${label} exited ${code}: ${stderr}`));
+  });
+});
+const runFixtureProcess = async (script, options = {}) => {
+  const child = spawnFixtureChild(script);
+  return collectFixtureChild(child, options);
+};
+const makeFixtureChild = ({ pid = 4242, kill, track = true } = {}) => {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = kill || (() => true);
+  return track ? trackFixtureChild(child) : child;
+};
+
+const errorCloseOrder = [];
+const errorBeforeCloseChild = makeFixtureChild({ pid: 61001 });
+let errorBeforeCloseSettled = false;
+const errorBeforeCloseResult = collectFixtureChild(errorBeforeCloseChild, {
+  label: 'spawn error close barrier',
+  timeoutMs: 1000,
+}).catch((error) => {
+  errorCloseOrder.push('settled');
+  errorBeforeCloseSettled = true;
+  return error;
+});
+const exactSpawnError = new Error('fixture-spawn-error');
+errorBeforeCloseChild.emit('error', exactSpawnError);
+await new Promise((resolve) => setImmediate(resolve));
+ok(!errorBeforeCloseSettled,
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER ChildProcess error cannot settle before the exact child close event');
+errorCloseOrder.push('close');
+errorBeforeCloseChild.emit('close', -1);
+const observedSpawnError = await errorBeforeCloseResult;
+ok(observedSpawnError === exactSpawnError && errorCloseOrder.join('>') === 'close>settled'
+    && closedFixtureChildren.has(errorBeforeCloseChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER preserves the primary spawn error only after exact-child close');
+
+const missingExecutable = path.join(tmp, 'es4-missing-child-executable');
+const actualSpawnErrorChild = trackFixtureChild(spawn(missingExecutable, [], {
+  stdio: ['ignore', 'pipe', 'pipe'],
+}));
+const actualSpawnErrorFinding = await collectFixtureChild(actualSpawnErrorChild, {
+  label: 'actual spawn error close barrier',
+  timeoutMs: 1000,
+}).catch((error) => error);
+ok(actualSpawnErrorFinding.code === 'ENOENT' && closedFixtureChildren.has(actualSpawnErrorChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER real spawn ENOENT preserves its error through the later exact-child close');
+
+const killFalseSignals = [];
+let killFalseChild;
+killFalseChild = makeFixtureChild({
+  pid: 61002,
+  kill: (signal) => {
+    killFalseSignals.push(signal);
+    if (signal === 'SIGKILL') setImmediate(() => killFalseChild.emit('close', null));
+    return false;
+  },
+});
+const killFalseFinding = await collectFixtureChild(killFalseChild, {
+  label: 'kill false close barrier',
+  timeoutMs: 20,
+}).catch((error) => error);
+ok(/timed out/.test(killFalseFinding.message)
+    && killFalseSignals.join('>') === 'SIGTERM>SIGKILL'
+    && closedFixtureChildren.has(killFalseChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER kill returning false still escalates and awaits exact-child close');
+
+const killThrowSignals = [];
+let killThrowChild;
+killThrowChild = makeFixtureChild({
+  pid: 61003,
+  kill: (signal) => {
+    killThrowSignals.push(signal);
+    if (signal === 'SIGKILL') setImmediate(() => killThrowChild.emit('close', null));
+    throw new Error(`fixture-${signal}-throw`);
+  },
+});
+const killThrowFinding = await collectFixtureChild(killThrowChild, {
+  label: 'kill throw close barrier',
+  timeoutMs: 20,
+}).catch((error) => error);
+ok(killThrowFinding.message === 'fixture-SIGTERM-throw'
+    && killThrowSignals.join('>') === 'SIGTERM>SIGKILL'
+    && closedFixtureChildren.has(killThrowChild),
+  'ES4-CHILD-ERROR-BYPASSES-CLOSE-BARRIER kill exceptions preserve the first error while awaiting exact-child close');
+
+const terminalNoCloseSignals = [];
+const terminalNoClosePrimary = new Error('fixture-terminal-primary-error');
+const terminalNoCloseChild = makeFixtureChild({
+  pid: 61004,
+  track: false,
+  kill: (signal) => {
+    terminalNoCloseSignals.push(signal);
+    return false;
+  },
+});
+const terminalNoCloseResult = collectFixtureChild(terminalNoCloseChild, {
+  label: 'terminal no-close barrier',
+  timeoutMs: 10,
+}).catch((error) => error);
+terminalNoCloseChild.emit('error', terminalNoClosePrimary);
+const terminalNoCloseFinding = await terminalNoCloseResult;
+const terminalSignalsAtSettlement = terminalNoCloseSignals.join('>');
+await new Promise((resolve) => setTimeout(resolve, 300));
+ok(terminalNoCloseFinding === terminalNoClosePrimary
+    && terminalNoCloseFinding.lifecycle_terminal === true
+    && terminalNoCloseFinding.close_barrier_observed === false
+    && terminalSignalsAtSettlement === 'SIGTERM>SIGKILL'
+    && terminalNoCloseSignals.join('>') === terminalSignalsAtSettlement
+    && !closedFixtureChildren.has(terminalNoCloseChild),
+  'ES4-TERMINAL-NO-CLOSE-PRIMARY-ERROR-PRECEDENCE returns the exact first error, reports no close authority, and clears every lifecycle timer');
+const coordinatorModulePath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+const crossProcessGateName = await runFixtureProcess([
+  `const { cardGateLockName } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `process.stdout.write(cardGateLockName(${JSON.stringify('Lock Alias')}));`,
+].join(' '), { label: 'exact gate identity probe', timeoutMs: 2000 });
+eq(crossProcessGateName, cardGateLockName('Lock Alias'),
+  'ES4-GATE-IDENTITY-CROSS-PROCESS-FIXTURE-MISSING proves exact gate identity is stable in a fresh child process');
+ok(cardGateLockName('Lock Alias') !== cardGateLockName('Lock-Alias'),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION binds the exact full card identity beyond its readable slug');
+ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.repeat(400)).length <= 143,
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION gate identities are filesystem-safe and bounded');
+const coordinatorLockSource = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
+eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN keeps the shipping slug spelling in one compatibility helper only');
+eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
+ok(collisionReconcile.results[0].projection_findings[0].card === 'Lock Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves the exact bounded legacy finding');
+eq(collisionLockSequence.slice(0, 4), [
+  legacyCardGateLockName('Lock Alias'),
+  cardGateLockName('Lock Alias'),
+  cardGateLockName('Lock-Alias'),
+  'completion-projection',
+], 'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION retains one shared compatibility gate plus two exact gates without a slug self-collision');
+const collisionReplay = await commandReconcile(
+  { root: gateSlugCollision.root },
+  { card: 'Lock Alias' },
+  collisionDeps,
+);
+ok(collisionReplay.no_op && collisionReplay.results[0].projection_findings[0].card === 'Lock Alias',
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION exact replay is a byte-stable no-op');
+
+const lockNamespaceMigration = makeEpicProjectionFixture('gate-lock-namespace-migration');
+const migrationLegacyLock = legacyCardGateLockName('A1');
+const frozenShippingLegacyLock = 'gates-a1';
+eq(migrationLegacyLock, frozenShippingLegacyLock,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN matches the frozen shipping lock spelling without deriving the expected value from production code');
+const migrationActiveLocks = new Set([migrationLegacyLock]);
+const migrationLockSequence = [];
+let migrationOldProcessBlocked = false;
+const migrationWithLock = async (ctx, name, fn) => {
+  migrationLockSequence.push(name);
+  if (migrationActiveLocks.has(name)) throw new Error(`lock ${name} held by shipping coordinator`);
+  migrationActiveLocks.add(name);
+  try {
+    if (name === cardGateLockName('A1')) {
+      try {
+        await migrationWithLock(ctx, migrationLegacyLock, async () => {
+          throw new Error('old coordinator entered while new coordinator held compatibility authority');
+        });
+      } catch (error) {
+        migrationOldProcessBlocked = /held by shipping coordinator/.test(error.message);
+      }
+    }
+    return await fn();
+  } finally {
+    migrationActiveLocks.delete(name);
+  }
+};
+const migrationDeps = {
+  readState: () => lockNamespaceMigration.state,
+  writeState: () => {},
+  withLock: migrationWithLock,
+  boardPath: lockNamespaceMigration.parentBoardPath,
+  cardsRoot: lockNamespaceMigration.cardsRoot,
+  now: () => '2026-07-24T22:15:00.000Z',
+};
+const migrationBlocked = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+eq(migrationBlocked.action, 'reconcile-failed',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a new exact-identity operation while a shipping slug-only coordinator holds legacy authority');
+ok(!migrationLockSequence.includes(cardGateLockName('A1')),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN refuses before the new exact-identity authoritative section');
+migrationActiveLocks.delete(migrationLegacyLock);
+migrationLockSequence.length = 0;
+const migrationReleased = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+eq(migrationReleased.action, 'reconciled',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN proceeds after the shipping legacy lock releases');
+eq(migrationLockSequence.slice(0, 4), [
+  migrationLegacyLock, cardGateLockName('A1'), migrationLegacyLock, 'completion-projection',
+], 'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN holds legacy compatibility before exact identity, refuses the simulated old acquisition, then reaches completion projection');
+ok(migrationOldProcessBlocked,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks an old slug-only acquisition throughout the new exact-identity section');
+const migrationReplay = await commandReconcile(
+  { root: lockNamespaceMigration.root },
+  { card: 'A1' },
+  migrationDeps,
+);
+ok(migrationReplay.no_op,
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN preserves exact-card no-op replay after the compatibility lock releases');
+
+const crossProcessMigrationStateDir = path.join(tmp, 'es4-gate-migration-cross-process');
+const crossProcessMigrationCtx = {
+  root: tmp,
+  stateDir: crossProcessMigrationStateDir,
+  statePath: path.join(crossProcessMigrationStateDir, 'state.json'),
+};
+const crossProcessLegacyPath = path.join(crossProcessMigrationStateDir, 'locks', `${migrationLegacyLock}.lock`);
+fs.mkdirSync(crossProcessLegacyPath, { recursive: true });
+fs.writeFileSync(path.join(crossProcessLegacyPath, 'owner.json'), JSON.stringify({
+  pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(),
+}));
+const migrationChildScript = [
+  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `const ctx = ${JSON.stringify(crossProcessMigrationCtx)};`,
+  `withCardGateLock(ctx, 'A1', async () => 'entered')`,
+  `.then((value) => process.stdout.write(value))`,
+  `.catch((error) => process.stdout.write(error.code || error.message));`,
+].join(' ');
+eq(await runFixtureProcess(migrationChildScript, {
+  label: 'legacy-held migration probe',
+  timeoutMs: 2000,
+}), 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh process on a live shipping legacy lock directory');
+fs.rmSync(crossProcessLegacyPath, { recursive: true, force: true });
+eq(await runFixtureProcess(migrationChildScript, {
+  label: 'legacy-released migration probe',
+  timeoutMs: 2000,
+}), 'entered',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN lets the same fresh process enter after the live legacy lock releases');
+
+const installedShippingCoordinatorPath = '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js';
+const shippingCoordinatorFixturePath = fs.existsSync(installedShippingCoordinatorPath)
+  ? installedShippingCoordinatorPath
+  : path.join(tmp, 'frozen-shipping-codex-coordinator.js');
+if (!fs.existsSync(shippingCoordinatorFixturePath)) {
+  fs.writeFileSync(shippingCoordinatorFixturePath, [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const os = require('os');",
+    "const path = require('path');",
+    "function slugify(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 72); }",
+    "async function withLock(ctx, name, fn) {",
+    "  const lockPath = path.join(ctx.stateDir, 'locks', `${name}.lock`);",
+    "  fs.mkdirSync(path.dirname(lockPath), { recursive: true });",
+    "  try { fs.mkdirSync(lockPath); } catch (error) {",
+    "    if (error.code !== 'EEXIST') throw error;",
+    "    const held = new Error(`lock ${name} held`); held.code = 'LOCKED'; throw held;",
+    "  }",
+    "  fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), started_at: new Date().toISOString() }));",
+    "  try { return await fn(); } finally { fs.rmSync(lockPath, { recursive: true, force: true }); }",
+    "}",
+    "async function withShippingCardGateLock(ctx, card, fn) { return withLock(ctx, `gates-${slugify(card)}`, fn, { card }); }",
+    "module.exports = {};",
+  ].join('\n'));
+}
+const shippingCoordinatorSource = fs.readFileSync(shippingCoordinatorFixturePath, 'utf8');
+ok(shippingCoordinatorSource.includes('`gates-${slugify(card)}`'),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN binds the installed shipping artifact direct slug-only namespace when Homebrew is present');
+const shippingModuleLoaderLines = [
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "const Module = require('module');",
+  `const shippingPath = ${JSON.stringify(shippingCoordinatorFixturePath)};`,
+  "const shippingSource = fs.readFileSync(shippingPath, 'utf8');",
+  "const shippingModule = new Module(shippingPath);",
+  "shippingModule.filename = shippingPath;",
+  "shippingModule.paths = Module._nodeModulePaths(path.dirname(shippingPath));",
+  "shippingModule._compile(shippingSource + '\\nmodule.exports.__fixtureWithLock = withLock; module.exports.__fixtureSlugify = slugify;', shippingPath);",
+  "const shippingWithLock = shippingModule.exports.__fixtureWithLock;",
+  "const shippingSlugify = shippingModule.exports.__fixtureSlugify;",
+  "const shippingWithCardGateLock = (ctx, card, fn) => shippingWithLock(ctx, 'gates-' + shippingSlugify(card), fn, { card });",
+];
+const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000, lifecycle = {}) => {
+  let cancelled = false;
+  let pendingTimer = null;
+  let wakePendingTimer = null;
+  lifecycle.poll_count = 0;
+  lifecycle.timer_count = 0;
+  lifecycle.cancelled = false;
+  lifecycle.joined = false;
+  lifecycle.settled = false;
+  lifecycle.pending_timer = false;
+  const waitForNextPoll = () => new Promise((resolve) => {
+    const wake = () => {
+      if (wakePendingTimer !== wake) return;
+      pendingTimer = null;
+      wakePendingTimer = null;
+      lifecycle.pending_timer = false;
+      resolve();
+    };
+    wakePendingTimer = wake;
+    pendingTimer = setTimeout(wake, 10);
+    lifecycle.timer_count += 1;
+    lifecycle.pending_timer = true;
+  });
+  const cancelReadiness = () => {
+    cancelled = true;
+    lifecycle.cancelled = true;
+    if (pendingTimer) clearTimeout(pendingTimer);
+    const wake = wakePendingTimer;
+    if (wake) wake();
+    else {
+      pendingTimer = null;
+      lifecycle.pending_timer = false;
+    }
+  };
+  const readiness = (async () => {
+    try {
+      const deadline = Date.now() + timeoutMs;
+      while (!fs.existsSync(targetPath)) {
+        if (cancelled) return 'cancelled';
+        if (Date.now() >= deadline) throw new Error(`fixture readiness timed out after ${timeoutMs}ms`);
+        lifecycle.poll_count += 1;
+        await waitForNextPoll();
+      }
+      return 'ready';
+    } finally {
+      if (pendingTimer) clearTimeout(pendingTimer);
+      pendingTimer = null;
+      wakePendingTimer = null;
+      lifecycle.pending_timer = false;
+      lifecycle.settled = true;
+    }
+  })();
+  const winner = await Promise.race([
+    readiness.then(() => ({ source: 'readiness' })),
+    childResult.then(
+      () => ({ source: 'holder', error: new Error('fixture holder exited before readiness') }),
+      (error) => ({ source: 'holder', error }),
+    ),
+  ]);
+  if (winner.source === 'holder') {
+    cancelReadiness();
+    await readiness;
+    lifecycle.joined = true;
+    throw winner.error;
+  }
+};
+
+const readinessRaceDir = path.join(tmp, 'es4-readiness-early-exit');
+fs.mkdirSync(readinessRaceDir, { recursive: true });
+const readinessRaceMissing = path.join(readinessRaceDir, 'missing');
+const observeReadinessTimerCallbacks = async (operation, settleMs = 25) => {
+  const scope = new AsyncLocalStorage();
+  const marker = {};
+  const scopedTimerIds = new Set();
+  let operationSettled = false;
+  let scheduledTimerCount = 0;
+  let callbacksAfterSettle = 0;
+  const hook = createHook({
+    init: (asyncId, type) => {
+      if (type !== 'Timeout' || scope.getStore() !== marker) return;
+      scopedTimerIds.add(asyncId);
+      scheduledTimerCount += 1;
+    },
+    before: (asyncId) => {
+      if (operationSettled && scopedTimerIds.has(asyncId)) callbacksAfterSettle += 1;
+    },
+    destroy: (asyncId) => {
+      scopedTimerIds.delete(asyncId);
+    },
+  });
+  hook.enable();
+  let value;
+  let error = null;
+  try {
+    try {
+      value = await scope.run(marker, operation);
+    } catch (caught) {
+      error = caught;
+    }
+    operationSettled = true;
+    await scope.exit(() => new Promise((resolve) => setTimeout(resolve, settleMs)));
+    return { value, error, scheduledTimerCount, callbacksAfterSettle };
+  } finally {
+    hook.disable();
+    scope.disable();
+  }
+};
+const readinessUnhandled = [];
+const recordReadinessUnhandled = (reason) => readinessUnhandled.push(reason);
+process.on('unhandledRejection', recordReadinessUnhandled);
+try {
+  const cleanExitLifecycle = {};
+  const cleanExitObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(readinessRaceMissing, Promise.resolve('clean exit'), 1000, cleanExitLifecycle),
+  );
+  const cleanExitFinding = cleanExitObservation.error?.message || '';
+  const cleanExitPolls = cleanExitLifecycle.poll_count;
+  ok(/holder exited before readiness/.test(cleanExitFinding)
+      && cleanExitLifecycle.cancelled
+      && cleanExitLifecycle.joined
+      && cleanExitLifecycle.settled
+      && !cleanExitLifecycle.pending_timer
+      && cleanExitLifecycle.poll_count === cleanExitPolls,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK clean holder exit cancels and joins readiness with no surviving poll timer');
+
+  const earlyError = new Error('fixture holder early error');
+  const errorExitLifecycle = {};
+  const errorExitObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(readinessRaceMissing, Promise.reject(earlyError), 1000, errorExitLifecycle),
+  );
+  const errorExitFinding = errorExitObservation.error;
+  eq(errorExitFinding, earlyError,
+    'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK early holder error remains the exact primary error');
+  ok(errorExitLifecycle.cancelled
+      && errorExitLifecycle.joined
+      && errorExitLifecycle.settled
+      && !errorExitLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK early holder error leaves the readiness loser fully settled');
+
+  const successPath = path.join(readinessRaceDir, 'ready');
+  fs.writeFileSync(successPath, 'ready');
+  let resolveSuccessHolder;
+  const successHolder = new Promise((resolve) => { resolveSuccessHolder = resolve; });
+  const successLifecycle = {};
+  await waitForFixturePath(successPath, successHolder, 1000, successLifecycle);
+  resolveSuccessHolder('released');
+  await successHolder;
+  ok(successLifecycle.settled
+      && !successLifecycle.cancelled
+      && !successLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK successful readiness settles without manufacturing cancellation or a timer');
+
+  let resolveTimeoutHolder;
+  const timeoutHolder = new Promise((resolve) => { resolveTimeoutHolder = resolve; });
+  const timeoutLifecycle = {};
+  let timeoutFinding = '';
+  try {
+    await waitForFixturePath(readinessRaceMissing, timeoutHolder, 20, timeoutLifecycle);
+  } catch (error) {
+    timeoutFinding = error.message;
+  }
+  resolveTimeoutHolder('released');
+  await timeoutHolder;
+  ok(/readiness timed out/.test(timeoutFinding)
+      && timeoutLifecycle.settled
+      && !timeoutLifecycle.pending_timer,
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK readiness timeout settles its own final timer before propagation');
+
+  const finalTickPath = path.join(readinessRaceDir, 'final-tick');
+  let resolveFinalTickHolder;
+  const finalTickHolder = new Promise((resolve) => { resolveFinalTickHolder = resolve; });
+  const finalTickLifecycle = {};
+  const finalTick = setTimeout(() => {
+    fs.writeFileSync(finalTickPath, 'ready');
+    resolveFinalTickHolder('exited');
+  }, 10);
+  const finalTickObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(finalTickPath, finalTickHolder, 1000, finalTickLifecycle),
+  );
+  const finalTickFinding = finalTickObservation.error?.message || '';
+  clearTimeout(finalTick);
+  await finalTickHolder;
+  ok((!finalTickFinding || /holder exited before readiness/.test(finalTickFinding))
+      && finalTickLifecycle.settled
+      && !finalTickLifecycle.pending_timer
+      && (!finalTickLifecycle.cancelled || finalTickLifecycle.joined),
+  'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK final-tick race reports a valid winner and leaves no readiness timer');
+  ok(cleanExitObservation.scheduledTimerCount > 0
+      && errorExitObservation.scheduledTimerCount > 0
+      && finalTickObservation.scheduledTimerCount > 0
+      && cleanExitObservation.callbacksAfterSettle === 0
+      && errorExitObservation.callbacksAfterSettle === 0
+      && finalTickObservation.callbacksAfterSettle === 0,
+  'ES4-READINESS-PENDING-TIMER-CALLBACK-ORACLE-MISSING async_hooks independently observes zero real readiness callbacks after clean, error, and final-tick cleanup');
+  await new Promise((resolve) => setImmediate(resolve));
+  eq(readinessUnhandled.length, 0,
+    'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK clean, error, success, timeout, and final-tick paths emit zero unhandled rejections');
+} finally {
+  process.off('unhandledRejection', recordReadinessUnhandled);
+}
+const withFixtureHolder = async ({
+  holderScript, readyPath, releasePath, probe, readinessMs = 5000, holderMs = 5000, label,
+}) => {
+  const holder = spawnFixtureChild(holderScript);
+  const holderResult = collectFixtureChild(holder, { label: `${label} holder`, timeoutMs: holderMs });
+  let result;
+  let primaryError = null;
+  let holderOutput = '';
+  try {
+    await waitForFixturePath(readyPath, holderResult, readinessMs);
+    result = await probe();
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    try {
+      fs.mkdirSync(path.dirname(releasePath), { recursive: true });
+      fs.writeFileSync(releasePath, 'release');
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+    try {
+      holderOutput = await holderResult;
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+    for (const artifactPath of [readyPath, releasePath]) {
+      try {
+        fs.rmSync(artifactPath, { force: true });
+      } catch (error) {
+        if (!primaryError) primaryError = error;
+      }
+    }
+  }
+  if (primaryError) throw primaryError;
+  return { result, holderOutput, pid: holder.pid };
+};
+const newCoordinatorHolderScript = (ctx, readyPath, releasePath, writeReady = true) => [
+  "const fs = require('fs');",
+  `const { withCardGateLock } = require(${JSON.stringify(coordinatorModulePath)});`,
+  `const ctx = ${JSON.stringify(ctx)};`,
+  `withCardGateLock(ctx, 'A1', async () => {`,
+  ...(writeReady ? [`  fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');`] : []),
+  `  while (!fs.existsSync(${JSON.stringify(releasePath)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
+  "  return 'released';",
+  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
+].join('\n');
+
+const artifactIsolationDir = path.join(tmp, 'es4-readiness-artifact-isolation');
+const artifactIsolationReady = path.join(artifactIsolationDir, 'ready');
+const artifactIsolationRelease = path.join(artifactIsolationDir, 'release');
+fs.mkdirSync(artifactIsolationDir, { recursive: true });
+const artifactIsolationCtx = {
+  root: tmp,
+  stateDir: path.join(artifactIsolationDir, 'state'),
+  statePath: path.join(artifactIsolationDir, 'state', 'state.json'),
+};
+for (const reuseAttempt of ['first', 'second']) {
+  const artifactIsolationResult = await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(
+      artifactIsolationCtx,
+      artifactIsolationReady,
+      artifactIsolationRelease,
+    ),
+    readyPath: artifactIsolationReady,
+    releasePath: artifactIsolationRelease,
+    label: `artifact isolation ${reuseAttempt}`,
+    probe: async () => reuseAttempt,
+  });
+  ok(artifactIsolationResult.result === reuseAttempt
+      && artifactIsolationResult.holderOutput === 'released'
+      && !fs.existsSync(artifactIsolationReady)
+      && !fs.existsSync(artifactIsolationRelease),
+  `ES4-READINESS-READY-RELEASE-ARTIFACT-LEAK ${reuseAttempt} success removes both lifecycle artifacts before directory reuse`);
+}
+let artifactIsolationFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(
+      artifactIsolationCtx,
+      artifactIsolationReady,
+      artifactIsolationRelease,
+    ),
+    readyPath: artifactIsolationReady,
+    releasePath: artifactIsolationRelease,
+    label: 'artifact isolation failure',
+    probe: async () => { throw new Error('artifact isolation probe failure'); },
+  });
+} catch (error) {
+  artifactIsolationFinding = error.message;
+}
+ok(/artifact isolation probe failure/.test(artifactIsolationFinding)
+    && !fs.existsSync(artifactIsolationReady)
+    && !fs.existsSync(artifactIsolationRelease),
+'ES4-READINESS-READY-RELEASE-ARTIFACT-LEAK failure preserves the primary error and removes both lifecycle artifacts');
+
+const liveOldHeldDir = path.join(tmp, 'es4-gate-live-old-held');
+const liveOldReady = path.join(liveOldHeldDir, 'old-ready');
+const liveOldRelease = path.join(liveOldHeldDir, 'old-release');
+fs.mkdirSync(liveOldHeldDir, { recursive: true });
+const liveOldCtx = {
+  root: tmp,
+  stateDir: path.join(liveOldHeldDir, 'state'),
+  statePath: path.join(liveOldHeldDir, 'state', 'state.json'),
+};
+const liveOldResult = await withFixtureHolder({
+  holderScript: [
+  ...shippingModuleLoaderLines,
+  `const ctx = ${JSON.stringify(liveOldCtx)};`,
+  `shippingWithCardGateLock(ctx, 'A1', async () => {`,
+  `  fs.writeFileSync(${JSON.stringify(liveOldReady)}, 'ready');`,
+  `  while (!fs.existsSync(${JSON.stringify(liveOldRelease)})) await new Promise((resolve) => setTimeout(resolve, 10));`,
+  "  return 'released';",
+  "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
+  ].join('\n'),
+  readyPath: liveOldReady,
+  releasePath: liveOldRelease,
+  label: 'live shipping-old',
+  probe: async () => {
+    try {
+      await withCardGateLock(liveOldCtx, 'A1', async () => 'incorrectly-entered');
+      return 'incorrectly-entered';
+    } catch (error) {
+      return error.code || error.message;
+    }
+  },
+});
+eq(liveOldResult.result, 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks the new coordinator behind a live installed shipping process');
+eq(liveOldResult.holderOutput, 'released',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live shipping process cleanly after the new-side exclusion proof');
+
+const liveNewHeldDir = path.join(tmp, 'es4-gate-live-new-held');
+const liveNewReady = path.join(liveNewHeldDir, 'new-ready');
+const liveNewRelease = path.join(liveNewHeldDir, 'new-release');
+fs.mkdirSync(liveNewHeldDir, { recursive: true });
+const liveNewCtx = {
+  root: tmp,
+  stateDir: path.join(liveNewHeldDir, 'state'),
+  statePath: path.join(liveNewHeldDir, 'state', 'state.json'),
+};
+const liveNewResult = await withFixtureHolder({
+  holderScript: newCoordinatorHolderScript(liveNewCtx, liveNewReady, liveNewRelease),
+  readyPath: liveNewReady,
+  releasePath: liveNewRelease,
+  label: 'live new',
+  probe: () => runFixtureProcess([
+    ...shippingModuleLoaderLines,
+    `const ctx = ${JSON.stringify(liveNewCtx)};`,
+    "shippingWithCardGateLock(ctx, 'A1', async () => 'incorrectly-entered')",
+    ".then((value) => process.stdout.write(value))",
+    ".catch((error) => process.stdout.write(error.code || error.message));",
+  ].join('\n'), { label: 'live shipping probe', timeoutMs: 2000 }),
+});
+eq(liveNewResult.result, 'LOCKED',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN blocks a fresh installed shipping process behind the live new coordinator');
+eq(liveNewResult.holderOutput, 'released',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases the live new process cleanly after the old-side exclusion proof');
+
+const shippingFaultScript = (faultSource) => [
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "const Module = require('module');",
+  `const shippingPath = ${JSON.stringify(shippingCoordinatorFixturePath)};`,
+  "const shippingSource = fs.readFileSync(shippingPath, 'utf8');",
+  "const shippingModule = new Module(shippingPath);",
+  "shippingModule.filename = shippingPath;",
+  "shippingModule.paths = Module._nodeModulePaths(path.dirname(shippingPath));",
+  `shippingModule._compile(shippingSource + ${JSON.stringify(`\n${faultSource}`)}, shippingPath);`,
+].join('\n');
+const lifecycleFaults = [
+  {
+    name: 'compilation',
+    script: shippingFaultScript('this is not valid JavaScript {'),
+    pattern: /SyntaxError/,
+  },
+  {
+    name: 'resolution',
+    script: shippingFaultScript("require('./es4-live-migration-definitely-missing');"),
+    pattern: /Cannot find module/,
+  },
+  {
+    name: 'execution',
+    script: shippingFaultScript("throw new Error('probe-execution-failure');"),
+    pattern: /probe-execution-failure/,
+  },
+  {
+    name: 'timeout',
+    script: shippingFaultScript('setInterval(() => {}, 1000);'),
+    pattern: /timed out/,
+    timeoutMs: 50,
+  },
+];
+for (const fault of lifecycleFaults) {
+  const faultDir = path.join(tmp, `es4-live-migration-${fault.name}`);
+  const faultReady = path.join(faultDir, 'ready');
+  const faultRelease = path.join(faultDir, 'release');
+  const faultCtx = {
+    root: tmp,
+    stateDir: path.join(faultDir, 'state'),
+    statePath: path.join(faultDir, 'state', 'state.json'),
+  };
+  let finding = '';
+  try {
+    await withFixtureHolder({
+      holderScript: newCoordinatorHolderScript(faultCtx, faultReady, faultRelease),
+      readyPath: faultReady,
+      releasePath: faultRelease,
+      label: `${fault.name} failure`,
+      probe: () => runFixtureProcess(fault.script, {
+        label: `${fault.name} probe`,
+        timeoutMs: fault.timeoutMs || 1000,
+      }),
+    });
+  } catch (error) {
+    finding = error.message;
+  }
+  ok(fault.pattern.test(finding)
+      && !fs.existsSync(path.join(faultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+      && !fs.existsSync(path.join(faultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+  `ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK ${fault.name} failure releases its peer, reaps children, and removes both lock namespaces`);
+}
+
+const readinessFaultDir = path.join(tmp, 'es4-live-migration-readiness');
+const readinessFaultReady = path.join(readinessFaultDir, 'never-ready');
+const readinessFaultRelease = path.join(readinessFaultDir, 'release');
+const readinessFaultCtx = {
+  root: tmp,
+  stateDir: path.join(readinessFaultDir, 'state'),
+  statePath: path.join(readinessFaultDir, 'state', 'state.json'),
+};
+let readinessFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(readinessFaultCtx, readinessFaultReady, readinessFaultRelease, false),
+    readyPath: readinessFaultReady,
+    releasePath: readinessFaultRelease,
+    readinessMs: 50,
+    label: 'readiness failure',
+    probe: async () => 'unreachable',
+  });
+} catch (error) {
+  readinessFinding = error.message;
+}
+ok(/readiness timed out/.test(readinessFinding)
+    && !fs.existsSync(path.join(readinessFaultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(readinessFaultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK readiness timeout releases and reaps the holder before continuing');
+
+const assertionFaultDir = path.join(tmp, 'es4-live-migration-assertion');
+const assertionFaultReady = path.join(assertionFaultDir, 'ready');
+const assertionFaultRelease = path.join(assertionFaultDir, 'release');
+const assertionFaultCtx = {
+  root: tmp,
+  stateDir: path.join(assertionFaultDir, 'state'),
+  statePath: path.join(assertionFaultDir, 'state', 'state.json'),
+};
+let assertionFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(assertionFaultCtx, assertionFaultReady, assertionFaultRelease),
+    readyPath: assertionFaultReady,
+    releasePath: assertionFaultRelease,
+    label: 'assertion failure',
+    probe: async () => { throw new Error('probe-assertion-failure'); },
+  });
+} catch (error) {
+  assertionFinding = error.message;
+}
+ok(/probe-assertion-failure/.test(assertionFinding)
+    && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(assertionFaultCtx.stateDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+'ES4-LIVE-MIGRATION-FIXTURE-CHILD-LEAK assertion failure releases and reaps the holder before propagating');
+
+const reusedPidOriginal = makeFixtureChild({ pid: 62000 });
+const reusedPidOriginalResult = collectFixtureChild(reusedPidOriginal, {
+  label: 'reused PID original',
+  timeoutMs: 1000,
+});
+reusedPidOriginal.emit('close', 0);
+await reusedPidOriginalResult;
+const reusedPidReplacement = makeFixtureChild({ pid: 62000 });
+const reusedPidReplacementResult = collectFixtureChild(reusedPidReplacement, {
+  label: 'reused PID replacement',
+  timeoutMs: 1000,
+});
+ok(closedFixtureChildren.has(reusedPidOriginal) && !closedFixtureChildren.has(reusedPidReplacement),
+  'ES4-PID-REUSE-LIVENESS-ORACLE close authority binds the exact child object even when another child reuses its numeric PID');
+reusedPidReplacement.emit('close', 0);
+await reusedPidReplacementResult;
+
+const originalProcessKill = process.kill;
+let forbiddenPidProbeCalls = 0;
+process.kill = () => {
+  forbiddenPidProbeCalls += 1;
+  const error = new Error('fixture EPERM ambiguity');
+  error.code = 'EPERM';
+  throw error;
+};
+try {
+  ok([...fixtureChildren].every((child) => closedFixtureChildren.has(child)),
+    'ES4-PID-REUSE-LIVENESS-ORACLE every holder and probe is reaped by the close event of its exact captured child object');
+  eq(forbiddenPidProbeCalls, 0,
+    'ES4-PID-REUSE-LIVENESS-ORACLE EPERM and PID-reuse observations cannot participate in the reaping verdict');
+} finally {
+  process.kill = originalProcessKill;
+}
+const lifecycleHarnessSource = fs.readFileSync(__filename, 'utf8');
+ok(!/process\.kill\(pid,\s*0\)/.test(lifecycleHarnessSource),
+  'ES4-PID-REUSE-LIVENESS-ORACLE removes the numeric PID liveness inference from the migration harness');
+
+const exceptionReleaseDir = path.join(tmp, 'es4-gate-exception-release');
+const exceptionReleaseCtx = {
+  root: tmp,
+  stateDir: exceptionReleaseDir,
+  statePath: path.join(exceptionReleaseDir, 'state.json'),
+};
+let exceptionReleaseFinding = '';
+try {
+  await withCardGateLock(exceptionReleaseCtx, 'A1', async () => {
+    throw new Error('fixture-authoritative-section-failed');
+  });
+} catch (error) {
+  exceptionReleaseFinding = error.message;
+}
+eq(exceptionReleaseFinding, 'fixture-authoritative-section-failed',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN propagates an authoritative-section failure through production locks');
+ok(!fs.existsSync(path.join(exceptionReleaseDir, 'locks', `${frozenShippingLegacyLock}.lock`))
+    && !fs.existsSync(path.join(exceptionReleaseDir, 'locks', `${cardGateLockName('A1')}.lock`)),
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN releases both production legacy and exact directories after an exception');
+eq(await withCardGateLock(exceptionReleaseCtx, 'A1', async () => 'reacquired'), 'reacquired',
+  'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN reacquires both production lock namespaces after exception cleanup');
+
+const containedStatus = commandStatus(
+  { root: diagnosticProjection.root },
+  {
+    state: diagnosticProjection.state,
+    boardMd: fs.readFileSync(diagnosticProjection.parentBoardPath, 'utf8'),
+    boardPath: diagnosticProjection.parentBoardPath,
+    cardsRoot: diagnosticProjection.cardsRoot,
+    loadCard: () => null,
+  },
+);
+ok(containedStatus.board_drift.some((finding) => finding.card === 'A2'
+  && /legacy completion lacks successful deployment receipts/.test(finding.issue)),
+  'ES4-VALID-CANONICAL-UNTRACKED-COMPLETION-GRACEFUL-FINDING keeps coordinator status available with the bounded finding');
+
+eq(projectionBoardDrift(
+  fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
+  epicProjection.state.cards.A1,
+  {
+    boardPath: epicProjection.parentBoardPath,
+    cardsRoot: epicProjection.cardsRoot,
+    state: epicProjection.state,
+  },
+), null, 'ES4-DUAL-INVARIANT accepts a converged slice, epic board, atlas, and parent board');
+fs.writeFileSync(
+  epicProjection.parentBoardPath,
+  moveBoardCard(fs.readFileSync(epicProjection.parentBoardPath, 'utf8'), 'Epic A', 'Completed', true),
+);
+ok(/epic surface differs/.test(projectionBoardDrift(
+  fs.readFileSync(epicProjection.parentBoardPath, 'utf8'),
+  epicProjection.state.cards.A1,
+  {
+    boardPath: epicProjection.parentBoardPath,
+    cardsRoot: epicProjection.cardsRoot,
+    state: epicProjection.state,
+  },
+).issue), 'ES4-DUAL-INVARIANT detects a hand-moved epic against the authoritative slice roll-up');
+projectCard(
+  epicProjection.cardPath,
+  epicProjection.parentBoardPath,
+  'A1',
+  'implementing',
+  {
+    record: epicProjection.state.cards.A1,
+    state: epicProjection.state,
+    cardsRoot: epicProjection.cardsRoot,
+    now: () => '2026-07-23T14:00:00.000Z',
+  },
+);
+assertEpicProjectionConverged(epicProjection, 'ES4-DUAL-INVARIANT-REPAIR');
+
+for (let boundary = 1; boundary <= 4; boundary++) {
+  const fixture = makeEpicProjectionFixture(`fault-${boundary}`);
+  let writes = 0;
+  assert.throws(() => projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+      writeText: (target, value) => {
+        writes += 1;
+        if (writes === boundary) throw new Error(`ES4-WRITE-${boundary}`);
+        fs.writeFileSync(target, value);
+      },
+    },
+  ), new RegExp(`ES4-WRITE-${boundary}`), `ES4-WRITE-${boundary} injects a crash at its atomic write boundary`);
+  const recovered = projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+    },
+  );
+  ok(recovered.changed, `ES4-WRITE-${boundary} reconcile repairs the interrupted projection`);
+  assertEpicProjectionConverged(fixture, `ES4-WRITE-${boundary}`);
+  eq(projectCard(
+    fixture.cardPath,
+    fixture.parentBoardPath,
+    'A1',
+    'implementing',
+    {
+      record: fixture.state.cards.A1,
+      state: fixture.state,
+      cardsRoot: fixture.cardsRoot,
+      now: () => '2026-07-23T14:00:00.000Z',
+    },
+  ).changed, false, `ES4-WRITE-${boundary} converges to a projection no-op`);
+}
+
 const lockDir = path.join(tmp, 'owner-gap.lock');
 fs.mkdirSync(lockDir);
 ok(!lockDirectoryIsStale(lockDir, null, 30_000), 'new lock without owner is not stolen during owner-write gap');
@@ -1019,7 +2875,10 @@ const amendPriorInvalidation = deepCopy(amend.state.cards[AMEND_CARD].receipt_in
 const amended = await commandAmendContract({ root: amend.root }, amend.args, amend.deps);
 eq(amended.action, 'contract-amended', 'amend-contract succeeds through the explicit supervised command');
 eq(amended.no_op, false, 'real execution-contract amendment is not a no-op');
-eq(amend.locks, ['selector', `gates-protected-active-contract`, 'completion-projection'], 'amend-contract uses selector, card, then projection lock order');
+eq(amend.locks, [
+  'selector', legacyCardGateLockName('Protected active contract'),
+  cardGateLockName('Protected active contract'), 'completion-projection',
+], 'amend-contract uses selector, migration-compatible card, exact card, then projection lock order');
 eq(amend.state.cards[AMEND_CARD].touch_zones, [
   'platform/mechanisms/delivery', 'platform/schemas-index.json', 'platform/manifest.json',
 ], 'touch-zone amendment is normalized, deduplicated, additive, and preserves existing order');
@@ -1418,7 +3277,9 @@ const parked = await commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
-eq(parkLocks.slice(-3), ['selector', 'gates-park-me', 'completion-projection'], 'park serializes selector, card transition, and metadata projection');
+eq(parkLocks.slice(-4), [
+  'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
+], 'park serializes selector, migration-compatible card, exact-card transition, and metadata projection');
 eq(parkState.cards['Park me'].phase, 'parked', 'park records the durable parked phase');
 eq(parkState.cards['Park me'].dependencies, ['Prerequisite A', 'Prerequisite B'], 'park records exact prerequisite names');
 eq(parkState.cards['Park me'].resume_condition, 'Both prerequisites deploy cleanly', 'park records exact resume condition');
@@ -1678,7 +3539,9 @@ eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite i
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
 eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
 ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
-eq(parkLocks.slice(resumeLockStart), ['selector', 'gates-park-me', 'completion-projection'], 'resume serializes selector, card, and projection transitions in one lock order');
+eq(parkLocks.slice(resumeLockStart), [
+  'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
+], 'resume serializes selector, migration-compatible card, exact-card, and projection transitions in one lock order');
 eq(parkState.cards['Park me'].phase, 'implementing', 'successful resume returns to implementing');
 eq(parkState.cards['Park me'].reviews, {}, 'successful resume invalidates all current review receipts');
 eq(parkState.cards['Park me'].gate_receipt, null, 'successful resume invalidates the combined gate receipt');
@@ -1745,7 +3608,9 @@ eq(driftBeforeReconcile.projection_problems, [{
 }], 'status reports card projection problems independently from board drift');
 const firstReconcile = await commandReconcile({ root: reconcileRoot }, { card: 'Tracked deployed' }, reconcileDeps);
 eq(firstReconcile.action, 'reconciled', 'single-card reconciliation succeeds');
-eq(reconcileLocks.slice(0, 2), ['gates-tracked-deployed', 'completion-projection'], 'reconciliation serializes card state then shared board projection');
+eq(reconcileLocks.slice(0, 3), [
+  legacyCardGateLockName('Tracked deployed'), cardGateLockName('Tracked deployed'), 'completion-projection',
+], 'reconciliation serializes migration-compatible and exact-card state before shared board projection');
 eq(firstReconcile.changed, 1, 'first reconciliation repairs projection');
 ok(/## Completed[\s\S]*- \[x\] \[\[Tracked deployed\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'deployed execution card moves to checked Completed');
 ok(/## Archive[\s\S]*- \[ \] \[\[Archived unchecked work\]\]/.test(fs.readFileSync(reconcileBoardPath, 'utf8')), 'unchecked Archive entry stays untouched');
@@ -2041,10 +3906,11 @@ recoveryState.cards['Stranded shipped card'] = {
   reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
 };
 let recoveryWrites = 0;
+const recoveryLocks = [];
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
-  withLock: immediateCardLock,
+  withLock: async (_ctx, name, fn) => { recoveryLocks.push(name); return fn(); },
   collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
@@ -2081,6 +3947,9 @@ await assert.rejects(() => commandRecoverDeployed(
 eq(recoveryWrites, 0, 'preserved exact-head receipt refusals perform no ledger write');
 const recoveryDryRun = await commandRecoverDeployed({ root: reconcileRoot }, recoveryArgs, recoveryDeps);
 eq(recoveryDryRun.action, 'recover-deployed-plan', 'receipt-bound recovery is dry-run first');
+eq(recoveryLocks.slice(-2), [
+  legacyCardGateLockName('Stranded shipped card'), cardGateLockName('Stranded shipped card'),
+], 'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves recover-deployed acquires migration-compatible and exact card gates');
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
@@ -2125,14 +3994,19 @@ metadataState.cards['Metadata drift'] = {
 };
 let metadataWrites = 0;
 let metadataCardWrites = 0;
+const metadataLocks = [];
 const metadataDeps = {
-  readState: () => metadataState, writeState: () => { metadataWrites++; }, withLock: immediateCardLock,
+  readState: () => metadataState, writeState: () => { metadataWrites++; },
+  withLock: async (_ctx, name, fn) => { metadataLocks.push(name); return fn(); },
   atomicWriteText: (file, raw) => { metadataCardWrites++; fs.writeFileSync(file, raw); },
   durablePathBarrier: () => {},
   cardsRoot: reconcileRoot, now: () => '2026-07-20T19:02:00.000Z',
 };
 const metadataDryRun = await commandReconcileMetadata({ root: reconcileRoot }, { card: 'Metadata drift', 'dry-run': true }, metadataDeps);
 eq(metadataDryRun.changed_fields, ['schema_version'], 'metadata dry-run scopes repair to the one ledger-owned scalar');
+eq(metadataLocks.slice(-2), [
+  legacyCardGateLockName('Metadata drift'), cardGateLockName('Metadata drift'),
+], 'ES4-PER-CARD-LOCK-PATH-COVERAGE-INCOMPLETE proves reconcile-metadata acquires migration-compatible and exact card gates');
 eq(fs.readFileSync(metadataCardPath, 'utf8'), historicalMetadataRaw, 'metadata dry-run performs no card write');
 const metadataApplyArgs = {
   card: 'Metadata drift', apply: true, reason: 'repair exact ledger-owned schema metadata',
