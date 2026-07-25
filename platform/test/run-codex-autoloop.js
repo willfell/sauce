@@ -2281,6 +2281,13 @@ const withFixtureHolder = async ({
     } catch (error) {
       if (!primaryError) primaryError = error;
     }
+    for (const artifactPath of [readyPath, releasePath]) {
+      try {
+        fs.rmSync(artifactPath, { force: true });
+      } catch (error) {
+        if (!primaryError) primaryError = error;
+      }
+    }
   }
   if (primaryError) throw primaryError;
   return { result, holderOutput, pid: holder.pid };
@@ -2295,6 +2302,54 @@ const newCoordinatorHolderScript = (ctx, readyPath, releasePath, writeReady = tr
   "  return 'released';",
   "}).then((value) => process.stdout.write(value)).catch((error) => { process.stderr.write(error.stack || error.message); process.exitCode = 1; });",
 ].join('\n');
+
+const artifactIsolationDir = path.join(tmp, 'es4-readiness-artifact-isolation');
+const artifactIsolationReady = path.join(artifactIsolationDir, 'ready');
+const artifactIsolationRelease = path.join(artifactIsolationDir, 'release');
+fs.mkdirSync(artifactIsolationDir, { recursive: true });
+const artifactIsolationCtx = {
+  root: tmp,
+  stateDir: path.join(artifactIsolationDir, 'state'),
+  statePath: path.join(artifactIsolationDir, 'state', 'state.json'),
+};
+for (const reuseAttempt of ['first', 'second']) {
+  const artifactIsolationResult = await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(
+      artifactIsolationCtx,
+      artifactIsolationReady,
+      artifactIsolationRelease,
+    ),
+    readyPath: artifactIsolationReady,
+    releasePath: artifactIsolationRelease,
+    label: `artifact isolation ${reuseAttempt}`,
+    probe: async () => reuseAttempt,
+  });
+  ok(artifactIsolationResult.result === reuseAttempt
+      && artifactIsolationResult.holderOutput === 'released'
+      && !fs.existsSync(artifactIsolationReady)
+      && !fs.existsSync(artifactIsolationRelease),
+  `ES4-READINESS-READY-RELEASE-ARTIFACT-LEAK ${reuseAttempt} success removes both lifecycle artifacts before directory reuse`);
+}
+let artifactIsolationFinding = '';
+try {
+  await withFixtureHolder({
+    holderScript: newCoordinatorHolderScript(
+      artifactIsolationCtx,
+      artifactIsolationReady,
+      artifactIsolationRelease,
+    ),
+    readyPath: artifactIsolationReady,
+    releasePath: artifactIsolationRelease,
+    label: 'artifact isolation failure',
+    probe: async () => { throw new Error('artifact isolation probe failure'); },
+  });
+} catch (error) {
+  artifactIsolationFinding = error.message;
+}
+ok(/artifact isolation probe failure/.test(artifactIsolationFinding)
+    && !fs.existsSync(artifactIsolationReady)
+    && !fs.existsSync(artifactIsolationRelease),
+'ES4-READINESS-READY-RELEASE-ARTIFACT-LEAK failure preserves the primary error and removes both lifecycle artifacts');
 
 const liveOldHeldDir = path.join(tmp, 'es4-gate-live-old-held');
 const liveOldReady = path.join(liveOldHeldDir, 'old-ready');
