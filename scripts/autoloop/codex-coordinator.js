@@ -920,18 +920,40 @@ function boardCardLocation(md, card) {
 
 function moveBoardCard(md, card, target, complete = false) {
   const lines = String(md).split('\n');
-  const location = boardCardLocation(md, card);
-  if (!location) throw new Error(`card ${card} not found on board`);
-  if (location.column === target && location.checked === complete) return String(md);
-  if (location.column === target) {
-    lines[location.line] = lines[location.line].replace(/^\s*- \[[ xX]\]/, `- [${complete ? 'x' : ' '}]`);
-    return lines.join('\n');
+  const escaped = card.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const locations = [];
+  let section = null;
+  lines.forEach((line, index) => {
+    const heading = line.match(/^##\s+(.+?)\s*$/);
+    if (heading) section = heading[1];
+    const match = line.match(new RegExp(`^\\s*- \\[([ xX])\\] \\[\\[${escaped}(?:\\|[^\\]]+)?\\]\\]`));
+    if (match) locations.push({
+      column: section,
+      checked: /x/i.test(match[1]),
+      line: index,
+    });
+  });
+  if (!locations.length) throw new Error(`card ${card} not found on board`);
+  const inTarget = locations.find((location) => location.column === target);
+  if (inTarget) {
+    const duplicateLines = new Set(locations.map((location) => location.line));
+    const targetIndex = lines
+      .slice(0, inTarget.line)
+      .filter((_line, index) => !duplicateLines.has(index))
+      .length;
+    const retained = lines.filter((_line, index) => index === inTarget.line || !duplicateLines.has(index));
+    retained[targetIndex] = retained[targetIndex]
+      .replace(/^\s*- \[[ xX]\]/, `- [${complete ? 'x' : ' '}]`);
+    return retained.join('\n');
   }
-  lines.splice(location.line, 1);
-  const header = lines.findIndex((line) => line.trim() === `## ${target}`);
+  const retainedLine = lines[locations[0].line]
+    .replace(/^\s*- \[[ xX]\]/, `- [${complete ? 'x' : ' '}]`);
+  const duplicateLines = new Set(locations.map((location) => location.line));
+  const retained = lines.filter((_line, index) => !duplicateLines.has(index));
+  const header = retained.findIndex((line) => line.trim() === `## ${target}`);
   if (header < 0) throw new Error(`board column ${target} missing`);
-  lines.splice(header + 1, 0, '', `- [${complete ? 'x' : ' '}] [[${card}]]`);
-  return lines.join('\n');
+  retained.splice(header + 1, 0, '', retainedLine);
+  return retained.join('\n');
 }
 
 function atomicWriteText(file, value) {
@@ -1218,15 +1240,34 @@ function noteProjectionMapping(raw, record = null) {
   }[status];
 }
 
-function auditDetectionFinding(finding, card) {
+function auditReconcileFinding(
+  finding,
+  card,
+  backupPaths = [],
+  repairable = false,
+  routeable = true,
+) {
   const exactCard = normalizeCardLink(card);
   return {
     ...finding,
-    owner: 'semantic',
+    owner: routeable && exactCard ? 'coordinator' : 'semantic',
     ...(exactCard ? { card: exactCard } : {}),
-    repairable: false,
-    backup_paths: [],
+    ...(routeable && exactCard ? { reconcile: reconcileRoute(exactCard) } : {}),
+    repairable: Boolean(repairable && routeable && exactCard),
+    backup_paths: routeable
+      ? [...new Set(backupPaths.filter(Boolean).map((target) => path.resolve(target)))]
+      : [],
   };
+}
+
+function epicProjectionMutationPaths(parentBoardPath, atlasPath, boardPath, card) {
+  const exactCard = normalizeCardLink(card);
+  return [
+    parentBoardPath,
+    atlasPath,
+    boardPath,
+    exactCard ? path.join(path.dirname(boardPath), `${exactCard}.md`) : null,
+  ];
 }
 
 function auditEpicProject({
@@ -1245,6 +1286,9 @@ function auditEpicProject({
   const parentNames = new Set(columns.flatMap((column) => parseBoard(parentRaw)[column] || []));
   const resolvedNames = new Set(resolved.epics.map((entry) => entry.epic));
   const flatNames = new Set(resolved.flat.map((entry) => entry.card));
+  const resolverBlockedEpics = new Set(resolved.findings
+    .filter((finding) => finding.code !== 'duplicate-parent-membership')
+    .map((finding) => finding.epic));
 
   const boardMembers = (boardPath) => {
     try {
@@ -1254,19 +1298,70 @@ function auditEpicProject({
       return [];
     }
   };
-  const findingCardForEpic = (epic, boardPath = null) => {
+  const canonicalTrackedRouteCard = (card, boardPath) => {
+    const exactCard = normalizeCardLink(card);
+    const record = exactCard && state.cards && state.cards[exactCard];
+    if (!record
+      || normalizeCardLink(record.card) !== exactCard
+      || !projectionMapping(record.phase)
+      || typeof record.card_path !== 'string'
+      || !record.card_path.trim()) return null;
+    const expectedPath = path.resolve(path.dirname(boardPath), `${exactCard}.md`);
+    const recordedPath = path.resolve(record.card_path);
+    if (recordedPath !== expectedPath) return null;
+    try {
+      const cardsPhysicalRoot = fs.realpathSync(cardsRoot);
+      const recordedEntry = fs.lstatSync(recordedPath);
+      const expectedEntry = fs.lstatSync(expectedPath);
+      if (recordedEntry.isSymbolicLink()
+        || expectedEntry.isSymbolicLink()
+        || !recordedEntry.isFile()
+        || !expectedEntry.isFile()) return null;
+      const recordedPhysical = physicalDescendant(
+        cardsPhysicalRoot,
+        recordedPath,
+        `ledger card_path for ${exactCard}`,
+      );
+      const expectedPhysical = physicalDescendant(
+        cardsPhysicalRoot,
+        expectedPath,
+        `canonical epic member ${exactCard}`,
+      );
+      const recordedStat = fs.statSync(recordedPhysical);
+      const expectedStat = fs.statSync(expectedPhysical);
+      if (recordedPhysical !== expectedPhysical
+        || recordedStat.dev !== expectedStat.dev
+        || recordedStat.ino !== expectedStat.ino) return null;
+    } catch (_) {
+      return null;
+    }
+    return exactCard;
+  };
+  const trackedRouteCardForEpic = (epic, boardPath = null) => {
     const candidate = boardPath || path.join(cardsRoot, epic, 'board', `${epic}-board.md`);
-    return boardMembers(candidate)[0] || null;
+    return boardMembers(candidate)
+      .map((card) => canonicalTrackedRouteCard(card, candidate))
+      .find(Boolean) || null;
   };
 
   for (const finding of resolved.findings) {
     const boardPath = finding.board_path || path.join(cardsRoot, finding.epic, 'board', `${finding.epic}-board.md`);
-    findings.push(auditDetectionFinding({
+    const routeCard = trackedRouteCardForEpic(finding.epic, boardPath);
+    const surfaceCard = boardMembers(boardPath)[0] || null;
+    const repairable = finding.code === 'duplicate-parent-membership'
+      && Boolean(routeCard)
+      && !resolverBlockedEpics.has(finding.epic);
+    findings.push(auditReconcileFinding({
       code: `resolver-${finding.code}`,
       epic: finding.epic,
       issue: `epic resolver finding: ${finding.code}`,
       detail: finding.detail || null,
-    }, findingCardForEpic(finding.epic, boardPath)));
+    }, routeCard || surfaceCard, epicProjectionMutationPaths(
+      parentBoardPath,
+      path.join(cardsRoot, finding.epic, `${finding.epic}.md`),
+      boardPath,
+      routeCard || surfaceCard,
+    ), repairable, repairable));
   }
 
   for (const entry of fs.readdirSync(cardsRoot, { withFileTypes: true })) {
@@ -1299,8 +1394,8 @@ function auditEpicProject({
   for (const epic of resolved.epics) {
     const members = boardMembers(epic.board_path);
     sliceCount += members.length;
-    const findingCard = members[0] || null;
-    if (!findingCard) {
+    const surfaceCard = members[0] || null;
+    if (!surfaceCard) {
       const atlasRaw = fs.readFileSync(epic.atlas_path, 'utf8');
       const lifecycle = delivery.deriveEpicLifecycle([]);
       const expected = epicProjectionMapping(lifecycle.state);
@@ -1319,33 +1414,46 @@ function auditEpicProject({
       }
       continue;
     }
-    const findingCardPath = path.join(path.dirname(epic.board_path), `${findingCard}.md`);
+    const routeCard = members
+      .map((card) => canonicalTrackedRouteCard(card, epic.board_path))
+      .find(Boolean) || null;
+    const surfacePath = path.join(path.dirname(epic.board_path), `${surfaceCard}.md`);
     let surface;
     try {
       surface = canonicalEpicProjection(
-        fs.readFileSync(findingCardPath, 'utf8'),
-        findingCardPath,
+        fs.readFileSync(surfacePath, 'utf8'),
+        surfacePath,
         parentBoardPath,
         cardsRoot,
         { state },
       );
     } catch (err) {
-      findings.push(auditDetectionFinding({
+      findings.push(auditReconcileFinding({
         code: 'epic-referential-invalid',
         epic: epic.epic,
         issue: `canonical epic topology is invalid: ${err.message}`,
-      }, findingCard));
+      }, routeCard || surfaceCard, epicProjectionMutationPaths(
+        parentBoardPath,
+        epic.atlas_path,
+        epic.board_path,
+        routeCard || surfaceCard,
+      ), false, false));
       continue;
     }
 
     const lifecycle = deriveEpicProjection(surface, null, null);
     for (const finding of lifecycle.findings) {
-      findings.push(auditDetectionFinding({
+      findings.push(auditReconcileFinding({
         code: 'legacy-completion-no-receipt',
         epic: surface.epic,
         phase: finding.phase,
         issue: finding.issue,
-      }, finding.card));
+      }, finding.card, epicProjectionMutationPaths(
+        parentBoardPath,
+        surface.atlasPath,
+        surface.boardPath,
+        finding.card,
+      )));
     }
 
     for (const member of surface.members) {
@@ -1354,7 +1462,8 @@ function auditEpicProject({
       const mapping = noteProjectionMapping(memberRaw, state.cards && state.cards[member]);
       const location = boardCardLocation(surface.boardRaw, member);
       if (!location || location.column !== mapping.column || location.checked !== mapping.complete) {
-        findings.push(auditDetectionFinding({
+        const routeable = Boolean(canonicalTrackedRouteCard(member, surface.boardPath));
+        findings.push(auditReconcileFinding({
           code: 'slice-projection-drift',
           epic: surface.epic,
           issue: 'slice board position differs from authoritative lifecycle projection',
@@ -1362,7 +1471,12 @@ function auditEpicProject({
           actual_column: location ? location.column : null,
           expected_checked: mapping.complete,
           actual_checked: location ? location.checked : null,
-        }, member));
+        }, member, epicProjectionMutationPaths(
+          parentBoardPath,
+          surface.atlasPath,
+          surface.boardPath,
+          member,
+        ), routeable, routeable));
       }
     }
 
@@ -1375,7 +1489,7 @@ function auditEpicProject({
       || epicLocation.checked !== expectedEpic.complete
       || actualStatus !== lifecycle.state
       || actualPosture !== lifecycle.posture) {
-      findings.push(auditDetectionFinding({
+      findings.push(auditReconcileFinding({
         code: 'epic-rollup-drift',
         epic: surface.epic,
         issue: 'epic column and atlas projection differ from authoritative slice roll-up',
@@ -1387,8 +1501,27 @@ function auditEpicProject({
         actual_status: actualStatus || null,
         expected_posture: lifecycle.posture,
         actual_posture: actualPosture || null,
-      }, findingCard));
+      }, routeCard || surfaceCard, epicProjectionMutationPaths(
+        parentBoardPath,
+        surface.atlasPath,
+        surface.boardPath,
+        routeCard || surfaceCard,
+      ), Boolean(routeCard), Boolean(routeCard)));
     }
+  }
+
+  const finalRepairBlockedEpics = new Set(findings
+    .filter((finding) => finding.code === 'epic-referential-invalid'
+      || (finding.code.startsWith('resolver-')
+        && finding.code !== 'resolver-duplicate-parent-membership'))
+    .map((finding) => finding.epic));
+  for (const finding of findings) {
+    if (finding.code !== 'resolver-duplicate-parent-membership'
+      || !finalRepairBlockedEpics.has(finding.epic)) continue;
+    finding.owner = 'semantic';
+    finding.repairable = false;
+    finding.backup_paths = [];
+    delete finding.reconcile;
   }
 
   findings.sort((a, b) => [
