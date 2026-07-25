@@ -571,16 +571,23 @@ function normalizedPath(value) {
 
 function resolveEpicBoardSet({
   parentBoardMd, cardsRoot = CARDS_ROOT,
+  columns = ['In Progress', 'In Planning'],
   readFile = (file) => fs.readFileSync(file, 'utf8'),
   readDir = (dir) => fs.readdirSync(dir, { withFileTypes: true }),
   exists = (target) => fs.existsSync(target),
 } = {}) {
   const parent = parseBoard(parentBoardMd || '');
-  const ordered = [...(parent['In Progress'] || []), ...(parent['In Planning'] || [])];
+  const ordered = columns.flatMap((column) => parent[column] || []);
   const epics = [];
   const findings = [];
   const flat = [];
+  const seen = new Set();
   ordered.forEach((epic, parentOrder) => {
+    if (seen.has(epic)) {
+      findings.push({ epic, code: 'duplicate-parent-membership' });
+      return;
+    }
+    seen.add(epic);
     const epicRoot = path.join(cardsRoot, epic);
     const resolvedRoot = path.resolve(epicRoot);
     const resolvedCardsRoot = path.resolve(cardsRoot);
@@ -602,7 +609,11 @@ function resolveEpicBoardSet({
           return;
         }
       }
-      flat.push({ card: epic, parent_column: (parent['In Progress'] || []).includes(epic) ? 'In Progress' : 'In Planning', parent_order: parentOrder });
+      flat.push({
+        card: epic,
+        parent_column: columns.find((column) => (parent[column] || []).includes(epic)) || null,
+        parent_order: parentOrder,
+      });
       return;
     }
     let candidates;
@@ -641,7 +652,7 @@ function resolveEpicBoardSet({
     }
     epics.push({
       epic, atlas_path: atlasPath, board_path: candidates[0].board_path,
-      parent_column: (parent['In Progress'] || []).includes(epic) ? 'In Progress' : 'In Planning',
+      parent_column: columns.find((column) => (parent[column] || []).includes(epic)) || null,
       parent_order: parentOrder,
     });
   });
@@ -1184,6 +1195,213 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
     return decorate(status);
   });
   return { ...delivery.deriveEpicLifecycle(slices), findings };
+}
+
+function noteProjectionMapping(raw, record = null) {
+  const tracked = record && projectionMapping(record.phase);
+  if (tracked) {
+    if (tracked.status === 'completed' && !successfulDeploymentReceipts(record)) {
+      return projectionMapping('implementing');
+    }
+    return tracked;
+  }
+  const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+  if (status === 'completed' && scalarField(raw, 'type') === 'slice') {
+    return projectionMapping('implementing');
+  }
+  return {
+    planning: { column: 'In Planning', complete: false, status: 'planning' },
+    in_progress: { column: 'In Progress', complete: false, status: 'in_progress' },
+    parked: { column: 'In Progress', complete: false, status: 'parked' },
+    blocked: { column: 'Blocked', complete: false, status: 'blocked' },
+    completed: { column: 'Completed', complete: true, status: 'completed' },
+  }[status];
+}
+
+function auditDetectionFinding(finding, card) {
+  const exactCard = normalizeCardLink(card);
+  return {
+    ...finding,
+    owner: 'semantic',
+    ...(exactCard ? { card: exactCard } : {}),
+    repairable: false,
+    backup_paths: [],
+  };
+}
+
+function auditEpicProject({
+  parentBoardPath = BOARD,
+  cardsRoot = CARDS_ROOT,
+  state = { cards: {} },
+} = {}) {
+  const parentRaw = fs.readFileSync(parentBoardPath, 'utf8');
+  const columns = ['In Planning', 'In Progress', 'Blocked', 'Completed'];
+  const resolved = resolveEpicBoardSet({
+    parentBoardMd: parentRaw,
+    cardsRoot,
+    columns,
+  });
+  const findings = [];
+  const parentNames = new Set(columns.flatMap((column) => parseBoard(parentRaw)[column] || []));
+  const resolvedNames = new Set(resolved.epics.map((entry) => entry.epic));
+  const flatNames = new Set(resolved.flat.map((entry) => entry.card));
+
+  const boardMembers = (boardPath) => {
+    try {
+      const parsed = parseBoard(fs.readFileSync(boardPath, 'utf8'));
+      return columns.flatMap((column) => parsed[column] || []);
+    } catch (_) {
+      return [];
+    }
+  };
+  const findingCardForEpic = (epic, boardPath = null) => {
+    const candidate = boardPath || path.join(cardsRoot, epic, 'board', `${epic}-board.md`);
+    return boardMembers(candidate)[0] || null;
+  };
+
+  for (const finding of resolved.findings) {
+    const boardPath = finding.board_path || path.join(cardsRoot, finding.epic, 'board', `${finding.epic}-board.md`);
+    findings.push(auditDetectionFinding({
+      code: `resolver-${finding.code}`,
+      epic: finding.epic,
+      issue: `epic resolver finding: ${finding.code}`,
+      detail: finding.detail || null,
+    }, findingCardForEpic(finding.epic, boardPath)));
+  }
+
+  for (const entry of fs.readdirSync(cardsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const epic = entry.name;
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    if (!fs.existsSync(boardDir)) continue;
+    let epicBoards = [];
+    try {
+      epicBoards = fs.readdirSync(boardDir)
+        .filter((name) => name.endsWith('.md'))
+        .map((name) => path.join(boardDir, name))
+        .filter((boardPath) => scalarField(fs.readFileSync(boardPath, 'utf8'), 'board_role') === 'epic');
+    } catch (_) {
+      continue;
+    }
+    if (epicBoards.length && !parentNames.has(epic) && !resolvedNames.has(epic) && !flatNames.has(epic)) {
+      findings.push({
+        code: 'orphan-epic-directory',
+        epic,
+        issue: 'conformant epic directory is absent from the parent board',
+        owner: 'semantic',
+        repairable: false,
+        backup_paths: [],
+      });
+    }
+  }
+
+  let sliceCount = 0;
+  for (const epic of resolved.epics) {
+    const members = boardMembers(epic.board_path);
+    sliceCount += members.length;
+    const findingCard = members[0] || null;
+    if (!findingCard) {
+      const atlasRaw = fs.readFileSync(epic.atlas_path, 'utf8');
+      const lifecycle = delivery.deriveEpicLifecycle([]);
+      const expected = epicProjectionMapping(lifecycle.state);
+      const actual = boardCardLocation(parentRaw, epic.epic);
+      if (!actual || actual.column !== expected.column || actual.checked !== expected.complete
+        || scalarField(atlasRaw, 'status') !== lifecycle.state
+        || scalarField(atlasRaw, 'posture') !== lifecycle.posture) {
+        findings.push({
+          code: 'empty-epic-rollup-drift',
+          epic: epic.epic,
+          issue: 'empty epic surface differs from canonical Delivery derivation',
+          owner: 'semantic',
+          repairable: false,
+          backup_paths: [],
+        });
+      }
+      continue;
+    }
+    const findingCardPath = path.join(path.dirname(epic.board_path), `${findingCard}.md`);
+    let surface;
+    try {
+      surface = canonicalEpicProjection(
+        fs.readFileSync(findingCardPath, 'utf8'),
+        findingCardPath,
+        parentBoardPath,
+        cardsRoot,
+        { state },
+      );
+    } catch (err) {
+      findings.push(auditDetectionFinding({
+        code: 'epic-referential-invalid',
+        epic: epic.epic,
+        issue: `canonical epic topology is invalid: ${err.message}`,
+      }, findingCard));
+      continue;
+    }
+
+    const lifecycle = deriveEpicProjection(surface, null, null);
+    for (const finding of lifecycle.findings) {
+      findings.push(auditDetectionFinding({
+        code: 'legacy-completion-no-receipt',
+        epic: surface.epic,
+        phase: finding.phase,
+        issue: finding.issue,
+      }, finding.card));
+    }
+
+    for (const member of surface.members) {
+      const memberPath = path.join(path.dirname(surface.boardPath), `${member}.md`);
+      const memberRaw = fs.readFileSync(memberPath, 'utf8');
+      const mapping = noteProjectionMapping(memberRaw, state.cards && state.cards[member]);
+      const location = boardCardLocation(surface.boardRaw, member);
+      if (!location || location.column !== mapping.column || location.checked !== mapping.complete) {
+        findings.push(auditDetectionFinding({
+          code: 'slice-projection-drift',
+          epic: surface.epic,
+          issue: 'slice board position differs from authoritative lifecycle projection',
+          expected_column: mapping.column,
+          actual_column: location ? location.column : null,
+          expected_checked: mapping.complete,
+          actual_checked: location ? location.checked : null,
+        }, member));
+      }
+    }
+
+    const expectedEpic = epicProjectionMapping(lifecycle.state);
+    const epicLocation = boardCardLocation(surface.parentRaw, surface.epic);
+    const actualStatus = scalarField(surface.atlasRaw, 'status');
+    const actualPosture = scalarField(surface.atlasRaw, 'posture');
+    if (!epicLocation
+      || epicLocation.column !== expectedEpic.column
+      || epicLocation.checked !== expectedEpic.complete
+      || actualStatus !== lifecycle.state
+      || actualPosture !== lifecycle.posture) {
+      findings.push(auditDetectionFinding({
+        code: 'epic-rollup-drift',
+        epic: surface.epic,
+        issue: 'epic column and atlas projection differ from authoritative slice roll-up',
+        expected_column: expectedEpic.column,
+        actual_column: epicLocation ? epicLocation.column : null,
+        expected_checked: expectedEpic.complete,
+        actual_checked: epicLocation ? epicLocation.checked : null,
+        expected_status: lifecycle.state,
+        actual_status: actualStatus || null,
+        expected_posture: lifecycle.posture,
+        actual_posture: actualPosture || null,
+      }, findingCard));
+    }
+  }
+
+  findings.sort((a, b) => [
+    a.epic || '', a.card || '', a.code || '',
+  ].join('\0').localeCompare([
+    b.epic || '', b.card || '', b.code || '',
+  ].join('\0')));
+  return {
+    clean: findings.length === 0,
+    epic_count: resolved.epics.length,
+    slice_count: sliceCount,
+    findings,
+  };
 }
 
 function durablePathBarrier(file, deps = {}) {
@@ -3054,7 +3272,7 @@ module.exports = {
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   normalizeDeploymentMap, moveBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
-  projectionBoardDrift, projectionMetadataProblem, projectionMetadataProblemFromRaw,
+  projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 };
