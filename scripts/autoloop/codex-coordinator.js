@@ -2387,10 +2387,7 @@ function discardReplayMatches(record, reason, supersededBy, carriedFixtures) {
     && JSON.stringify(record.carried_fixtures || []) === JSON.stringify(carriedFixtures);
 }
 
-async function commandDiscard(ctx, args, deps = {}) {
-  // GA-OPS10 F2 precedent: the machine-readable contract is required before
-  // any read or write, so refusal here precedes every lock and state load.
-  if (args.json !== true) throw new Error('discard requires --json for a machine-readable receipt');
+function discardOperands(args) {
   const card = String(args.card || '').trim();
   const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
   const supersededBy = args['superseded-by'] == null
@@ -2403,157 +2400,441 @@ async function commandDiscard(ctx, args, deps = {}) {
   if (carriedFixtures.some((item) => typeof item !== 'string' || !item.trim())) {
     throw new Error('--carried-fixture values must be non-empty strings');
   }
-  const loadState = deps.readState || readState;
-  const persist = deps.writeState || writeState;
-  const transitionLock = deps.withLock || withLock;
-  const run = deps.sh || sh;
-  const worktreeExists = deps.worktreeExists || fs.existsSync;
-  const boardPath = deps.boardPath || BOARD;
-  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
-  const writeText = deps.writeText || atomicWriteText;
-  const now = deps.now || (() => new Date().toISOString());
-  return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
-    const state = loadState(ctx);
-    const record = state.cards[card];
-    if (record && record.phase === 'discarded') {
-      if (discardReplayMatches(record, reason, supersededBy, carriedFixtures)) {
-        return {
-          action: 'discarded', card, phase: 'discarded', no_op: true, tracked: true,
-          tombstone: {
-            discarded_at: record.discarded_at || null, discard_reason: record.discard_reason || null,
-            superseded_by: record.superseded_by || null, final_head: record.final_head || null,
-            carried_fixtures: record.carried_fixtures || [],
-          },
-        };
-      }
-      throw new Error(`card ${card} is already discarded with different operands; replay must be literal`);
-    }
-    if (record && record.phase !== 'parked' && !['blocked', 'failed', 'cancelled'].includes(record.phase)) {
-      throw new Error(`discard refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${card} is ${record.phase}`);
-    }
-    const cardPath = resolveCardPath(record ? record.card_path : null, card, cardsRoot);
-    const noteExists = Boolean(cardPath && fs.existsSync(cardPath));
-    let cardRaw = '';
-    let epicSurface = null;
-    let epicSurfaceError = null;
-    if (noteExists) {
-      cardRaw = fs.readFileSync(cardPath, 'utf8');
-      // ES4a canonicalization: refuse to unlink anything but one regular
-      // non-symlink file physically inside the project tasks root.
-      const entry = fs.lstatSync(cardPath);
-      if (entry.isSymbolicLink() || !entry.isFile()) {
-        throw new Error(`discard target note for ${card} must be one regular non-symlink file`);
-      }
-      physicalDescendant(cardsRoot, cardPath, `discard target note ${card}`);
-      try {
-        epicSurface = canonicalEpicProjection(cardRaw, cardPath, boardPath, cardsRoot, { state, currentCard: card });
-      } catch (err) { epicSurfaceError = err.message; }
-    }
-    const targetBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
-    let boardRaw;
-    try { boardRaw = fs.readFileSync(targetBoardPath, 'utf8'); }
-    catch (err) { throw new Error(`discard target board is unreadable: ${err.message}`); }
-    const boardLine = boardCardLocation(boardRaw, card);
-    if (!record && !noteExists && !boardLine) {
-      throw new Error(`discard requires a tracked record, card note, or board line for ${card}; none exist`);
-    }
+  return { card, reason, supersededBy, carriedFixtures };
+}
 
-    // Ledger first: the tombstone is authoritative before any projection removal.
-    const preservedHead = record && record.gate_receipt && record.gate_receipt.head_sha;
-    const tombstone = {
-      discarded_at: now(), discard_reason: reason, superseded_by: supersededBy,
-      // A tombstone's final_head must be canonical: exactly one 40-hex SHA or null.
-      final_head: typeof preservedHead === 'string' && EXACT_SHA.test(preservedHead) ? preservedHead : null,
-      carried_fixtures: carriedFixtures,
-    };
-    const target = record || { card, card_path: noteExists ? cardPath : null };
-    target.phase = 'discarded';
-    Object.assign(target, tombstone);
-    state.cards[card] = target;
-    persist(ctx, state, target);
+function resolveDiscardDeps(deps = {}) {
+  return {
+    loadState: deps.readState || readState,
+    persist: deps.writeState || writeState,
+    transitionLock: deps.withLock || withLock,
+    run: deps.sh || sh,
+    worktreeExists: deps.worktreeExists || fs.existsSync,
+    boardPath: deps.boardPath || BOARD,
+    cardsRoot: deps.cardsRoot || CARDS_ROOT,
+    writeText: deps.writeText || atomicWriteText,
+    now: deps.now || (() => new Date().toISOString()),
+  };
+}
 
-    const boardNext = removeBoardCard(boardRaw, card);
-    const boardChanged = boardNext !== boardRaw;
-    if (boardChanged) writeText(targetBoardPath, boardNext);
-    let noteDeleted = false;
-    if (noteExists) {
-      fs.unlinkSync(cardPath);
-      noteDeleted = true;
-    }
-    let epicReceipt = null;
-    if (epicSurface) {
+// Shared worktree/branch pruning for discard-shaped exits: never deletes a
+// branch with a recorded feature PR or a live worktree checkout.
+function pruneCardWorkspace(ctx, record, { run, worktreeExists }) {
+  let worktreeRemoved = false;
+  let worktreeError = null;
+  if (record && record.worktree && worktreeExists(record.worktree)) {
+    try {
+      run('git', ['worktree', 'remove', '--force', record.worktree], { cwd: ctx.root, stdio: 'pipe' });
+      worktreeRemoved = true;
+    } catch (err) { worktreeError = err.message; }
+  }
+  let branchReceipt = null;
+  if (record && record.branch) {
+    if (record.feature_pr != null) {
+      branchReceipt = {
+        branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
+        reason: `record has feature PR #${record.feature_pr} recorded; branch deletion not verified safe`,
+      };
+    } else {
       try {
-        epicSurface.boardRaw = boardNext;
-        const lifecycle = deriveEpicProjection(epicSurface, null, null);
-        const epicMapping = epicProjectionMapping(lifecycle.state);
-        if (!epicMapping) throw new Error(`unsupported derived epic state ${lifecycle.state}`);
-        const parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
-        const atlasNext = patchFrontmatter(epicSurface.atlasRaw, { status: lifecycle.state, posture: lifecycle.posture });
-        if (parentNext !== epicSurface.parentRaw) writeText(boardPath, parentNext);
-        if (atlasNext !== epicSurface.atlasRaw) writeText(epicSurface.atlasPath, atlasNext);
-        epicReceipt = {
-          epic: epicSurface.epic, state: lifecycle.state, posture: lifecycle.posture,
-          findings: lifecycle.findings,
-        };
-      } catch (err) {
-        target.projection_error = err.message;
-        target.projection_failed_at = now();
-        persist(ctx, state, target);
-        epicReceipt = { epic: epicSurface.epic, error: err.message, reconcile: reconcileRoute(card) };
-      }
-    }
-
-    let worktreeRemoved = false;
-    let worktreeError = null;
-    if (record && record.worktree && worktreeExists(record.worktree)) {
-      try {
-        run('git', ['worktree', 'remove', '--force', record.worktree], { cwd: ctx.root, stdio: 'pipe' });
-        worktreeRemoved = true;
-      } catch (err) { worktreeError = err.message; }
-    }
-    let branchReceipt = null;
-    if (record && record.branch) {
-      if (record.feature_pr != null) {
-        branchReceipt = {
-          branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
-          reason: `record has feature PR #${record.feature_pr} recorded; branch deletion not verified safe`,
-        };
-      } else {
-        try {
-          const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
-          if (String(listed).split('\n').some((line) => line.trim() === `branch refs/heads/${record.branch}`)) {
-            branchReceipt = {
-              branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
-              reason: 'branch is checked out in a worktree',
-            };
-          }
-        } catch (err) {
+        const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
+        if (String(listed).split('\n').some((line) => line.trim() === `branch refs/heads/${record.branch}`)) {
           branchReceipt = {
             branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
-            reason: `could not inspect worktree checkouts: ${err.message}`,
+            reason: 'branch is checked out in a worktree',
           };
         }
-        if (!branchReceipt) {
-          try {
-            run('git', ['branch', '-D', record.branch], { cwd: ctx.root, stdio: 'pipe' });
-            branchReceipt = { branch: record.branch, deleted: true };
-          } catch (err) {
-            branchReceipt = { branch: record.branch, deleted: false, reason: `branch deletion failed: ${err.message}` };
-          }
+      } catch (err) {
+        branchReceipt = {
+          branch: record.branch, deleted: false, retained_unsafe_to_delete: true,
+          reason: `could not inspect worktree checkouts: ${err.message}`,
+        };
+      }
+      if (!branchReceipt) {
+        try {
+          run('git', ['branch', '-D', record.branch], { cwd: ctx.root, stdio: 'pipe' });
+          branchReceipt = { branch: record.branch, deleted: true };
+        } catch (err) {
+          branchReceipt = { branch: record.branch, deleted: false, reason: `branch deletion failed: ${err.message}` };
         }
       }
     }
-    return {
-      action: 'discarded', card, phase: 'discarded', no_op: false,
-      tracked: Boolean(record), tombstone,
-      board_path: targetBoardPath, board_line_removed: boardChanged, note_deleted: noteDeleted,
-      worktree_removed: worktreeRemoved,
-      ...(worktreeError ? { worktree_error: worktreeError } : {}),
-      ...(branchReceipt ? { branch: branchReceipt } : {}),
-      ...(epicReceipt ? { epic: epicReceipt } : {}),
-      ...(epicSurfaceError ? { epic_surface_error: epicSurfaceError } : {}),
+  }
+  return { worktreeRemoved, worktreeError, branchReceipt };
+}
+
+// Per-card discard core. Callers own the selector + card-gate locks; commandDiscard
+// takes them for a single card and commandReap takes them per corpse in one batch.
+async function discardCardCore(ctx, operands, d) {
+  const { card, reason, supersededBy, carriedFixtures } = operands;
+  const {
+    loadState, persist, run, worktreeExists, boardPath, cardsRoot, writeText, now,
+  } = d;
+  const state = loadState(ctx);
+  const record = state.cards[card];
+  if (record && record.phase === 'discarded') {
+    if (discardReplayMatches(record, reason, supersededBy, carriedFixtures)) {
+      return {
+        action: 'discarded', card, phase: 'discarded', no_op: true, tracked: true,
+        tombstone: {
+          discarded_at: record.discarded_at || null, discard_reason: record.discard_reason || null,
+          superseded_by: record.superseded_by || null, final_head: record.final_head || null,
+          carried_fixtures: record.carried_fixtures || [],
+        },
+      };
+    }
+    throw new Error(`card ${card} is already discarded with different operands; replay must be literal`);
+  }
+  if (record && record.phase !== 'parked' && !['blocked', 'failed', 'cancelled'].includes(record.phase)) {
+    throw new Error(`discard refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${card} is ${record.phase}`);
+  }
+  const cardPath = resolveCardPath(record ? record.card_path : null, card, cardsRoot);
+  const noteExists = Boolean(cardPath && fs.existsSync(cardPath));
+  let cardRaw = '';
+  let epicSurface = null;
+  let epicSurfaceError = null;
+  if (noteExists) {
+    cardRaw = fs.readFileSync(cardPath, 'utf8');
+    // ES4a canonicalization: refuse to unlink anything but one regular
+    // non-symlink file physically inside the project tasks root.
+    const entry = fs.lstatSync(cardPath);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`discard target note for ${card} must be one regular non-symlink file`);
+    }
+    physicalDescendant(cardsRoot, cardPath, `discard target note ${card}`);
+    try {
+      epicSurface = canonicalEpicProjection(cardRaw, cardPath, boardPath, cardsRoot, { state, currentCard: card });
+    } catch (err) { epicSurfaceError = err.message; }
+  }
+  const targetBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
+  let boardRaw;
+  try { boardRaw = fs.readFileSync(targetBoardPath, 'utf8'); }
+  catch (err) { throw new Error(`discard target board is unreadable: ${err.message}`); }
+  const boardLine = boardCardLocation(boardRaw, card);
+  if (!record && !noteExists && !boardLine) {
+    throw new Error(`discard requires a tracked record, card note, or board line for ${card}; none exist`);
+  }
+
+  // Ledger first: the tombstone is authoritative before any projection removal.
+  const preservedHead = record && record.gate_receipt && record.gate_receipt.head_sha;
+  const tombstone = {
+    discarded_at: now(), discard_reason: reason, superseded_by: supersededBy,
+    // A tombstone's final_head must be canonical: exactly one 40-hex SHA or null.
+    final_head: typeof preservedHead === 'string' && EXACT_SHA.test(preservedHead) ? preservedHead : null,
+    carried_fixtures: carriedFixtures,
+  };
+  const target = record || { card, card_path: noteExists ? cardPath : null };
+  target.phase = 'discarded';
+  Object.assign(target, tombstone);
+  state.cards[card] = target;
+  persist(ctx, state, target);
+
+  const boardNext = removeBoardCard(boardRaw, card);
+  const boardChanged = boardNext !== boardRaw;
+  if (boardChanged) writeText(targetBoardPath, boardNext);
+  let noteDeleted = false;
+  if (noteExists) {
+    fs.unlinkSync(cardPath);
+    noteDeleted = true;
+  }
+  let epicReceipt = null;
+  if (epicSurface) {
+    try {
+      epicSurface.boardRaw = boardNext;
+      const lifecycle = deriveEpicProjection(epicSurface, null, null);
+      const epicMapping = epicProjectionMapping(lifecycle.state);
+      if (!epicMapping) throw new Error(`unsupported derived epic state ${lifecycle.state}`);
+      const parentNext = moveBoardCard(epicSurface.parentRaw, epicSurface.epic, epicMapping.column, epicMapping.complete);
+      const atlasNext = patchFrontmatter(epicSurface.atlasRaw, { status: lifecycle.state, posture: lifecycle.posture });
+      if (parentNext !== epicSurface.parentRaw) writeText(boardPath, parentNext);
+      if (atlasNext !== epicSurface.atlasRaw) writeText(epicSurface.atlasPath, atlasNext);
+      epicReceipt = {
+        epic: epicSurface.epic, state: lifecycle.state, posture: lifecycle.posture,
+        findings: lifecycle.findings,
+      };
+    } catch (err) {
+      target.projection_error = err.message;
+      target.projection_failed_at = now();
+      persist(ctx, state, target);
+      epicReceipt = { epic: epicSurface.epic, error: err.message, reconcile: reconcileRoute(card) };
+    }
+  }
+
+  const workspace = pruneCardWorkspace(ctx, record, { run, worktreeExists });
+  return {
+    action: 'discarded', card, phase: 'discarded', no_op: false,
+    tracked: Boolean(record), tombstone,
+    board_path: targetBoardPath, board_line_removed: boardChanged, note_deleted: noteDeleted,
+    worktree_removed: workspace.worktreeRemoved,
+    ...(workspace.worktreeError ? { worktree_error: workspace.worktreeError } : {}),
+    ...(workspace.branchReceipt ? { branch: workspace.branchReceipt } : {}),
+    ...(epicReceipt ? { epic: epicReceipt } : {}),
+    ...(epicSurfaceError ? { epic_surface_error: epicSurfaceError } : {}),
+  };
+}
+
+async function commandDiscard(ctx, args, deps = {}) {
+  // GA-OPS10 F2 precedent: the machine-readable contract is required before
+  // any read or write, so refusal here precedes every lock and state load.
+  if (args.json !== true) throw new Error('discard requires --json for a machine-readable receipt');
+  const operands = discardOperands(args);
+  const d = resolveDiscardDeps(deps);
+  const gate = { card: operands.card, staleMs: 60 * 60 * 1000 };
+  return d.transitionLock(ctx, 'selector',
+    async () => withCardGateLock(ctx, operands.card, () => discardCardCore(ctx, operands, d), gate, d.transitionLock),
+    gate);
+}
+
+// --- Superseded-corpse inference, ported from scripts/autoloop/delivery-review-triage.js.
+// The coordinator owns the canonical answer; the triage skill repoints here (Task 7).
+
+// The first whitespace-delimited token is the card id (e.g. "GA-C9a2").
+function cardIdToken(cardName) {
+  return String(cardName || '').trim().split(/\s+/)[0] || '';
+}
+
+// Strip a trailing supersession suffix: a lowercase letter + optional digits
+// ("a", "b", "a2", "c"). "GA-C9a2" → "GA-C9"; "GA-OPS11a" → "GA-OPS11".
+function stemOf(cardName) {
+  const id = cardIdToken(cardName);
+  const m = id.match(/^(.*?)([a-z]\d*)$/);
+  return m ? m[1] : id;
+}
+
+function supersessionStatusIsDeployed(status) {
+  return status === 'deployed' || status === 'completed';
+}
+
+// A settled card X is a superseded corpse when some OTHER tracked card Y is
+// deployed AND shares X's stem AND its name marks it as the successor
+// ("supersedes" or "final value-review completion").
+function deployedSupersedingSibling(card, tracked) {
+  const stem = stemOf(card.card);
+  if (!stem) return null;
+  const selfId = cardIdToken(card.card);
+  return (tracked || []).find((y) => {
+    if (cardIdToken(y.card) === selfId) return false;
+    if (!supersessionStatusIsDeployed(y.status)) return false;
+    if (stemOf(y.card) !== stem) return false;
+    return /supersedes|final value-review completion/i.test(y.card);
+  }) || null;
+}
+
+function hasDeployedSupersedingSibling(card, tracked) {
+  return Boolean(deployedSupersedingSibling(card, tracked));
+}
+
+// Board-line grammar for the reap sweep: a checkbox line whose first wikilink
+// is the card it targets, optionally trailed by a planning-stub annotation
+// ("(decomposed → …)" / "(docs-only → …)").
+const REAP_BOARD_LINE = /^\s*- \[[ xX]\] \[\[([^\]|]+)(?:\|[^\]]*)?\]\]/;
+
+// Never String.replace here: card names can contain $-specials. The kept
+// prefix is the captured checkbox + wikilink, byte-exact.
+function stubAnnotationParts(line) {
+  const m = line.match(/^(\s*- \[[ xX]\] \[\[[^\]]+\]\])\s*\((?:decomposed|docs-only)\b/);
+  if (!m) return null;
+  const children = [...line.slice(m[1].length).matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g)]
+    .map((match) => match[1]);
+  return { kept: m[1], children };
+}
+
+const REAP_DISCARDABLE_PHASES = new Set(['parked', 'blocked', 'failed', 'cancelled']);
+
+async function commandReap(ctx, args, deps = {}) {
+  // Same contract as discard: the machine-readable receipt is required before
+  // any read or write, so refusal here precedes every lock and state load.
+  if (args.json !== true) throw new Error('reap requires --json for a machine-readable receipt');
+  const alsoNames = args.also == null ? [] : [...new Set(argumentValues(args.also))];
+  if (args.also != null && !alsoNames.length) throw new Error('--also values must be non-empty card names');
+  const d = resolveDiscardDeps(deps);
+  const staleMs = 60 * 60 * 1000;
+  return d.transitionLock(ctx, 'selector', async () => {
+    const discardOne = (operands, boardOverride) => withCardGateLock(
+      ctx, operands.card,
+      () => discardCardCore(ctx, operands, boardOverride ? { ...d, boardPath: boardOverride } : d),
+      { card: operands.card, staleMs }, d.transitionLock,
+    );
+    let state = d.loadState(ctx);
+    // Explicit --also refusal precedes every write: same refusal set as discard,
+    // and every name must resolve (tracked record, card note, or board line) so
+    // a typo can never abort the batch mid-run after corpse discards landed.
+    let alsoBoardRaw = null;
+    for (const name of alsoNames) {
+      const record = state.cards[name];
+      if (record && record.phase !== 'discarded' && !REAP_DISCARDABLE_PHASES.has(record.phase)) {
+        throw new Error(`reap refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${name} is ${record.phase}`);
+      }
+      if (record || findCard(d.cardsRoot, name)) continue;
+      if (alsoBoardRaw == null) {
+        try { alsoBoardRaw = fs.readFileSync(d.boardPath, 'utf8'); } catch (_) { alsoBoardRaw = ''; }
+      }
+      if (boardCardLocation(alsoBoardRaw, name)) continue;
+      throw new Error(`reap cannot resolve --also card ${name}; no tracked record, card note, or board line exists`);
+    }
+    const receipt = {
+      action: 'reaped', no_op: true, boards: [],
+      corpses: [], stub_parents: [], also: [],
+      annotations_stripped: [], duplicates_removed: [],
+      residue_lines_removed: [], residue_notes_deleted: [], residue_notes_refused: [],
     };
-  }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
+
+    // (1)+(2) Corpse set from the ledger via the ported triage inference: a
+    // settled record whose deployed stem-sibling names itself the successor.
+    const trackedView = Object.values(state.cards || {}).map((record) => ({ card: record.card, status: record.phase }));
+    for (const record of Object.values(state.cards || {})) {
+      if (!REAP_DISCARDABLE_PHASES.has(record.phase)) continue;
+      const successor = deployedSupersedingSibling({ card: record.card }, trackedView);
+      if (!successor) continue;
+      receipt.corpses.push(await discardOne({
+        card: record.card, reason: 'reaped: superseded corpse (deployed successor)',
+        supersededBy: successor.card, carriedFixtures: [],
+      }));
+    }
+
+    // (6) Explicitly listed names ride the same per-card discard core. A name
+    // already tombstoned when this pass reaches it (this run's corpse pass, or
+    // an earlier discard with its own reason) is skipped, never re-routed into
+    // the core with a fresh reason — that non-literal replay throw would brick
+    // every identical re-run.
+    state = d.loadState(ctx);
+    for (const name of alsoNames) {
+      const listed = state.cards[name];
+      if (listed && listed.phase === 'discarded') {
+        receipt.also.push({ card: name, no_op: true, skipped: 'already discarded' });
+        continue;
+      }
+      receipt.also.push(await discardOne({
+        card: name, reason: 'reaped: explicitly listed via --also',
+        supersededBy: null, carriedFixtures: [],
+      }));
+    }
+
+    // Board sweep set: the parent board, every resolvable epic board, and every
+    // tracked record's projected epic board.
+    state = d.loadState(ctx);
+    const boards = new Map();
+    const addBoard = (target) => {
+      if (target && fs.existsSync(target)) boards.set(path.resolve(target), target);
+    };
+    addBoard(d.boardPath);
+    let parentRaw = '';
+    try { parentRaw = fs.readFileSync(d.boardPath, 'utf8'); } catch (_) {}
+    try {
+      for (const epic of resolveEpicBoardSet({ parentBoardMd: parentRaw, cardsRoot: d.cardsRoot }).epics) {
+        addBoard(epic.board_path);
+      }
+    } catch (_) {}
+    for (const record of Object.values(state.cards || {})) {
+      if (!record.card_path) continue;
+      const rel = path.relative(path.resolve(d.cardsRoot), path.resolve(record.card_path));
+      const segments = rel.split(path.sep);
+      if (!rel.startsWith('..') && segments.length === 3 && segments[1] === 'board') {
+        addBoard(path.join(d.cardsRoot, segments[0], 'board', `${segments[0]}-board.md`));
+      }
+    }
+    receipt.boards = [...boards.values()];
+
+    // A stub child is settled when its ledger record is tombstoned or deployed,
+    // or a swept board checks it Completed.
+    const completedAnywhere = new Set();
+    for (const sweptPath of boards.values()) {
+      try {
+        for (const name of parseCheckedColumn(fs.readFileSync(sweptPath, 'utf8'), 'Completed')) completedAnywhere.add(name);
+      } catch (_) {}
+    }
+    const childSettled = (child) => {
+      const record = state.cards[child];
+      if (record && (record.phase === 'discarded' || record.phase === 'deployed')) return true;
+      return completedAnywhere.has(child);
+    };
+    // A parent is a non-claimable planning container when it was never tracked
+    // and carries no valid execution contract.
+    const carriesExecutionContract = (name) => {
+      const notePath = findCard(d.cardsRoot, name);
+      if (!notePath) return false;
+      try {
+        return validateExecutionMeta(parseExecutionMeta(fs.readFileSync(notePath, 'utf8'), name)).length === 0;
+      } catch (_) { return false; }
+    };
+
+    for (const sweptPath of boards.values()) {
+      // (3a) Settled planning containers are discarded outright through the core.
+      for (const line of fs.readFileSync(sweptPath, 'utf8').split('\n')) {
+        const stub = stubAnnotationParts(line);
+        if (!stub || !stub.children.length) continue;
+        const target = line.match(REAP_BOARD_LINE);
+        if (!target) continue;
+        const name = target[1];
+        if (state.cards[name] || !stub.children.every(childSettled) || carriesExecutionContract(name)) continue;
+        receipt.stub_parents.push(await discardOne({
+          card: name, reason: 'reaped: settled planning container (every child tombstoned or completed)',
+          supersededBy: null, carriedFixtures: [],
+        }, sweptPath));
+        state = d.loadState(ctx);
+      }
+      // (3b) strip surviving annotations, (4) dedupe, (5) heal residual tombstone lines.
+      const raw = fs.readFileSync(sweptPath, 'utf8');
+      const seen = new Set();
+      const kept = [];
+      let changed = false;
+      for (const line of raw.split('\n')) {
+        const target = line.match(REAP_BOARD_LINE);
+        if (!target) { kept.push(line); continue; }
+        const name = target[1];
+        const record = state.cards[name];
+        if (record && record.phase === 'discarded') {
+          receipt.residue_lines_removed.push({ board: sweptPath, card: name });
+          changed = true;
+          continue;
+        }
+        if (seen.has(name)) {
+          receipt.duplicates_removed.push({ board: sweptPath, card: name });
+          changed = true;
+          continue;
+        }
+        seen.add(name);
+        const stub = stubAnnotationParts(line);
+        if (stub) {
+          receipt.annotations_stripped.push({ board: sweptPath, card: name });
+          kept.push(stub.kept);
+          changed = true;
+          continue;
+        }
+        kept.push(line);
+      }
+      // A mid-sweep abort after this write is safe: the write is converged state, and an identical replay heals the remainder.
+      if (changed) d.writeText(sweptPath, kept.join('\n'));
+    }
+
+    // (5) Tombstone note residue: same lstat + containment guards as discard,
+    // enforced per item. A corrupt entry is refused loudly in the receipt but
+    // never aborts the batch — an abort would lose the whole receipt, and the
+    // persistent corrupt entry would make every future reap throw.
+    for (const record of Object.values(state.cards || {})) {
+      if (record.phase !== 'discarded') continue;
+      const notePath = resolveCardPath(record.card_path, record.card, d.cardsRoot);
+      if (!notePath || !fs.existsSync(notePath)) continue;
+      try {
+        const entry = fs.lstatSync(notePath);
+        if (entry.isSymbolicLink() || !entry.isFile()) {
+          throw new Error(`reap residue note for ${record.card} must be one regular non-symlink file`);
+        }
+        physicalDescendant(d.cardsRoot, notePath, `reap residue note ${record.card}`);
+        fs.unlinkSync(notePath);
+        receipt.residue_notes_deleted.push({ card: record.card, path: notePath });
+      } catch (err) {
+        receipt.residue_notes_refused.push({ card: record.card, residue_note: 'refused', reason: err.message });
+      }
+    }
+
+    receipt.no_op = receipt.corpses.every((item) => item.no_op)
+      && receipt.stub_parents.every((item) => item.no_op)
+      && receipt.also.every((item) => item.no_op)
+      && !receipt.annotations_stripped.length && !receipt.duplicates_removed.length
+      && !receipt.residue_lines_removed.length && !receipt.residue_notes_deleted.length;
+    return receipt;
+  }, { staleMs });
 }
 
 async function commandClaim(ctx, args) {
@@ -3238,6 +3519,7 @@ async function main() {
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
+  else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
@@ -3250,7 +3532,7 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|reap|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -3264,7 +3546,8 @@ module.exports = {
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandResume, commandDiscard, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,

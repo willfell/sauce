@@ -16,8 +16,8 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
   selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReconcile, commandRecover,
-  removeBoardCard, discardedDependencyProblem,
+  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandReconcile, commandRecover,
+  removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
@@ -4593,6 +4593,285 @@ eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports 
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI discard without --json refuses with a machine-parseable error before any read or write');
+}
+
+// --- BGR redesign: idempotent reap ---
+
+// BGR-REAP-STEM-EXACT: the ported triage inference is token-exact.
+eq(stemOf('ES4a Something bounded'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a single lowercase supersession suffix');
+eq(stemOf('ES4a2 Something rebuilt'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a lowercase letter + digits suffix');
+eq(stemOf('ES41 No suffix here'), 'ES41', 'BGR-REAP-STEM-EXACT ids without a lowercase suffix are their own stem');
+eq(stemOf('GA-C9a2'), 'GA-C9', 'BGR-REAP-STEM-EXACT stem handles hyphenated card ids');
+const stemTracked = [
+  { card: 'ES4a2 Rebuilt renderer (supersedes ES4a)', status: 'deployed' },
+  { card: 'ES5a2 Rebuilt without marker', status: 'deployed' },
+  { card: 'ES6a2 Pending successor (supersedes ES6a)', status: 'parked' },
+];
+eq(hasDeployedSupersedingSibling({ card: 'ES4a Original renderer' }, stemTracked), true,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling with a supersession marker is a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES5a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling without the marker is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES6a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a non-deployed successor is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES4a2 Rebuilt renderer (supersedes ES4a)' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a card is never its own superseding sibling (id tokens are exact)');
+eq(hasDeployedSupersedingSibling({ card: 'ES40a Widened scope' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT stem matching is token-exact, never substring: ES40a does not match the ES4 stem');
+eq(hasDeployedSupersedingSibling({ card: 'ES7a Legacy pass' },
+  [{ card: 'ES7a2 Wrap-up (final value-review completion)', status: 'completed' }]), true,
+  'BGR-REAP-STEM-EXACT completed final value-review successors also mark corpses');
+
+// BGR-REAP-CORPSES / STUBS / DUPES / RESIDUE-HEAL: one sweep over a live board.
+const reapRoot = path.join(tmp, 'bgr-reap');
+const reapProjectRoot = path.join(reapRoot, 'spice', 'projects', 'test');
+const reapCardsRoot = path.join(reapProjectRoot, 'tasks');
+fs.mkdirSync(reapCardsRoot, { recursive: true });
+const reapBoardPath = path.join(reapProjectRoot, 'project-board.md');
+fs.writeFileSync(reapBoardPath, [
+  '---', 'kanban-plugin: board', '---', '',
+  '## In Planning',
+  '- [ ] [[Decomposed parent]] (decomposed → [[Child one]] → [[Child two]])',
+  '- [ ] [[Settled container]] (decomposed → [[Done child]] → [[Dead child]])',
+  '- [ ] [[Docs $$ parent]] (docs-only → [[Some doc]])',
+  '- [ ] [[Dupe card]]',
+  '- [ ] [[Dupe card]]',
+  '',
+  '## In Progress',
+  '- [ ] [[ES9a Old renderer]]',
+  '- [ ] [[Keeper parked]]',
+  '- [ ] [[Ghost residue]]',
+  '',
+  '## Blocked', '',
+  '## Completed',
+  '- [x] [[Done child]]',
+  '- [x] [[ES9a2 Renderer rework (supersedes ES9a)]]',
+  '',
+].join('\n'));
+const reapCorpsePath = path.join(reapCardsRoot, 'ES9a Old renderer.md');
+const reapKeeperPath = path.join(reapCardsRoot, 'Keeper parked.md');
+const reapGhostPath = path.join(reapCardsRoot, 'Ghost residue.md');
+fs.writeFileSync(reapCorpsePath, '---\nstatus: parked\n---\nold renderer body\n');
+fs.writeFileSync(reapKeeperPath, '---\nstatus: parked\n---\nkeeper body\n');
+fs.writeFileSync(reapGhostPath, '---\nstatus: parked\n---\nghost body\n');
+const REAP_HEAD = 'e'.repeat(40);
+const reapState = emptyState();
+reapState.cards['ES9a Old renderer'] = {
+  card: 'ES9a Old renderer', phase: 'parked', card_path: reapCorpsePath,
+  branch: 'codex-autoloop/es9a', dependencies: ['ES9 base'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(REAP_HEAD),
+};
+reapState.cards['ES9a2 Renderer rework (supersedes ES9a)'] = {
+  card: 'ES9a2 Renderer rework (supersedes ES9a)', phase: 'deployed',
+};
+reapState.cards['Keeper parked'] = {
+  card: 'Keeper parked', phase: 'parked', card_path: reapKeeperPath,
+  dependencies: ['Something real'], resume_condition: 'still real',
+};
+reapState.cards['Dead child'] = {
+  card: 'Dead child', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+reapState.cards['Ghost residue'] = {
+  card: 'Ghost residue', phase: 'discarded', card_path: reapGhostPath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crashed mid-discard',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+let reapWrites = 0;
+const reapLocks = [];
+const reapShCalls = [];
+const reapDeps = {
+  readState: () => reapState,
+  writeState: () => { reapWrites++; },
+  withLock: async (_ctx, name, fn) => { reapLocks.push(name); return fn(); },
+  boardPath: reapBoardPath, cardsRoot: reapCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, cmdArgs) => { reapShCalls.push([cmd, ...cmdArgs]); return ''; },
+  now: () => '2026-07-25T14:00:00.000Z',
+};
+await assert.rejects(() => commandReap({ root: reapRoot }, {}, reapDeps), /requires --json/,
+  'BGR-REAP refuses without --json before any read or write');
+eq(reapLocks, [], 'BGR-REAP missing --json refusal precedes every lock');
+eq(reapWrites, 0, 'BGR-REAP missing --json refusal performs zero writes');
+const reaped = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reaped.action, 'reaped', 'BGR-REAP emits one machine-readable reap receipt');
+eq(reaped.no_op, false, 'BGR-REAP first sweep is not a no-op');
+ok(reapLocks.includes('selector'), 'BGR-REAP the sweep runs under the selector lock');
+
+// BGR-REAP-CORPSES: parked stem-sibling with a deployed successor is discarded.
+eq(reaped.corpses.length, 1, 'BGR-REAP-CORPSES exactly one superseded corpse is discovered');
+eq(reaped.corpses[0].card, 'ES9a Old renderer', 'BGR-REAP-CORPSES the parked stem-sibling is the corpse');
+eq(reaped.corpses[0].tombstone.superseded_by, 'ES9a2 Renderer rework (supersedes ES9a)',
+  'BGR-REAP-CORPSES the tombstone names the exact deployed successor card');
+eq(reapState.cards['ES9a Old renderer'].phase, 'discarded', 'BGR-REAP-CORPSES the corpse ledger record becomes a tombstone');
+eq(reapState.cards['ES9a Old renderer'].final_head, REAP_HEAD, 'BGR-REAP-CORPSES the tombstone preserves the corpse gate-receipt HEAD');
+ok(!fs.existsSync(reapCorpsePath), 'BGR-REAP-CORPSES the corpse note is deleted');
+const sweptBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[ES9a Old renderer\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the corpse board line is removed');
+eq(reapState.cards['Keeper parked'].phase, 'parked', 'BGR-REAP-CORPSES a parked card with no deployed successor is untouched');
+ok(fs.existsSync(reapKeeperPath), 'BGR-REAP-CORPSES the untouched parked note survives');
+ok(/- \[ \] \[\[Keeper parked\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the untouched parked board line survives');
+
+// BGR-REAP-STUBS: annotations stripped; fully settled containers discarded outright.
+ok(sweptBoard.includes('- [ ] [[Decomposed parent]]') && !/Decomposed parent\]\] \(decomposed/.test(sweptBoard),
+  'BGR-REAP-STUBS the decomposition annotation is stripped, checkbox state and wikilink preserved exactly');
+ok(sweptBoard.includes('- [ ] [[Docs $$ parent]]') && !/\(docs-only/.test(sweptBoard),
+  'BGR-REAP-STUBS the docs-only variant strips safely for names containing $');
+ok(!/\[\[Settled container\]\]/.test(sweptBoard),
+  'BGR-REAP-STUBS a planning container whose children are all tombstoned or completed is discarded outright');
+eq(reapState.cards['Settled container'].phase, 'discarded', 'BGR-REAP-STUBS the settled container gains a tombstone');
+eq(reaped.stub_parents.length, 1, 'BGR-REAP-STUBS the receipt lists exactly one settled-container discard');
+eq(reaped.stub_parents[0].card, 'Settled container', 'BGR-REAP-STUBS the receipt names the discarded container');
+eq(reaped.annotations_stripped.map((item) => item.card).sort(), ['Decomposed parent', 'Docs $$ parent'],
+  'BGR-REAP-STUBS the receipt lists every stripped annotation');
+
+// BGR-REAP-DUPES: two lines targeting the same wikilink → first kept, second removed.
+eq((sweptBoard.match(/\[\[Dupe card\]\]/g) || []).length, 1, 'BGR-REAP-DUPES only the first duplicate line survives');
+eq(reaped.duplicates_removed, [{ board: reapBoardPath, card: 'Dupe card' }],
+  'BGR-REAP-DUPES the receipt lists the removed duplicate line');
+
+// BGR-REAP-RESIDUE-HEAL: tombstone residue (line + note) is healed.
+ok(!/\[\[Ghost residue\]\]/.test(sweptBoard), 'BGR-REAP-RESIDUE-HEAL the residual tombstone board line is removed');
+eq(reaped.residue_lines_removed, [{ board: reapBoardPath, card: 'Ghost residue' }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual line');
+ok(!fs.existsSync(reapGhostPath), 'BGR-REAP-RESIDUE-HEAL the residual tombstone note is deleted');
+eq(reaped.residue_notes_deleted, [{ card: 'Ghost residue', path: reapGhostPath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual note');
+
+// BGR-REAP-NOOP: replay on the settled board is a no-op with zero writes.
+const noopWritesBefore = reapWrites;
+const noopShBefore = reapShCalls.length;
+const noopBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const noopStateBytes = JSON.stringify(reapState);
+const reapReplay = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reapReplay.action, 'reaped', 'BGR-REAP-NOOP replay still emits the reap receipt');
+eq(reapReplay.no_op, true, 'BGR-REAP-NOOP replay on a settled board is an explicit no-op');
+eq(reapWrites, noopWritesBefore, 'BGR-REAP-NOOP replay performs zero ledger writes');
+eq(reapShCalls.length, noopShBefore, 'BGR-REAP-NOOP replay performs zero git operations');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), noopBoardBytes, 'BGR-REAP-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(reapState), noopStateBytes, 'BGR-REAP-NOOP replay keeps ledger state byte-stable');
+
+// BGR-REAP-EXPLICIT-LIST: --also discards named settled work, refuses active phases.
+const explicitPath = path.join(reapCardsRoot, 'Explicit corpse.md');
+const untrackedStubPath = path.join(reapCardsRoot, 'Untracked stub.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ blocked: ['Explicit corpse'], planning: ['Untracked stub'], progress: ['Busy card'] }));
+fs.writeFileSync(explicitPath, '---\nstatus: blocked\n---\nexplicit body\n');
+fs.writeFileSync(untrackedStubPath, '---\nstatus: planning\n---\nstub body\n');
+const alsoState = emptyState();
+alsoState.cards['Explicit corpse'] = { card: 'Explicit corpse', phase: 'blocked', card_path: explicitPath };
+alsoState.cards['Busy card'] = { card: 'Busy card', phase: 'implementing' };
+let alsoWrites = 0;
+const alsoDeps = { ...reapDeps, readState: () => alsoState, writeState: () => { alsoWrites++; } };
+const alsoReap = await commandReap({ root: reapRoot }, { json: true, also: ['Explicit corpse', 'Untracked stub'] }, alsoDeps);
+eq(alsoReap.also.map((item) => item.card), ['Explicit corpse', 'Untracked stub'],
+  'BGR-REAP-EXPLICIT-LIST discards every explicitly listed card');
+eq(alsoState.cards['Explicit corpse'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST a blocked listed card becomes a tombstone');
+eq(alsoState.cards['Untracked stub'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST an untracked listed card gains a minimal tombstone');
+ok(!fs.existsSync(explicitPath) && !fs.existsSync(untrackedStubPath), 'BGR-REAP-EXPLICIT-LIST listed card notes are deleted');
+const alsoBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[Explicit corpse\]\]/.test(alsoBoard) && !/\[\[Untracked stub\]\]/.test(alsoBoard),
+  'BGR-REAP-EXPLICIT-LIST listed board lines are removed');
+ok(/\[\[Busy card\]\]/.test(alsoBoard), 'BGR-REAP-EXPLICIT-LIST the active board line survives');
+const refuseWritesBefore = alsoWrites;
+const refuseBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'Busy card' }, alsoDeps),
+  /refuses active in-flight work/, 'BGR-REAP-EXPLICIT-LIST refuses names with active in-flight phases');
+eq(alsoWrites, refuseWritesBefore, 'BGR-REAP-EXPLICIT-LIST active-name refusal performs zero writes');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), refuseBoardBytes, 'BGR-REAP-EXPLICIT-LIST active-name refusal keeps board bytes stable');
+eq(alsoState.cards['Busy card'].phase, 'implementing', 'BGR-REAP-EXPLICIT-LIST the active record is preserved');
+
+// BGR-REAP-EXPLICIT-LIST overlap: --also naming a corpse-set member (or any
+// already-tombstoned card) records a skip entry; the identical re-run stays no_op.
+const overlapCorpsePath = path.join(reapCardsRoot, 'ES8a Old pass.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ progress: ['ES8a Old pass'] }));
+fs.writeFileSync(overlapCorpsePath, '---\nstatus: parked\n---\nold pass body\n');
+const overlapState = emptyState();
+overlapState.cards['ES8a Old pass'] = { card: 'ES8a Old pass', phase: 'parked', card_path: overlapCorpsePath };
+overlapState.cards['ES8a2 New pass (supersedes ES8a)'] = { card: 'ES8a2 New pass (supersedes ES8a)', phase: 'deployed' };
+overlapState.cards['Manual tombstone'] = {
+  card: 'Manual tombstone', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'hand discarded with its own reason', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+const overlapDeps = { ...reapDeps, readState: () => overlapState, writeState: () => {} };
+const overlapArgs = { json: true, also: ['ES8a Old pass', 'Manual tombstone'] };
+
+// BGR-REAP-EXPLICIT-LIST typo: an unresolvable --also name refuses up-front,
+// before the corpse pass performs any write, and names the offender.
+const typoBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'No Such Card' }, overlapDeps),
+  /cannot resolve --also card No Such Card/,
+  'BGR-REAP-EXPLICIT-LIST typo: an unresolvable listed name refuses up-front and names the offender');
+eq(overlapState.cards['ES8a Old pass'].phase, 'parked',
+  'BGR-REAP-EXPLICIT-LIST typo: the refusal precedes the corpse pass, so the corpse record is untouched');
+ok(fs.existsSync(overlapCorpsePath), 'BGR-REAP-EXPLICIT-LIST typo: the refused run performs zero note deletions');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), typoBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST typo: the refused run keeps board bytes stable');
+
+const overlapReap = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReap.corpses.map((item) => item.card), ['ES8a Old pass'],
+  'BGR-REAP-EXPLICIT-LIST overlap: the corpse pass discards the listed card first');
+eq(overlapReap.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: already-tombstoned listed names record skip entries, never a throw');
+eq(overlapReap.no_op, false, 'BGR-REAP-EXPLICIT-LIST overlap: the first run still reports its corpse work');
+const overlapBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const overlapReplay = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReplay.no_op, true, 'BGR-REAP-EXPLICIT-LIST overlap: the identical re-run is an explicit no-op');
+eq(overlapReplay.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps the skip entries');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), overlapBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps board bytes stable');
+
+// BGR-REAP-RESIDUE-HEAL guard: a symlinked residue note is refused per-item and
+// reported in the receipt; the rest of the reap completes.
+const symTargetPath = path.join(reapRoot, 'outside-note.md');
+const symNotePath = path.join(reapCardsRoot, 'Symlinked residue.md');
+const healthyResiduePath = path.join(reapCardsRoot, 'Healthy residue.md');
+fs.writeFileSync(symTargetPath, 'outside body\n');
+fs.symlinkSync(symTargetPath, symNotePath);
+fs.writeFileSync(healthyResiduePath, '---\nstatus: parked\n---\nhealthy residue body\n');
+const symState = emptyState();
+symState.cards['Symlinked residue'] = {
+  card: 'Symlinked residue', phase: 'discarded', card_path: symNotePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+symState.cards['Healthy residue'] = {
+  card: 'Healthy residue', phase: 'discarded', card_path: healthyResiduePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+fs.writeFileSync(reapBoardPath, liveBoard({}));
+const symDeps = { ...reapDeps, readState: () => symState, writeState: () => {} };
+const symReap = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReap.action, 'reaped', 'BGR-REAP-RESIDUE-HEAL a corrupt residue entry never aborts the batch');
+eq(symReap.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL exactly one residue refusal is reported');
+eq(symReap.residue_notes_refused[0].card, 'Symlinked residue', 'BGR-REAP-RESIDUE-HEAL the refusal names the corrupt entry');
+eq(symReap.residue_notes_refused[0].residue_note, 'refused', 'BGR-REAP-RESIDUE-HEAL the refusal is marked refused');
+ok(/regular non-symlink file/.test(symReap.residue_notes_refused[0].reason),
+  'BGR-REAP-RESIDUE-HEAL the refusal carries the guard reason');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink in place');
+ok(fs.existsSync(symTargetPath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink target untouched');
+ok(!fs.existsSync(healthyResiduePath), 'BGR-REAP-RESIDUE-HEAL the rest of the residue pass still completes');
+eq(symReap.residue_notes_deleted, [{ card: 'Healthy residue', path: healthyResiduePath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt still lists the healed healthy residue');
+const symReplay = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReplay.no_op, true, 'BGR-REAP-RESIDUE-HEAL a persistent refused entry keeps the replay an explicit zero-write no-op');
+eq(symReplay.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL the replay still reports the persistent refusal');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the replay still leaves the symlink in place');
+
+// CLI wiring: the reap command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI reap without --json refuses with a machine-parseable error before any read or write');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
