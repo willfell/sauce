@@ -5,6 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { AsyncLocalStorage, createHook } = require('async_hooks');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
@@ -2162,19 +2163,53 @@ const waitForFixturePath = async (targetPath, childResult, timeoutMs = 5000, lif
 const readinessRaceDir = path.join(tmp, 'es4-readiness-early-exit');
 fs.mkdirSync(readinessRaceDir, { recursive: true });
 const readinessRaceMissing = path.join(readinessRaceDir, 'missing');
+const observeReadinessTimerCallbacks = async (operation, settleMs = 25) => {
+  const scope = new AsyncLocalStorage();
+  const marker = {};
+  const scopedTimerIds = new Set();
+  let operationSettled = false;
+  let scheduledTimerCount = 0;
+  let callbacksAfterSettle = 0;
+  const hook = createHook({
+    init: (asyncId, type) => {
+      if (type !== 'Timeout' || scope.getStore() !== marker) return;
+      scopedTimerIds.add(asyncId);
+      scheduledTimerCount += 1;
+    },
+    before: (asyncId) => {
+      if (operationSettled && scopedTimerIds.has(asyncId)) callbacksAfterSettle += 1;
+    },
+    destroy: (asyncId) => {
+      scopedTimerIds.delete(asyncId);
+    },
+  });
+  hook.enable();
+  let value;
+  let error = null;
+  try {
+    try {
+      value = await scope.run(marker, operation);
+    } catch (caught) {
+      error = caught;
+    }
+    operationSettled = true;
+    await scope.exit(() => new Promise((resolve) => setTimeout(resolve, settleMs)));
+    return { value, error, scheduledTimerCount, callbacksAfterSettle };
+  } finally {
+    hook.disable();
+    scope.disable();
+  }
+};
 const readinessUnhandled = [];
 const recordReadinessUnhandled = (reason) => readinessUnhandled.push(reason);
 process.on('unhandledRejection', recordReadinessUnhandled);
 try {
   const cleanExitLifecycle = {};
-  let cleanExitFinding = '';
-  try {
-    await waitForFixturePath(readinessRaceMissing, Promise.resolve('clean exit'), 1000, cleanExitLifecycle);
-  } catch (error) {
-    cleanExitFinding = error.message;
-  }
+  const cleanExitObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(readinessRaceMissing, Promise.resolve('clean exit'), 1000, cleanExitLifecycle),
+  );
+  const cleanExitFinding = cleanExitObservation.error?.message || '';
   const cleanExitPolls = cleanExitLifecycle.poll_count;
-  await new Promise((resolve) => setTimeout(resolve, 25));
   ok(/holder exited before readiness/.test(cleanExitFinding)
       && cleanExitLifecycle.cancelled
       && cleanExitLifecycle.joined
@@ -2185,12 +2220,10 @@ try {
 
   const earlyError = new Error('fixture holder early error');
   const errorExitLifecycle = {};
-  let errorExitFinding = null;
-  try {
-    await waitForFixturePath(readinessRaceMissing, Promise.reject(earlyError), 1000, errorExitLifecycle);
-  } catch (error) {
-    errorExitFinding = error;
-  }
+  const errorExitObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(readinessRaceMissing, Promise.reject(earlyError), 1000, errorExitLifecycle),
+  );
+  const errorExitFinding = errorExitObservation.error;
   eq(errorExitFinding, earlyError,
     'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK early holder error remains the exact primary error');
   ok(errorExitLifecycle.cancelled
@@ -2236,20 +2269,24 @@ try {
     fs.writeFileSync(finalTickPath, 'ready');
     resolveFinalTickHolder('exited');
   }, 10);
-  let finalTickFinding = '';
-  try {
-    await waitForFixturePath(finalTickPath, finalTickHolder, 1000, finalTickLifecycle);
-  } catch (error) {
-    finalTickFinding = error.message;
-  } finally {
-    clearTimeout(finalTick);
-  }
+  const finalTickObservation = await observeReadinessTimerCallbacks(
+    () => waitForFixturePath(finalTickPath, finalTickHolder, 1000, finalTickLifecycle),
+  );
+  const finalTickFinding = finalTickObservation.error?.message || '';
+  clearTimeout(finalTick);
   await finalTickHolder;
   ok((!finalTickFinding || /holder exited before readiness/.test(finalTickFinding))
       && finalTickLifecycle.settled
       && !finalTickLifecycle.pending_timer
       && (!finalTickLifecycle.cancelled || finalTickLifecycle.joined),
   'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK final-tick race reports a valid winner and leaves no readiness timer');
+  ok(cleanExitObservation.scheduledTimerCount > 0
+      && errorExitObservation.scheduledTimerCount > 0
+      && finalTickObservation.scheduledTimerCount > 0
+      && cleanExitObservation.callbacksAfterSettle === 0
+      && errorExitObservation.callbacksAfterSettle === 0
+      && finalTickObservation.callbacksAfterSettle === 0,
+  'ES4-READINESS-PENDING-TIMER-CALLBACK-ORACLE-MISSING async_hooks independently observes zero real readiness callbacks after clean, error, and final-tick cleanup');
   await new Promise((resolve) => setImmediate(resolve));
   eq(readinessUnhandled.length, 0,
     'ES4-READINESS-EARLY-EXIT-LOSER-PROMISE-LEAK clean, error, success, timeout, and final-tick paths emit zero unhandled rejections');
