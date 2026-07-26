@@ -391,22 +391,22 @@ function uniqueRatificationErrors(errors) {
   });
 }
 
-function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, provenance, parsedErrors) {
-  const current = Array.isArray(parsedErrors) ? parsedErrors : [];
-  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return current;
+function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, provenance, parsed) {
+  const current = Array.isArray(parsed && parsed.errors) ? parsed.errors : [];
+  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return parsed;
   const section = exactRatificationSection(markdown, sectionHeading);
-  if (!section) return current;
+  if (!section) return parsed;
   const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
-  if (blocks.length !== 1) return current;
+  if (blocks.length !== 1) return parsed;
   let payload;
-  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return current; }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return current;
+  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return parsed; }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return parsed;
   const allowed = new Set([
     'schema_version', 'receipt_id', 'decision', 'accepted_at',
     'authority', 'target_card', 'target_head', 'scope',
   ]);
   const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
-  if (!unexpected.length) return current;
+  if (!unexpected.length) return parsed;
   const nonUnexpected = current.filter((issue) => issue && issue.code !== 'ratification-field-unexpected');
   const unexpectedErrors = unexpected.map((field) => ({
     code: 'ratification-field-unexpected',
@@ -431,11 +431,15 @@ function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, proven
   const semantic = delivery.parseRatificationArtifact(
     sanitizedMarkdown, sectionHeading, provenance,
   );
-  return uniqueRatificationErrors([
-    ...nonUnexpected,
-    ...unexpectedErrors,
-    ...(semantic.ok ? [] : semantic.errors),
-  ]);
+  return {
+    ...semantic,
+    ok: false,
+    errors: uniqueRatificationErrors([
+      ...nonUnexpected,
+      ...unexpectedErrors,
+      ...(semantic.ok ? [] : semantic.errors),
+    ]),
+  };
 }
 
 function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
@@ -448,6 +452,9 @@ function consumeRatificationArtifact(markdown, sectionHeading, provenance, expec
     }
   }
   const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
+  const payloadValidation = allUnexpectedRatificationPayloadErrors(
+    markdown, sectionHeading, provenance, parsed,
+  );
   if (duplicates.length || !parsed.ok) return {
     ok: false,
     errors: uniqueRatificationErrors([
@@ -456,9 +463,9 @@ function consumeRatificationArtifact(markdown, sectionHeading, provenance, expec
         field,
         message: `ratification payload contains duplicate field ${field}`,
       })),
-      ...allUnexpectedRatificationPayloadErrors(
-        markdown, sectionHeading, provenance, parsed.errors,
-      ),
+      ...payloadValidation.errors,
+      ...(payloadValidation.receipt
+        ? consumeRatificationReceipt(payloadValidation.receipt, expected).errors : []),
     ]),
     receipt: null,
     contract_version: delivery.CONTRACT_VERSION,

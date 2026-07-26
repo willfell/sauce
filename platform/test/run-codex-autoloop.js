@@ -7151,6 +7151,8 @@ eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), duplicatePayloadRaw,
 const mixedPayloadInvalidRaw = acceptedRaw
   .replace('"decision": "accepted"', '"decision": "",\n  "decision": "accepted"')
   .replace('"accepted_at": "2026-07-26T09:31:00-06:00"', '"accepted_at": "not-a-timestamp"')
+  .replace(`"target_card": "${OPX4_CARD}"`, '"target_card": "GA-OPX4 wrong target"')
+  .replace(`"target_head": "${OPX4_HEAD}"`, `"target_head": "${'b'.repeat(40)}"`)
   .replace(
     '  "scope": [',
     '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
@@ -7166,8 +7168,10 @@ eq(
     ['ratification-field-unexpected', 'unexpected_one'],
     ['ratification-field-unexpected', 'unexpected_two'],
     ['invalid-ratification-timestamp', 'accepted_at'],
+    ['ratification-target-card-mismatch', 'target_card'],
+    ['ratification-target-head-mismatch', 'target_head'],
   ],
-  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS returns duplicate, unsupported, and semantic errors together',
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS returns structural, semantic, and binding errors together',
 );
 eq(opx4Writes, 0,
   'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS performs zero ledger writes');
