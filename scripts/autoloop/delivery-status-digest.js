@@ -72,7 +72,7 @@ function sinceCount(since) {
 function buildDigest(status, fidText, releases, opts) {
   const t = triage.triage(status, fidText);
   const active = (status.active && status.active[0]) || null;
-  return {
+  const digest = {
     exceptionCount: t.actionable.length,
     noAction: t.noAction,
     activeClaim: active ? { card: active.card, phase: active.phase } : null,
@@ -80,6 +80,16 @@ function buildDigest(status, fidText, releases, opts) {
     releases: releases || [],
     since: sinceLastLook(status, fidText, (opts && opts.lastSeen) || null),
   };
+  const residue = Array.isArray(status.tombstone_residue) ? status.tombstone_residue : [];
+  if (residue.length) {
+    digest.tombstoneResidue = {
+      count: residue.length,
+      entries: residue.map((entry) => ({
+        card: entry.card, path: entry.path, heal: entry.heal,
+      })),
+    };
+  }
+  return digest;
 }
 
 function headline(d) {

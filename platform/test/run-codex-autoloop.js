@@ -34,6 +34,7 @@ const {
   parseBoard, parseDependsOn,
   delivery, prepareDeliveryCard, prepareDeliveryObject,
 } = require('../../scripts/autoloop/select-card');
+const deliveryStatusDigest = require('../../scripts/autoloop/delivery-status-digest');
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
@@ -5504,6 +5505,91 @@ eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
 }, 'status lists recent tombstones with name, time, supersession, and reason');
 eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
 eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
+
+// OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
+// residue that reap heals, but performs no mutation while doing so.
+const opx5Root = path.join(tmp, 'opx5-residue');
+const opx5CardsRoot = path.join(opx5Root, 'tasks');
+const opx5BoardPath = path.join(opx5Root, 'project-board.md');
+const opx5ResiduePath = path.join(opx5CardsRoot, 'GA-OPS14a Residue.md');
+fs.mkdirSync(opx5CardsRoot, { recursive: true });
+fs.writeFileSync(opx5BoardPath, liveBoard({}));
+fs.writeFileSync(opx5ResiduePath, '---\nstatus: archived\n---\nresidual body\n');
+const opx5State = emptyState();
+opx5State.cards['GA-OPS14a Residue'] = {
+  card: 'GA-OPS14a Residue', phase: 'discarded', card_path: opx5ResiduePath,
+  discarded_at: '2026-07-26T05:49:28.000Z', discard_reason: 'superseded at mint',
+  superseded_by: 'GA-OPS14a2 Successor', final_head: null, carried_fixtures: [],
+};
+const opx5StateBefore = JSON.stringify(opx5State);
+const opx5BoardBefore = fs.readFileSync(opx5BoardPath);
+const opx5NoteBefore = fs.readFileSync(opx5ResiduePath);
+const opx5WriteMethods = ['appendFileSync', 'mkdirSync', 'renameSync', 'rmSync', 'unlinkSync', 'writeFileSync'];
+const opx5OriginalWrites = Object.fromEntries(opx5WriteMethods.map((name) => [name, fs[name]]));
+const opx5Writes = [];
+let opx5Status;
+try {
+  for (const name of opx5WriteMethods) {
+    fs[name] = (...args) => {
+      opx5Writes.push({ name, target: args[0] });
+      throw new Error(`OPX5 status attempted filesystem write via ${name}`);
+    };
+  }
+  opx5Status = commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'state.json') }, {
+    boardMd: opx5BoardBefore.toString('utf8'), boardPath: opx5BoardPath,
+    loadCard: () => null, state: opx5State, cardsRoot: opx5CardsRoot,
+  });
+} finally {
+  for (const name of opx5WriteMethods) fs[name] = opx5OriginalWrites[name];
+}
+eq(opx5Status.tombstone_residue, [{
+  card: 'GA-OPS14a Residue', path: opx5ResiduePath, heal: 'reap',
+}], 'OPX5-RESIDUE-REPORTED status reports the exact discarded-note residue and its sanctioned healer');
+eq(opx5Writes, [], 'OPX5-RESIDUE-READ-ONLY status invokes no filesystem write seam');
+eq(JSON.stringify(opx5State), opx5StateBefore, 'OPX5-RESIDUE-READ-ONLY status keeps the ledger object byte-stable');
+eq(fs.readFileSync(opx5BoardPath), opx5BoardBefore, 'OPX5-RESIDUE-READ-ONLY status keeps board bytes stable');
+eq(fs.readFileSync(opx5ResiduePath), opx5NoteBefore, 'OPX5-RESIDUE-READ-ONLY status keeps residue-note bytes stable');
+
+// OPX5-DIGEST-SURFACES-RESIDUE: current residue is an attention-lite digest
+// block; an empty field is omitted so the pre-OPX5 digest shape is unchanged.
+const opx5Digest = deliveryStatusDigest.buildDigest(opx5Status, '', []);
+eq(opx5Digest.tombstoneResidue, {
+  count: 1,
+  entries: [{ card: 'GA-OPS14a Residue', path: opx5ResiduePath, heal: 'reap' }],
+}, 'OPX5-DIGEST-SURFACES-RESIDUE digest carries the residue count and exact entries');
+const opx5DigestBaseline = deliveryStatusDigest.buildDigest({
+  ...opx5Status, tombstone_residue: undefined,
+}, '', []);
+const opx5DigestEmpty = deliveryStatusDigest.buildDigest({
+  ...opx5Status, tombstone_residue: [],
+}, '', []);
+eq(JSON.stringify(opx5DigestEmpty), JSON.stringify(opx5DigestBaseline),
+  'OPX5-DIGEST-SURFACES-RESIDUE residue-free status keeps the prior digest shape byte-identical');
+
+// OPX5-RESIDUE-CLEAN-AFTER-REAP: reap remains the only healer; status observes
+// its deletion and an empty discarded set deterministically reports [].
+const opx5ReapDeps = {
+  readState: () => opx5State,
+  writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: opx5BoardPath, cardsRoot: opx5CardsRoot,
+  worktreeExists: () => false, sh: () => '',
+  now: () => '2026-07-26T12:00:00.000Z',
+};
+const opx5Reaped = await commandReap({ root: opx5Root }, { json: true }, opx5ReapDeps);
+eq(opx5Reaped.residue_notes_deleted, [{
+  card: 'GA-OPS14a Residue', path: opx5ResiduePath,
+}], 'OPX5-RESIDUE-CLEAN-AFTER-REAP reap deletes the detected residue');
+const opx5CleanStatus = commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'state.json') }, {
+  boardMd: fs.readFileSync(opx5BoardPath, 'utf8'), boardPath: opx5BoardPath,
+  loadCard: () => null, state: opx5State, cardsRoot: opx5CardsRoot,
+});
+eq(opx5CleanStatus.tombstone_residue, [],
+  'OPX5-RESIDUE-CLEAN-AFTER-REAP status is empty after reap heals the note');
+eq(commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'empty-state.json') }, {
+  boardMd: liveBoard({}), boardPath: opx5BoardPath,
+  loadCard: () => null, state: emptyState(), cardsRoot: opx5CardsRoot,
+}).tombstone_residue, [], 'OPX5-RESIDUE-CLEAN-AFTER-REAP a ledger without tombstones reports an empty array');
 
 // BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
 const replayWritesBefore = discardWrites;
