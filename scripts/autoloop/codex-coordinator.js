@@ -4339,14 +4339,16 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
   const writeText = deps.writeText || atomicWriteText;
   const now = deps.now || (() => new Date().toISOString());
-  const boardMd = deps.boardMd ?? readText(boardPath);
-  const status = deps.status || commandStatus(ctx, {
-    state, boardMd, boardPath, cardsRoot,
-    loadCard: (card) => {
-      const target = findCard(cardsRoot, card);
-      return target ? { path: target, raw: readText(target) } : null;
-    },
-  });
+  const status = deps.status || (() => {
+    const boardMd = deps.boardMd ?? readText(boardPath);
+    return commandStatus(ctx, {
+      state, boardMd, boardPath, cardsRoot,
+      loadCard: (card) => {
+        const target = findCard(cardsRoot, card);
+        return target ? { path: target, raw: readText(target) } : null;
+      },
+    });
+  })();
   const fidPath = deps.fidPath || deliveryPaths().fid;
   const fidText = Object.prototype.hasOwnProperty.call(deps, 'fidText')
     ? deps.fidText

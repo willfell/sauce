@@ -5771,10 +5771,20 @@ fs.writeFileSync(opx2MarkerPath, '2026-07-25T00:00:00.000Z');
 const opx2MarkerBefore = fs.readFileSync(opx2MarkerPath);
 let opx2StationWrites = 0;
 let opx2NowCalls = 0;
+let opx2UnexpectedBoardReads = 0;
+const opx2InjectedBoardPath = path.join(opx2Root, 'machine-default-board-must-not-be-read.md');
 const opx2ProjectionDeps = {
-  status: opx2Status, stationPath: opx2StationPath, markerPath: opx2MarkerPath,
+  status: opx2Status, boardPath: opx2InjectedBoardPath,
+  stationPath: opx2StationPath, markerPath: opx2MarkerPath,
   fidText: opx2Fid, releases: opx2Releases,
   now: () => `2026-07-26T12:0${opx2NowCalls++}:00.000Z`,
+  readText: (target) => {
+    if (target === opx2InjectedBoardPath) {
+      opx2UnexpectedBoardReads++;
+      throw new Error(`unexpected injected-status read: ${target}`);
+    }
+    return fs.readFileSync(target, 'utf8');
+  },
   writeText: (target, raw) => { opx2StationWrites++; fs.writeFileSync(target, raw); },
 };
 const opx2Projected = projectLoopStation(
@@ -5783,6 +5793,8 @@ const opx2Projected = projectLoopStation(
 );
 eq(opx2Projected.changed, true, 'OPX2-BODY-PRESERVED first projection changes frontmatter');
 eq(opx2StationWrites, 1, 'OPX2-BODY-PRESERVED first projection performs exactly one station write');
+eq(opx2UnexpectedBoardReads, 0,
+  'OPX2-INJECTED-STATUS-ISOLATION injected authoritative status performs no machine-default board read');
 ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
   'OPX2-BODY-PRESERVED existing station body remains byte-identical');
 const opx2ProjectedBytes = fs.readFileSync(opx2StationPath);
