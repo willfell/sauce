@@ -5591,6 +5591,27 @@ eq(commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'empty-state.j
   loadCard: () => null, state: emptyState(), cardsRoot: opx5CardsRoot,
 }).tombstone_residue, [], 'OPX5-RESIDUE-CLEAN-AFTER-REAP a ledger without tombstones reports an empty array');
 
+// OPX5-REAP-LAZY-EXISTENCE: sharing the predicate must preserve reap's
+// per-record existence check. If corrupt tombstones alias one note path, the
+// first deletion makes the second a clean skip rather than a false refusal.
+const opx5SharedPath = path.join(opx5CardsRoot, 'Shared residue.md');
+fs.writeFileSync(opx5SharedPath, '---\nstatus: archived\n---\nshared residue\n');
+const opx5AliasedState = emptyState();
+opx5AliasedState.cards['Aliased residue A'] = {
+  card: 'Aliased residue A', phase: 'discarded', card_path: opx5SharedPath,
+};
+opx5AliasedState.cards['Aliased residue B'] = {
+  card: 'Aliased residue B', phase: 'discarded', card_path: opx5SharedPath,
+};
+const opx5AliasedReap = await commandReap({ root: opx5Root }, { json: true }, {
+  ...opx5ReapDeps, readState: () => opx5AliasedState,
+});
+eq(opx5AliasedReap.residue_notes_deleted, [{
+  card: 'Aliased residue A', path: opx5SharedPath,
+}], 'OPX5-REAP-LAZY-EXISTENCE the first aliased tombstone deletes the shared residue');
+eq(opx5AliasedReap.residue_notes_refused, [],
+  'OPX5-REAP-LAZY-EXISTENCE the second aliased tombstone observes deletion and skips cleanly');
+
 // BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
 const replayWritesBefore = discardWrites;
 const replayShBefore = discardShCalls.length;

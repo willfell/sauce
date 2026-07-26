@@ -3084,18 +3084,18 @@ function hasDeployedSupersedingSibling(card, tracked) {
   return Boolean(deployedSupersedingSibling(card, tracked));
 }
 
-// One predicate owns both read-only status detection and reap healing:
-// a discarded ledger record whose resolved card note still exists.
-function tombstoneResidue(state, cardsRoot = CARDS_ROOT, exists = fs.existsSync) {
-  return Object.values((state && state.cards) || {})
+// One lazy predicate owns both read-only status detection and reap healing:
+// a discarded ledger record whose resolved card note still exists. Laziness
+// preserves reap's per-item check after each prior deletion.
+function* tombstoneResidue(state, cardsRoot = CARDS_ROOT, exists = fs.existsSync) {
+  const discarded = Object.values((state && state.cards) || {})
     .filter((record) => record.phase === 'discarded')
-    .map((record) => ({
-      record,
-      notePath: resolveCardPath(record.card_path, record.card, cardsRoot),
-    }))
-    .filter(({ notePath }) => notePath && exists(notePath))
-    .map(({ record, notePath }) => ({ card: record.card, path: notePath, heal: 'reap' }))
-    .sort((a, b) => String(a.card).localeCompare(String(b.card)) || String(a.path).localeCompare(String(b.path)));
+    .sort((a, b) => String(a.card).localeCompare(String(b.card)));
+  for (const record of discarded) {
+    const notePath = resolveCardPath(record.card_path, record.card, cardsRoot);
+    if (!notePath || !exists(notePath)) continue;
+    yield { card: record.card, path: notePath, heal: 'reap' };
+  }
 }
 
 // Board-line grammar for the reap sweep: a checkbox line whose first wikilink
@@ -4029,7 +4029,7 @@ function commandStatus(ctx, opts = {}) {
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
   const discarded = Object.values(state.cards || {}).filter((record) => record.phase === 'discarded');
   const cardsRoot = opts.cardsRoot || CARDS_ROOT;
-  const residue = tombstoneResidue(state, cardsRoot, opts.exists || fs.existsSync);
+  const residue = [...tombstoneResidue(state, cardsRoot, opts.exists || fs.existsSync)];
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
