@@ -22,6 +22,7 @@ const {
   commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
   metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
   PARKED_METADATA_REBIND_CARDS,
+  buildLoopStationPayload, validateLoopStationPayload, projectLoopStation,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
@@ -937,16 +938,20 @@ eq(events, ['write'], 'record-pr persists validated state without arming auto-me
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
 const reviewLocks = [];
+let opx2ReviewProjections = 0;
 const review = await commandRecordReview({ root: '/workshop' }, {
   card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
 }, {
   readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
+  projectLoopStation: () => { opx2ReviewProjections++; },
   withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
 eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
   'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
+eq(opx2ReviewProjections, 0,
+  'OPX2-TRANSITION-ONLY review receipt writes never project Loop Station');
 
 reviewState.cards.Review.phase = 'feature_merged';
 await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
@@ -989,6 +994,7 @@ ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined r
 const advanceState = emptyState();
 advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
 const advanceLocks = []; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+let opx2WaitingProjections = 0;
 const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
   withLock: async (_ctx, name, fn) => {
     advanceLocks.push(name); insideAdvanceLock = true;
@@ -996,12 +1002,41 @@ const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advan
   },
   readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
+  projectLoopStation: () => { opx2WaitingProjections++; },
   emit: () => {},
 });
 eq(advanceLocks, [legacyCardGateLockName('Advance'), cardGateLockName('Advance')],
   'advance acquires migration-compatible then exact-identity per-card gates');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
+eq(opx2WaitingProjections, 0,
+  'OPX2-TRANSITION-ONLY waiting poll/retry fires no Loop Station projection');
+const opx2DeployState = emptyState();
+opx2DeployState.cards.Deploy = { card: 'Deploy', phase: 'tap_merged' };
+const opx2DeployProjections = [];
+const opx2DeployDeps = {
+  withLock: immediateCardLock,
+  readState: () => opx2DeployState,
+  stepCard: async (_ctx, _state, record) => {
+    record.phase = 'deployed';
+    return { action: 'complete', card: record.card, phase: record.phase };
+  },
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2DeployProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
+  emit: () => {},
+};
+eq((await commandAdvance({ root: '/workshop' }, { card: 'Deploy', 'lease-seconds': '0' }, opx2DeployDeps)).phase,
+  'deployed', 'OPX2-TRANSITION-ONLY deploy transition completes normally');
+eq(opx2DeployProjections, ['deploy'],
+  'OPX2-TRANSITION-ONLY deploy transition fires exactly one Loop Station projection');
+opx2DeployDeps.stepCard = async (_ctx, _state, record) => ({
+  action: 'complete', card: record.card, phase: record.phase,
+});
+await commandAdvance({ root: '/workshop' }, { card: 'Deploy', 'lease-seconds': '0' }, opx2DeployDeps);
+eq(opx2DeployProjections, ['deploy'],
+  'OPX2-TRANSITION-ONLY deployed replay fires no additional Loop Station projection');
 const parkedAdvanceState = emptyState();
 parkedAdvanceState.cards.Parked = {
   card: 'Parked', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
@@ -3451,6 +3486,7 @@ parkState.cards['Park me'] = {
 };
 const parkLocks = [];
 let parkWrites = 0;
+const opx2ParkResumeProjections = [];
 const parkDeps = {
   readState: () => parkState,
   writeState: () => { parkWrites++; },
@@ -3458,6 +3494,10 @@ const parkDeps = {
   boardPath: parkBoardPath,
   findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   now: () => '2026-07-15T16:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2ParkResumeProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 await assert.rejects(() => commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': 'Park me', 'resume-condition': 'wait for myself',
@@ -3477,6 +3517,8 @@ const parked = await commandPark({ root: parkRoot }, {
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
+eq(opx2ParkResumeProjections, ['park'],
+  'OPX2-TRANSITION-ONLY park transition fires exactly one Loop Station projection');
 eq(parkLocks.slice(-4), [
   'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
 ], 'park serializes selector, migration-compatible card, exact-card transition, and metadata projection');
@@ -3722,6 +3764,7 @@ eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
 parkState.cards['Prerequisite A'].vault_receipts.ero.ok = true;
 const gitCalls = [];
 const resumeLockStart = parkLocks.length;
+opx2ParkResumeProjections.length = 0;
 const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
   ...parkDeps,
   findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
@@ -3736,6 +3779,8 @@ const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
   now: () => '2026-07-15T16:05:00.000Z',
 });
 eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite is satisfied');
+eq(opx2ParkResumeProjections, ['resume'],
+  'OPX2-TRANSITION-ONLY resume transition fires exactly one Loop Station projection');
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
 eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
 ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
@@ -4107,6 +4152,7 @@ recoveryState.cards['Stranded shipped card'] = {
 };
 let recoveryWrites = 0;
 const recoveryLocks = [];
+const opx2RecoveryProjections = [];
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
@@ -4115,6 +4161,10 @@ const recoveryDeps = {
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
   now: () => '2026-07-20T19:01:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2RecoveryProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
 const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
@@ -4153,6 +4203,8 @@ eq(recoveryLocks.slice(-2), [
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed apply fires exactly one Loop Station projection');
 eq(recoveryState.cards['Stranded shipped card'].phase, 'deployed', 'recovery changes the terminal phase only after every proof passes');
 eq(recoveryState.cards['Stranded shipped card'].branch, 'preserved-branch', 'recovery preserves the branch');
 eq(recoveryState.cards['Stranded shipped card'].worktree, '/preserved-worktree', 'recovery preserves the worktree');
@@ -4166,6 +4218,8 @@ const replayedRecovery = await commandRecoverDeployed({ root: reconcileRoot }, {
 eq(replayedRecovery.no_op, true, 'literal receipt-bound recovery replay returns no_op true');
 eq(recoveryWrites, recoveryWritesAfterApply, 'literal recovery replay performs no ledger write');
 eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'literal recovery replay never duplicates its audit');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed replay fires no additional Loop Station projection');
 await assert.rejects(() => commandRecoverDeployed(
   { root: reconcileRoot }, { ...recoveryArgs, 'expected-head': `prefix-${RECOVERY_HEAD}` },
   { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: deepCopy(recoveryBefore) } }) },
@@ -5435,6 +5489,7 @@ let discardWrites = 0;
 const discardLocks = [];
 const discardShCalls = [];
 const discardBoardAtPersist = [];
+const opx2DiscardProjections = [];
 const discardDeps = {
   readState: () => discardState,
   writeState: () => { discardWrites++; discardBoardAtPersist.push(fs.readFileSync(discardBoardPath, 'utf8')); },
@@ -5444,6 +5499,10 @@ const discardDeps = {
   worktreeExists: () => false,
   sh: (cmd, args) => { discardShCalls.push([cmd, ...args]); return ''; },
   now: () => '2026-07-25T12:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2DiscardProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 await assert.rejects(() => commandDiscard({ root: discardRoot }, {
   card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR',
@@ -5455,6 +5514,8 @@ const discardArgs = {
 };
 const discarded = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
 eq(discarded.action, 'discarded', 'BGR-DISCARD-HAPPY discard succeeds with a machine-readable receipt');
+eq(opx2DiscardProjections, ['discard'],
+  'OPX2-TRANSITION-ONLY discard transition fires exactly one Loop Station projection');
 eq(discarded.no_op, false, 'BGR-DISCARD-HAPPY first discard is not a no-op');
 eq(discarded.tombstone, {
   discarded_at: '2026-07-25T12:00:00.000Z', discard_reason: 'redesigned under BGR',
@@ -5612,9 +5673,223 @@ eq(opx5AliasedReap.residue_notes_deleted, [{
 eq(opx5AliasedReap.residue_notes_refused, [],
   'OPX5-REAP-LAZY-EXISTENCE the second aliased tombstone observes deletion and skips cleanly');
 
+ok(typeof buildLoopStationPayload === 'function'
+  && typeof validateLoopStationPayload === 'function'
+  && typeof projectLoopStation === 'function',
+'OPX2-PAYLOAD-SCHEMA exposes the deterministic Loop Station payload, validator, and projection seam');
+
+// OPX2-PAYLOAD-SCHEMA / EXACT-ACTION / BOUNDED: one render-ready payload,
+// reuse of triage + digest semantics, and an explicit overflow count beside
+// every capped list.
+const opx2Root = path.join(tmp, 'opx2-loop-station');
+const opx2StationPath = path.join(opx2Root, 'spice', 'projects', 'sauce', 'Loop Station.md');
+const opx2Ratifications = path.join(path.dirname(opx2StationPath), 'ratifications');
+fs.mkdirSync(opx2Ratifications, { recursive: true });
+fs.writeFileSync(path.join(opx2Ratifications, 'ESC0.md'), 'pending\n');
+const opx2State = emptyState();
+const opx2Active = { card: 'ACTIVE0 Working slice', phase: 'implementing', parent_card: '[[Loop Ops]]' };
+opx2State.cards[opx2Active.card] = opx2Active;
+const opx2Parked = [];
+const opx2Tracked = [{ card: opx2Active.card, phase: 'implementing', status: 'in_progress' }];
+for (let i = 0; i < 25; i++) {
+  const escalation = `ESC${i} Escalation`;
+  const wait = `WAIT${i} Deploy wait`;
+  opx2State.cards[escalation] = { card: escalation, phase: 'parked', parent_card: '[[Loop Ops]]' };
+  opx2State.cards[wait] = { card: wait, phase: 'parked', parent_card: '[[Other Epic]]' };
+  opx2Parked.push(
+    { card: escalation, phase: 'parked', resume_condition: `Will ratifies decision ${i}` },
+    { card: wait, phase: 'parked', resume_condition: `resume after release deploys ${i}` },
+  );
+  opx2Tracked.push(
+    { card: escalation, phase: 'parked', status: 'parked' },
+    { card: wait, phase: 'parked', status: 'parked' },
+  );
+}
+const opx2Status = {
+  action: 'status',
+  active: [{ card: opx2Active.card, phase: 'implementing' }],
+  parked: opx2Parked,
+  tracked: opx2Tracked,
+  projection_problems: [],
+  discarded_recent: Array.from({ length: 25 }, (_, i) => ({
+    name: `DEAD${i}`, discarded_at: `2026-07-26T10:${String(i).padStart(2, '0')}:00.000Z`,
+    reason: 'superseded', superseded_by: null,
+  })),
+  cutover_history: Array.from({ length: 25 }, (_, i) => ({
+    enabled: i % 2 === 0, at: `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+  })),
+  tombstone_residue: Array.from({ length: 25 }, (_, i) => ({
+    card: `RES${i}`, path: `/cards/RES${i}.md`, heal: 'reap',
+  })),
+  state_path: path.join(opx2Root, 'state.json'),
+};
+const opx2Fid = Array.from({ length: 25 }, (_, i) =>
+  `## Amendment ${i} — SELF-RATIFIED 2026-07-${String(i + 1).padStart(2, '0')}`).join('\n');
+const opx2Releases = Array.from({ length: 25 }, (_, i) => `0.${300 - i}.0`);
+const opx2Payload = buildLoopStationPayload({
+  status: opx2Status, state: opx2State, fidText: opx2Fid, lastSeen: null,
+  updatedOn: 'park', updatedAt: '2026-07-26T12:00:00.000Z',
+  stationPath: opx2StationPath, releases: opx2Releases,
+});
+eq(validateLoopStationPayload(opx2Payload), { ok: true, errors: [] },
+  'OPX2-PAYLOAD-SCHEMA the complete projected payload validates against sauce.loop-station.v1');
+ok(opx2Payload.exact_action.includes('ESC0 Escalation')
+  && opx2Payload.exact_action.includes('[[spice/projects/sauce/ratifications/ESC0]]'),
+'OPX2-EXACT-ACTION names the first escalation and its existing ratification artifact');
+eq(opx2Payload.active, { card: opx2Active.card, phase: 'implementing', epic: 'Loop Ops' },
+  'OPX2-PAYLOAD-SCHEMA active carries card, phase, and epic');
+for (const [label, list, overflow] of [
+  ['needs_attention', opx2Payload.needs_attention, opx2Payload.needs_attention_overflow_count],
+  ['waiting', opx2Payload.waiting, opx2Payload.waiting_overflow_count],
+  ['releases_recent', opx2Payload.releases_recent, opx2Payload.releases_recent_overflow_count],
+  ['tombstone_residue', opx2Payload.tombstone_residue, opx2Payload.tombstone_residue_overflow_count],
+  ['since.discards', opx2Payload.since.discards, opx2Payload.since.discards_overflow_count],
+  ['since.self_ratified', opx2Payload.since.self_ratified, opx2Payload.since.self_ratified_overflow_count],
+  ['since.cutover_flips', opx2Payload.since.cutover_flips, opx2Payload.since.cutover_flips_overflow_count],
+]) {
+  eq(list.length, 20, `OPX2-BOUNDED ${label} caps at twenty`);
+  eq(overflow, 5, `OPX2-BOUNDED ${label} records five overflow entries`);
+}
+eq(opx2Payload.counts.needs_attention, 25, 'OPX2-BOUNDED counts preserve the unbounded needs-attention total');
+eq(opx2Payload.counts.waiting, 25, 'OPX2-BOUNDED counts preserve the unbounded genuine-wait total');
+const opx2NoAction = buildLoopStationPayload({
+  status: {
+    ...opx2Status, active: [], parked: [], tracked: [], discarded_recent: [],
+    cutover_history: [], tombstone_residue: [],
+  },
+  state: emptyState(), fidText: '', lastSeen: null, updatedOn: 'resume',
+  updatedAt: '2026-07-26T12:01:00.000Z', stationPath: opx2StationPath, releases: [],
+});
+eq(opx2NoAction.exact_action, null, 'OPX2-EXACT-ACTION no escalation state projects exact_action null');
+
+// OPX2-BODY-PRESERVED / IDEMPOTENT-REPLAY / PEEK-NEVER-ADVANCES.
+fs.mkdirSync(path.dirname(opx2StationPath), { recursive: true });
+const opx2Body = '\n\nCUSTOM OPERATOR BODY — coordinator must never rewrite this.\n';
+fs.writeFileSync(opx2StationPath, `---\ntype: loop-station\n---${opx2Body}`);
+const opx2MarkerPath = path.join(opx2Root, '.delivery-digest-last-seen');
+fs.writeFileSync(opx2MarkerPath, '2026-07-25T00:00:00.000Z');
+const opx2MarkerBefore = fs.readFileSync(opx2MarkerPath);
+let opx2StationWrites = 0;
+let opx2NowCalls = 0;
+let opx2UnexpectedBoardReads = 0;
+const opx2InjectedBoardPath = path.join(opx2Root, 'machine-default-board-must-not-be-read.md');
+const opx2ProjectionDeps = {
+  status: opx2Status, boardPath: opx2InjectedBoardPath,
+  stationPath: opx2StationPath, markerPath: opx2MarkerPath,
+  fidText: opx2Fid, releases: opx2Releases,
+  now: () => `2026-07-26T12:0${opx2NowCalls++}:00.000Z`,
+  readText: (target) => {
+    if (target === opx2InjectedBoardPath) {
+      opx2UnexpectedBoardReads++;
+      throw new Error(`unexpected injected-status read: ${target}`);
+    }
+    return fs.readFileSync(target, 'utf8');
+  },
+  writeText: (target, raw) => { opx2StationWrites++; fs.writeFileSync(target, raw); },
+};
+const opx2Projected = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2Projected.changed, true, 'OPX2-BODY-PRESERVED first projection changes frontmatter');
+eq(opx2StationWrites, 1, 'OPX2-BODY-PRESERVED first projection performs exactly one station write');
+eq(opx2UnexpectedBoardReads, 0,
+  'OPX2-INJECTED-STATUS-ISOLATION injected authoritative status performs no machine-default board read');
+ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
+  'OPX2-BODY-PRESERVED existing station body remains byte-identical');
+const opx2ProjectedBytes = fs.readFileSync(opx2StationPath);
+const opx2Replay = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2Replay.no_op, true, 'OPX2-IDEMPOTENT-REPLAY identical transition replay is an explicit no-op');
+eq(opx2StationWrites, 1, 'OPX2-IDEMPOTENT-REPLAY identical replay performs zero churn writes');
+eq(fs.readFileSync(opx2StationPath), opx2ProjectedBytes,
+  'OPX2-IDEMPOTENT-REPLAY station frontmatter and body stay byte-identical');
+eq(fs.readFileSync(opx2MarkerPath), opx2MarkerBefore,
+  'OPX2-PEEK-NEVER-ADVANCES projection leaves the digest last-seen marker byte-identical');
+eq(opx2Projected.payload.since.marker_at, '2026-07-25T00:00:00.000Z',
+  'OPX2-PEEK-NEVER-ADVANCES payload carries the peeked marker value');
+const opx2MalformedTimestamp = fs.readFileSync(opx2StationPath, 'utf8')
+  .replace(/updated_at: "[^"]+"/, 'updated_at: "not-an-iso-timestamp"');
+fs.writeFileSync(opx2StationPath, opx2MalformedTimestamp);
+const opx2TimestampWritesBefore = opx2StationWrites;
+const opx2TimestampHealed = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2TimestampHealed.changed, true,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at is healed instead of reused after validation');
+eq(opx2StationWrites, opx2TimestampWritesBefore + 1,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at performs one corrective projection write');
+ok(Number.isFinite(Date.parse(
+  fs.readFileSync(opx2StationPath, 'utf8').match(/updated_at: "([^"]+)"/)[1],
+)), 'OPX2-PAYLOAD-SCHEMA healed station carries a valid updated_at timestamp');
+ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
+  'OPX2-BODY-PRESERVED timestamp healing still preserves the existing station body byte-identically');
+
+const opx2MissingStationPath = path.join(opx2Root, 'missing', 'Loop Station.md');
+let opx2ScaffoldWrites = 0;
+const opx2ScaffoldDeps = {
+  ...opx2ProjectionDeps, stationPath: opx2MissingStationPath,
+  writeText: (target, raw) => { opx2ScaffoldWrites++; fs.writeFileSync(target, raw); },
+};
+const opx2Scaffolded = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'deploy', opx2ScaffoldDeps,
+);
+eq(opx2Scaffolded.scaffolded, true, 'OPX2-BODY-PRESERVED a missing station is scaffolded exactly once');
+ok(/customjs-guard.*OperatorStation/.test(fs.readFileSync(opx2MissingStationPath, 'utf8')),
+  'OPX2-BODY-PRESERVED scaffold carries the stock OperatorStation render body');
+eq(projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'deploy', opx2ScaffoldDeps,
+).no_op, true, 'OPX2-IDEMPOTENT-REPLAY scaffold replay is a no-op');
+eq(opx2ScaffoldWrites, 1, 'OPX2-IDEMPOTENT-REPLAY scaffold replay performs zero writes');
+
+// OPX2-STATUS-NO-WRITE-MUTATION: intercept the real atomic writer used by
+// projectLoopStation at the exact station target. Status must perform zero
+// writes, while the positive-control projector must hit the trap exactly once;
+// adding that projector to status therefore turns this fixture red.
+const opx2ReadOnlyBoard = path.join(opx2Root, 'read-only', 'sauce-board.md');
+const opx2ReadOnlyStation = path.join(path.dirname(opx2ReadOnlyBoard), 'Loop Station.md');
+const opx2OriginalWriteFileSync = fs.writeFileSync;
+const opx2ReadWriteAttempts = [];
+fs.writeFileSync = (target) => {
+  opx2ReadWriteAttempts.push(String(target));
+  throw new Error('OPX2-STATUS-NO-WRITE-MUTATION trapped a forbidden station write');
+};
+try {
+  commandStatus({ root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') }, {
+    state: emptyState(), boardMd: liveBoard({}), boardPath: opx2ReadOnlyBoard,
+    cardsRoot: path.join(opx2Root, 'read-only-cards'), loadCard: () => null,
+  });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION status reaches zero production-writer calls');
+  commandRecover({ root: opx2Root }, { state: emptyState(), sh: () => '' });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION read-only recovery inspection reaches zero production-writer calls');
+  assert.throws(() => projectLoopStation(
+    { root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') },
+    opx2State, 'status-positive-control', {
+      status: opx2Status, stationPath: opx2ReadOnlyStation, markerPath: null,
+      fidText: opx2Fid, releases: opx2Releases,
+      now: () => '2026-07-26T12:30:00.000Z',
+    },
+  ), /OPX2-STATUS-NO-WRITE-MUTATION trapped/,
+  'OPX2-STATUS-NO-WRITE-MUTATION positive-control projection turns the writer oracle red'); count++;
+  eq(opx2ReadWriteAttempts.length, 1,
+    'OPX2-STATUS-NO-WRITE-MUTATION positive control reaches the exact atomic station writer once');
+} finally {
+  fs.writeFileSync = opx2OriginalWriteFileSync;
+}
+ok(!fs.existsSync(opx2ReadOnlyStation),
+  'OPX2-TRANSITION-ONLY status and the trapped positive control leave the actual station target absent');
+
 // BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
 const replayWritesBefore = discardWrites;
 const replayShBefore = discardShCalls.length;
+const replayStationBefore = opx2DiscardProjections.length;
 const replayBoardBytes = fs.readFileSync(discardBoardPath, 'utf8');
 const replayStateBytes = JSON.stringify(discardState);
 const discardReplay = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
@@ -5622,6 +5897,8 @@ eq(discardReplay.action, 'discarded', 'BGR-DISCARD-REPLAY-NOOP literal replay re
 eq(discardReplay.no_op, true, 'BGR-DISCARD-REPLAY-NOOP literal replay is an explicit no-op');
 eq(discardWrites, replayWritesBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero ledger writes');
 eq(discardShCalls.length, replayShBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero git operations');
+eq(opx2DiscardProjections.length, replayStationBefore,
+  'OPX2-TRANSITION-ONLY discard replay fires no additional Loop Station projection');
 eq(fs.readFileSync(discardBoardPath, 'utf8'), replayBoardBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps board bytes stable');
 eq(JSON.stringify(discardState), replayStateBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps ledger state byte-stable');
 await assert.rejects(() => commandDiscard({ root: discardRoot }, {
@@ -5867,6 +6144,7 @@ reapState.cards['Ghost residue'] = {
 let reapWrites = 0;
 const reapLocks = [];
 const reapShCalls = [];
+const opx2ReapProjections = [];
 const reapDeps = {
   readState: () => reapState,
   writeState: () => { reapWrites++; },
@@ -5875,6 +6153,10 @@ const reapDeps = {
   worktreeExists: () => false,
   sh: (cmd, cmdArgs) => { reapShCalls.push([cmd, ...cmdArgs]); return ''; },
   now: () => '2026-07-25T14:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2ReapProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 await assert.rejects(() => commandReap({ root: reapRoot }, {}, reapDeps), /requires --json/,
   'BGR-REAP refuses without --json before any read or write');
@@ -5883,6 +6165,8 @@ eq(reapWrites, 0, 'BGR-REAP missing --json refusal performs zero writes');
 const reaped = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
 eq(reaped.action, 'reaped', 'BGR-REAP emits one machine-readable reap receipt');
 eq(reaped.no_op, false, 'BGR-REAP first sweep is not a no-op');
+eq(opx2ReapProjections, ['reap'],
+  'OPX2-TRANSITION-ONLY one mutating reap batch fires exactly one Loop Station projection');
 ok(reapLocks.includes('selector'), 'BGR-REAP the sweep runs under the selector lock');
 
 // BGR-REAP-CORPSES: parked stem-sibling with a deployed successor is discarded.
@@ -6540,11 +6824,16 @@ eq(cutDrift.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK a drift-finding full 
 eq(cutState.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK the reset persists in coordinator state');
 
 // BGR-CUTOVER-CRITERIA: --json first, operands required, every unmet criterion listed.
+const opx2CutoverProjections = [];
 const cutoverBaseDeps = {
   readState: () => cutState,
   writeState: () => { cutWrites++; },
   withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
   now: () => '2026-07-25T19:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2CutoverProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 cutLocks.length = 0;
 const cutWritesBeforeRefusals = cutWrites;
@@ -6614,6 +6903,8 @@ const cutEnabled = await commandCutover({ root: cutRoot }, {
 eq(cutEnabled.action, 'cutover', 'BGR-CUTOVER-CRITERIA all-green cutover emits the cutover receipt');
 eq(cutEnabled.enabled, true, 'BGR-CUTOVER-CRITERIA all-green cutover enables the flag');
 eq(cutEnabled.no_op, false, 'BGR-CUTOVER-CRITERIA first enable is not a no-op');
+eq(opx2CutoverProjections, ['cutover'],
+  'OPX2-TRANSITION-ONLY cutover enable fires exactly one Loop Station projection');
 ok(cutLocks.includes('selector'), 'BGR-CUTOVER-CRITERIA cutover evaluates under the selector lock');
 eq(cutWrites, cutWritesBeforeEnable + 1, 'BGR-CUTOVER-CRITERIA enabling writes coordinator state exactly once');
 eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-CRITERIA the enabled flag persists in coordinator state');
@@ -6639,6 +6930,8 @@ eq(cutReplay.enabled, true, 'BGR-CUTOVER-NOOP replay reports the enabled flag');
 eq(cutWrites, cutWritesBeforeReplay, 'BGR-CUTOVER-NOOP replay performs zero writes');
 eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-NOOP replay never restamps enabled_at');
 eq(cutState.cutover_history.length, 1, 'BGR-CUTOVER-NOOP replay appends no cutover_history entry');
+eq(opx2CutoverProjections, ['cutover'],
+  'OPX2-TRANSITION-ONLY cutover replay fires no additional Loop Station projection');
 
 // BGR-CUTOVER-REVERSIBLE: --off flips it back; status exposes both ways; re-enable works.
 const cutStatusEnabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
@@ -6655,6 +6948,8 @@ await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: 
 const cutOff = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
 eq(cutOff.enabled, false, 'BGR-CUTOVER-REVERSIBLE --off disables the flag');
 eq(cutOff.no_op, false, 'BGR-CUTOVER-REVERSIBLE first --off is not a no-op');
+eq(opx2CutoverProjections, ['cutover', 'cutover'],
+  'OPX2-TRANSITION-ONLY cutover disable fires exactly one additional Loop Station projection');
 eq(cutState.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
   'BGR-CUTOVER-REVERSIBLE the disable receipt records disabled_at and reason');
 eq(cutState.cutover_history, [

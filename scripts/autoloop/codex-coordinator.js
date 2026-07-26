@@ -24,6 +24,9 @@ const {
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
+const deliveryStatusDigest = require('./delivery-status-digest');
+const deliveryReviewTriage = require('./delivery-review-triage');
+const { deliveryPaths } = require('./delivery-paths');
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
@@ -2721,10 +2724,14 @@ async function commandPark(ctx, args, deps = {}) {
       withLock: transitionLock, projectCard: project, now, state,
     });
     persist(ctx, state, record);
+    const station = await attemptLoopStationProjection(ctx, state, 'park', {
+      projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot: deps.cardsRoot,
+    });
     const result = {
       action: projection.ok ? 'parked' : 'parked-projection-failed',
       card, phase: record.phase, dependencies, resume_condition: resumeCondition,
       branch: record.branch, worktree: record.worktree,
+      loop_station: station.receipt,
     };
     if (!projection.ok) {
       result.projection_error = projection.error;
@@ -2829,6 +2836,9 @@ async function commandResume(ctx, args, deps = {}) {
       withLock: transitionLock, projectCard: project, now, state,
     });
     persist(ctx, state, record);
+    const station = await attemptLoopStationProjection(ctx, state, 'resume', {
+      projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot: deps.cardsRoot,
+    });
     return {
       action: projection.ok ? 'implement' : 'resume-projection-failed',
       card, phase: record.phase, branch: record.branch, worktree: record.worktree,
@@ -2836,6 +2846,7 @@ async function commandResume(ctx, args, deps = {}) {
       invalidation_reason: invalidation.reason,
       head_sha: headSha, origin_main_sha: originMainSha,
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
+      loop_station: station.receipt,
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
     };
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
@@ -2874,6 +2885,7 @@ function resolveDiscardDeps(deps = {}) {
     cardsRoot: deps.cardsRoot || CARDS_ROOT,
     writeText: deps.writeText || atomicWriteText,
     now: deps.now || (() => new Date().toISOString()),
+    stationProject: deps.projectLoopStation || projectLoopStation,
   };
 }
 
@@ -3041,7 +3053,14 @@ async function commandDiscard(ctx, args, deps = {}) {
   const d = resolveDiscardDeps(deps);
   const gate = { card: operands.card, staleMs: 60 * 60 * 1000 };
   return d.transitionLock(ctx, 'selector',
-    async () => withCardGateLock(ctx, operands.card, () => discardCardCore(ctx, operands, d), gate, d.transitionLock),
+    async () => withCardGateLock(ctx, operands.card, async () => {
+      const result = await discardCardCore(ctx, operands, d);
+      if (result.no_op) return result;
+      const station = await attemptLoopStationProjection(ctx, d.loadState(ctx), 'discard', {
+        projectLoopStation: d.stationProject, boardPath: d.boardPath, cardsRoot: d.cardsRoot,
+      });
+      return { ...result, loop_station: station.receipt };
+    }, gate, d.transitionLock),
     gate);
 }
 
@@ -3306,6 +3325,12 @@ async function commandReap(ctx, args, deps = {}) {
       && receipt.also.every((item) => item.no_op)
       && !receipt.annotations_stripped.length && !receipt.duplicates_removed.length
       && !receipt.residue_lines_removed.length && !receipt.residue_notes_deleted.length;
+    if (!receipt.no_op) {
+      const station = await attemptLoopStationProjection(ctx, d.loadState(ctx), 'reap', {
+        projectLoopStation: d.stationProject, boardPath: d.boardPath, cardsRoot: d.cardsRoot,
+      });
+      receipt.loop_station = station.receipt;
+    }
     return receipt;
   }, { staleMs });
 }
@@ -3868,7 +3893,11 @@ async function commandClaim(ctx, args) {
     record.phase = 'implementing';
     await attemptProjection(ctx, record, BOARD, { state });
     writeState(ctx, state, record);
-    return { action: 'implement', ...record, skipped: selected.skipped };
+    const station = await attemptLoopStationProjection(ctx, state, 'claim');
+    return {
+      action: 'implement', ...record, skipped: selected.skipped,
+      loop_station: station.receipt,
+    };
   });
 }
 
@@ -4000,6 +4029,7 @@ async function commandAdvance(ctx, args, deps = {}) {
   const gateLock = deps.withLock || withLock;
   const step = deps.stepCard || stepCard;
   const emit = deps.emit || ((value) => process.stdout.write(`${JSON.stringify(value)}\n`));
+  const selectorLock = deps.selectorLock || deps.withLock || withLock;
   const deadline = Date.now() + lease * 1000;
   let last = '';
   while (true) {
@@ -4007,11 +4037,26 @@ async function commandAdvance(ctx, args, deps = {}) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
       emit(halted); return halted;
     }
-    const result = await withCardGateLock(ctx, card, async () => {
+    let transitionedTo = null;
+    let result = await withCardGateLock(ctx, card, async () => {
       const state = loadState(ctx); const record = state.cards[card];
       if (!record) throw new Error(`card ${card} not in state`);
-      return step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+      const priorPhase = record.phase;
+      const stepped = await step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
+      if (!args['dry-run'] && record.phase !== priorPhase) transitionedTo = record.phase;
+      return stepped;
     }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
+    if (transitionedTo) {
+      const station = await selectorLock(ctx, 'selector', async () => attemptLoopStationProjection(
+        ctx, loadState(ctx), transitionedTo === 'deployed' ? 'deploy' : 'advance',
+        {
+          projectLoopStation: deps.projectLoopStation,
+          boardPath: deps.boardPath,
+          cardsRoot: deps.cardsRoot,
+        },
+      ));
+      result = { ...result, loop_station: station.receipt };
+    }
     const fingerprint = JSON.stringify(result);
     if (fingerprint !== last) { emit(result); last = fingerprint; }
     if (!['waiting', 'phase-change'].includes(result.action) || lease === 0) return result;
@@ -4093,6 +4138,280 @@ function commandStatus(ctx, opts = {}) {
     cutover_history: state.cutover_history || [],
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
+}
+
+const LOOP_STATION_SCHEMA_VERSION = '1.0.0';
+const LOOP_STATION_LIST_CAP = 20;
+const LOOP_STATION_BODY = [
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });',
+  '```',
+  '',
+].join('\n');
+
+function boundedStationList(items, cap = LOOP_STATION_LIST_CAP) {
+  const values = Array.isArray(items) ? items : [];
+  return { items: values.slice(0, cap), overflow_count: Math.max(0, values.length - cap) };
+}
+
+function loopStationEpic(record) {
+  if (!record) return null;
+  return normalizeCardLink(record.parent_card
+    || (record.delivery_contract && record.delivery_contract.epic)
+    || '') || null;
+}
+
+function loopStationWhy(item) {
+  const raw = String((item && item.resume_condition) || '').trim();
+  if (raw) return raw.slice(0, 500);
+  if (item && item.bucket === 'coordinator-deadend') return 'Coordinator projection needs deterministic repair.';
+  if (item && item.bucket === 'provisional-pending') return 'A provisional design amendment needs resolution.';
+  return 'This item is outside the loop’s autonomous resume authority.';
+}
+
+function loopStationRatificationPath(stationPath, card, exists = fs.existsSync) {
+  const id = cardIdToken(card);
+  if (!id) return null;
+  const artifact = path.join(path.dirname(stationPath), 'ratifications', `${id}.md`);
+  if (!exists(artifact)) return null;
+  const normalized = artifact.replace(/\\/g, '/');
+  const marker = normalized.lastIndexOf('/spice/');
+  const relative = marker >= 0 ? normalized.slice(marker + 1) : path.relative(path.dirname(stationPath), artifact).replace(/\\/g, '/');
+  return relative.replace(/\.md$/i, '');
+}
+
+function recentLoopStationReleases(state) {
+  const seen = new Set();
+  return Object.values((state && state.cards) || {})
+    .filter((record) => record.phase === 'deployed' && (record.required_version || record.brew_version))
+    .sort((a, b) => String(b.deployed_at || '').localeCompare(String(a.deployed_at || '')))
+    .map((record) => String(record.required_version || record.brew_version))
+    .filter((version) => {
+      if (seen.has(version)) return false;
+      seen.add(version);
+      return true;
+    });
+}
+
+function buildLoopStationPayload({
+  status, state, fidText = '', lastSeen = null, updatedOn, updatedAt,
+  stationPath, exists = fs.existsSync, releases,
+}) {
+  const digest = deliveryStatusDigest.buildDigest(
+    status, fidText, releases || recentLoopStationReleases(state), { lastSeen },
+  );
+  const cards = (state && state.cards) || {};
+  const needsAll = digest.actionable.map((item) => {
+    const ratification = loopStationRatificationPath(stationPath, item.card, exists);
+    return {
+      card: item.card,
+      epic: loopStationEpic(cards[item.card]),
+      bucket: item.bucket,
+      why: loopStationWhy(item),
+      ratification,
+    };
+  });
+  const activeIds = new Set((status.active || []).map((item) => item.card));
+  const trackedByCard = new Map((status.tracked || []).map((item) => [item.card, item]));
+  const waitingAll = (status.parked || []).flatMap((parked) => {
+    const enriched = { ...parked, ...(trackedByCard.get(parked.card) || {}) };
+    const bucket = deliveryReviewTriage.classifyCard(enriched, {
+      activeIds, tracked: status.tracked || [],
+    });
+    if (!['concurrency-wait', 'deploy-wait'].includes(bucket)) return [];
+    return [{
+      card: parked.card,
+      epic: loopStationEpic(cards[parked.card]),
+      bucket,
+      why: loopStationWhy(enriched),
+    }];
+  });
+  const needs = boundedStationList(needsAll);
+  const waiting = boundedStationList(waitingAll);
+  const discards = boundedStationList((digest.since && digest.since.discards) || []);
+  const selfRatified = boundedStationList((digest.since && digest.since.self_ratified) || []);
+  const cutoverFlips = boundedStationList((digest.since && digest.since.cutover_flips) || []);
+  const releaseList = boundedStationList(digest.releases || []);
+  const residue = boundedStationList(status.tombstone_residue || []);
+  const activeStatus = (status.active || [])[0] || null;
+  const active = activeStatus ? {
+    card: activeStatus.card,
+    phase: activeStatus.phase,
+    epic: loopStationEpic(cards[activeStatus.card]),
+  } : null;
+  const first = needs.items[0] || null;
+  const exactAction = !first
+    ? null
+    : first.ratification
+      ? `Ratify ${first.card} in [[${first.ratification}]] — ${first.why}`
+      : `Review ${first.card} — ${first.why}`;
+  return {
+    type: 'loop-station',
+    schema_version: LOOP_STATION_SCHEMA_VERSION,
+    updated_at: updatedAt,
+    updated_on: updatedOn,
+    headline: deliveryStatusDigest.headline(digest),
+    exact_action: exactAction,
+    active,
+    needs_attention: needs.items,
+    needs_attention_overflow_count: needs.overflow_count,
+    waiting: waiting.items,
+    waiting_overflow_count: waiting.overflow_count,
+    since: {
+      marker_at: lastSeen,
+      discards: discards.items,
+      discards_overflow_count: discards.overflow_count,
+      self_ratified: selfRatified.items,
+      self_ratified_overflow_count: selfRatified.overflow_count,
+      cutover_flips: cutoverFlips.items,
+      cutover_flips_overflow_count: cutoverFlips.overflow_count,
+    },
+    releases_recent: releaseList.items,
+    releases_recent_overflow_count: releaseList.overflow_count,
+    tombstone_residue: residue.items,
+    tombstone_residue_overflow_count: residue.overflow_count,
+    counts: {
+      needs_attention: needsAll.length,
+      waiting: waitingAll.length,
+      frozen: digest.noAction.frozen,
+      done: digest.noAction.done,
+      tombstone_residue: (status.tombstone_residue || []).length,
+    },
+  };
+}
+
+function validateLoopStationPayload(payload) {
+  const errors = [];
+  const required = [
+    'type', 'schema_version', 'updated_at', 'updated_on', 'headline', 'exact_action',
+    'active', 'needs_attention', 'needs_attention_overflow_count', 'waiting',
+    'waiting_overflow_count', 'since', 'releases_recent', 'releases_recent_overflow_count',
+    'tombstone_residue', 'tombstone_residue_overflow_count', 'counts',
+  ];
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, key)) errors.push(`missing ${key}`);
+  }
+  if (!payload || payload.type !== 'loop-station') errors.push('type must be loop-station');
+  if (!payload || payload.schema_version !== LOOP_STATION_SCHEMA_VERSION) errors.push(`schema_version must be ${LOOP_STATION_SCHEMA_VERSION}`);
+  if (!payload || typeof payload.updated_at !== 'string' || !Number.isFinite(Date.parse(payload.updated_at))) errors.push('updated_at must be an ISO timestamp');
+  if (!payload || typeof payload.updated_on !== 'string' || !payload.updated_on.trim()) errors.push('updated_on must be a non-empty transition verb');
+  if (!payload || typeof payload.headline !== 'string') errors.push('headline must be a string');
+  if (payload && payload.exact_action !== null && typeof payload.exact_action !== 'string') errors.push('exact_action must be string|null');
+  if (payload && payload.active !== null && (typeof payload.active !== 'object' || Array.isArray(payload.active))) errors.push('active must be object|null');
+  const checkBounded = (value, overflow, label) => {
+    if (!Array.isArray(value)) errors.push(`${label} must be an array`);
+    else if (value.length > LOOP_STATION_LIST_CAP) errors.push(`${label} exceeds ${LOOP_STATION_LIST_CAP}`);
+    if (!Number.isInteger(overflow) || overflow < 0) errors.push(`${label}_overflow_count must be a non-negative integer`);
+  };
+  checkBounded(payload && payload.needs_attention, payload && payload.needs_attention_overflow_count, 'needs_attention');
+  checkBounded(payload && payload.waiting, payload && payload.waiting_overflow_count, 'waiting');
+  checkBounded(payload && payload.releases_recent, payload && payload.releases_recent_overflow_count, 'releases_recent');
+  checkBounded(payload && payload.tombstone_residue, payload && payload.tombstone_residue_overflow_count, 'tombstone_residue');
+  if (!payload || !payload.since || typeof payload.since !== 'object' || Array.isArray(payload.since)) {
+    errors.push('since must be an object');
+  } else {
+    checkBounded(payload.since.discards, payload.since.discards_overflow_count, 'since.discards');
+    checkBounded(payload.since.self_ratified, payload.since.self_ratified_overflow_count, 'since.self_ratified');
+    checkBounded(payload.since.cutover_flips, payload.since.cutover_flips_overflow_count, 'since.cutover_flips');
+  }
+  if (!payload || !payload.counts || typeof payload.counts !== 'object' || Array.isArray(payload.counts)) {
+    errors.push('counts must be an object');
+  } else {
+    for (const key of ['needs_attention', 'waiting', 'frozen', 'done', 'tombstone_residue']) {
+      if (!Number.isInteger(payload.counts[key]) || payload.counts[key] < 0) errors.push(`counts.${key} must be a non-negative integer`);
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+function loopStationFrontmatterFields(payload) {
+  return Object.fromEntries(Object.entries(payload).map(([key, value]) => [
+    key, value === null ? 'null' : JSON.stringify(value),
+  ]));
+}
+
+function projectLoopStation(ctx, state, updatedOn, deps = {}) {
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const stationPath = deps.stationPath || path.join(path.dirname(boardPath), 'Loop Station.md');
+  const exists = deps.exists || fs.existsSync;
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const writeText = deps.writeText || atomicWriteText;
+  const now = deps.now || (() => new Date().toISOString());
+  const status = deps.status || (() => {
+    const boardMd = deps.boardMd ?? readText(boardPath);
+    return commandStatus(ctx, {
+      state, boardMd, boardPath, cardsRoot,
+      loadCard: (card) => {
+        const target = findCard(cardsRoot, card);
+        return target ? { path: target, raw: readText(target) } : null;
+      },
+    });
+  })();
+  const fidPath = deps.fidPath || deliveryPaths().fid;
+  const fidText = Object.prototype.hasOwnProperty.call(deps, 'fidText')
+    ? deps.fidText
+    : (exists(fidPath) ? readText(fidPath) : '');
+  const markerPath = Object.prototype.hasOwnProperty.call(deps, 'markerPath')
+    ? deps.markerPath
+    : deliveryStatusDigest.markerPathFor(status);
+  const lastSeen = Object.prototype.hasOwnProperty.call(deps, 'lastSeen')
+    ? deps.lastSeen
+    : (markerPath && exists(markerPath) ? readText(markerPath).trim() || null : null);
+  const updatedAt = now();
+  const payload = buildLoopStationPayload({
+    status, state, fidText, lastSeen, updatedOn, updatedAt, stationPath, exists,
+    releases: deps.releases,
+  });
+  const validation = validateLoopStationPayload(payload);
+  if (!validation.ok) throw new Error(`Loop Station payload is invalid: ${validation.errors.join('; ')}`);
+  const fields = loopStationFrontmatterFields(payload);
+  if (!exists(stationPath)) {
+    if (deps.ensureDir) deps.ensureDir(path.dirname(stationPath));
+    else fs.mkdirSync(path.dirname(stationPath), { recursive: true });
+    const scaffold = patchFrontmatter(`---\n\n---${LOOP_STATION_BODY}`, fields);
+    writeText(stationPath, scaffold);
+    return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: true, no_op: false, path: stationPath, payload };
+  }
+  const raw = readText(stationPath);
+  if (!/^---\n[\s\S]*?\n---/.test(raw)) {
+    throw new Error('Loop Station exists without frontmatter; refusing to rewrite its body');
+  }
+  const priorUpdatedAt = scalarField(raw, 'updated_at');
+  const stablePayload = {
+    ...payload,
+    updated_at: priorUpdatedAt && Number.isFinite(Date.parse(priorUpdatedAt))
+      ? priorUpdatedAt
+      : payload.updated_at,
+  };
+  const stableNext = patchFrontmatter(raw, loopStationFrontmatterFields(stablePayload));
+  if (stableNext === raw) {
+    return { action: 'loop-station-projected', updated_on: updatedOn, changed: false, scaffolded: false, no_op: true, path: stationPath, payload: stablePayload };
+  }
+  const next = patchFrontmatter(raw, fields);
+  writeText(stationPath, next);
+  return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: false, no_op: false, path: stationPath, payload };
+}
+
+async function attemptLoopStationProjection(ctx, state, updatedOn, deps = {}) {
+  const project = deps.projectLoopStation || projectLoopStation;
+  try {
+    const receipt = await project(ctx, state, updatedOn, {
+      boardPath: deps.boardPath || BOARD,
+      cardsRoot: deps.cardsRoot || CARDS_ROOT,
+    });
+    return { ok: true, receipt };
+  } catch (err) {
+    return {
+      ok: false,
+      receipt: {
+        action: 'loop-station-projection-failed',
+        updated_on: updatedOn,
+        error: err.message,
+      },
+    };
+  }
 }
 
 async function commandStatusLocked(ctx, opts = {}) {
@@ -4307,7 +4626,15 @@ async function commandCutover(ctx, args, deps = {}) {
       state.cutover = { enabled: false, disabled_at: disabledAt, reason };
       appendCutoverHistory(state, { enabled: false, at: disabledAt, reason });
       persist(ctx, state);
-      return { action: 'cutover', enabled: false, no_op: false, cutover: state.cutover };
+      const station = await attemptLoopStationProjection(ctx, state, 'cutover', {
+        projectLoopStation: deps.projectLoopStation,
+        boardPath: deps.boardPath,
+        cardsRoot: deps.cardsRoot,
+      });
+      return {
+        action: 'cutover', enabled: false, no_op: false, cutover: state.cutover,
+        loop_station: station.receipt,
+      };
     });
   }
   const requiredCards = args['require-card'] == null ? [] : argumentValues(args['require-card']);
@@ -4376,7 +4703,15 @@ async function commandCutover(ctx, args, deps = {}) {
     state.cutover = { enabled: true, enabled_at: enabledAt, receipts };
     appendCutoverHistory(state, { enabled: true, at: enabledAt });
     persist(ctx, state);
-    return { action: 'cutover', enabled: true, no_op: false, cutover: state.cutover };
+    const station = await attemptLoopStationProjection(ctx, state, 'cutover', {
+      projectLoopStation: deps.projectLoopStation,
+      boardPath: deps.boardPath,
+      cardsRoot: deps.cardsRoot,
+    });
+    return {
+      action: 'cutover', enabled: true, no_op: false, cutover: state.cutover,
+      loop_station: station.receipt,
+    };
   });
 }
 
@@ -4404,7 +4739,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
   const collect = deps.collectDeployedRecoveryEvidence || collectDeployedRecoveryEvidence;
   const project = deps.attemptProjection || attemptProjection;
   const now = deps.now || (() => new Date().toISOString());
-  return withCardGateLock(ctx, request.card, async () => {
+  const result = await withCardGateLock(ctx, request.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[request.card];
     if (!record) throw new Error('recover-deployed requires a tracked card');
@@ -4454,6 +4789,15 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
       card: record.card, phase: record.phase, no_op: false, request, evidence, projection,
     };
   }, { card: request.card }, lock);
+  if (!apply || result.no_op) return result;
+  const station = await lock(ctx, 'selector', async () => attemptLoopStationProjection(
+    ctx, loadState(ctx), 'recover', {
+      projectLoopStation: deps.projectLoopStation,
+      boardPath: deps.boardPath,
+      cardsRoot: deps.cardsRoot,
+    },
+  ));
+  return { ...result, loop_station: station.receipt };
 }
 
 function metadataScalar(value) {
@@ -5171,6 +5515,7 @@ module.exports = {
   discardedDependencyProblem,
   resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
   summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
+  buildLoopStationPayload, validateLoopStationPayload, projectLoopStation, attemptLoopStationProjection,
   commandRecoverDeployed, commandReconcileMetadata, commandRebindParkedMetadata,
   commandRestampContractFrontmatter,
   metadataReconciliationPlan, parkedMetadataRebindPlan, validateParkedMetadataRebindSpec,
