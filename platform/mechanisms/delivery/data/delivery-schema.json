@@ -128,7 +128,7 @@
           "type": "object:deployment-map",
           "required": true,
           "since_version": "1.0.0",
-          "description": "Exact headspace, Accuris, and ERO component additions; empty arrays remain explicit."
+          "description": "Exact headspace, Accuris, and ERO component additions; empty arrays remain explicit. Note frontmatter may carry this semantic object directly (legacy) or as a JSON text scalar (canonical Obsidian-safe encoding)."
         },
         {
           "name": "epic",
@@ -142,7 +142,7 @@
           "type": "array:evidence-claim",
           "required": true,
           "since_version": "1.0.0",
-          "description": "Pinned evidence claims. Current claims require source identity, capture timestamp, revision or external identifier, locator, and supported claim; historical strings remain readable only with an unpinned-evidence warning."
+          "description": "Pinned evidence claims. Current claims require source identity, capture timestamp, revision or external identifier, locator, and supported claim; historical strings remain readable only with an unpinned-evidence warning. Note frontmatter may carry this semantic array directly (legacy) or as a JSON text scalar (canonical Obsidian-safe encoding)."
         },
         {
           "name": "context_pack",

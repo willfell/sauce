@@ -33,7 +33,8 @@ check('DEL-API-1 public API exposes the semantic surface', [
   'validateCard', 'resolveDependencies', 'completionProof', 'zoneConflicts',
   'derivePolicy', 'classifyFailure', 'posture', 'migrate', 'describe',
   'batchEligibility', 'normalizeCard', 'normalizeStatus', 'parseDependencyField', 'compareVersions',
-  'normalizeEvidenceClaim', 'validateEpic', 'validateSlice', 'deriveEpicLifecycle',
+  'normalizeEvidenceClaim', 'decodeStructuredContractFields', 'encodeStructuredFrontmatterValue',
+  'validateEpic', 'validateSlice', 'deriveEpicLifecycle',
   'deriveEpicState', 'deriveEpicPosture', 'validateRatificationReceipt', 'parseRatificationArtifact',
 ].every((name) => typeof api[name] === 'function'));
 eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSION, api.registry.contract.version);
@@ -51,6 +52,37 @@ check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
 eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults',
   api.registry.fixtures.base_execution_card.deploy_subscriptions,
   { headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'] });
+const legacyStructuredCard = fixtureCard({});
+const stringStructuredCard = {
+  ...legacyStructuredCard,
+  evidence: JSON.stringify(legacyStructuredCard.evidence),
+  deploy_subscriptions: JSON.stringify(legacyStructuredCard.deploy_subscriptions),
+};
+const legacyStructuredVerdict = api.validateCard(legacyStructuredCard);
+const stringStructuredVerdict = api.validateCard(stringStructuredCard);
+check('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator accepts legacy objects and JSON strings',
+  legacyStructuredVerdict.ok && stringStructuredVerdict.ok);
+eq('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator returns byte-equivalent evidence',
+  stringStructuredVerdict.card.evidence, legacyStructuredVerdict.card.evidence);
+eq('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator returns byte-equivalent deployment maps',
+  stringStructuredVerdict.card.deploy_subscriptions, legacyStructuredVerdict.card.deploy_subscriptions);
+eq('BGR-OBSY-WRITER-STRING-ENCODING helper emits one YAML text scalar containing exact JSON',
+  JSON.parse(api.encodeStructuredFrontmatterValue(legacyStructuredCard.evidence)),
+  JSON.stringify(legacyStructuredCard.evidence));
+const malformedStructuredVerdict = api.validateCard({
+  ...legacyStructuredCard,
+  evidence: '[{"source_identity":"unterminated"}',
+});
+check('BGR-OBSY-READERS-BOTH-ENCODINGS malformed JSON string refuses loudly',
+  !malformedStructuredVerdict.ok
+    && malformedStructuredVerdict.errors.some((issue) => issue.code === 'invalid-structured-json' && issue.field === 'evidence'));
+const duplicateStructuredVerdict = api.validateCard({
+  ...legacyStructuredCard,
+  deploy_subscriptions: '{"headspace":[],"headspace":[],"accuris":[],"ero":[]}',
+});
+check('BGR-OBSY-READERS-BOTH-ENCODINGS duplicate JSON object keys refuse loudly',
+  !duplicateStructuredVerdict.ok
+    && duplicateStructuredVerdict.errors.some((issue) => issue.code === 'duplicate-structured-json-key'));
 
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');

@@ -8,7 +8,6 @@ const childProcess = require('child_process');
 const delivery = require('../../../../platform/mechanisms/delivery');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
-const VAULTS = delivery.registry.policies.required_vaults;
 const EPIC_SCHEMA_VERSION = '1.1.0';
 const RISK_MAP = {
   new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
@@ -550,10 +549,14 @@ function renderCard(card, spec, options = {}) {
   if (dependencies.length) lines.push(...dependencies.map((item) => `  - ${quoted(item)}`));
   else lines.push('  []');
   if (role === 'execution') {
-    lines.push('deploy_subscriptions:');
-    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);
+    lines.push(`deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(contract.deploy_subscriptions)}`);
   }
-  if (role === 'execution') lines.push(`evidence: ${JSON.stringify(contract.evidence)}`, `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`);
+  if (role === 'execution') {
+    lines.push(
+      `evidence: ${delivery.encodeStructuredFrontmatterValue(contract.evidence)}`,
+      `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`,
+    );
+  }
   if (role === 'execution' && card.supersedes) {
     lines.push(`supersedes: ${quoted(card.supersedes)}`, `carried_findings: ${JSON.stringify(card.carried_findings)}`, `binding_fixtures: ${JSON.stringify(card.binding_fixtures)}`);
   }

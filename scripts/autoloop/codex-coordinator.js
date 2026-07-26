@@ -61,6 +61,9 @@ const PARKED_METADATA_REBIND_CARDS = Object.freeze([
 const PARKED_METADATA_REBIND_OPTIONS = new Set([
   '_', 'json', 'parked-rebind', 'dry-run', 'apply', 'reason', 'spec',
 ]);
+const CONTRACT_FRONTMATTER_RESTAMP_OPTIONS = new Set([
+  '_', 'json', 'contract-frontmatter-restamp', 'dry-run', 'apply', 'reason', 'spec',
+]);
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
@@ -4735,8 +4738,265 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
   }, { cards: PARKED_METADATA_REBIND_CARDS });
 }
 
+function authoredFrontmatterField(raw, key) {
+  return frontmatter(raw).split('\n').some((line) => new RegExp(`^${key}:`).test(line));
+}
+
+function frontmatterBodySuffix(raw) {
+  const match = String(raw).match(/^---\n[\s\S]*?\n---/);
+  if (!match) throw new Error('contract frontmatter restamp requires leading frontmatter');
+  return String(raw).slice(match[0].length);
+}
+
+function restampContractFrontmatter(raw, card) {
+  const fields = ['deploy_subscriptions', 'evidence']
+    .filter((field) => authoredFrontmatterField(raw, field));
+  if (!fields.length) return { changed: false, next: raw, fields: [], contract: null };
+  const prepared = prepareDeliveryCard(raw, card);
+  const decoded = delivery.decodeStructuredContractFields(prepared.raw_card);
+  const structuredErrors = decoded.errors.filter((issue) => fields.includes(issue.field));
+  if (structuredErrors.length) {
+    throw new Error(`contract frontmatter restamp refuses invalid structured metadata for ${card}: ${
+      structuredErrors.map((issue) => `${issue.code}:${issue.field}`).join(', ')
+    }`);
+  }
+  const replacements = {};
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(decoded.card, field)) {
+      throw new Error(`contract frontmatter restamp cannot decode authored ${field} for ${card}`);
+    }
+    replacements[field] = delivery.encodeStructuredFrontmatterValue(decoded.card[field]);
+  }
+  const next = patchFrontmatter(raw, replacements);
+  if (frontmatterBodySuffix(next) !== frontmatterBodySuffix(raw)) {
+    throw new Error(`contract frontmatter restamp changed body bytes for ${card}`);
+  }
+  const verified = prepareDeliveryCard(next, card);
+  const verifiedDecoded = delivery.decodeStructuredContractFields(verified.raw_card);
+  const verifiedErrors = verifiedDecoded.errors.filter((issue) => fields.includes(issue.field));
+  if (verifiedErrors.length) throw new Error(`contract frontmatter restamp produced invalid structured metadata for ${card}`);
+  for (const field of fields) {
+    if (!sameJson(verifiedDecoded.card[field], decoded.card[field])) {
+      throw new Error(`contract frontmatter restamp changed parsed ${field} for ${card}`);
+    }
+  }
+  return {
+    changed: next !== raw,
+    next,
+    fields,
+    contract: decoded.card,
+  };
+}
+
+function canonicalContractNoteFiles(cardsRoot) {
+  const root = path.resolve(cardsRoot);
+  const rootEntry = fs.lstatSync(root);
+  if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
+    throw new Error('contract frontmatter restamp cards root must be one regular non-symlink directory');
+  }
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const directory = stack.pop();
+    const entries = fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name);
+      const stat = fs.lstatSync(target);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`contract frontmatter restamp refuses symlink path ${target}`);
+      }
+      physicalDescendant(root, target, `contract frontmatter restamp target ${entry.name}`);
+      if (stat.isDirectory()) {
+        stack.push(target);
+      } else if (stat.isFile() && entry.name.endsWith('.md')) {
+        const raw = fs.readFileSync(target, 'utf8');
+        if (/^card:/m.test(frontmatter(raw))
+          && (authoredFrontmatterField(raw, 'deploy_subscriptions')
+            || authoredFrontmatterField(raw, 'evidence'))) {
+          files.push(target);
+        }
+      }
+    }
+  }
+  return files.sort((left, right) => left.localeCompare(right));
+}
+
+function contractFrontmatterRestampPlan(cardsRoot, reason) {
+  if (typeof reason !== 'string' || !reason.trim()) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp requires non-empty --reason');
+  }
+  const root = path.resolve(cardsRoot);
+  const files = [];
+  for (const file of canonicalContractNoteFiles(root)) {
+    const raw = fs.readFileSync(file, 'utf8');
+    const card = path.basename(file, '.md');
+    const restamped = restampContractFrontmatter(raw, card);
+    if (!restamped.changed) continue;
+    files.push({
+      path: path.relative(root, file).split(path.sep).join('/'),
+      card,
+      fields: restamped.fields,
+      expected_sha256: sha256Text(raw),
+      intended_sha256: sha256Text(restamped.next),
+    });
+  }
+  return {
+    schema_version: 1,
+    reason,
+    cards_root: root,
+    files,
+  };
+}
+
+function validateContractFrontmatterRestampSpec(spec, reason, cardsRoot) {
+  const hash = /^[0-9a-f]{64}$/;
+  const root = path.resolve(cardsRoot);
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)
+    || JSON.stringify(Object.keys(spec)) !== JSON.stringify(['schema_version', 'reason', 'cards_root', 'files'])
+    || spec.schema_version !== 1 || spec.reason !== reason || spec.cards_root !== root
+    || !Array.isArray(spec.files)) {
+    throw new Error('contract frontmatter restamp spec does not exactly match the dry-run contract and literal reason');
+  }
+  const seen = new Set();
+  for (let index = 0; index < spec.files.length; index++) {
+    const entry = spec.files[index];
+    const platformPath = typeof entry.path === 'string' ? entry.path : '';
+    const normalized = platformPath.split('/').filter(Boolean);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || JSON.stringify(Object.keys(entry)) !== JSON.stringify([
+        'path', 'card', 'fields', 'expected_sha256', 'intended_sha256',
+      ])
+      || !platformPath || path.isAbsolute(platformPath) || normalized.join('/') !== platformPath
+      || normalized.some((part) => part === '.' || part === '..')
+      || !platformPath.endsWith('.md') || path.basename(platformPath, '.md') !== entry.card
+      || !Array.isArray(entry.fields) || !entry.fields.length
+      || entry.fields.some((field) => !['deploy_subscriptions', 'evidence'].includes(field))
+      || new Set(entry.fields).size !== entry.fields.length
+      || !hash.test(String(entry.expected_sha256 || ''))
+      || !hash.test(String(entry.intended_sha256 || ''))
+      || entry.expected_sha256 === entry.intended_sha256
+      || seen.has(platformPath)) {
+      throw new Error(`contract frontmatter restamp spec has an invalid entry at index ${index}`);
+    }
+    seen.add(platformPath);
+  }
+  const ordered = [...spec.files].sort((left, right) => left.path.localeCompare(right.path));
+  if (!sameJson(ordered, spec.files)) {
+    throw new Error('contract frontmatter restamp spec files must use deterministic path order');
+  }
+  return spec;
+}
+
+async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
+  for (const key of Object.keys(args)) {
+    if (!CONTRACT_FRONTMATTER_RESTAMP_OPTIONS.has(key)) {
+      throw new Error(`reconcile-metadata --contract-frontmatter-restamp refuses unsupported --${key} operand`);
+    }
+  }
+  if (args['contract-frontmatter-restamp'] !== true || args.json !== true) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp requires literal --contract-frontmatter-restamp and --json');
+  }
+  if (typeof args.reason !== 'string' || !args.reason.trim()) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp requires non-empty --reason');
+  }
+  const apply = args.apply === true;
+  const dryRun = args['dry-run'] === true;
+  if (apply === dryRun) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp requires exactly one of --apply or --dry-run');
+  }
+  if ((apply && Object.prototype.hasOwnProperty.call(args, 'dry-run'))
+    || (dryRun && Object.prototype.hasOwnProperty.call(args, 'apply'))) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp refuses a substituted opposite-mode operand');
+  }
+  if ((apply && typeof args.spec !== 'string') || (!apply && args.spec !== undefined)) {
+    throw new Error('reconcile-metadata --contract-frontmatter-restamp accepts --spec only with --apply');
+  }
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const lock = deps.withLock || withLock;
+  const writeText = deps.atomicWriteText || atomicWriteText;
+  const barrier = deps.durablePathBarrier || durablePathBarrier;
+  const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
+  return lock(ctx, 'contract-frontmatter-restamp', async () => {
+    if (!apply) {
+      const spec = contractFrontmatterRestampPlan(cardsRoot, args.reason);
+      return {
+        action: 'contract-frontmatter-restamp-plan',
+        apply_required: spec.files.length > 0,
+        no_op: spec.files.length === 0,
+        exact_target_count: spec.files.length,
+        spec,
+      };
+    }
+    const specRaw = readSpec(path.resolve(String(args.spec)));
+    let parsed;
+    try { parsed = JSON.parse(specRaw); }
+    catch (err) { throw new Error(`contract frontmatter restamp spec is malformed JSON: ${err.message}`); }
+    const spec = validateContractFrontmatterRestampSpec(parsed, args.reason, cardsRoot);
+    const request = {
+      command_operands: Array.isArray(args._) ? [...args._] : [],
+      restamp_operand: args['contract-frontmatter-restamp'],
+      spec_operand: String(args.spec),
+      reason_operand: args.reason,
+      apply_operand: args.apply,
+      json_operand: args.json,
+      spec_sha256: sha256Text(specRaw),
+    };
+    const pendingWrites = [];
+    const specByPath = new Map(spec.files.map((entry) => [entry.path, entry]));
+    const currentPlan = contractFrontmatterRestampPlan(cardsRoot, args.reason);
+    for (const current of currentPlan.files) {
+      const expected = specByPath.get(current.path);
+      if (!expected || !sameJson(current, expected)) {
+        throw new Error(`contract frontmatter restamp found an unplanned or changed canonical target ${current.path}; zero writes`);
+      }
+    }
+    for (const entry of spec.files) {
+      const file = path.resolve(cardsRoot, ...entry.path.split('/'));
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        throw new Error(`contract frontmatter restamp target ${entry.path} must be one regular non-symlink file`);
+      }
+      physicalDescendant(cardsRoot, file, `contract frontmatter restamp target ${entry.path}`);
+      const raw = fs.readFileSync(file, 'utf8');
+      const currentSha256 = sha256Text(raw);
+      if (currentSha256 !== entry.expected_sha256 && currentSha256 !== entry.intended_sha256) {
+        throw new Error(`contract frontmatter restamp found a third hash for ${entry.path}; zero writes`);
+      }
+      const restamped = restampContractFrontmatter(raw, entry.card);
+      if (currentSha256 === entry.expected_sha256) {
+        if (!restamped.changed || sha256Text(restamped.next) !== entry.intended_sha256
+          || !sameJson(restamped.fields, entry.fields)) {
+          throw new Error(`contract frontmatter restamp cannot reproduce intended bytes for ${entry.path}; zero writes`);
+        }
+        pendingWrites.push({ file, next: restamped.next, entry });
+      } else if (restamped.changed || sha256Text(restamped.next) !== entry.intended_sha256) {
+        throw new Error(`contract frontmatter restamp intended state is not canonical for ${entry.path}; zero writes`);
+      }
+    }
+    for (const pending of pendingWrites) {
+      writeText(pending.file, pending.next);
+      barrier(pending.file);
+      if (sha256Text(fs.readFileSync(pending.file, 'utf8')) !== pending.entry.intended_sha256) {
+        throw new Error(`contract frontmatter restamp write did not verify for ${pending.entry.path}`);
+      }
+    }
+    return {
+      action: 'restamped-contract-frontmatter',
+      no_op: pendingWrites.length === 0,
+      exact_target_count: spec.files.length,
+      changed_count: pendingWrites.length,
+      request,
+      spec,
+    };
+  }, { cards_root: path.resolve(cardsRoot) });
+}
+
 async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   if (args['parked-rebind'] === true) return commandRebindParkedMetadata(ctx, args, deps);
+  if (args['contract-frontmatter-restamp'] === true) {
+    return commandRestampContractFrontmatter(ctx, args, deps);
+  }
   const card = normalizeCardLink(args.card);
   if (!card) throw new Error('reconcile-metadata requires exact --card');
   if (args.apply === true && args['dry-run'] === true) throw new Error('reconcile-metadata accepts only one of --apply or --dry-run');
@@ -4890,7 +5150,10 @@ module.exports = {
   resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
   summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, commandRebindParkedMetadata,
+  commandRestampContractFrontmatter,
   metadataReconciliationPlan, parkedMetadataRebindPlan, validateParkedMetadataRebindSpec,
+  restampContractFrontmatter, canonicalContractNoteFiles,
+  contractFrontmatterRestampPlan, validateContractFrontmatterRestampSpec,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,

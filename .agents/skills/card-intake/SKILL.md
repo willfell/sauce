@@ -53,7 +53,7 @@ Before `--apply`, inspect the dry-run plan. Refuse any plan that:
 - makes a parent claimable, places an execution child at root, or decomposes more than the next parent;
 - inserts dependency order backwards, uses a non-normalized status, or makes docs-only coordinator-eligible.
 
-The validator stamps `schema_version`, derives a policy that cannot weaken `supervised_only`, and validates through the Delivery public API. Use its atomic/idempotent apply only after validation. Never hand-edit a generated marker region. Re-run the same spec and require `no_op: true`. Remove the temporary spec afterward.
+The validator stamps the schema, derives policy, and uses the Delivery API. The writer stores `evidence` and `deploy_subscriptions` as JSON text scalars; readers decode those plus legacy YAML shapes. Never emit nested objects for these fields. Apply only after validation, replay for `no_op: true`, then remove the spec.
 
 ## Supersede a predecessor card
 

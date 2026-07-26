@@ -68,6 +68,29 @@ function emittedLinksResolve(raw, root) {
   const titles = markdownTitles(root);
   return [...raw.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)].every((match) => titles.has(path.basename(match[1], '.md')));
 }
+function structuredJsonScalar(raw, key) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  const line = frontmatter && frontmatter[1].split('\n').find((entry) => entry.startsWith(`${key}: `));
+  if (!line) return null;
+  return JSON.parse(JSON.parse(line.slice(line.indexOf(':') + 1).trim()));
+}
+function objectValuedFrontmatterKeys(raw) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatter) return [];
+  const lines = frontmatter[1].split('\n');
+  const offenders = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const field = lines[index].match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (!field) continue;
+    if (field[2].trim().startsWith('{')) offenders.push(field[1]);
+    if (!field[2].trim()) {
+      const block = [];
+      for (let cursor = index + 1; cursor < lines.length && /^\s+/.test(lines[cursor]); cursor += 1) block.push(lines[cursor]);
+      if (block.some((entry) => /^\s{2}[A-Za-z_][A-Za-z0-9_-]*:\s*/.test(entry))) offenders.push(field[1]);
+    }
+  }
+  return [...new Set(offenders)];
+}
 function findTaskFile(root, title) {
   const wanted = `${title}.md`;
   const stack = [path.join(root, 'tasks')];
@@ -156,6 +179,12 @@ function localizedBug() {
     ok(raw.includes(`schema_version: "${delivery.CONTRACT_VERSION}"`) && raw.includes('batch_policy: continue'), 'new execution card stamps the current Delivery contract and derived policy');
     const prepared = prepareDeliveryCard(raw, card.title);
     ok(prepared.ok && prepared.source === 'current' && prepared.card.evidence[0].revision === 'fixture-revision', 'rendered card round-trips through the shared current contract');
+    eq(structuredJsonScalar(raw, 'evidence'), prepared.card.evidence,
+      'BGR-OBSY-WRITER-STRING-ENCODING flat intake writes evidence as one JSON text scalar');
+    eq(structuredJsonScalar(raw, 'deploy_subscriptions'), prepared.card.deploy_subscriptions,
+      'BGR-OBSY-WRITER-STRING-ENCODING flat intake writes deploy_subscriptions as one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(raw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD flat intake emits no object-valued frontmatter key');
     ok(emittedLinksResolve(raw, dir), 'every emitted bug-card wikilink resolves');
     ok(!run({ ...spec, reproduction: '' }, false).ok, 'bug without reproduction is refused');
     delete spec.created_at;
@@ -396,6 +425,13 @@ function cutoverEpicIntake() {
       && new RegExp(`^source_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw)
       && new RegExp(`^kanban_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw),
     'BGD-CUTOVER-EPIC-INTAKE-ROUTING emits exact slice type and epic/atlas/board backlinks');
+    const directPrepared = prepareDeliveryCard(directRaw, direct.title);
+    eq(structuredJsonScalar(directRaw, 'evidence'), directPrepared.card.evidence,
+      'BGR-OBSY-WRITER-STRING-ENCODING epic-native intake writes evidence as one JSON text scalar');
+    eq(structuredJsonScalar(directRaw, 'deploy_subscriptions'), directPrepared.card.deploy_subscriptions,
+      'BGR-OBSY-WRITER-STRING-ENCODING epic-native intake writes deploy_subscriptions as one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(directRaw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD epic-native intake emits no object-valued frontmatter key');
     eq(fs.readFileSync(directSpec.board_path, 'utf8'), parentBefore, 'BGD-CUTOVER-PARENT-BOARD-PRESERVED leaves the parent board byte-identical');
     ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
     ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
