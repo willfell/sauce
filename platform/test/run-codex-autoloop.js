@@ -4581,6 +4581,7 @@ function parkedRebindHarness(id = 'happy') {
   return {
     root, boardPath, state, ctx, deps, reason, dryRunArgs, applyArgs,
     setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    setSpecRaw: (raw) => { specRaw = String(raw); },
     counts: () => ({ ledgerWrites, cardWrites, barrierCalls, locks: [...locks] }),
     failBarrier: (message) => { barrierFailure = message; },
     clearBarrierFailure: () => { barrierFailure = null; },
@@ -4725,6 +4726,18 @@ realPersistenceRebind.state.top_level_authority_sentinel = {
   cutover: { enabled: true, streak: 3 },
   receipts: ['alpha', 'beta'],
 };
+realPersistenceRebind.state.cards['Unrelated ledger authority sentinel'] = {
+  card: 'Unrelated ledger authority sentinel',
+  phase: 'completed',
+  delivery_contract: {
+    epic: '[[Unrelated Epic]]',
+    status: 'completed',
+  },
+  nested_authority: {
+    deployment_receipts: [{ vault: 'sentinel', ok: true }],
+    prior_reviews: { correctness: 'preserve-exactly' },
+  },
+};
 atomicWriteJson(realPersistenceRebind.ctx.statePath, realPersistenceRebind.state);
 const realPersistenceBefore = JSON.parse(fs.readFileSync(
   realPersistenceRebind.ctx.statePath, 'utf8',
@@ -4758,6 +4771,9 @@ for (const entry of realPersistencePlan.spec.cards) {
 }
 eq(realPersistenceAfter, realPersistenceExpected,
   'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
+eq(realPersistenceAfter.cards['Unrelated ledger authority sentinel'],
+  realPersistenceBefore.cards['Unrelated ledger authority sentinel'],
+  'GA-OPS14A4-NON-TARGET-CARD-ENVELOPE-UNBOUND preserves an unrelated complete ledger record through real persistence');
 eq(realPersistenceAfter.updated_at, realPersistenceBefore.updated_at,
   'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT preserves the exact top-level updated_at authority');
 const realPersistenceHashAfterApply = testSha256(fs.readFileSync(
@@ -4978,6 +4994,39 @@ await assertParkedRefusalNoMutation(
   thirdStateRebind.applyArgs,
   /third card hash/,
   'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third card state',
+);
+const malformedJsonRefusal = parkedRebindHarness('write-seam-malformed-json');
+await commandReconcileMetadata(
+  malformedJsonRefusal.ctx,
+  malformedJsonRefusal.dryRunArgs,
+  malformedJsonRefusal.deps,
+);
+malformedJsonRefusal.setSpecRaw('{"schema_version":1,"reason":');
+await assertParkedRefusalNoMutation(
+  malformedJsonRefusal,
+  malformedJsonRefusal.applyArgs,
+  /spec is malformed JSON/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP malformed spec JSON',
+);
+const malformedProjectedRefusal = parkedRebindHarness('write-seam-malformed-projected-target');
+const malformedProjectedPlan = await commandReconcileMetadata(
+  malformedProjectedRefusal.ctx,
+  malformedProjectedRefusal.dryRunArgs,
+  malformedProjectedRefusal.deps,
+);
+const malformedProjectedPath =
+  malformedProjectedRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+const malformedProjectedRaw = 'malformed projected target with no Delivery contract\n';
+fs.writeFileSync(malformedProjectedPath, malformedProjectedRaw);
+const malformedProjectedSpec = deepCopy(malformedProjectedPlan.spec);
+malformedProjectedSpec.cards[0].expected_card_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedSpec.cards[0].intended_next_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedRefusal.setSpec(malformedProjectedSpec);
+await assertParkedRefusalNoMutation(
+  malformedProjectedRefusal,
+  malformedProjectedRefusal.applyArgs,
+  /third projected epic state/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP hash-matched malformed projected target',
 );
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`write-seam-phase-${phase}`);
