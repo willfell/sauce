@@ -4647,9 +4647,12 @@ async function commandRecordReview(ctx, args, deps = {}) {
   const card = args.card; const lens = args.lens; const verdict = args.verdict;
   const summary = String(args.summary || '').trim();
   const expectedHead = Array.isArray(args['expected-head']) ? '' : String(args['expected-head'] || '').trim();
+  const limitationFlagPresent = args['accepted-limitation'] != null;
   const acceptedLimitation = args['accepted-limitation'] === true;
-  const bound = (Array.isArray(args.bound) ? args.bound : (args.bound == null ? [] : [args.bound]))
-    .filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
+  const rawBounds = Array.isArray(args.bound) ? args.bound : (args.bound == null ? [] : [args.bound]);
+  const malformedLimitationOperand = (limitationFlagPresent && !acceptedLimitation)
+    || rawBounds.some((item) => typeof item !== 'string' || !item.trim());
+  const bound = rawBounds.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
   if (!card || !REVIEW_LENSES.includes(lens)) {
     usage('record-review-refused', 'invalid_arguments',
       `record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
@@ -4665,7 +4668,7 @@ async function commandRecordReview(ctx, args, deps = {}) {
     usage('record-review-refused', 'invalid_arguments',
       'record-review --expected-head must be one exact lowercase 40-hex SHA');
   }
-  if (acceptedLimitation !== (bound.length > 0)) {
+  if (malformedLimitationOperand || acceptedLimitation !== (bound.length > 0)) {
     refuse('record-review-refused', 'invalid_limitation',
       'record-review --accepted-limitation requires one or more --bound names, and --bound requires --accepted-limitation');
   }

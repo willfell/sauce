@@ -1103,6 +1103,17 @@ for (const [label, malformed] of [
     ...limitedReviewArgs, 'accepted-limitation': undefined,
     bound: 'single-writer-no-concurrent-races',
   }],
+  ['bare bound token without accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': undefined, bound: true,
+  }],
+  ['valued accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': 'yes',
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['mixed named and bare bound tokens', {
+    ...limitedReviewArgs, 'accepted-limitation': true,
+    bound: ['single-writer-no-concurrent-races', true],
+  }],
 ]) {
   const invalidLimitationEffects = { reads: 0, locks: 0, writes: 0 };
   const invalidLimitationDeps = {
