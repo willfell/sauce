@@ -48,6 +48,19 @@ const RECOVER_DEPLOYED_PHASES = new Set([
   'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'blocked', 'needs-inspection',
 ]);
 const METADATA_RECONCILE_PHASES = new Set(['blocked', 'needs-inspection', 'deployed']);
+const PARKED_METADATA_REBIND_CARDS = Object.freeze([
+  'GA-C8a2 To-do and meetings actions onto sauce-core (supersedes GA-C8a)',
+  'GA-V1a2 Deterministic visual baseline runner (supersedes GA-V1a)',
+  'GA-R1a2 Migrate move references and retire duplicate helpers (supersedes GA-R1a)',
+  'GA-R4a2 Parameterized Cowork timeframe hub cards (supersedes GA-R4a)',
+  'GA-R2a2 Extract sticky-notes day-capture shared core (supersedes GA-R2a1)',
+  'GA-R3a2 Shared Links behavior contract (supersedes GA-R3a)',
+  'GA-F1a Bare project Docs scaffolding and zero-section creation',
+  'GA-F3a2 Recursive recent docs across project and wiki hubs (supersedes GA-F3a)',
+]);
+const PARKED_METADATA_REBIND_OPTIONS = new Set([
+  '_', 'json', 'parked-rebind', 'dry-run', 'apply', 'reason', 'spec',
+]);
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
@@ -4493,7 +4506,223 @@ function finalizeMetadataReconciliation(ctx, state, record, pending, persist, ba
   return audit;
 }
 
+function sha256Text(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function exactParkedMetadataProblemCards(state, cardsRoot) {
+  return Object.values(state.cards || {})
+    .filter((record) => record.phase === 'parked' && projectionMetadataProblem(record, cardsRoot))
+    .map((record) => record.card);
+}
+
+function parkedMetadataRebindPlan(state, cardsRoot, reason) {
+  if (typeof reason !== 'string' || !reason.trim()) {
+    throw new Error('reconcile-metadata --parked-rebind requires non-empty --reason');
+  }
+  const findings = exactParkedMetadataProblemCards(state, cardsRoot);
+  if (JSON.stringify([...findings].sort()) !== JSON.stringify([...PARKED_METADATA_REBIND_CARDS].sort())) {
+    throw new Error('parked metadata rebind requires the complete exact-eight status finding set');
+  }
+  const cards = PARKED_METADATA_REBIND_CARDS.map((card) => {
+    const record = state.cards[card];
+    if (!record || record.phase !== 'parked') {
+      throw new Error(`parked metadata rebind requires parked tracked target ${card}`);
+    }
+    const cardPath = resolveCardPath(record.card_path, record.card, cardsRoot);
+    const raw = fs.readFileSync(cardPath, 'utf8');
+    const prepared = prepareDeliveryCard(raw, card);
+    if (!prepared.ok || !record.delivery_contract) {
+      throw new Error(`parked metadata rebind requires a valid projected and ledger Delivery contract for ${card}`);
+    }
+    const expected = expectedProjectedContract(record, effectiveProjectionMapping(record, raw));
+    const differences = DELIVERY_STABLE_FIELDS.filter(
+      (field) => JSON.stringify(prepared.card[field]) !== JSON.stringify(expected[field]),
+    );
+    if (JSON.stringify(differences) !== JSON.stringify(['epic'])) {
+      throw new Error(`parked metadata rebind refuses non-epic or multi-field migration drift for ${card}`);
+    }
+    const currentSha256 = sha256Text(raw);
+    return {
+      card,
+      expected_card_sha256: currentSha256,
+      intended_next_sha256: currentSha256,
+      expected_ledger_epic: expected.epic,
+      intended_ledger_epic: prepared.card.epic,
+    };
+  });
+  return { schema_version: 1, reason, cards };
+}
+
+function validateParkedMetadataRebindSpec(spec, reason) {
+  const hash = /^[0-9a-f]{64}$/;
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)
+    || JSON.stringify(Object.keys(spec)) !== JSON.stringify(['schema_version', 'reason', 'cards'])
+    || spec.schema_version !== 1 || spec.reason !== reason || !Array.isArray(spec.cards)
+    || spec.cards.length !== PARKED_METADATA_REBIND_CARDS.length) {
+    throw new Error('parked metadata rebind spec does not exactly match the dry-run contract and literal reason');
+  }
+  for (let index = 0; index < spec.cards.length; index++) {
+    const entry = spec.cards[index];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || JSON.stringify(Object.keys(entry)) !== JSON.stringify([
+        'card', 'expected_card_sha256', 'intended_next_sha256',
+        'expected_ledger_epic', 'intended_ledger_epic',
+      ])
+      || entry.card !== PARKED_METADATA_REBIND_CARDS[index]
+      || !hash.test(String(entry.expected_card_sha256 || ''))
+      || !hash.test(String(entry.intended_next_sha256 || ''))
+      || entry.expected_card_sha256 !== entry.intended_next_sha256
+      || typeof entry.expected_ledger_epic !== 'string' || !normalizeCardLink(entry.expected_ledger_epic)
+      || typeof entry.intended_ledger_epic !== 'string' || !normalizeCardLink(entry.intended_ledger_epic)
+      || entry.expected_ledger_epic === entry.intended_ledger_epic) {
+      throw new Error(`parked metadata rebind spec has an invalid exact-eight entry at index ${index}`);
+    }
+  }
+  return spec;
+}
+
+function parkedMetadataRebindRequest(args, specRaw) {
+  return {
+    command_operands: Array.isArray(args._) ? [...args._] : [],
+    parked_rebind_operand: args['parked-rebind'],
+    spec_operand: String(args.spec),
+    reason_operand: args.reason,
+    apply_operand: args.apply,
+    json_operand: args.json,
+    spec_sha256: sha256Text(specRaw),
+  };
+}
+
+function parkedMetadataRebindReplayMatches(records, request, spec) {
+  return records.every((record) => {
+    const audits = Array.isArray(record.parked_metadata_rebindings) ? record.parked_metadata_rebindings : [];
+    const audit = audits[audits.length - 1] || null;
+    return audit && sameJson(audit.request, request) && sameJson(audit.spec, spec);
+  });
+}
+
+async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
+  for (const key of Object.keys(args)) {
+    if (!PARKED_METADATA_REBIND_OPTIONS.has(key)) {
+      throw new Error(`reconcile-metadata --parked-rebind refuses unsupported --${key} operand`);
+    }
+  }
+  if (args['parked-rebind'] !== true || args.json !== true) {
+    throw new Error('reconcile-metadata --parked-rebind requires literal --parked-rebind and --json');
+  }
+  if (typeof args.reason !== 'string' || !args.reason.trim()) {
+    throw new Error('reconcile-metadata --parked-rebind requires non-empty --reason');
+  }
+  const apply = args.apply === true;
+  const dryRun = args['dry-run'] === true;
+  if (apply === dryRun) {
+    throw new Error('reconcile-metadata --parked-rebind requires exactly one of --apply or --dry-run');
+  }
+  if ((apply && typeof args.spec !== 'string') || (!apply && args.spec !== undefined)) {
+    throw new Error('reconcile-metadata --parked-rebind accepts --spec only with --apply');
+  }
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const barrier = deps.durablePathBarrier || durablePathBarrier;
+  const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
+  const now = deps.now || (() => new Date().toISOString());
+  return lock(ctx, 'parked-metadata-rebind', async () => {
+    const state = loadState(ctx);
+    if (!apply) {
+      const spec = parkedMetadataRebindPlan(state, cardsRoot, args.reason);
+      return {
+        action: 'rebind-parked-metadata-plan',
+        apply_required: true,
+        no_op: false,
+        exact_target_count: spec.cards.length,
+        spec,
+      };
+    }
+    const specRaw = readSpec(path.resolve(String(args.spec)));
+    let parsed;
+    try { parsed = JSON.parse(specRaw); }
+    catch (err) { throw new Error(`parked metadata rebind spec is malformed JSON: ${err.message}`); }
+    const spec = validateParkedMetadataRebindSpec(parsed, args.reason);
+    const request = parkedMetadataRebindRequest(args, specRaw);
+    const records = [];
+    const states = [];
+    for (const entry of spec.cards) {
+      const record = state.cards[entry.card];
+      if (!record || record.phase !== 'parked' || !record.delivery_contract) {
+        throw new Error(`parked metadata rebind refuses missing, active, completed, or untracked target ${entry.card}`);
+      }
+      const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
+      const currentSha256 = sha256Text(raw);
+      if (currentSha256 !== entry.expected_card_sha256
+        && currentSha256 !== entry.intended_next_sha256) {
+        throw new Error(`parked metadata rebind found a third card hash for ${entry.card}; zero writes`);
+      }
+      const prepared = prepareDeliveryCard(raw, entry.card);
+      if (!prepared.ok || prepared.card.epic !== entry.intended_ledger_epic) {
+        throw new Error(`parked metadata rebind found a third projected epic state for ${entry.card}; zero writes`);
+      }
+      const ledgerEpic = record.delivery_contract.epic;
+      if (ledgerEpic !== entry.expected_ledger_epic && ledgerEpic !== entry.intended_ledger_epic) {
+        throw new Error(`parked metadata rebind found a third ledger epic state for ${entry.card}; zero writes`);
+      }
+      records.push(record);
+      states.push(ledgerEpic === entry.expected_ledger_epic ? 'expected' : 'intended');
+    }
+    const allExpected = states.every((stateName) => stateName === 'expected');
+    const allIntended = states.every((stateName) => stateName === 'intended');
+    if (!allExpected && !allIntended) {
+      throw new Error('parked metadata rebind found a mixed third state; zero writes');
+    }
+    if (allIntended) {
+      if (!parkedMetadataRebindReplayMatches(records, request, spec)) {
+        throw new Error('parked metadata rebind completed state accepts only literal replay of the exact successful apply request');
+      }
+      return {
+        action: 'rebound-parked-metadata', no_op: true,
+        exact_target_count: records.length, request, spec,
+      };
+    }
+    const plan = parkedMetadataRebindPlan(state, cardsRoot, args.reason);
+    if (!sameJson(plan, spec)) {
+      throw new Error('parked metadata rebind --apply requires the exact expected and intended SHAs from its dry-run');
+    }
+    const reconciledAt = now();
+    const nextRecords = records.map((record, index) => {
+      const nextRecord = {
+        ...record,
+        delivery_contract: {
+          ...record.delivery_contract,
+          epic: spec.cards[index].intended_ledger_epic,
+        },
+        parked_metadata_rebindings: [
+          ...(Array.isArray(record.parked_metadata_rebindings) ? record.parked_metadata_rebindings : []),
+          { request, spec, reconciled_at: reconciledAt },
+        ],
+      };
+      const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
+      const remaining = projectionMetadataProblemFromRaw(nextRecord, raw, { ignoreSavedProjectionError: true });
+      if (remaining) {
+        throw new Error(`parked metadata rebind did not clear the bounded finding for ${record.card}: ${remaining.error}`);
+      }
+      return nextRecord;
+    });
+    for (const nextRecord of nextRecords) {
+      state.cards[nextRecord.card] = nextRecord;
+    }
+    persist(ctx, state);
+    barrier(ctx.statePath);
+    return {
+      action: 'rebound-parked-metadata', no_op: false,
+      exact_target_count: records.length, request, spec, reconciled_at: reconciledAt,
+    };
+  }, { cards: PARKED_METADATA_REBIND_CARDS });
+}
+
 async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
+  if (args['parked-rebind'] === true) return commandRebindParkedMetadata(ctx, args, deps);
   const card = normalizeCardLink(args.card);
   if (!card) throw new Error('reconcile-metadata requires exact --card');
   if (args.apply === true && args['dry-run'] === true) throw new Error('reconcile-metadata accepts only one of --apply or --dry-run');
@@ -4646,7 +4875,8 @@ module.exports = {
   discardedDependencyProblem,
   resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
   summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
-  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
+  commandRecoverDeployed, commandReconcileMetadata, commandRebindParkedMetadata,
+  metadataReconciliationPlan, parkedMetadataRebindPlan, validateParkedMetadataRebindSpec,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
@@ -4657,6 +4887,7 @@ module.exports = {
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
+  PARKED_METADATA_REBIND_CARDS,
 };
 
 if (require.main === module) {

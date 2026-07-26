@@ -19,6 +19,7 @@ const {
   commandStatus, commandStatusLocked, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
+  PARKED_METADATA_REBIND_CARDS,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
@@ -4470,6 +4471,188 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+
+// BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
+function parkedRebindHarness(id = 'happy') {
+  const root = path.join(reconcileRoot, `parked-rebind-${id}`);
+  fs.mkdirSync(root, { recursive: true });
+  const state = emptyState();
+  const actualEpics = [
+    'Core Styling Adoption', 'Harness and Docs Hygiene',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Feature Polish', 'Feature Polish',
+  ];
+  for (let index = 0; index < PARKED_METADATA_REBIND_CARDS.length; index++) {
+    const name = PARKED_METADATA_REBIND_CARDS[index];
+    const cardPath = path.join(root, `${name}.md`);
+    const raw = card({ name, deps: ['Satisfied dependency'] })
+      .replace('---\n', '---\nkanban_column: In Progress\nresume_condition: \"wait for bounded authority\"\n')
+      .replace('status: planning', 'status: parked')
+      .replace('epic: "[[Test epic]]"', `epic: "[[${actualEpics[index]}]]"`);
+    fs.writeFileSync(cardPath, raw);
+    const projected = prepareDeliveryCard(raw, name).card;
+    state.cards[name] = {
+      card: name, phase: 'parked', card_path: cardPath,
+      delivery_contract: { ...projected, status: 'planning', epic: '[[Priorities for GA]]' },
+      delivery_contract_version: delivery.CONTRACT_VERSION,
+      dependencies: projected.depends_on, touch_zones: projected.touch_zones,
+      deploy_subscriptions: projected.deploy_subscriptions, batch_policy: projected.batch_policy,
+      resume_condition: 'wait for bounded authority',
+      head_sha: 'a'.repeat(40), branch: `preserved-${index}`, worktree: `/preserved-${index}`,
+      gate_receipt: { fixture: `gate-${index}` }, reviews: { fixture: `reviews-${index}` },
+    };
+  }
+  let ledgerWrites = 0;
+  let cardWrites = 0;
+  const locks = [];
+  const ctx = { root, statePath: path.join(root, 'state.json') };
+  let specRaw = '';
+  const deps = {
+    readState: () => state,
+    writeState: () => { ledgerWrites++; },
+    withLock: async (_ctx, name, fn) => { locks.push(name); return fn(); },
+    atomicWriteText: () => { cardWrites++; },
+    durablePathBarrier: () => {},
+    readSpec: () => specRaw,
+    cardsRoot: root,
+    now: () => '2026-07-25T23:30:00.000Z',
+  };
+  const reason = 'rebind the exact eight canonical epic migrations';
+  const dryRunArgs = { 'parked-rebind': true, 'dry-run': true, reason, json: true };
+  const applyArgs = { 'parked-rebind': true, apply: true, reason, spec: 'exact-eight.json', json: true };
+  return {
+    root, state, ctx, deps, reason, dryRunArgs, applyArgs,
+    setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    counts: () => ({ ledgerWrites, cardWrites, locks: [...locks] }),
+  };
+}
+
+const parkedRebind = parkedRebindHarness();
+const parkedAuthorityBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const record = parkedRebind.state.cards[name];
+  const raw = fs.readFileSync(record.card_path, 'utf8');
+  return [name, {
+    raw, phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: deepCopy(record.gate_receipt), reviews: deepCopy(record.reviews),
+    dependencies: deepCopy(record.dependencies),
+  }];
+}));
+const parkedRebindPlan = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.dryRunArgs, parkedRebind.deps,
+);
+eq(parkedRebindPlan.action, 'rebind-parked-metadata-plan', 'BGD-PARKED-REBIND-EXACT-EIGHT exposes a dry-run first');
+eq(parkedRebindPlan.spec.cards.map((entry) => entry.card), PARKED_METADATA_REBIND_CARDS,
+  'BGD-PARKED-REBIND-EXACT-EIGHT binds the complete canonical target set in order');
+ok(parkedRebindPlan.spec.cards.every((entry) => entry.expected_card_sha256 === entry.intended_next_sha256),
+  'BGD-PARKED-REBIND-PRESERVES-AUTHORITY binds byte-identical card preimage and intended hashes');
+eq(parkedRebind.counts().ledgerWrites, 0, 'parked rebind dry-run performs zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'parked rebind dry-run performs zero card writes');
+parkedRebind.setSpec(parkedRebindPlan.spec);
+const parkedRebindApplied = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindApplied.action, 'rebound-parked-metadata', 'bounded exact-eight parked rebind applies');
+eq(parkedRebindApplied.no_op, false, 'first exact-eight parked rebind records a real ledger repair');
+eq(parkedRebind.counts().ledgerWrites, 1, 'exact-eight parked rebind is one atomic ledger write');
+eq(parkedRebind.counts().cardWrites, 0, 'exact-eight parked rebind never rewrites a card');
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  const record = parkedRebind.state.cards[name];
+  const before = parkedAuthorityBefore[name];
+  eq({
+    raw: fs.readFileSync(record.card_path, 'utf8'),
+    phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: record.gate_receipt, reviews: record.reviews, dependencies: record.dependencies,
+  }, before, `BGD-PARKED-REBIND-PRESERVES-AUTHORITY preserves ${name}`);
+  eq(projectionMetadataProblem(record, parkedRebind.root), null,
+    `BGD-PARKED-REBIND-PRESERVES-AUTHORITY clears ${name}`);
+  eq(record.parked_metadata_rebindings.length, 1, `parked rebind journals one audit for ${name}`);
+}
+const parkedRebindCountsAfterApply = parkedRebind.counts();
+const parkedRebindReplay = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindReplay.no_op, true, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS returns no_op true');
+eq(parkedRebind.counts(), {
+  ...parkedRebindCountsAfterApply,
+  locks: [...parkedRebindCountsAfterApply.locks, 'parked-metadata-rebind'],
+}, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS performs zero second ledger or card writes');
+for (const altered of [
+  { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
+  { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
+  { ...parkedRebind.applyArgs, json: false },
+]) {
+  await assert.rejects(() => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|requires|reason/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
+}
+const substitutedParkedSpec = deepCopy(parkedRebindPlan.spec);
+substitutedParkedSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
+parkedRebind.setSpec(substitutedParkedSpec);
+await assert.rejects(() => commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+), /invalid exact-eight entry/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted CAS hash'); count++;
+parkedRebind.setSpec(parkedRebindPlan.spec);
+eq(parkedRebind.counts().ledgerWrites, 1, 'substituted parked-rebind operands perform zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'substituted parked-rebind operands perform zero card writes');
+
+for (const phase of ['implementing', 'deployed']) {
+  const refusal = parkedRebindHarness(`phase-${phase}`);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  refusal.setSpec(refusalPlan.spec);
+  refusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].phase = phase;
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /missing, active, completed/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${phase} target before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${phase} parked-rebind refusal performs zero ledger writes`);
+}
+const missingFindingRebind = parkedRebindHarness('missing-finding');
+const missingFindingRecord = missingFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+missingFindingRecord.delivery_contract.epic = prepareDeliveryCard(
+  fs.readFileSync(missingFindingRecord.card_path, 'utf8'), missingFindingRecord.card,
+).card.epic;
+await assert.rejects(() => commandReconcileMetadata(
+  missingFindingRebind.ctx, missingFindingRebind.dryRunArgs, missingFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a missing current finding before writes'); count++;
+eq(missingFindingRebind.counts().ledgerWrites, 0, 'missing current finding refusal performs zero ledger writes');
+const extraFindingRebind = parkedRebindHarness('extra-finding');
+const extraFindingName = 'Unexpected ninth parked metadata finding';
+const extraFindingSource = extraFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+const extraFindingPath = path.join(extraFindingRebind.root, `${extraFindingName}.md`);
+const extraFindingRaw = fs.readFileSync(extraFindingSource.card_path, 'utf8')
+  .replaceAll(PARKED_METADATA_REBIND_CARDS[0], extraFindingName);
+fs.writeFileSync(extraFindingPath, extraFindingRaw);
+extraFindingRebind.state.cards[extraFindingName] = {
+  ...deepCopy(extraFindingSource),
+  card: extraFindingName,
+  card_path: extraFindingPath,
+  delivery_contract: {
+    ...deepCopy(extraFindingSource.delivery_contract),
+    card: extraFindingName,
+  },
+};
+await assert.rejects(() => commandReconcileMetadata(
+  extraFindingRebind.ctx, extraFindingRebind.dryRunArgs, extraFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses an extra current finding before writes'); count++;
+eq(extraFindingRebind.counts().ledgerWrites, 0, 'extra current finding refusal performs zero ledger writes');
+const thirdStateRebind = parkedRebindHarness('third-card-state');
+const thirdStatePlan = await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.dryRunArgs, thirdStateRebind.deps);
+thirdStateRebind.setSpec(thirdStatePlan.spec);
+fs.appendFileSync(thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path, '\nthird-state');
+await assert.rejects(() => commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps),
+  /third card hash/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a third card state before writes'); count++;
+eq(thirdStateRebind.counts().ledgerWrites, 0, 'third-state parked-rebind refusal performs zero ledger writes');
+for (const shape of ['missing', 'extra']) {
+  const refusal = parkedRebindHarness(shape);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  const cards = shape === 'missing'
+    ? refusalPlan.spec.cards.slice(0, -1)
+    : [...refusalPlan.spec.cards, deepCopy(refusalPlan.spec.cards[0])];
+  refusal.setSpec({ ...refusalPlan.spec, cards });
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /does not exactly match/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${shape} target set before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${shape} target-set refusal performs zero ledger writes`);
+}
 // --- BGR redesign: discarded terminal phase with tombstones ---
 
 // removeBoardCard: exact mirror of moveBoardCard's location grammar.
