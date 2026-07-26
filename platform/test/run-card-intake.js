@@ -4,7 +4,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { run, validateDeliveryContract } = require('../../.agents/skills/card-intake/scripts/card-intake');
+const {
+  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface,
+} = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
 const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
 const { prepareDeliveryCard } = require('../../scripts/autoloop/select-card');
@@ -17,6 +19,12 @@ let passed = 0;
 let failed = 0;
 function ok(condition, label) { if (condition) { passed += 1; console.log(`  PASS: ${label}`); } else { failed += 1; console.error(`  FAIL: ${label}`); } }
 function eq(actual, expected, label) { ok(JSON.stringify(actual) === JSON.stringify(expected), `${label} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`); }
+function run(spec, apply = false, deps = {}) {
+  return runCardIntake(spec, apply, {
+    readCoordinatorStatus: () => ({ action: 'status', cutover: null }),
+    ...deps,
+  });
+}
 function board() { return ['---', 'kanban-plugin: board', '---', '', '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Parked', '', '## Discovered (autoloop)', '', '## Post-GA', '', '## Completed', '', '- [x] [[Prerequisite]]', ''].join('\n'); }
 function base(dir, extra = {}) {
   return { mode: 'single', classification: 'direct_execution', completion_mode: 'release', outcome: 'Ship one bounded behavior with deterministic coverage.', project_root: dir, link_roots: [dir], evidence_roots: [dir], board_path: path.join(dir, 'board.md'), cards_root: path.join(dir, 'tasks'), source_board: 'project/board.md', epic: '[[Roadmap]]', created_at: '2026-07-15T12:00:00-06:00', evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior', source_identity: 'fixture repo', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-revision', claim: 'The bounded example behavior is verified.' }], protected_cards: [], cards: [], ...extra };
@@ -298,6 +306,154 @@ function missingEvidenceAndRefusals() {
   });
 }
 
+function cutoverEpicIntake() {
+  console.log('\n--- BGD-CUTOVER fixtures: epic-native intake ---');
+  tempCase((dir) => {
+    const enabledStatus = () => ({ action: 'status', cutover: { enabled: true, enabled_at: '2026-07-25T19:00:00.000Z' } });
+    const runEnabled = (spec, apply = false) => run(spec, apply, { readCoordinatorStatus: enabledStatus });
+    const legacySpec = base(dir, { cards: [execution('CUT-PRE Legacy flat card')] });
+    const legacyAbsent = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: null }) });
+    const legacyOff = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: { enabled: false, reason: 'fixture' } }) });
+    eq(legacyOff, legacyAbsent, 'BGD-CUTOVER-PRE-COMPAT absent and disabled cutover preserve the exact legacy intake receipt');
+    const existingEpic = 'Existing Epic';
+    const existingRoot = path.join(dir, 'tasks', existingEpic);
+    const existingBoardPath = path.join(existingRoot, 'board', `${existingEpic}-board.md`);
+    fs.mkdirSync(path.dirname(existingBoardPath), { recursive: true });
+    fs.writeFileSync(path.join(existingRoot, `${existingEpic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      `epic_board: "project/tasks/${existingEpic}/board/${existingEpic}-board.md"`,
+      '---', '',
+    ].join('\n'));
+    fs.writeFileSync(existingBoardPath, [
+      '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic',
+      `epic: "[[${existingEpic}]]"`, '---', '',
+      '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n'));
+
+    let statusReads = 0;
+    const direct = execution('CUT-1 Existing epic slice', {
+      model_profile: 'heavy', risk_flags: ['loader'],
+    });
+    const directSpec = base(dir, { epic: `[[${existingEpic}]]`, cards: [direct] });
+    const parentBefore = fs.readFileSync(directSpec.board_path, 'utf8');
+    const directResult = run(directSpec, true, {
+      readCoordinatorStatus: () => {
+        statusReads += 1;
+        return enabledStatus();
+      },
+    });
+    ok(directResult.ok && directResult.cutover_enabled === true, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING reads enabled cutover and applies');
+    eq(statusReads, 1, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING reads installed status exactly once per planning pass');
+    const directPath = path.join(existingRoot, 'board', `${direct.title}.md`);
+    eq(directResult.changed_paths.sort(), [directPath, existingBoardPath].sort(), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING changes only the epic slice and epic board');
+    const directRaw = fs.readFileSync(directPath, 'utf8');
+    ok(/^type: slice$/m.test(directRaw)
+      && new RegExp(`^epic: "\\[\\[${existingEpic}\\]\\]"$`, 'm').test(directRaw)
+      && new RegExp(`^task_parent: "project/tasks/${existingEpic}/${existingEpic}\\.md"$`, 'm').test(directRaw)
+      && new RegExp(`^source_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw)
+      && new RegExp(`^kanban_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw),
+    'BGD-CUTOVER-EPIC-INTAKE-ROUTING emits exact slice type and epic/atlas/board backlinks');
+    eq(fs.readFileSync(directSpec.board_path, 'utf8'), parentBefore, 'BGD-CUTOVER-PARENT-BOARD-PRESERVED leaves the parent board byte-identical');
+    ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
+    ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
+
+    const flatTitle = 'GA-OPS13a Close epic cutover selector and intake deadlock';
+    const flatSpec = base(dir, { epic: null, cards: [execution(flatTitle, { model_profile: 'heavy', risk_flags: ['loader'] })] });
+    const flatBoardBefore = fs.readFileSync(flatSpec.board_path, 'utf8');
+    const flatRefused = runEnabled(flatSpec, true);
+    ok(!flatRefused.ok && (flatRefused.errors || []).some((error) => error.includes('post-cutover execution intake requires one named epic')),
+      'BGD-CUTOVER-FLAT-REFUSAL refuses a post-cutover heavy flat execution card, including a fresh bootstrap-named card');
+    ok(!fs.existsSync(path.join(dir, 'tasks', flatTitle)) && fs.readFileSync(flatSpec.board_path, 'utf8') === flatBoardBefore,
+      'BGD-CUTOVER-ONE-SHOT-BOOTSTRAP flat refusal happens before any card or board write and has no name bypass');
+
+    const triage = execution('BUG-CUT One-line triage', {
+      lane: 'Discovered (autoloop)', model_profile: 'standard',
+    });
+    const triageSpec = base(dir, {
+      classification: 'bug', outcome: 'Record one bounded post-cutover finding.',
+      reproduction: 'Open the fixture and observe the bounded finding.', cards: [triage],
+    });
+    const triageResult = runEnabled(triageSpec, true);
+    ok(triageResult.ok && fs.existsSync(path.join(dir, 'tasks', triage.title, `${triage.title}.md`)),
+      'BGD-CUTOVER-FLAT-REFUSAL preserves the explicit Discovered one-line triage path');
+
+    const parent = { title: 'New Theme Epic', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const child = execution('NEW-1 First epic slice', { parent_title: parent.title, slice: 'NEW-1' });
+    const roadmapSpec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme', epic: '[[Roadmap]]',
+      outcome: 'Create a new canonical epic theme and prepare its first slice.',
+      cards: [parent, child],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'New Theme.md'),
+      roadmap_key: 'new-theme',
+      roadmap_section: '## New Theme\n\nPrepare the first bounded slice.',
+    });
+    const roadmapResult = runEnabled(roadmapSpec, true);
+    ok(roadmapResult.ok, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD applies the post-cutover roadmap theme');
+    const newRoot = path.join(dir, 'tasks', parent.title);
+    const expectedSurface = [
+      `${parent.title}.md`,
+      `board/${parent.title}-board.md`,
+      `board/${child.title}.md`,
+      'context/pack.md',
+      'context/runs/.keep',
+      'context/lessons/.keep',
+      'context/decisions/.keep',
+    ].sort();
+    eq(fileListForTest(newRoot), expectedSurface, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD creates exactly the canonical atlas/board/context/slice file set');
+    ok(canonicalEpicSurface(roadmapSpec, parent.title).ok, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD creates a resolver-conformant epic pair');
+    const newParentBoard = fs.readFileSync(roadmapSpec.board_path, 'utf8');
+    const newEpicBoard = fs.readFileSync(path.join(newRoot, 'board', `${parent.title}-board.md`), 'utf8');
+    ok(newParentBoard.includes(`[[${parent.title}]]`) && !newParentBoard.includes(`[[${child.title}]]`)
+      && newEpicBoard.includes(`[[${child.title}]]`),
+    'BGD-CUTOVER-NEW-EPIC-SCAFFOLD adds only the atlas line to the parent board and the slice line to the epic board');
+    ok(/^[a-f0-9]{64}$/.test((fs.readFileSync(path.join(newRoot, 'context', 'pack.md'), 'utf8').match(/^content_sha256:\s*(.+)$/m) || [])[1] || ''),
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD context pack carries a deterministic content hash');
+    ok(runEnabled(roadmapSpec, true).no_op, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD literal replay is no_op');
+
+    const corruptParent = { title: 'Corrupt Theme Epic', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const corruptChild = execution('CORRUPT-1 Slice', { parent_title: corruptParent.title, slice: 'CORRUPT-1' });
+    const corruptSpec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme',
+      outcome: 'Prove corrupt partial scaffold bytes fail closed.',
+      cards: [corruptParent, corruptChild],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'Corrupt Theme.md'),
+      roadmap_section: '## Corrupt Theme\n\nMust fail closed.',
+    });
+    const corruptRoot = path.join(dir, 'tasks', corruptParent.title);
+    fs.mkdirSync(corruptRoot, { recursive: true });
+    fs.writeFileSync(path.join(corruptRoot, `${corruptParent.title}.md`), 'unexpected bytes\n');
+    const corruptBoardBefore = fs.readFileSync(corruptSpec.board_path, 'utf8');
+    const corruptResult = runEnabled(corruptSpec, true);
+    ok(!corruptResult.ok && (corruptResult.errors || []).some((error) => error.includes('unexpected pre-existing bytes')),
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD unexpected pre-existing scaffold bytes refuse');
+    eq(fs.readFileSync(corruptSpec.board_path, 'utf8'), corruptBoardBefore,
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD scaffold refusal occurs before parent-board mutation');
+
+    const statusFailureBoard = fs.readFileSync(corruptSpec.board_path, 'utf8');
+    const statusFailure = runCardIntake(base(dir, { cards: [execution('CUT Status unreadable')] }), true, {
+      readCoordinatorStatus: () => { throw new Error('fixture status failure'); },
+    });
+    ok(!statusFailure.ok && statusFailure.errors[0].includes('fresh installed coordinator status failed'),
+      'BGD-CUTOVER-EPIC-INTAKE-ROUTING installed-status failure refuses planning');
+    eq(fs.readFileSync(corruptSpec.board_path, 'utf8'), statusFailureBoard,
+      'BGD-CUTOVER-EPIC-INTAKE-ROUTING installed-status refusal performs zero board writes');
+  });
+}
+
+function fileListForTest(root) {
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else files.push(path.relative(root, item).replace(/\\/g, '/'));
+    }
+  }
+  return files.sort();
+}
+
 function supersedeGovernance() {
   console.log('\n--- BGR fixtures: supersede finding-coverage + discard-at-mint ---');
   tempCase((dir) => {
@@ -372,7 +528,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); supersedeGovernance(); await exactHeadMaterialization();
+  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

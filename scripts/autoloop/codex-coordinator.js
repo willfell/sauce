@@ -669,7 +669,7 @@ function resolveEpicBoardSet({
   return { epics, flat, findings };
 }
 
-function selectEpicShadowCandidate({
+function selectEpicCandidate({
   boardMd, state, loadCard, supervised = false, cardsRoot = CARDS_ROOT,
   readFile, readDir, exists,
 } = {}) {
@@ -728,7 +728,7 @@ function selectEpicShadowCandidate({
     });
     if (selected.action === 'claim' || selected.action === 'at-capacity') {
       return {
-        ...summarizeClaimSelection(selected),
+        ...selected,
         source: epic ? 'epic' : 'flat',
         ...(epic ? { epic: name, board_path: epic.board_path } : {}),
         findings: resolved.findings,
@@ -738,6 +738,18 @@ function selectEpicShadowCandidate({
     skipped.push(...(selected.skipped || []).map((item) => ({ ...item, ...(epic ? { epic: name } : {}) })));
   }
   return { action: 'no-work', reason: 'no eligible execution card', findings: resolved.findings, skipped };
+}
+
+function selectEpicShadowCandidate(options = {}) {
+  const selected = selectEpicCandidate(options);
+  return {
+    ...summarizeClaimSelection(selected),
+    ...(selected.source ? { source: selected.source } : {}),
+    ...(selected.epic ? { epic: selected.epic } : {}),
+    ...(selected.board_path ? { board_path: selected.board_path } : {}),
+    findings: selected.findings || [],
+    skipped: selected.skipped || [],
+  };
 }
 
 function selectClaimCandidate({
@@ -805,6 +817,21 @@ function selectClaimCandidate({
   return selected;
 }
 
+function selectCoordinatorCandidate({
+  boardMd, state, loadCard, supervised = false, epicShadow = false,
+  cardsRoot = CARDS_ROOT, readFile, readDir, exists,
+}) {
+  if (state && state.cutover && state.cutover.enabled === true) {
+    return selectEpicCandidate({
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+    });
+  }
+  return selectClaimCandidate({
+    boardMd, state, loadCard, supervised, epicShadow,
+    cardsRoot, readFile, readDir, exists,
+  });
+}
+
 function summarizeClaimSelection(selected) {
   const skipped = selected.skipped || [];
   if (selected.action === 'claim') {
@@ -820,6 +847,10 @@ function summarizeClaimSelection(selected) {
     if (selected.meta.batchPolicy) summary.batch_policy = selected.meta.batchPolicy;
     if (selected.board_drift) summary.board_drift = selected.board_drift;
     if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
+    if (selected.source) summary.source = selected.source;
+    if (selected.epic) summary.epic = selected.epic;
+    if (selected.board_path) summary.board_path = selected.board_path;
+    if (selected.findings) summary.findings = selected.findings;
     return summary;
   }
   if (selected.action === 'at-capacity') {
@@ -834,6 +865,10 @@ function summarizeClaimSelection(selected) {
   };
   if (selected.board_drift) summary.board_drift = selected.board_drift;
   if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
+  if (selected.source) summary.source = selected.source;
+  if (selected.epic) summary.epic = selected.epic;
+  if (selected.board_path) summary.board_path = selected.board_path;
+  if (selected.findings) summary.findings = selected.findings;
   return summary;
 }
 
@@ -3710,7 +3745,7 @@ async function commandClaim(ctx, args) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) return { action: 'halted', reason: '.autoloop-halt present' };
     const state = readState(ctx);
     const boardMd = fs.readFileSync(BOARD, 'utf8');
-    const selected = selectClaimCandidate({
+    const selected = selectCoordinatorCandidate({
       boardMd, state,
       loadCard: (card) => { const p = findCard(CARDS_ROOT, card); return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null; },
       // A direct coordinator claim is the supervised operator path. Future
@@ -3912,7 +3947,7 @@ function commandStatus(ctx, opts = {}) {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
-  const next = summarizeClaimSelection(selectClaimCandidate({
+  const next = summarizeClaimSelection(selectCoordinatorCandidate({
     boardMd, state, loadCard, supervised: opts.supervised !== false,
     epicShadow: opts.epicShadow ?? process.env.SAUCE_EPIC_SELECTION_SHADOW === '1',
     cardsRoot,
@@ -3968,6 +4003,11 @@ function commandStatus(ctx, opts = {}) {
     cutover_history: state.cutover_history || [],
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
+}
+
+async function commandStatusLocked(ctx, opts = {}) {
+  const lock = opts.withLock || withLock;
+  return lock(ctx, 'selector', () => commandStatus(ctx, opts));
 }
 
 async function commandReconcile(ctx, args = {}, deps = {}) {
@@ -4531,7 +4571,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2)); const command = args._[0] || 'status';
   const ctx = workshopContext();
   let result;
-  if (command === 'status') result = commandStatus(ctx);
+  if (command === 'status') result = await commandStatusLocked(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
   else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
@@ -4561,7 +4601,8 @@ module.exports = {
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem,
-  resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandCutover, commandRecover,
+  resolveEpicBoardSet, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
+  summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
