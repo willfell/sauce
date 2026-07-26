@@ -4,6 +4,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const {
   run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
 } = require('../../.agents/skills/card-intake/scripts/card-intake');
@@ -15,6 +16,21 @@ const { aggregateClaudeSurface, materializeClaudeSurface } = require('../install
 const { regenerateClaudeMd } = require('../mechanisms/platform-claude/claude-md-renderer');
 
 const ROOT = path.resolve(__dirname, '../..');
+const ACTUAL_LEGACY_WRITER_PROVENANCE = Object.freeze({
+  commit: '402988f32e6ef4c510f5b7e3ad8b6f327648266b',
+  git_blob: '7b2c06084136b8b2a4aef8324a024846250aa334',
+  blob_sha256: '70d74b4af3a468d7fa2e076780126bae2e1d5ee1f6316633a9e91e92ba426b67',
+});
+const ACTUAL_LEGACY_WRITER_EXCERPT = [
+  "  else lines.push('  []');",
+  "  if (role === 'execution') {",
+  "    lines.push('deploy_subscriptions:');",
+  '    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);',
+  '  }',
+  '  if (role === \'execution\') lines.push(`evidence: ${JSON.stringify(contract.evidence)}`, `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`);',
+  '  if (role === \'execution\' && card.supersedes) {',
+].join('\n') + '\n';
+const ACTUAL_LEGACY_WRITER_EXCERPT_SHA256 = 'bc7280f6c3498b1e50addd9ef81da28ed6c283fd706e9aaec36d83135ea403f3';
 let passed = 0;
 let failed = 0;
 function ok(condition, label) { if (condition) { passed += 1; console.log(`  PASS: ${label}`); } else { failed += 1; console.error(`  FAIL: ${label}`); } }
@@ -67,6 +83,62 @@ function markdownTitles(root) {
 function emittedLinksResolve(raw, root) {
   const titles = markdownTitles(root);
   return [...raw.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)].every((match) => titles.has(path.basename(match[1], '.md')));
+}
+function structuredJsonScalar(raw, key) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  const line = frontmatter && frontmatter[1].split('\n').find((entry) => entry.startsWith(`${key}: `));
+  if (!line) return null;
+  return JSON.parse(JSON.parse(line.slice(line.indexOf(':') + 1).trim()));
+}
+function actualLegacyWriterPreimage(raw, contract, bindingFixtures) {
+  const deployBlock = [
+    'deploy_subscriptions:',
+    ...delivery.registry.policies.required_vaults
+      .map((vault) => `  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`),
+  ].join('\n');
+  let next = String(raw).replace(/^deploy_subscriptions:\s*.*$/m, deployBlock);
+  next = next.replace(/^evidence:\s*.*$/m, `evidence: ${JSON.stringify(contract.evidence)}`);
+  if (bindingFixtures !== undefined) {
+    next = next.replace(/^binding_fixtures:\s*.*$/m, `binding_fixtures: ${JSON.stringify(bindingFixtures)}`);
+  }
+  return next;
+}
+function actualLegacyWriterPin() {
+  console.log('\n--- carried fixture: actual pre-change intake writer ---');
+  eq(crypto.createHash('sha256').update(ACTUAL_LEGACY_WRITER_EXCERPT).digest('hex'),
+    ACTUAL_LEGACY_WRITER_EXCERPT_SHA256,
+    `GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY pins ${ACTUAL_LEGACY_WRITER_PROVENANCE.commit}:${ACTUAL_LEGACY_WRITER_PROVENANCE.git_blob}`);
+  ok(ACTUAL_LEGACY_WRITER_PROVENANCE.blob_sha256.length === 64
+    && ACTUAL_LEGACY_WRITER_EXCERPT.includes("lines.push('deploy_subscriptions:');")
+    && ACTUAL_LEGACY_WRITER_EXCERPT.includes('for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);')
+    && ACTUAL_LEGACY_WRITER_EXCERPT.includes('lines.push(`evidence: ${JSON.stringify(contract.evidence)}`'),
+  'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY carries provenance plus the exact YAML deploy block and inline evidence grammar');
+}
+function objectValuedFrontmatterKeys(raw) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatter) return [];
+  const lines = frontmatter[1].split('\n');
+  const offenders = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const field = lines[index].match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (!field) continue;
+    const inline = field[2].trim();
+    if (inline.startsWith('{')) offenders.push(field[1]);
+    if (inline.startsWith('[')) {
+      try {
+        const value = JSON.parse(inline);
+        const containsObject = (item) => Boolean(item && typeof item === 'object'
+          && (!Array.isArray(item) || item.some(containsObject)));
+        if (containsObject(value)) offenders.push(field[1]);
+      } catch (_) {}
+    }
+    if (!inline) {
+      const block = [];
+      for (let cursor = index + 1; cursor < lines.length && /^\s+/.test(lines[cursor]); cursor += 1) block.push(lines[cursor]);
+      if (block.some((entry) => /^\s{2}[A-Za-z_][A-Za-z0-9_-]*:\s*/.test(entry))) offenders.push(field[1]);
+    }
+  }
+  return [...new Set(offenders)];
 }
 function findTaskFile(root, title) {
   const wanted = `${title}.md`;
@@ -156,10 +228,35 @@ function localizedBug() {
     ok(raw.includes(`schema_version: "${delivery.CONTRACT_VERSION}"`) && raw.includes('batch_policy: continue'), 'new execution card stamps the current Delivery contract and derived policy');
     const prepared = prepareDeliveryCard(raw, card.title);
     ok(prepared.ok && prepared.source === 'current' && prepared.card.evidence[0].revision === 'fixture-revision', 'rendered card round-trips through the shared current contract');
+    eq(structuredJsonScalar(raw, 'evidence'), prepared.card.evidence,
+      'BGR-OBSY-WRITER-STRING-ENCODING flat intake writes evidence as one JSON text scalar');
+    eq(structuredJsonScalar(raw, 'deploy_subscriptions'), prepared.card.deploy_subscriptions,
+      'BGR-OBSY-WRITER-STRING-ENCODING flat intake writes deploy_subscriptions as one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(raw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD flat intake emits no object-valued frontmatter key');
     ok(emittedLinksResolve(raw, dir), 'every emitted bug-card wikilink resolves');
     ok(!run({ ...spec, reproduction: '' }, false).ok, 'bug without reproduction is refused');
     delete spec.created_at;
     ok(run(spec, true).no_op, 'repeat bug intake is idempotent without restating generated created_at');
+    const cardFile = path.join(dir, 'tasks', card.title, `${card.title}.md`);
+    const legacyPreimage = actualLegacyWriterPreimage(raw, prepared.card);
+    ok(objectValuedFrontmatterKeys(legacyPreimage).includes('deploy_subscriptions')
+      && objectValuedFrontmatterKeys(legacyPreimage).includes('evidence'),
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY flat fixture contains the actual legacy object shapes');
+    fs.writeFileSync(cardFile, legacyPreimage);
+    const legacyReplay = run(spec, true);
+    ok(legacyReplay.ok && legacyReplay.changed_paths.includes(cardFile),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS flat intake accepts and heals its byte-equivalent legacy writer preimage');
+    eq(objectValuedFrontmatterKeys(fs.readFileSync(cardFile, 'utf8')), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD healed flat replay restores object-free frontmatter');
+    const unrelatedLegacyBytes = legacyPreimage.replace('### Outcome', '### Outcome\n\nunrelated legacy mutation');
+    const boardBeforeRefusal = fs.readFileSync(spec.board_path, 'utf8');
+    fs.writeFileSync(cardFile, unrelatedLegacyBytes);
+    const unrelatedRefusal = run(spec, true);
+    ok(!unrelatedRefusal.ok
+      && fs.readFileSync(cardFile, 'utf8') === unrelatedLegacyBytes
+      && fs.readFileSync(spec.board_path, 'utf8') === boardBeforeRefusal,
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY flat unrelated-byte third state refuses before every write');
   });
 }
 
@@ -396,9 +493,36 @@ function cutoverEpicIntake() {
       && new RegExp(`^source_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw)
       && new RegExp(`^kanban_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw),
     'BGD-CUTOVER-EPIC-INTAKE-ROUTING emits exact slice type and epic/atlas/board backlinks');
+    const directPrepared = prepareDeliveryCard(directRaw, direct.title);
+    eq(structuredJsonScalar(directRaw, 'evidence'), directPrepared.card.evidence,
+      'BGR-OBSY-WRITER-STRING-ENCODING epic-native intake writes evidence as one JSON text scalar');
+    eq(structuredJsonScalar(directRaw, 'deploy_subscriptions'), directPrepared.card.deploy_subscriptions,
+      'BGR-OBSY-WRITER-STRING-ENCODING epic-native intake writes deploy_subscriptions as one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(directRaw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD epic-native intake emits no object-valued frontmatter key');
     eq(fs.readFileSync(directSpec.board_path, 'utf8'), parentBefore, 'BGD-CUTOVER-PARENT-BOARD-PRESERVED leaves the parent board byte-identical');
     ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
     ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
+    const legacyEpicPreimage = actualLegacyWriterPreimage(directRaw, directPrepared.card);
+    ok(objectValuedFrontmatterKeys(legacyEpicPreimage).includes('deploy_subscriptions')
+      && objectValuedFrontmatterKeys(legacyEpicPreimage).includes('evidence'),
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY epic-native fixture contains the actual legacy object shapes');
+    fs.writeFileSync(directPath, legacyEpicPreimage);
+    const legacyEpicReplay = runEnabled(directSpec, true);
+    ok(legacyEpicReplay.ok && legacyEpicReplay.changed_paths.includes(directPath),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS epic-native intake accepts and heals its byte-equivalent legacy writer preimage');
+    eq(objectValuedFrontmatterKeys(fs.readFileSync(directPath, 'utf8')), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD healed epic-native replay restores object-free frontmatter');
+    const healedEpicRaw = fs.readFileSync(directPath, 'utf8');
+    const unrelatedEpicBytes = legacyEpicPreimage.replace('### Outcome', '### Outcome\n\nunrelated legacy mutation');
+    const epicBoardBeforeRefusal = fs.readFileSync(existingBoardPath, 'utf8');
+    fs.writeFileSync(directPath, unrelatedEpicBytes);
+    const unrelatedEpicRefusal = runEnabled(directSpec, true);
+    ok(!unrelatedEpicRefusal.ok
+      && fs.readFileSync(directPath, 'utf8') === unrelatedEpicBytes
+      && fs.readFileSync(existingBoardPath, 'utf8') === epicBoardBeforeRefusal,
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY epic-native unrelated-byte third state refuses before every write');
+    fs.writeFileSync(directPath, healedEpicRaw);
 
     const duplicate = execution('CUT-DUP Cross epic title', {
       model_profile: 'heavy', risk_flags: ['loader'],
@@ -615,6 +739,45 @@ function supersedeGovernance() {
     eq(applied.post_apply_instructions, [{ discard: { card: 'X Legacy card', superseded_by: 'SUP-1 Successor card' } }], 'BGR-INTAKE-SUPERSEDE-DISCARDS: apply receipt instructs predecessor discard without touching coordinator state');
     const raw = fs.readFileSync(findTaskFile(dir, 'SUP-1 Successor card') || path.join(dir, 'missing.md'), 'utf8');
     ok(raw.includes('supersedes: "X Legacy card"') && raw.includes('carried_findings: ["F1","F2"]') && raw.includes('binding_fixtures:'), 'BGR-INTAKE-SUPERSEDE-DISCARDS: supersede metadata materializes on the card note');
+    eq(structuredJsonScalar(raw, 'binding_fixtures'), successor().binding_fixtures,
+      'BGR-OBSY-WRITER-STRING-ENCODING object-bearing binding_fixtures use one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(raw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD superseding intake emits no nested object in frontmatter');
+    const successorPath = findTaskFile(dir, 'SUP-1 Successor card');
+    const legacySupersedePreimage = actualLegacyWriterPreimage(
+      raw,
+      prepareDeliveryCard(raw, successor().title).card,
+      successor().binding_fixtures,
+    );
+    ok(objectValuedFrontmatterKeys(legacySupersedePreimage).includes('binding_fixtures'),
+      'GA-OPS20A-NESTED-OBJECT-GUARD carried fixture reproduces the actual object-bearing supersession writer');
+    const legacySupersedeThirdState = legacySupersedePreimage.replace(
+      'binds finding F1 as a regression fixture',
+      'binds finding F1 as a regression fixturX',
+    );
+    const supersedeThirdStateBoard = fs.readFileSync(spec.board_path, 'utf8');
+    const supersedeThirdStatePeerPath = path.join(dir, 'Roadmap.md');
+    const supersedeThirdStatePeer = fs.readFileSync(supersedeThirdStatePeerPath, 'utf8');
+    eq(Buffer.byteLength(legacySupersedeThirdState), Buffer.byteLength(legacySupersedePreimage),
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state mutation preserves preimage length');
+    eq([...Buffer.from(legacySupersedeThirdState)].filter(
+      (byte, index) => byte !== Buffer.from(legacySupersedePreimage)[index],
+    ).length, 1,
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding fixture mutates exactly one unrelated byte');
+    fs.writeFileSync(successorPath, legacySupersedeThirdState);
+    const legacySupersedeThirdStateResult = run(spec, true);
+    ok(!legacySupersedeThirdStateResult.ok && legacySupersedeThirdStateResult.no_op !== true,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding legacy unrelated-byte third state refuses');
+    eq(fs.readFileSync(successorPath, 'utf8'), legacySupersedeThirdState,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves the card bytes');
+    eq(fs.readFileSync(spec.board_path, 'utf8'), supersedeThirdStateBoard,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves board bytes');
+    eq(fs.readFileSync(supersedeThirdStatePeerPath, 'utf8'), supersedeThirdStatePeer,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves peer bytes');
+    fs.writeFileSync(successorPath, legacySupersedePreimage);
+    const legacySupersedeReplay = run(spec, true);
+    ok(legacySupersedeReplay.ok && legacySupersedeReplay.changed_paths.includes(successorPath),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS superseding intake accepts and heals its legacy object-bearing preimage');
 
     const replay = run(spec, true);
     ok(replay.ok && replay.no_op === true, 'BGR-INTAKE-SUPERSEDE-NOOP: literal replay of the applied superseding spec is a no_op');
@@ -672,7 +835,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
+  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

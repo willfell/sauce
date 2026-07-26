@@ -19,7 +19,8 @@ const {
   selectClaimCandidate, selectCoordinatorCandidate, summarizeClaimSelection,
   commandStatus, commandStatusLocked, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
-  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
+  commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
+  metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
   PARKED_METADATA_REBIND_CARDS,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
@@ -131,6 +132,29 @@ const inlineDeploymentMeta = parseExecutionMeta(currentRaw.replace(
 ));
 ok(inlineDeploymentMeta.contractOk, 'coordinator accepts a valid inline YAML deployment map');
 eq(inlineDeploymentMeta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'inline deployment map preserves every required vault');
+const encodedStructuredRaw = currentRaw
+  .replace(
+    'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+    `deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(meta.deploySubscriptions)}`,
+  )
+  .replace(
+    /^evidence:.*$/m,
+    `evidence: ${delivery.encodeStructuredFrontmatterValue(meta.contract.evidence)}`,
+  );
+const encodedStructuredMeta = parseExecutionMeta(encodedStructuredRaw);
+ok(encodedStructuredMeta.contractOk,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator accepts JSON-string structured fields');
+eq(encodedStructuredMeta.deploySubscriptions, meta.deploySubscriptions,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator preserves byte-equivalent deployment maps');
+eq(encodedStructuredMeta.contract.evidence, meta.contract.evidence,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator preserves byte-equivalent evidence');
+const malformedStructuredMeta = parseExecutionMeta(encodedStructuredRaw.replace(
+  /^evidence:.*$/m,
+  `evidence: ${JSON.stringify('[{"source_identity":"unterminated"}')}`,
+));
+ok(!malformedStructuredMeta.contractOk
+  && validateExecutionMeta(malformedStructuredMeta).some((error) => /invalid-structured-json:evidence/.test(error)),
+'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator refuses malformed JSON strings loudly');
 const malformedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  ero: []', '  ero: []\n    broken mapping line'));
 ok(!malformedDeploymentMeta.contractOk, 'coordinator rejects unsupported indented deployment-map lines');
 const flowDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [mechanism:delivery]'));
@@ -3056,10 +3080,33 @@ eq(Object.fromEntries(Object.keys(amendProtectedBefore).map((key) => [key, amend
   amendProtectedBefore, 'amendment preserves every protected target metadata field outside the two authorized contract fields');
 ok(/platform\/manifest\.json/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'amended touch zones project into card frontmatter');
 ok(/mechanism:delivery/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'typed deployments project into card frontmatter');
+const amendedCardRaw = fs.readFileSync(amend.cardPath, 'utf8');
+const amendedDeploymentLine = amendedCardRaw.split('\n').find((line) => line.startsWith('deploy_subscriptions: '));
+eq(JSON.parse(JSON.parse(amendedDeploymentLine.slice(amendedDeploymentLine.indexOf(':') + 1).trim())),
+  typedDeployments,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract projects the exact authority map as one JSON text scalar');
+ok(!/\ndeploy_subscriptions:\n\s+headspace:/m.test(amendedCardRaw),
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract never restores the legacy nested deployment map');
 ok(/status: in_progress/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection preserves lifecycle metadata');
 ok(!/status_changed_at: 2026-07-16T18:00:00.000Z/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection does not rewrite the status timestamp');
 eq(withoutExecutionContractBlocks(fs.readFileSync(amend.cardPath, 'utf8')), withoutExecutionContractBlocks(amend.cardSnapshot),
   'card projection preserves every frontmatter field and body byte outside the two authorized contract blocks');
+const repeatedAmendProjection = projectCard(
+  amend.cardPath,
+  amend.boardPath,
+  AMEND_CARD,
+  'implementing',
+  {
+    cardsRoot: amend.root,
+    record: amend.state.cards[AMEND_CARD],
+    state: amend.state,
+    now: amend.deps.now,
+  },
+);
+ok(repeatedAmendProjection.changed === false && repeatedAmendProjection.card_changed === false,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection recognizes the JSON text scalar and stays no-op');
+eq(fs.readFileSync(amend.cardPath, 'utf8'), amendedCardRaw,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection preserves the scalar card byte-for-byte');
 eq(snapshotDirectory(amend.worktree), amend.worktreeSnapshot, 'successful amendment preserves the complete target worktree tree and bytes');
 eq(amend.gitCalls, [
   { cmd: 'git', argv: ['fetch', 'origin', 'main', '--quiet'], cwd: amend.worktree, stdio: 'pipe' },
@@ -4473,6 +4520,216 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+
+// GA-OPS20a: canonical structured fields restamp to Obsidian-safe text scalars.
+function restampHarness(id = 'happy') {
+  const root = path.join(reconcileRoot, `contract-frontmatter-restamp-${id}`);
+  fs.mkdirSync(path.join(root, 'Nested Epic', 'board'), { recursive: true });
+  const legacyNames = ['Legacy Restamp A', 'Legacy Restamp B'];
+  const paths = legacyNames.map((name, index) => {
+    const file = index === 0
+      ? path.join(root, `${name}.md`)
+      : path.join(root, 'Nested Epic', 'board', `${name}.md`);
+    fs.writeFileSync(file, `${card({ name })}\nBODY-SENTINEL-${index}\n`);
+    return file;
+  });
+  const alreadyName = 'Already Encoded';
+  const alreadyPath = path.join(root, `${alreadyName}.md`);
+  const alreadyLegacy = card({ name: alreadyName });
+  const alreadyMeta = parseExecutionMeta(alreadyLegacy, alreadyName);
+  const alreadyEncoded = alreadyLegacy
+    .replace(
+      'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+      `deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(alreadyMeta.deploySubscriptions)}`,
+    )
+    .replace(
+      /^evidence:.*$/m,
+      `evidence: ${delivery.encodeStructuredFrontmatterValue(alreadyMeta.contract.evidence)}`,
+    );
+  fs.writeFileSync(alreadyPath, alreadyEncoded);
+  fs.writeFileSync(path.join(root, 'non-card.md'), '---\ntype: context-pack\n---\n\nUnrelated body.\n');
+  let specRaw = '';
+  let writes = 0;
+  let failWrite = 0;
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const reason = 'restamp canonical structured contract fields';
+  const deps = {
+    cardsRoot: root,
+    withLock: async (_ctx, _name, fn) => fn(),
+    readSpec: () => specRaw,
+    atomicWriteText: (file, raw) => {
+      writes += 1;
+      if (failWrite && writes === failWrite) throw new Error('injected restamp write failure');
+      fs.writeFileSync(file, raw);
+    },
+    durablePathBarrier: () => {},
+  };
+  const dryRunArgs = {
+    _: ['reconcile-metadata'],
+    'contract-frontmatter-restamp': true,
+    'dry-run': true,
+    reason,
+    json: true,
+  };
+  const applyArgs = {
+    _: ['reconcile-metadata'],
+    'contract-frontmatter-restamp': true,
+    apply: true,
+    reason,
+    spec: 'contract-frontmatter-restamp.json',
+    json: true,
+  };
+  return {
+    root, paths, alreadyPath, ctx, deps, reason, dryRunArgs, applyArgs,
+    setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    setSpecRaw: (raw) => { specRaw = raw; },
+    writes: () => writes,
+    failWrite: (attempt) => { failWrite = attempt; },
+    clearFailure: () => { failWrite = 0; },
+  };
+}
+
+function independentlyRestampedContractBytes(raw) {
+  const legacyDeployments = [
+    'deploy_subscriptions:',
+    '  headspace: []',
+    '  accuris: []',
+    '  ero: []',
+  ].join('\n');
+  const evidenceMatch = raw.match(/^evidence: (.*)$/m);
+  if (!raw.includes(legacyDeployments) || !evidenceMatch) {
+    throw new Error('independent restamp oracle requires the exact legacy writer preimage');
+  }
+  const scalar = (value) => JSON.stringify(JSON.stringify(value));
+  return raw
+    .replace(legacyDeployments, `deploy_subscriptions: ${scalar({
+      headspace: [], accuris: [], ero: [],
+    })}`)
+    .replace(/^evidence:.*$/m, `evidence: ${scalar(JSON.parse(evidenceMatch[1]))}`);
+}
+
+const restamp = restampHarness();
+const restampBodiesBefore = restamp.paths.map((file) => {
+  const raw = fs.readFileSync(file, 'utf8');
+  return raw.slice(raw.match(/^---\n[\s\S]*?\n---/)[0].length);
+});
+const restampContractsBefore = restamp.paths.map((file) => (
+  parseExecutionMeta(fs.readFileSync(file, 'utf8'), path.basename(file, '.md')).contract
+));
+const restampPreimages = restamp.paths.map((file) => fs.readFileSync(file, 'utf8'));
+const restampIntended = restampPreimages.map(independentlyRestampedContractBytes);
+const restampPlan = await commandReconcileMetadata(restamp.ctx, restamp.dryRunArgs, restamp.deps);
+eq(restampPlan.action, 'contract-frontmatter-restamp-plan',
+  'BGR-OBSY-HEAL-IDEMPOTENT starts with a deterministic dry-run');
+eq(restampPlan.exact_target_count, 2,
+  'BGR-OBSY-HEAL-IDEMPOTENT plans every legacy canonical note and excludes already encoded or unrelated notes');
+eq(restampPlan.spec.files.map((entry) => entry.card), ['Legacy Restamp A', 'Legacy Restamp B'],
+  'BGR-OBSY-HEAL-IDEMPOTENT uses stable path ordering');
+for (let index = 0; index < restampPlan.spec.files.length; index += 1) {
+  eq(restampPlan.spec.files[index].expected_sha256, testSha256(restampPreimages[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} expected receipt uses independent SHA-256`);
+  eq(restampPlan.spec.files[index].intended_sha256, testSha256(restampIntended[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} intended receipt uses independent SHA-256`);
+}
+eq(restamp.writes(), 0, 'BGR-OBSY-HEAL-IDEMPOTENT dry-run performs zero writes');
+restamp.setSpec(restampPlan.spec);
+restamp.failWrite(2);
+await assert.rejects(
+  () => commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps),
+  /injected restamp write failure/,
+  'BGR-OBSY-HEAL-IDEMPOTENT propagates an interrupted atomic write',
+); count++;
+const firstInterruptedRaw = fs.readFileSync(restamp.paths[0], 'utf8');
+const secondInterruptedRaw = fs.readFileSync(restamp.paths[1], 'utf8');
+ok(!restampContractFrontmatter(firstInterruptedRaw, 'Legacy Restamp A').changed
+  && restampContractFrontmatter(secondInterruptedRaw, 'Legacy Restamp B').changed,
+'BGR-OBSY-HEAL-IDEMPOTENT interrupted apply leaves only canonical intended or exact preimage states');
+restamp.clearFailure();
+const restampApplied = await commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps);
+eq(restampApplied.changed_count, 1,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal retry rolls the one remaining preimage forward');
+for (let index = 0; index < restamp.paths.length; index += 1) {
+  const raw = fs.readFileSync(restamp.paths[index], 'utf8');
+  const fieldLines = raw.match(/^---\n([\s\S]*?)\n---/)[1].split('\n');
+  ok(/^deploy_subscriptions: "/m.test(raw) && /^evidence: "/m.test(raw),
+    `BGR-OBSY-HEAL-IDEMPOTENT target ${index + 1} uses JSON text scalars`);
+  ok(!fieldLines.some((line) => /^\s{2}(?:headspace|accuris|ero):/.test(line)),
+    `BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD target ${index + 1} has no nested deployment map`);
+  eq(raw.slice(raw.match(/^---\n[\s\S]*?\n---/)[0].length), restampBodiesBefore[index],
+    `BGR-OBSY-HEAL-IDEMPOTENT target ${index + 1} preserves every body byte`);
+  eq(parseExecutionMeta(raw, path.basename(restamp.paths[index], '.md')).contract,
+    restampContractsBefore[index],
+    `BGR-OBSY-READERS-BOTH-ENCODINGS target ${index + 1} preserves its complete parsed contract`);
+}
+const restampWritesAfterApply = restamp.writes();
+const restampReplay = await commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps);
+ok(restampReplay.no_op && restampReplay.changed_count === 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal replay returns no_op true');
+eq(restamp.writes(), restampWritesAfterApply,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal replay performs zero writes');
+
+const malformedRestamp = restampHarness('malformed');
+fs.writeFileSync(malformedRestamp.paths[0], fs.readFileSync(malformedRestamp.paths[0], 'utf8')
+  .replace(/^evidence:.*$/m, `evidence: ${JSON.stringify('[{"source_identity":"unterminated"}')}`));
+assert.throws(
+  () => contractFrontmatterRestampPlan(malformedRestamp.root, malformedRestamp.reason),
+  /invalid-structured-json:evidence/,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS bulk restamp refuses malformed structured JSON before writes',
+); count++;
+eq(malformedRestamp.writes(), 0,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS malformed bulk restamp performs zero writes');
+
+const symlinkRestamp = restampHarness('symlink');
+const outsideRestamp = path.join(reconcileRoot, 'contract-frontmatter-restamp-outside.md');
+fs.writeFileSync(outsideRestamp, card({ name: 'Outside Restamp' }));
+fs.symlinkSync(outsideRestamp, path.join(symlinkRestamp.root, 'Escaped Restamp.md'));
+assert.throws(
+  () => contractFrontmatterRestampPlan(symlinkRestamp.root, symlinkRestamp.reason),
+  /refuses symlink path/,
+  'BGR-OBSY-HEAL-IDEMPOTENT refuses a symlinked canonical-note path',
+); count++;
+eq(symlinkRestamp.writes(), 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT symlink refusal performs zero writes');
+
+const escapeRestamp = restampHarness('escape-spec');
+const escapePlan = await commandRestampContractFrontmatter(
+  escapeRestamp.ctx, escapeRestamp.dryRunArgs, escapeRestamp.deps,
+);
+const escapedSpec = deepCopy(escapePlan.spec);
+escapedSpec.files[0].path = '../contract-frontmatter-restamp-outside.md';
+escapeRestamp.setSpec(escapedSpec);
+await assert.rejects(
+  () => commandRestampContractFrontmatter(escapeRestamp.ctx, escapeRestamp.applyArgs, escapeRestamp.deps),
+  /invalid entry/,
+  'BGR-OBSY-HEAL-IDEMPOTENT refuses an out-of-root spec before writes',
+); count++;
+eq(escapeRestamp.writes(), 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT out-of-root refusal performs zero writes');
+
+const thirdHashRestamp = restampHarness('third-hash');
+const thirdHashRestampPlan = await commandRestampContractFrontmatter(
+  thirdHashRestamp.ctx, thirdHashRestamp.dryRunArgs, thirdHashRestamp.deps,
+);
+thirdHashRestamp.setSpec(thirdHashRestampPlan.spec);
+const untouchedThirdHashPeer = fs.readFileSync(thirdHashRestamp.paths[1], 'utf8');
+const thirdHashPreimage = fs.readFileSync(thirdHashRestamp.paths[0], 'utf8');
+const thirdHashMutated = thirdHashPreimage.replace('BODY-SENTINEL-0', 'BODY-SENTINEL-X');
+eq(Buffer.byteLength(thirdHashMutated), Buffer.byteLength(thirdHashPreimage),
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED mutation preserves preimage length');
+eq([...Buffer.from(thirdHashMutated)].filter((byte, index) => byte !== Buffer.from(thirdHashPreimage)[index]).length, 1,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED fixture mutates exactly one byte');
+fs.writeFileSync(thirdHashRestamp.paths[0], thirdHashMutated);
+await assert.rejects(
+  () => commandRestampContractFrontmatter(
+    thirdHashRestamp.ctx, thirdHashRestamp.applyArgs, thirdHashRestamp.deps,
+  ),
+  /unplanned or changed canonical target|third hash/,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED refuses a one-byte post-plan mutation before writes',
+); count++;
+eq(thirdHashRestamp.writes(), 0,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal performs zero coordinator writes');
+eq(fs.readFileSync(thirdHashRestamp.paths[1], 'utf8'), untouchedThirdHashPeer,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal preserves every peer preimage');
 
 // BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
 async function captureFsMutationAttempts(run) {

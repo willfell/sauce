@@ -8,8 +8,8 @@ const childProcess = require('child_process');
 const delivery = require('../../../../platform/mechanisms/delivery');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
-const VAULTS = delivery.registry.policies.required_vaults;
 const EPIC_SCHEMA_VERSION = '1.1.0';
+const VAULTS = delivery.registry.policies.required_vaults;
 const RISK_MAP = {
   new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
   migration: 'migration', heal: 'migration', loader: 'control_plane',
@@ -534,6 +534,7 @@ function renderCard(card, spec, options = {}) {
   const contract = role === 'execution' ? validateDeliveryContract(deliveryContract(card, spec, options)).card : null;
   const boardRef = options.boardRef || spec.source_board || spec.board_path;
   const noteType = options.epicNative && role === 'execution' ? 'slice' : 'task-hub';
+  const structuredValue = (value) => delivery.encodeStructuredFrontmatterValue(value);
   const lines = ['---', `type: ${noteType}`, `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
   if (options.epicNative && role === 'execution') {
     lines.push(`epic: ${quoted(`[[${options.epicName}]]`)}`, `task_parent: ${quoted(options.atlasRef)}`);
@@ -550,12 +551,25 @@ function renderCard(card, spec, options = {}) {
   if (dependencies.length) lines.push(...dependencies.map((item) => `  - ${quoted(item)}`));
   else lines.push('  []');
   if (role === 'execution') {
-    lines.push('deploy_subscriptions:');
-    for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);
+    if (options.legacyStructuredFrontmatter === true) {
+      lines.push('deploy_subscriptions:');
+      for (const vault of VAULTS) lines.push(`  ${vault}: ${JSON.stringify(contract.deploy_subscriptions[vault])}`);
+    } else {
+      lines.push(`deploy_subscriptions: ${structuredValue(contract.deploy_subscriptions)}`);
+    }
   }
-  if (role === 'execution') lines.push(`evidence: ${JSON.stringify(contract.evidence)}`, `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`);
+  if (role === 'execution') {
+    lines.push(
+      `evidence: ${options.legacyStructuredFrontmatter === true ? JSON.stringify(contract.evidence) : structuredValue(contract.evidence)}`,
+      `risk_dimensions: ${JSON.stringify(contract.risk_dimensions)}`,
+    );
+  }
   if (role === 'execution' && card.supersedes) {
-    lines.push(`supersedes: ${quoted(card.supersedes)}`, `carried_findings: ${JSON.stringify(card.carried_findings)}`, `binding_fixtures: ${JSON.stringify(card.binding_fixtures)}`);
+    lines.push(
+      `supersedes: ${quoted(card.supersedes)}`,
+      `carried_findings: ${JSON.stringify(card.carried_findings)}`,
+      `binding_fixtures: ${options.legacyStructuredFrontmatter === true ? JSON.stringify(card.binding_fixtures) : structuredValue(card.binding_fixtures)}`,
+    );
   }
   lines.push('tags:', ...(options.epicNative && role === 'execution' ? ['  - slice'] : ['  - kanban-card', '  - project-card']), '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
   for (const item of spec.evidence || []) lines.push(`- \`${item.path}:${item.line}\`${item.note ? ` — ${item.note}` : ''}`);
@@ -882,7 +896,11 @@ function planEpicNative(spec, validation, boardRaw) {
       const stableSpec = !spec.created_at && prior ? { ...spec, created_at: priorCreatedAt(prior) || undefined }
         : (!spec.created_at ? { ...spec, created_at: createdAt } : spec);
       const content = renderCard(card, stableSpec, options);
-      const error = enqueuePlan(planned, file, content, { label: card.title });
+      const legacyContent = renderCard(card, stableSpec, { ...options, legacyStructuredFrontmatter: true });
+      const error = enqueuePlan(planned, file, content, {
+        label: card.title,
+        acceptedPreimages: [legacyContent],
+      });
       if (error) errors.push(error);
     }
   }
@@ -917,7 +935,10 @@ function planLegacy(spec, validation, boardRaw) {
     const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
     const stableSpec = !spec.created_at && prior ? { ...spec, created_at: priorCreatedAt(prior) || undefined } : spec;
     const content = renderCard(card, stableSpec);
-    if (prior !== null && prior !== content) return { ok: false, errors: [`refuses to overwrite existing card: ${card.title}`] };
+    const legacyContent = renderCard(card, stableSpec, { legacyStructuredFrontmatter: true });
+    if (prior !== null && prior !== content && prior !== legacyContent) {
+      return { ok: false, errors: [`refuses to overwrite existing card: ${card.title}`] };
+    }
     planned.push({ path: file, content, changed: prior !== content });
   }
   planSupplementalFiles(spec, planned);
