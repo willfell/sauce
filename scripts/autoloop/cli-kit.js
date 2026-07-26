@@ -69,6 +69,14 @@ function requireJson(args, verb) {
   }
 }
 
+function requireOnlyOptions(args, verb, allowed = []) {
+  const accepted = new Set(['_', ...allowed]);
+  const unknown = Object.keys(args || {}).filter((key) => !accepted.has(key));
+  if (unknown.length) {
+    refuse(`${verb}-refused`, 'unknown_option', `${verb} does not accept --${unknown[0]}`);
+  }
+}
+
 function receiptForError(error) {
   if (error instanceof CliRefusal) {
     return refusalReceipt(error.action, error.code, error.message, error.extra);
@@ -110,6 +118,7 @@ module.exports = {
   refuse,
   usage,
   requireJson,
+  requireOnlyOptions,
   receiptForError,
   validateReceiptEnvelope,
 };

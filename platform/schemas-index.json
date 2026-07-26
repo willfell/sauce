@@ -408,7 +408,7 @@
         "scripts/autoloop/codex-coordinator.js",
         "platform/test/run-codex-autoloop.js"
       ],
-      "notes": "Shared autoloop CLI grammar v1.0.0. Successful mutating receipts preserve action and add ok:true plus literal-replay no_op; refusals add ok:false, no_op:false, a stable code, and a message. Mutating verbs require --json before reads, locks, or writes. Exit codes are 0 success/no-op, 1 refusal/failure, and 2 usage."
+      "notes": "Shared autoloop CLI grammar v1.0.0. Successful mutating receipts preserve action and add ok:true plus literal-replay no_op; refusals add ok:false, no_op:false, a stable code, and a message. Mutating verbs require --json and reject unknown options before reads, locks, or writes; record-review also requires one exact expected HEAD. Exit codes are 0 success/no-op, 1 refusal/failure, and 2 usage."
     },
     {
       "id": "sauce.loop-station.v1",

@@ -42,7 +42,7 @@ const {
   delivery, prepareDeliveryCard, prepareDeliveryObject,
 } = require('../../scripts/autoloop/select-card');
 const {
-  EXIT_CODES, successReceipt, refusalReceipt, usage, validateReceiptEnvelope,
+  EXIT_CODES, successReceipt, refusalReceipt, usage, requireOnlyOptions, validateReceiptEnvelope,
 } = require('../../scripts/autoloop/cli-kit');
 const deliveryStatusDigest = require('../../scripts/autoloop/delivery-status-digest');
 const commandPark = rawCommandPark;
@@ -250,6 +250,16 @@ eq(validateReceiptEnvelope(refusalReceipt('park-refused', 'json_required', 'park
   { ok: true, errors: [] }, 'CS1-KIT-ENVELOPE validates a refusal receipt');
 eq(validateReceiptEnvelope({ action: 'broken', ok: true }).errors, ['no_op must be boolean'],
   'CS1-KIT-ENVELOPE rejects an incomplete envelope');
+let unknownOptionError = null;
+try {
+  requireOnlyOptions({ _: ['park'], json: true, 'expected-heed': 'a'.repeat(40) },
+    'park', ['json', 'card']);
+} catch (error) {
+  unknownOptionError = error;
+}
+eq({ action: unknownOptionError.action, code: unknownOptionError.code }, {
+  action: 'park-refused', code: 'unknown_option',
+}, 'CS1-KIT-ENVELOPE exports stable shared option allowlist enforcement');
 let cliUsageError = null;
 try {
   usage('record-pr-refused', 'invalid_arguments', 'record-pr requires --card and numeric --pr');
@@ -969,6 +979,55 @@ eq(JSON.parse(jsonFirstCli.stderr), {
   action: 'park-refused', ok: false, no_op: false, code: 'json_required',
   message: 'park requires --json for a machine-readable receipt',
 }, 'CS1-JSON-FIRST-REFUSAL CLI emits a parseable refusal even outside a Git checkout');
+for (const [verb, args, invoke] of [
+  ['park', {
+    json: true, card: 'A', 'depends-on': 'B', 'resume-condition': 'B deploys',
+    'unexpected-park-option': true,
+  }, rawCommandPark],
+  ['resume', {
+    json: true, card: 'A', 'unexpected-resume-option': true,
+  }, rawCommandResume],
+  ['record-review', {
+    json: true, card: 'A', lens: 'correctness', verdict: 'pass',
+    summary: 'A sufficiently specific exact-head correctness summary.',
+    'expected-head': 'a'.repeat(40), 'expected-heed': 'a'.repeat(40),
+  }, rawCommandRecordReview],
+  ['record-pr', {
+    json: true, card: 'A', pr: '42', 'unexpected-pr-option': true,
+  }, rawCommandRecordPr],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(recordState);
+  await assert.rejects(() => invoke({ root: '/workshop' }, args, {
+    readState: () => { effects.reads++; return recordState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'unknown_option' && error.action === `${verb}-refused`,
+  `CS1-UNKNOWN-OPTION-REFUSAL ${verb} returns the stable refusal`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(recordState), before,
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} preserves authoritative state byte-for-byte`);
+}
+const unknownOptionCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'record-review', '--json', '--card', 'A', '--lens', 'correctness', '--verdict', 'pass',
+    '--summary', 'A sufficiently specific exact-head correctness summary.',
+    '--expected-heed', 'a'.repeat(40),
+  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(unknownOptionCli.code, EXIT_CODES.refusal,
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI exits 1 before attempting workshop resolution');
+eq(unknownOptionCli.stdout, '',
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI emits no non-machine success output');
+eq(JSON.parse(unknownOptionCli.stderr).code, 'unknown_option',
+  'CS1-UNKNOWN-OPTION-REFUSAL misspelled expected-head emits a stable refusal outside Git');
 const usageCli = await new Promise((resolve) => {
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
@@ -1057,15 +1116,59 @@ reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree
 const reviewLocks = [];
 let opx2ReviewProjections = 0;
 let reviewWrites = 0;
+const initialReviewHead = 'c'.repeat(40);
+const missingHeadEffects = { reads: 0, locks: 0, writes: 0 };
+const beforeMissingHead = JSON.stringify(reviewState);
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
+}, {
+  readState: () => { missingHeadEffects.reads++; return reviewState; },
+  writeState: () => { missingHeadEffects.writes++; },
+  withLock: async (_ctx, _name, fn) => { missingHeadEffects.locks++; return fn(); },
+}), (error) => error.code === 'invalid_arguments' && error.exitCode === EXIT_CODES.usage,
+'CS1-MANDATORY-EXACT-HEAD omission refuses with stable usage before command effects');
+eq(missingHeadEffects, { reads: 0, locks: 0, writes: 0 },
+  'CS1-MANDATORY-EXACT-HEAD omission performs zero reads, locks, or writes');
+eq(JSON.stringify(reviewState), beforeMissingHead,
+  'CS1-MANDATORY-EXACT-HEAD omission preserves review state byte-for-byte');
+for (const [label, expectedHeadOperand] of [
+  ['bare token', true],
+  ['duplicate operands', ['a'.repeat(40), 'a'.repeat(40)]],
+  ['uppercase SHA', 'A'.repeat(40)],
+  ['short SHA', 'a'.repeat(39)],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(reviewState);
+  await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+    json: true,
+    card: 'Review', lens: 'correctness', verdict: 'pass',
+    summary: 'No correctness defect found in the reviewed diff.',
+    'expected-head': expectedHeadOperand,
+  }, {
+    readState: () => { effects.reads++; return reviewState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'invalid_arguments',
+  `CS1-MANDATORY-EXACT-HEAD ${label} refuses with stable usage`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-MANDATORY-EXACT-HEAD ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), before,
+    `CS1-MANDATORY-EXACT-HEAD ${label} preserves review state byte-for-byte`);
+}
 const review = await commandRecordReview({ root: '/workshop' }, {
   json: true,
-  card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
+  'expected-head': initialReviewHead,
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => { reviewWrites++; },
+  readState: () => reviewState, sh: () => initialReviewHead, writeState: () => { reviewWrites++; },
   projectLoopStation: () => { opx2ReviewProjections++; },
   withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
-eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
+eq(review.head_sha, initialReviewHead, 'review receipt is tied to the mandatory exact commit');
 eq(review.ok, true, 'record-review adds ok:true without removing legacy receipt keys');
 eq(review.no_op, false, 'record-review first apply reports no_op:false');
 eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
@@ -1171,9 +1274,11 @@ await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
 reviewState.cards.Review.phase = 'feature_merged';
 await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
   json: true,
-  card: 'Review', lens: 'correctness', verdict: 'refute', summary: 'A late refutation must not reopen a merged feature.',
+  card: 'Review', lens: 'correctness', verdict: 'refute',
+  summary: 'A late refutation must not reopen a merged feature.',
+  'expected-head': exactReviewHead,
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => {}, withLock: immediateCardLock,
+  readState: () => reviewState, sh: () => exactReviewHead, writeState: () => {}, withLock: immediateCardLock,
 }), /reviews are closed .*feature_merged/, 'review writes are rejected after the feature PR merges');
 reviewState.cards.Review.phase = 'implementing';
 

@@ -28,7 +28,7 @@ const deliveryStatusDigest = require('./delivery-status-digest');
 const deliveryReviewTriage = require('./delivery-review-triage');
 const { deliveryPaths } = require('./delivery-paths');
 const {
-  EXIT_CODES, parseArgs, successReceipt, refuse, usage, requireJson, receiptForError,
+  EXIT_CODES, parseArgs, successReceipt, refuse, usage, requireJson, requireOnlyOptions, receiptForError,
 } = require('./cli-kit');
 
 const execFileAsync = promisify(execFile);
@@ -39,6 +39,15 @@ const MAX_ACTIVE = 3;
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
+const STRICT_CLI_OPTIONS = Object.freeze({
+  park: ['json', 'card', 'depends-on', 'resume-condition'],
+  resume: ['json', 'card'],
+  'record-review': [
+    'json', 'card', 'lens', 'verdict', 'summary', 'expected-head',
+    'accepted-limitation', 'bound',
+  ],
+  'record-pr': ['json', 'card', 'pr'],
+});
 const DEPLOYMENT_VAULT_IDS = ['headspace', 'accuris', 'ero'];
 const DELIVERY_STABLE_FIELDS = Object.freeze(
   delivery.registry.types['execution-card'].fields.map((field) => field.name),
@@ -3386,6 +3395,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
 
 async function commandPark(ctx, args, deps = {}) {
   requireJson(args, 'park');
+  requireOnlyOptions(args, 'park', STRICT_CLI_OPTIONS.park);
   const card = String(args.card || '').trim();
   const resumeCondition = Array.isArray(args['resume-condition']) ? '' : String(args['resume-condition'] || '').trim();
   const dependencies = [...new Set(argumentValues(args['depends-on']))];
@@ -3458,6 +3468,7 @@ async function commandPark(ctx, args, deps = {}) {
 
 async function commandResume(ctx, args, deps = {}) {
   requireJson(args, 'resume');
+  requireOnlyOptions(args, 'resume', STRICT_CLI_OPTIONS.resume);
   const card = String(args.card || '').trim();
   if (!card) usage('resume-refused', 'invalid_arguments', 'resume requires --card');
   const loadState = deps.readState || readState;
@@ -4644,6 +4655,7 @@ async function commandClaim(ctx, args) {
 
 async function commandRecordReview(ctx, args, deps = {}) {
   requireJson(args, 'record-review');
+  requireOnlyOptions(args, 'record-review', STRICT_CLI_OPTIONS['record-review']);
   const card = args.card; const lens = args.lens; const verdict = args.verdict;
   const summary = String(args.summary || '').trim();
   const expectedHead = Array.isArray(args['expected-head']) ? '' : String(args['expected-head'] || '').trim();
@@ -4664,9 +4676,9 @@ async function commandRecordReview(ctx, args, deps = {}) {
     usage('record-review-refused', 'invalid_arguments',
       'record-review requires a specific --summary of at least 20 characters');
   }
-  if (args['expected-head'] != null && !EXACT_SHA.test(expectedHead)) {
+  if (!EXACT_SHA.test(expectedHead)) {
     usage('record-review-refused', 'invalid_arguments',
-      'record-review --expected-head must be one exact lowercase 40-hex SHA');
+      'record-review requires --expected-head as one exact lowercase 40-hex SHA');
   }
   if (malformedLimitationOperand || acceptedLimitation !== (bound.length > 0)) {
     refuse('record-review-refused', 'invalid_limitation',
@@ -4790,6 +4802,7 @@ async function commandVerifyGates(ctx, args, deps = {}) {
 
 async function commandRecordPr(ctx, args, deps = {}) {
   requireJson(args, 'record-pr');
+  requireOnlyOptions(args, 'record-pr', STRICT_CLI_OPTIONS['record-pr']);
   const card = args.card; const number = Number(args.pr);
   if (!card || !Number.isInteger(number)) {
     usage('record-pr-refused', 'invalid_arguments', 'record-pr requires --card and numeric --pr');
@@ -6384,8 +6397,9 @@ function commandRecover(ctx, opts = {}) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2)); const command = args._[0] || 'status';
-  if (['park', 'resume', 'record-review', 'record-pr'].includes(command)) {
+  if (STRICT_CLI_OPTIONS[command]) {
     requireJson(args, command);
+    requireOnlyOptions(args, command, STRICT_CLI_OPTIONS[command]);
   }
   const ctx = workshopContext();
   let result;
