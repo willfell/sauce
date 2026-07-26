@@ -62,7 +62,7 @@ The coordinator is the sole writer of `spice/projects/sauce/Loop Station.md`. On
 
 The station body belongs to the render layer. If the note is absent, the first projection scaffolds one stock `OperatorStation` customjs-guard block; after that, projection changes frontmatter only and preserves the body byte-for-byte. Replaying an unchanged transition preserves the complete note byte-for-byte and performs no write. An existing body-only note fails closed rather than being rewritten.
 
-Projection is transition-driven, never read-driven: claim, park, resume, discard/reap, advancing phases (including deploy), and cutover flips refresh it. Status, review, gate, poll, refusal, retry, and no-op replay paths do not. The shared station write remains under the selector boundary, including the short projection step after a per-card advance, so concurrent card transitions cannot write the single note simultaneously.
+Projection is transition-driven, never read-driven: claim, park, resume, discard/reap, advancing phases (including deploy), receipt-bound deployed recovery, and cutover flips refresh it. Status, review, gate, dry-run, poll, refusal, retry, and no-op replay paths do not. The shared station write remains under the selector boundary, including the short projection step after a per-card advance or recovery, so concurrent card transitions cannot write the single note simultaneously.
 
 The `since` section reads `.delivery-digest-last-seen` with peek semantics. Station projection never advances that marker; only a successful real `delivery:status` read does. A transition receipt includes `loop_station`, including a visible failure receipt if the additive station projection fails after authoritative lifecycle state has committed.
 

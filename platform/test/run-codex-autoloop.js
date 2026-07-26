@@ -4144,6 +4144,7 @@ recoveryState.cards['Stranded shipped card'] = {
 };
 let recoveryWrites = 0;
 const recoveryLocks = [];
+const opx2RecoveryProjections = [];
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
@@ -4152,6 +4153,10 @@ const recoveryDeps = {
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
   now: () => '2026-07-20T19:01:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2RecoveryProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
 const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
@@ -4190,6 +4195,8 @@ eq(recoveryLocks.slice(-2), [
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed apply fires exactly one Loop Station projection');
 eq(recoveryState.cards['Stranded shipped card'].phase, 'deployed', 'recovery changes the terminal phase only after every proof passes');
 eq(recoveryState.cards['Stranded shipped card'].branch, 'preserved-branch', 'recovery preserves the branch');
 eq(recoveryState.cards['Stranded shipped card'].worktree, '/preserved-worktree', 'recovery preserves the worktree');
@@ -4203,6 +4210,8 @@ const replayedRecovery = await commandRecoverDeployed({ root: reconcileRoot }, {
 eq(replayedRecovery.no_op, true, 'literal receipt-bound recovery replay returns no_op true');
 eq(recoveryWrites, recoveryWritesAfterApply, 'literal recovery replay performs no ledger write');
 eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'literal recovery replay never duplicates its audit');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed replay fires no additional Loop Station projection');
 await assert.rejects(() => commandRecoverDeployed(
   { root: reconcileRoot }, { ...recoveryArgs, 'expected-head': `prefix-${RECOVERY_HEAD}` },
   { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: deepCopy(recoveryBefore) } }) },
@@ -5781,6 +5790,23 @@ eq(fs.readFileSync(opx2MarkerPath), opx2MarkerBefore,
   'OPX2-PEEK-NEVER-ADVANCES projection leaves the digest last-seen marker byte-identical');
 eq(opx2Projected.payload.since.marker_at, '2026-07-25T00:00:00.000Z',
   'OPX2-PEEK-NEVER-ADVANCES payload carries the peeked marker value');
+const opx2MalformedTimestamp = fs.readFileSync(opx2StationPath, 'utf8')
+  .replace(/updated_at: "[^"]+"/, 'updated_at: "not-an-iso-timestamp"');
+fs.writeFileSync(opx2StationPath, opx2MalformedTimestamp);
+const opx2TimestampWritesBefore = opx2StationWrites;
+const opx2TimestampHealed = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2TimestampHealed.changed, true,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at is healed instead of reused after validation');
+eq(opx2StationWrites, opx2TimestampWritesBefore + 1,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at performs one corrective projection write');
+ok(Number.isFinite(Date.parse(
+  fs.readFileSync(opx2StationPath, 'utf8').match(/updated_at: "([^"]+)"/)[1],
+)), 'OPX2-PAYLOAD-SCHEMA healed station carries a valid updated_at timestamp');
+ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
+  'OPX2-BODY-PRESERVED timestamp healing still preserves the existing station body byte-identically');
 
 const opx2MissingStationPath = path.join(opx2Root, 'missing', 'Loop Station.md');
 let opx2ScaffoldWrites = 0;

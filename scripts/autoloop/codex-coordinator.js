@@ -4376,7 +4376,13 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   if (!/^---\n[\s\S]*?\n---/.test(raw)) {
     throw new Error('Loop Station exists without frontmatter; refusing to rewrite its body');
   }
-  const stablePayload = { ...payload, updated_at: scalarField(raw, 'updated_at') || payload.updated_at };
+  const priorUpdatedAt = scalarField(raw, 'updated_at');
+  const stablePayload = {
+    ...payload,
+    updated_at: priorUpdatedAt && Number.isFinite(Date.parse(priorUpdatedAt))
+      ? priorUpdatedAt
+      : payload.updated_at,
+  };
   const stableNext = patchFrontmatter(raw, loopStationFrontmatterFields(stablePayload));
   if (stableNext === raw) {
     return { action: 'loop-station-projected', updated_on: updatedOn, changed: false, scaffolded: false, no_op: true, path: stationPath, payload: stablePayload };
@@ -4731,7 +4737,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
   const collect = deps.collectDeployedRecoveryEvidence || collectDeployedRecoveryEvidence;
   const project = deps.attemptProjection || attemptProjection;
   const now = deps.now || (() => new Date().toISOString());
-  return withCardGateLock(ctx, request.card, async () => {
+  const result = await withCardGateLock(ctx, request.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[request.card];
     if (!record) throw new Error('recover-deployed requires a tracked card');
@@ -4781,6 +4787,15 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
       card: record.card, phase: record.phase, no_op: false, request, evidence, projection,
     };
   }, { card: request.card }, lock);
+  if (!apply || result.no_op) return result;
+  const station = await lock(ctx, 'selector', async () => attemptLoopStationProjection(
+    ctx, loadState(ctx), 'recover', {
+      projectLoopStation: deps.projectLoopStation,
+      boardPath: deps.boardPath,
+      cardsRoot: deps.cardsRoot,
+    },
+  ));
+  return { ...result, loop_station: station.receipt };
 }
 
 function metadataScalar(value) {
