@@ -4619,6 +4619,10 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
   if (apply === dryRun) {
     throw new Error('reconcile-metadata --parked-rebind requires exactly one of --apply or --dry-run');
   }
+  if ((apply && Object.prototype.hasOwnProperty.call(args, 'dry-run'))
+    || (dryRun && Object.prototype.hasOwnProperty.call(args, 'apply'))) {
+    throw new Error('reconcile-metadata --parked-rebind refuses a substituted opposite-mode operand');
+  }
   if ((apply && typeof args.spec !== 'string') || (!apply && args.spec !== undefined)) {
     throw new Error('reconcile-metadata --parked-rebind accepts --spec only with --apply');
   }
@@ -4680,6 +4684,7 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
       if (!parkedMetadataRebindReplayMatches(records, request, spec)) {
         throw new Error('parked metadata rebind completed state accepts only literal replay of the exact successful apply request');
       }
+      barrier(ctx.statePath);
       return {
         action: 'rebound-parked-metadata', no_op: true,
         exact_target_count: records.length, request, spec,

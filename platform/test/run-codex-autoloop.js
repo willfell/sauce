@@ -4505,6 +4505,8 @@ function parkedRebindHarness(id = 'happy') {
   }
   let ledgerWrites = 0;
   let cardWrites = 0;
+  let barrierCalls = 0;
+  let barrierFailure = null;
   const locks = [];
   const ctx = { root, statePath: path.join(root, 'state.json') };
   let specRaw = '';
@@ -4513,7 +4515,10 @@ function parkedRebindHarness(id = 'happy') {
     writeState: () => { ledgerWrites++; },
     withLock: async (_ctx, name, fn) => { locks.push(name); return fn(); },
     atomicWriteText: () => { cardWrites++; },
-    durablePathBarrier: () => {},
+    durablePathBarrier: () => {
+      barrierCalls++;
+      if (barrierFailure) throw new Error(barrierFailure);
+    },
     readSpec: () => specRaw,
     cardsRoot: root,
     now: () => '2026-07-25T23:30:00.000Z',
@@ -4524,7 +4529,9 @@ function parkedRebindHarness(id = 'happy') {
   return {
     root, state, ctx, deps, reason, dryRunArgs, applyArgs,
     setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
-    counts: () => ({ ledgerWrites, cardWrites, locks: [...locks] }),
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls, locks: [...locks] }),
+    failBarrier: (message) => { barrierFailure = message; },
+    clearBarrierFailure: () => { barrierFailure = null; },
   };
 }
 
@@ -4577,15 +4584,17 @@ const parkedRebindReplay = await commandReconcileMetadata(
 eq(parkedRebindReplay.no_op, true, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS returns no_op true');
 eq(parkedRebind.counts(), {
   ...parkedRebindCountsAfterApply,
+  barrierCalls: parkedRebindCountsAfterApply.barrierCalls + 1,
   locks: [...parkedRebindCountsAfterApply.locks, 'parked-metadata-rebind'],
 }, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS performs zero second ledger or card writes');
 for (const altered of [
   { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
   { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
   { ...parkedRebind.applyArgs, json: false },
+  { ...parkedRebind.applyArgs, 'dry-run': 'false' },
 ]) {
   await assert.rejects(() => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
-    /literal|requires|reason/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
+    /literal|requires|reason|substituted/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
 }
 const substitutedParkedSpec = deepCopy(parkedRebindPlan.spec);
 substitutedParkedSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
@@ -4596,6 +4605,28 @@ await assert.rejects(() => commandReconcileMetadata(
 parkedRebind.setSpec(parkedRebindPlan.spec);
 eq(parkedRebind.counts().ledgerWrites, 1, 'substituted parked-rebind operands perform zero ledger writes');
 eq(parkedRebind.counts().cardWrites, 0, 'substituted parked-rebind operands perform zero card writes');
+
+const parkedDurabilityReplay = parkedRebindHarness('durability-replay');
+const parkedDurabilityPlan = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.dryRunArgs, parkedDurabilityReplay.deps,
+);
+parkedDurabilityReplay.setSpec(parkedDurabilityPlan.spec);
+parkedDurabilityReplay.failBarrier('injected post-ledger durability failure');
+await assert.rejects(() => commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+), /post-ledger durability failure/, 'GA-OPS14A-DURABILITY-REPLAY-GAP propagates the first post-ledger barrier failure'); count++;
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP leaves exactly one visible atomic ledger write');
+parkedDurabilityReplay.clearBarrierFailure();
+const parkedDurabilityRecovered = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+);
+eq(parkedDurabilityRecovered.no_op, true,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP exact retry recovers through the replay path');
+eq(parkedDurabilityReplay.counts().barrierCalls, 2,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP replay re-establishes the state durability barrier');
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP recovery performs zero second ledger writes');
 
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`phase-${phase}`);
