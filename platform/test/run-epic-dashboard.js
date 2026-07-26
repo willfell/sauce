@@ -286,8 +286,12 @@ async function main() {
   let lifecycleCalls = 0;
   let lifecycleInput;
   let lifecycleOutput;
+  const statusNormalizeCalls = [];
   const lifecycleApi = {
-    normalizeStatus: delivery.normalizeStatus,
+    normalizeStatus(value) {
+      statusNormalizeCalls.push(value);
+      return delivery.normalizeStatus(value);
+    },
     deriveEpicLifecycle(slices) {
       lifecycleCalls += 1;
       lifecycleInput = slices;
@@ -353,6 +357,7 @@ async function main() {
     'ES2C10-CORE-READ-ONLY: render invokes no vault, adapter, frontmatter, or metadata mutator');
 
   const opxRoot = element();
+  const opxNormalizeCallsBefore = statusNormalizeCalls.length;
   const parkedReason = 'Yield the project helper touch zone until the deployed selector release is installed everywhere, then resume from the exact clean head with rebuilt receipts and no repeated side effects.';
   const opxSlices = [
     {
@@ -387,6 +392,8 @@ async function main() {
     { container: opxRoot }, opxRoot, opxSlices,
     { frontier: opxSlices[0].card }, epicPath, lifecycleApi,
   );
+  assert.deepStrictEqual(statusNormalizeCalls.slice(opxNormalizeCallsBefore), opxSlices.map((slice) => slice.status),
+    'OPX1-STATUS-NORMALIZED calls the resolved Delivery normalizeStatus API exactly once per rendered slice');
   const cleanRow = sliceRow(opxRoot, 'Rebind parked-card migration metadata');
   assert(cleanRow, 'OPX1-TITLE-CLEAN renders the cleaned linked title');
   assert.strictEqual(descendants(cleanRow, 'epic-dashboard-slice-title-row').length, 1,
