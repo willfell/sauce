@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
@@ -47,6 +48,17 @@ function stepBodies(job) {
     const end = index + 1 < starts.length ? starts[index + 1] : lines.length;
     return lines.slice(start, end).join("\n");
   });
+}
+
+function stepRunScript(step) {
+  const lines = String(step).split("\n");
+  const runAt = lines.findIndex((line) => line === "        run: |");
+  if (runAt < 0) return "";
+  return lines
+    .slice(runAt + 1)
+    .filter((line) => line.startsWith("          ") || line === "")
+    .map((line) => line.startsWith("          ") ? line.slice(10) : line)
+    .join("\n");
 }
 
 function candidateErrors(source) {
@@ -160,6 +172,48 @@ check(
   "candidate CLI source is directly executable",
   `status=${help.status} stderr=${String(help.stderr || "").trim()}`
 );
+
+const candidateStep = stepBodies(jobBody(workflow, "preflight")).find((step) =>
+  step.includes('node "$SAUCE_CANDIDATE_CLI" bootstrap --vault "$TMP_VAULT" --non-interactive --no-register')
+) || "";
+const candidateScript = stepRunScript(candidateStep);
+const behaviorRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-ci-candidate-step-"));
+try {
+  const fakeCli = path.join(behaviorRoot, "candidate-cli.js");
+  fs.writeFileSync(fakeCli, [
+    '"use strict";',
+    'const command = process.argv[2];',
+    'if (command === "help") { console.log("Sauce candidate fixture"); process.exit(0); }',
+    'if (command === "bootstrap") process.exit(0);',
+    'if (command === "audit") process.exit(Number(process.env.CANDIDATE_AUDIT_EXIT || 0));',
+    'process.exit(64);',
+    "",
+  ].join("\n"));
+  const runCandidateStep = (auditExit) => spawnSync("bash", ["-e", "-o", "pipefail", "-c", candidateScript], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SAUCE_CANDIDATE_CLI: fakeCli,
+      CANDIDATE_AUDIT_EXIT: String(auditExit),
+      RUNNER_TEMP: behaviorRoot,
+    },
+  });
+  const failedAudit = runCandidateStep(2);
+  check(
+    failedAudit.status !== 0,
+    "GA-OPS12B2-CANDIDATE-AUDIT-FAILURE-LOUD real nonzero audit fails the required candidate step",
+    `status=${failedAudit.status} stdout=${String(failedAudit.stdout || "").trim()}`
+  );
+  const cleanAudit = runCandidateStep(0);
+  check(
+    cleanAudit.status === 0,
+    "failure-loud candidate step remains green for a clean audit",
+    `status=${cleanAudit.status} stderr=${String(cleanAudit.stderr || "").trim()}`
+  );
+} finally {
+  fs.rmSync(behaviorRoot, { recursive: true, force: true });
+}
 
 if (candidateBaseline.length === 0 && releasedBaseline.length === 0) {
   const badFormula = replaceOnce(
