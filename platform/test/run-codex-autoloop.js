@@ -1213,6 +1213,10 @@ for (const [label, malformed] of [
     ...limitedReviewArgs, 'accepted-limitation': 'yes',
     bound: 'single-writer-no-concurrent-races',
   }],
+  ['duplicated accepted flags', {
+    ...limitedReviewArgs, 'accepted-limitation': [true, true],
+    bound: 'single-writer-no-concurrent-races',
+  }],
   ['mixed named and bare bound tokens', {
     ...limitedReviewArgs, 'accepted-limitation': true,
     bound: ['single-writer-no-concurrent-races', true],
@@ -1233,6 +1237,42 @@ for (const [label, malformed] of [
     `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} refuses before reads, locks, or writes`);
   eq(JSON.stringify(reviewState), beforeInvalidLimitation,
     `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} preserves review state byte-for-byte`);
+}
+const rawLimitationCliBase = [
+  path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+  'record-review', '--json', '--card', 'Review', '--lens', 'regression-risk',
+  '--verdict', 'pass',
+  '--summary', 'A sufficiently specific raw limitation operand refusal summary.',
+  '--expected-head', exactReviewHead,
+];
+for (const [label, rawOperands] of [
+  ['bare bound token', ['--bound']],
+  ['valued accepted flag', [
+    '--accepted-limitation', 'yes', '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['duplicated accepted flags', [
+    '--accepted-limitation', '--accepted-limitation',
+    '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['mixed named and bare bound tokens', [
+    '--accepted-limitation', '--bound', 'single-writer-no-concurrent-races', '--bound',
+  ]],
+]) {
+  const cliResult = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [...rawLimitationCliBase, ...rawOperands], {
+      cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+  eq(cliResult.code, EXIT_CODES.refusal,
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} exits 1 before workshop resolution`);
+  eq(cliResult.stdout, '',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} emits no non-machine success output`);
+  eq(JSON.parse(cliResult.stderr).code, 'invalid_limitation',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} reaches the real parser and dispatcher`);
 }
 const limitedReview = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
   readState: () => reviewState, sh: () => exactReviewHead,

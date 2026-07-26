@@ -4653,9 +4653,7 @@ async function commandClaim(ctx, args) {
   });
 }
 
-async function commandRecordReview(ctx, args, deps = {}) {
-  requireJson(args, 'record-review');
-  requireOnlyOptions(args, 'record-review', STRICT_CLI_OPTIONS['record-review']);
+function recordReviewOperands(args) {
   const card = args.card; const lens = args.lens; const verdict = args.verdict;
   const summary = String(args.summary || '').trim();
   const expectedHead = Array.isArray(args['expected-head']) ? '' : String(args['expected-head'] || '').trim();
@@ -4688,6 +4686,17 @@ async function commandRecordReview(ctx, args, deps = {}) {
     refuse('record-review-refused', 'invalid_limitation',
       'record-review accepted limitations require --verdict pass');
   }
+  return {
+    card, lens, verdict, summary, expectedHead, acceptedLimitation, bound,
+  };
+}
+
+async function commandRecordReview(ctx, args, deps = {}) {
+  requireJson(args, 'record-review');
+  requireOnlyOptions(args, 'record-review', STRICT_CLI_OPTIONS['record-review']);
+  const {
+    card, lens, verdict, summary, expectedHead, acceptedLimitation, bound,
+  } = recordReviewOperands(args);
   const loadState = deps.readState || readState;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
@@ -6401,6 +6410,7 @@ async function main() {
     requireJson(args, command);
     requireOnlyOptions(args, command, STRICT_CLI_OPTIONS[command]);
   }
+  if (command === 'record-review') recordReviewOperands(args);
   const ctx = workshopContext();
   let result;
   if (command === 'status') result = await commandStatusLocked(ctx);
@@ -6452,7 +6462,8 @@ module.exports = {
   ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
+  commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure,
+  recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
