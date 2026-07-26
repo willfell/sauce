@@ -4,10 +4,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const childProcess = require('child_process');
 const delivery = require('../../../../platform/mechanisms/delivery');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
 const VAULTS = delivery.registry.policies.required_vaults;
+const EPIC_SCHEMA_VERSION = '1.1.0';
 const RISK_MAP = {
   new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
   migration: 'migration', heal: 'migration', loader: 'control_plane',
@@ -39,8 +41,155 @@ function within(root, target) {
   return file === base || file.startsWith(`${base}${path.sep}`);
 }
 
+function lstatMaybe(target) {
+  try { return fs.lstatSync(target); } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// Binds lexical intake routes to their physical filesystem roots. Existing
+// components must be ordinary directories/files, never symlinks; missing
+// suffixes are resolved from the nearest real ancestor. This validation runs
+// for the complete plan before the first write.
+function physicalIntakeTarget(root, target, label, expected = 'file') {
+  const rootPath = path.resolve(root);
+  const targetPath = path.resolve(target);
+  const prefix = 'GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT';
+  if (!within(rootPath, targetPath) || targetPath === rootPath) {
+    throw new Error(`${prefix} ${label} escapes its lexical root`);
+  }
+  const rootEntry = lstatMaybe(rootPath);
+  if (!rootEntry || rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
+    throw new Error(`${prefix} ${label} root must be one existing regular non-symlink directory`);
+  }
+  const physicalRoot = fs.realpathSync(rootPath);
+  const parts = path.relative(rootPath, targetPath).split(path.sep).filter(Boolean);
+  let cursor = rootPath;
+  for (let index = 0; index < parts.length; index += 1) {
+    cursor = path.join(cursor, parts[index]);
+    const entry = lstatMaybe(cursor);
+    if (!entry) {
+      const unresolved = parts.slice(index + 1);
+      const resolved = path.join(fs.realpathSync(path.dirname(cursor)), path.basename(cursor), ...unresolved);
+      if (!resolved.startsWith(`${physicalRoot}${path.sep}`)) {
+        throw new Error(`${prefix} ${label} escapes its physical root`);
+      }
+      return resolved;
+    }
+    if (entry.isSymbolicLink()) {
+      throw new Error(`${prefix} ${label} contains a symlink component at ${cursor}`);
+    }
+    const final = index === parts.length - 1;
+    if (!final && !entry.isDirectory()) {
+      throw new Error(`${prefix} ${label} has a non-directory path component at ${cursor}`);
+    }
+    if (final && expected === 'directory' && !entry.isDirectory()) {
+      throw new Error(`${prefix} ${label} must be one regular non-symlink directory`);
+    }
+    if (final && expected === 'file' && !entry.isFile()) {
+      throw new Error(`${prefix} ${label} must be one regular non-symlink file`);
+    }
+    const resolved = fs.realpathSync(cursor);
+    if (!resolved.startsWith(`${physicalRoot}${path.sep}`)) {
+      throw new Error(`${prefix} ${label} escapes its physical root`);
+    }
+  }
+  return fs.realpathSync(targetPath);
+}
+
 function safeTitle(value) {
   return Boolean(value) && value === value.trim() && !/[\\/\0\n\r]/.test(value) && value !== '.' && value !== '..';
+}
+
+function normalizePath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.\//, '');
+}
+
+function scalarField(markdown, key) {
+  const match = String(markdown || '').match(new RegExp(`^${escapeRe(key)}:\\s*(.+?)\\s*$`, 'm'));
+  if (!match) return '';
+  const value = match[1].trim();
+  try { return JSON.parse(value); } catch (_) { return value.replace(/^['"]|['"]$/g, ''); }
+}
+
+function resolveInstalledCoordinator(execFileSync = childProcess.execFileSync) {
+  const prefix = String(execFileSync('brew', ['--prefix', 'sauce'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }) || '').trim();
+  if (!prefix || !path.isAbsolute(prefix)) {
+    throw new Error('brew --prefix sauce returned no absolute installed formula path');
+  }
+  return path.join(prefix, 'libexec', 'scripts', 'autoloop', 'codex-coordinator.js');
+}
+
+function readInstalledCoordinatorStatus(execFileSync = childProcess.execFileSync) {
+  const coordinator = resolveInstalledCoordinator(execFileSync);
+  const stdout = execFileSync(process.execPath, [coordinator, 'status', '--json'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const status = JSON.parse(stdout);
+  if (!status || status.action !== 'status') throw new Error('installed coordinator returned a non-status receipt');
+  return status;
+}
+
+function epicNameForCard(spec, card) {
+  return card.parent_title || linkName(spec.epic);
+}
+
+function projectPrefix(spec) {
+  const source = normalizePath(spec.source_board || '');
+  return source && !path.isAbsolute(source) ? path.posix.dirname(source) : '';
+}
+
+function epicRoute(spec, epic) {
+  const prefix = projectPrefix(spec);
+  const relative = (...parts) => normalizePath(path.posix.join(prefix === '.' ? '' : prefix, 'tasks', epic, ...parts));
+  return {
+    epic,
+    root: path.join(spec.cards_root, epic),
+    atlas_path: path.join(spec.cards_root, epic, `${epic}.md`),
+    board_path: path.join(spec.cards_root, epic, 'board', `${epic}-board.md`),
+    atlas_ref: relative(`${epic}.md`),
+    board_ref: relative('board', `${epic}-board.md`),
+  };
+}
+
+function canonicalEpicSurface(spec, epic) {
+  if (!safeTitle(epic)) return { ok: false, reason: 'epic name must be a safe title' };
+  const route = epicRoute(spec, epic);
+  try {
+    physicalIntakeTarget(spec.cards_root, route.root, `${epic} epic root`, 'directory');
+    physicalIntakeTarget(spec.cards_root, route.atlas_path, `${epic} atlas`);
+    physicalIntakeTarget(spec.cards_root, path.dirname(route.board_path), `${epic} board directory`, 'directory');
+    physicalIntakeTarget(spec.cards_root, route.board_path, `${epic} board`);
+  } catch (error) {
+    return { ok: false, reason: error.message };
+  }
+  if (!fs.existsSync(route.atlas_path) || !fs.existsSync(route.board_path)) {
+    return { ok: false, reason: `canonical epic scaffold does not resolve: ${epic}` };
+  }
+  const atlas = fs.readFileSync(route.atlas_path, 'utf8');
+  const board = fs.readFileSync(route.board_path, 'utf8');
+  const atlasBoard = normalizePath(scalarField(atlas, 'epic_board'));
+  const boardEpic = linkName(scalarField(board, 'epic')) || scalarField(board, 'epic');
+  if (scalarField(atlas, 'type') !== 'epic'
+    || (atlasBoard !== route.board_ref && !atlasBoard.endsWith(`/${route.board_ref}`))
+    || scalarField(board, 'board_role') !== 'epic'
+    || boardEpic !== epic) {
+    return { ok: false, reason: `canonical epic scaffold is invalid: ${epic}` };
+  }
+  return { ok: true, route, atlas, board };
+}
+
+function renderOptionsForCard(spec, card, epicNative) {
+  if (!epicNative || (card.role || 'execution') !== 'execution') return {};
+  const epic = epicNameForCard(spec, card);
+  if (!safeTitle(epic)) return { epicNative: true, epicName: epic || '' };
+  const route = epicRoute(spec, epic);
+  return { epicNative: true, epicName: epic, boardRef: route.board_ref, atlasRef: route.atlas_ref };
 }
 
 function evidenceClaims(spec) {
@@ -57,15 +206,17 @@ function evidenceClaims(spec) {
     });
 }
 
-function deliveryContract(card, spec) {
+function deliveryContract(card, spec, options = {}) {
   const has = (key) => Object.prototype.hasOwnProperty.call(card, key);
   const riskInput = has('risk_dimensions') ? card.risk_dimensions : (has('risk_flags') ? card.risk_flags : []);
   const riskDimensions = Array.isArray(riskInput)
     ? [...new Set(riskInput.map((risk) => RISK_MAP[risk] || risk))] : riskInput;
+  const epic = options.epicNative ? `[[${options.epicName}]]` : spec.epic;
   const contract = {
     card: card.title,
     schema_version: has('schema_version') ? card.schema_version : delivery.CONTRACT_VERSION,
-    parent_card: has('parent_title') ? (card.parent_title ? `[[${card.parent_title}]]` : card.parent_title) : spec.epic,
+    parent_card: options.epicNative ? epic
+      : (has('parent_title') ? (card.parent_title ? `[[${card.parent_title}]]` : card.parent_title) : spec.epic),
     slice: has('slice') ? card.slice : card.title,
     model_profile: card.model_profile,
     execution_mode: has('execution_mode') ? card.execution_mode : spec.completion_mode,
@@ -74,7 +225,7 @@ function deliveryContract(card, spec) {
     touch_zones: card.touch_zones,
     depends_on: card.depends_on,
     deploy_subscriptions: has('deploy_subscriptions') ? card.deploy_subscriptions : { headspace: [], accuris: [], ero: [] },
-    epic: spec.epic,
+    epic,
     evidence: evidenceClaims(spec),
     release_required: has('release_required') ? card.release_required : spec.completion_mode === 'release',
     deployment_required: has('deployment_required') ? card.deployment_required : spec.completion_mode === 'release',
@@ -121,6 +272,22 @@ function findCard(cardsRoot, title) {
     }
   }
   return null;
+}
+
+function findCards(cardsRoot, title) {
+  if (!cardsRoot || !fs.existsSync(cardsRoot)) return [];
+  const wanted = `${title}.md`;
+  const matches = [];
+  const stack = [cardsRoot];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else if (entry.name === wanted) matches.push(item);
+    }
+  }
+  return matches.sort();
 }
 
 function findNote(roots, title) {
@@ -197,7 +364,7 @@ function validateSupersede(card, errors) {
   }
 }
 
-function validateCard(card, spec, errors) {
+function validateCard(card, spec, errors, options = {}) {
   const role = card.role || 'execution';
   if (!safeTitle(card.title)) errors.push('every card needs a safe one-line title without path separators');
   if (card.parent_title && !safeTitle(card.parent_title)) errors.push(`${card.title}: parent title is unsafe`);
@@ -223,12 +390,12 @@ function validateCard(card, spec, errors) {
   } else {
     if (card.execution_mode !== 'docs_only' || card.release_required !== false || card.deployment_required !== false) errors.push(`${card.title}: docs_only routing flags are required`);
   }
-  const verdict = validateDeliveryContract(deliveryContract(card, spec));
+  const verdict = validateDeliveryContract(deliveryContract(card, spec, options));
   for (const issue of verdict.errors) errors.push(`${card.title}: Delivery ${issue.code} (${issue.field}): ${issue.message}`);
   if (verdict.requires_migration) errors.push(`${card.title}: new intake must use Delivery ${delivery.CONTRACT_VERSION}`);
 }
 
-function validateSpec(spec, boardRaw = '') {
+function validateSpec(spec, boardRaw = '', options = {}) {
   const errors = [];
   if (!['single', 'roadmap'].includes(spec.mode)) errors.push('mode must be single|roadmap');
   if (!CLASSIFICATIONS.has(spec.classification)) errors.push('classification is invalid');
@@ -252,10 +419,14 @@ function validateSpec(spec, boardRaw = '') {
   if (spec.research_artifact && !hasResearch) errors.push('research_artifact must resolve and contain path:line evidence');
   if (!hasEvidence && !hasResearch && !scoutOnly) errors.push('file evidence path+line, research_artifact, or scout_artifact is required');
   const cards = Array.isArray(spec.cards) ? spec.cards : [];
+  const cutoverEnabled = options.cutoverEnabled === true;
+  const triageFlat = cutoverEnabled && spec.classification === 'bug'
+    && cards.length === 1 && cards[0].lane === 'Discovered (autoloop)';
+  const epicNative = cutoverEnabled && !triageFlat && !scoutOnly && spec.completion_mode === 'release';
   if (new Set(cards.map((card) => card.title)).size !== cards.length) errors.push('card titles must be unique across parents and children');
   if (scoutOnly && cards.some((card) => (card.role || 'execution') === 'execution')) errors.push('scout-only intake cannot create an execution card');
   if (!scoutOnly && !cards.length) errors.push('evidenced intake requires cards');
-  for (const card of cards) validateCard(card, spec, errors);
+  for (const card of cards) validateCard(card, spec, errors, renderOptionsForCard(spec, card, epicNative));
   if (spec.completion_mode === 'docs_only') {
     if (cards.some((card) => card.lane !== 'Docs Only')) errors.push('docs_only cards must route to Docs Only');
   } else if (spec.classification === 'roadmap_theme') {
@@ -267,6 +438,27 @@ function validateSpec(spec, boardRaw = '') {
   }
   const executionCards = cards.filter((card) => (card.role || 'execution') === 'execution');
   const parentCards = cards.filter((card) => card.role === 'parent');
+  if (epicNative) {
+    const newEpicNames = new Set(parentCards.filter((card) => card.existing !== true).map((card) => card.title));
+    for (const card of executionCards) {
+      const epic = epicNameForCard(spec, card);
+      if (!safeTitle(epic)) {
+        errors.push(`${card.title}: post-cutover execution intake requires one named epic`);
+        continue;
+      }
+      if (!newEpicNames.has(epic)) {
+        const surface = canonicalEpicSurface(spec, epic);
+        if (!surface.ok) errors.push(`${card.title}: ${surface.reason}`);
+      }
+    }
+    for (const parent of parentCards.filter((card) => card.existing === true)) {
+      const surface = canonicalEpicSurface(spec, parent.title);
+      if (!surface.ok) errors.push(`${parent.title}: ${surface.reason}`);
+    }
+    if (!parentCards.length && !executionCards.length) {
+      errors.push('post-cutover intake requires an epic slice, epic scaffold, or Discovered triage card');
+    }
+  }
   if (!scoutOnly && spec.classification === 'bug') {
     if (!spec.reproduction || /[\n\r]/.test(spec.reproduction)) errors.push('bugs require one-line reproduction evidence');
     if (cards.length !== 1 || executionCards.length !== 1 || cards.some((card) => card.parent_title)) errors.push('a bug intake must create one direct execution card');
@@ -305,6 +497,14 @@ function validateSpec(spec, boardRaw = '') {
   for (const card of cards) {
     if (protectedNames.has(card.title) || protectedNames.has(card.parent_title)) errors.push(`${card.title}: refuses to touch active/protected card`);
     const priorPath = findCard(spec.cards_root, card.title);
+    if (epicNative && (card.role || 'execution') === 'execution') {
+      const intendedPath = cardPath(spec, card, renderOptionsForCard(spec, card, true));
+      const foreignPath = findCards(spec.cards_root, card.title)
+        .find((candidate) => path.resolve(candidate) !== path.resolve(intendedPath));
+      if (foreignPath) {
+        errors.push(`${card.title}: duplicate card title resolves outside intended epic: ${foreignPath}`);
+      }
+    }
     if (card.existing === true && !priorPath) errors.push(`${card.title}: existing card does not resolve`);
     if (card.existing === true && card.role !== 'parent') errors.push(`${card.title}: only non-claimable parents may be updated as existing cards`);
     const actualLane = boardLane(lanes, card.title);
@@ -320,21 +520,24 @@ function validateSpec(spec, boardRaw = '') {
   }
   if (!scoutOnly && cards.length && errors.length === 0) {
     const plannedNames = new Set(cards.map((card) => card.title));
-    const emitted = [...cards.map((card) => renderCard(card, spec)), spec.roadmap_section, spec.ga_exception_section].filter(Boolean).join('\n');
+    const emitted = [...cards.map((card) => renderCard(card, spec, renderOptionsForCard(spec, card, epicNative))), spec.roadmap_section, spec.ga_exception_section].filter(Boolean).join('\n');
     for (const match of emitted.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
       const target = match[1].trim();
       if (!plannedNames.has(target) && !findNote(linkRoots, target)) errors.push(`emitted wikilink does not resolve: ${target}`);
     }
   }
-  return { errors, scoutOnly, cards, lanes };
+  return { errors, scoutOnly, cards, lanes, cutoverEnabled, triageFlat, epicNative };
 }
 
-function renderCard(card, spec) {
+function renderCard(card, spec, options = {}) {
   const role = card.role || 'execution';
-  const contract = role === 'execution' ? validateDeliveryContract(deliveryContract(card, spec)).card : null;
-  const boardRef = spec.source_board || spec.board_path;
-  const lines = ['---', 'type: task-hub', `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
-  if (spec.epic) lines.push(`epic: ${quoted(spec.epic)}`);
+  const contract = role === 'execution' ? validateDeliveryContract(deliveryContract(card, spec, options)).card : null;
+  const boardRef = options.boardRef || spec.source_board || spec.board_path;
+  const noteType = options.epicNative && role === 'execution' ? 'slice' : 'task-hub';
+  const lines = ['---', `type: ${noteType}`, `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
+  if (options.epicNative && role === 'execution') {
+    lines.push(`epic: ${quoted(`[[${options.epicName}]]`)}`, `task_parent: ${quoted(options.atlasRef)}`);
+  } else if (spec.epic) lines.push(`epic: ${quoted(spec.epic)}`);
   if (role === 'execution') {
     lines.push(`card: ${quoted(contract.card)}`, `schema_version: ${quoted(contract.schema_version)}`, `parent_card: ${quoted(`[[${contract.parent_card}]]`)}`, `slice: ${quoted(contract.slice)}`);
     lines.push(`model_profile: ${contract.model_profile}`, `execution_mode: ${contract.execution_mode}`, `batch_policy: ${contract.batch_policy}`);
@@ -354,7 +557,7 @@ function renderCard(card, spec) {
   if (role === 'execution' && card.supersedes) {
     lines.push(`supersedes: ${quoted(card.supersedes)}`, `carried_findings: ${JSON.stringify(card.carried_findings)}`, `binding_fixtures: ${JSON.stringify(card.binding_fixtures)}`);
   }
-  lines.push('tags:', '  - kanban-card', '  - project-card', '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
+  lines.push('tags:', ...(options.epicNative && role === 'execution' ? ['  - slice'] : ['  - kanban-card', '  - project-card']), '---', '', `## ${card.title}`, '', '### Outcome', '', card.outcome || spec.outcome, '', '### Evidence', '');
   for (const item of spec.evidence || []) lines.push(`- \`${item.path}:${item.line}\`${item.note ? ` — ${item.note}` : ''}`);
   if (spec.reproduction) lines.push(`- Reproduction: ${spec.reproduction}`);
   if (spec.research_artifact) lines.push(`- Research artifact: [[${spec.research_artifact}]]`);
@@ -362,6 +565,75 @@ function renderCard(card, spec) {
   if (role === 'parent') lines.push('', 'Parent only — do not claim. Decompose per [[Loop System with Codex]] §Execution-slice contract.');
   else lines.push('', '### Acceptance tests', '', ...card.acceptance_tests.map((item) => `- ${item}`), '', '### Applicable guides', '', ...card.applicable_guides.map((item) => `- \`${item}\``), '', '### Trap warnings', '', ...card.trap_warnings.map((item) => `- ${item}`));
   return `${lines.join('\n')}\n`;
+}
+
+function renderEpicAtlas(parent, spec, boardRaw, route, createdAt) {
+  const projectName = scalarField(boardRaw, 'project_name');
+  const projectSlug = scalarField(boardRaw, 'project_slug');
+  const sourceBoard = spec.source_board || spec.board_path;
+  const lines = ['---', 'type: epic', `schema_version: ${EPIC_SCHEMA_VERSION}`, `created_at: ${quoted(createdAt)}`];
+  if (projectName) lines.push(`project: ${quoted(`[[${projectName}]]`)}`);
+  if (projectSlug) lines.push(`project_slug: ${projectSlug}`);
+  if (projectName) lines.push(`project_name: ${quoted(projectName)}`);
+  lines.push(
+    `source_board: ${quoted(sourceBoard)}`,
+    `kanban_board: ${quoted(sourceBoard)}`,
+    `status: ${delivery.normalizeStatus(parent.status || 'planning') || parent.status}`,
+    `epic_board: ${quoted(route.board_ref)}`,
+    'posture: claimable',
+    'docs: []',
+    'tags:', '  - epic',
+    `kanban_column: ${quoted(parent.lane)}`,
+    '---', '',
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });',
+    '```', '',
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });',
+    '```', '',
+  );
+  return lines.join('\n');
+}
+
+function renderEpicBoard(epic, spec, boardRaw, route, createdAt) {
+  const projectName = scalarField(boardRaw, 'project_name');
+  const projectSlug = scalarField(boardRaw, 'project_slug');
+  const settings = JSON.stringify({
+    'kanban-plugin': 'board',
+    'list-collapse': [false, false, false, false],
+    'mark-cards-complete': true,
+    'new-note-folder': normalizePath(path.posix.dirname(route.board_ref)),
+    'new-note-template': 'ranch/templates/Template, Slice Card.md',
+  });
+  const lines = [
+    '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic',
+    `epic: ${quoted(`[[${epic}]]`)}`,
+    ...(projectSlug ? [`project_slug: ${projectSlug}`] : []),
+    ...(projectName ? [`project_name: ${quoted(projectName)}`] : []),
+    `created_at: ${quoted(createdAt)}`,
+    'tags:', '  - epic-board', '---', '',
+    '```dataviewjs',
+    'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });',
+    '```', '',
+    '## In Planning', '',
+    '## In Progress', '',
+    '## Blocked', '',
+    '## Completed', '',
+    '%% kanban:settings', '```', settings, '```', '%%', '',
+  ];
+  return lines.join('\n');
+}
+
+function renderContextPack(epic, spec, createdAt) {
+  const body = `Prepared by card-intake for: ${spec.outcome}\n`;
+  const digest = crypto.createHash('sha256').update(body).digest('hex');
+  return [
+    '---', 'type: context-pack', 'schema_version: 1.0.0',
+    `epic: ${quoted(`[[${epic}]]`)}`,
+    `content_sha256: ${digest}`,
+    `generated_at: ${quoted(createdAt)}`,
+    '---', '', body,
+  ].join('\n');
 }
 
 function ensureLane(board, lane) {
@@ -401,8 +673,10 @@ function insertBoardCard(board, card, children = []) {
   return next;
 }
 
-function cardPath(spec, card) {
-  const target = card.parent_title ? path.join(spec.cards_root, card.parent_title, card.title, `${card.title}.md`) : path.join(spec.cards_root, card.title, `${card.title}.md`);
+function cardPath(spec, card, options = {}) {
+  const target = options.epicNative
+    ? path.join(spec.cards_root, options.epicName, 'board', `${card.title}.md`)
+    : (card.parent_title ? path.join(spec.cards_root, card.parent_title, card.title, `${card.title}.md`) : path.join(spec.cards_root, card.title, `${card.title}.md`));
   if (!within(spec.cards_root, target)) throw new Error(`card path escapes cards_root: ${card.title}`);
   return target;
 }
@@ -457,10 +731,167 @@ function posture(spec, validation, boardRaw) {
   return { result: 'awaiting_user_decision', next_card: null, model_profile: null, candidate_card: next.title, candidate_model_profile: next.model_profile, eligibility_dry_run_required: true };
 }
 
-function run(spec, apply = false) {
-  const boardRaw = fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : '';
-  const validation = validateSpec(spec, boardRaw);
-  if (validation.errors.length) return { ok: false, errors: validation.errors };
+function fileList(root) {
+  if (!fs.existsSync(root)) return [];
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else files.push(item);
+    }
+  }
+  return files.sort();
+}
+
+function enqueuePlan(planned, file, content, options = {}) {
+  const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const accepted = Array.isArray(options.acceptedPreimages) ? options.acceptedPreimages : [];
+  if (prior !== null && prior !== content && !options.allowExisting && !accepted.includes(prior)) {
+    return `${options.label || path.basename(file)}: refuses unexpected pre-existing bytes at ${file}`;
+  }
+  const existing = planned.find((item) => item.path === file);
+  if (existing && existing.content !== content) return `conflicting planned bytes for ${file}`;
+  if (!existing) planned.push({ path: file, content, changed: prior !== content });
+  return null;
+}
+
+function planSupplementalFiles(spec, planned) {
+  if (spec.mode === 'roadmap') {
+    const prior = fs.existsSync(spec.roadmap_path) ? fs.readFileSync(spec.roadmap_path, 'utf8') : '';
+    const content = roadmapContent(prior, spec);
+    planned.push({ path: spec.roadmap_path, content, changed: prior !== content });
+  }
+  if (spec.classification === 'ga_exception') {
+    const prior = fs.existsSync(spec.ga_exception_path) ? fs.readFileSync(spec.ga_exception_path, 'utf8') : '';
+    const content = roadmapContent(prior, { ...spec, roadmap_key: `ga-exception-${slug(spec.outcome)}`, roadmap_section: spec.ga_exception_section });
+    planned.push({ path: spec.ga_exception_path, content, changed: prior !== content });
+  }
+}
+
+function validateEpicRouteForPlan(spec, route, creating) {
+  physicalIntakeTarget(spec.cards_root, route.root, `${route.epic} epic root`, 'directory');
+  physicalIntakeTarget(spec.cards_root, route.atlas_path, `${route.epic} atlas`);
+  physicalIntakeTarget(spec.cards_root, path.dirname(route.board_path), `${route.epic} board directory`, 'directory');
+  physicalIntakeTarget(spec.cards_root, route.board_path, `${route.epic} board`);
+  if (creating) {
+    physicalIntakeTarget(spec.cards_root, path.join(route.root, 'context'), `${route.epic} context directory`, 'directory');
+  }
+}
+
+function validatePhysicalPlan(spec, planned) {
+  const cardsRoot = path.resolve(spec.cards_root);
+  const projectRoot = path.resolve(spec.project_root);
+  for (const item of planned) {
+    const target = path.resolve(item.path);
+    if (within(cardsRoot, target) && target !== cardsRoot) {
+      physicalIntakeTarget(cardsRoot, target, `planned card target ${path.basename(target)}`);
+    } else if (within(projectRoot, target) && target !== projectRoot) {
+      physicalIntakeTarget(projectRoot, target, `planned project target ${path.basename(target)}`);
+    } else {
+      throw new Error(`GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT planned target escapes sanctioned roots: ${target}`);
+    }
+  }
+}
+
+function planEpicNative(spec, validation, boardRaw) {
+  const planned = [];
+  const errors = [];
+  const parents = validation.cards.filter((card) => card.role === 'parent');
+  const executionCards = validation.cards.filter((card) => (card.role || 'execution') === 'execution');
+  const parentByName = new Map(parents.map((card) => [card.title, card]));
+  let nextParentBoard = boardRaw;
+  for (const parent of [...parents].reverse()) nextParentBoard = insertBoardCard(nextParentBoard, parent, []);
+
+  const cardsByEpic = new Map();
+  for (const card of executionCards) {
+    const epic = epicNameForCard(spec, card);
+    if (!cardsByEpic.has(epic)) cardsByEpic.set(epic, []);
+    cardsByEpic.get(epic).push(card);
+  }
+  const epicNames = new Set([...parents.map((card) => card.title), ...cardsByEpic.keys()]);
+  for (const epic of epicNames) {
+    const parent = parentByName.get(epic);
+    const creating = Boolean(parent && parent.existing !== true);
+    const route = epicRoute(spec, epic);
+    try {
+      validateEpicRouteForPlan(spec, route, creating);
+    } catch (error) {
+      errors.push(error.message);
+      continue;
+    }
+    const atlasPrior = fs.existsSync(route.atlas_path) ? fs.readFileSync(route.atlas_path, 'utf8') : null;
+    const boardPrior = fs.existsSync(route.board_path) ? fs.readFileSync(route.board_path, 'utf8') : null;
+    const packPath = path.join(route.root, 'context', 'pack.md');
+    const packPrior = fs.existsSync(packPath) ? fs.readFileSync(packPath, 'utf8') : null;
+    const createdAt = spec.created_at
+      || (atlasPrior && scalarField(atlasPrior, 'created_at'))
+      || (boardPrior && scalarField(boardPrior, 'created_at'))
+      || (packPrior && scalarField(packPrior, 'generated_at'))
+      || new Date().toISOString();
+    let baseBoard;
+    if (creating) {
+      baseBoard = renderEpicBoard(epic, spec, boardRaw, route, createdAt);
+    } else {
+      const surface = canonicalEpicSurface(spec, epic);
+      if (!surface.ok) {
+        errors.push(`${epic}: ${surface.reason}`);
+        continue;
+      }
+      baseBoard = surface.board;
+    }
+    let nextEpicBoard = baseBoard;
+    const epicCards = cardsByEpic.get(epic) || [];
+    for (const card of [...epicCards].reverse()) nextEpicBoard = insertBoardCard(nextEpicBoard, card, []);
+
+    if (creating) {
+      const atlas = renderEpicAtlas(parent, spec, boardRaw, route, createdAt);
+      const keepPaths = ['runs', 'lessons', 'decisions'].map((kind) => path.join(route.root, 'context', kind, '.keep'));
+      const intendedPaths = new Set([
+        route.atlas_path, route.board_path, packPath, ...keepPaths,
+        ...epicCards.map((card) => cardPath(spec, card, renderOptionsForCard(spec, card, true))),
+      ].map((file) => path.resolve(file)));
+      for (const existing of fileList(route.root)) {
+        if (!intendedPaths.has(path.resolve(existing))) {
+          errors.push(`${epic}: refuses unexpected pre-existing bytes at ${existing}`);
+        }
+      }
+      for (const [file, content, label] of [
+        [route.atlas_path, atlas, `${epic} atlas`],
+        [path.join(route.root, 'context', 'pack.md'), renderContextPack(epic, spec, createdAt), `${epic} context pack`],
+        ...keepPaths.map((file) => [file, '', `${epic} context keep`]),
+      ]) {
+        const error = enqueuePlan(planned, file, content, { label });
+        if (error) errors.push(error);
+      }
+      const boardError = enqueuePlan(planned, route.board_path, nextEpicBoard, {
+        label: `${epic} board`,
+        acceptedPreimages: [baseBoard],
+      });
+      if (boardError) errors.push(boardError);
+    } else {
+      planned.push({ path: route.board_path, content: nextEpicBoard, changed: nextEpicBoard !== baseBoard });
+    }
+
+    for (const card of epicCards) {
+      const options = renderOptionsForCard(spec, card, true);
+      const file = cardPath(spec, card, options);
+      const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      const stableSpec = !spec.created_at && prior ? { ...spec, created_at: priorCreatedAt(prior) || undefined }
+        : (!spec.created_at ? { ...spec, created_at: createdAt } : spec);
+      const content = renderCard(card, stableSpec, options);
+      const error = enqueuePlan(planned, file, content, { label: card.title });
+      if (error) errors.push(error);
+    }
+  }
+  planSupplementalFiles(spec, planned);
+  planned.push({ path: spec.board_path, content: nextParentBoard, changed: nextParentBoard !== boardRaw });
+  return { planned, errors, nextBoard: nextParentBoard };
+}
+
+function planLegacy(spec, validation, boardRaw) {
   let nextBoard = boardRaw;
   const planned = [];
   const roots = validation.cards.filter((card) => !card.parent_title);
@@ -489,27 +920,57 @@ function run(spec, apply = false) {
     if (prior !== null && prior !== content) return { ok: false, errors: [`refuses to overwrite existing card: ${card.title}`] };
     planned.push({ path: file, content, changed: prior !== content });
   }
-  if (spec.mode === 'roadmap') {
-    const prior = fs.existsSync(spec.roadmap_path) ? fs.readFileSync(spec.roadmap_path, 'utf8') : '';
-    const content = roadmapContent(prior, spec);
-    planned.push({ path: spec.roadmap_path, content, changed: prior !== content });
-  }
-  if (spec.classification === 'ga_exception') {
-    const prior = fs.existsSync(spec.ga_exception_path) ? fs.readFileSync(spec.ga_exception_path, 'utf8') : '';
-    const content = roadmapContent(prior, { ...spec, roadmap_key: `ga-exception-${slug(spec.outcome)}`, roadmap_section: spec.ga_exception_section });
-    planned.push({ path: spec.ga_exception_path, content, changed: prior !== content });
-  }
+  planSupplementalFiles(spec, planned);
   planned.push({ path: spec.board_path, content: nextBoard, changed: nextBoard !== boardRaw });
+  return { planned, errors: [], nextBoard };
+}
+
+function run(spec, apply = false, deps = {}) {
+  let coordinatorStatus;
+  try {
+    coordinatorStatus = (deps.readCoordinatorStatus || readInstalledCoordinatorStatus)();
+  } catch (error) {
+    return { ok: false, errors: [`fresh installed coordinator status failed: ${error.message}`] };
+  }
+  const boardRaw = fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : '';
+  const cutoverEnabled = Boolean(coordinatorStatus && coordinatorStatus.cutover && coordinatorStatus.cutover.enabled === true);
+  const validation = validateSpec(spec, boardRaw, { cutoverEnabled });
+  if (validation.errors.length) return {
+    ok: false, errors: validation.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
+  };
+  const plan = validation.epicNative ? planEpicNative(spec, validation, boardRaw) : planLegacy(spec, validation, boardRaw);
+  if (plan.errors.length) return {
+    ok: false, errors: plan.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
+  };
+  const planned = plan.planned;
+  if (validation.epicNative) {
+    try {
+      validatePhysicalPlan(spec, planned);
+    } catch (error) {
+      return { ok: false, errors: [error.message], ...(cutoverEnabled ? { cutover_enabled: true } : {}) };
+    }
+  }
   const changed = planned.filter((item) => item.changed);
   if (apply) for (const item of changed) atomicWrite(item.path, item.content);
-  const finalBoard = apply && fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : nextBoard;
+  const finalBoard = apply && fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : plan.nextBoard;
   const discardInstructions = validation.cards
     .filter((card) => (card.role || 'execution') === 'execution' && card.supersedes)
     .map((card) => ({ discard: { card: card.supersedes, superseded_by: card.title } }));
-  return { ok: true, applied: apply, no_op: changed.length === 0, plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(spec)).digest('hex'), changed_paths: changed.map((item) => item.path), ...(discardInstructions.length ? { post_apply_instructions: discardInstructions } : {}), ...posture(spec, validation, finalBoard) };
+  return {
+    ok: true, applied: apply, no_op: changed.length === 0,
+    ...(cutoverEnabled ? { cutover_enabled: true } : {}),
+    plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(cutoverEnabled ? { spec, cutover_enabled: true } : spec)).digest('hex'),
+    changed_paths: changed.map((item) => item.path),
+    ...(discardInstructions.length ? { post_apply_instructions: discardInstructions } : {}),
+    ...posture(spec, validation, finalBoard),
+  };
 }
 
-module.exports = { validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath };
+module.exports = {
+  validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath,
+  resolveInstalledCoordinator, readInstalledCoordinatorStatus, epicRoute, canonicalEpicSurface,
+  renderEpicAtlas, renderEpicBoard, renderContextPack,
+};
 
 if (require.main === module) {
   const args = argsOf(process.argv.slice(2));

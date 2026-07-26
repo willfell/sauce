@@ -4,7 +4,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { run, validateDeliveryContract } = require('../../.agents/skills/card-intake/scripts/card-intake');
+const {
+  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
+} = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
 const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
 const { prepareDeliveryCard } = require('../../scripts/autoloop/select-card');
@@ -17,12 +19,37 @@ let passed = 0;
 let failed = 0;
 function ok(condition, label) { if (condition) { passed += 1; console.log(`  PASS: ${label}`); } else { failed += 1; console.error(`  FAIL: ${label}`); } }
 function eq(actual, expected, label) { ok(JSON.stringify(actual) === JSON.stringify(expected), `${label} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`); }
+function run(spec, apply = false, deps = {}) {
+  return runCardIntake(spec, apply, {
+    readCoordinatorStatus: () => ({ action: 'status', cutover: null }),
+    ...deps,
+  });
+}
 function board() { return ['---', 'kanban-plugin: board', '---', '', '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Parked', '', '## Discovered (autoloop)', '', '## Post-GA', '', '## Completed', '', '- [x] [[Prerequisite]]', ''].join('\n'); }
 function base(dir, extra = {}) {
   return { mode: 'single', classification: 'direct_execution', completion_mode: 'release', outcome: 'Ship one bounded behavior with deterministic coverage.', project_root: dir, link_roots: [dir], evidence_roots: [dir], board_path: path.join(dir, 'board.md'), cards_root: path.join(dir, 'tasks'), source_board: 'project/board.md', epic: '[[Roadmap]]', created_at: '2026-07-15T12:00:00-06:00', evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior', source_identity: 'fixture repo', captured_at: '2026-07-15T12:00:00-06:00', revision: 'fixture-revision', claim: 'The bounded example behavior is verified.' }], protected_cards: [], cards: [], ...extra };
 }
 function execution(title, extra = {}) {
   return { title, role: 'execution', lane: 'In Planning', status: 'planning', model_profile: 'standard', risk_flags: [], execution_mode: 'release', touch_zones: ['platform/example.js', 'platform/test/run-example.js'], depends_on: [], deploy_subscriptions: { headspace: [], accuris: [], ero: [] }, acceptance_tests: ['Focused behavior test passes.', 'Full preflight passes.'], applicable_guides: ['AGENTS.md', 'Docs/agent-guides/build-test-verify.md'], trap_warnings: ['Do not widen scope or edit version pins.'], ...extra };
+}
+
+function installedCoordinatorResolution() {
+  for (const prefix of ['/usr/local/opt/sauce', '/home/linuxbrew/.linuxbrew/opt/sauce']) {
+    const calls = [];
+    const status = readInstalledCoordinatorStatus((file, args) => {
+      calls.push({ file, args });
+      if (file === 'brew') return `${prefix}\n`;
+      return JSON.stringify({ action: 'status', cutover: { enabled: false } });
+    });
+    eq(calls[0], { file: 'brew', args: ['--prefix', 'sauce'] },
+      `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH resolves ${prefix} through brew`);
+    eq(calls[1], {
+      file: process.execPath,
+      args: [path.join(prefix, 'libexec/scripts/autoloop/codex-coordinator.js'), 'status', '--json'],
+    }, `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH invokes installed coordinator under ${prefix}`);
+    eq(status, { action: 'status', cutover: { enabled: false } },
+      `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH parses status under ${prefix}`);
+  }
 }
 function markdownTitles(root) {
   const titles = new Set();
@@ -298,6 +325,279 @@ function missingEvidenceAndRefusals() {
   });
 }
 
+function cutoverEpicIntake() {
+  console.log('\n--- BGD-CUTOVER fixtures: epic-native intake ---');
+  tempCase((dir) => {
+    const enabledStatus = () => ({ action: 'status', cutover: { enabled: true, enabled_at: '2026-07-25T19:00:00.000Z' } });
+    const runEnabled = (spec, apply = false) => run(spec, apply, { readCoordinatorStatus: enabledStatus });
+    const epicAtlas = (epic) => [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      `epic_board: "project/tasks/${epic}/board/${epic}-board.md"`,
+      '---', '',
+    ].join('\n');
+    const epicBoard = (epic) => [
+      '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic',
+      `epic: "[[${epic}]]"`, '---', '',
+      '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n');
+    const physicalRefusal = (label, spec, sentinelPath, escapedTarget) => {
+      const boardBefore = fs.readFileSync(spec.board_path, 'utf8');
+      const sentinelBefore = fs.readFileSync(sentinelPath, 'utf8');
+      const dryRun = runEnabled(spec, false);
+      const applied = runEnabled(spec, true);
+      const isPhysicalRefusal = (result) => !result.ok && (result.errors || [])
+        .some((error) => error.includes('GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT'));
+      ok(isPhysicalRefusal(dryRun) && isPhysicalRefusal(applied),
+        `GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT ${label} dry-run and apply refuse`);
+      ok(fs.readFileSync(spec.board_path, 'utf8') === boardBefore
+        && fs.readFileSync(sentinelPath, 'utf8') === sentinelBefore
+        && !fs.existsSync(escapedTarget),
+      `GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT ${label} preserves every sentinel and creates no escaped target`);
+    };
+    const legacySpec = base(dir, { cards: [execution('CUT-PRE Legacy flat card')] });
+    const legacyAbsent = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: null }) });
+    const legacyOff = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: { enabled: false, reason: 'fixture' } }) });
+    eq(legacyOff, legacyAbsent, 'BGD-CUTOVER-PRE-COMPAT absent and disabled cutover preserve the exact legacy intake receipt');
+    const existingEpic = 'Existing Epic';
+    const existingRoot = path.join(dir, 'tasks', existingEpic);
+    const existingBoardPath = path.join(existingRoot, 'board', `${existingEpic}-board.md`);
+    fs.mkdirSync(path.dirname(existingBoardPath), { recursive: true });
+    fs.writeFileSync(path.join(existingRoot, `${existingEpic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      `epic_board: "project/tasks/${existingEpic}/board/${existingEpic}-board.md"`,
+      '---', '',
+    ].join('\n'));
+    fs.writeFileSync(existingBoardPath, [
+      '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic',
+      `epic: "[[${existingEpic}]]"`, '---', '',
+      '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n'));
+
+    let statusReads = 0;
+    const direct = execution('CUT-1 Existing epic slice', {
+      model_profile: 'heavy', risk_flags: ['loader'],
+    });
+    const directSpec = base(dir, { epic: `[[${existingEpic}]]`, cards: [direct] });
+    const parentBefore = fs.readFileSync(directSpec.board_path, 'utf8');
+    const directResult = run(directSpec, true, {
+      readCoordinatorStatus: () => {
+        statusReads += 1;
+        return enabledStatus();
+      },
+    });
+    ok(directResult.ok && directResult.cutover_enabled === true, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING reads enabled cutover and applies');
+    eq(statusReads, 1, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING reads installed status exactly once per planning pass');
+    const directPath = path.join(existingRoot, 'board', `${direct.title}.md`);
+    eq(directResult.changed_paths.sort(), [directPath, existingBoardPath].sort(), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING changes only the epic slice and epic board');
+    const directRaw = fs.readFileSync(directPath, 'utf8');
+    ok(/^type: slice$/m.test(directRaw)
+      && new RegExp(`^epic: "\\[\\[${existingEpic}\\]\\]"$`, 'm').test(directRaw)
+      && new RegExp(`^task_parent: "project/tasks/${existingEpic}/${existingEpic}\\.md"$`, 'm').test(directRaw)
+      && new RegExp(`^source_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw)
+      && new RegExp(`^kanban_board: "project/tasks/${existingEpic}/board/${existingEpic}-board\\.md"$`, 'm').test(directRaw),
+    'BGD-CUTOVER-EPIC-INTAKE-ROUTING emits exact slice type and epic/atlas/board backlinks');
+    eq(fs.readFileSync(directSpec.board_path, 'utf8'), parentBefore, 'BGD-CUTOVER-PARENT-BOARD-PRESERVED leaves the parent board byte-identical');
+    ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
+    ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
+
+    const duplicate = execution('CUT-DUP Cross epic title', {
+      model_profile: 'heavy', risk_flags: ['loader'],
+    });
+    const otherEpic = 'Other Epic';
+    const otherBoardDir = path.join(dir, 'tasks', otherEpic, 'board');
+    fs.mkdirSync(otherBoardDir, { recursive: true });
+    const duplicateReplayPath = path.join(otherBoardDir, `${direct.title}.md`);
+    fs.writeFileSync(duplicateReplayPath, directRaw
+      .replaceAll(existingEpic, otherEpic));
+    const duplicateReplay = runEnabled(directSpec, true);
+    ok(!duplicateReplay.ok && (duplicateReplay.errors || []).some((error) => error.includes('duplicate card title resolves outside intended epic')),
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses replay when the intended slice and a foreign same-title slice both exist');
+    fs.unlinkSync(duplicateReplayPath);
+    fs.writeFileSync(path.join(otherBoardDir, `${duplicate.title}.md`), [
+      '---', 'type: slice', 'status: planning', `card: ${duplicate.title}`,
+      `epic: "[[${otherEpic}]]"`, `parent_card: "[[${otherEpic}]]"`, '---', '',
+    ].join('\n'));
+    const duplicateSpec = base(dir, { epic: `[[${existingEpic}]]`, cards: [duplicate] });
+    const duplicateTarget = path.join(existingRoot, 'board', `${duplicate.title}.md`);
+    const duplicateBoardBefore = fs.readFileSync(existingBoardPath, 'utf8');
+    const duplicateResult = runEnabled(duplicateSpec, true);
+    ok(!duplicateResult.ok && (duplicateResult.errors || []).some((error) => error.includes('duplicate card title resolves outside intended epic')),
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses a post-cutover title already owned by another epic');
+    ok(!fs.existsSync(duplicateTarget) && fs.readFileSync(existingBoardPath, 'utf8') === duplicateBoardBefore,
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses before any target slice or epic-board write');
+
+    const symlinkRootEpic = 'Symlink Root Epic';
+    const outsideRoot = path.join(dir, 'outside-root-epic');
+    fs.mkdirSync(path.join(outsideRoot, 'board'), { recursive: true });
+    fs.writeFileSync(path.join(outsideRoot, `${symlinkRootEpic}.md`), epicAtlas(symlinkRootEpic));
+    fs.writeFileSync(path.join(outsideRoot, 'board', `${symlinkRootEpic}-board.md`), epicBoard(symlinkRootEpic));
+    const rootSentinel = path.join(outsideRoot, 'sentinel.txt');
+    fs.writeFileSync(rootSentinel, 'root sentinel\n');
+    fs.symlinkSync(outsideRoot, path.join(dir, 'tasks', symlinkRootEpic), 'dir');
+    const rootEscapeCard = execution('PHYS-1 Root escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'epic-root symlink',
+      base(dir, { epic: `[[${symlinkRootEpic}]]`, cards: [rootEscapeCard] }),
+      rootSentinel,
+      path.join(outsideRoot, 'board', `${rootEscapeCard.title}.md`),
+    );
+
+    const symlinkBoardEpic = 'Symlink Board Epic';
+    const symlinkBoardRoot = path.join(dir, 'tasks', symlinkBoardEpic);
+    const outsideBoard = path.join(dir, 'outside-board-dir');
+    fs.mkdirSync(symlinkBoardRoot, { recursive: true });
+    fs.mkdirSync(outsideBoard, { recursive: true });
+    fs.writeFileSync(path.join(symlinkBoardRoot, `${symlinkBoardEpic}.md`), epicAtlas(symlinkBoardEpic));
+    fs.writeFileSync(path.join(outsideBoard, `${symlinkBoardEpic}-board.md`), epicBoard(symlinkBoardEpic));
+    const boardSentinel = path.join(outsideBoard, 'sentinel.txt');
+    fs.writeFileSync(boardSentinel, 'board sentinel\n');
+    fs.symlinkSync(outsideBoard, path.join(symlinkBoardRoot, 'board'), 'dir');
+    const boardEscapeCard = execution('PHYS-2 Board escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'board-directory symlink',
+      base(dir, { epic: `[[${symlinkBoardEpic}]]`, cards: [boardEscapeCard] }),
+      boardSentinel,
+      path.join(outsideBoard, `${boardEscapeCard.title}.md`),
+    );
+
+    const symlinkContextEpic = 'Symlink Context Epic';
+    const symlinkContextRoot = path.join(dir, 'tasks', symlinkContextEpic);
+    const outsideContext = path.join(dir, 'outside-context-dir');
+    fs.mkdirSync(symlinkContextRoot, { recursive: true });
+    fs.mkdirSync(outsideContext, { recursive: true });
+    const contextSentinel = path.join(outsideContext, 'sentinel.txt');
+    fs.writeFileSync(contextSentinel, 'context sentinel\n');
+    fs.symlinkSync(outsideContext, path.join(symlinkContextRoot, 'context'), 'dir');
+    const contextParent = { title: symlinkContextEpic, role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const contextChild = execution('PHYS-3 Context escape slice', { parent_title: symlinkContextEpic, slice: 'PHYS-3' });
+    physicalRefusal(
+      'context-directory symlink',
+      base(dir, {
+        mode: 'roadmap', classification: 'roadmap_theme',
+        outcome: 'Reject a new epic whose context directory escapes cards_root.',
+        cards: [contextParent, contextChild],
+        roadmap_path: path.join(dir, 'docs', 'roadmap', 'Symlink Context.md'),
+        roadmap_section: '## Symlink context\n\nMust fail closed.',
+      }),
+      contextSentinel,
+      path.join(outsideContext, 'pack.md'),
+    );
+
+    const symlinkAtlasEpic = 'Symlink Atlas Epic';
+    const symlinkAtlasRoot = path.join(dir, 'tasks', symlinkAtlasEpic);
+    const symlinkAtlasBoard = path.join(symlinkAtlasRoot, 'board');
+    const outsideAtlas = path.join(dir, 'outside-atlas.md');
+    fs.mkdirSync(symlinkAtlasBoard, { recursive: true });
+    fs.writeFileSync(outsideAtlas, epicAtlas(symlinkAtlasEpic));
+    fs.symlinkSync(outsideAtlas, path.join(symlinkAtlasRoot, `${symlinkAtlasEpic}.md`));
+    fs.writeFileSync(path.join(symlinkAtlasBoard, `${symlinkAtlasEpic}-board.md`), epicBoard(symlinkAtlasEpic));
+    const atlasSentinel = path.join(dir, 'outside-atlas-sentinel.txt');
+    fs.writeFileSync(atlasSentinel, 'atlas sentinel\n');
+    const atlasEscapeCard = execution('PHYS-4 Atlas escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'pre-existing atlas symlink',
+      base(dir, { epic: `[[${symlinkAtlasEpic}]]`, cards: [atlasEscapeCard] }),
+      atlasSentinel,
+      path.join(symlinkAtlasBoard, `${atlasEscapeCard.title}.md`),
+    );
+
+    const flatTitle = 'GA-OPS13a Close epic cutover selector and intake deadlock';
+    const flatSpec = base(dir, { epic: null, cards: [execution(flatTitle, { model_profile: 'heavy', risk_flags: ['loader'] })] });
+    const flatBoardBefore = fs.readFileSync(flatSpec.board_path, 'utf8');
+    const flatRefused = runEnabled(flatSpec, true);
+    ok(!flatRefused.ok && (flatRefused.errors || []).some((error) => error.includes('post-cutover execution intake requires one named epic')),
+      'BGD-CUTOVER-FLAT-REFUSAL refuses a post-cutover heavy flat execution card, including a fresh bootstrap-named card');
+    ok(!fs.existsSync(path.join(dir, 'tasks', flatTitle)) && fs.readFileSync(flatSpec.board_path, 'utf8') === flatBoardBefore,
+      'BGD-CUTOVER-ONE-SHOT-BOOTSTRAP flat refusal happens before any card or board write and has no name bypass');
+
+    const triage = execution('BUG-CUT One-line triage', {
+      lane: 'Discovered (autoloop)', model_profile: 'standard',
+    });
+    const triageSpec = base(dir, {
+      classification: 'bug', outcome: 'Record one bounded post-cutover finding.',
+      reproduction: 'Open the fixture and observe the bounded finding.', cards: [triage],
+    });
+    const triageResult = runEnabled(triageSpec, true);
+    ok(triageResult.ok && fs.existsSync(path.join(dir, 'tasks', triage.title, `${triage.title}.md`)),
+      'BGD-CUTOVER-FLAT-REFUSAL preserves the explicit Discovered one-line triage path');
+
+    const parent = { title: 'New Theme Epic', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const child = execution('NEW-1 First epic slice', { parent_title: parent.title, slice: 'NEW-1' });
+    const roadmapSpec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme', epic: '[[Roadmap]]',
+      outcome: 'Create a new canonical epic theme and prepare its first slice.',
+      cards: [parent, child],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'New Theme.md'),
+      roadmap_key: 'new-theme',
+      roadmap_section: '## New Theme\n\nPrepare the first bounded slice.',
+    });
+    const roadmapResult = runEnabled(roadmapSpec, true);
+    ok(roadmapResult.ok, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD applies the post-cutover roadmap theme');
+    const newRoot = path.join(dir, 'tasks', parent.title);
+    const expectedSurface = [
+      `${parent.title}.md`,
+      `board/${parent.title}-board.md`,
+      `board/${child.title}.md`,
+      'context/pack.md',
+      'context/runs/.keep',
+      'context/lessons/.keep',
+      'context/decisions/.keep',
+    ].sort();
+    eq(fileListForTest(newRoot), expectedSurface, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD creates exactly the canonical atlas/board/context/slice file set');
+    ok(canonicalEpicSurface(roadmapSpec, parent.title).ok, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD creates a resolver-conformant epic pair');
+    const newParentBoard = fs.readFileSync(roadmapSpec.board_path, 'utf8');
+    const newEpicBoard = fs.readFileSync(path.join(newRoot, 'board', `${parent.title}-board.md`), 'utf8');
+    ok(newParentBoard.includes(`[[${parent.title}]]`) && !newParentBoard.includes(`[[${child.title}]]`)
+      && newEpicBoard.includes(`[[${child.title}]]`),
+    'BGD-CUTOVER-NEW-EPIC-SCAFFOLD adds only the atlas line to the parent board and the slice line to the epic board');
+    ok(/^[a-f0-9]{64}$/.test((fs.readFileSync(path.join(newRoot, 'context', 'pack.md'), 'utf8').match(/^content_sha256:\s*(.+)$/m) || [])[1] || ''),
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD context pack carries a deterministic content hash');
+    ok(runEnabled(roadmapSpec, true).no_op, 'BGD-CUTOVER-NEW-EPIC-SCAFFOLD literal replay is no_op');
+
+    const corruptParent = { title: 'Corrupt Theme Epic', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const corruptChild = execution('CORRUPT-1 Slice', { parent_title: corruptParent.title, slice: 'CORRUPT-1' });
+    const corruptSpec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme',
+      outcome: 'Prove corrupt partial scaffold bytes fail closed.',
+      cards: [corruptParent, corruptChild],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'Corrupt Theme.md'),
+      roadmap_section: '## Corrupt Theme\n\nMust fail closed.',
+    });
+    const corruptRoot = path.join(dir, 'tasks', corruptParent.title);
+    fs.mkdirSync(corruptRoot, { recursive: true });
+    fs.writeFileSync(path.join(corruptRoot, `${corruptParent.title}.md`), 'unexpected bytes\n');
+    const corruptBoardBefore = fs.readFileSync(corruptSpec.board_path, 'utf8');
+    const corruptResult = runEnabled(corruptSpec, true);
+    ok(!corruptResult.ok && (corruptResult.errors || []).some((error) => error.includes('unexpected pre-existing bytes')),
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD unexpected pre-existing scaffold bytes refuse');
+    eq(fs.readFileSync(corruptSpec.board_path, 'utf8'), corruptBoardBefore,
+      'BGD-CUTOVER-NEW-EPIC-SCAFFOLD scaffold refusal occurs before parent-board mutation');
+
+    const statusFailureBoard = fs.readFileSync(corruptSpec.board_path, 'utf8');
+    const statusFailure = runCardIntake(base(dir, { cards: [execution('CUT Status unreadable')] }), true, {
+      readCoordinatorStatus: () => { throw new Error('fixture status failure'); },
+    });
+    ok(!statusFailure.ok && statusFailure.errors[0].includes('fresh installed coordinator status failed'),
+      'BGD-CUTOVER-EPIC-INTAKE-ROUTING installed-status failure refuses planning');
+    eq(fs.readFileSync(corruptSpec.board_path, 'utf8'), statusFailureBoard,
+      'BGD-CUTOVER-EPIC-INTAKE-ROUTING installed-status refusal performs zero board writes');
+  });
+}
+
+function fileListForTest(root) {
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else files.push(path.relative(root, item).replace(/\\/g, '/'));
+    }
+  }
+  return files.sort();
+}
+
 function supersedeGovernance() {
   console.log('\n--- BGR fixtures: supersede finding-coverage + discard-at-mint ---');
   tempCase((dir) => {
@@ -372,7 +672,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); supersedeGovernance(); await exactHeadMaterialization();
+  installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

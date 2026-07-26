@@ -44,7 +44,7 @@ node .agents/skills/card-intake/scripts/card-intake.js --spec <spec.json> --json
 node .agents/skills/card-intake/scripts/card-intake.js --spec <spec.json> --apply --json
 ```
 
-Every execution card must include exact touch zones, wikilink-list dependencies, three-vault deployment settings, acceptance tests, applicable guides, trap warnings, and one Delivery-normalized lifecycle status. Evidence claims must pin `source_identity`, `captured_at`, `revision`, `locator`, and `claim`. Execution children live at `tasks/<parent>/<child>/<child>.md`; parents remain at `tasks/<parent>/<parent>.md`.
+Every execution card must include exact touch zones, wikilink-list dependencies, three-vault deployment settings, acceptance tests, applicable guides, trap warnings, and one Delivery-normalized lifecycle status. Evidence claims must pin `source_identity`, `captured_at`, `revision`, `locator`, and `claim`. Before cutover, execution children live at `tasks/<parent>/<child>/<child>.md`; parents remain at `tasks/<parent>/<parent>.md`.
 
 Before `--apply`, inspect the dry-run plan. Refuse any plan that:
 
@@ -67,7 +67,14 @@ Coverage rule: every carried finding name must appear as an exact token in at le
 
 The receipt for a valid superseding spec includes `post_apply_instructions: [{discard: {card, superseded_by}}]`. Intake NEVER touches coordinator state — it only instructs; the run-loose flow / discard runbook executes the instruction via `coordinator discard --superseded-by <successor> --carried-fixture <fixture>`.
 
-Epic-native default: post-cutover (`coordinator status --json` reports `cutover.enabled` true), new medium/heavy work MUST target an epic board; flat creation is reserved for Discovered-lane one-liners.
+Epic-native default: the script itself resolves `brew --prefix sauce` and reads fresh status from that installed Homebrew coordinator on every dry-run/apply. When `cutover.enabled` is true:
+
+- Direct execution specs name an existing canonical epic in `epic`; the script writes `type: slice` at `tasks/<Epic>/board/<Slice>.md`, inserts only the epic-board line, and leaves the parent board byte-identical.
+- New parent/roadmap themes become canonical epic scaffolds at `tasks/<Epic>/{<Epic>.md,board/<Epic>-board.md,context/{pack.md,runs/.keep,lessons/.keep,decisions/.keep}}`; prepared children are flat slice notes in `board/`, and only epic atlas lines reach the parent board.
+- Every slice binds exact `epic`, `task_parent`, `source_board`, and `kanban_board`; slice titles remain globally unique, and intake refuses a title already owned by another epic.
+- Unexpected pre-existing scaffold bytes refuse before mutation; matching intended partial bytes resume forward, and literal replay is `no_op:true`.
+- Every epic root, board, context directory, scaffold component, and slice target must be a regular non-symlink physical descendant of `cards_root`; dry-run and apply validate the complete plan before the first write.
+- Flat execution creation is refused. The sole flat exception is the existing `bug` → `Discovered (autoloop)` one-line triage route; there is no card-name bootstrap exception.
 
 The cutover flag is receipt-gated and reversible (`coordinator cutover`), so never cache it: read `coordinator status --json` → `cutover.enabled` fresh at planning time (absent or `enabled: false` both mean pre-cutover).
 

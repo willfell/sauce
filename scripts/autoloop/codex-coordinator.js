@@ -669,9 +669,42 @@ function resolveEpicBoardSet({
   return { epics, flat, findings };
 }
 
-function selectEpicShadowCandidate({
+function loadCanonicalEpicSlice({
+  epic, card, boardPath, cardsRoot = CARDS_ROOT,
+  readFile = (file) => fs.readFileSync(file, 'utf8'),
+  exists = (target) => fs.existsSync(target),
+} = {}) {
+  const boardDir = path.resolve(path.dirname(boardPath));
+  const cardPath = path.resolve(boardDir, `${card}.md`);
+  if (path.dirname(cardPath) !== boardDir) {
+    return { path: cardPath, error: 'epic slice name must remain beside its epic board' };
+  }
+  if (!exists(cardPath)) return null;
+  let raw;
+  try { raw = readFile(cardPath); }
+  catch (err) { return { path: cardPath, error: `epic slice unreadable: ${err.message}` }; }
+  const expectedBoardSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, 'board', path.basename(boardPath)));
+  const expectedAtlasSuffix = normalizedPath(path.join(path.basename(cardsRoot), epic, `${epic}.md`));
+  const actualEpic = normalizeCardLink(scalarField(raw, 'epic'));
+  const actualParent = normalizeCardLink(scalarField(raw, 'parent_card'));
+  const actualTaskParent = normalizedPath(scalarField(raw, 'task_parent'));
+  const actualSourceBoard = normalizedPath(scalarField(raw, 'source_board'));
+  const actualKanbanBoard = normalizedPath(scalarField(raw, 'kanban_board'));
+  const suffixMatches = (actual, expected) => actual === expected || actual.endsWith(`/${expected}`);
+  const problems = [];
+  if (scalarField(raw, 'type') !== 'slice') problems.push('type must be slice');
+  if (actualEpic !== epic) problems.push(`epic must be ${epic}`);
+  if (actualParent !== epic) problems.push(`parent_card must be ${epic}`);
+  if (!suffixMatches(actualTaskParent, expectedAtlasSuffix)) problems.push(`task_parent must end with ${expectedAtlasSuffix}`);
+  if (!suffixMatches(actualSourceBoard, expectedBoardSuffix)) problems.push(`source_board must end with ${expectedBoardSuffix}`);
+  if (!suffixMatches(actualKanbanBoard, expectedBoardSuffix)) problems.push(`kanban_board must end with ${expectedBoardSuffix}`);
+  if (problems.length) return { path: cardPath, error: `epic slice binding invalid: ${problems.join('; ')}` };
+  return { path: cardPath, raw };
+}
+
+function selectEpicCandidate({
   boardMd, state, loadCard, supervised = false, cardsRoot = CARDS_ROOT,
-  readFile, readDir, exists,
+  readFile, readDir, exists, loadEpicCard,
 } = {}) {
   const resolved = resolveEpicBoardSet({
     parentBoardMd: boardMd, cardsRoot, readFile, readDir, exists,
@@ -723,12 +756,21 @@ function selectEpicShadowCandidate({
         '## Completed', ...[...globalCompleted].map((card) => `- [x] [[${card}]]`), '',
       ].join('\n');
     }
+    const candidateLoader = epic
+      ? (card) => (loadEpicCard
+        ? loadEpicCard(name, card, epic.board_path)
+        : loadCanonicalEpicSlice({
+          epic: name, card, boardPath: epic.board_path, cardsRoot,
+          readFile: readFile || ((file) => fs.readFileSync(file, 'utf8')),
+          exists: exists || ((target) => fs.existsSync(target)),
+        }))
+      : loadCard;
     const selected = selectClaimCandidate({
-      boardMd: candidateBoard, state, loadCard, supervised, epicShadow: false,
+      boardMd: candidateBoard, state, loadCard: candidateLoader, supervised, epicShadow: false,
     });
     if (selected.action === 'claim' || selected.action === 'at-capacity') {
       return {
-        ...summarizeClaimSelection(selected),
+        ...selected,
         source: epic ? 'epic' : 'flat',
         ...(epic ? { epic: name, board_path: epic.board_path } : {}),
         findings: resolved.findings,
@@ -740,16 +782,28 @@ function selectEpicShadowCandidate({
   return { action: 'no-work', reason: 'no eligible execution card', findings: resolved.findings, skipped };
 }
 
+function selectEpicShadowCandidate(options = {}) {
+  const selected = selectEpicCandidate(options);
+  return {
+    ...summarizeClaimSelection(selected),
+    ...(selected.source ? { source: selected.source } : {}),
+    ...(selected.epic ? { epic: selected.epic } : {}),
+    ...(selected.board_path ? { board_path: selected.board_path } : {}),
+    findings: selected.findings || [],
+    skipped: selected.skipped || [],
+  };
+}
+
 function selectClaimCandidate({
   boardMd, state, loadCard, supervised = false, epicShadow = false,
-  cardsRoot = CARDS_ROOT, readFile, readDir, exists,
+  cardsRoot = CARDS_ROOT, readFile, readDir, exists, loadEpicCard,
 }) {
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) {
     const selected = { action: 'at-capacity', active: active.map((r) => r.card) };
     if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
-      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
     });
     return selected;
   }
@@ -757,7 +811,7 @@ function selectClaimCandidate({
   for (const card of board['In Planning']) {
     if (state.cards[card] && state.cards[card].phase !== 'cancelled') { skipped.push({ card, reason: `already tracked (${state.cards[card].phase})` }); continue; }
     const loaded = loadCard(card);
-    if (!loaded || !loaded.raw) { skipped.push({ card, reason: 'card note missing' }); continue; }
+    if (!loaded || !loaded.raw) { skipped.push({ card, reason: (loaded && loaded.error) || 'card note missing' }); continue; }
     const meta = parseExecutionMeta(loaded.raw, card);
     const errors = validateExecutionMeta(meta);
     if (errors.length) { skipped.push({ card, reason: errors.join('; ') }); continue; }
@@ -791,7 +845,7 @@ function selectClaimCandidate({
       ...(boardDrift.length ? { board_drift: boardDrift } : {}),
     };
     if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
-      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
     });
     return selected;
   }
@@ -800,9 +854,24 @@ function selectClaimCandidate({
     ...(boardDrift.length ? { board_drift: boardDrift } : {}),
   };
   if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
-    boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists,
+    boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
   });
   return selected;
+}
+
+function selectCoordinatorCandidate({
+  boardMd, state, loadCard, supervised = false, epicShadow = false,
+  cardsRoot = CARDS_ROOT, readFile, readDir, exists, loadEpicCard,
+}) {
+  if (state && state.cutover && state.cutover.enabled === true) {
+    return selectEpicCandidate({
+      boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
+    });
+  }
+  return selectClaimCandidate({
+    boardMd, state, loadCard, supervised, epicShadow,
+    cardsRoot, readFile, readDir, exists, loadEpicCard,
+  });
 }
 
 function summarizeClaimSelection(selected) {
@@ -820,6 +889,10 @@ function summarizeClaimSelection(selected) {
     if (selected.meta.batchPolicy) summary.batch_policy = selected.meta.batchPolicy;
     if (selected.board_drift) summary.board_drift = selected.board_drift;
     if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
+    if (selected.source) summary.source = selected.source;
+    if (selected.epic) summary.epic = selected.epic;
+    if (selected.board_path) summary.board_path = selected.board_path;
+    if (selected.findings) summary.findings = selected.findings;
     return summary;
   }
   if (selected.action === 'at-capacity') {
@@ -834,6 +907,10 @@ function summarizeClaimSelection(selected) {
   };
   if (selected.board_drift) summary.board_drift = selected.board_drift;
   if (selected.shadow_selection) summary.shadow_selection = selected.shadow_selection;
+  if (selected.source) summary.source = selected.source;
+  if (selected.epic) summary.epic = selected.epic;
+  if (selected.board_path) summary.board_path = selected.board_path;
+  if (selected.findings) summary.findings = selected.findings;
   return summary;
 }
 
@@ -3710,7 +3787,7 @@ async function commandClaim(ctx, args) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) return { action: 'halted', reason: '.autoloop-halt present' };
     const state = readState(ctx);
     const boardMd = fs.readFileSync(BOARD, 'utf8');
-    const selected = selectClaimCandidate({
+    const selected = selectCoordinatorCandidate({
       boardMd, state,
       loadCard: (card) => { const p = findCard(CARDS_ROOT, card); return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null; },
       // A direct coordinator claim is the supervised operator path. Future
@@ -3912,11 +3989,12 @@ function commandStatus(ctx, opts = {}) {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
   });
-  const next = summarizeClaimSelection(selectClaimCandidate({
+  const next = summarizeClaimSelection(selectCoordinatorCandidate({
     boardMd, state, loadCard, supervised: opts.supervised !== false,
     epicShadow: opts.epicShadow ?? process.env.SAUCE_EPIC_SELECTION_SHADOW === '1',
     cardsRoot,
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
+    loadEpicCard: opts.loadEpicCard,
   }));
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
@@ -3968,6 +4046,11 @@ function commandStatus(ctx, opts = {}) {
     cutover_history: state.cutover_history || [],
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
+}
+
+async function commandStatusLocked(ctx, opts = {}) {
+  const lock = opts.withLock || withLock;
+  return lock(ctx, 'selector', () => commandStatus(ctx, opts));
 }
 
 async function commandReconcile(ctx, args = {}, deps = {}) {
@@ -4531,7 +4614,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2)); const command = args._[0] || 'status';
   const ctx = workshopContext();
   let result;
-  if (command === 'status') result = commandStatus(ctx);
+  if (command === 'status') result = await commandStatusLocked(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
   else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
@@ -4561,7 +4644,8 @@ module.exports = {
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem,
-  resolveEpicBoardSet, selectEpicShadowCandidate, selectClaimCandidate, summarizeClaimSelection, commandStatus, commandReconcile, commandCutover, commandRecover,
+  resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
+  summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,

@@ -14,9 +14,9 @@ const {
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
-  selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
+  normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicCandidate, selectEpicShadowCandidate,
+  selectClaimCandidate, selectCoordinatorCandidate, summarizeClaimSelection,
+  commandStatus, commandStatusLocked, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
   consumeRatificationReceipt, consumeRatificationArtifact,
@@ -63,6 +63,19 @@ function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], de
     'deployment_required: true',
     '---', '', '# Work', '', 'Bounded work.',
   ].join('\n');
+}
+
+function canonicalEpicSlice({ name, epic, zones = ['Docs/example.md'], deps = [] }) {
+  return card({ name, parent: epic, zones, deps })
+    .replace('---\n', [
+      '---',
+      'type: slice',
+      `task_parent: "tasks/${epic}/${epic}.md"`,
+      `source_board: "tasks/${epic}/board/${epic}-board.md"`,
+      `kanban_board: "tasks/${epic}/board/${epic}-board.md"`,
+      '',
+    ].join('\n'))
+    .replace('epic: "[[Test epic]]"', `epic: "[[${epic}]]"`);
 }
 
 (async () => {
@@ -493,9 +506,11 @@ const shadowIo = (overrides = {}) => {
 };
 const shadow = (extra = {}) => {
   const io = extra.io || shadowIo();
+  const loader = extra.loadCard || io.loadCard;
   return selectEpicShadowCandidate({
     boardMd: extra.boardMd || shadowParent(), state: extra.state || emptyState(),
-    loadCard: extra.loadCard || io.loadCard, supervised: true, cardsRoot: shadowRoot,
+    loadCard: loader, loadEpicCard: extra.loadEpicCard || ((_epic, name) => loader(name)),
+    supervised: true, cardsRoot: shadowRoot,
     readFile: io.readFile, readDir: io.readDir, exists: io.exists,
   });
 };
@@ -588,6 +603,7 @@ const fileSnapshot = JSON.stringify(shadowFiles);
 const flagOn = selectClaimCandidate({
   boardMd: shadowParent(), state: emptyState(), loadCard: shadowIo().loadCard, supervised: true,
   epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+  loadEpicCard: (_epic, name) => shadowIo().loadCard(name),
 });
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
@@ -598,6 +614,7 @@ try {
   const statusIo = shadowIo();
   flaggedStatus = commandStatus({ root: '/tmp/es3-shadow-status', statePath: '/tmp/es3-shadow-state.json' }, {
     state: emptyState(), boardMd: shadowParent(), loadCard: statusIo.loadCard,
+    loadEpicCard: (_epic, name) => statusIo.loadCard(name),
     cardsRoot: shadowRoot, readFile: statusIo.readFile, readDir: statusIo.readDir, exists: statusIo.exists,
   });
 } finally {
@@ -611,10 +628,140 @@ for (const [index, zone] of ['x', 'y', 'z'].entries()) shadowCapacityState.cards
 const shadowAtCapacity = selectClaimCandidate({
   boardMd: shadowParent(), state: shadowCapacityState, loadCard: shadowIo().loadCard, supervised: true,
   epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+  loadEpicCard: (_epic, name) => shadowIo().loadCard(name),
 });
 eq(shadowAtCapacity.action, 'at-capacity', 'ES3-STATE-13 legacy capacity remains authoritative');
 eq(shadowAtCapacity.shadow_selection.action, 'at-capacity', 'ES3-STATE-13 shadow status still reports the same global capacity boundary');
 eq(summarizeClaimSelection(shadowAtCapacity).shadow_selection.action, 'at-capacity', 'ES3-STATE-13 summarized status preserves the observational capacity receipt');
+
+const cutoverActualState = emptyState();
+cutoverActualState.cutover = { enabled: true, enabled_at: '2026-07-25T19:00:00.000Z', receipts: {} };
+const cutoverActualIo = shadowIo();
+const cutoverEpicLoader = (_epic, name) => cutoverActualIo.loadCard(name);
+const cutoverActual = selectCoordinatorCandidate({
+  boardMd: shadowParent(), state: cutoverActualState, loadCard: cutoverActualIo.loadCard, supervised: true,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  [cutoverActual.action, cutoverActual.card, cutoverActual.source, cutoverActual.epic, cutoverActual.board_path],
+  ['claim', 'A1', 'epic', 'Epic A', '/vault/tasks/Epic A/board/Epic A-board.md'],
+  'BGD-CUTOVER-ACTUAL-SELECTOR cutover-on authority selects the top epic frontier slice and records its board',
+);
+const duplicateSlice = 'DUP-1 Shared slice title';
+const duplicateIo = shadowIo({
+  files: {
+    '/vault/tasks/Epic A/board/Epic A-board.md': epicBoard([duplicateSlice]),
+    '/vault/tasks/Epic B/board/Epic B-board.md': epicBoard([duplicateSlice]),
+    [`/vault/tasks/Epic A/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic A', zones: ['platform/from-epic-a'],
+    }),
+    [`/vault/tasks/Epic B/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic B', zones: ['platform/from-epic-b'],
+    }),
+  },
+});
+const duplicateSelection = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A', 'Epic B']), state: cutoverActualState,
+  loadCard: () => ({
+    path: `/vault/tasks/Epic B/board/${duplicateSlice}.md`,
+    raw: duplicateIo.files[`/vault/tasks/Epic B/board/${duplicateSlice}.md`],
+  }),
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: duplicateIo.readFile, readDir: duplicateIo.readDir, exists: duplicateIo.exists,
+});
+eq(
+  [duplicateSelection.cardPath, normalizeCardLink(duplicateSelection.meta.parentCard), duplicateSelection.meta.touchZones],
+  [`/vault/tasks/Epic A/board/${duplicateSlice}.md`, 'Epic A', ['platform/from-epic-a']],
+  'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM binds a selected board line to the canonical slice beside that exact epic board',
+);
+const invalidDuplicateIo = shadowIo({
+  files: {
+    '/vault/tasks/Epic A/board/Epic A-board.md': epicBoard([duplicateSlice]),
+    [`/vault/tasks/Epic A/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic B', zones: ['platform/from-wrong-epic'],
+    }),
+  },
+});
+const invalidDuplicateSelection = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: () => ({
+    path: `/vault/tasks/Epic B/board/${duplicateSlice}.md`,
+    raw: duplicateIo.files[`/vault/tasks/Epic B/board/${duplicateSlice}.md`],
+  }),
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: invalidDuplicateIo.readFile, readDir: invalidDuplicateIo.readDir, exists: invalidDuplicateIo.exists,
+});
+ok(
+  invalidDuplicateSelection.action === 'no-work'
+    && invalidDuplicateSelection.skipped[0].reason.includes('epic slice binding invalid: epic must be Epic A'),
+  'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses a malformed board-local slice instead of resolving a same-title note from another epic',
+);
+const cutoverStatus = commandStatus({ root: '/tmp/bgd-cutover-status', statePath: '/tmp/bgd-cutover-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(), loadCard: cutoverActualIo.loadCard,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  [cutoverStatus.next.card, cutoverStatus.next.source, cutoverStatus.next.epic, cutoverStatus.next.board_path],
+  [cutoverActual.card, cutoverActual.source, cutoverActual.epic, cutoverActual.board_path],
+  'BGD-CUTOVER-STATUS-CLAIM-PARITY status exposes the exact authoritative claim card, epic, and board path',
+);
+const atlasLoadAttempts = [];
+selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: (name) => {
+    if (name === 'Epic A') throw new Error('epic atlas must never be validated as an execution card');
+    return cutoverActualIo.loadCard(name);
+  },
+  loadEpicCard: (_epic, name) => {
+    atlasLoadAttempts.push(name);
+    return cutoverActualIo.loadCard(name);
+  },
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(atlasLoadAttempts, ['A1'], 'BGD-CUTOVER-ACTUAL-SELECTOR never loads the epic atlas through execution-card validation');
+const cutoverBlockedBodies = {
+  ...shadowBodies,
+  A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'], deps: ['Missing'] }),
+  A2: card({ name: 'A2', parent: 'Epic A', zones: ['platform/a2'], deps: ['Missing'] }),
+};
+const cutoverBlocked = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: (name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  loadEpicCard: (_epic, name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+const cutoverBlockedStatus = commandStatus({ root: '/tmp/bgd-cutover-blocked', statePath: '/tmp/bgd-cutover-blocked-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(['Epic A']),
+  loadCard: (name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  loadEpicCard: (_epic, name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  cutoverBlockedStatus.next.first_blocker,
+  cutoverBlocked.skipped[0],
+  'BGD-CUTOVER-STATUS-CLAIM-PARITY status and claim preserve the same first refusal reason',
+);
+const cutoverOffState = emptyState();
+cutoverOffState.cutover = { enabled: false, disabled_at: '2026-07-25T20:00:00.000Z', reason: 'fixture' };
+const cutoverOffActual = selectCoordinatorCandidate({ boardMd: board(['A']), state: cutoverOffState, loadCard });
+const cutoverOffLegacy = selectClaimCandidate({ boardMd: board(['A']), state: cutoverOffState, loadCard });
+eq(cutoverOffActual, cutoverOffLegacy, 'BGD-CUTOVER-PRE-COMPAT cutover-off selection is byte-for-byte legacy-compatible');
+const cutoverAbsentActual = selectCoordinatorCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
+const cutoverAbsentLegacy = selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
+eq(cutoverAbsentActual, cutoverAbsentLegacy, 'BGD-CUTOVER-PRE-COMPAT absent cutover selection is byte-for-byte legacy-compatible');
+const statusLockNames = [];
+const lockedStatus = await commandStatusLocked({ root: '/tmp/bgd-cutover-locked', statePath: '/tmp/bgd-cutover-locked-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(), loadCard: cutoverActualIo.loadCard,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+  withLock: async (_ctx, name, fn) => { statusLockNames.push(name); return fn(); },
+});
+eq(statusLockNames, ['selector'], 'BGD-CUTOVER-STATUS-CLAIM-PARITY operational status selects under the selector lock');
+eq(lockedStatus.next.card, cutoverActual.card, 'BGD-CUTOVER-STATUS-CLAIM-PARITY locked status preserves the authoritative candidate');
 
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
