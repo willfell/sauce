@@ -7209,6 +7209,30 @@ eq(opx4Digest.since.ratified, [{
   artifact_path: opx4Artifact.relative,
 }], 'OPX4-CONSUME-VALID successful consumption enters the digest ratified feed');
 
+// GA-OPS19A2-CLI-DISPATCH-UNBOUND: execute both ratification verbs through
+// main(), rather than proving only the exported command functions.
+for (const [verb, args, expected] of [
+  [
+    'backfill-ratifications',
+    ['backfill-ratifications'],
+    /backfill-ratifications requires --json for a machine-readable receipt/,
+  ],
+  [
+    'consume-ratification',
+    ['consume-ratification', '--card', OPX4_CARD],
+    /consume-ratification requires --json for a machine-readable receipt/,
+  ],
+]) {
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && expected.test(String(cliError.stderr)),
+    `GA-OPS19A2-CLI-DISPATCH-UNBOUND ${verb} reaches its real dispatcher branch and refuses before state read`);
+}
+
 // CLI wiring: the cutover command exists and refuses without --json.
 {
   const { execFileSync: execCli } = require('child_process');
