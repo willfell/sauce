@@ -357,6 +357,32 @@ function cutoverEpicIntake() {
     ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
     ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
 
+    const duplicate = execution('CUT-DUP Cross epic title', {
+      model_profile: 'heavy', risk_flags: ['loader'],
+    });
+    const otherEpic = 'Other Epic';
+    const otherBoardDir = path.join(dir, 'tasks', otherEpic, 'board');
+    fs.mkdirSync(otherBoardDir, { recursive: true });
+    const duplicateReplayPath = path.join(otherBoardDir, `${direct.title}.md`);
+    fs.writeFileSync(duplicateReplayPath, directRaw
+      .replaceAll(existingEpic, otherEpic));
+    const duplicateReplay = runEnabled(directSpec, true);
+    ok(!duplicateReplay.ok && (duplicateReplay.errors || []).some((error) => error.includes('duplicate card title resolves outside intended epic')),
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses replay when the intended slice and a foreign same-title slice both exist');
+    fs.unlinkSync(duplicateReplayPath);
+    fs.writeFileSync(path.join(otherBoardDir, `${duplicate.title}.md`), [
+      '---', 'type: slice', 'status: planning', `card: ${duplicate.title}`,
+      `epic: "[[${otherEpic}]]"`, `parent_card: "[[${otherEpic}]]"`, '---', '',
+    ].join('\n'));
+    const duplicateSpec = base(dir, { epic: `[[${existingEpic}]]`, cards: [duplicate] });
+    const duplicateTarget = path.join(existingRoot, 'board', `${duplicate.title}.md`);
+    const duplicateBoardBefore = fs.readFileSync(existingBoardPath, 'utf8');
+    const duplicateResult = runEnabled(duplicateSpec, true);
+    ok(!duplicateResult.ok && (duplicateResult.errors || []).some((error) => error.includes('duplicate card title resolves outside intended epic')),
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses a post-cutover title already owned by another epic');
+    ok(!fs.existsSync(duplicateTarget) && fs.readFileSync(existingBoardPath, 'utf8') === duplicateBoardBefore,
+      'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses before any target slice or epic-board write');
+
     const flatTitle = 'GA-OPS13a Close epic cutover selector and intake deadlock';
     const flatSpec = base(dir, { epic: null, cards: [execution(flatTitle, { model_profile: 'heavy', risk_flags: ['loader'] })] });
     const flatBoardBefore = fs.readFileSync(flatSpec.board_path, 'utf8');

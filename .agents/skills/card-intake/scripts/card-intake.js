@@ -199,6 +199,22 @@ function findCard(cardsRoot, title) {
   return null;
 }
 
+function findCards(cardsRoot, title) {
+  if (!cardsRoot || !fs.existsSync(cardsRoot)) return [];
+  const wanted = `${title}.md`;
+  const matches = [];
+  const stack = [cardsRoot];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const item = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(item);
+      else if (entry.name === wanted) matches.push(item);
+    }
+  }
+  return matches.sort();
+}
+
 function findNote(roots, title) {
   const target = linkName(title) || String(title || '').trim();
   if (!target) return null;
@@ -406,6 +422,14 @@ function validateSpec(spec, boardRaw = '', options = {}) {
   for (const card of cards) {
     if (protectedNames.has(card.title) || protectedNames.has(card.parent_title)) errors.push(`${card.title}: refuses to touch active/protected card`);
     const priorPath = findCard(spec.cards_root, card.title);
+    if (epicNative && (card.role || 'execution') === 'execution') {
+      const intendedPath = cardPath(spec, card, renderOptionsForCard(spec, card, true));
+      const foreignPath = findCards(spec.cards_root, card.title)
+        .find((candidate) => path.resolve(candidate) !== path.resolve(intendedPath));
+      if (foreignPath) {
+        errors.push(`${card.title}: duplicate card title resolves outside intended epic: ${foreignPath}`);
+      }
+    }
     if (card.existing === true && !priorPath) errors.push(`${card.title}: existing card does not resolve`);
     if (card.existing === true && card.role !== 'parent') errors.push(`${card.title}: only non-claimable parents may be updated as existing cards`);
     const actualLane = boardLane(lanes, card.title);

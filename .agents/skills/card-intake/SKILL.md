@@ -71,7 +71,7 @@ Epic-native default: the script itself reads fresh status from the installed Hom
 
 - Direct execution specs name an existing canonical epic in `epic`; the script writes `type: slice` at `tasks/<Epic>/board/<Slice>.md`, inserts only the epic-board line, and leaves the parent board byte-identical.
 - New parent/roadmap themes become canonical epic scaffolds at `tasks/<Epic>/{<Epic>.md,board/<Epic>-board.md,context/{pack.md,runs/.keep,lessons/.keep,decisions/.keep}}`; prepared children are flat slice notes in `board/`, and only epic atlas lines reach the parent board.
-- Every slice binds exact `epic`, `task_parent`, `source_board`, and `kanban_board`.
+- Every slice binds exact `epic`, `task_parent`, `source_board`, and `kanban_board`; slice titles remain globally unique, and intake refuses a title already owned by another epic.
 - Unexpected pre-existing scaffold bytes refuse before mutation; matching intended partial bytes resume forward, and literal replay is `no_op:true`.
 - Flat execution creation is refused. The sole flat exception is the existing `bug` → `Discovered (autoloop)` one-line triage route; there is no card-name bootstrap exception.
 
