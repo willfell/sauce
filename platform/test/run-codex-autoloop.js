@@ -4524,8 +4524,21 @@ function parkedRebindHarness(id = 'happy') {
     now: () => '2026-07-25T23:30:00.000Z',
   };
   const reason = 'rebind the exact eight canonical epic migrations';
-  const dryRunArgs = { 'parked-rebind': true, 'dry-run': true, reason, json: true };
-  const applyArgs = { 'parked-rebind': true, apply: true, reason, spec: 'exact-eight.json', json: true };
+  const dryRunArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    'dry-run': true,
+    reason,
+    json: true,
+  };
+  const applyArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    apply: true,
+    reason,
+    spec: 'exact-eight.json',
+    json: true,
+  };
   return {
     root, state, ctx, deps, reason, dryRunArgs, applyArgs,
     setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
@@ -4595,6 +4608,21 @@ for (const altered of [
 ]) {
   await assert.rejects(() => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
     /literal|requires|reason|substituted/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
+}
+for (const [mutation, altered] of [
+  ['added', { ...parkedRebind.applyArgs, _: ['reconcile-metadata', 'extra'] }],
+  ['removed', { ...parkedRebind.applyArgs, _: [] }],
+  ['changed', { ...parkedRebind.applyArgs, _: ['reconcile-metadata-substituted'] }],
+]) {
+  await assert.rejects(
+    () => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|substituted/,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED refuses ${mutation} positional operands`,
+  ); count++;
+  eq(parkedRebind.counts().ledgerWrites, 1,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero ledger writes`);
+  eq(parkedRebind.counts().cardWrites, 0,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero card writes`);
 }
 const substitutedParkedSpec = deepCopy(parkedRebindPlan.spec);
 substitutedParkedSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
