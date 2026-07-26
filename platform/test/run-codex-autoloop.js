@@ -7237,6 +7237,38 @@ const opx4OffsetDigest = deliveryStatusDigest.buildDigest({
 }, '', [], { lastSeen: '2026-07-26T16:00:00.000Z' });
 eq(opx4OffsetDigest.since.ratified.length, 1,
   'OPX4-CONSUME-VALID digest compares offset timestamps chronologically');
+const opx4OffsetStatusState = emptyState();
+opx4OffsetStatusState.cards['GA-RAT-NEWER'] = {
+  card: 'GA-RAT-NEWER',
+  phase: 'discarded',
+  ratification_receipt: {
+    accepted_at: '2026-07-26T10:00:00-06:00',
+    authority: 'delegate',
+    artifact_path: 'spice/projects/sauce/ratifications/GA-RAT-NEWER.md',
+  },
+};
+opx4OffsetStatusState.cards['GA-RAT-OLDER'] = {
+  card: 'GA-RAT-OLDER',
+  phase: 'discarded',
+  ratification_receipt: {
+    accepted_at: '2026-07-26T15:30:00Z',
+    authority: 'delegate',
+    artifact_path: 'spice/projects/sauce/ratifications/GA-RAT-OLDER.md',
+  },
+};
+const opx4OffsetStatus = commandStatus(
+  { root: tmp, statePath: path.join(tmp, 'opx4-offset-state.json') },
+  {
+    state: opx4OffsetStatusState,
+    boardMd: '# Board\n\n## In Planning\n\n## In Progress\n\n## Blocked\n\n## Completed\n',
+    boardPath: opx4Board,
+    cardsRoot: opx4Project,
+    loadCard: () => null,
+    exists: () => false,
+  },
+);
+eq(opx4OffsetStatus.ratified_recent.map((item) => item.card), ['GA-RAT-NEWER', 'GA-RAT-OLDER'],
+  'OPX4-CONSUME-VALID status orders offset ratification timestamps chronologically');
 
 const deliveryReviewTriage = require('../../scripts/autoloop/delivery-review-triage');
 for (const [label, wait, expectedBucket] of [
