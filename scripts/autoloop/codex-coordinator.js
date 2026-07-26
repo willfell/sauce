@@ -3412,9 +3412,13 @@ async function commandPark(ctx, args, deps = {}) {
         refuse('park-refused', 'literal_replay_mismatch',
           `parked card ${card} accepts only literal replay of its settled park operands`);
       }
-      return successReceipt('parked', {
+      return successReceipt(record.projection_error ? 'parked-projection-failed' : 'parked', {
         no_op: true, card, phase: record.phase, dependencies,
         resume_condition: resumeCondition, branch: record.branch, worktree: record.worktree,
+        ...(record.projection_error ? {
+          projection_error: record.projection_error,
+          reconcile: `reconcile --card ${card}`,
+        } : {}),
       });
     }
     if (!['claimed', 'implementing'].includes(record.phase)) {
@@ -3470,7 +3474,7 @@ async function commandResume(ctx, args, deps = {}) {
     if (!record) refuse('resume-refused', 'card_not_claimed', `card ${card} is not claimed`);
     if (record.phase === 'implementing' && record.last_resume_request
       && record.last_resume_request.card === card) {
-      return successReceipt('implement', {
+      return successReceipt(record.projection_error ? 'resume-projection-failed' : 'implement', {
         no_op: true, card, phase: record.phase, branch: record.branch,
         worktree: record.worktree, dependencies: record.dependencies || [],
         reviews_invalidated: true,
@@ -3479,6 +3483,10 @@ async function commandResume(ctx, args, deps = {}) {
         origin_main_sha: record.last_resume_request.origin_main_sha || null,
         origin_main_advanced: record.last_resume_request.origin_main_advanced === true,
         requires_main_update: record.last_resume_request.requires_main_update === true,
+        ...(record.projection_error ? {
+          projection_error: record.projection_error,
+          reconcile: `reconcile --card ${card}`,
+        } : {}),
       });
     }
     if (record.phase !== 'parked') return resumeRefused(record, `card is ${record.phase}, not parked`);

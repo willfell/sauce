@@ -3863,6 +3863,55 @@ crashParkState.cards['Crash parked'].branch = 'codex-autoloop/crash-parked';
 crashParkState.cards['Crash parked'].worktree = parkRoot;
 crashParkState.cards['Crash parked'].touch_zones = ['platform/crash'];
 fs.writeFileSync(crashBoardPath, liveBoard({ progress: ['Crash parked'], completed: [[true, 'Prerequisite A']] }));
+const failedResumeState = JSON.parse(JSON.stringify(crashParkState));
+let failedResumeWrites = 0;
+const failedResumeGitCalls = [];
+const failedResumeDeps = {
+  ...parkDeps,
+  readState: () => failedResumeState,
+  writeState: () => { failedResumeWrites++; },
+  boardPath: crashBoardPath,
+  findCard: (_root, name) => name === 'Prerequisite A' ? '/cards/Prerequisite A.md' : null,
+  worktreeExists: () => true,
+  projectCard: () => { throw new Error('resume metadata projection denied'); },
+  sh: (cmd, args) => {
+    failedResumeGitCalls.push([cmd, ...args]);
+    if (args[0] === 'fetch') return '';
+    if (args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'current-main' : 'branch-head';
+    if (args[0] === 'merge-base') return '';
+    throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
+  },
+  now: () => '2026-07-15T16:02:30.000Z',
+};
+const failedResume = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+);
+eq(failedResume.action, 'resume-projection-failed',
+  'CS1-PROJECTION-REPLAY initial resume projection failure is explicit');
+eq(failedResumeState.cards['Crash parked'].phase, 'implementing',
+  'CS1-PROJECTION-REPLAY failed resume projection preserves authoritative implementing state');
+eq(failedResumeState.cards['Crash parked'].projection_error, 'resume metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed resume projection is saved for reconciliation');
+const failedResumeBytes = JSON.stringify(failedResumeState);
+const failedResumeWritesBeforeReplay = failedResumeWrites;
+const failedResumeGitCallsBeforeReplay = failedResumeGitCalls.length;
+const failedResumeReplay = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+);
+eq(failedResumeReplay.action, 'resume-projection-failed',
+  'CS1-PROJECTION-REPLAY resume replay keeps the unresolved projection failure explicit');
+eq(failedResumeReplay.no_op, true,
+  'CS1-PROJECTION-REPLAY failed resume replay is a settled zero-write no-op');
+eq(failedResumeReplay.projection_error, 'resume metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed resume replay preserves the exact projection error');
+eq(failedResumeReplay.reconcile, 'reconcile --card Crash parked',
+  'CS1-PROJECTION-REPLAY failed resume replay names the exact repair command');
+eq(failedResumeWrites, failedResumeWritesBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed resume replay performs zero ledger writes');
+eq(failedResumeGitCalls.length, failedResumeGitCallsBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed resume replay performs zero Git freshness reads');
+eq(JSON.stringify(failedResumeState), failedResumeBytes,
+  'CS1-PROJECTION-REPLAY failed resume replay preserves authoritative state byte-for-byte');
 const currentMainCalls = [];
 const currentMainResume = await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
@@ -3898,6 +3947,26 @@ eq(failedPark.action, 'parked-projection-failed', 'metadata projection failure i
 eq(failedParkState.cards.Failed.phase, 'parked', 'failed metadata projection preserves authoritative parked state');
 eq(failedParkState.cards.Failed.projection_error, 'metadata projection denied', 'failed metadata projection is saved for reconciliation');
 ok(failedParkWrites >= 2, 'failed metadata projection persists both transition and failure receipt');
+const failedParkBytes = JSON.stringify(failedParkState);
+const failedParkWritesBeforeReplay = failedParkWrites;
+const failedParkReplay = await commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
+}, {
+  ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
+});
+eq(failedParkReplay.action, 'parked-projection-failed',
+  'CS1-PROJECTION-REPLAY park replay keeps the unresolved projection failure explicit');
+eq(failedParkReplay.no_op, true,
+  'CS1-PROJECTION-REPLAY failed park replay is a settled zero-write no-op');
+eq(failedParkReplay.projection_error, 'metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed park replay preserves the exact projection error');
+eq(failedParkReplay.reconcile, 'reconcile --card Failed',
+  'CS1-PROJECTION-REPLAY failed park replay names the exact repair command');
+eq(failedParkWrites, failedParkWritesBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed park replay performs zero ledger writes');
+eq(JSON.stringify(failedParkState), failedParkBytes,
+  'CS1-PROJECTION-REPLAY failed park replay preserves authoritative state byte-for-byte');
 eq((await commandResume({ root: parkRoot }, { json: true, card: 'Failed' }, {
   ...parkDeps, readState: () => failedParkState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a parked card with unresolved metadata projection failure');
