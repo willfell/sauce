@@ -29,31 +29,18 @@ jobs:
       - name: Run full release:preflight (includes integration smoke)
         run: npm run release:preflight
 
-      - name: Tap sauce formula (macOS only)
+      - name: Validate checked-out candidate CLI and fresh-vault bootstrap (macOS only)
         if: matrix.os == 'macos-latest'
+        env:
+          SAUCE_CANDIDATE_CLI: ${{ github.workspace }}/platform/cli/sauce-cli.js
         run: |
-          if brew tap willfell/sauce 2>/dev/null; then
-            echo "Tapped willfell/sauce"
-          else
-            echo "Tap unavailable — skipping brew install smoke this run"
-            echo "SKIP_BREW_SMOKE=1" >> "$GITHUB_ENV"
-          fi
-
-      - name: Install sauce via brew (smoke, macOS only)
-        if: matrix.os == 'macos-latest' && env.SKIP_BREW_SMOKE != '1'
-        run: |
-          brew install willfell/sauce/sauce || (echo "brew install failed" && exit 1)
-          which sauce
-          sauce help | head -3
-
-      - name: Bootstrap a fresh vault via brewed sauce (macOS only)
-        if: matrix.os == 'macos-latest' && env.SKIP_BREW_SMOKE != '1'
-        run: |
+          test -f "$SAUCE_CANDIDATE_CLI"
+          node "$SAUCE_CANDIDATE_CLI" help | head -3
           TMP_VAULT="$RUNNER_TEMP/sauce-ci-vault"
           mkdir -p "$TMP_VAULT"
-          sauce bootstrap --vault "$TMP_VAULT" --non-interactive --no-register || (echo "bootstrap failed" && exit 1)
+          node "$SAUCE_CANDIDATE_CLI" bootstrap --vault "$TMP_VAULT" --non-interactive --no-register
           ls -la "$TMP_VAULT"
-          if sauce audit --vault "$TMP_VAULT" 2>/dev/null; then
+          if node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT" 2>/dev/null; then
             echo "audit ok"
           else
             echo "audit skipped or non-fatal — bootstrap-pass is the gate"
@@ -63,7 +50,30 @@ jobs:
         if: always()
         run: |
           rm -rf "$RUNNER_TEMP/sauce-ci-vault" 2>/dev/null || true
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            brew uninstall sauce 2>/dev/null || true
-            brew untap willfell/sauce 2>/dev/null || true
-          fi
+
+  released-formula-smoke:
+    name: released formula smoke (non-required)
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: macos-latest
+    steps:
+      - name: Tap and install released sauce formula
+        run: |
+          brew tap willfell/sauce
+          brew install willfell/sauce/sauce
+          which sauce
+          sauce help | head -3
+
+      - name: Bootstrap a fresh vault via released formula
+        run: |
+          TMP_VAULT="$RUNNER_TEMP/sauce-released-formula-vault"
+          mkdir -p "$TMP_VAULT"
+          sauce bootstrap --vault "$TMP_VAULT" --non-interactive --no-register
+          ls -la "$TMP_VAULT"
+
+      - name: Cleanup released formula smoke
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/sauce-released-formula-vault" 2>/dev/null || true
+          brew uninstall sauce 2>/dev/null || true
+          brew untap willfell/sauce 2>/dev/null || true
