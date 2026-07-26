@@ -4656,6 +4656,25 @@ await assert.rejects(
 eq(escapeRestamp.writes(), 0,
   'BGR-OBSY-HEAL-IDEMPOTENT out-of-root refusal performs zero writes');
 
+const thirdHashRestamp = restampHarness('third-hash');
+const thirdHashRestampPlan = await commandRestampContractFrontmatter(
+  thirdHashRestamp.ctx, thirdHashRestamp.dryRunArgs, thirdHashRestamp.deps,
+);
+thirdHashRestamp.setSpec(thirdHashRestampPlan.spec);
+const untouchedThirdHashPeer = fs.readFileSync(thirdHashRestamp.paths[1], 'utf8');
+fs.writeFileSync(thirdHashRestamp.paths[0], `${fs.readFileSync(thirdHashRestamp.paths[0], 'utf8')}operator drift\n`);
+await assert.rejects(
+  () => commandRestampContractFrontmatter(
+    thirdHashRestamp.ctx, thirdHashRestamp.applyArgs, thirdHashRestamp.deps,
+  ),
+  /unplanned or changed canonical target|third hash/,
+  'BGR-OBSY-HEAL-IDEMPOTENT refuses a post-plan third hash before writes',
+); count++;
+eq(thirdHashRestamp.writes(), 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT third-hash refusal performs zero coordinator writes');
+eq(fs.readFileSync(thirdHashRestamp.paths[1], 'utf8'), untouchedThirdHashPeer,
+  'BGR-OBSY-HEAL-IDEMPOTENT third-hash refusal preserves every peer preimage');
+
 // BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
 async function captureFsMutationAttempts(run) {
   const methods = ['writeFileSync', 'appendFileSync', 'renameSync', 'unlinkSync', 'rmSync'];
