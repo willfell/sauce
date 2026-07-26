@@ -264,7 +264,7 @@ function consumeRatificationReceipt(receipt, expected = {}) {
   };
 }
 
-function exactRatificationSection(markdown, heading) {
+function exactRatificationSectionRange(markdown, heading) {
   const wanted = String(heading || '').trim();
   if (!wanted) return null;
   const source = String(markdown || '');
@@ -310,7 +310,16 @@ function exactRatificationSection(markdown, heading) {
     }
     offset += chunk.length;
   }
-  return source.slice(selected.start, end);
+  return {
+    start: selected.start,
+    end,
+    section: source.slice(selected.start, end),
+  };
+}
+
+function exactRatificationSection(markdown, heading) {
+  const selected = exactRatificationSectionRange(markdown, heading);
+  return selected ? selected.section : null;
 }
 
 function jsonDuplicateKeys(raw) {
@@ -394,8 +403,9 @@ function uniqueRatificationErrors(errors) {
 function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, provenance, parsed) {
   const current = Array.isArray(parsed && parsed.errors) ? parsed.errors : [];
   if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return parsed;
-  const section = exactRatificationSection(markdown, sectionHeading);
-  if (!section) return parsed;
+  const selected = exactRatificationSectionRange(markdown, sectionHeading);
+  if (!selected) return parsed;
+  const section = selected.section;
   const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
   if (blocks.length !== 1) return parsed;
   let payload;
@@ -422,11 +432,10 @@ function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, proven
     '```',
   ].join('\n');
   const sanitizedSection = section.replace(blocks[0][0], sanitizedBlock);
-  const sectionOffset = markdown.indexOf(section);
-  const sanitizedMarkdown = sectionOffset < 0 ? markdown : [
-    markdown.slice(0, sectionOffset),
+  const sanitizedMarkdown = [
+    markdown.slice(0, selected.start),
     sanitizedSection,
-    markdown.slice(sectionOffset + section.length),
+    markdown.slice(selected.end),
   ].join('');
   const semantic = delivery.parseRatificationArtifact(
     sanitizedMarkdown, sectionHeading, provenance,

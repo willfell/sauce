@@ -7149,7 +7149,10 @@ eq(opx4Writes, 0,
 eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), duplicatePayloadRaw,
   'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal leaves the artifact byte-identical');
 const mixedPayloadInvalidRaw = acceptedRaw
-  .replace('"decision": "accepted"', '"decision": "",\n  "decision": "accepted"')
+  .replace(
+    '"decision": "accepted"',
+    '"decision": "accepted",\n  "decision": "provisionally_accepted"',
+  )
   .replace('"accepted_at": "2026-07-26T09:31:00-06:00"', '"accepted_at": "not-a-timestamp"')
   .replace(`"target_card": "${OPX4_CARD}"`, '"target_card": "GA-OPX4 wrong target"')
   .replace(`"target_head": "${OPX4_HEAD}"`, `"target_head": "${'b'.repeat(40)}"`)
@@ -7170,6 +7173,7 @@ eq(
     ['invalid-ratification-timestamp', 'accepted_at'],
     ['ratification-target-card-mismatch', 'target_card'],
     ['ratification-target-head-mismatch', 'target_head'],
+    ['ratification-decision-mismatch', 'decision'],
   ],
   'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS returns structural, semantic, and binding errors together',
 );
@@ -7177,6 +7181,31 @@ eq(opx4Writes, 0,
   'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS performs zero ledger writes');
 eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), mixedPayloadInvalidRaw,
   'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS leaves the artifact pending and byte-identical');
+const mixedSectionOffset = mixedPayloadInvalidRaw.indexOf(`## Ratification — ${OPX4_CARD}`);
+ok(mixedSectionOffset >= 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION locates the authoritative section fixture');
+const mixedSection = mixedPayloadInvalidRaw.slice(mixedSectionOffset);
+const positionCollisionRaw = [
+  mixedPayloadInvalidRaw.slice(0, mixedSectionOffset),
+  '````md',
+  mixedSection,
+  '````',
+  '',
+  mixedPayloadInvalidRaw.slice(mixedSectionOffset),
+].join('\n');
+fs.writeFileSync(opx4Artifact.absolute, positionCollisionRaw);
+const positionCollisionConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  positionCollisionConsume.errors.map((issue) => [issue.code, issue.field]),
+  mixedPayloadInvalidConsume.errors.map((issue) => [issue.code, issue.field]),
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION ignores the earlier byte-identical fenced decoy and preserves the exhaustive error order',
+);
+eq(opx4Writes, 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), positionCollisionRaw,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION leaves the pending artifact byte-identical');
 const multiPayloadDecoy = [
   '````md',
   `## Ratification — ${OPX4_CARD}`,
