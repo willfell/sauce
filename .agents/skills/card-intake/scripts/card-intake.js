@@ -9,8 +9,6 @@ const delivery = require('../../../../platform/mechanisms/delivery');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
 const VAULTS = delivery.registry.policies.required_vaults;
-const INSTALLED_NODE = '/opt/homebrew/opt/node/bin/node';
-const INSTALLED_COORDINATOR = '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js';
 const EPIC_SCHEMA_VERSION = '1.1.0';
 const RISK_MAP = {
   new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
@@ -115,8 +113,20 @@ function scalarField(markdown, key) {
   try { return JSON.parse(value); } catch (_) { return value.replace(/^['"]|['"]$/g, ''); }
 }
 
+function resolveInstalledCoordinator(execFileSync = childProcess.execFileSync) {
+  const prefix = String(execFileSync('brew', ['--prefix', 'sauce'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }) || '').trim();
+  if (!prefix || !path.isAbsolute(prefix)) {
+    throw new Error('brew --prefix sauce returned no absolute installed formula path');
+  }
+  return path.join(prefix, 'libexec', 'scripts', 'autoloop', 'codex-coordinator.js');
+}
+
 function readInstalledCoordinatorStatus(execFileSync = childProcess.execFileSync) {
-  const stdout = execFileSync(INSTALLED_NODE, [INSTALLED_COORDINATOR, 'status', '--json'], {
+  const coordinator = resolveInstalledCoordinator(execFileSync);
+  const stdout = execFileSync(process.execPath, [coordinator, 'status', '--json'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -958,7 +968,8 @@ function run(spec, apply = false, deps = {}) {
 
 module.exports = {
   validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath,
-  readInstalledCoordinatorStatus, epicRoute, canonicalEpicSurface, renderEpicAtlas, renderEpicBoard, renderContextPack,
+  resolveInstalledCoordinator, readInstalledCoordinatorStatus, epicRoute, canonicalEpicSurface,
+  renderEpicAtlas, renderEpicBoard, renderContextPack,
 };
 
 if (require.main === module) {

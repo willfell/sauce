@@ -67,7 +67,7 @@ Coverage rule: every carried finding name must appear as an exact token in at le
 
 The receipt for a valid superseding spec includes `post_apply_instructions: [{discard: {card, superseded_by}}]`. Intake NEVER touches coordinator state — it only instructs; the run-loose flow / discard runbook executes the instruction via `coordinator discard --superseded-by <successor> --carried-fixture <fixture>`.
 
-Epic-native default: the script itself reads fresh status from the installed Homebrew coordinator on every dry-run/apply. When `cutover.enabled` is true:
+Epic-native default: the script itself resolves `brew --prefix sauce` and reads fresh status from that installed Homebrew coordinator on every dry-run/apply. When `cutover.enabled` is true:
 
 - Direct execution specs name an existing canonical epic in `epic`; the script writes `type: slice` at `tasks/<Epic>/board/<Slice>.md`, inserts only the epic-board line, and leaves the parent board byte-identical.
 - New parent/roadmap themes become canonical epic scaffolds at `tasks/<Epic>/{<Epic>.md,board/<Epic>-board.md,context/{pack.md,runs/.keep,lessons/.keep,decisions/.keep}}`; prepared children are flat slice notes in `board/`, and only epic atlas lines reach the parent board.

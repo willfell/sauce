@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface,
+  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
 } = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
 const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
@@ -31,6 +31,25 @@ function base(dir, extra = {}) {
 }
 function execution(title, extra = {}) {
   return { title, role: 'execution', lane: 'In Planning', status: 'planning', model_profile: 'standard', risk_flags: [], execution_mode: 'release', touch_zones: ['platform/example.js', 'platform/test/run-example.js'], depends_on: [], deploy_subscriptions: { headspace: [], accuris: [], ero: [] }, acceptance_tests: ['Focused behavior test passes.', 'Full preflight passes.'], applicable_guides: ['AGENTS.md', 'Docs/agent-guides/build-test-verify.md'], trap_warnings: ['Do not widen scope or edit version pins.'], ...extra };
+}
+
+function installedCoordinatorResolution() {
+  for (const prefix of ['/usr/local/opt/sauce', '/home/linuxbrew/.linuxbrew/opt/sauce']) {
+    const calls = [];
+    const status = readInstalledCoordinatorStatus((file, args) => {
+      calls.push({ file, args });
+      if (file === 'brew') return `${prefix}\n`;
+      return JSON.stringify({ action: 'status', cutover: { enabled: false } });
+    });
+    eq(calls[0], { file: 'brew', args: ['--prefix', 'sauce'] },
+      `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH resolves ${prefix} through brew`);
+    eq(calls[1], {
+      file: process.execPath,
+      args: [path.join(prefix, 'libexec/scripts/autoloop/codex-coordinator.js'), 'status', '--json'],
+    }, `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH invokes installed coordinator under ${prefix}`);
+    eq(status, { action: 'status', cutover: { enabled: false } },
+      `GA-OPS13A2-RR1-HARDCODED-HOMEBREW-PATH parses status under ${prefix}`);
+  }
 }
 function markdownTitles(root) {
   const titles = new Set();
@@ -653,7 +672,7 @@ async function exactHeadMaterialization() {
 }
 
 async function main() {
-  validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
+  installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
