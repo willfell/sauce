@@ -87,9 +87,13 @@ function flatten(root, out = []) {
 function textOf(root) { return flatten(root).map((node) => node.textContent).filter(Boolean).join('\n'); }
 function indices(haystack, labels) { return labels.map((label) => haystack.indexOf(label)); }
 function sliceRow(root, label) {
-  return flatten(root).find((node) => (node.children || []).some((child) => child.tag === 'button' && child.textContent === label));
+  return flatten(root).find((node) => node.className.includes('epic-dashboard-slice-row')
+    && flatten(node).some((child) => child.tag === 'button' && child.textContent === label));
 }
-function pillOf(row) { return (row.children || []).find((child) => child.className.includes('status-pill')); }
+function pillOf(row) { return flatten(row).find((child) => child.className.includes('status-pill')); }
+function descendants(root, className) {
+  return flatten(root).filter((node) => node.className.split(/\s+/).includes(className));
+}
 function visualUrlFor(filePath) { return pathToFileURL(filePath).href; }
 function deploymentHostFor(identity, env, io = fs) {
   return env.SAUCE_DEPLOYMENT_HOST === 'true'
@@ -189,7 +193,7 @@ async function renderGeometry(chrome, profile, visualPath, viewportWidth) {
       width: viewportWidth, height: 1400, deviceScaleFactor: 1, mobile: false,
       screenWidth: viewportWidth, screenHeight: 1400,
     }, session);
-    await send('Page.navigate', { url: visualUrlFor(visualPath) }, session);
+    await send('Page.navigate', { url: `${visualUrlFor(visualPath)}?expectedViewport=${viewportWidth}` }, session);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const evaluated = await send('Runtime.evaluate', {
         expression: `JSON.stringify({readyState:document.readyState,geometry:document.body?.dataset.geometry||null,innerWidth:window.innerWidth,clientWidth:document.documentElement.clientWidth,result:document.querySelector('.geometry-result')?.textContent||''})`,
@@ -283,6 +287,7 @@ async function main() {
   let lifecycleInput;
   let lifecycleOutput;
   const lifecycleApi = {
+    normalizeStatus: delivery.normalizeStatus,
     deriveEpicLifecycle(slices) {
       lifecycleCalls += 1;
       lifecycleInput = slices;
@@ -323,10 +328,10 @@ async function main() {
   const order = indices(rendered, ['Slices', 'Context pack', 'Runs', 'Lessons', 'Decisions', 'Docs']);
   assert(order.every((at, index) => at >= 0 && (!index || at > order[index - 1])), 'sections use canonical order');
   const rowExpectations = [
-    ['S1 Planned', 'planning', 'status-pill open', 'frontier', null],
-    ['S2 Active', 'in_progress', 'status-pill open', null, 'depends on S1 Planned'],
-    ['S3 Blocked', 'blocked', 'status-pill overdue', null, 'depends on S2 Active'],
-    ['S4 Done', 'completed', 'status-pill done', null, null],
+    ['S1 Planned', 'planning', 'status-planning', '→ next up', null],
+    ['S2 Active', 'in progress', 'status-in-progress', null, 'needs'],
+    ['S3 Blocked', 'blocked', 'status-blocked', null, 'needs'],
+    ['S4 Done', 'done', 'status-done', null, null],
   ];
   for (const [name, status, className, marker, dependency] of rowExpectations) {
     const row = sliceRow(container, name);
@@ -335,17 +340,151 @@ async function main() {
       `epic-slice-render-association-mutation-gap: ${name} keeps status label ${status}`);
     assert(pillOf(row)?.className.includes(className),
       `epic-slice-render-association-mutation-gap: ${name} keeps class ${className}`);
-    assert.strictEqual(textOf(row).includes('frontier'), Boolean(marker),
+    assert.strictEqual(textOf(row).includes('→ next up'), Boolean(marker),
       `epic-slice-render-association-mutation-gap: ${name} frontier association is exact`);
-    assert.strictEqual(textOf(row).includes('depends on'), Boolean(dependency),
+    assert.strictEqual(textOf(row).includes('needs'), Boolean(dependency),
       `epic-slice-render-association-mutation-gap: ${name} dependency presence is exact`);
     if (dependency) assert(textOf(row).includes(dependency), `${name} binds exact dependency text`);
   }
-  assert.strictEqual(flatten(container).filter((node) => node.textContent === 'frontier').length, 1,
+  assert.strictEqual(flatten(container).filter((node) => node.textContent === '→ next up').length, 1,
     'epic-slice-render-association-mutation-gap: exactly one rendered row owns the frontier marker');
   assert.strictEqual(opened.length, 0, 'render performs no navigation');
   assert.deepStrictEqual(mutations, [],
     'ES2C10-CORE-READ-ONLY: render invokes no vault, adapter, frontmatter, or metadata mutator');
+
+  const opxRoot = element();
+  const parkedReason = 'Yield the project helper touch zone until the deployed selector release is installed everywhere, then resume from the exact clean head with rebuilt receipts and no repeated side effects.';
+  const opxSlices = [
+    {
+      card: 'GA-OPS14a3 Rebind parked-card migration metadata (supersedes GA-OPS14a2)',
+      status: 'in-progress',
+      depends_on: ['[[GA-OPS13a2 Close epic cutover]]', 'GA-OPS12 Plain dependency'],
+      file: {
+        name: 'GA-OPS14a3 Rebind parked-card migration metadata (supersedes GA-OPS14a2)',
+        path: `${board}/GA-OPS14a3 Rebind parked-card migration metadata (supersedes GA-OPS14a2).md`,
+      },
+    },
+    { card: 'Alias Planning', status: 'in-planning', depends_on: [], file: { name: 'Alias Planning', path: `${board}/Alias Planning.md` } },
+    { card: 'Alias Active', status: 'in_progress', depends_on: [], file: { name: 'Alias Active', path: `${board}/Alias Active.md` } },
+    {
+      card: 'GA-OPS9 Parked sample', status: 'parked', depends_on: [], resume_condition: parkedReason,
+      file: { name: 'GA-OPS9 Parked sample', path: `${board}/GA-OPS9 Parked sample.md` },
+    },
+    {
+      card: 'GA-OPS10 Parked without reason', status: 'parked', depends_on: [],
+      file: { name: 'GA-OPS10 Parked without reason', path: `${board}/GA-OPS10 Parked without reason.md` },
+    },
+    {
+      card: 'GA-OPS11 Archived ghost', status: 'archived', depends_on: [],
+      file: { name: 'GA-OPS11 Archived ghost', path: `${board}/GA-OPS11 Archived ghost.md` },
+    },
+    {
+      card: 'Plain title without identifier', status: 'completed', depends_on: [],
+      file: { name: 'Plain title without identifier', path: `${board}/Plain title without identifier.md` },
+    },
+  ];
+  dashboard._renderSlices(
+    { container: opxRoot }, opxRoot, opxSlices,
+    { frontier: opxSlices[0].card }, epicPath, lifecycleApi,
+  );
+  const cleanRow = sliceRow(opxRoot, 'Rebind parked-card migration metadata');
+  assert(cleanRow, 'OPX1-TITLE-CLEAN renders the cleaned linked title');
+  assert.strictEqual(descendants(cleanRow, 'epic-dashboard-slice-title-row').length, 1,
+    'OPX1-TWO-LINE-ROW renders one dedicated title block row');
+  assert.strictEqual(descendants(cleanRow, 'epic-dashboard-slice-meta-row').length, 1,
+    'OPX1-TWO-LINE-ROW renders one dedicated metadata block row');
+  assert.strictEqual(descendants(cleanRow, 'epic-dashboard-short-id').map((node) => node.textContent).join(''), 'GA-OPS14a3',
+    'OPX1-TITLE-CLEAN renders the leading short id as a muted chip');
+  assert(!textOf(cleanRow).includes('(supersedes'),
+    'OPX1-TITLE-CLEAN never displays the trailing supersedes parenthetical');
+  const cleanTitleLink = flatten(cleanRow).find((node) => node.tag === 'button'
+    && node.textContent === 'Rebind parked-card migration metadata');
+  cleanTitleLink.listeners.click();
+  assert.deepStrictEqual(opened.at(-1), [opxSlices[0].file.path.replace(/\.md$/, ''), epicPath, false],
+    'OPX1-TITLE-CLEAN keeps the full source note as the clean title link target');
+  const plainRow = sliceRow(opxRoot, 'Plain title without identifier');
+  assert(plainRow && descendants(plainRow, 'epic-dashboard-short-id').length === 0,
+    'OPX1-TITLE-CLEAN keeps an id-less basename whole and emits no id chip');
+
+  const dependencyLinks = descendants(cleanRow, 'epic-dashboard-dependency-link');
+  assert.deepStrictEqual(dependencyLinks.map((node) => node.textContent), ['GA-OPS13a2', 'GA-OPS12'],
+    'OPX1-DEP-LINKS-REAL renders bracketed and plain dependencies as separate compact links');
+  assert(!textOf(cleanRow).includes('[[') && !textOf(cleanRow).includes(']]'),
+    'OPX1-DEP-LINKS-REAL emits no literal wikilink brackets');
+  dependencyLinks[0].listeners.click();
+  dependencyLinks[1].listeners.click();
+  assert.deepStrictEqual(opened.slice(-2), [
+    ['GA-OPS13a2 Close epic cutover', epicPath, false],
+    ['GA-OPS12 Plain dependency', epicPath, false],
+  ], 'OPX1-DEP-LINKS-REAL routes each dependency click to its normalized internal note identity');
+
+  const normalizedLabels = new Map(opxSlices.map((slice) => {
+    const row = sliceRow(opxRoot, slice.file.name.replace(/^[A-Z]+-[A-Za-z0-9]+\s+/, '')
+      .replace(/\s+\(supersedes[^)]*\)\s*$/i, ''));
+    return [slice.status, pillOf(row)?.textContent];
+  }));
+  assert.deepStrictEqual(
+    [...normalizedLabels.entries()].filter(([status]) => ['in-planning', 'in-progress', 'in_progress', 'parked'].includes(status)),
+    [['in-progress', 'in progress'], ['in-planning', 'planning'], ['in_progress', 'in progress'], ['parked', 'waiting']],
+    'OPX1-STATUS-NORMALIZED uses Delivery normalization plus one display map for every alias',
+  );
+  for (const raw of ['in-planning', 'in-progress', 'in_progress', 'parked']) {
+    assert(!flatten(opxRoot).some((node) => node.className.includes('status-pill') && node.textContent === raw),
+      `OPX1-STATUS-NORMALIZED never exposes raw ${raw} as a status label`);
+  }
+  for (const [label, color] of [
+    ['planning', 'var(--color-blue)'],
+    ['in progress', 'var(--color-green)'],
+    ['waiting', 'var(--color-orange)'],
+    ['done', 'var(--color-purple)'],
+  ]) {
+    const chip = flatten(opxRoot).find((node) => node.className.includes('status-pill') && node.textContent === label);
+    assert(chip?.style.cssText.includes(`color:${color}`)
+      && chip.style.cssText.includes(`background:color-mix(in srgb, ${color} 12%, transparent)`)
+      && chip.style.cssText.includes(`border:1px solid color-mix(in srgb, ${color} 35%, transparent)`),
+    `OPX1-STATUS-NORMALIZED ${label} reuses the shared STATUS_COLORS board-stats chip recipe`);
+  }
+  assert.strictEqual(descendants(opxRoot, 'epic-dashboard-frontier-chip').length, 1,
+    'OPX1-FRONTIER-CHIP renders exactly one styled frontier chip');
+  assert.strictEqual(descendants(opxRoot, 'epic-dashboard-frontier-chip')[0].textContent, '→ next up',
+    'OPX1-FRONTIER-CHIP names the frontier action');
+  assert(!flatten(opxRoot).some((node) => node.textContent === 'frontier'),
+    'OPX1-FRONTIER-CHIP emits no bare frontier text node');
+  const parkedRow = sliceRow(opxRoot, 'Parked sample');
+  const why = descendants(parkedRow, 'epic-dashboard-waiting-why');
+  assert.strictEqual(why.length, 1, 'OPX1-PARKED-WHY renders a parked resume condition');
+  const whyExcerpt = why[0].textContent.match(/^waiting on: "([\s\S]*)"$/)?.[1] || '';
+  assert(whyExcerpt.length > 0 && whyExcerpt.length <= 140,
+    'OPX1-PARKED-WHY caps the one-line excerpt at 140 characters');
+  assert.strictEqual(descendants(sliceRow(opxRoot, 'Parked without reason'), 'epic-dashboard-waiting-why').length, 0,
+    'OPX1-PARKED-WHY omits the why row when resume_condition is absent');
+  const archivedRow = sliceRow(opxRoot, 'Archived ghost');
+  assert.strictEqual(pillOf(archivedRow)?.textContent, 'unrecognized: archived',
+    'OPX1-UNRECOGNIZED-STATUS names an out-of-vocabulary value instead of camouflaging it');
+  assert(pillOf(archivedRow)?.className.includes('status-unrecognized'),
+    'OPX1-UNRECOGNIZED-STATUS uses a distinct attention chip');
+
+  const segmented = element();
+  dashboard._renderLifecycle(segmented, {
+    state: 'active',
+    counts: { done: 0, active: 2, waiting: 1, blocked: 1, planned: 1, total: 5 },
+  });
+  assert.deepStrictEqual(descendants(segmented, 'epic-dashboard-progress-segment').map((node) => node.className.split(' ').at(-1)), [
+    'segment-active', 'segment-waiting', 'segment-blocked',
+  ], 'OPX1-PROGRESS-SEGMENTED renders visible active, waiting, and blocked segments when done is zero');
+  assert(descendants(segmented, 'epic-dashboard-progress-segment').every((node) => !/width:0(?:%|;)/.test(node.style.cssText)),
+    'OPX1-PROGRESS-SEGMENTED gives every nonzero lifecycle segment visible width');
+  assert(!textOf(segmented).includes('0 deployed'),
+    'OPX1-PROGRESS-SEGMENTED silently drops zero-count lifecycle metric chips');
+  const allPlanned = element();
+  dashboard._renderLifecycle(allPlanned, {
+    state: 'planned',
+    counts: { done: 0, active: 0, waiting: 0, blocked: 0, planned: 3, total: 3 },
+  });
+  assert(textOf(allPlanned).includes('not started'),
+    'OPX1-PROGRESS-SEGMENTED labels an all-planned epic instead of rendering a bare empty track');
+  assert.strictEqual(descendants(allPlanned, 'epic-dashboard-progress').length, 1,
+    'OPX1-PROGRESS-SEGMENTED keeps a visible track for an all-planned epic');
 
   currentPage = { file: { path: epicPath, folder: epicFolder }, docs: ['[[Native Architecture]]', '[[Native Runbook]]'] };
   const nativeDocsContainer = element();
@@ -1261,14 +1400,25 @@ async function main() {
   assert(!source.includes('ranch/delivery/'), 'production contains no obsolete pre-content-path Delivery location');
   assert(/epic-dashboard-link[\s\S]*?min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;/.test(source),
     'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production links wrap long slice and context labels');
-  assert(/border-bottom:[^"]*?flex-wrap:wrap;min-width:0;/.test(source),
-    'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production slice rows can shrink inside the viewport');
+  assert(/epic-dashboard-slice-row[\s\S]*?display:grid;gap:7px;[\s\S]*?min-width:0;/.test(source),
+    'OPX1-TWO-LINE-ROW: production slice rows are shrinkable stacked grids');
+  assert(source.includes('epic-dashboard-slice-title-row') && source.includes('epic-dashboard-slice-meta-row'),
+    'OPX1-TWO-LINE-ROW: production owns separate title and metadata rows');
+  assert(source.includes('api?.normalizeStatus?.(raw)') && source.includes('STATUS_DISPLAY'),
+    'OPX1-STATUS-NORMALIZED: production routes raw status through Delivery and one display map');
+  assert(source.includes('epic-dashboard-dependency-link') && !source.includes('depends on ${deps.join'),
+    'OPX1-DEP-LINKS-REAL: production uses real dependency link elements, never interpolated dependency text');
+  assert(source.includes('epic-dashboard-progress-segment') && source.includes('epic-dashboard-not-started'),
+    'OPX1-PROGRESS-SEGMENTED: production owns segmented and all-planned treatments');
   assert(/border-radius:8px;padding:9px;min-width:0;overflow-wrap:anywhere;/.test(source),
     'ES2C11-390-FIXTURE-PRODUCTION-DIVERGENCE: production context tiles match the overflow-safe fixture');
 
   const visual = fs.readFileSync(VISUAL, 'utf8');
-  assert((visual.match(/<main class="phone/g) || []).length === 2 && visual.includes('class="phone dark"'), 'visual proof includes light and dark phones');
-  for (const guard of ['width:390px', 'name="viewport"', 'overflow:hidden', 'overflow-wrap:anywhere', 'completed', 'in_progress', 'planning']) {
+  assert((visual.match(/<main class="phone/g) || []).length === 2
+    && visual.includes('class="phone theme-light"') && visual.includes('class="phone theme-dark"'),
+  'visual proof includes light and dark phones');
+  for (const guard of ['width:390px', 'name="viewport"', 'overflow:hidden', 'overflow-wrap:anywhere',
+    'in progress', 'planning', 'waiting', 'unrecognized: archived', 'not started', '→ next up']) {
     assert(visual.includes(guard), `visual proof locks ${guard}`);
   }
   assert(/body\{[^}]*padding:0(?:;|})/.test(visual), '390px viewport adds no body width outside the phone');
@@ -1284,8 +1434,11 @@ async function main() {
   for (const geometryGuard of [
     'document.documentElement.scrollWidth', 'document.documentElement.clientWidth',
     'phone.scrollWidth', 'phone.clientWidth', 'getBoundingClientRect()',
-    "phone.querySelectorAll('.stack,.row,.tiles,.tile')", "document.body.dataset.geometry = failures.length ? 'fail' : 'pass'",
-    'const expectedViewportWidth = 390', 'effectiveViewport.innerWidth !== expectedViewportWidth',
+    "phone.querySelectorAll('.stack,.slice-row,.slice-title-row,.slice-meta-row,.tiles,.tile')",
+    "row.querySelector('.slice-title-row')", "row.querySelector('.slice-meta-row')",
+    "failures.push('slice-title-meta-intersection')",
+    "document.body.dataset.geometry = failures.length ? 'fail' : 'pass'",
+    "get('expectedViewport')", 'effectiveViewport.innerWidth !== expectedViewportWidth',
     'effectiveViewport.clientWidth !== expectedViewportWidth', 'document.body.dataset.viewportWidth',
   ]) assert(visual.includes(geometryGuard), `rendered geometry proof locks ${geometryGuard}`);
 
@@ -1353,6 +1506,16 @@ async function main() {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
     }, `ES2C10-CORE-390-NO-OVERFLOW: effective browser viewport and geometry are exact: ${JSON.stringify(browser)}`);
     assert.strictEqual(browser.result, '390px geometry pass', 'light and dark rendered geometry checker completed');
+    const desktopBrowser = await renderGeometry(chrome, profile, VISUAL, 1024);
+    assert.deepStrictEqual({
+      geometry: desktopBrowser.geometry,
+      innerWidth: desktopBrowser.innerWidth,
+      clientWidth: desktopBrowser.clientWidth,
+    }, {
+      geometry: 'pass', innerWidth: 1024, clientWidth: 1024,
+    }, `OPX1-TWO-LINE-ROW desktop light/dark geometry is exact: ${JSON.stringify(desktopBrowser)}`);
+    assert.strictEqual(desktopBrowser.result, '1024px geometry pass',
+      'desktop light and dark rendered geometry checker completed');
     const specialBrowser = await renderGeometry(chrome, specialProfile, specialVisualPath, 390);
     assert.deepStrictEqual({ geometry: specialBrowser.geometry, innerWidth: specialBrowser.innerWidth, clientWidth: specialBrowser.clientWidth }, {
       geometry: 'pass', innerWidth: 390, clientWidth: 390,
