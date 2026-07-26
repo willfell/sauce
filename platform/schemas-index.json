@@ -396,6 +396,20 @@
         "platform/test/run-autoloop-batch.js"
       ],
       "notes": "A4 durable batch ledger v1.0.0. Stored below the Git common directory with immutable batch/attempt identity, wall-clock/card/retry/usage/intervention ceilings, exact engine and Delivery contract pins, atomic integrity-checked persistence, idempotent start/status/stop/resume controls, side-effect idempotency keys, and shadow-only unattended selection. A4 never claims or dispatches a card."
+    },
+    {
+      "id": "sauce.loop-station.v1",
+      "kind": "contract",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "scripts/autoloop/codex-coordinator.js",
+      "accepted_versions": ["1.0.0"],
+      "validator": "scripts/autoloop/codex-coordinator.js",
+      "consumers": [
+        "scripts/autoloop/delivery-status-digest.js",
+        "scripts/autoloop/delivery-review-triage.js",
+        "platform/test/run-codex-autoloop.js"
+      ],
+      "notes": "Coordinator-owned Loop Station frontmatter projection. Every list is capped at 20 with an explicit overflow count; projection runs only on meaningful transitions, preserves the note body, and reads the delivery digest marker with peek semantics."
     }
   ]
 }
