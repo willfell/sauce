@@ -264,11 +264,87 @@ function consumeRatificationReceipt(receipt, expected = {}) {
   };
 }
 
+function exactRatificationSection(markdown, heading) {
+  const wanted = String(heading || '').trim();
+  if (!wanted) return null;
+  const source = String(markdown || '');
+  const lines = source.split(/(?<=\n)/);
+  const matches = [];
+  let offset = 0;
+  let fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+      offset += chunk.length;
+      continue;
+    }
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      fence = { character: opening[1][0], length: opening[1].length };
+      offset += chunk.length;
+      continue;
+    }
+    const match = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
+    if (match && match[2].trim() === wanted) matches.push({ start: offset, level: match[1].length });
+    offset += chunk.length;
+  }
+  if (matches.length !== 1) return null;
+  const selected = matches[0];
+  let end = source.length;
+  offset = 0;
+  fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+    } else {
+      const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (opening) fence = { character: opening[1][0], length: opening[1].length };
+      else if (offset > selected.start) {
+        const match = line.match(/^(#{1,6})[ \t]+/);
+        if (match && match[1].length <= selected.level) { end = offset; break; }
+      }
+    }
+    offset += chunk.length;
+  }
+  return source.slice(selected.start, end);
+}
+
+function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsedErrors) {
+  const current = Array.isArray(parsedErrors) ? parsedErrors : [];
+  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return current;
+  const section = exactRatificationSection(markdown, sectionHeading);
+  if (!section) return current;
+  const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+  if (blocks.length !== 1) return current;
+  let payload;
+  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return current; }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return current;
+  const allowed = new Set([
+    'schema_version', 'receipt_id', 'decision', 'accepted_at',
+    'authority', 'target_card', 'target_head', 'scope',
+  ]);
+  const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
+  if (!unexpected.length) return current;
+  const nonUnexpected = current.filter((issue) => issue && issue.code !== 'ratification-field-unexpected');
+  return [
+    ...nonUnexpected,
+    ...unexpected.map((field) => ({
+      code: 'ratification-field-unexpected',
+      field,
+      message: `ratification payload contains unsupported field ${field}`,
+    })),
+  ];
+}
+
 function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
   const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
   if (!parsed.ok) return {
     ok: false,
-    errors: parsed.errors,
+    errors: allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsed.errors),
     receipt: null,
     contract_version: delivery.CONTRACT_VERSION,
   };
