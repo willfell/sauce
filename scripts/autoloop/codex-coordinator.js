@@ -128,7 +128,7 @@ function atomicWriteJson(file, value) {
   fs.renameSync(tmp, file);
 }
 
-function writeState(ctx, state, changedRecord) {
+function writeState(ctx, state, changedRecord, options = {}) {
   ensureStateDir(ctx);
   const lockPath = path.join(ctx.stateDir, 'locks', 'state-write.lock');
   const ownerPath = path.join(lockPath, 'owner.json');
@@ -154,9 +154,18 @@ function writeState(ctx, state, changedRecord) {
     const next = changedRecord
       ? { ...latest, cards: { ...latest.cards, [changedRecord.card]: changedRecord } }
       : { ...latest, ...state, cards: { ...latest.cards, ...(state.cards || {}) } };
-    next.updated_at = new Date().toISOString();
+    if (options.preserveUpdatedAt === true) {
+      if (Object.prototype.hasOwnProperty.call(latest, 'updated_at')) {
+        next.updated_at = latest.updated_at;
+      } else {
+        delete next.updated_at;
+      }
+    } else {
+      next.updated_at = new Date().toISOString();
+    }
     atomicWriteJson(ctx.statePath, next);
-    state.updated_at = next.updated_at;
+    if (Object.prototype.hasOwnProperty.call(next, 'updated_at')) state.updated_at = next.updated_at;
+    else delete state.updated_at;
     state.cards = next.cards;
   } finally { fs.rmSync(lockPath, { recursive: true, force: true }); }
 }
@@ -4717,7 +4726,7 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
     for (const nextRecord of nextRecords) {
       state.cards[nextRecord.card] = nextRecord;
     }
-    persist(ctx, state);
+    persist(ctx, state, null, { preserveUpdatedAt: true });
     barrier(ctx.statePath);
     return {
       action: 'rebound-parked-metadata', no_op: false,

@@ -4542,7 +4542,8 @@ function parkedRebindHarness(id = 'happy') {
   let barrierCalls = 0;
   let barrierFailure = null;
   const locks = [];
-  const ctx = { root, statePath: path.join(root, 'state.json'), boardPath };
+  const stateDir = path.join(root, '.state');
+  const ctx = { root, stateDir, statePath: path.join(stateDir, 'state.json'), boardPath };
   let specRaw = '';
   const deps = {
     readState: () => state,
@@ -4713,6 +4714,66 @@ eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
   parkedRebind.state.cards[name].parked_metadata_rebindings,
 ])), parkedAuditsAfterApply,
   'GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND literal replay leaves every prior-plus-appended audit chain exact');
+
+// GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT: cross the real readState/writeState seam
+// and compare the complete serialized ledger envelope, then prove literal replay
+// is byte-identical. Only the eight epic values and eight appended audits may move.
+const realPersistenceRebind = parkedRebindHarness('real-persistence-envelope');
+realPersistenceRebind.state.updated_at = '2026-07-20T12:34:56.789Z';
+realPersistenceRebind.state.top_level_authority_sentinel = {
+  digest_marker: 'preserve-exactly',
+  cutover: { enabled: true, streak: 3 },
+  receipts: ['alpha', 'beta'],
+};
+atomicWriteJson(realPersistenceRebind.ctx.statePath, realPersistenceRebind.state);
+const realPersistenceBefore = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceDeps = { ...realPersistenceRebind.deps };
+delete realPersistenceDeps.readState;
+delete realPersistenceDeps.writeState;
+const realPersistencePlan = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.dryRunArgs,
+  realPersistenceDeps,
+);
+realPersistenceRebind.setSpec(realPersistencePlan.spec);
+const realPersistenceApplied = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+const realPersistenceAfter = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceExpected = deepCopy(realPersistenceBefore);
+for (const entry of realPersistencePlan.spec.cards) {
+  const record = realPersistenceExpected.cards[entry.card];
+  record.delivery_contract.epic = entry.intended_ledger_epic;
+  record.parked_metadata_rebindings.push({
+    request: realPersistenceApplied.request,
+    spec: realPersistenceApplied.spec,
+    reconciled_at: realPersistenceApplied.reconciled_at,
+  });
+}
+eq(realPersistenceAfter, realPersistenceExpected,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
+eq(realPersistenceAfter.updated_at, realPersistenceBefore.updated_at,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT preserves the exact top-level updated_at authority');
+const realPersistenceHashAfterApply = testSha256(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceReplay = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+eq(realPersistenceReplay.no_op, true,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay is a no-op through real persistence');
+eq(testSha256(fs.readFileSync(realPersistenceRebind.ctx.statePath, 'utf8')),
+  realPersistenceHashAfterApply,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay preserves the complete serialized ledger byte hash');
+
 for (const altered of [
   { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
   { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
