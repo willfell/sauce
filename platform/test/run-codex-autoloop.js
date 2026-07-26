@@ -1095,13 +1095,6 @@ const limitedReviewArgs = {
   'expected-head': exactReviewHead, 'accepted-limitation': true,
   bound: 'single-writer-no-concurrent-races',
 };
-const invalidLimitationEffects = { reads: 0, locks: 0, writes: 0 };
-const invalidLimitationDeps = {
-  readState: () => { invalidLimitationEffects.reads++; return reviewState; },
-  writeState: () => { invalidLimitationEffects.writes++; },
-  withLock: async (_ctx, _name, fn) => { invalidLimitationEffects.locks++; return fn(); },
-};
-const beforeInvalidLimitations = JSON.stringify(reviewState);
 for (const [label, malformed] of [
   ['accepted flag without bound', {
     ...limitedReviewArgs, 'accepted-limitation': true, bound: undefined,
@@ -1111,15 +1104,22 @@ for (const [label, malformed] of [
     bound: 'single-writer-no-concurrent-races',
   }],
 ]) {
+  const invalidLimitationEffects = { reads: 0, locks: 0, writes: 0 };
+  const invalidLimitationDeps = {
+    readState: () => { invalidLimitationEffects.reads++; return reviewState; },
+    writeState: () => { invalidLimitationEffects.writes++; },
+    withLock: async (_ctx, _name, fn) => { invalidLimitationEffects.locks++; return fn(); },
+  };
+  const beforeInvalidLimitation = JSON.stringify(reviewState);
   await assert.rejects(() => commandRecordReview({ root: '/workshop' }, malformed, invalidLimitationDeps),
     (error) => error.code === 'invalid_limitation',
-    `CS1-ACCEPTED-LIMITATION ${label} refuses with the stable code`);
+    `CS1-ACCEPTED-LIMITATION-PAIRING-COVERAGE ${label} refuses with the stable code`);
   count++;
+  eq(invalidLimitationEffects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), beforeInvalidLimitation,
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} preserves review state byte-for-byte`);
 }
-eq(invalidLimitationEffects, { reads: 0, locks: 0, writes: 0 },
-  'CS1-ACCEPTED-LIMITATION both invalid flag pairings refuse before reads, locks, or writes');
-eq(JSON.stringify(reviewState), beforeInvalidLimitations,
-  'CS1-ACCEPTED-LIMITATION both invalid flag pairings preserve review state byte-for-byte');
 const limitedReview = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
   readState: () => reviewState, sh: () => exactReviewHead,
   writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
