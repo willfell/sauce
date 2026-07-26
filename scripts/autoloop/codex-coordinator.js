@@ -505,6 +505,14 @@ function ratificationReplayMatches(record, requestIdentity) {
   return Boolean(consumption && sameJson(consumption.request_identity, requestIdentity));
 }
 
+function ratificationAcceptedWait({ sibling, conflict, unmet = [], atCapacity = false } = {}) {
+  if (sibling) return `accepted authority recorded; resume after active sibling ${sibling.card} concurrency clears`;
+  if (conflict) return `accepted authority recorded; resume after touch-zone conflict with ${conflict.card} clears`;
+  if (unmet.length) return `accepted authority recorded; resume after dependencies deploy: ${unmet.join(', ')}`;
+  if (atCapacity) return 'accepted authority recorded; resume after concurrency capacity clears';
+  return 'accepted authority recorded; preserved worktree recovery required before resume';
+}
+
 async function commandConsumeRatification(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   // OPX4-CONTAINMENT: resolve and physically contain the artifact before even
@@ -693,16 +701,12 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
       record.resumed_at = consumedAt;
       record.resume_invalidation_reason = invalidation.reason;
     } else {
-      const wait = sibling
-        ? `ratification accepted; resume after active sibling ${sibling.card} clears`
-        : conflict
-          ? `ratification accepted; resume after touch-zone conflict with ${conflict.card} clears`
-          : unmet.length
-            ? `ratification accepted; resume after dependencies deploy: ${unmet.join(', ')}`
-            : active.length >= MAX_ACTIVE
-              ? 'ratification accepted; resume after active capacity clears'
-              : 'ratification accepted; preserved worktree must be recovered before resume';
-      record.resume_condition = wait;
+      record.resume_condition = ratificationAcceptedWait({
+        sibling,
+        conflict,
+        unmet,
+        atCapacity: active.length >= MAX_ACTIVE,
+      });
     }
     try {
       persist(ctx, state, record);
@@ -4729,8 +4733,10 @@ function buildLoopStationPayload({
   const cards = (state && state.cards) || {};
   const parkedByCard = new Map((status.parked || []).map((item) => [item.card, item]));
   const needsAll = digest.actionable.map((item) => {
-    const ratification = loopStationRatificationPath(stationPath, item.card, exists);
     const parked = parkedByCard.get(item.card);
+    const ratification = cards[item.card] && cards[item.card].ratification_receipt
+      ? null
+      : loopStationRatificationPath(stationPath, item.card, exists);
     return {
       card: item.card,
       epic: loopStationEpic(cards[item.card]),
@@ -6071,7 +6077,7 @@ module.exports = {
   isRatificationEscalation, pendingRatificationMarkdown, scaffoldPendingRatifications,
   commandBackfillRatifications,
   validateRatificationArtifactOperand, ratificationFrontmatterErrors, ratificationStatus,
-  commandConsumeRatification,
+  ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
