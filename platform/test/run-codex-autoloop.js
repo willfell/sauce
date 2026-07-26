@@ -17,7 +17,9 @@ const {
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
   normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicCandidate, selectEpicShadowCandidate,
   selectClaimCandidate, selectCoordinatorCandidate, summarizeClaimSelection,
-  commandStatus, commandStatusLocked, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
+  commandStatus, commandStatusLocked, commandAmendContract,
+  commandPark: rawCommandPark, commandResume: rawCommandResume,
+  commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
   metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
@@ -27,8 +29,10 @@ const {
   scaffoldPendingRatifications, ratificationArtifactForCard, ratificationStatus,
   commandBackfillRatifications, ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle,
-  gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
-  runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
+  gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
+  commandRecordReview: rawCommandRecordReview, commandVerifyGates,
+  runIsolatedWorkshopSelfInstall, commandRecordPr: rawCommandRecordPr,
+  commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
 } = require('../../scripts/autoloop/codex-coordinator');
@@ -37,7 +41,14 @@ const {
   parseBoard, parseDependsOn,
   delivery, prepareDeliveryCard, prepareDeliveryObject,
 } = require('../../scripts/autoloop/select-card');
+const {
+  EXIT_CODES, successReceipt, refusalReceipt, usage, requireOnlyOptions, validateReceiptEnvelope,
+} = require('../../scripts/autoloop/cli-kit');
 const deliveryStatusDigest = require('../../scripts/autoloop/delivery-status-digest');
+const commandPark = rawCommandPark;
+const commandResume = rawCommandResume;
+const commandRecordReview = rawCommandRecordReview;
+const commandRecordPr = rawCommandRecordPr;
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
@@ -226,6 +237,37 @@ for (const fixture of sharedFixtures.invalid) {
   ok(!prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter rejects shared invalid fixture: ${fixture.name}`);
 }
 eq(parseArgs(['park', '--depends-on', 'A', '--depends-on', 'B'])['depends-on'], ['A', 'B'], 'CLI preserves repeated dependency arguments');
+eq(EXIT_CODES, { success: 0, refusal: 1, usage: 2 }, 'CS1-KIT-ENVELOPE exports the shared exit-code contract');
+eq(successReceipt('changed', { card: 'A' }), {
+  action: 'changed', ok: true, no_op: false, card: 'A',
+}, 'CS1-KIT-ENVELOPE builds the additive success receipt');
+eq(refusalReceipt('park-refused', 'json_required', 'park requires --json'), {
+  action: 'park-refused', ok: false, no_op: false, code: 'json_required', message: 'park requires --json',
+}, 'CS1-KIT-ENVELOPE builds the machine refusal receipt');
+eq(validateReceiptEnvelope(successReceipt('changed')), { ok: true, errors: [] },
+  'CS1-KIT-ENVELOPE validates a successful receipt');
+eq(validateReceiptEnvelope(refusalReceipt('park-refused', 'json_required', 'park requires --json')),
+  { ok: true, errors: [] }, 'CS1-KIT-ENVELOPE validates a refusal receipt');
+eq(validateReceiptEnvelope({ action: 'broken', ok: true }).errors, ['no_op must be boolean'],
+  'CS1-KIT-ENVELOPE rejects an incomplete envelope');
+let unknownOptionError = null;
+try {
+  requireOnlyOptions({ _: ['park'], json: true, 'expected-heed': 'a'.repeat(40) },
+    'park', ['json', 'card']);
+} catch (error) {
+  unknownOptionError = error;
+}
+eq({ action: unknownOptionError.action, code: unknownOptionError.code }, {
+  action: 'park-refused', code: 'unknown_option',
+}, 'CS1-KIT-ENVELOPE exports stable shared option allowlist enforcement');
+let cliUsageError = null;
+try {
+  usage('record-pr-refused', 'invalid_arguments', 'record-pr requires --card and numeric --pr');
+} catch (error) {
+  cliUsageError = error;
+}
+eq(cliUsageError.exitCode, EXIT_CODES.usage,
+  'CS1-KIT-ENVELOPE assigns exit code 2 to usage errors');
 eq(projectionMapping('claimed').status, 'in_progress', 'claimed lifecycle projects to canonical in_progress');
 eq(projectionMapping('feature_pr').status, 'in_progress', 'waiting release lifecycle remains canonical in_progress');
 eq(projectionMapping('blocked').status, 'blocked', 'blocked lifecycle keeps canonical blocked');
@@ -895,7 +937,112 @@ await stepCard({ root: '/workshop' }, emptyState(), validGateRecord, {}, {
 eq(armed, 1, 'feature PR arms auto-merge only after current local gates and GitHub CI are green');
 let writes = 0; let merges = 0;
 const immediateCardLock = async (_ctx, _name, fn) => fn();
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+let cs1Reads = 0; let cs1Locks = 0; let cs1Writes = 0;
+const jsonFirstDeps = {
+  readState: () => { cs1Reads++; return emptyState(); },
+  writeState: () => { cs1Writes++; },
+  withLock: async (_ctx, _name, fn) => { cs1Locks++; return fn(); },
+};
+for (const [verb, invoke] of [
+  ['park', () => rawCommandPark({ root: '/workshop' }, {
+    card: 'A', 'depends-on': 'B', 'resume-condition': 'B deploys',
+  }, jsonFirstDeps)],
+  ['resume', () => rawCommandResume({ root: '/workshop' }, { card: 'A' }, jsonFirstDeps)],
+  ['record-review', () => rawCommandRecordReview({ root: '/workshop' }, {
+    card: 'A', lens: 'correctness', verdict: 'pass',
+    summary: 'A sufficiently specific exact-head correctness summary.',
+  }, jsonFirstDeps)],
+  ['record-pr', () => rawCommandRecordPr({ root: '/workshop' }, {
+    card: 'A', pr: '42',
+  }, jsonFirstDeps)],
+]) {
+  await assert.rejects(invoke, (error) => error.code === 'json_required'
+    && error.action === `${verb}-refused`, `CS1-JSON-FIRST-REFUSAL ${verb} has a stable refusal`);
+  count++;
+}
+eq({ reads: cs1Reads, locks: cs1Locks, writes: cs1Writes }, { reads: 0, locks: 0, writes: 0 },
+  'CS1-JSON-FIRST-REFUSAL all four verbs refuse before every read, lock, or write');
+const jsonFirstCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'park', '--card', 'A', '--depends-on', 'B', '--resume-condition', 'B deploys',
+  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(jsonFirstCli.code, EXIT_CODES.refusal,
+  'CS1-JSON-FIRST-REFUSAL CLI exits 1 before attempting workshop resolution');
+eq(jsonFirstCli.stdout, '', 'CS1-JSON-FIRST-REFUSAL CLI emits no non-machine success output');
+eq(JSON.parse(jsonFirstCli.stderr), {
+  action: 'park-refused', ok: false, no_op: false, code: 'json_required',
+  message: 'park requires --json for a machine-readable receipt',
+}, 'CS1-JSON-FIRST-REFUSAL CLI emits a parseable refusal even outside a Git checkout');
+for (const [verb, args, invoke] of [
+  ['park', {
+    json: true, card: 'A', 'depends-on': 'B', 'resume-condition': 'B deploys',
+    'unexpected-park-option': true,
+  }, rawCommandPark],
+  ['resume', {
+    json: true, card: 'A', 'unexpected-resume-option': true,
+  }, rawCommandResume],
+  ['record-review', {
+    json: true, card: 'A', lens: 'correctness', verdict: 'pass',
+    summary: 'A sufficiently specific exact-head correctness summary.',
+    'expected-head': 'a'.repeat(40), 'expected-heed': 'a'.repeat(40),
+  }, rawCommandRecordReview],
+  ['record-pr', {
+    json: true, card: 'A', pr: '42', 'unexpected-pr-option': true,
+  }, rawCommandRecordPr],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(recordState);
+  await assert.rejects(() => invoke({ root: '/workshop' }, args, {
+    readState: () => { effects.reads++; return recordState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'unknown_option' && error.action === `${verb}-refused`,
+  `CS1-UNKNOWN-OPTION-REFUSAL ${verb} returns the stable refusal`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(recordState), before,
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} preserves authoritative state byte-for-byte`);
+}
+const unknownOptionCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'record-review', '--json', '--card', 'A', '--lens', 'correctness', '--verdict', 'pass',
+    '--summary', 'A sufficiently specific exact-head correctness summary.',
+    '--expected-heed', 'a'.repeat(40),
+  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(unknownOptionCli.code, EXIT_CODES.refusal,
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI exits 1 before attempting workshop resolution');
+eq(unknownOptionCli.stdout, '',
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI emits no non-machine success output');
+eq(JSON.parse(unknownOptionCli.stderr).code, 'unknown_option',
+  'CS1-UNKNOWN-OPTION-REFUSAL misspelled expected-head emits a stable refusal outside Git');
+const usageCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'record-pr', '--json',
+  ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(usageCli.code, EXIT_CODES.usage, 'CS1-KIT-ENVELOPE CLI exits 2 for invalid usage');
+eq(usageCli.stdout, '', 'CS1-KIT-ENVELOPE usage emits no non-machine success output');
+eq(JSON.parse(usageCli.stderr).code, 'invalid_arguments',
+  'CS1-KIT-ENVELOPE usage emits a stable machine code');
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => basePr,
   sh: () => { throw new Error('git or gh must not run for a rejected title'); },
@@ -907,7 +1054,7 @@ eq(writes, 0, 'rejected title is not persisted');
 eq(merges, 0, 'rejected title never arms auto-merge');
 eq(recordState.cards.A.phase, 'implementing', 'rejected title leaves the recorded phase unchanged');
 
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
@@ -916,7 +1063,7 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
 }), /gate receipt is missing/, 'record-pr refuses a clean matching PR without gate receipts');
 
 recordState.cards.A.gate_receipt = passingReceipt();
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, baseRefOid: 'new-base', title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
@@ -926,7 +1073,7 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
 
 const events = [];
 const prLocks = [];
-const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+const accepted = await commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
   sh: (cmd, args) => {
@@ -938,33 +1085,240 @@ const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '
   withLock: async (_ctx, name, fn) => { prLocks.push(name); return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
+eq(accepted.ok, true, 'record-pr adds ok:true without removing legacy receipt keys');
+eq(accepted.no_op, false, 'record-pr first apply reports no_op:false');
 eq(prLocks, [legacyCardGateLockName('A'), cardGateLockName('A')],
   'record-pr acquires migration-compatible then exact-identity per-card gates');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
+const prReplayStateBytes = JSON.stringify(recordState);
+const writesBeforePrReplay = writes;
+const prReplay = await commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => { throw new Error('literal record-pr replay must not query GitHub'); },
+  sh: () => { throw new Error('literal record-pr replay must not inspect Git'); },
+  writeState: () => { writes++; },
+  withLock: immediateCardLock,
+});
+eq(prReplay.no_op, true, 'CS1-REPLAY-NOOP literal record-pr replay returns no_op:true');
+eq(JSON.stringify(recordState), prReplayStateBytes,
+  'CS1-REPLAY-NOOP literal record-pr replay preserves authoritative state byte-for-byte');
+eq(writes, writesBeforePrReplay, 'CS1-REPLAY-NOOP literal record-pr replay performs zero ledger writes');
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, {
+  json: true, card: 'A', pr: '43',
+}, {
+  readState: () => recordState, writeState: () => { writes++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different record-pr operands on a settled target refuse');
+eq(writes, writesBeforePrReplay, 'CS1-REPLAY-NOOP mismatched record-pr replay performs zero ledger writes');
 
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
 const reviewLocks = [];
 let opx2ReviewProjections = 0;
-const review = await commandRecordReview({ root: '/workshop' }, {
-  card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
+let reviewWrites = 0;
+const initialReviewHead = 'c'.repeat(40);
+const missingHeadEffects = { reads: 0, locks: 0, writes: 0 };
+const beforeMissingHead = JSON.stringify(reviewState);
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
+  readState: () => { missingHeadEffects.reads++; return reviewState; },
+  writeState: () => { missingHeadEffects.writes++; },
+  withLock: async (_ctx, _name, fn) => { missingHeadEffects.locks++; return fn(); },
+}), (error) => error.code === 'invalid_arguments' && error.exitCode === EXIT_CODES.usage,
+'CS1-MANDATORY-EXACT-HEAD omission refuses with stable usage before command effects');
+eq(missingHeadEffects, { reads: 0, locks: 0, writes: 0 },
+  'CS1-MANDATORY-EXACT-HEAD omission performs zero reads, locks, or writes');
+eq(JSON.stringify(reviewState), beforeMissingHead,
+  'CS1-MANDATORY-EXACT-HEAD omission preserves review state byte-for-byte');
+for (const [label, expectedHeadOperand] of [
+  ['bare token', true],
+  ['duplicate operands', ['a'.repeat(40), 'a'.repeat(40)]],
+  ['uppercase SHA', 'A'.repeat(40)],
+  ['short SHA', 'a'.repeat(39)],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(reviewState);
+  await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+    json: true,
+    card: 'Review', lens: 'correctness', verdict: 'pass',
+    summary: 'No correctness defect found in the reviewed diff.',
+    'expected-head': expectedHeadOperand,
+  }, {
+    readState: () => { effects.reads++; return reviewState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'invalid_arguments',
+  `CS1-MANDATORY-EXACT-HEAD ${label} refuses with stable usage`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-MANDATORY-EXACT-HEAD ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), before,
+    `CS1-MANDATORY-EXACT-HEAD ${label} preserves review state byte-for-byte`);
+}
+const review = await commandRecordReview({ root: '/workshop' }, {
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
+  'expected-head': initialReviewHead,
+}, {
+  readState: () => reviewState, sh: () => initialReviewHead, writeState: () => { reviewWrites++; },
   projectLoopStation: () => { opx2ReviewProjections++; },
   withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
-eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
+eq(review.head_sha, initialReviewHead, 'review receipt is tied to the mandatory exact commit');
+eq(review.ok, true, 'record-review adds ok:true without removing legacy receipt keys');
+eq(review.no_op, false, 'record-review first apply reports no_op:false');
 eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
   'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
 eq(opx2ReviewProjections, 0,
   'OPX2-TRANSITION-ONLY review receipt writes never project Loop Station');
+const exactReviewHead = 'a'.repeat(40);
+const beforeHeadMismatch = JSON.stringify(reviewState);
+const writesBeforeHeadMismatch = reviewWrites;
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  json: true, card: 'Review', lens: 'regression-risk', verdict: 'pass',
+  summary: 'Regression behavior remains bounded by the single-writer deployment model.',
+  'expected-head': 'b'.repeat(40),
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'head_mismatch',
+'CS1-EXPECTED-HEAD-BINDING refuses a review bound to a different exact HEAD');
+eq(JSON.stringify(reviewState), beforeHeadMismatch,
+  'CS1-EXPECTED-HEAD-BINDING mismatch preserves review state byte-for-byte');
+eq(reviewWrites, writesBeforeHeadMismatch,
+  'CS1-EXPECTED-HEAD-BINDING mismatch performs zero ledger writes');
+const limitedReviewArgs = {
+  json: true, card: 'Review', lens: 'regression-risk', verdict: 'pass',
+  summary: 'Concurrency races remain outside the ratified single-writer deployment model.',
+  'expected-head': exactReviewHead, 'accepted-limitation': true,
+  bound: 'single-writer-no-concurrent-races',
+};
+for (const [label, malformed] of [
+  ['accepted flag without bound', {
+    ...limitedReviewArgs, 'accepted-limitation': true, bound: undefined,
+  }],
+  ['bound without accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': undefined,
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['bare bound token without accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': undefined, bound: true,
+  }],
+  ['valued accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': 'yes',
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['duplicated accepted flags', {
+    ...limitedReviewArgs, 'accepted-limitation': [true, true],
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['mixed named and bare bound tokens', {
+    ...limitedReviewArgs, 'accepted-limitation': true,
+    bound: ['single-writer-no-concurrent-races', true],
+  }],
+]) {
+  const invalidLimitationEffects = { reads: 0, locks: 0, writes: 0 };
+  const invalidLimitationDeps = {
+    readState: () => { invalidLimitationEffects.reads++; return reviewState; },
+    writeState: () => { invalidLimitationEffects.writes++; },
+    withLock: async (_ctx, _name, fn) => { invalidLimitationEffects.locks++; return fn(); },
+  };
+  const beforeInvalidLimitation = JSON.stringify(reviewState);
+  await assert.rejects(() => commandRecordReview({ root: '/workshop' }, malformed, invalidLimitationDeps),
+    (error) => error.code === 'invalid_limitation',
+    `CS1-ACCEPTED-LIMITATION-PAIRING-COVERAGE ${label} refuses with the stable code`);
+  count++;
+  eq(invalidLimitationEffects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), beforeInvalidLimitation,
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} preserves review state byte-for-byte`);
+}
+const rawLimitationCliBase = [
+  path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+  'record-review', '--json', '--card', 'Review', '--lens', 'regression-risk',
+  '--verdict', 'pass',
+  '--summary', 'A sufficiently specific raw limitation operand refusal summary.',
+  '--expected-head', exactReviewHead,
+];
+for (const [label, rawOperands] of [
+  ['bare bound token', ['--bound']],
+  ['valued accepted flag', [
+    '--accepted-limitation', 'yes', '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['duplicated accepted flags', [
+    '--accepted-limitation', '--accepted-limitation',
+    '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['mixed named and bare bound tokens', [
+    '--accepted-limitation', '--bound', 'single-writer-no-concurrent-races', '--bound',
+  ]],
+]) {
+  const cliResult = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [...rawLimitationCliBase, ...rawOperands], {
+      cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+  eq(cliResult.code, EXIT_CODES.refusal,
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} exits 1 before workshop resolution`);
+  eq(cliResult.stdout, '',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} emits no non-machine success output`);
+  eq(JSON.parse(cliResult.stderr).code, 'invalid_limitation',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} reaches the real parser and dispatcher`);
+}
+const limitedReview = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+});
+eq(limitedReview.accepted_limitation, { bound: ['single-writer-no-concurrent-races'] },
+  'CS1-ACCEPTED-LIMITATION returns the named bound machine-readably');
+eq(reviewState.cards.Review.reviews['regression-risk'].accepted_limitation,
+  { bound: ['single-writer-no-concurrent-races'] },
+  'CS1-ACCEPTED-LIMITATION persists the named single-writer-bound limitation');
+const limitedReviewStateBytes = JSON.stringify(reviewState);
+const writesBeforeReviewReplay = reviewWrites;
+const limitedReplay = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+});
+eq(limitedReplay.no_op, true, 'CS1-REPLAY-NOOP literal record-review replay returns no_op:true');
+eq(JSON.stringify(reviewState), limitedReviewStateBytes,
+  'CS1-REPLAY-NOOP literal record-review replay preserves authoritative state byte-for-byte');
+eq(reviewWrites, writesBeforeReviewReplay,
+  'CS1-REPLAY-NOOP literal record-review replay performs zero ledger writes');
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  ...limitedReviewArgs, summary: 'A different summary cannot replace a settled exact-head review receipt.',
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different record-review operands on the same exact HEAD refuse');
+eq(reviewWrites, writesBeforeReviewReplay,
+  'CS1-REPLAY-NOOP mismatched record-review replay performs zero ledger writes');
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  ...limitedReviewArgs, lens: 'test-adequacy', verdict: 'refute',
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'invalid_limitation',
+'CS1-ACCEPTED-LIMITATION refuses attaching an accepted limitation to a refutation');
 
 reviewState.cards.Review.phase = 'feature_merged';
 await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
-  card: 'Review', lens: 'correctness', verdict: 'refute', summary: 'A late refutation must not reopen a merged feature.',
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'refute',
+  summary: 'A late refutation must not reopen a merged feature.',
+  'expected-head': exactReviewHead,
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => {}, withLock: immediateCardLock,
+  readState: () => reviewState, sh: () => exactReviewHead, writeState: () => {}, withLock: immediateCardLock,
 }), /reviews are closed .*feature_merged/, 'review writes are rejected after the feature PR merges');
 reviewState.cards.Review.phase = 'implementing';
 
@@ -3507,23 +3861,30 @@ const parkDeps = {
   },
 };
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Park me', 'resume-condition': 'wait for myself',
 }, parkDeps), /cannot depend on itself/, 'park rejects self-dependencies');
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Missing prerequisite', 'resume-condition': 'wait for it',
 }, parkDeps), /prerequisite card .* does not exist/, 'park rejects missing prerequisite cards');
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': '   ',
 }, parkDeps), /non-empty --resume-condition/, 'park requires an exact non-empty resume condition');
 parkState.cards['Park me'].phase = 'feature_pr';
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': 'wait for deployment',
 }, parkDeps), /claimed pre-PR work/, 'park refuses post-feature-PR phases');
 parkState.cards['Park me'].phase = 'implementing';
 const parked = await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
+eq({ ok: parked.ok, no_op: parked.no_op }, { ok: true, no_op: false },
+  'park adds the success envelope without removing legacy receipt keys');
 eq(opx2ParkResumeProjections, ['park'],
   'OPX2-TRANSITION-ONLY park transition fires exactly one Loop Station projection');
 eq(parkLocks.slice(-4), [
@@ -3539,9 +3900,34 @@ eq(parkState.cards['Park me'].gate_receipt, oldGate, 'park preserves the combine
 ok(/depends_on: \["\[\[Prerequisite A\]\]","\[\[Prerequisite B\]\]"\]/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects exact dependencies into card metadata');
 ok(/resume_condition: "Both prerequisites deploy cleanly"/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects the resume condition into card metadata');
 ok(parkWrites >= 2, 'park saves authoritative state before and after projection for crash recovery');
+const parkedStateBytes = JSON.stringify(parkState);
+const parkedCardBytes = fs.readFileSync(parkCardPath, 'utf8');
+const writesBeforeParkReplay = parkWrites;
+const projectionsBeforeParkReplay = opx2ParkResumeProjections.length;
+const parkReplay = await commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
+}, parkDeps);
+eq(parkReplay.no_op, true, 'CS1-REPLAY-NOOP literal park replay returns no_op:true');
+eq(JSON.stringify(parkState), parkedStateBytes,
+  'CS1-REPLAY-NOOP literal park replay preserves authoritative state byte-for-byte');
+eq(fs.readFileSync(parkCardPath, 'utf8'), parkedCardBytes,
+  'CS1-REPLAY-NOOP literal park replay preserves projected card bytes');
+eq(parkWrites, writesBeforeParkReplay, 'CS1-REPLAY-NOOP literal park replay performs zero ledger writes');
+eq(opx2ParkResumeProjections.length, projectionsBeforeParkReplay,
+  'CS1-REPLAY-NOOP literal park replay performs zero Loop Station writes');
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Different condition',
+}, parkDeps), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different park operands on a settled target refuse');
+eq(parkWrites, writesBeforeParkReplay, 'CS1-REPLAY-NOOP mismatched park replay performs zero ledger writes');
+eq(fs.readFileSync(parkCardPath, 'utf8'), parkedCardBytes,
+  'CS1-REPLAY-NOOP mismatched park replay preserves projected card bytes');
 const claimedParkState = emptyState();
 claimedParkState.cards.Claimed = { card: 'Claimed', phase: 'claimed', card_path: parkCardPath };
 eq((await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Claimed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps, readState: () => claimedParkState, writeState: () => {}, projectCard: () => ({ changed: false }),
@@ -3550,6 +3936,7 @@ const parkRaceState = emptyState();
 parkRaceState.cards.Race = { card: 'Race', phase: 'claimed', card_path: parkCardPath };
 let parkSelectorEntered = false; let parkReadAfterSelector = false;
 eq((await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Race', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps,
@@ -3602,7 +3989,7 @@ eq(commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
 }], 'status detects a crash between authoritative park state and card metadata projection');
 eq(crashParkState.cards['Crash parked'].phase, 'parked', 'authoritative ledger remains parked while human projection says in_progress');
 const crashBeforeRefusal = JSON.stringify(crashParkState.cards['Crash parked']);
-eq((await commandResume({ root: parkRoot }, { card: 'Crash parked' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
 })).action, 'resume-refused', 'resume directly refuses ledger/card metadata divergence without a saved projection error');
 eq(JSON.stringify(crashParkState.cards['Crash parked']), crashBeforeRefusal, 'metadata-divergence refusal preserves the parked record byte-for-byte');
@@ -3632,8 +4019,57 @@ crashParkState.cards['Crash parked'].branch = 'codex-autoloop/crash-parked';
 crashParkState.cards['Crash parked'].worktree = parkRoot;
 crashParkState.cards['Crash parked'].touch_zones = ['platform/crash'];
 fs.writeFileSync(crashBoardPath, liveBoard({ progress: ['Crash parked'], completed: [[true, 'Prerequisite A']] }));
+const failedResumeState = JSON.parse(JSON.stringify(crashParkState));
+let failedResumeWrites = 0;
+const failedResumeGitCalls = [];
+const failedResumeDeps = {
+  ...parkDeps,
+  readState: () => failedResumeState,
+  writeState: () => { failedResumeWrites++; },
+  boardPath: crashBoardPath,
+  findCard: (_root, name) => name === 'Prerequisite A' ? '/cards/Prerequisite A.md' : null,
+  worktreeExists: () => true,
+  projectCard: () => { throw new Error('resume metadata projection denied'); },
+  sh: (cmd, args) => {
+    failedResumeGitCalls.push([cmd, ...args]);
+    if (args[0] === 'fetch') return '';
+    if (args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'current-main' : 'branch-head';
+    if (args[0] === 'merge-base') return '';
+    throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
+  },
+  now: () => '2026-07-15T16:02:30.000Z',
+};
+const failedResume = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+);
+eq(failedResume.action, 'resume-projection-failed',
+  'CS1-PROJECTION-REPLAY initial resume projection failure is explicit');
+eq(failedResumeState.cards['Crash parked'].phase, 'implementing',
+  'CS1-PROJECTION-REPLAY failed resume projection preserves authoritative implementing state');
+eq(failedResumeState.cards['Crash parked'].projection_error, 'resume metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed resume projection is saved for reconciliation');
+const failedResumeBytes = JSON.stringify(failedResumeState);
+const failedResumeWritesBeforeReplay = failedResumeWrites;
+const failedResumeGitCallsBeforeReplay = failedResumeGitCalls.length;
+const failedResumeReplay = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+);
+eq(failedResumeReplay.action, 'resume-projection-failed',
+  'CS1-PROJECTION-REPLAY resume replay keeps the unresolved projection failure explicit');
+eq(failedResumeReplay.no_op, true,
+  'CS1-PROJECTION-REPLAY failed resume replay is a settled zero-write no-op');
+eq(failedResumeReplay.projection_error, 'resume metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed resume replay preserves the exact projection error');
+eq(failedResumeReplay.reconcile, 'reconcile --card Crash parked',
+  'CS1-PROJECTION-REPLAY failed resume replay names the exact repair command');
+eq(failedResumeWrites, failedResumeWritesBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed resume replay performs zero ledger writes');
+eq(failedResumeGitCalls.length, failedResumeGitCallsBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed resume replay performs zero Git freshness reads');
+eq(JSON.stringify(failedResumeState), failedResumeBytes,
+  'CS1-PROJECTION-REPLAY failed resume replay preserves authoritative state byte-for-byte');
 const currentMainCalls = [];
-const currentMainResume = await commandResume({ root: parkRoot }, { card: 'Crash parked' }, {
+const currentMainResume = await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
   findCard: (_root, name) => name === 'Prerequisite A' ? '/cards/Prerequisite A.md' : null,
   worktreeExists: () => true,
@@ -3657,6 +4093,7 @@ failedParkState.cards.Failed = {
 };
 let failedParkWrites = 0;
 const failedPark = await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
@@ -3666,35 +4103,55 @@ eq(failedPark.action, 'parked-projection-failed', 'metadata projection failure i
 eq(failedParkState.cards.Failed.phase, 'parked', 'failed metadata projection preserves authoritative parked state');
 eq(failedParkState.cards.Failed.projection_error, 'metadata projection denied', 'failed metadata projection is saved for reconciliation');
 ok(failedParkWrites >= 2, 'failed metadata projection persists both transition and failure receipt');
-eq((await commandResume({ root: parkRoot }, { card: 'Failed' }, {
+const failedParkBytes = JSON.stringify(failedParkState);
+const failedParkWritesBeforeReplay = failedParkWrites;
+const failedParkReplay = await commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
+}, {
+  ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
+});
+eq(failedParkReplay.action, 'parked-projection-failed',
+  'CS1-PROJECTION-REPLAY park replay keeps the unresolved projection failure explicit');
+eq(failedParkReplay.no_op, true,
+  'CS1-PROJECTION-REPLAY failed park replay is a settled zero-write no-op');
+eq(failedParkReplay.projection_error, 'metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed park replay preserves the exact projection error');
+eq(failedParkReplay.reconcile, 'reconcile --card Failed',
+  'CS1-PROJECTION-REPLAY failed park replay names the exact repair command');
+eq(failedParkWrites, failedParkWritesBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed park replay performs zero ledger writes');
+eq(JSON.stringify(failedParkState), failedParkBytes,
+  'CS1-PROJECTION-REPLAY failed park replay preserves authoritative state byte-for-byte');
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Failed' }, {
   ...parkDeps, readState: () => failedParkState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a parked card with unresolved metadata projection failure');
 
 const malformedResumeState = emptyState();
 malformedResumeState.cards.Malformed = { card: 'Malformed', phase: 'parked', dependencies: [], resume_condition: 'later', card_path: parkCardPath };
 const malformedBefore = JSON.stringify(malformedResumeState.cards.Malformed);
-eq((await commandResume({ root: parkRoot }, { card: 'Malformed' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Malformed' }, {
   ...parkDeps, readState: () => malformedResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses missing dependency metadata');
 eq(JSON.stringify(malformedResumeState.cards.Malformed), malformedBefore, 'missing-dependency refusal preserves the parked record');
 const invalidDependencyState = emptyState();
 invalidDependencyState.cards.Invalid = { card: 'Invalid', phase: 'parked', dependencies: [42], resume_condition: 'later', card_path: parkCardPath };
 const invalidBefore = JSON.stringify(invalidDependencyState.cards.Invalid);
-eq((await commandResume({ root: parkRoot }, { card: 'Invalid' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Invalid' }, {
   ...parkDeps, readState: () => invalidDependencyState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses malformed dependency elements');
 eq(JSON.stringify(invalidDependencyState.cards.Invalid), invalidBefore, 'malformed-dependency refusal preserves receipts and state');
 const selfResumeState = emptyState();
 selfResumeState.cards.Self = { card: 'Self', phase: 'parked', dependencies: ['Self'], resume_condition: 'later', card_path: parkCardPath };
 const selfBefore = JSON.stringify(selfResumeState.cards.Self);
-eq((await commandResume({ root: parkRoot }, { card: 'Self' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Self' }, {
   ...parkDeps, readState: () => selfResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a saved self-dependency');
 eq(JSON.stringify(selfResumeState.cards.Self), selfBefore, 'self-dependency refusal preserves receipts and state byte-for-byte');
 const emptyConditionState = emptyState();
 emptyConditionState.cards.Empty = { card: 'Empty', phase: 'parked', dependencies: ['Prerequisite A'], resume_condition: ' ', card_path: parkCardPath };
 const emptyConditionBefore = JSON.stringify(emptyConditionState.cards.Empty);
-eq((await commandResume({ root: parkRoot }, { card: 'Empty' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Empty' }, {
   ...parkDeps, readState: () => emptyConditionState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses an empty saved resume condition');
 eq(JSON.stringify(emptyConditionState.cards.Empty), emptyConditionBefore, 'empty-condition refusal preserves receipts and state byte-for-byte');
@@ -3702,7 +4159,7 @@ const missingResumeState = emptyState();
 missingResumeState.cards.Missing = {
   card: 'Missing', phase: 'parked', dependencies: ['Vanished prerequisite'], resume_condition: 'later', card_path: parkCardPath,
 };
-eq((await commandResume({ root: parkRoot }, { card: 'Missing' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Missing' }, {
   ...parkDeps, readState: () => missingResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a dependency whose card no longer exists');
 
@@ -3720,7 +4177,7 @@ resumeRaceState.cards.Target = {
 };
 resumeRaceState.cards.Contender = { card: 'Contender', phase: 'parked', parent_card: 'Shared parent', touch_zones: ['platform/contender'] };
 let resumeSelectorEntered = false; let resumeReadAfterSelector = false;
-const resumeRace = await commandResume({ root: parkRoot }, { card: 'Target' }, {
+const resumeRace = await commandResume({ root: parkRoot }, { json: true, card: 'Target' }, {
   ...parkDeps,
   readState: () => { resumeReadAfterSelector = resumeSelectorEntered; return resumeRaceState; },
   writeState: () => {}, worktreeExists: () => true,
@@ -3739,20 +4196,20 @@ eq(resumeRaceState.cards.Target.phase, 'parked', 'losing resume contender remain
 for (const name of ['Capacity 1', 'Capacity 2', 'Capacity 3']) {
   parkState.cards[name] = { card: name, phase: 'implementing', touch_zones: [`platform/${name.toLowerCase().replace(' ', '-')}`] };
 }
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
 })).action, 'resume-refused', 'resume refuses to create a fourth active card');
 for (const name of ['Capacity 1', 'Capacity 2', 'Capacity 3']) delete parkState.cards[name];
 parkState.cards.Overlap = { card: 'Overlap', phase: 'implementing', touch_zones: ['platform/park-me'] };
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
 })).action, 'resume-refused', 'resume refuses an active touch-zone conflict');
 delete parkState.cards.Overlap;
 const preservedWorktree = parkState.cards['Park me'].worktree;
 parkState.cards['Park me'].worktree = '/missing/parked-worktree';
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => false,
 })).action, 'resume-refused', 'resume refuses a missing preserved parked worktree');
@@ -3760,19 +4217,19 @@ parkState.cards['Park me'].worktree = preservedWorktree;
 parkState.cards.Sibling = {
   card: 'Sibling', phase: 'implementing', parent_card: 'Shared parent', touch_zones: ['platform/sibling'],
 };
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
 })).action, 'resume-refused', 'resume refuses a second active child of the normalized parent');
 parkState.cards.Sibling.phase = 'parked';
 parkState.cards['Prerequisite A'].vault_receipts.ero.ok = false;
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
 })).action, 'resume-refused', 'resume refuses a tracked prerequisite with a failed required-vault receipt');
 parkState.cards['Prerequisite A'].vault_receipts.ero.ok = true;
 const gitCalls = [];
 const resumeLockStart = parkLocks.length;
 opx2ParkResumeProjections.length = 0;
-const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+const resumed = await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps,
   findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
@@ -3786,6 +4243,8 @@ const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
   now: () => '2026-07-15T16:05:00.000Z',
 });
 eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite is satisfied');
+eq({ ok: resumed.ok, no_op: resumed.no_op }, { ok: true, no_op: false },
+  'resume adds the success envelope without removing legacy receipt keys');
 eq(opx2ParkResumeProjections, ['resume'],
   'OPX2-TRANSITION-ONLY resume transition fires exactly one Loop Station projection');
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
@@ -3808,6 +4267,32 @@ eq(parkState.cards['Park me'].resume_condition, null, 'successful resume clears 
 ok(!/^resume_condition:/m.test(fs.readFileSync(parkCardPath, 'utf8')), 'successful resume clears resume condition from card metadata');
 eq(parkState.cards['Park me'].branch, 'codex-autoloop/park-me', 'resume preserves the branch');
 eq(parkState.cards['Park me'].worktree, '/worktrees/park-me', 'resume preserves the worktree and implementation');
+const resumedStateBytes = JSON.stringify(parkState);
+const resumedCardBytes = fs.readFileSync(parkCardPath, 'utf8');
+const writesBeforeResumeReplay = parkWrites;
+const projectionsBeforeResumeReplay = opx2ParkResumeProjections.length;
+const parkResumeReplay = await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
+  ...parkDeps,
+  sh: () => { throw new Error('literal resume replay must not inspect Git'); },
+  writeState: () => { parkWrites++; },
+  projectCard: () => { throw new Error('literal resume replay must not project card metadata'); },
+  projectLoopStation: () => { throw new Error('literal resume replay must not project Loop Station'); },
+});
+eq(parkResumeReplay.no_op, true, 'CS1-REPLAY-NOOP literal resume replay returns no_op:true');
+eq({
+  origin_main_advanced: parkResumeReplay.origin_main_advanced,
+  requires_main_update: parkResumeReplay.requires_main_update,
+}, {
+  origin_main_advanced: resumed.origin_main_advanced,
+  requires_main_update: resumed.requires_main_update,
+}, 'CS1-REPLAY-NOOP literal resume replay preserves the legacy freshness fields');
+eq(JSON.stringify(parkState), resumedStateBytes,
+  'CS1-REPLAY-NOOP literal resume replay preserves authoritative state byte-for-byte');
+eq(fs.readFileSync(parkCardPath, 'utf8'), resumedCardBytes,
+  'CS1-REPLAY-NOOP literal resume replay preserves projected card bytes');
+eq(parkWrites, writesBeforeResumeReplay, 'CS1-REPLAY-NOOP literal resume replay performs zero ledger writes');
+eq(opx2ParkResumeProjections.length, projectionsBeforeResumeReplay,
+  'CS1-REPLAY-NOOP literal resume replay performs zero Loop Station writes');
 
 const reconcileRoot = path.join(tmp, 'projection');
 fs.mkdirSync(reconcileRoot, { recursive: true });
