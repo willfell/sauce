@@ -67,7 +67,9 @@ const PARKED_METADATA_REBIND_OPTIONS = new Set([
 const CONTRACT_FRONTMATTER_RESTAMP_OPTIONS = new Set([
   '_', 'json', 'contract-frontmatter-restamp', 'dry-run', 'apply', 'reason', 'spec',
 ]);
+const CONSUME_RATIFICATION_OPTIONS = new Set(['_', 'json', 'card', 'artifact']);
 const EXACT_SHA = /^[0-9a-f]{40}$/;
+const RATIFICATION_SCHEMA_VERSION = '1.0.0';
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
 const BOARD = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
@@ -262,15 +264,673 @@ function consumeRatificationReceipt(receipt, expected = {}) {
   };
 }
 
+function exactRatificationSection(markdown, heading) {
+  const wanted = String(heading || '').trim();
+  if (!wanted) return null;
+  const source = String(markdown || '');
+  const lines = source.split(/(?<=\n)/);
+  const matches = [];
+  let offset = 0;
+  let fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+      offset += chunk.length;
+      continue;
+    }
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      fence = { character: opening[1][0], length: opening[1].length };
+      offset += chunk.length;
+      continue;
+    }
+    const match = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
+    if (match && match[2].trim() === wanted) matches.push({ start: offset, level: match[1].length });
+    offset += chunk.length;
+  }
+  if (matches.length !== 1) return null;
+  const selected = matches[0];
+  let end = source.length;
+  offset = 0;
+  fence = null;
+  for (const chunk of lines) {
+    const line = chunk.replace(/\r?\n$/, '');
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.character && closing[1].length >= fence.length) fence = null;
+    } else {
+      const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (opening) fence = { character: opening[1][0], length: opening[1].length };
+      else if (offset > selected.start) {
+        const match = line.match(/^(#{1,6})[ \t]+/);
+        if (match && match[1].length <= selected.level) { end = offset; break; }
+      }
+    }
+    offset += chunk.length;
+  }
+  return source.slice(selected.start, end);
+}
+
+function jsonDuplicateKeys(raw) {
+  let index = 0;
+  const duplicates = [];
+  const skip = () => { while (/\s/.test(raw[index] || '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (raw[index] !== '"') throw new Error('string');
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === '\\') { index += 2; continue; }
+      if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated string');
+  };
+  const value = () => {
+    skip();
+    if (raw[index] === '{') {
+      index += 1;
+      skip();
+      const keys = new Set();
+      if (raw[index] === '}') { index += 1; return; }
+      while (index < raw.length) {
+        const key = string();
+        if (keys.has(key) && !duplicates.includes(key)) duplicates.push(key);
+        keys.add(key);
+        skip();
+        if (raw[index] !== ':') throw new Error('colon');
+        index += 1;
+        value();
+        skip();
+        if (raw[index] === '}') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+        skip();
+      }
+      throw new Error('unterminated object');
+    }
+    if (raw[index] === '[') {
+      index += 1;
+      skip();
+      if (raw[index] === ']') { index += 1; return; }
+      while (index < raw.length) {
+        value();
+        skip();
+        if (raw[index] === ']') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+      }
+      throw new Error('unterminated array');
+    }
+    if (raw[index] === '"') { string(); return; }
+    const token = raw.slice(index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
+    if (!token) throw new Error('value');
+    index += token[0].length;
+  };
+  try {
+    value();
+    skip();
+    return index === raw.length ? duplicates : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsedErrors) {
+  const current = Array.isArray(parsedErrors) ? parsedErrors : [];
+  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return current;
+  const section = exactRatificationSection(markdown, sectionHeading);
+  if (!section) return current;
+  const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+  if (blocks.length !== 1) return current;
+  let payload;
+  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return current; }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return current;
+  const allowed = new Set([
+    'schema_version', 'receipt_id', 'decision', 'accepted_at',
+    'authority', 'target_card', 'target_head', 'scope',
+  ]);
+  const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
+  if (!unexpected.length) return current;
+  const nonUnexpected = current.filter((issue) => issue && issue.code !== 'ratification-field-unexpected');
+  return [
+    ...nonUnexpected,
+    ...unexpected.map((field) => ({
+      code: 'ratification-field-unexpected',
+      field,
+      message: `ratification payload contains unsupported field ${field}`,
+    })),
+  ];
+}
+
 function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
+  const section = exactRatificationSection(markdown, sectionHeading);
+  if (section) {
+    const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+    if (blocks.length === 1) {
+      const duplicates = jsonDuplicateKeys(blocks[0][1]);
+      if (duplicates && duplicates.length) return {
+        ok: false,
+        errors: duplicates.map((field) => ({
+          code: 'ratification-field-duplicate',
+          field,
+          message: `ratification payload contains duplicate field ${field}`,
+        })),
+        receipt: null,
+        contract_version: delivery.CONTRACT_VERSION,
+      };
+    }
+  }
   const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
   if (!parsed.ok) return {
     ok: false,
-    errors: parsed.errors,
+    errors: allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsed.errors),
     receipt: null,
     contract_version: delivery.CONTRACT_VERSION,
   };
   return consumeRatificationReceipt(parsed.receipt, expected);
+}
+
+function ratificationRoots(boardPath = BOARD) {
+  const projectRoot = path.dirname(boardPath);
+  return {
+    projectRoot,
+    vaultRoot: path.resolve(projectRoot, '../../..'),
+    ratificationsRoot: path.join(projectRoot, 'ratifications'),
+  };
+}
+
+function ratificationArtifactForCard(card, boardPath = BOARD) {
+  const id = cardIdToken(card);
+  if (!id) throw new Error('ratification target card has no canonical short id');
+  const roots = ratificationRoots(boardPath);
+  const absolute = path.join(roots.ratificationsRoot, `${id}.md`);
+  return {
+    ...roots,
+    absolute,
+    relative: path.relative(roots.vaultRoot, absolute).replace(/\\/g, '/'),
+    sectionHeading: `Ratification — ${card}`,
+  };
+}
+
+function ratificationTargetHead(record) {
+  const head = record && record.gate_receipt && record.gate_receipt.head_sha;
+  return typeof head === 'string' && EXACT_SHA.test(head) ? head : null;
+}
+
+function isRatificationEscalation(record, state) {
+  if (!record || record.phase !== 'parked' || record.ratification_receipt) return false;
+  const activeIds = new Set(activeRecords(state || { cards: {} }).map((item) => item.card));
+  return deliveryReviewTriage.classifyCard({
+    card: record.card,
+    status: 'parked',
+    resume_condition: record.resume_condition || '',
+  }, {
+    activeIds,
+    tracked: Object.values((state && state.cards) || {}),
+  }) === 'escalation';
+}
+
+function pendingRatificationMarkdown(record, artifact, createdAt, receiptId) {
+  const head = ratificationTargetHead(record);
+  if (!head) throw new Error(`ratification scaffold requires exact 40-hex gate HEAD for ${record.card}`);
+  const scope = String(record.resume_condition || '').trim();
+  if (!scope) throw new Error(`ratification scaffold requires a non-empty scope for ${record.card}`);
+  const payload = {
+    schema_version: delivery.CONTRACT_VERSION,
+    receipt_id: receiptId,
+    decision: '',
+    accepted_at: '',
+    authority: '',
+    target_card: record.card,
+    target_head: head,
+    scope: [scope],
+  };
+  return [
+    '---',
+    'type: ratification',
+    `schema_version: ${JSON.stringify(RATIFICATION_SCHEMA_VERSION)}`,
+    'state: pending',
+    `target_card: ${JSON.stringify(record.card)}`,
+    `created_at: ${JSON.stringify(createdAt)}`,
+    '---',
+    '',
+    `# Ratification: ${cardIdToken(record.card)}`,
+    '',
+    `Decide whether to accept the bounded authority for **${record.card}**.`,
+    'Accepting records the exact authority receipt and lets the coordinator resume the parked work when its remaining execution constraints are clear.',
+    '',
+    `## ${artifact.sectionHeading}`,
+    '',
+    '```delivery-ratification',
+    JSON.stringify(payload, null, 2),
+    '```',
+    '',
+  ].join('\n');
+}
+
+function scaffoldPendingRatifications(state, deps = {}) {
+  const boardPath = deps.boardPath || BOARD;
+  const now = deps.now || (() => new Date().toISOString());
+  const exists = deps.exists || fs.existsSync;
+  const writeText = deps.writeText || atomicWriteText;
+  const ensureDir = deps.ensureDir || ((dir) => fs.mkdirSync(dir, { recursive: true }));
+  const uuid = deps.uuid || (() => crypto.randomUUID());
+  const records = Object.values((state && state.cards) || {})
+    .filter((record) => isRatificationEscalation(record, state))
+    .sort((a, b) => a.card.localeCompare(b.card));
+  const scaffolded = [];
+  const existing = [];
+  const errors = [];
+  const plans = [];
+  for (const record of records) {
+    const artifact = ratificationArtifactForCard(record.card, boardPath);
+    if (exists(artifact.absolute)) {
+      existing.push(artifact.relative);
+      continue;
+    }
+    try {
+      const createdAt = now();
+      const markdown = pendingRatificationMarkdown(record, artifact, createdAt, uuid());
+      plans.push({ artifact, markdown });
+    } catch (err) {
+      errors.push({ card: record.card, error: err.message });
+    }
+  }
+  if (errors.length === 0 && plans.length) {
+    ensureDir(plans[0].artifact.ratificationsRoot);
+    for (const plan of plans) {
+      writeText(plan.artifact.absolute, plan.markdown);
+      scaffolded.push(plan.artifact.relative);
+    }
+  }
+  return {
+    scaffolded,
+    existing,
+    errors,
+    no_op: scaffolded.length === 0,
+  };
+}
+
+async function commandBackfillRatifications(ctx, args, deps = {}) {
+  if (args.json !== true) throw new Error('backfill-ratifications requires --json for a machine-readable receipt');
+  if (!Array.isArray(args._) || args._.length !== 1 || args._[0] !== 'backfill-ratifications') {
+    throw new Error('backfill-ratifications requires the exact command verb');
+  }
+  const extras = Object.keys(args).filter((key) => !['_', 'json'].includes(key));
+  if (extras.length) throw new Error(`backfill-ratifications received unsupported option --${extras[0]}`);
+  const loadState = deps.readState || readState;
+  const lock = deps.withLock || withLock;
+  return lock(ctx, 'selector', async () => {
+    const receipt = scaffoldPendingRatifications(loadState(ctx), deps);
+    if (receipt.errors.length) {
+      const error = new Error(`ratification backfill refused: ${receipt.errors.map((item) => `${item.card}: ${item.error}`).join('; ')}`);
+      error.code = 'RATIFICATION_BACKFILL_REFUSED';
+      throw error;
+    }
+    return {
+      action: 'ratifications-backfilled',
+      no_op: receipt.no_op,
+      created: receipt.scaffolded,
+      existing: receipt.existing,
+    };
+  }, { staleMs: 60 * 60 * 1000 });
+}
+
+function validateRatificationArtifactOperand(args, boardPath = BOARD, deps = {}) {
+  if (args.json !== true) throw new Error('consume-ratification requires --json for a machine-readable receipt');
+  const extras = Object.keys(args).filter((key) => !CONSUME_RATIFICATION_OPTIONS.has(key));
+  if (extras.length) throw new Error(`consume-ratification received unsupported option --${extras[0]}`);
+  if (!Array.isArray(args._) || args._.length !== 1 || args._[0] !== 'consume-ratification') {
+    throw new Error('consume-ratification requires the exact command verb');
+  }
+  const card = Array.isArray(args.card) ? '' : String(args.card || '').trim();
+  if (!card || normalizeCardLink(card) !== card) {
+    throw new Error('consume-ratification requires one exact canonical --card identity');
+  }
+  const canonical = ratificationArtifactForCard(card, boardPath);
+  const artifactOperand = args.artifact == null
+    ? null
+    : (Array.isArray(args.artifact) ? '' : String(args.artifact).trim().replace(/\\/g, '/'));
+  if (args.artifact != null && !artifactOperand) {
+    throw new Error('consume-ratification requires --artifact to be one non-empty vault-relative Markdown path');
+  }
+  const relative = artifactOperand == null ? canonical.relative : artifactOperand;
+  const parts = relative.split('/');
+  if (!relative || relative.startsWith('/') || /^[A-Za-z]:\//.test(relative)
+    || !/\.md$/i.test(relative)
+    || parts.some((part) => !part || part === '.' || part === '..')) {
+    throw new Error('consume-ratification artifact must be a canonical vault-relative Markdown path');
+  }
+  const absolute = path.resolve(canonical.vaultRoot, ...parts);
+  const lexicalRoot = path.resolve(canonical.ratificationsRoot);
+  if (absolute === lexicalRoot || !absolute.startsWith(`${lexicalRoot}${path.sep}`)) {
+    throw new Error('consume-ratification artifact must stay inside the project ratifications directory');
+  }
+  const exists = deps.exists || fs.existsSync;
+  if (!exists(absolute)) throw new Error(`consume-ratification artifact does not exist: ${relative}`);
+  const lstat = deps.lstat || fs.lstatSync;
+  const entry = lstat(absolute);
+  if (entry.isSymbolicLink() || !entry.isFile()) {
+    throw new Error('consume-ratification artifact must be one regular non-symlink Markdown file');
+  }
+  const physical = deps.physicalDescendant || physicalDescendant;
+  physical(canonical.ratificationsRoot, absolute, 'consume-ratification artifact');
+  return {
+    card,
+    artifactOperand,
+    absolute,
+    relative,
+    sectionHeading: canonical.sectionHeading,
+    requestIdentity: {
+      positional: [...args._],
+      json: true,
+      card: args.card,
+      artifact: artifactOperand,
+    },
+  };
+}
+
+function ratificationFrontmatterErrors(raw, expectedCard, expectedState) {
+  const allowed = new Set([
+    'type', 'schema_version', 'state', 'target_card', 'created_at',
+    ...(expectedState === 'consumed' ? ['consumed_at'] : []),
+  ]);
+  const lines = frontmatter(raw).split('\n').filter(Boolean);
+  const keys = lines.filter((line) => !/^\s/.test(line) && line.includes(':'))
+    .map((line) => line.slice(0, line.indexOf(':')).trim());
+  const errors = [];
+  const counts = keys.reduce((result, key) => result.set(key, (result.get(key) || 0) + 1), new Map());
+  for (const unexpected of keys.filter((key) => !allowed.has(key))) {
+    errors.push({ code: 'ratification-frontmatter-field-unexpected', field: unexpected, message: `ratification frontmatter contains unsupported field ${unexpected}` });
+  }
+  for (const [duplicate, count] of counts.entries()) {
+    if (count > 1) errors.push({ code: 'ratification-frontmatter-field-duplicate', field: duplicate, message: `ratification frontmatter contains duplicate field ${duplicate}` });
+  }
+  if (scalarField(raw, 'type') !== 'ratification') errors.push({ code: 'ratification-frontmatter-type', field: 'type', message: 'ratification frontmatter type must be ratification' });
+  if (scalarField(raw, 'schema_version') !== RATIFICATION_SCHEMA_VERSION) errors.push({ code: 'ratification-frontmatter-version', field: 'schema_version', message: `ratification frontmatter schema_version must be ${RATIFICATION_SCHEMA_VERSION}` });
+  if (scalarField(raw, 'state') !== expectedState) errors.push({ code: 'ratification-frontmatter-state', field: 'state', message: `ratification frontmatter state must be ${expectedState}` });
+  if (scalarField(raw, 'target_card') !== expectedCard) errors.push({ code: 'ratification-frontmatter-target', field: 'target_card', message: 'ratification frontmatter target_card must match the exact ledger identity' });
+  const createdAt = scalarField(raw, 'created_at');
+  if (!createdAt || !Number.isFinite(Date.parse(createdAt))) errors.push({ code: 'ratification-frontmatter-created-at', field: 'created_at', message: 'ratification frontmatter created_at must be an ISO timestamp' });
+  return errors;
+}
+
+function ratificationReplayMatches(record, requestIdentity) {
+  const consumption = record && record.ratification_consumption;
+  return Boolean(consumption && sameJson(consumption.request_identity, requestIdentity));
+}
+
+function ratificationAcceptedWait({ sibling, conflict, unmet = [], atCapacity = false } = {}) {
+  if (sibling) return `accepted authority recorded; resume after active sibling ${sibling.card} concurrency clears`;
+  if (conflict) return `accepted authority recorded; resume after touch-zone conflict with ${conflict.card} clears`;
+  if (unmet.length) return `accepted authority recorded; resume after dependencies deploy: ${unmet.join(', ')}`;
+  if (atCapacity) return 'accepted authority recorded; resume after concurrency capacity clears';
+  return 'accepted authority recorded; preserved worktree recovery required before resume';
+}
+
+async function commandConsumeRatification(ctx, args, deps = {}) {
+  const boardPath = deps.boardPath || BOARD;
+  // OPX4-CONTAINMENT: resolve and physically contain the artifact before even
+  // selecting a state reader. No malformed path can observe coordinator state.
+  const operand = validateRatificationArtifactOperand(args, boardPath, deps);
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const writeText = deps.writeText || atomicWriteText;
+  const now = deps.now || (() => new Date().toISOString());
+  const project = deps.projectCard || projectCard;
+  return lock(ctx, 'selector', async () => withCardGateLock(ctx, operand.card, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[operand.card];
+    if (!record) throw new Error(`card ${operand.card} is not claimed`);
+    if (record.ratification_receipt) {
+      if (!ratificationReplayMatches(record, operand.requestIdentity)) {
+        throw new Error('ratification was already consumed with different operands; replay must be literal');
+      }
+      const raw = readText(operand.absolute);
+      const artifactState = scalarField(raw, 'state');
+      const expectedState = artifactState === 'consumed' ? 'consumed' : 'pending';
+      const frontmatterErrors = ratificationFrontmatterErrors(raw, operand.card, expectedState);
+      const stored = record.ratification_receipt;
+      const finishRecovery = async () => {
+        const projection = await attemptProjection(ctx, record, boardPath, {
+          withLock: lock, projectCard: project, now, state,
+        });
+        persist(ctx, state, record);
+        const station = await attemptLoopStationProjection(ctx, state, 'consume-ratification-recovery', {
+          projectLoopStation: deps.projectLoopStation,
+          boardPath,
+          cardsRoot: deps.cardsRoot,
+        });
+        const deadend = record.phase === 'blocked' ? String(record.reason || '') : '';
+        return {
+          action: projection.ok
+            ? (deadend ? 'ratification-consumed-deadend' : 'ratification-consumed')
+            : 'ratification-consumed-projection-failed',
+          card: operand.card,
+          phase: record.phase,
+          no_op: false,
+          recovered: true,
+          receipt: stored,
+          artifact: operand.relative,
+          ...(deadend ? { blocked: true, deadend } : {}),
+          ...(projection.ok ? {} : { projection_error: projection.error, reconcile: reconcileRoute(operand.card) }),
+          loop_station: station.receipt,
+        };
+      };
+      const verdict = consumeRatificationArtifact(
+        raw,
+        operand.sectionHeading,
+        { artifact_path: operand.relative },
+        { target_card: operand.card, target_head: stored.target_head, decision: 'accepted' },
+      );
+      const receipt = verdict.receipt;
+      const receiptMismatch = !receipt
+        || receipt.section_sha256 !== stored.section_sha256
+        || receipt.section_heading !== stored.section_heading
+        || receipt.artifact_path !== stored.artifact_path
+        || receipt.receipt_id !== stored.receipt_id
+        || receipt.decision !== stored.decision
+        || receipt.accepted_at !== stored.accepted_at
+        || receipt.authority !== stored.authority
+        || JSON.stringify(receipt.scope) !== JSON.stringify(stored.scope)
+        || (artifactState === 'pending' && receipt.artifact_sha256 !== stored.artifact_sha256)
+        || (artifactState === 'consumed'
+          && sha256Text(raw) !== record.ratification_consumption.consumed_artifact_sha256);
+      if (frontmatterErrors.length || !verdict.ok || receiptMismatch) {
+        throw new Error('settled ratification artifact differs from the stored exact-head receipt');
+      }
+      if (artifactState === 'pending') {
+        const consumedAt = record.ratification_consumption.consumed_at;
+        writeText(operand.absolute, patchFrontmatter(raw, {
+          state: 'consumed',
+          consumed_at: JSON.stringify(consumedAt),
+        }));
+        record.ratification_consumption.artifact_state = 'consumed';
+        record.ratification_consumption.artifact_finalized_at = consumedAt;
+        persist(ctx, state, record);
+        return finishRecovery();
+      }
+      if (scalarField(raw, 'consumed_at') !== record.ratification_consumption.consumed_at) {
+        throw new Error('settled ratification artifact consumed_at differs from the ledger');
+      }
+      if (record.ratification_consumption.artifact_state !== 'consumed') {
+        record.ratification_consumption.artifact_state = 'consumed';
+        record.ratification_consumption.artifact_finalized_at = record.ratification_consumption.consumed_at;
+        persist(ctx, state, record);
+        return finishRecovery();
+      }
+      return {
+        action: 'ratification-consumed',
+        card: operand.card,
+        phase: record.phase,
+        no_op: true,
+        recovered: false,
+        receipt: stored,
+        artifact: operand.relative,
+      };
+    }
+    if (record.phase !== 'parked' || !isRatificationEscalation(record, state)) {
+      throw new Error(`consume-ratification requires a parked escalation; ${operand.card} is ${record.phase}`);
+    }
+    const targetHead = ratificationTargetHead(record);
+    if (!targetHead) throw new Error('parked escalation lacks an exact 40-hex gate HEAD');
+    const raw = readText(operand.absolute);
+    const frontmatterErrors = ratificationFrontmatterErrors(raw, operand.card, 'pending');
+    const verdict = consumeRatificationArtifact(
+      raw,
+      operand.sectionHeading,
+      { artifact_path: operand.relative },
+      { target_card: operand.card, target_head: targetHead, decision: 'accepted' },
+    );
+    const errors = [...frontmatterErrors, ...(verdict.errors || [])];
+    if (errors.length) {
+      return {
+        action: 'ratification-refused',
+        card: operand.card,
+        phase: record.phase,
+        no_op: true,
+        state_changed: false,
+        artifact: operand.relative,
+        errors,
+      };
+    }
+    const consumedAt = now();
+    const consumedRaw = patchFrontmatter(raw, {
+      state: 'consumed',
+      consumed_at: JSON.stringify(consumedAt),
+    });
+    const active = activeRecords(state);
+    const sibling = sameParentConflict(record.parent_card, active, record.card);
+    const conflict = conflictsWithActive({ touchZones: record.touch_zones || [] }, active);
+    const boardMd = readText(boardPath);
+    const dependencies = record.dependencies || [];
+    const discardedDependencyProblems = dependencies
+      .map((dependency) => discardedDependencyProblem(normalizeCardLink(dependency), state))
+      .filter(Boolean);
+    const unmet = dependencies.filter((dependency) => (
+      !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd)
+    ));
+    const deadend = discardedDependencyProblems.length
+      ? `ratification accepted but resume refused: ${discardedDependencyProblems.join('; ')}`
+      : null;
+    const worktreeExists = deps.worktreeExists || fs.existsSync;
+    const canResume = !deadend && active.length < MAX_ACTIVE && !sibling && !conflict && unmet.length === 0
+      && record.worktree && worktreeExists(record.worktree);
+    if (canResume) {
+      let actualHead;
+      try {
+        actualHead = typeof deps.resolveWorktreeHead === 'function'
+          ? deps.resolveWorktreeHead(record)
+          : (deps.sh || sh)('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+      } catch (err) {
+        return {
+          action: 'ratification-refused',
+          card: operand.card,
+          phase: record.phase,
+          no_op: true,
+          state_changed: false,
+          artifact: operand.relative,
+          errors: [{ code: 'ratification-worktree-head-unreadable', field: 'target_head', message: err.message }],
+        };
+      }
+      if (String(actualHead || '').trim().toLowerCase() !== targetHead) {
+        return {
+          action: 'ratification-refused',
+          card: operand.card,
+          phase: record.phase,
+          no_op: true,
+          state_changed: false,
+          artifact: operand.relative,
+          errors: [{ code: 'ratification-worktree-head-mismatch', field: 'target_head', message: 'preserved worktree HEAD differs from the exact ratification target' }],
+        };
+      }
+    }
+    const invalidation = {
+      invalidated_at: consumedAt,
+      reason: 'ratification receipt consumed; rerun every review and combined gate',
+      head_sha: targetHead,
+      reviews: record.reviews || {},
+      gate_receipt: record.gate_receipt || null,
+    };
+    const priorRecord = JSON.parse(JSON.stringify(record));
+    record.ratification_receipt = verdict.receipt;
+    record.ratification_consumption = {
+      consumed_at: consumedAt,
+      request_identity: operand.requestIdentity,
+      artifact_state: 'pending-finalize',
+      artifact_finalized_at: null,
+      consumed_artifact_sha256: sha256Text(consumedRaw),
+    };
+    if (deadend) {
+      record.phase = 'blocked';
+      record.reason = deadend;
+      record.resume_condition = null;
+      record.blocked_at = consumedAt;
+    } else if (canResume) {
+      record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
+      record.reviews = {};
+      record.gate_receipt = null;
+      record.phase = 'implementing';
+      record.resume_condition = null;
+      record.resumed_at = consumedAt;
+      record.resume_invalidation_reason = invalidation.reason;
+    } else {
+      record.resume_condition = ratificationAcceptedWait({
+        sibling,
+        conflict,
+        unmet,
+        atCapacity: active.length >= MAX_ACTIVE,
+      });
+    }
+    try {
+      persist(ctx, state, record);
+    } catch (err) {
+      state.cards[operand.card] = priorRecord;
+      throw err;
+    }
+    writeText(operand.absolute, consumedRaw);
+    record.ratification_consumption.artifact_state = 'consumed';
+    record.ratification_consumption.artifact_finalized_at = consumedAt;
+    persist(ctx, state, record);
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: lock, projectCard: project, now, state,
+    });
+    persist(ctx, state, record);
+    const station = await attemptLoopStationProjection(ctx, state, 'consume-ratification', {
+      projectLoopStation: deps.projectLoopStation,
+      boardPath,
+      cardsRoot: deps.cardsRoot,
+    });
+    return {
+      action: projection.ok
+        ? (deadend ? 'ratification-consumed-deadend' : 'ratification-consumed')
+        : 'ratification-consumed-projection-failed',
+      card: operand.card,
+      phase: record.phase,
+      no_op: false,
+      artifact: operand.relative,
+      receipt: verdict.receipt,
+      resumed: canResume,
+      ...(deadend
+        ? { blocked: true, deadend }
+        : canResume
+          ? { reviews_invalidated: true, invalidation_reason: invalidation.reason }
+          : { wait: record.resume_condition }),
+      ...(projection.ok ? {} : { projection_error: projection.error, reconcile: reconcileRoute(operand.card) }),
+      loop_station: station.receipt,
+    };
+  }, { card: operand.card, staleMs: 60 * 60 * 1000 }, lock), {
+    card: operand.card,
+    staleMs: 60 * 60 * 1000,
+  });
 }
 
 function sameParentConflict(parentCard, records, excludeCard = '') {
@@ -2715,10 +3375,11 @@ async function commandPark(ctx, args, deps = {}) {
     for (const dependency of dependencies) {
       if (!find(CARDS_ROOT, dependency)) throw new Error(`prerequisite card ${dependency} does not exist`);
     }
+    const parkedAt = now();
     record.phase = 'parked';
     record.dependencies = dependencies;
     record.resume_condition = resumeCondition;
-    record.parked_at = now();
+    record.parked_at = parkedAt;
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, state,
@@ -4075,7 +4736,8 @@ function commandStatus(ctx, opts = {}) {
   const discarded = Object.values(state.cards || {}).filter((record) => record.phase === 'discarded');
   const cardsRoot = opts.cardsRoot || CARDS_ROOT;
   const residue = [...tombstoneResidue(state, cardsRoot, opts.exists || fs.existsSync)];
-  const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
+  const boardPath = opts.boardPath || BOARD;
+  const boardMd = opts.boardMd ?? fs.readFileSync(boardPath, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
     return p ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
@@ -4115,11 +4777,19 @@ function commandStatus(ctx, opts = {}) {
       card: r.card, phase: r.phase, status: (projectedRecordMapping(r, cardsRoot) || {}).status || null,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null, branch: r.branch, pr: r.feature_pr || null,
     })),
-    parked: parked.map((r) => ({
-      card: r.card, phase: r.phase, status: 'parked', model_profile: r.model_profile, branch: r.branch,
-      dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
-      parked_at: r.parked_at || null, projection_error: r.projection_error || null,
-    })),
+    parked: parked.map((r) => {
+      const ratification = ratificationStatus(r, state, {
+        boardPath,
+        exists: opts.exists,
+        readText: opts.readText,
+      });
+      return {
+        card: r.card, phase: r.phase, status: 'parked', model_profile: r.model_profile, branch: r.branch,
+        dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
+        parked_at: r.parked_at || null, projection_error: r.projection_error || null,
+        ...(ratification ? { ratification } : {}),
+      };
+    }),
     tracked: tracked.map((r) => ({
       card: r.card, phase: r.phase, status: projectedRecordMapping(r, cardsRoot).status,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null,
@@ -4132,12 +4802,66 @@ function commandStatus(ctx, opts = {}) {
         name: record.card, discarded_at: record.discarded_at || null,
         superseded_by: record.superseded_by || null, reason: record.discard_reason || null,
       })),
+    ratified_recent: Object.values(state.cards || {})
+      .filter((record) => record.ratification_receipt)
+      .sort((a, b) => {
+        const acceptedA = String(a.ratification_receipt.accepted_at || '');
+        const acceptedB = String(b.ratification_receipt.accepted_at || '');
+        const timeA = Date.parse(acceptedA);
+        const timeB = Date.parse(acceptedB);
+        if (Number.isFinite(timeA) && Number.isFinite(timeB) && timeA !== timeB) return timeB - timeA;
+        return acceptedB.localeCompare(acceptedA);
+      })
+      .slice(0, 20)
+      .map((record) => ({
+        card: record.card,
+        authority: record.ratification_receipt.authority,
+        at: record.ratification_receipt.accepted_at,
+        artifact_path: record.ratification_receipt.artifact_path,
+      })),
     tombstone_residue: residue,
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
     cutover: state.cutover || null,
     cutover_history: state.cutover_history || [],
     next, projection_problems: projectionProblems, board_drift: boardDrift, state_path: ctx.statePath,
   };
+}
+
+function ratificationStatus(record, state, deps = {}) {
+  if (!isRatificationEscalation(record, state)) return null;
+  const artifact = ratificationArtifactForCard(record.card, deps.boardPath || BOARD);
+  const exists = deps.exists || fs.existsSync;
+  if (!exists(artifact.absolute)) return {
+    state: 'missing',
+    artifact_path: artifact.relative,
+    error: 'pending ratification artifact is missing',
+  };
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  try {
+    const raw = readText(artifact.absolute);
+    const frontmatterErrors = ratificationFrontmatterErrors(raw, record.card, 'pending');
+    const targetHead = ratificationTargetHead(record);
+    const verdict = targetHead
+      ? consumeRatificationArtifact(
+        raw,
+        artifact.sectionHeading,
+        { artifact_path: artifact.relative },
+        { target_card: record.card, target_head: targetHead, decision: 'accepted' },
+      )
+      : { errors: [{ message: 'parked escalation lacks an exact 40-hex gate HEAD' }] };
+    const errors = [...frontmatterErrors, ...(verdict.errors || [])];
+    return {
+      state: scalarField(raw, 'state') || 'unknown',
+      artifact_path: artifact.relative,
+      ...(errors.length ? { error: errors[0].message } : {}),
+    };
+  } catch (err) {
+    return {
+      state: 'unreadable',
+      artifact_path: artifact.relative,
+      error: err.message,
+    };
+  }
 }
 
 const LOOP_STATION_SCHEMA_VERSION = '1.0.0';
@@ -4202,13 +4926,19 @@ function buildLoopStationPayload({
     status, fidText, releases || recentLoopStationReleases(state), { lastSeen },
   );
   const cards = (state && state.cards) || {};
+  const parkedByCard = new Map((status.parked || []).map((item) => [item.card, item]));
   const needsAll = digest.actionable.map((item) => {
-    const ratification = loopStationRatificationPath(stationPath, item.card, exists);
+    const parked = parkedByCard.get(item.card);
+    const ratification = cards[item.card] && cards[item.card].ratification_receipt
+      ? null
+      : loopStationRatificationPath(stationPath, item.card, exists);
     return {
       card: item.card,
       epic: loopStationEpic(cards[item.card]),
       bucket: item.bucket,
-      why: loopStationWhy(item),
+      why: parked && parked.ratification && parked.ratification.error
+        ? `ratification for ${item.card} is malformed: ${parked.ratification.error}`
+        : loopStationWhy(item),
       ratification,
     };
   });
@@ -4232,6 +4962,7 @@ function buildLoopStationPayload({
   const discards = boundedStationList((digest.since && digest.since.discards) || []);
   const selfRatified = boundedStationList((digest.since && digest.since.self_ratified) || []);
   const cutoverFlips = boundedStationList((digest.since && digest.since.cutover_flips) || []);
+  const ratified = boundedStationList((digest.since && digest.since.ratified) || []);
   const releaseList = boundedStationList(digest.releases || []);
   const residue = boundedStationList(status.tombstone_residue || []);
   const activeStatus = (status.active || [])[0] || null;
@@ -4266,6 +4997,8 @@ function buildLoopStationPayload({
       self_ratified_overflow_count: selfRatified.overflow_count,
       cutover_flips: cutoverFlips.items,
       cutover_flips_overflow_count: cutoverFlips.overflow_count,
+      ratified: ratified.items,
+      ratified_overflow_count: ratified.overflow_count,
     },
     releases_recent: releaseList.items,
     releases_recent_overflow_count: releaseList.overflow_count,
@@ -4314,6 +5047,7 @@ function validateLoopStationPayload(payload) {
     checkBounded(payload.since.discards, payload.since.discards_overflow_count, 'since.discards');
     checkBounded(payload.since.self_ratified, payload.since.self_ratified_overflow_count, 'since.self_ratified');
     checkBounded(payload.since.cutover_flips, payload.since.cutover_flips_overflow_count, 'since.cutover_flips');
+    checkBounded(payload.since.ratified, payload.since.ratified_overflow_count, 'since.ratified');
   }
   if (!payload || !payload.counts || typeof payload.counts !== 'object' || Array.isArray(payload.counts)) {
     errors.push('counts must be an object');
@@ -4339,10 +5073,21 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
   const writeText = deps.writeText || atomicWriteText;
   const now = deps.now || (() => new Date().toISOString());
+  const updatedAt = now();
+  const ratifications = scaffoldPendingRatifications(state, {
+    boardPath,
+    now: () => updatedAt,
+    exists,
+    writeText,
+    ensureDir: deps.ensureDir,
+    uuid: deps.uuid,
+  });
   const status = deps.status || (() => {
     const boardMd = deps.boardMd ?? readText(boardPath);
     return commandStatus(ctx, {
       state, boardMd, boardPath, cardsRoot,
+      exists,
+      readText,
       loadCard: (card) => {
         const target = findCard(cardsRoot, card);
         return target ? { path: target, raw: readText(target) } : null;
@@ -4359,7 +5104,6 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   const lastSeen = Object.prototype.hasOwnProperty.call(deps, 'lastSeen')
     ? deps.lastSeen
     : (markerPath && exists(markerPath) ? readText(markerPath).trim() || null : null);
-  const updatedAt = now();
   const payload = buildLoopStationPayload({
     status, state, fidText, lastSeen, updatedOn, updatedAt, stationPath, exists,
     releases: deps.releases,
@@ -4372,7 +5116,7 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
     else fs.mkdirSync(path.dirname(stationPath), { recursive: true });
     const scaffold = patchFrontmatter(`---\n\n---${LOOP_STATION_BODY}`, fields);
     writeText(stationPath, scaffold);
-    return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: true, no_op: false, path: stationPath, payload };
+    return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: true, no_op: false, path: stationPath, payload, ratifications };
   }
   const raw = readText(stationPath);
   if (!/^---\n[\s\S]*?\n---/.test(raw)) {
@@ -4387,11 +5131,11 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   };
   const stableNext = patchFrontmatter(raw, loopStationFrontmatterFields(stablePayload));
   if (stableNext === raw) {
-    return { action: 'loop-station-projected', updated_on: updatedOn, changed: false, scaffolded: false, no_op: true, path: stationPath, payload: stablePayload };
+    return { action: 'loop-station-projected', updated_on: updatedOn, changed: false, scaffolded: false, no_op: true, path: stationPath, payload: stablePayload, ratifications };
   }
   const next = patchFrontmatter(raw, fields);
   writeText(stationPath, next);
-  return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: false, no_op: false, path: stationPath, payload };
+  return { action: 'loop-station-projected', updated_on: updatedOn, changed: true, scaffolded: false, no_op: false, path: stationPath, payload, ratifications };
 }
 
 async function attemptLoopStationProjection(ctx, state, updatedOn, deps = {}) {
@@ -5488,6 +6232,8 @@ async function main() {
   else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
+  else if (command === 'backfill-ratifications') result = await commandBackfillRatifications(ctx, args);
+  else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
@@ -5504,7 +6250,7 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -5522,6 +6268,11 @@ module.exports = {
   restampContractFrontmatter, canonicalContractNoteFiles,
   contractFrontmatterRestampPlan, validateContractFrontmatterRestampSpec,
   consumeRatificationReceipt, consumeRatificationArtifact,
+  ratificationRoots, ratificationArtifactForCard, ratificationTargetHead,
+  isRatificationEscalation, pendingRatificationMarkdown, scaffoldPendingRatifications,
+  commandBackfillRatifications,
+  validateRatificationArtifactOperand, ratificationFrontmatterErrors, ratificationStatus,
+  ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,

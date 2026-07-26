@@ -48,7 +48,14 @@ function parseSelfRatified(fidText) {
 // same-day amendments always show — over-inclusion is the safe side.
 function sinceLastLook(status, fidText, lastSeen) {
   const seen = lastSeen || null;
-  const afterTs = (ts) => !seen || String(ts || '') > seen;
+  const seenMs = seen ? Date.parse(seen) : NaN;
+  const afterTs = (ts) => {
+    if (!seen) return true;
+    const candidate = String(ts || '');
+    const candidateMs = Date.parse(candidate);
+    if (Number.isFinite(seenMs) && Number.isFinite(candidateMs)) return candidateMs > seenMs;
+    return candidate > seen;
+  };
   const seenDay = seen ? String(seen).slice(0, 10) : null;
   return {
     last_seen: seen,
@@ -61,12 +68,21 @@ function sinceLastLook(status, fidText, lastSeen) {
       })),
     cutover_flips: (status.cutover_history || []).filter((c) => afterTs(c.at)),
     self_ratified: parseSelfRatified(fidText).filter((a) => !seenDay || a.date >= seenDay),
+    ratified: (status.ratified_recent || [])
+      .filter((receipt) => afterTs(receipt.at))
+      .map((receipt) => ({
+        card: receipt.card,
+        authority: receipt.authority,
+        at: receipt.at,
+        artifact_path: receipt.artifact_path || null,
+      })),
   };
 }
 
 function sinceCount(since) {
   if (!since) return 0;
-  return since.discards.length + since.cutover_flips.length + since.self_ratified.length;
+  return since.discards.length + since.cutover_flips.length
+    + since.self_ratified.length + since.ratified.length;
 }
 
 function buildDigest(status, fidText, releases, opts) {
