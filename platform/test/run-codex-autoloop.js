@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -36,6 +37,7 @@ const {
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
+function testSha256(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
 
 function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
   const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
@@ -4476,6 +4478,8 @@ eq(projectionMetadataProblem({
 function parkedRebindHarness(id = 'happy') {
   const root = path.join(reconcileRoot, `parked-rebind-${id}`);
   fs.mkdirSync(root, { recursive: true });
+  const boardPath = path.join(root, 'board-sentinel.md');
+  fs.writeFileSync(boardPath, '## In Progress\n- [ ] parked authority sentinel\n');
   const state = emptyState();
   const actualEpics = [
     'Core Styling Adoption', 'Harness and Docs Hygiene',
@@ -4540,7 +4544,7 @@ function parkedRebindHarness(id = 'happy') {
     json: true,
   };
   return {
-    root, state, ctx, deps, reason, dryRunArgs, applyArgs,
+    root, boardPath, state, ctx, deps, reason, dryRunArgs, applyArgs,
     setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
     counts: () => ({ ledgerWrites, cardWrites, barrierCalls, locks: [...locks] }),
     failBarrier: (message) => { barrierFailure = message; },
@@ -4549,6 +4553,12 @@ function parkedRebindHarness(id = 'happy') {
 }
 
 const parkedRebind = parkedRebindHarness();
+const parkedLedgerBefore = deepCopy(parkedRebind.state.cards);
+const parkedBoardBefore = fs.readFileSync(parkedRebind.boardPath, 'utf8');
+const parkedCardHashesBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+}));
 const parkedAuthorityBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
   const record = parkedRebind.state.cards[name];
   const raw = fs.readFileSync(record.card_path, 'utf8');
@@ -4590,6 +4600,26 @@ for (const name of PARKED_METADATA_REBIND_CARDS) {
     `BGD-PARKED-REBIND-PRESERVES-AUTHORITY clears ${name}`);
   eq(record.parked_metadata_rebindings.length, 1, `parked rebind journals one audit for ${name}`);
 }
+const parkedLedgerAfterNormalized = deepCopy(parkedRebind.state.cards);
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  parkedLedgerAfterNormalized[name].delivery_contract.epic =
+    parkedLedgerBefore[name].delivery_contract.epic;
+  if (Object.prototype.hasOwnProperty.call(parkedLedgerBefore[name], 'parked_metadata_rebindings')) {
+    parkedLedgerAfterNormalized[name].parked_metadata_rebindings =
+      deepCopy(parkedLedgerBefore[name].parked_metadata_rebindings);
+  } else {
+    delete parkedLedgerAfterNormalized[name].parked_metadata_rebindings;
+  }
+}
+eq(parkedLedgerAfterNormalized, parkedLedgerBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every ledger and control field except intended epic plus audit');
+eq(fs.readFileSync(parkedRebind.boardPath, 'utf8'), parkedBoardBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves board bytes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+})), parkedCardHashesBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every card byte hash');
 const parkedRebindCountsAfterApply = parkedRebind.counts();
 const parkedRebindReplay = await commandReconcileMetadata(
   parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
@@ -4656,6 +4686,29 @@ eq(parkedDurabilityReplay.counts().barrierCalls, 2,
 eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
   'GA-OPS14A-DURABILITY-REPLAY-GAP recovery performs zero second ledger writes');
 
+const mixedStateRebind = parkedRebindHarness('mixed-ledger-state');
+const mixedStatePlan = await commandReconcileMetadata(
+  mixedStateRebind.ctx, mixedStateRebind.dryRunArgs, mixedStateRebind.deps,
+);
+mixedStateRebind.setSpec(mixedStatePlan.spec);
+mixedStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic =
+  mixedStatePlan.spec.cards[0].intended_ledger_epic;
+const mixedStateBefore = deepCopy(mixedStateRebind.state.cards);
+const mixedStateBoardBefore = fs.readFileSync(mixedStateRebind.boardPath, 'utf8');
+await assert.rejects(
+  () => commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps),
+  /mixed third state; zero writes/,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT refuses one intended plus seven expected ledger epics',
+); count++;
+eq(mixedStateRebind.counts().ledgerWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero ledger writes');
+eq(mixedStateRebind.counts().cardWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero card writes');
+eq(mixedStateRebind.state.cards, mixedStateBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves every record unchanged');
+eq(fs.readFileSync(mixedStateRebind.boardPath, 'utf8'), mixedStateBoardBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves board bytes unchanged');
+
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`phase-${phase}`);
   const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -4711,6 +4764,25 @@ for (const shape of ['missing', 'extra']) {
   await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
     /does not exactly match/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${shape} target set before writes`); count++;
   eq(refusal.counts().ledgerWrites, 0, `${shape} target-set refusal performs zero ledger writes`);
+}
+
+// GA-OPS14A2-CLI-ROUTING-UNCOVERED: real parser + main dispatch reach the parked-rebind route.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [
+      coordinatorCli,
+      'reconcile-metadata',
+      '--parked-rebind',
+      '--dry-run',
+      '--reason',
+      'side-effect-free routing probe',
+    ], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /--parked-rebind requires literal --parked-rebind and --json/.test(String(cliError.stderr)),
+    'GA-OPS14A2-CLI-ROUTING-UNCOVERED parser and main dispatch reach the parked-rebind-specific pre-read refusal');
 }
 // --- BGR redesign: discarded terminal phase with tombstones ---
 
