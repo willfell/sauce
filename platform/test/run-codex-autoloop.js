@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -19,6 +20,7 @@ const {
   commandStatus, commandStatusLocked, commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
+  PARKED_METADATA_REBIND_CARDS,
   consumeRatificationReceipt, consumeRatificationArtifact,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
@@ -35,6 +37,7 @@ const {
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
+function testSha256(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
 
 function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
   const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
@@ -4470,6 +4473,679 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+
+// BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
+async function captureFsMutationAttempts(run) {
+  const methods = ['writeFileSync', 'appendFileSync', 'renameSync', 'unlinkSync', 'rmSync'];
+  const originals = Object.fromEntries(methods.map((method) => [method, fs[method]]));
+  const calls = [];
+  for (const method of methods) {
+    fs[method] = (...args) => {
+      calls.push({
+        method,
+        path: args[0] == null ? null : String(args[0]),
+        target: args[1] == null || method !== 'renameSync' ? null : String(args[1]),
+      });
+      return undefined;
+    };
+  }
+  let result = null;
+  let error = null;
+  try {
+    try { result = await run(); }
+    catch (err) { error = err; }
+  } finally {
+    for (const method of methods) fs[method] = originals[method];
+  }
+  return { result, error, calls };
+}
+
+function parkedRebindHarness(id = 'happy') {
+  const root = path.join(reconcileRoot, `parked-rebind-${id}`);
+  fs.mkdirSync(root, { recursive: true });
+  const boardPath = path.join(root, 'board-sentinel.md');
+  fs.writeFileSync(boardPath, '## In Progress\n- [ ] parked authority sentinel\n');
+  const state = emptyState();
+  const actualEpics = [
+    'Core Styling Adoption', 'Harness and Docs Hygiene',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Feature Polish', 'Feature Polish',
+  ];
+  for (let index = 0; index < PARKED_METADATA_REBIND_CARDS.length; index++) {
+    const name = PARKED_METADATA_REBIND_CARDS[index];
+    const cardPath = path.join(root, `${name}.md`);
+    const raw = card({ name, deps: ['Satisfied dependency'] })
+      .replace('---\n', '---\nkanban_column: In Progress\nresume_condition: \"wait for bounded authority\"\n')
+      .replace('status: planning', 'status: parked')
+      .replace('epic: "[[Test epic]]"', `epic: "[[${actualEpics[index]}]]"`);
+    fs.writeFileSync(cardPath, raw);
+    const projected = prepareDeliveryCard(raw, name).card;
+    state.cards[name] = {
+      card: name, phase: 'parked', card_path: cardPath,
+      delivery_contract: { ...projected, status: 'planning', epic: '[[Priorities for GA]]' },
+      delivery_contract_version: delivery.CONTRACT_VERSION,
+      dependencies: projected.depends_on, touch_zones: projected.touch_zones,
+      deploy_subscriptions: projected.deploy_subscriptions, batch_policy: projected.batch_policy,
+      resume_condition: 'wait for bounded authority',
+      head_sha: 'a'.repeat(40), branch: `preserved-${index}`, worktree: `/preserved-${index}`,
+      gate_receipt: { fixture: `gate-${index}` }, reviews: { fixture: `reviews-${index}` },
+      parked_metadata_rebindings: [{
+        request: { prior_receipt: name, index },
+        spec: { prior_spec: name, index },
+        reconciled_at: `2026-07-24T00:00:${String(index).padStart(2, '0')}.000Z`,
+      }],
+    };
+  }
+  let ledgerWrites = 0;
+  let cardWrites = 0;
+  let barrierCalls = 0;
+  let barrierFailure = null;
+  const locks = [];
+  const stateDir = path.join(root, '.state');
+  const ctx = { root, stateDir, statePath: path.join(stateDir, 'state.json'), boardPath };
+  let specRaw = '';
+  const deps = {
+    readState: () => state,
+    writeState: () => { ledgerWrites++; },
+    withLock: async (_ctx, name, fn) => { locks.push(name); return fn(); },
+    atomicWriteText: (target, raw) => {
+      cardWrites++;
+      fs.writeFileSync(target, raw);
+    },
+    durablePathBarrier: () => {
+      barrierCalls++;
+      if (barrierFailure) throw new Error(barrierFailure);
+    },
+    readSpec: () => specRaw,
+    cardsRoot: root,
+    boardPath,
+    now: () => '2026-07-25T23:30:00.000Z',
+  };
+  const reason = 'rebind the exact eight canonical epic migrations';
+  const dryRunArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    'dry-run': true,
+    reason,
+    json: true,
+  };
+  const applyArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    apply: true,
+    reason,
+    spec: 'exact-eight.json',
+    json: true,
+  };
+  return {
+    root, boardPath, state, ctx, deps, reason, dryRunArgs, applyArgs,
+    setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    setSpecRaw: (raw) => { specRaw = String(raw); },
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls, locks: [...locks] }),
+    failBarrier: (message) => { barrierFailure = message; },
+    clearBarrierFailure: () => { barrierFailure = null; },
+  };
+}
+
+function parkedRefusalSnapshot(harness) {
+  return {
+    state: deepCopy(harness.state),
+    board_sha256: testSha256(fs.readFileSync(harness.boardPath, 'utf8')),
+    card_sha256: Object.fromEntries(Object.entries(harness.state.cards)
+      .filter(([, record]) => record && record.card_path && fs.existsSync(record.card_path))
+      .map(([name, record]) => [name, testSha256(fs.readFileSync(record.card_path, 'utf8'))])),
+    ledger_writes: harness.counts().ledgerWrites,
+    card_writes: harness.counts().cardWrites,
+  };
+}
+
+async function assertParkedRefusalNoMutation(harness, args, pattern, label) {
+  const before = parkedRefusalSnapshot(harness);
+  const probe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+    harness.ctx, args, harness.deps,
+  ));
+  ok(probe.error && pattern.test(probe.error.message),
+    `${label} reaches its exact refusal`);
+  eq(probe.calls, [], `${label} attempts zero filesystem or board mutations`);
+  eq(harness.counts().ledgerWrites, before.ledger_writes,
+    `${label} performs zero ledger writes`);
+  eq(harness.counts().cardWrites, before.card_writes,
+    `${label} performs zero card or board writer calls`);
+  eq(harness.state, before.state, `${label} leaves every ledger/control record exact`);
+  eq(testSha256(fs.readFileSync(harness.boardPath, 'utf8')), before.board_sha256,
+    `${label} preserves the relevant board hash`);
+  eq(Object.fromEntries(Object.entries(harness.state.cards)
+    .filter(([, record]) => record && record.card_path && fs.existsSync(record.card_path))
+    .map(([name, record]) => [name, testSha256(fs.readFileSync(record.card_path, 'utf8'))])),
+  before.card_sha256, `${label} preserves every target card hash`);
+}
+
+const parkedRebind = parkedRebindHarness();
+const parkedLedgerBefore = deepCopy(parkedRebind.state.cards);
+const parkedBoardBefore = fs.readFileSync(parkedRebind.boardPath, 'utf8');
+const parkedCardHashesBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+}));
+const parkedAuthorityBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const record = parkedRebind.state.cards[name];
+  const raw = fs.readFileSync(record.card_path, 'utf8');
+  return [name, {
+    raw, phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: deepCopy(record.gate_receipt), reviews: deepCopy(record.reviews),
+    dependencies: deepCopy(record.dependencies),
+  }];
+}));
+const parkedRebindPlan = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.dryRunArgs, parkedRebind.deps,
+);
+eq(parkedRebindPlan.action, 'rebind-parked-metadata-plan', 'BGD-PARKED-REBIND-EXACT-EIGHT exposes a dry-run first');
+eq(parkedRebindPlan.spec.cards.map((entry) => entry.card), PARKED_METADATA_REBIND_CARDS,
+  'BGD-PARKED-REBIND-EXACT-EIGHT binds the complete canonical target set in order');
+ok(parkedRebindPlan.spec.cards.every((entry) => entry.expected_card_sha256 === entry.intended_next_sha256),
+  'BGD-PARKED-REBIND-PRESERVES-AUTHORITY binds byte-identical card preimage and intended hashes');
+eq(parkedRebind.counts().ledgerWrites, 0, 'parked rebind dry-run performs zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'parked rebind dry-run performs zero card writes');
+parkedRebind.setSpec(parkedRebindPlan.spec);
+const parkedRebindApplied = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindApplied.action, 'rebound-parked-metadata', 'bounded exact-eight parked rebind applies');
+eq(parkedRebindApplied.no_op, false, 'first exact-eight parked rebind records a real ledger repair');
+eq(parkedRebind.counts().ledgerWrites, 1, 'exact-eight parked rebind is one atomic ledger write');
+eq(parkedRebind.counts().cardWrites, 0, 'exact-eight parked rebind never rewrites a card');
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  const record = parkedRebind.state.cards[name];
+  const before = parkedAuthorityBefore[name];
+  eq({
+    raw: fs.readFileSync(record.card_path, 'utf8'),
+    phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: record.gate_receipt, reviews: record.reviews, dependencies: record.dependencies,
+  }, before, `BGD-PARKED-REBIND-PRESERVES-AUTHORITY preserves ${name}`);
+  eq(projectionMetadataProblem(record, parkedRebind.root), null,
+    `BGD-PARKED-REBIND-PRESERVES-AUTHORITY clears ${name}`);
+  eq(record.parked_metadata_rebindings, [
+    ...parkedLedgerBefore[name].parked_metadata_rebindings,
+    {
+      request: parkedRebindApplied.request,
+      spec: parkedRebindApplied.spec,
+      reconciled_at: parkedRebindApplied.reconciled_at,
+    },
+  ], `GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND preserves ${name}'s exact audit prefix and appends one receipt`);
+}
+const parkedLedgerAfterNormalized = deepCopy(parkedRebind.state.cards);
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  parkedLedgerAfterNormalized[name].delivery_contract.epic =
+    parkedLedgerBefore[name].delivery_contract.epic;
+  if (Object.prototype.hasOwnProperty.call(parkedLedgerBefore[name], 'parked_metadata_rebindings')) {
+    parkedLedgerAfterNormalized[name].parked_metadata_rebindings =
+      deepCopy(parkedLedgerBefore[name].parked_metadata_rebindings);
+  } else {
+    delete parkedLedgerAfterNormalized[name].parked_metadata_rebindings;
+  }
+}
+eq(parkedLedgerAfterNormalized, parkedLedgerBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every ledger and control field except intended epic plus audit');
+eq(fs.readFileSync(parkedRebind.boardPath, 'utf8'), parkedBoardBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves board bytes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+})), parkedCardHashesBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every card byte hash');
+const parkedRebindCountsAfterApply = parkedRebind.counts();
+const parkedAuditsAfterApply = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  deepCopy(parkedRebind.state.cards[name].parked_metadata_rebindings),
+]));
+const parkedRebindReplay = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindReplay.no_op, true, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS returns no_op true');
+eq(parkedRebind.counts(), {
+  ...parkedRebindCountsAfterApply,
+  barrierCalls: parkedRebindCountsAfterApply.barrierCalls + 1,
+  locks: [...parkedRebindCountsAfterApply.locks, 'parked-metadata-rebind'],
+}, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS performs zero second ledger or card writes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  parkedRebind.state.cards[name].parked_metadata_rebindings,
+])), parkedAuditsAfterApply,
+  'GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND literal replay leaves every prior-plus-appended audit chain exact');
+
+// GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT: cross the real readState/writeState seam
+// and compare the complete serialized ledger envelope, then prove literal replay
+// is byte-identical. Only the eight epic values and eight appended audits may move.
+const realPersistenceRebind = parkedRebindHarness('real-persistence-envelope');
+realPersistenceRebind.state.updated_at = '2026-07-20T12:34:56.789Z';
+realPersistenceRebind.state.top_level_authority_sentinel = {
+  digest_marker: 'preserve-exactly',
+  cutover: { enabled: true, streak: 3 },
+  receipts: ['alpha', 'beta'],
+};
+realPersistenceRebind.state.cards['Unrelated ledger authority sentinel'] = {
+  card: 'Unrelated ledger authority sentinel',
+  phase: 'completed',
+  delivery_contract: {
+    epic: '[[Unrelated Epic]]',
+    status: 'completed',
+  },
+  nested_authority: {
+    deployment_receipts: [{ vault: 'sentinel', ok: true }],
+    prior_reviews: { correctness: 'preserve-exactly' },
+  },
+};
+atomicWriteJson(realPersistenceRebind.ctx.statePath, realPersistenceRebind.state);
+const realPersistenceBefore = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceDeps = { ...realPersistenceRebind.deps };
+delete realPersistenceDeps.readState;
+delete realPersistenceDeps.writeState;
+const realPersistencePlan = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.dryRunArgs,
+  realPersistenceDeps,
+);
+realPersistenceRebind.setSpec(realPersistencePlan.spec);
+const realPersistenceApplied = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+const realPersistenceAfter = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceExpected = deepCopy(realPersistenceBefore);
+for (const entry of realPersistencePlan.spec.cards) {
+  const record = realPersistenceExpected.cards[entry.card];
+  record.delivery_contract.epic = entry.intended_ledger_epic;
+  record.parked_metadata_rebindings.push({
+    request: realPersistenceApplied.request,
+    spec: realPersistenceApplied.spec,
+    reconciled_at: realPersistenceApplied.reconciled_at,
+  });
+}
+eq(realPersistenceAfter.cards['Unrelated ledger authority sentinel'],
+  realPersistenceBefore.cards['Unrelated ledger authority sentinel'],
+  'GA-OPS14A4-NON-TARGET-CARD-ENVELOPE-UNBOUND preserves an unrelated complete ledger record through real persistence');
+eq(realPersistenceAfter, realPersistenceExpected,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
+eq(realPersistenceAfter.updated_at, realPersistenceBefore.updated_at,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT preserves the exact top-level updated_at authority');
+const realPersistenceHashAfterApply = testSha256(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceReplay = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+eq(realPersistenceReplay.no_op, true,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay is a no-op through real persistence');
+eq(testSha256(fs.readFileSync(realPersistenceRebind.ctx.statePath, 'utf8')),
+  realPersistenceHashAfterApply,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay preserves the complete serialized ledger byte hash');
+
+for (const altered of [
+  { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
+  { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
+  { ...parkedRebind.applyArgs, json: false },
+  { ...parkedRebind.applyArgs, 'dry-run': 'false' },
+]) {
+  await assert.rejects(() => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|requires|reason|substituted/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
+}
+for (const [mutation, altered] of [
+  ['added', { ...parkedRebind.applyArgs, _: ['reconcile-metadata', 'extra'] }],
+  ['removed', { ...parkedRebind.applyArgs, _: [] }],
+  ['changed', { ...parkedRebind.applyArgs, _: ['reconcile-metadata-substituted'] }],
+]) {
+  await assert.rejects(
+    () => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|substituted/,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED refuses ${mutation} positional operands`,
+  ); count++;
+  eq(parkedRebind.counts().ledgerWrites, 1,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero ledger writes`);
+  eq(parkedRebind.counts().cardWrites, 0,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero card writes`);
+}
+const substitutedParkedSpec = deepCopy(parkedRebindPlan.spec);
+substitutedParkedSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
+parkedRebind.setSpec(substitutedParkedSpec);
+await assert.rejects(() => commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+), /invalid exact-eight entry/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted CAS hash'); count++;
+parkedRebind.setSpec(parkedRebindPlan.spec);
+eq(parkedRebind.counts().ledgerWrites, 1, 'substituted parked-rebind operands perform zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'substituted parked-rebind operands perform zero card writes');
+
+const parkedDurabilityReplay = parkedRebindHarness('durability-replay');
+const parkedDurabilityPlan = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.dryRunArgs, parkedDurabilityReplay.deps,
+);
+parkedDurabilityReplay.setSpec(parkedDurabilityPlan.spec);
+parkedDurabilityReplay.failBarrier('injected post-ledger durability failure');
+await assert.rejects(() => commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+), /post-ledger durability failure/, 'GA-OPS14A-DURABILITY-REPLAY-GAP propagates the first post-ledger barrier failure'); count++;
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP leaves exactly one visible atomic ledger write');
+parkedDurabilityReplay.clearBarrierFailure();
+const parkedDurabilityRecovered = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+);
+eq(parkedDurabilityRecovered.no_op, true,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP exact retry recovers through the replay path');
+eq(parkedDurabilityReplay.counts().barrierCalls, 2,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP replay re-establishes the state durability barrier');
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP recovery performs zero second ledger writes');
+
+const mixedStateRebind = parkedRebindHarness('mixed-ledger-state');
+const mixedStatePlan = await commandReconcileMetadata(
+  mixedStateRebind.ctx, mixedStateRebind.dryRunArgs, mixedStateRebind.deps,
+);
+mixedStateRebind.setSpec(mixedStatePlan.spec);
+mixedStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic =
+  mixedStatePlan.spec.cards[0].intended_ledger_epic;
+const mixedStateBefore = deepCopy(mixedStateRebind.state.cards);
+const mixedStateBoardBefore = fs.readFileSync(mixedStateRebind.boardPath, 'utf8');
+await assert.rejects(
+  () => commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps),
+  /mixed third state; zero writes/,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT refuses one intended plus seven expected ledger epics',
+); count++;
+eq(mixedStateRebind.counts().ledgerWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero ledger writes');
+eq(mixedStateRebind.counts().cardWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero card writes');
+eq(mixedStateRebind.state.cards, mixedStateBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves every record unchanged');
+eq(fs.readFileSync(mixedStateRebind.boardPath, 'utf8'), mixedStateBoardBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves board bytes unchanged');
+
+for (const phase of ['implementing', 'deployed']) {
+  const refusal = parkedRebindHarness(`phase-${phase}`);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  refusal.setSpec(refusalPlan.spec);
+  refusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].phase = phase;
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /missing, active, completed/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${phase} target before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${phase} parked-rebind refusal performs zero ledger writes`);
+}
+const missingFindingRebind = parkedRebindHarness('missing-finding');
+const missingFindingRecord = missingFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+missingFindingRecord.delivery_contract.epic = prepareDeliveryCard(
+  fs.readFileSync(missingFindingRecord.card_path, 'utf8'), missingFindingRecord.card,
+).card.epic;
+await assert.rejects(() => commandReconcileMetadata(
+  missingFindingRebind.ctx, missingFindingRebind.dryRunArgs, missingFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a missing current finding before writes'); count++;
+eq(missingFindingRebind.counts().ledgerWrites, 0, 'missing current finding refusal performs zero ledger writes');
+const extraFindingRebind = parkedRebindHarness('extra-finding');
+const extraFindingName = 'Unexpected ninth parked metadata finding';
+const extraFindingSource = extraFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+const extraFindingPath = path.join(extraFindingRebind.root, `${extraFindingName}.md`);
+const extraFindingRaw = fs.readFileSync(extraFindingSource.card_path, 'utf8')
+  .replaceAll(PARKED_METADATA_REBIND_CARDS[0], extraFindingName);
+fs.writeFileSync(extraFindingPath, extraFindingRaw);
+extraFindingRebind.state.cards[extraFindingName] = {
+  ...deepCopy(extraFindingSource),
+  card: extraFindingName,
+  card_path: extraFindingPath,
+  delivery_contract: {
+    ...deepCopy(extraFindingSource.delivery_contract),
+    card: extraFindingName,
+  },
+};
+await assert.rejects(() => commandReconcileMetadata(
+  extraFindingRebind.ctx, extraFindingRebind.dryRunArgs, extraFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses an extra current finding before writes'); count++;
+eq(extraFindingRebind.counts().ledgerWrites, 0, 'extra current finding refusal performs zero ledger writes');
+const thirdStateRebind = parkedRebindHarness('third-card-state');
+const thirdStatePlan = await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.dryRunArgs, thirdStateRebind.deps);
+thirdStateRebind.setSpec(thirdStatePlan.spec);
+fs.appendFileSync(thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path, '\nthird-state');
+await assert.rejects(() => commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps),
+  /third card hash/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a third card state before writes'); count++;
+eq(thirdStateRebind.counts().ledgerWrites, 0, 'third-state parked-rebind refusal performs zero ledger writes');
+for (const shape of ['missing', 'extra']) {
+  const refusal = parkedRebindHarness(shape);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  const cards = shape === 'missing'
+    ? refusalPlan.spec.cards.slice(0, -1)
+    : [...refusalPlan.spec.cards, deepCopy(refusalPlan.spec.cards[0])];
+  refusal.setSpec({ ...refusalPlan.spec, cards });
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /does not exactly match/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${shape} target set before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${shape} target-set refusal performs zero ledger writes`);
+}
+
+// GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE: every refusal class crosses the
+// same filesystem/state/card/board zero-mutation oracle.
+for (const [label, altered, pattern] of [
+  ['unsupported named operand',
+    { ...parkedRebind.applyArgs, 'unknown-named-operand': true },
+    /unsupported --unknown-named-operand/],
+  ['substituted reason',
+    { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
+    /literal/],
+  ['substituted spec path',
+    { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
+    /literal/],
+  ['substituted JSON operand',
+    { ...parkedRebind.applyArgs, json: false },
+    /requires literal/],
+  ['opposite-mode operand',
+    { ...parkedRebind.applyArgs, 'dry-run': 'false' },
+    /opposite-mode operand/],
+  ['added positional operand',
+    { ...parkedRebind.applyArgs, _: ['reconcile-metadata', 'extra'] },
+    /literal/],
+  ['removed positional operand',
+    { ...parkedRebind.applyArgs, _: [] },
+    /literal/],
+  ['changed positional operand',
+    { ...parkedRebind.applyArgs, _: ['reconcile-metadata-substituted'] },
+    /literal/],
+]) {
+  await assertParkedRefusalNoMutation(
+    parkedRebind,
+    altered,
+    pattern,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${label}`,
+  );
+}
+const refusalCasSpec = deepCopy(parkedRebindPlan.spec);
+refusalCasSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
+parkedRebind.setSpec(refusalCasSpec);
+await assertParkedRefusalNoMutation(
+  parkedRebind,
+  parkedRebind.applyArgs,
+  /invalid exact-eight entry/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE substituted CAS',
+);
+parkedRebind.setSpec(parkedRebindPlan.spec);
+await assertParkedRefusalNoMutation(
+  missingFindingRebind,
+  missingFindingRebind.dryRunArgs,
+  /complete exact-eight status finding set/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE missing current finding',
+);
+await assertParkedRefusalNoMutation(
+  extraFindingRebind,
+  extraFindingRebind.dryRunArgs,
+  /complete exact-eight status finding set/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE extra current finding',
+);
+await assertParkedRefusalNoMutation(
+  mixedStateRebind,
+  mixedStateRebind.applyArgs,
+  /mixed third state/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE mixed ledger state',
+);
+await assertParkedRefusalNoMutation(
+  thirdStateRebind,
+  thirdStateRebind.applyArgs,
+  /third card hash/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third card state',
+);
+const malformedJsonRefusal = parkedRebindHarness('write-seam-malformed-json');
+await commandReconcileMetadata(
+  malformedJsonRefusal.ctx,
+  malformedJsonRefusal.dryRunArgs,
+  malformedJsonRefusal.deps,
+);
+malformedJsonRefusal.setSpecRaw('{"schema_version":1,"reason":');
+await assertParkedRefusalNoMutation(
+  malformedJsonRefusal,
+  malformedJsonRefusal.applyArgs,
+  /spec is malformed JSON/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP malformed spec JSON',
+);
+const malformedProjectedRefusal = parkedRebindHarness('write-seam-malformed-projected-target');
+const malformedProjectedPlan = await commandReconcileMetadata(
+  malformedProjectedRefusal.ctx,
+  malformedProjectedRefusal.dryRunArgs,
+  malformedProjectedRefusal.deps,
+);
+const malformedProjectedPath =
+  malformedProjectedRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+const malformedProjectedRaw = 'malformed projected target with no Delivery contract\n';
+fs.writeFileSync(malformedProjectedPath, malformedProjectedRaw);
+const malformedProjectedSpec = deepCopy(malformedProjectedPlan.spec);
+malformedProjectedSpec.cards[0].expected_card_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedSpec.cards[0].intended_next_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedRefusal.setSpec(malformedProjectedSpec);
+await assertParkedRefusalNoMutation(
+  malformedProjectedRefusal,
+  malformedProjectedRefusal.applyArgs,
+  /third projected epic state/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP hash-matched malformed projected target',
+);
+for (const phase of ['implementing', 'deployed']) {
+  const refusal = parkedRebindHarness(`write-seam-phase-${phase}`);
+  const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  refusal.setSpec(plan.spec);
+  refusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].phase = phase;
+  await assertParkedRefusalNoMutation(
+    refusal,
+    refusal.applyArgs,
+    /missing, active, completed/,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${phase} target`,
+  );
+}
+const missingRecordRefusal = parkedRebindHarness('write-seam-missing-record');
+const missingRecordPlan = await commandReconcileMetadata(
+  missingRecordRefusal.ctx, missingRecordRefusal.dryRunArgs, missingRecordRefusal.deps,
+);
+missingRecordRefusal.setSpec(missingRecordPlan.spec);
+delete missingRecordRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+await assertParkedRefusalNoMutation(
+  missingRecordRefusal,
+  missingRecordRefusal.applyArgs,
+  /missing, active, completed/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE missing target record',
+);
+const thirdLedgerRefusal = parkedRebindHarness('write-seam-third-ledger');
+const thirdLedgerPlan = await commandReconcileMetadata(
+  thirdLedgerRefusal.ctx, thirdLedgerRefusal.dryRunArgs, thirdLedgerRefusal.deps,
+);
+thirdLedgerRefusal.setSpec(thirdLedgerPlan.spec);
+thirdLedgerRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic = '[[Third epic]]';
+await assertParkedRefusalNoMutation(
+  thirdLedgerRefusal,
+  thirdLedgerRefusal.applyArgs,
+  /third ledger epic state/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third ledger state',
+);
+for (const shape of ['missing', 'extra']) {
+  const refusal = parkedRebindHarness(`write-seam-spec-${shape}`);
+  const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  const cards = shape === 'missing'
+    ? plan.spec.cards.slice(0, -1)
+    : [...plan.spec.cards, deepCopy(plan.spec.cards[0])];
+  refusal.setSpec({ ...plan.spec, cards });
+  await assertParkedRefusalNoMutation(
+    refusal,
+    refusal.applyArgs,
+    /does not exactly match/,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${shape} spec target`,
+  );
+}
+
+// GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED: instrument every filesystem
+// mutation seam while apply, replay, and refusal execute, then prove the probe
+// itself catches an injected board write without allowing it to reach disk.
+const boardSeamRebind = parkedRebindHarness('board-write-seam');
+const boardSeamPlan = await commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.dryRunArgs, boardSeamRebind.deps,
+);
+boardSeamRebind.setSpec(boardSeamPlan.spec);
+const boardSeamHash = testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8'));
+const boardApplyProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardApplyProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply completes under the filesystem mutation probe');
+eq(boardApplyProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply preserves the relevant board hash');
+const boardReplayProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardReplayProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay completes under the mutation probe');
+eq(boardReplayProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay preserves the relevant board hash');
+const boardRefusalProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx,
+  { ...boardSeamRebind.applyArgs, reason: `${boardSeamRebind.reason} substituted` },
+  boardSeamRebind.deps,
+));
+ok(boardRefusalProbe.error && /literal/.test(boardRefusalProbe.error.message),
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED substituted request reaches the expected refusal');
+eq(boardRefusalProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal preserves the relevant board hash');
+const injectedBoardMutation = await captureFsMutationAttempts(async () => {
+  fs.writeFileSync(boardSeamRebind.boardPath, 'injected board mutation');
+});
+eq(injectedBoardMutation.calls, [{
+  method: 'writeFileSync',
+  path: boardSeamRebind.boardPath,
+  target: null,
+}], 'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe turns red on a targeted board-write mutation');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe blocks the injected mutation from disk');
+
+// GA-OPS14A2-CLI-ROUTING-UNCOVERED: real parser + main dispatch reach the parked-rebind route.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [
+      coordinatorCli,
+      'reconcile-metadata',
+      '--parked-rebind',
+      '--dry-run',
+      '--reason',
+      'side-effect-free routing probe',
+    ], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /--parked-rebind requires literal --parked-rebind and --json/.test(String(cliError.stderr)),
+    'GA-OPS14A2-CLI-ROUTING-UNCOVERED parser and main dispatch reach the parked-rebind-specific pre-read refusal');
+}
 // --- BGR redesign: discarded terminal phase with tombstones ---
 
 // removeBoardCard: exact mirror of moveBoardCard's location grammar.
