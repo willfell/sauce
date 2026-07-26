@@ -83,6 +83,13 @@ function candidateErrors(source) {
   if (!candidateStep.includes('node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT"')) {
     errors.push("fresh-vault audit does not execute checked-out source");
   }
+  if (
+    candidateStep.includes('if node "$SAUCE_CANDIDATE_CLI" audit') ||
+    candidateStep.includes('node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT" ||') ||
+    candidateStep.includes("audit skipped or non-fatal")
+  ) {
+    errors.push("candidate audit failure is masked instead of failing required preflight");
+  }
   if (/\bbrew (?:tap|install|upgrade)\b/.test(body)) {
     errors.push("required preflight still depends on a released formula");
   }
@@ -126,7 +133,7 @@ function replaceOnce(source, from, to) {
   return source.slice(0, at) + to + source.slice(at + from.length);
 }
 
-console.log("\n--- GA-OPS12b2 candidate-source macOS premerge validation ---");
+console.log("\n--- GA-OPS12b3 failure-loud candidate-source macOS premerge validation ---");
 
 const workflow = fs.readFileSync(CI_PATH, "utf8");
 const candidateBaseline = candidateErrors(workflow);
@@ -183,6 +190,20 @@ if (candidateBaseline.length === 0 && releasedBaseline.length === 0) {
   check(
     candidateErrors(ambientBootstrap).length > 0,
     "ambient released sauce cannot replace candidate bootstrap"
+  );
+
+  const maskedAudit = replaceOnce(
+    workflow,
+    '          node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT"',
+    '          if node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT"; then\n' +
+      '            echo "audit ok"\n' +
+      '          else\n' +
+      '            echo "audit skipped or non-fatal"\n' +
+      '          fi'
+  );
+  check(
+    candidateErrors(maskedAudit).length > 0,
+    "GA-OPS12B2-CANDIDATE-AUDIT-FAILURE-LOUD rejects masked nonzero audit exits"
   );
 
   const ubuntuOnlyCandidate = replaceOnce(

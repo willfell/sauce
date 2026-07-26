@@ -40,11 +40,8 @@ jobs:
           mkdir -p "$TMP_VAULT"
           node "$SAUCE_CANDIDATE_CLI" bootstrap --vault "$TMP_VAULT" --non-interactive --no-register
           ls -la "$TMP_VAULT"
-          if node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT" 2>/dev/null; then
-            echo "audit ok"
-          else
-            echo "audit skipped or non-fatal — bootstrap-pass is the gate"
-          fi
+          node "$SAUCE_CANDIDATE_CLI" audit --vault "$TMP_VAULT"
+          echo "audit ok"
 
       - name: Cleanup
         if: always()
