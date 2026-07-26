@@ -716,12 +716,18 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
     const sibling = sameParentConflict(record.parent_card, active, record.card);
     const conflict = conflictsWithActive({ touchZones: record.touch_zones || [] }, active);
     const boardMd = readText(boardPath);
-    const unmet = (record.dependencies || []).filter((dependency) => (
-      discardedDependencyProblem(normalizeCardLink(dependency), state)
-      || !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd)
+    const dependencies = record.dependencies || [];
+    const discardedDependencyProblems = dependencies
+      .map((dependency) => discardedDependencyProblem(normalizeCardLink(dependency), state))
+      .filter(Boolean);
+    const unmet = dependencies.filter((dependency) => (
+      !dependencySatisfied(normalizeCardLink(dependency), parseBoard(boardMd), state, boardMd)
     ));
+    const deadend = discardedDependencyProblems.length
+      ? `ratification accepted but resume refused: ${discardedDependencyProblems.join('; ')}`
+      : null;
     const worktreeExists = deps.worktreeExists || fs.existsSync;
-    const canResume = active.length < MAX_ACTIVE && !sibling && !conflict && unmet.length === 0
+    const canResume = !deadend && active.length < MAX_ACTIVE && !sibling && !conflict && unmet.length === 0
       && record.worktree && worktreeExists(record.worktree);
     if (canResume) {
       let actualHead;
@@ -768,7 +774,12 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
       artifact_finalized_at: null,
       consumed_artifact_sha256: sha256Text(consumedRaw),
     };
-    if (canResume) {
+    if (deadend) {
+      record.phase = 'blocked';
+      record.reason = deadend;
+      record.resume_condition = null;
+      record.blocked_at = consumedAt;
+    } else if (canResume) {
       record.receipt_invalidations = [...(record.receipt_invalidations || []), invalidation];
       record.reviews = {};
       record.gate_receipt = null;
@@ -804,14 +815,20 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
       cardsRoot: deps.cardsRoot,
     });
     return {
-      action: projection.ok ? 'ratification-consumed' : 'ratification-consumed-projection-failed',
+      action: projection.ok
+        ? (deadend ? 'ratification-consumed-deadend' : 'ratification-consumed')
+        : 'ratification-consumed-projection-failed',
       card: operand.card,
       phase: record.phase,
       no_op: false,
       artifact: operand.relative,
       receipt: verdict.receipt,
       resumed: canResume,
-      ...(canResume ? { reviews_invalidated: true, invalidation_reason: invalidation.reason } : { wait: record.resume_condition }),
+      ...(deadend
+        ? { blocked: true, deadend }
+        : canResume
+          ? { reviews_invalidated: true, invalidation_reason: invalidation.reason }
+          : { wait: record.resume_condition }),
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: reconcileRoute(operand.card) }),
       loop_station: station.receipt,
     };

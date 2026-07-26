@@ -7296,6 +7296,78 @@ for (const [label, wait, expectedBucket] of [
   );
 }
 
+const OPX4_DEAD_CARD = 'GA-TEST1b Discarded dependency ratification fixture';
+const OPX4_DEAD_DEP = 'GA-TEST0a Discarded prerequisite';
+const opx4DeadCardPath = path.join(
+  opx4Project, 'tasks/Test epic/board', `${OPX4_DEAD_CARD}.md`,
+);
+fs.writeFileSync(opx4DeadCardPath, card({ name: OPX4_DEAD_CARD, parent: 'Test epic' })
+  .replace('status: planning', 'status: parked'));
+const opx4DeadState = {
+  schema_version: 1,
+  cards: {
+    [OPX4_DEAD_DEP]: {
+      card: OPX4_DEAD_DEP,
+      phase: 'discarded',
+      superseded_by: 'GA-TEST0a2 Deployed successor',
+    },
+    [OPX4_DEAD_CARD]: {
+      card: OPX4_DEAD_CARD,
+      phase: 'parked',
+      status: 'parked',
+      model_profile: 'heavy',
+      parent_card: 'Test epic',
+      touch_zones: ['scripts/autoloop/codex-coordinator.js'],
+      dependencies: [OPX4_DEAD_DEP],
+      deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+      resume_condition: 'Will must ratify the exact bounded continuation.',
+      gate_receipt: passingReceipt(OPX4_HEAD),
+      reviews: { correctness: { head_sha: OPX4_HEAD } },
+      worktree: opx4Worktree,
+      card_path: opx4DeadCardPath,
+    },
+  },
+};
+scaffoldPendingRatifications(opx4DeadState, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T15:40:00.000Z',
+  uuid: () => '99999999-2222-4333-8444-555555555555',
+});
+const opx4DeadArtifact = ratificationArtifactForCard(OPX4_DEAD_CARD, opx4Board);
+const opx4DeadAcceptedRaw = fs.readFileSync(opx4DeadArtifact.absolute, 'utf8')
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:40:00-06:00"')
+  .replace('"authority": ""', '"authority": "delegate"');
+fs.writeFileSync(opx4DeadArtifact.absolute, opx4DeadAcceptedRaw);
+let opx4DeadProjectedPhase = null;
+const opx4DeadConsume = await commandConsumeRatification({ root: tmp }, {
+  _: ['consume-ratification'], json: true, card: OPX4_DEAD_CARD,
+}, {
+  boardPath: opx4Board,
+  cardsRoot: path.join(opx4Project, 'tasks'),
+  readState: () => opx4DeadState,
+  writeState: () => {},
+  withLock: opx4ImmediateLock,
+  projectCard: (_cardPath, _boardPath, _card, phase) => {
+    opx4DeadProjectedPhase = phase;
+    return { changed: true };
+  },
+  projectLoopStation: async () => ({ action: 'loop-station-projected', no_op: false }),
+  resolveWorktreeHead: () => OPX4_HEAD,
+  now: () => '2026-07-26T15:41:00.000Z',
+});
+eq(opx4DeadConsume.action, 'ratification-consumed-deadend',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND emits a fail-loud consumption receipt');
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].phase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND moves the accepted card out of parked');
+ok(opx4DeadConsume.blocked === true
+  && opx4DeadConsume.deadend.includes(`depends on discarded card ${OPX4_DEAD_DEP}`),
+'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND names the impossible prerequisite');
+eq(opx4DeadProjectedPhase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND projects the coordinator deadend');
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].resume_condition, null,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND never writes a hidden deploy wait');
+
 // GA-OPS19A2-CLI-DISPATCH-UNBOUND: execute both ratification verbs through
 // main(), rather than proving only the exported command functions.
 for (const [verb, args, expected] of [
