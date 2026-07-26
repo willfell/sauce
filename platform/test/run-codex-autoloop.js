@@ -3080,10 +3080,33 @@ eq(Object.fromEntries(Object.keys(amendProtectedBefore).map((key) => [key, amend
   amendProtectedBefore, 'amendment preserves every protected target metadata field outside the two authorized contract fields');
 ok(/platform\/manifest\.json/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'amended touch zones project into card frontmatter');
 ok(/mechanism:delivery/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'typed deployments project into card frontmatter');
+const amendedCardRaw = fs.readFileSync(amend.cardPath, 'utf8');
+const amendedDeploymentLine = amendedCardRaw.split('\n').find((line) => line.startsWith('deploy_subscriptions: '));
+eq(JSON.parse(JSON.parse(amendedDeploymentLine.slice(amendedDeploymentLine.indexOf(':') + 1).trim())),
+  typedDeployments,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract projects the exact authority map as one JSON text scalar');
+ok(!/\ndeploy_subscriptions:\n\s+headspace:/m.test(amendedCardRaw),
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract never restores the legacy nested deployment map');
 ok(/status: in_progress/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection preserves lifecycle metadata');
 ok(!/status_changed_at: 2026-07-16T18:00:00.000Z/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection does not rewrite the status timestamp');
 eq(withoutExecutionContractBlocks(fs.readFileSync(amend.cardPath, 'utf8')), withoutExecutionContractBlocks(amend.cardSnapshot),
   'card projection preserves every frontmatter field and body byte outside the two authorized contract blocks');
+const repeatedAmendProjection = projectCard(
+  amend.cardPath,
+  amend.boardPath,
+  AMEND_CARD,
+  'implementing',
+  {
+    cardsRoot: amend.root,
+    record: amend.state.cards[AMEND_CARD],
+    state: amend.state,
+    now: amend.deps.now,
+  },
+);
+ok(repeatedAmendProjection.changed === false && repeatedAmendProjection.card_changed === false,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection recognizes the JSON text scalar and stays no-op');
+eq(fs.readFileSync(amend.cardPath, 'utf8'), amendedCardRaw,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection preserves the scalar card byte-for-byte');
 eq(snapshotDirectory(amend.worktree), amend.worktreeSnapshot, 'successful amendment preserves the complete target worktree tree and bytes');
 eq(amend.gitCalls, [
   { cmd: 'git', argv: ['fetch', 'origin', 'main', '--quiet'], cwd: amend.worktree, stdio: 'pipe' },

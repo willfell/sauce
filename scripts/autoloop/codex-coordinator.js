@@ -324,6 +324,16 @@ function deploymentField(raw) {
   const lines = frontmatter(raw).split('\n');
   const idx = lines.findIndex((s) => /^deploy_subscriptions:/.test(s));
   if (idx < 0) return null;
+  const inline = lines[idx].slice(lines[idx].indexOf(':') + 1).trim();
+  if (inline) {
+    try {
+      const yamlScalar = JSON.parse(inline);
+      const decoded = delivery.decodeStructuredContractFields({ deploy_subscriptions: yamlScalar });
+      return decoded.errors.length ? null : decoded.card.deploy_subscriptions;
+    } catch (_) {
+      return null;
+    }
+  }
   const out = {};
   let current = null;
   for (let i = idx + 1; i < lines.length; i++) {
@@ -454,10 +464,7 @@ function formatExecutionContractFrontmatter(touchZones, deployments) {
   return {
     touch_zones: ['touch_zones:', ...touchZones.map((zone) => `  - ${JSON.stringify(zone)}`)],
     deploy_subscriptions: [
-      'deploy_subscriptions:',
-      ...DEPLOYMENT_VAULT_IDS.flatMap((vault) => deployments[vault].length
-        ? [`  ${vault}:`, ...deployments[vault].map((entry) => `    - ${JSON.stringify(entry)}`)]
-        : [`  ${vault}: []`]),
+      `deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(deployments)}`,
     ],
   };
 }
