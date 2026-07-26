@@ -7148,6 +7148,31 @@ eq(opx4Writes, 0,
   'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal performs zero ledger writes');
 eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), duplicatePayloadRaw,
   'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal leaves the artifact byte-identical');
+const mixedPayloadInvalidRaw = acceptedRaw
+  .replace('"decision": "accepted"', '"decision": "",\n  "decision": "accepted"')
+  .replace('"accepted_at": "2026-07-26T09:31:00-06:00"', '"accepted_at": "not-a-timestamp"')
+  .replace(
+    '  "scope": [',
+    '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
+  );
+fs.writeFileSync(opx4Artifact.absolute, mixedPayloadInvalidRaw);
+const mixedPayloadInvalidConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  mixedPayloadInvalidConsume.errors.map((issue) => [issue.code, issue.field]),
+  [
+    ['ratification-field-duplicate', 'decision'],
+    ['ratification-field-unexpected', 'unexpected_one'],
+    ['ratification-field-unexpected', 'unexpected_two'],
+    ['invalid-ratification-timestamp', 'accepted_at'],
+  ],
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS returns duplicate, unsupported, and semantic errors together',
+);
+eq(opx4Writes, 0,
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), mixedPayloadInvalidRaw,
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS leaves the artifact pending and byte-identical');
 const multiPayloadDecoy = [
   '````md',
   `## Ratification — ${OPX4_CARD}`,
