@@ -410,6 +410,20 @@
         "platform/test/run-codex-autoloop.js"
       ],
       "notes": "Coordinator-owned Loop Station frontmatter projection. Every list is capped at 20 with an explicit overflow count; projection runs only on meaningful transitions, preserves the note body, and reads the delivery digest marker with peek semantics."
+    },
+    {
+      "id": "sauce.ratification-artifact.v1",
+      "kind": "contract",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "scripts/autoloop/codex-coordinator.js",
+      "accepted_versions": ["1.0.0"],
+      "validator": "scripts/autoloop/codex-coordinator.js",
+      "consumers": [
+        "scripts/autoloop/delivery-status-digest.js",
+        "platform/mechanisms/delivery/scripts/delivery-contract.js",
+        "platform/test/run-codex-autoloop.js"
+      ],
+      "notes": "Coordinator-owned ratification inbox note under spice/projects/sauce/ratifications/*.md. Pending frontmatter requires exactly type:ratification, schema_version:1.0.0, state:pending, canonical target_card, and ISO created_at; consumption adds state:consumed plus ISO consumed_at. The embedded delivery-ratification JSON block remains governed by the Delivery registry."
     }
   ]
 }

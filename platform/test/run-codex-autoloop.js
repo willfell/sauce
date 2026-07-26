@@ -24,6 +24,8 @@ const {
   PARKED_METADATA_REBIND_CARDS,
   buildLoopStationPayload, validateLoopStationPayload, projectLoopStation,
   consumeRatificationReceipt, consumeRatificationArtifact,
+  scaffoldPendingRatifications, ratificationArtifactForCard, ratificationStatus,
+  commandBackfillRatifications, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
@@ -41,6 +43,11 @@ let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
 function testSha256(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
+function testScalarField(raw, key) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  const line = frontmatter && frontmatter[1].split('\n').find((item) => item.startsWith(`${key}:`));
+  return line ? line.slice(line.indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '') : '';
+}
 
 function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
   const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
@@ -6983,6 +6990,224 @@ eq(cutState.cutover_history.length, 20, 'BGR-CUTOVER-REVERSIBLE cutover_history 
 eq(cutState.cutover_history[0].at, 'seed-3', 'BGR-CUTOVER-REVERSIBLE the cap drops the oldest entries first');
 eq(cutState.cutover_history[19], { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'cap check' },
   'BGR-CUTOVER-REVERSIBLE the newest capped entry is the latest flip');
+
+// --- OPX4: coordinator-owned ratification inbox, receipt consumption, and digest feed ---
+const OPX4_CARD = 'GA-TEST1a Exact ratification fixture';
+const OPX4_HEAD = 'e'.repeat(40);
+const opx4Vault = path.join(tmp, 'opx4-vault');
+const opx4Project = path.join(opx4Vault, 'spice/projects/sauce');
+const opx4Board = path.join(opx4Project, 'sauce-board.md');
+const opx4Worktree = path.join(tmp, 'opx4-worktree');
+const opx4CardPath = path.join(opx4Project, 'tasks/Test epic/board', `${OPX4_CARD}.md`);
+fs.mkdirSync(path.dirname(opx4CardPath), { recursive: true });
+fs.mkdirSync(opx4Worktree, { recursive: true });
+fs.writeFileSync(opx4Board, [
+  '# Board', '', '## In Planning', '', '## In Progress', '',
+  `- [ ] [[${OPX4_CARD}]]`, '', '## Blocked', '', '## Completed', '',
+].join('\n'));
+fs.writeFileSync(opx4CardPath, card({ name: OPX4_CARD, parent: 'Test epic' })
+  .replace('status: planning', 'status: parked'));
+const opx4State = {
+  schema_version: 1,
+  cards: {
+    [OPX4_CARD]: {
+      card: OPX4_CARD,
+      phase: 'parked',
+      status: 'parked',
+      model_profile: 'heavy',
+      parent_card: 'Test epic',
+      touch_zones: ['scripts/autoloop/codex-coordinator.js'],
+      dependencies: [],
+      deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+      resume_condition: 'Will must ratify the exact bounded continuation.',
+      gate_receipt: passingReceipt(OPX4_HEAD),
+      reviews: { correctness: { head_sha: OPX4_HEAD } },
+      worktree: opx4Worktree,
+      card_path: opx4CardPath,
+    },
+  },
+};
+const firstScaffold = scaffoldPendingRatifications(opx4State, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T15:30:00.000Z',
+  uuid: () => '11111111-2222-4333-8444-555555555555',
+});
+eq(firstScaffold.scaffolded.length, 1,
+  'OPX4-SCAFFOLD-PREFILLED escalation projection scaffolds exactly one missing artifact');
+const opx4Artifact = ratificationArtifactForCard(OPX4_CARD, opx4Board);
+const opx4PendingRaw = fs.readFileSync(opx4Artifact.absolute, 'utf8');
+eq(testScalarField(opx4PendingRaw, 'type'), 'ratification',
+  'OPX4-SCAFFOLD-PREFILLED artifact frontmatter has the canonical type');
+eq(testScalarField(opx4PendingRaw, 'state'), 'pending',
+  'OPX4-SCAFFOLD-PREFILLED artifact frontmatter begins pending');
+eq(testScalarField(opx4PendingRaw, 'target_card'), OPX4_CARD,
+  'OPX4-SCAFFOLD-PREFILLED target identity comes from the ledger');
+ok(opx4PendingRaw.includes(`"target_head": "${OPX4_HEAD}"`),
+  'OPX4-SCAFFOLD-PREFILLED exact 40-hex target HEAD comes from the preserved gate receipt');
+ok(opx4PendingRaw.includes('"decision": ""')
+  && opx4PendingRaw.includes('"accepted_at": ""')
+  && opx4PendingRaw.includes('"authority": ""'),
+'OPX4-SCAFFOLD-PREFILLED only the three human-authored receipt fields begin empty');
+const scaffoldReplay = scaffoldPendingRatifications(opx4State, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T16:00:00.000Z',
+  uuid: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+});
+eq(scaffoldReplay.scaffolded, [],
+  'OPX4-BACKFILL-IDEMPOTENT replay scaffolds no artifact');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), opx4PendingRaw,
+  'OPX4-BACKFILL-IDEMPOTENT replay preserves the existing artifact byte-for-byte');
+const commandBackfillReplay = await commandBackfillRatifications({ root: tmp }, {
+  _: ['backfill-ratifications'], json: true,
+}, {
+  boardPath: opx4Board,
+  readState: () => opx4State,
+  withLock: async (_ctx, _name, fn) => fn(),
+});
+eq(commandBackfillReplay.no_op, true,
+  'OPX4-BACKFILL-IDEMPOTENT the explicit backfill replay emits no_op true');
+ok(ratificationStatus(opx4State.cards[OPX4_CARD], opx4State, { boardPath: opx4Board }).error,
+  'OPX4-CONSUME-INCOMPLETE status surfaces the incomplete pending receipt read-only');
+
+let opx4Writes = 0;
+let opx4StateReads = 0;
+const opx4ImmediateLock = async (_ctx, _name, fn) => fn();
+const opx4Deps = {
+  boardPath: opx4Board,
+  cardsRoot: path.join(opx4Project, 'tasks'),
+  readState: () => { opx4StateReads++; return opx4State; },
+  writeState: () => { opx4Writes++; },
+  withLock: opx4ImmediateLock,
+  projectCard: () => ({ changed: true }),
+  projectLoopStation: async () => ({ action: 'loop-station-projected', no_op: false }),
+  resolveWorktreeHead: () => OPX4_HEAD,
+  now: () => '2026-07-26T15:31:00.000Z',
+};
+const opx4Args = { _: ['consume-ratification'], json: true, card: OPX4_CARD };
+const incompleteConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(incompleteConsume.action, 'ratification-refused',
+  'OPX4-CONSUME-INCOMPLETE an empty decision refuses with a machine receipt');
+eq(opx4Writes, 0, 'OPX4-CONSUME-INCOMPLETE refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), opx4PendingRaw,
+  'OPX4-CONSUME-INCOMPLETE refusal leaves the pending artifact byte-identical');
+
+const multiInvalidRaw = opx4PendingRaw.replace(
+  'created_at:',
+  'unexpected_one: "x"\nunexpected_two: "y"\ntype: ratification\ncreated_at:',
+);
+fs.writeFileSync(opx4Artifact.absolute, multiInvalidRaw);
+const multiInvalidConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(
+  multiInvalidConsume.errors.filter((issue) => issue.code === 'ratification-frontmatter-field-unexpected')
+    .map((issue) => issue.field),
+  ['unexpected_one', 'unexpected_two'],
+  'OPX4-CONSUME-INCOMPLETE returns every unsupported frontmatter field',
+);
+ok(multiInvalidConsume.errors.some((issue) => (
+  issue.code === 'ratification-frontmatter-field-duplicate' && issue.field === 'type'
+)), 'OPX4-CONSUME-INCOMPLETE rejects ambiguous duplicate frontmatter keys');
+eq(opx4Writes, 0, 'OPX4-CONSUME-INCOMPLETE multi-error refusal performs zero ledger writes');
+
+const tamperedRaw = opx4PendingRaw
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:30:00-06:00"')
+  .replace('"authority": ""', '"authority": "delegate"')
+  .replace(OPX4_HEAD, `f${OPX4_HEAD.slice(1)}`);
+fs.writeFileSync(opx4Artifact.absolute, tamperedRaw);
+const tamperedConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(tamperedConsume.action, 'ratification-refused',
+  'OPX4-CONSUME-TAMPERED-HEAD target-head deviation refuses');
+ok(tamperedConsume.errors.some((issue) => issue.code === 'ratification-target-head-mismatch'),
+  'OPX4-CONSUME-TAMPERED-HEAD receipt names the exact-head mismatch');
+eq(opx4Writes, 0, 'OPX4-CONSUME-TAMPERED-HEAD refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), tamperedRaw,
+  'OPX4-CONSUME-TAMPERED-HEAD refusal does not flip artifact state');
+
+const authorityVerbatim = 'delegate: exact mechanical authority';
+const acceptedRaw = opx4PendingRaw
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:31:00-06:00"')
+  .replace('"authority": ""', `"authority": ${JSON.stringify(authorityVerbatim)}`);
+fs.writeFileSync(opx4Artifact.absolute, acceptedRaw);
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, opx4Args, {
+  ...opx4Deps,
+  writeText: (_target, value) => {
+    if (String(value).includes('state: consumed')) throw new Error('injected artifact finalize failure');
+  },
+}), /injected artifact finalize failure/,
+'OPX4-CONSUME-VALID a post-ledger artifact finalize failure remains recoverable');
+count++;
+ok(opx4State.cards[OPX4_CARD].ratification_receipt
+  && testScalarField(fs.readFileSync(opx4Artifact.absolute, 'utf8'), 'state') === 'pending',
+'OPX4-CONSUME-VALID authority persists before a failed consumed-state flip');
+const validConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(validConsume.action, 'ratification-consumed',
+  'OPX4-CONSUME-VALID a complete exact-head artifact is consumed');
+eq(validConsume.recovered, true,
+  'OPX4-CONSUME-VALID literal recovery finishes the pending artifact flip');
+eq(opx4State.cards[OPX4_CARD].ratification_receipt.authority, authorityVerbatim,
+  'OPX4-AUTHORITY-VERBATIM authority is recorded exactly without validator policy');
+for (const field of ['artifact_path', 'artifact_sha256', 'section_heading', 'section_sha256']) {
+  ok(opx4State.cards[OPX4_CARD].ratification_receipt[field],
+    `OPX4-CONSUME-VALID stores receipt provenance ${field}`);
+}
+eq(opx4State.cards[OPX4_CARD].phase, 'implementing',
+  'OPX4-CONSUME-VALID resolves the ratification park');
+const opx4ConsumedRaw = fs.readFileSync(opx4Artifact.absolute, 'utf8');
+eq(testScalarField(opx4ConsumedRaw, 'state'), 'consumed',
+  'OPX4-CONSUME-VALID flips artifact frontmatter to consumed');
+eq(testScalarField(opx4ConsumedRaw, 'consumed_at'), '2026-07-26T15:31:00.000Z',
+  'OPX4-CONSUME-VALID records the exact consumption timestamp');
+const opx4WritesAfterSuccess = opx4Writes;
+const replayConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(replayConsume.no_op, true,
+  'OPX4-REPLAY-LITERAL identical re-consume returns no_op true');
+eq(opx4Writes, opx4WritesAfterSuccess,
+  'OPX4-REPLAY-LITERAL exact replay performs no additional ledger write');
+fs.writeFileSync(opx4Artifact.absolute, `${opx4ConsumedRaw}\nchanged prose outside the receipt\n`);
+await assert.rejects(
+  () => commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps),
+  /differs from the stored exact-head receipt/,
+  'OPX4-REPLAY-LITERAL full consumed-artifact drift refuses even when the selected receipt is unchanged',
+);
+count++;
+fs.writeFileSync(opx4Artifact.absolute, opx4ConsumedRaw);
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, {
+  ...opx4Args,
+  artifact: opx4Artifact.relative,
+}, opx4Deps), /different operands; replay must be literal/,
+'OPX4-REPLAY-LITERAL an explicit substituted artifact operand refuses after omitted-operand success');
+count++;
+
+const outsideArtifact = path.join(opx4Vault, 'outside.md');
+fs.writeFileSync(outsideArtifact, '# outside\n');
+const readsBeforeContainment = opx4StateReads;
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, {
+  ...opx4Args,
+  artifact: 'outside.md',
+}, opx4Deps), /inside the project ratifications directory/,
+'OPX4-CONTAINMENT an artifact outside the ratifications root refuses');
+count++;
+eq(opx4StateReads, readsBeforeContainment,
+  'OPX4-CONTAINMENT refusal happens before any state read');
+
+const opx4Digest = deliveryStatusDigest.buildDigest({
+  active: [],
+  parked: [],
+  tracked: [],
+  ratified_recent: [{
+    card: OPX4_CARD,
+    authority: authorityVerbatim,
+    at: '2026-07-26T09:31:00-06:00',
+    artifact_path: opx4Artifact.relative,
+  }],
+}, '', [], { lastSeen: '2026-07-26T09:00:00-06:00' });
+eq(opx4Digest.since.ratified, [{
+  card: OPX4_CARD,
+  authority: authorityVerbatim,
+  at: '2026-07-26T09:31:00-06:00',
+  artifact_path: opx4Artifact.relative,
+}], 'OPX4-CONSUME-VALID successful consumption enters the digest ratified feed');
 
 // CLI wiring: the cutover command exists and refuses without --json.
 {
