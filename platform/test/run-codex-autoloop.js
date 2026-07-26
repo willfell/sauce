@@ -7128,10 +7128,19 @@ const acceptedRaw = opx4PendingRaw
   .replace('"decision": ""', '"decision": "accepted"')
   .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:31:00-06:00"')
   .replace('"authority": ""', `"authority": ${JSON.stringify(authorityVerbatim)}`);
-const multiPayloadInvalidRaw = acceptedRaw.replace(
+const multiPayloadDecoy = [
+  '````md',
+  `## Ratification — ${OPX4_CARD}`,
+  '```delivery-ratification',
+  '{"decoy_unexpected":"must-not-be-selected"}',
+  '```',
+  '````',
+  '',
+].join('\n');
+const multiPayloadInvalidRaw = `${multiPayloadDecoy}${acceptedRaw.replace(
   '  "scope": [',
   '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
-);
+)}`;
 fs.writeFileSync(opx4Artifact.absolute, multiPayloadInvalidRaw);
 const multiPayloadInvalidConsume = await commandConsumeRatification(
   { root: tmp }, opx4Args, opx4Deps,

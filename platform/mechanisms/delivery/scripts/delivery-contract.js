@@ -697,17 +697,7 @@ function parseRatificationArtifact(markdown, sectionHeading, provenance = {}) {
   const unexpected = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? Object.keys(payload).filter((key) => !allowed.has(key)) : ['payload'];
   if (unexpected.length) {
-    return {
-      ok: false,
-      errors: unexpected.map((field) => error(
-        'ratification-field-unexpected',
-        field,
-        `ratification payload contains unsupported field ${field}`,
-      )),
-      warnings: [],
-      receipt: null,
-      contract_version: CONTRACT_VERSION,
-    };
+    return { ok: false, errors: [error('ratification-field-unexpected', unexpected[0], 'ratification payload contains an unsupported field')], warnings: [], receipt: null, contract_version: CONTRACT_VERSION };
   }
   const artifactPath = String(provenance.artifact_path || '').trim();
   const receipt = {
