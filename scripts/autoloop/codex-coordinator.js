@@ -27,6 +27,9 @@ const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 const deliveryStatusDigest = require('./delivery-status-digest');
 const deliveryReviewTriage = require('./delivery-review-triage');
 const { deliveryPaths } = require('./delivery-paths');
+const {
+  EXIT_CODES, parseArgs, successReceipt, refuse, usage, requireJson, receiptForError,
+} = require('./cli-kit');
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
@@ -82,22 +85,6 @@ const VAULTS = [
 
 function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: MAXBUF, ...opts }).trim();
-}
-
-function parseArgs(argv) {
-  const out = { _: [] };
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (!token.startsWith('--')) { out._.push(token); continue; }
-    const key = token.slice(2);
-    const value = argv[i + 1];
-    const parsed = value && !value.startsWith('--') ? value : true;
-    if (Object.prototype.hasOwnProperty.call(out, key)) {
-      out[key] = Array.isArray(out[key]) ? [...out[key], parsed] : [out[key], parsed];
-    } else out[key] = parsed;
-    if (parsed !== true) i++;
-  }
-  return out;
 }
 
 function workshopContext(cwd = process.cwd()) {
@@ -3191,7 +3178,9 @@ function argumentValues(value) {
 
 function resumeRefused(record, reason, extra = {}) {
   return {
-    action: 'resume-refused', card: record.card, phase: record.phase,
+    action: 'resume-refused', ok: false, no_op: false, code: 'resume_ineligible',
+    message: reason,
+    card: record.card, phase: record.phase,
     reason, dependencies: record.dependencies || [],
     resume_condition: record.resume_condition || '', ...extra,
   };
@@ -3396,14 +3385,15 @@ async function commandAmendContract(ctx, args, deps = {}) {
 }
 
 async function commandPark(ctx, args, deps = {}) {
+  requireJson(args, 'park');
   const card = String(args.card || '').trim();
   const resumeCondition = Array.isArray(args['resume-condition']) ? '' : String(args['resume-condition'] || '').trim();
   const dependencies = [...new Set(argumentValues(args['depends-on']))];
-  if (!card) throw new Error('park requires --card');
-  if (!dependencies.length) throw new Error('park requires one or more --depends-on prerequisite cards');
-  if (!resumeCondition) throw new Error('park requires a non-empty --resume-condition');
+  if (!card) usage('park-refused', 'invalid_arguments', 'park requires --card');
+  if (!dependencies.length) usage('park-refused', 'invalid_arguments', 'park requires one or more --depends-on prerequisite cards');
+  if (!resumeCondition) usage('park-refused', 'invalid_arguments', 'park requires a non-empty --resume-condition');
   if (dependencies.some((dependency) => normalizeCardLink(dependency) === normalizeCardLink(card))) {
-    throw new Error(`${card} cannot depend on itself`);
+    refuse('park-refused', 'self_dependency', `${card} cannot depend on itself`);
   }
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;
@@ -3414,12 +3404,27 @@ async function commandPark(ctx, args, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record) refuse('park-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    if (record.phase === 'parked') {
+      const exactReplay = JSON.stringify(record.dependencies || []) === JSON.stringify(dependencies)
+        && record.resume_condition === resumeCondition;
+      if (!exactReplay) {
+        refuse('park-refused', 'literal_replay_mismatch',
+          `parked card ${card} accepts only literal replay of its settled park operands`);
+      }
+      return successReceipt('parked', {
+        no_op: true, card, phase: record.phase, dependencies,
+        resume_condition: resumeCondition, branch: record.branch, worktree: record.worktree,
+      });
+    }
     if (!['claimed', 'implementing'].includes(record.phase)) {
-      throw new Error(`park only accepts claimed pre-PR work; ${card} is ${record.phase}`);
+      refuse('park-refused', 'phase_ineligible',
+        `park only accepts claimed pre-PR work; ${card} is ${record.phase}`);
     }
     for (const dependency of dependencies) {
-      if (!find(CARDS_ROOT, dependency)) throw new Error(`prerequisite card ${dependency} does not exist`);
+      if (!find(CARDS_ROOT, dependency)) {
+        refuse('park-refused', 'dependency_missing', `prerequisite card ${dependency} does not exist`);
+      }
     }
     const parkedAt = now();
     record.phase = 'parked';
@@ -3434,12 +3439,11 @@ async function commandPark(ctx, args, deps = {}) {
     const station = await attemptLoopStationProjection(ctx, state, 'park', {
       projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot: deps.cardsRoot,
     });
-    const result = {
-      action: projection.ok ? 'parked' : 'parked-projection-failed',
+    const result = successReceipt(projection.ok ? 'parked' : 'parked-projection-failed', {
       card, phase: record.phase, dependencies, resume_condition: resumeCondition,
       branch: record.branch, worktree: record.worktree,
       loop_station: station.receipt,
-    };
+    });
     if (!projection.ok) {
       result.projection_error = projection.error;
       result.reconcile = `reconcile --card ${card}`;
@@ -3449,8 +3453,9 @@ async function commandPark(ctx, args, deps = {}) {
 }
 
 async function commandResume(ctx, args, deps = {}) {
+  requireJson(args, 'resume');
   const card = String(args.card || '').trim();
-  if (!card) throw new Error('resume requires --card');
+  if (!card) usage('resume-refused', 'invalid_arguments', 'resume requires --card');
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;
   const transitionLock = deps.withLock || withLock;
@@ -3462,7 +3467,20 @@ async function commandResume(ctx, args, deps = {}) {
   const worktreeExists = deps.worktreeExists || fs.existsSync;
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record) refuse('resume-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    if (record.phase === 'implementing' && record.last_resume_request
+      && record.last_resume_request.card === card) {
+      return successReceipt('implement', {
+        no_op: true, card, phase: record.phase, branch: record.branch,
+        worktree: record.worktree, dependencies: record.dependencies || [],
+        reviews_invalidated: true,
+        invalidation_reason: record.resume_invalidation_reason || '',
+        head_sha: record.last_resume_request.head_sha || null,
+        origin_main_sha: record.last_resume_request.origin_main_sha || null,
+        origin_main_advanced: record.last_resume_request.origin_main_advanced === true,
+        requires_main_update: record.last_resume_request.requires_main_update === true,
+      });
+    }
     if (record.phase !== 'parked') return resumeRefused(record, `card is ${record.phase}, not parked`);
     if (record.projection_error) {
       return resumeRefused(record, `park metadata projection is unresolved: ${record.projection_error}`, {
@@ -3538,6 +3556,11 @@ async function commandResume(ctx, args, deps = {}) {
     record.resume_condition = null;
     record.resumed_at = invalidatedAt;
     record.resume_invalidation_reason = invalidation.reason;
+    record.last_resume_request = {
+      card, head_sha: headSha, origin_main_sha: originMainSha,
+      origin_main_advanced: originMainAdvanced,
+      requires_main_update: originMainAdvanced,
+    };
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, state,
@@ -3546,8 +3569,7 @@ async function commandResume(ctx, args, deps = {}) {
     const station = await attemptLoopStationProjection(ctx, state, 'resume', {
       projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot: deps.cardsRoot,
     });
-    return {
-      action: projection.ok ? 'implement' : 'resume-projection-failed',
+    return successReceipt(projection.ok ? 'implement' : 'resume-projection-failed', {
       card, phase: record.phase, branch: record.branch, worktree: record.worktree,
       dependencies: record.dependencies, reviews_invalidated: true,
       invalidation_reason: invalidation.reason,
@@ -3555,7 +3577,7 @@ async function commandResume(ctx, args, deps = {}) {
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
       loop_station: station.receipt,
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
-    };
+    });
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
 }
 
@@ -4561,7 +4583,9 @@ async function commandRestructure(ctx, args, deps = {}) {
 
 async function commandClaim(ctx, args) {
   return withLock(ctx, 'selector', async () => {
-    if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) return { action: 'halted', reason: '.autoloop-halt present' };
+    if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
+      return successReceipt('halted', { no_op: true, reason: '.autoloop-halt present' });
+    }
     const state = readState(ctx);
     const boardMd = fs.readFileSync(BOARD, 'utf8');
     const selected = selectCoordinatorCandidate({
@@ -4571,7 +4595,9 @@ async function commandClaim(ctx, args) {
       // batch callers use the pure selector without this capability.
       supervised: true,
     });
-    if (selected.action !== 'claim' || args['dry-run']) return selected;
+    if (selected.action !== 'claim' || args['dry-run']) {
+      return successReceipt(selected.action, { no_op: true, ...selected });
+    }
     const slug = slugify(selected.card);
     const branch = `codex-autoloop/${slug}`;
     const worktree = path.join(ctx.root, '.worktrees', `codex-autoloop-${slug}`);
@@ -4601,37 +4627,87 @@ async function commandClaim(ctx, args) {
     await attemptProjection(ctx, record, BOARD, { state });
     writeState(ctx, state, record);
     const station = await attemptLoopStationProjection(ctx, state, 'claim');
-    return {
-      action: 'implement', ...record, skipped: selected.skipped,
+    return successReceipt('implement', {
+      ...record, skipped: selected.skipped,
       loop_station: station.receipt,
-    };
+    });
   });
 }
 
 async function commandRecordReview(ctx, args, deps = {}) {
+  requireJson(args, 'record-review');
   const card = args.card; const lens = args.lens; const verdict = args.verdict;
   const summary = String(args.summary || '').trim();
-  if (!card || !REVIEW_LENSES.includes(lens)) throw new Error(`record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
-  if (!['pass', 'refute'].includes(verdict)) throw new Error('record-review requires --verdict pass|refute');
-  if (summary.length < 20) throw new Error('record-review requires a specific --summary of at least 20 characters');
+  const expectedHead = Array.isArray(args['expected-head']) ? '' : String(args['expected-head'] || '').trim();
+  const acceptedLimitation = args['accepted-limitation'] === true;
+  const bound = (Array.isArray(args.bound) ? args.bound : (args.bound == null ? [] : [args.bound]))
+    .filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
+  if (!card || !REVIEW_LENSES.includes(lens)) {
+    usage('record-review-refused', 'invalid_arguments',
+      `record-review requires --card and --lens ${REVIEW_LENSES.join('|')}`);
+  }
+  if (!['pass', 'refute'].includes(verdict)) {
+    usage('record-review-refused', 'invalid_arguments', 'record-review requires --verdict pass|refute');
+  }
+  if (summary.length < 20) {
+    usage('record-review-refused', 'invalid_arguments',
+      'record-review requires a specific --summary of at least 20 characters');
+  }
+  if (args['expected-head'] != null && !EXACT_SHA.test(expectedHead)) {
+    usage('record-review-refused', 'invalid_arguments',
+      'record-review --expected-head must be one exact lowercase 40-hex SHA');
+  }
+  if (acceptedLimitation !== (bound.length > 0)) {
+    refuse('record-review-refused', 'invalid_limitation',
+      'record-review --accepted-limitation requires one or more --bound names, and --bound requires --accepted-limitation');
+  }
+  if (acceptedLimitation && verdict !== 'pass') {
+    refuse('record-review-refused', 'invalid_limitation',
+      'record-review accepted limitations require --verdict pass');
+  }
   const loadState = deps.readState || readState;
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} is not claimed`);
-    if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
+    if (!record) refuse('record-review-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    if (!record.worktree || !fs.existsSync(record.worktree)) {
+      refuse('record-review-refused', 'worktree_missing', `worktree is missing for ${card}`);
+    }
     if (!['implementing', 'feature_pr'].includes(record.phase)) {
-      throw new Error(`reviews are closed for ${card} in phase ${record.phase}`);
+      refuse('record-review-refused', 'phase_ineligible',
+        `reviews are closed for ${card} in phase ${record.phase}`);
     }
     const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    if (expectedHead && expectedHead !== headSha) {
+      refuse('record-review-refused', 'head_mismatch',
+        `record-review expected HEAD ${expectedHead} but worktree is ${headSha}`);
+    }
+    const limitation = acceptedLimitation ? { bound } : null;
+    const prior = record.reviews && record.reviews[lens];
+    if (prior && prior.head_sha === headSha) {
+      const literalReplay = prior.verdict === verdict && prior.summary === summary
+        && JSON.stringify(prior.accepted_limitation || null) === JSON.stringify(limitation);
+      if (!literalReplay) {
+        refuse('record-review-refused', 'literal_replay_mismatch',
+          `review ${lens} at ${headSha} accepts only literal replay of its settled operands`);
+      }
+      return successReceipt('review-recorded', {
+        no_op: true, card, lens, verdict, head_sha: headSha,
+        ...(limitation ? { accepted_limitation: limitation } : {}),
+      });
+    }
     record.gate_receipt = null;
     record.reviews = { ...(record.reviews || {}), [lens]: {
       lens, verdict, refuted: verdict === 'refute', summary, head_sha: headSha, recorded_at: new Date().toISOString(),
+      ...(limitation ? { accepted_limitation: limitation } : {}),
     } };
     persist(ctx, state, record);
-    return { action: 'review-recorded', card, lens, verdict, head_sha: headSha };
+    return successReceipt('review-recorded', {
+      card, lens, verdict, head_sha: headSha,
+      ...(limitation ? { accepted_limitation: limitation } : {}),
+    });
   }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
 }
 
@@ -4702,8 +4778,11 @@ async function commandVerifyGates(ctx, args, deps = {}) {
 }
 
 async function commandRecordPr(ctx, args, deps = {}) {
+  requireJson(args, 'record-pr');
   const card = args.card; const number = Number(args.pr);
-  if (!card || !Number.isInteger(number)) throw new Error('record-pr requires --card and numeric --pr');
+  if (!card || !Number.isInteger(number)) {
+    usage('record-pr-refused', 'invalid_arguments', 'record-pr requires --card and numeric --pr');
+  }
   const loadState = deps.readState || readState;
   const viewPr = deps.prView || prView;
   const run = deps.sh || sh;
@@ -4711,20 +4790,41 @@ async function commandRecordPr(ctx, args, deps = {}) {
   const gateLock = deps.withLock || withLock;
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
-    if (!record) throw new Error(`card ${card} is not claimed`);
+    if (!record) refuse('record-pr-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    if (record.feature_pr != null) {
+      if (record.feature_pr !== number) {
+        refuse('record-pr-refused', 'literal_replay_mismatch',
+          `record-pr for ${card} accepts only literal replay of PR ${record.feature_pr}`);
+      }
+      return successReceipt('recorded', {
+        no_op: true, card, pr: number, phase: record.phase, url: record.feature_url,
+      });
+    }
     const pr = viewPr(REPO, number, ctx.root);
-    if (pr.headRefName !== record.branch) throw new Error(`PR head ${pr.headRefName} != recorded branch ${record.branch}`);
-    if (pr.baseRefName !== 'main') throw new Error(`PR base ${pr.baseRefName} != main`);
-    assertReleasableTitle(pr.title);
+    if (pr.headRefName !== record.branch) {
+      refuse('record-pr-refused', 'head_branch_mismatch',
+        `PR head ${pr.headRefName} != recorded branch ${record.branch}`);
+    }
+    if (pr.baseRefName !== 'main') {
+      refuse('record-pr-refused', 'base_branch_mismatch', `PR base ${pr.baseRefName} != main`);
+    }
+    if (!isReleasableTitle(pr.title)) {
+      refuse('record-pr-refused', 'title_not_releasable',
+        `PR title "${pr.title}" will not trigger a release`);
+    }
     const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
-    if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
+    if (dirty) refuse('record-pr-refused', 'worktree_dirty', `worktree is not clean: ${dirty.split('\n')[0]}`);
     const localHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
-    if (pr.headRefOid !== localHead) throw new Error(`PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
+    if (pr.headRefOid !== localHead) {
+      refuse('record-pr-refused', 'head_mismatch', `PR head ${pr.headRefOid} != worktree HEAD ${localHead}`);
+    }
     const gateStatus = gateReceiptStatus(record, localHead, pr.baseRefOid);
-    if (!gateStatus.valid) throw new Error(`record-pr refused: ${gateStatus.reason}`);
+    if (!gateStatus.valid) {
+      refuse('record-pr-refused', 'gate_invalid', `record-pr refused: ${gateStatus.reason}`);
+    }
     record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
     persist(ctx, state, record);
-    return { action: 'recorded', card, pr: number, phase: record.phase, url: pr.url };
+    return successReceipt('recorded', { card, pr: number, phase: record.phase, url: pr.url });
   }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
 }
 
@@ -6266,11 +6366,16 @@ function commandRecover(ctx, opts = {}) {
     const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
     if (dirty) inspections.push({ card: record.card, issue: 'dirty worktree requires inspection', sample: dirty.split('\n').slice(0, 20) });
   }
-  return { action: inspections.length ? 'needs-inspection' : 'clean', inspections };
+  return successReceipt(inspections.length ? 'needs-inspection' : 'clean', {
+    no_op: true, inspections,
+  });
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2)); const command = args._[0] || 'status';
+  if (['park', 'resume', 'record-review', 'record-pr'].includes(command)) {
+    requireJson(args, command);
+  }
   const ctx = workshopContext();
   let result;
   if (command === 'status') result = await commandStatusLocked(ctx);
@@ -6298,10 +6403,11 @@ async function main() {
   } else if (command === 'recover') result = commandRecover(ctx);
   else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
+  if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
 
 module.exports = {
-  parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
+  EXIT_CODES, parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem,
@@ -6332,5 +6438,8 @@ module.exports = {
 };
 
 if (require.main === module) {
-  main().catch((err) => { console.error(JSON.stringify({ action: 'error', message: err.message, code: err.code || null })); process.exit(1); });
+  main().catch((err) => {
+    console.error(JSON.stringify(receiptForError(err)));
+    process.exit(err.exitCode || EXIT_CODES.refusal);
+  });
 }

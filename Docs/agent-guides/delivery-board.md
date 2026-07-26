@@ -40,6 +40,12 @@ Tombstones are invisible machine state — never projected to a board, never cou
 
 When a superseding sibling X2 is minted, the predecessor X is discarded at mint time — no park-as-evidence, no rename-in-lane. The learning-preservation guarantee moved to intake: **card-intake refuses a superseding spec whose `binding_fixtures` do not cover every name in `carried_findings`** (each finding name must appear as an exact, case-sensitive token in at least one fixture's name or description; refusal codes `supersede_coverage_missing` / `supersede_missing_fields`). The valid-spec receipt carries `post_apply_instructions: [{discard: …}]` — intake never touches coordinator state; the loop executes the instruction via `coordinator discard --superseded-by <successor> --carried-fixture <fixture>`. Learning's canonical homes: committed fixtures in the successor, FID policy tables, epic `context/` notes, git history.
 
+## Shared CLI receipt grammar
+
+`scripts/autoloop/cli-kit.js` owns the shared argument parser, success/refusal envelopes, stable refusal errors, and exit-code vocabulary. Mutating coordinator verbs `park`, `resume`, `record-review`, and `record-pr` require a bare `--json` before the coordinator resolves the workshop, reads state, or acquires a lock. Success receipts preserve their existing `action` and verb-specific fields while adding `ok: true` and `no_op`; refusals use `ok: false`, a stable `code`, and a message. Literal replay of settled park, review, resume, and PR operands returns `no_op: true` without another ledger write; different operands fail closed.
+
+`record-review --expected-head <40-hex-sha>` binds a judgment receipt to the exact reviewed worktree HEAD. `--accepted-limitation --bound <bar-name>` records an in-threat-model single-writer limitation inside a passing review; either limitation flag without the other, or a limitation attached to a refutation, refuses before state mutation. Existing receipt keys are additive-only and remain consumer-compatible.
+
 ## Coordinator operations
 
 The mutating operations below require `--json` (refused before any read or write) and run under the selector lock.

@@ -398,6 +398,19 @@
       "notes": "A4 durable batch ledger v1.0.0. Stored below the Git common directory with immutable batch/attempt identity, wall-clock/card/retry/usage/intervention ceilings, exact engine and Delivery contract pins, atomic integrity-checked persistence, idempotent start/status/stop/resume controls, side-effect idempotency keys, and shadow-only unattended selection. A4 never claims or dispatches a card."
     },
     {
+      "id": "autoloop-cli-receipt-envelope",
+      "kind": "contract",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "scripts/autoloop/cli-kit.js",
+      "accepted_versions": ["1.0.0"],
+      "validator": "scripts/autoloop/cli-kit.js",
+      "consumers": [
+        "scripts/autoloop/codex-coordinator.js",
+        "platform/test/run-codex-autoloop.js"
+      ],
+      "notes": "Shared autoloop CLI grammar v1.0.0. Successful mutating receipts preserve action and add ok:true plus literal-replay no_op; refusals add ok:false, no_op:false, a stable code, and a message. Mutating verbs require --json before reads, locks, or writes. Exit codes are 0 success/no-op, 1 refusal/failure, and 2 usage."
+    },
+    {
       "id": "sauce.loop-station.v1",
       "kind": "contract",
       "owner": { "type": "workshop", "name": "sauce" },
