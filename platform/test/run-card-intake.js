@@ -311,6 +311,30 @@ function cutoverEpicIntake() {
   tempCase((dir) => {
     const enabledStatus = () => ({ action: 'status', cutover: { enabled: true, enabled_at: '2026-07-25T19:00:00.000Z' } });
     const runEnabled = (spec, apply = false) => run(spec, apply, { readCoordinatorStatus: enabledStatus });
+    const epicAtlas = (epic) => [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      `epic_board: "project/tasks/${epic}/board/${epic}-board.md"`,
+      '---', '',
+    ].join('\n');
+    const epicBoard = (epic) => [
+      '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic',
+      `epic: "[[${epic}]]"`, '---', '',
+      '## In Planning', '', '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n');
+    const physicalRefusal = (label, spec, sentinelPath, escapedTarget) => {
+      const boardBefore = fs.readFileSync(spec.board_path, 'utf8');
+      const sentinelBefore = fs.readFileSync(sentinelPath, 'utf8');
+      const dryRun = runEnabled(spec, false);
+      const applied = runEnabled(spec, true);
+      const isPhysicalRefusal = (result) => !result.ok && (result.errors || [])
+        .some((error) => error.includes('GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT'));
+      ok(isPhysicalRefusal(dryRun) && isPhysicalRefusal(applied),
+        `GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT ${label} dry-run and apply refuse`);
+      ok(fs.readFileSync(spec.board_path, 'utf8') === boardBefore
+        && fs.readFileSync(sentinelPath, 'utf8') === sentinelBefore
+        && !fs.existsSync(escapedTarget),
+      `GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT ${label} preserves every sentinel and creates no escaped target`);
+    };
     const legacySpec = base(dir, { cards: [execution('CUT-PRE Legacy flat card')] });
     const legacyAbsent = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: null }) });
     const legacyOff = run(legacySpec, false, { readCoordinatorStatus: () => ({ action: 'status', cutover: { enabled: false, reason: 'fixture' } }) });
@@ -382,6 +406,81 @@ function cutoverEpicIntake() {
       'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses a post-cutover title already owned by another epic');
     ok(!fs.existsSync(duplicateTarget) && fs.readFileSync(existingBoardPath, 'utf8') === duplicateBoardBefore,
       'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses before any target slice or epic-board write');
+
+    const symlinkRootEpic = 'Symlink Root Epic';
+    const outsideRoot = path.join(dir, 'outside-root-epic');
+    fs.mkdirSync(path.join(outsideRoot, 'board'), { recursive: true });
+    fs.writeFileSync(path.join(outsideRoot, `${symlinkRootEpic}.md`), epicAtlas(symlinkRootEpic));
+    fs.writeFileSync(path.join(outsideRoot, 'board', `${symlinkRootEpic}-board.md`), epicBoard(symlinkRootEpic));
+    const rootSentinel = path.join(outsideRoot, 'sentinel.txt');
+    fs.writeFileSync(rootSentinel, 'root sentinel\n');
+    fs.symlinkSync(outsideRoot, path.join(dir, 'tasks', symlinkRootEpic), 'dir');
+    const rootEscapeCard = execution('PHYS-1 Root escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'epic-root symlink',
+      base(dir, { epic: `[[${symlinkRootEpic}]]`, cards: [rootEscapeCard] }),
+      rootSentinel,
+      path.join(outsideRoot, 'board', `${rootEscapeCard.title}.md`),
+    );
+
+    const symlinkBoardEpic = 'Symlink Board Epic';
+    const symlinkBoardRoot = path.join(dir, 'tasks', symlinkBoardEpic);
+    const outsideBoard = path.join(dir, 'outside-board-dir');
+    fs.mkdirSync(symlinkBoardRoot, { recursive: true });
+    fs.mkdirSync(outsideBoard, { recursive: true });
+    fs.writeFileSync(path.join(symlinkBoardRoot, `${symlinkBoardEpic}.md`), epicAtlas(symlinkBoardEpic));
+    fs.writeFileSync(path.join(outsideBoard, `${symlinkBoardEpic}-board.md`), epicBoard(symlinkBoardEpic));
+    const boardSentinel = path.join(outsideBoard, 'sentinel.txt');
+    fs.writeFileSync(boardSentinel, 'board sentinel\n');
+    fs.symlinkSync(outsideBoard, path.join(symlinkBoardRoot, 'board'), 'dir');
+    const boardEscapeCard = execution('PHYS-2 Board escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'board-directory symlink',
+      base(dir, { epic: `[[${symlinkBoardEpic}]]`, cards: [boardEscapeCard] }),
+      boardSentinel,
+      path.join(outsideBoard, `${boardEscapeCard.title}.md`),
+    );
+
+    const symlinkContextEpic = 'Symlink Context Epic';
+    const symlinkContextRoot = path.join(dir, 'tasks', symlinkContextEpic);
+    const outsideContext = path.join(dir, 'outside-context-dir');
+    fs.mkdirSync(symlinkContextRoot, { recursive: true });
+    fs.mkdirSync(outsideContext, { recursive: true });
+    const contextSentinel = path.join(outsideContext, 'sentinel.txt');
+    fs.writeFileSync(contextSentinel, 'context sentinel\n');
+    fs.symlinkSync(outsideContext, path.join(symlinkContextRoot, 'context'), 'dir');
+    const contextParent = { title: symlinkContextEpic, role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const contextChild = execution('PHYS-3 Context escape slice', { parent_title: symlinkContextEpic, slice: 'PHYS-3' });
+    physicalRefusal(
+      'context-directory symlink',
+      base(dir, {
+        mode: 'roadmap', classification: 'roadmap_theme',
+        outcome: 'Reject a new epic whose context directory escapes cards_root.',
+        cards: [contextParent, contextChild],
+        roadmap_path: path.join(dir, 'docs', 'roadmap', 'Symlink Context.md'),
+        roadmap_section: '## Symlink context\n\nMust fail closed.',
+      }),
+      contextSentinel,
+      path.join(outsideContext, 'pack.md'),
+    );
+
+    const symlinkAtlasEpic = 'Symlink Atlas Epic';
+    const symlinkAtlasRoot = path.join(dir, 'tasks', symlinkAtlasEpic);
+    const symlinkAtlasBoard = path.join(symlinkAtlasRoot, 'board');
+    const outsideAtlas = path.join(dir, 'outside-atlas.md');
+    fs.mkdirSync(symlinkAtlasBoard, { recursive: true });
+    fs.writeFileSync(outsideAtlas, epicAtlas(symlinkAtlasEpic));
+    fs.symlinkSync(outsideAtlas, path.join(symlinkAtlasRoot, `${symlinkAtlasEpic}.md`));
+    fs.writeFileSync(path.join(symlinkAtlasBoard, `${symlinkAtlasEpic}-board.md`), epicBoard(symlinkAtlasEpic));
+    const atlasSentinel = path.join(dir, 'outside-atlas-sentinel.txt');
+    fs.writeFileSync(atlasSentinel, 'atlas sentinel\n');
+    const atlasEscapeCard = execution('PHYS-4 Atlas escape slice', { model_profile: 'heavy', risk_flags: ['loader'] });
+    physicalRefusal(
+      'pre-existing atlas symlink',
+      base(dir, { epic: `[[${symlinkAtlasEpic}]]`, cards: [atlasEscapeCard] }),
+      atlasSentinel,
+      path.join(symlinkAtlasBoard, `${atlasEscapeCard.title}.md`),
+    );
 
     const flatTitle = 'GA-OPS13a Close epic cutover selector and intake deadlock';
     const flatSpec = base(dir, { epic: null, cards: [execution(flatTitle, { model_profile: 'heavy', risk_flags: ['loader'] })] });

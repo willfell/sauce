@@ -73,6 +73,7 @@ Epic-native default: the script itself reads fresh status from the installed Hom
 - New parent/roadmap themes become canonical epic scaffolds at `tasks/<Epic>/{<Epic>.md,board/<Epic>-board.md,context/{pack.md,runs/.keep,lessons/.keep,decisions/.keep}}`; prepared children are flat slice notes in `board/`, and only epic atlas lines reach the parent board.
 - Every slice binds exact `epic`, `task_parent`, `source_board`, and `kanban_board`; slice titles remain globally unique, and intake refuses a title already owned by another epic.
 - Unexpected pre-existing scaffold bytes refuse before mutation; matching intended partial bytes resume forward, and literal replay is `no_op:true`.
+- Every epic root, board, context directory, scaffold component, and slice target must be a regular non-symlink physical descendant of `cards_root`; dry-run and apply validate the complete plan before the first write.
 - Flat execution creation is refused. The sole flat exception is the existing `bug` → `Discovered (autoloop)` one-line triage route; there is no card-name bootstrap exception.
 
 The cutover flag is receipt-gated and reversible (`coordinator cutover`), so never cache it: read `coordinator status --json` → `cutover.enabled` fresh at planning time (absent or `enabled: false` both mean pre-cutover).

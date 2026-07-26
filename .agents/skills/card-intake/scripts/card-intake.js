@@ -43,6 +43,63 @@ function within(root, target) {
   return file === base || file.startsWith(`${base}${path.sep}`);
 }
 
+function lstatMaybe(target) {
+  try { return fs.lstatSync(target); } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// Binds lexical intake routes to their physical filesystem roots. Existing
+// components must be ordinary directories/files, never symlinks; missing
+// suffixes are resolved from the nearest real ancestor. This validation runs
+// for the complete plan before the first write.
+function physicalIntakeTarget(root, target, label, expected = 'file') {
+  const rootPath = path.resolve(root);
+  const targetPath = path.resolve(target);
+  const prefix = 'GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT';
+  if (!within(rootPath, targetPath) || targetPath === rootPath) {
+    throw new Error(`${prefix} ${label} escapes its lexical root`);
+  }
+  const rootEntry = lstatMaybe(rootPath);
+  if (!rootEntry || rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
+    throw new Error(`${prefix} ${label} root must be one existing regular non-symlink directory`);
+  }
+  const physicalRoot = fs.realpathSync(rootPath);
+  const parts = path.relative(rootPath, targetPath).split(path.sep).filter(Boolean);
+  let cursor = rootPath;
+  for (let index = 0; index < parts.length; index += 1) {
+    cursor = path.join(cursor, parts[index]);
+    const entry = lstatMaybe(cursor);
+    if (!entry) {
+      const unresolved = parts.slice(index + 1);
+      const resolved = path.join(fs.realpathSync(path.dirname(cursor)), path.basename(cursor), ...unresolved);
+      if (!resolved.startsWith(`${physicalRoot}${path.sep}`)) {
+        throw new Error(`${prefix} ${label} escapes its physical root`);
+      }
+      return resolved;
+    }
+    if (entry.isSymbolicLink()) {
+      throw new Error(`${prefix} ${label} contains a symlink component at ${cursor}`);
+    }
+    const final = index === parts.length - 1;
+    if (!final && !entry.isDirectory()) {
+      throw new Error(`${prefix} ${label} has a non-directory path component at ${cursor}`);
+    }
+    if (final && expected === 'directory' && !entry.isDirectory()) {
+      throw new Error(`${prefix} ${label} must be one regular non-symlink directory`);
+    }
+    if (final && expected === 'file' && !entry.isFile()) {
+      throw new Error(`${prefix} ${label} must be one regular non-symlink file`);
+    }
+    const resolved = fs.realpathSync(cursor);
+    if (!resolved.startsWith(`${physicalRoot}${path.sep}`)) {
+      throw new Error(`${prefix} ${label} escapes its physical root`);
+    }
+  }
+  return fs.realpathSync(targetPath);
+}
+
 function safeTitle(value) {
   return Boolean(value) && value === value.trim() && !/[\\/\0\n\r]/.test(value) && value !== '.' && value !== '..';
 }
@@ -93,6 +150,14 @@ function epicRoute(spec, epic) {
 function canonicalEpicSurface(spec, epic) {
   if (!safeTitle(epic)) return { ok: false, reason: 'epic name must be a safe title' };
   const route = epicRoute(spec, epic);
+  try {
+    physicalIntakeTarget(spec.cards_root, route.root, `${epic} epic root`, 'directory');
+    physicalIntakeTarget(spec.cards_root, route.atlas_path, `${epic} atlas`);
+    physicalIntakeTarget(spec.cards_root, path.dirname(route.board_path), `${epic} board directory`, 'directory');
+    physicalIntakeTarget(spec.cards_root, route.board_path, `${epic} board`);
+  } catch (error) {
+    return { ok: false, reason: error.message };
+  }
   if (!fs.existsSync(route.atlas_path) || !fs.existsSync(route.board_path)) {
     return { ok: false, reason: `canonical epic scaffold does not resolve: ${epic}` };
   }
@@ -696,6 +761,31 @@ function planSupplementalFiles(spec, planned) {
   }
 }
 
+function validateEpicRouteForPlan(spec, route, creating) {
+  physicalIntakeTarget(spec.cards_root, route.root, `${route.epic} epic root`, 'directory');
+  physicalIntakeTarget(spec.cards_root, route.atlas_path, `${route.epic} atlas`);
+  physicalIntakeTarget(spec.cards_root, path.dirname(route.board_path), `${route.epic} board directory`, 'directory');
+  physicalIntakeTarget(spec.cards_root, route.board_path, `${route.epic} board`);
+  if (creating) {
+    physicalIntakeTarget(spec.cards_root, path.join(route.root, 'context'), `${route.epic} context directory`, 'directory');
+  }
+}
+
+function validatePhysicalPlan(spec, planned) {
+  const cardsRoot = path.resolve(spec.cards_root);
+  const projectRoot = path.resolve(spec.project_root);
+  for (const item of planned) {
+    const target = path.resolve(item.path);
+    if (within(cardsRoot, target) && target !== cardsRoot) {
+      physicalIntakeTarget(cardsRoot, target, `planned card target ${path.basename(target)}`);
+    } else if (within(projectRoot, target) && target !== projectRoot) {
+      physicalIntakeTarget(projectRoot, target, `planned project target ${path.basename(target)}`);
+    } else {
+      throw new Error(`GA-OPS13A-EPIC-INTAKE-PHYSICAL-CONTAINMENT planned target escapes sanctioned roots: ${target}`);
+    }
+  }
+}
+
 function planEpicNative(spec, validation, boardRaw) {
   const planned = [];
   const errors = [];
@@ -716,6 +806,12 @@ function planEpicNative(spec, validation, boardRaw) {
     const parent = parentByName.get(epic);
     const creating = Boolean(parent && parent.existing !== true);
     const route = epicRoute(spec, epic);
+    try {
+      validateEpicRouteForPlan(spec, route, creating);
+    } catch (error) {
+      errors.push(error.message);
+      continue;
+    }
     const atlasPrior = fs.existsSync(route.atlas_path) ? fs.readFileSync(route.atlas_path, 'utf8') : null;
     const boardPrior = fs.existsSync(route.board_path) ? fs.readFileSync(route.board_path, 'utf8') : null;
     const packPath = path.join(route.root, 'context', 'pack.md');
@@ -837,6 +933,13 @@ function run(spec, apply = false, deps = {}) {
     ok: false, errors: plan.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
   };
   const planned = plan.planned;
+  if (validation.epicNative) {
+    try {
+      validatePhysicalPlan(spec, planned);
+    } catch (error) {
+      return { ok: false, errors: [error.message], ...(cutoverEnabled ? { cutover_enabled: true } : {}) };
+    }
+  }
   const changed = planned.filter((item) => item.changed);
   if (apply) for (const item of changed) atomicWrite(item.path, item.content);
   const finalBoard = apply && fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : plan.nextBoard;

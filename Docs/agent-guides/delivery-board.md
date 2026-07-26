@@ -20,6 +20,8 @@ Each epic owns the canonical scaffold `tasks/<Epic>/{<Epic>.md (atlas, type: epi
 
 Card-intake reads the installed coordinator's status fresh on every planning pass. Post-cutover direct execution targets an existing canonical epic and changes only its slice note plus epic board; new roadmap parents create the full canonical scaffold and put only epic lines on the parent board. Unexpected partial-scaffold bytes fail before writes, while matching intended bytes resume idempotently. Flat execution intake is refused except for the existing one-line `Discovered (autoloop)` bug-triage route. Absent/disabled cutover retains the legacy flat planner and selector unchanged.
 
+Before dry-run or apply can succeed, every epic root, board directory, context directory, scaffold component, and slice target must resolve as a regular non-symlink physical descendant of `cards_root`. The complete plan is validated before its first mutation, so a symlinked partial scaffold cannot redirect atlas, board, context, or slice writes outside the project.
+
 The epic atlas renders an **EpicDashboard** rollup fed by `deriveEpicLifecycle` (delivery-contract.js). Bucket semantics: `completed→done`, `in_progress→active`, `parked→waiting`, `blocked→blocked`, `discarded→excluded entirely`, else `planned`. **Waiting rolls up like blocked** — a parked slice is a short-lived concurrency/deploy wait, never progress, and a claimable sibling must not hide it.
 
 ## The `discarded` terminal state
