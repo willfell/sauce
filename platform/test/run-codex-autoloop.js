@@ -4769,11 +4769,11 @@ for (const entry of realPersistencePlan.spec.cards) {
     reconciled_at: realPersistenceApplied.reconciled_at,
   });
 }
-eq(realPersistenceAfter, realPersistenceExpected,
-  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
 eq(realPersistenceAfter.cards['Unrelated ledger authority sentinel'],
   realPersistenceBefore.cards['Unrelated ledger authority sentinel'],
   'GA-OPS14A4-NON-TARGET-CARD-ENVELOPE-UNBOUND preserves an unrelated complete ledger record through real persistence');
+eq(realPersistenceAfter, realPersistenceExpected,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
 eq(realPersistenceAfter.updated_at, realPersistenceBefore.updated_at,
   'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT preserves the exact top-level updated_at authority');
 const realPersistenceHashAfterApply = testSha256(fs.readFileSync(
