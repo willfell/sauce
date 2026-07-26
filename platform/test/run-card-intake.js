@@ -751,6 +751,29 @@ function supersedeGovernance() {
     );
     ok(objectValuedFrontmatterKeys(legacySupersedePreimage).includes('binding_fixtures'),
       'GA-OPS20A-NESTED-OBJECT-GUARD carried fixture reproduces the actual object-bearing supersession writer');
+    const legacySupersedeThirdState = legacySupersedePreimage.replace(
+      'binds finding F1 as a regression fixture',
+      'binds finding F1 as a regression fixturX',
+    );
+    const supersedeThirdStateBoard = fs.readFileSync(spec.board_path, 'utf8');
+    const supersedeThirdStatePeerPath = path.join(dir, 'Roadmap.md');
+    const supersedeThirdStatePeer = fs.readFileSync(supersedeThirdStatePeerPath, 'utf8');
+    eq(Buffer.byteLength(legacySupersedeThirdState), Buffer.byteLength(legacySupersedePreimage),
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state mutation preserves preimage length');
+    eq([...Buffer.from(legacySupersedeThirdState)].filter(
+      (byte, index) => byte !== Buffer.from(legacySupersedePreimage)[index],
+    ).length, 1,
+    'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding fixture mutates exactly one unrelated byte');
+    fs.writeFileSync(successorPath, legacySupersedeThirdState);
+    const legacySupersedeThirdStateResult = run(spec, true);
+    ok(!legacySupersedeThirdStateResult.ok && legacySupersedeThirdStateResult.no_op !== true,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding legacy unrelated-byte third state refuses');
+    eq(fs.readFileSync(successorPath, 'utf8'), legacySupersedeThirdState,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves the card bytes');
+    eq(fs.readFileSync(spec.board_path, 'utf8'), supersedeThirdStateBoard,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves board bytes');
+    eq(fs.readFileSync(supersedeThirdStatePeerPath, 'utf8'), supersedeThirdStatePeer,
+      'GA-OPS20A-ACTUAL-LEGACY-BLOCK-REPLAY superseding third-state refusal preserves peer bytes');
     fs.writeFileSync(successorPath, legacySupersedePreimage);
     const legacySupersedeReplay = run(spec, true);
     ok(legacySupersedeReplay.ok && legacySupersedeReplay.changed_paths.includes(successorPath),

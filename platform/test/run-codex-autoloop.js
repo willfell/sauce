@@ -4589,6 +4589,25 @@ function restampHarness(id = 'happy') {
   };
 }
 
+function independentlyRestampedContractBytes(raw) {
+  const legacyDeployments = [
+    'deploy_subscriptions:',
+    '  headspace: []',
+    '  accuris: []',
+    '  ero: []',
+  ].join('\n');
+  const evidenceMatch = raw.match(/^evidence: (.*)$/m);
+  if (!raw.includes(legacyDeployments) || !evidenceMatch) {
+    throw new Error('independent restamp oracle requires the exact legacy writer preimage');
+  }
+  const scalar = (value) => JSON.stringify(JSON.stringify(value));
+  return raw
+    .replace(legacyDeployments, `deploy_subscriptions: ${scalar({
+      headspace: [], accuris: [], ero: [],
+    })}`)
+    .replace(/^evidence:.*$/m, `evidence: ${scalar(JSON.parse(evidenceMatch[1]))}`);
+}
+
 const restamp = restampHarness();
 const restampBodiesBefore = restamp.paths.map((file) => {
   const raw = fs.readFileSync(file, 'utf8');
@@ -4598,9 +4617,7 @@ const restampContractsBefore = restamp.paths.map((file) => (
   parseExecutionMeta(fs.readFileSync(file, 'utf8'), path.basename(file, '.md')).contract
 ));
 const restampPreimages = restamp.paths.map((file) => fs.readFileSync(file, 'utf8'));
-const restampIntended = restampPreimages.map((raw, index) => (
-  restampContractFrontmatter(raw, path.basename(restamp.paths[index], '.md')).next
-));
+const restampIntended = restampPreimages.map(independentlyRestampedContractBytes);
 const restampPlan = await commandReconcileMetadata(restamp.ctx, restamp.dryRunArgs, restamp.deps);
 eq(restampPlan.action, 'contract-frontmatter-restamp-plan',
   'BGR-OBSY-HEAL-IDEMPOTENT starts with a deterministic dry-run');
