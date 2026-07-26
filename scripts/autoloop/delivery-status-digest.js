@@ -61,12 +61,21 @@ function sinceLastLook(status, fidText, lastSeen) {
       })),
     cutover_flips: (status.cutover_history || []).filter((c) => afterTs(c.at)),
     self_ratified: parseSelfRatified(fidText).filter((a) => !seenDay || a.date >= seenDay),
+    ratified: (status.ratified_recent || [])
+      .filter((receipt) => afterTs(receipt.at))
+      .map((receipt) => ({
+        card: receipt.card,
+        authority: receipt.authority,
+        at: receipt.at,
+        artifact_path: receipt.artifact_path || null,
+      })),
   };
 }
 
 function sinceCount(since) {
   if (!since) return 0;
-  return since.discards.length + since.cutover_flips.length + since.self_ratified.length;
+  return since.discards.length + since.cutover_flips.length
+    + since.self_ratified.length + since.ratified.length;
 }
 
 function buildDigest(status, fidText, releases, opts) {
