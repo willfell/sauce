@@ -938,16 +938,20 @@ eq(events, ['write'], 'record-pr persists validated state without arming auto-me
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
 const reviewLocks = [];
+let opx2ReviewProjections = 0;
 const review = await commandRecordReview({ root: '/workshop' }, {
   card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
 }, {
   readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
+  projectLoopStation: () => { opx2ReviewProjections++; },
   withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
 eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
 eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
   'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
+eq(opx2ReviewProjections, 0,
+  'OPX2-TRANSITION-ONLY review receipt writes never project Loop Station');
 
 reviewState.cards.Review.phase = 'feature_merged';
 await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
@@ -990,6 +994,7 @@ ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined r
 const advanceState = emptyState();
 advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
 const advanceLocks = []; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+let opx2WaitingProjections = 0;
 const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
   withLock: async (_ctx, name, fn) => {
     advanceLocks.push(name); insideAdvanceLock = true;
@@ -997,12 +1002,15 @@ const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advan
   },
   readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
+  projectLoopStation: () => { opx2WaitingProjections++; },
   emit: () => {},
 });
 eq(advanceLocks, [legacyCardGateLockName('Advance'), cardGateLockName('Advance')],
   'advance acquires migration-compatible then exact-identity per-card gates');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
+eq(opx2WaitingProjections, 0,
+  'OPX2-TRANSITION-ONLY waiting poll/retry fires no Loop Station projection');
 const opx2DeployState = emptyState();
 opx2DeployState.cards.Deploy = { card: 'Deploy', phase: 'tap_merged' };
 const opx2DeployProjections = [];
@@ -5827,12 +5835,44 @@ eq(projectLoopStation(
 ).no_op, true, 'OPX2-IDEMPOTENT-REPLAY scaffold replay is a no-op');
 eq(opx2ScaffoldWrites, 1, 'OPX2-IDEMPOTENT-REPLAY scaffold replay performs zero writes');
 
-const opx2ReadOnlyStation = path.join(opx2Root, 'read-only', 'Loop Station.md');
-commandStatus({ root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') }, {
-  state: emptyState(), boardMd: liveBoard({}), boardPath: path.join(opx2Root, 'read-only-board.md'),
-  cardsRoot: path.join(opx2Root, 'read-only-cards'), loadCard: () => null,
-});
-ok(!fs.existsSync(opx2ReadOnlyStation), 'OPX2-TRANSITION-ONLY status reads never scaffold or write Loop Station');
+// OPX2-STATUS-NO-WRITE-MUTATION: intercept the real atomic writer used by
+// projectLoopStation at the exact station target. Status must perform zero
+// writes, while the positive-control projector must hit the trap exactly once;
+// adding that projector to status therefore turns this fixture red.
+const opx2ReadOnlyBoard = path.join(opx2Root, 'read-only', 'sauce-board.md');
+const opx2ReadOnlyStation = path.join(path.dirname(opx2ReadOnlyBoard), 'Loop Station.md');
+const opx2OriginalWriteFileSync = fs.writeFileSync;
+const opx2ReadWriteAttempts = [];
+fs.writeFileSync = (target) => {
+  opx2ReadWriteAttempts.push(String(target));
+  throw new Error('OPX2-STATUS-NO-WRITE-MUTATION trapped a forbidden station write');
+};
+try {
+  commandStatus({ root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') }, {
+    state: emptyState(), boardMd: liveBoard({}), boardPath: opx2ReadOnlyBoard,
+    cardsRoot: path.join(opx2Root, 'read-only-cards'), loadCard: () => null,
+  });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION status reaches zero production-writer calls');
+  commandRecover({ root: opx2Root }, { state: emptyState(), sh: () => '' });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION read-only recovery inspection reaches zero production-writer calls');
+  assert.throws(() => projectLoopStation(
+    { root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') },
+    opx2State, 'status-positive-control', {
+      status: opx2Status, stationPath: opx2ReadOnlyStation, markerPath: null,
+      fidText: opx2Fid, releases: opx2Releases,
+      now: () => '2026-07-26T12:30:00.000Z',
+    },
+  ), /OPX2-STATUS-NO-WRITE-MUTATION trapped/,
+  'OPX2-STATUS-NO-WRITE-MUTATION positive-control projection turns the writer oracle red'); count++;
+  eq(opx2ReadWriteAttempts.length, 1,
+    'OPX2-STATUS-NO-WRITE-MUTATION positive control reaches the exact atomic station writer once');
+} finally {
+  fs.writeFileSync = opx2OriginalWriteFileSync;
+}
+ok(!fs.existsSync(opx2ReadOnlyStation),
+  'OPX2-TRANSITION-ONLY status and the trapped positive control leave the actual station target absent');
 
 // BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
 const replayWritesBefore = discardWrites;
