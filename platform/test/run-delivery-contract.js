@@ -83,6 +83,23 @@ const duplicateStructuredVerdict = api.validateCard({
 check('BGR-OBSY-READERS-BOTH-ENCODINGS duplicate JSON object keys refuse loudly',
   !duplicateStructuredVerdict.ok
     && duplicateStructuredVerdict.errors.some((issue) => issue.code === 'duplicate-structured-json-key'));
+const wrongShapeStructuredCard = {
+  ...legacyStructuredCard,
+  evidence: '{"not":"an-array"}',
+  deploy_subscriptions: '[]',
+};
+const wrongShapeStructuredPreimage = JSON.stringify(wrongShapeStructuredCard);
+const wrongShapeStructuredVerdict = api.validateCard(wrongShapeStructuredCard);
+check('GA-OPS20A2-STRUCTURED-WRONG-SHAPE-UNBOUND refuses both field-specific wrong JSON shapes',
+  !wrongShapeStructuredVerdict.ok
+    && wrongShapeStructuredVerdict.errors.some((issue) => (
+      issue.code === 'invalid-structured-json-shape' && issue.field === 'evidence'
+    ))
+    && wrongShapeStructuredVerdict.errors.some((issue) => (
+      issue.code === 'invalid-structured-json-shape' && issue.field === 'deploy_subscriptions'
+    )));
+eq('GA-OPS20A2-STRUCTURED-WRONG-SHAPE-UNBOUND validation leaves the caller preimage byte-equivalent',
+  JSON.stringify(wrongShapeStructuredCard), wrongShapeStructuredPreimage);
 
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');

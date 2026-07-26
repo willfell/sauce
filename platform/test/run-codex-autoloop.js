@@ -4597,6 +4597,10 @@ const restampBodiesBefore = restamp.paths.map((file) => {
 const restampContractsBefore = restamp.paths.map((file) => (
   parseExecutionMeta(fs.readFileSync(file, 'utf8'), path.basename(file, '.md')).contract
 ));
+const restampPreimages = restamp.paths.map((file) => fs.readFileSync(file, 'utf8'));
+const restampIntended = restampPreimages.map((raw, index) => (
+  restampContractFrontmatter(raw, path.basename(restamp.paths[index], '.md')).next
+));
 const restampPlan = await commandReconcileMetadata(restamp.ctx, restamp.dryRunArgs, restamp.deps);
 eq(restampPlan.action, 'contract-frontmatter-restamp-plan',
   'BGR-OBSY-HEAL-IDEMPOTENT starts with a deterministic dry-run');
@@ -4604,6 +4608,12 @@ eq(restampPlan.exact_target_count, 2,
   'BGR-OBSY-HEAL-IDEMPOTENT plans every legacy canonical note and excludes already encoded or unrelated notes');
 eq(restampPlan.spec.files.map((entry) => entry.card), ['Legacy Restamp A', 'Legacy Restamp B'],
   'BGR-OBSY-HEAL-IDEMPOTENT uses stable path ordering');
+for (let index = 0; index < restampPlan.spec.files.length; index += 1) {
+  eq(restampPlan.spec.files[index].expected_sha256, testSha256(restampPreimages[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} expected receipt uses independent SHA-256`);
+  eq(restampPlan.spec.files[index].intended_sha256, testSha256(restampIntended[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} intended receipt uses independent SHA-256`);
+}
 eq(restamp.writes(), 0, 'BGR-OBSY-HEAL-IDEMPOTENT dry-run performs zero writes');
 restamp.setSpec(restampPlan.spec);
 restamp.failWrite(2);
@@ -4685,18 +4695,24 @@ const thirdHashRestampPlan = await commandRestampContractFrontmatter(
 );
 thirdHashRestamp.setSpec(thirdHashRestampPlan.spec);
 const untouchedThirdHashPeer = fs.readFileSync(thirdHashRestamp.paths[1], 'utf8');
-fs.writeFileSync(thirdHashRestamp.paths[0], `${fs.readFileSync(thirdHashRestamp.paths[0], 'utf8')}operator drift\n`);
+const thirdHashPreimage = fs.readFileSync(thirdHashRestamp.paths[0], 'utf8');
+const thirdHashMutated = thirdHashPreimage.replace('BODY-SENTINEL-0', 'BODY-SENTINEL-X');
+eq(Buffer.byteLength(thirdHashMutated), Buffer.byteLength(thirdHashPreimage),
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED mutation preserves preimage length');
+eq([...Buffer.from(thirdHashMutated)].filter((byte, index) => byte !== Buffer.from(thirdHashPreimage)[index]).length, 1,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED fixture mutates exactly one byte');
+fs.writeFileSync(thirdHashRestamp.paths[0], thirdHashMutated);
 await assert.rejects(
   () => commandRestampContractFrontmatter(
     thirdHashRestamp.ctx, thirdHashRestamp.applyArgs, thirdHashRestamp.deps,
   ),
   /unplanned or changed canonical target|third hash/,
-  'BGR-OBSY-HEAL-IDEMPOTENT refuses a post-plan third hash before writes',
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED refuses a one-byte post-plan mutation before writes',
 ); count++;
 eq(thirdHashRestamp.writes(), 0,
-  'BGR-OBSY-HEAL-IDEMPOTENT third-hash refusal performs zero coordinator writes');
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal performs zero coordinator writes');
 eq(fs.readFileSync(thirdHashRestamp.paths[1], 'utf8'), untouchedThirdHashPeer,
-  'BGR-OBSY-HEAL-IDEMPOTENT third-hash refusal preserves every peer preimage');
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal preserves every peer preimage');
 
 // BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
 async function captureFsMutationAttempts(run) {
