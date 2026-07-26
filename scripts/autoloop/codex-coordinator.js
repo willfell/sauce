@@ -264,7 +264,7 @@ function consumeRatificationReceipt(receipt, expected = {}) {
   };
 }
 
-function exactRatificationSection(markdown, heading) {
+function exactRatificationSectionRange(markdown, heading) {
   const wanted = String(heading || '').trim();
   if (!wanted) return null;
   const source = String(markdown || '');
@@ -310,7 +310,16 @@ function exactRatificationSection(markdown, heading) {
     }
     offset += chunk.length;
   }
-  return source.slice(selected.start, end);
+  return {
+    start: selected.start,
+    end,
+    section: source.slice(selected.start, end),
+  };
+}
+
+function exactRatificationSection(markdown, heading) {
+  const selected = exactRatificationSectionRange(markdown, heading);
+  return selected ? selected.section : null;
 }
 
 function jsonDuplicateKeys(raw) {
@@ -381,55 +390,92 @@ function jsonDuplicateKeys(raw) {
   }
 }
 
-function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsedErrors) {
-  const current = Array.isArray(parsedErrors) ? parsedErrors : [];
-  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return current;
-  const section = exactRatificationSection(markdown, sectionHeading);
-  if (!section) return current;
+function uniqueRatificationErrors(errors) {
+  const seen = new Set();
+  return errors.filter((issue) => {
+    const key = JSON.stringify([issue && issue.code, issue && issue.field, issue && issue.message]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, provenance, parsed) {
+  const current = Array.isArray(parsed && parsed.errors) ? parsed.errors : [];
+  if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return parsed;
+  const selected = exactRatificationSectionRange(markdown, sectionHeading);
+  if (!selected) return parsed;
+  const section = selected.section;
   const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
-  if (blocks.length !== 1) return current;
+  if (blocks.length !== 1) return parsed;
   let payload;
-  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return current; }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return current;
+  try { payload = JSON.parse(blocks[0][1]); } catch (_) { return parsed; }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return parsed;
   const allowed = new Set([
     'schema_version', 'receipt_id', 'decision', 'accepted_at',
     'authority', 'target_card', 'target_head', 'scope',
   ]);
   const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
-  if (!unexpected.length) return current;
+  if (!unexpected.length) return parsed;
   const nonUnexpected = current.filter((issue) => issue && issue.code !== 'ratification-field-unexpected');
-  return [
-    ...nonUnexpected,
-    ...unexpected.map((field) => ({
-      code: 'ratification-field-unexpected',
-      field,
-      message: `ratification payload contains unsupported field ${field}`,
-    })),
-  ];
+  const unexpectedErrors = unexpected.map((field) => ({
+    code: 'ratification-field-unexpected',
+    field,
+    message: `ratification payload contains unsupported field ${field}`,
+  }));
+  const sanitizedPayload = Object.fromEntries(
+    Object.entries(payload).filter(([field]) => allowed.has(field)),
+  );
+  const sanitizedBlock = [
+    '```delivery-ratification',
+    JSON.stringify(sanitizedPayload, null, 2),
+    '```',
+  ].join('\n');
+  const sanitizedSection = section.replace(blocks[0][0], sanitizedBlock);
+  const sanitizedMarkdown = [
+    markdown.slice(0, selected.start),
+    sanitizedSection,
+    markdown.slice(selected.end),
+  ].join('');
+  const semantic = delivery.parseRatificationArtifact(
+    sanitizedMarkdown, sectionHeading, provenance,
+  );
+  return {
+    ...semantic,
+    ok: false,
+    errors: uniqueRatificationErrors([
+      ...nonUnexpected,
+      ...unexpectedErrors,
+      ...(semantic.ok ? [] : semantic.errors),
+    ]),
+  };
 }
 
 function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
   const section = exactRatificationSection(markdown, sectionHeading);
+  let duplicates = [];
   if (section) {
     const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
     if (blocks.length === 1) {
-      const duplicates = jsonDuplicateKeys(blocks[0][1]);
-      if (duplicates && duplicates.length) return {
-        ok: false,
-        errors: duplicates.map((field) => ({
-          code: 'ratification-field-duplicate',
-          field,
-          message: `ratification payload contains duplicate field ${field}`,
-        })),
-        receipt: null,
-        contract_version: delivery.CONTRACT_VERSION,
-      };
+      duplicates = jsonDuplicateKeys(blocks[0][1]) || [];
     }
   }
   const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
-  if (!parsed.ok) return {
+  const payloadValidation = allUnexpectedRatificationPayloadErrors(
+    markdown, sectionHeading, provenance, parsed,
+  );
+  if (duplicates.length || !parsed.ok) return {
     ok: false,
-    errors: allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsed.errors),
+    errors: uniqueRatificationErrors([
+      ...duplicates.map((field) => ({
+        code: 'ratification-field-duplicate',
+        field,
+        message: `ratification payload contains duplicate field ${field}`,
+      })),
+      ...payloadValidation.errors,
+      ...(payloadValidation.receipt
+        ? consumeRatificationReceipt(payloadValidation.receipt, expected).errors : []),
+    ]),
     receipt: null,
     contract_version: delivery.CONTRACT_VERSION,
   };
