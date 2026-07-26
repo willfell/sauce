@@ -7071,6 +7071,7 @@ ok(ratificationStatus(opx4State.cards[OPX4_CARD], opx4State, { boardPath: opx4Bo
 
 let opx4Writes = 0;
 let opx4StateReads = 0;
+let opx4ProjectionWrites = 0;
 const opx4ImmediateLock = async (_ctx, _name, fn) => fn();
 const opx4Deps = {
   boardPath: opx4Board,
@@ -7078,8 +7079,11 @@ const opx4Deps = {
   readState: () => { opx4StateReads++; return opx4State; },
   writeState: () => { opx4Writes++; },
   withLock: opx4ImmediateLock,
-  projectCard: () => ({ changed: true }),
-  projectLoopStation: async () => ({ action: 'loop-station-projected', no_op: false }),
+  projectCard: () => { opx4ProjectionWrites++; return { changed: true }; },
+  projectLoopStation: async () => {
+    opx4ProjectionWrites++;
+    return { action: 'loop-station-projected', no_op: false };
+  },
   resolveWorktreeHead: () => OPX4_HEAD,
   now: () => '2026-07-26T15:31:00.000Z',
 };
@@ -7204,6 +7208,8 @@ eq(
 );
 eq(opx4Writes, 0,
   'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION performs zero ledger writes');
+eq(opx4ProjectionWrites, 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION performs zero card or Loop Station projection writes');
 eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), positionCollisionRaw,
   'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION leaves the pending artifact byte-identical');
 const multiPayloadDecoy = [
