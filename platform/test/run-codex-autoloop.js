@@ -7128,6 +7128,26 @@ const acceptedRaw = opx4PendingRaw
   .replace('"decision": ""', '"decision": "accepted"')
   .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:31:00-06:00"')
   .replace('"authority": ""', `"authority": ${JSON.stringify(authorityVerbatim)}`);
+const duplicatePayloadRaw = acceptedRaw
+  .replace('"decision": "accepted"', '"decision": "",\n  "decision": "accepted"')
+  .replace(
+    `"authority": ${JSON.stringify(authorityVerbatim)}`,
+    `"authority": "",\n  "authority": ${JSON.stringify(authorityVerbatim)}`,
+  );
+fs.writeFileSync(opx4Artifact.absolute, duplicatePayloadRaw);
+const duplicatePayloadConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  duplicatePayloadConsume.errors.filter((issue) => issue.code === 'ratification-field-duplicate')
+    .map((issue) => issue.field),
+  ['decision', 'authority'],
+  'OPX4-CONSUME-INCOMPLETE returns every duplicate selected receipt payload field',
+);
+eq(opx4Writes, 0,
+  'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), duplicatePayloadRaw,
+  'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal leaves the artifact byte-identical');
 const multiPayloadDecoy = [
   '````md',
   `## Ratification — ${OPX4_CARD}`,
@@ -7340,9 +7360,11 @@ const opx4DeadAcceptedRaw = fs.readFileSync(opx4DeadArtifact.absolute, 'utf8')
   .replace('"authority": ""', '"authority": "delegate"');
 fs.writeFileSync(opx4DeadArtifact.absolute, opx4DeadAcceptedRaw);
 let opx4DeadProjectedPhase = null;
-const opx4DeadConsume = await commandConsumeRatification({ root: tmp }, {
+let opx4DeadStationProjections = 0;
+const opx4DeadArgs = {
   _: ['consume-ratification'], json: true, card: OPX4_DEAD_CARD,
-}, {
+};
+const opx4DeadDeps = {
   boardPath: opx4Board,
   cardsRoot: path.join(opx4Project, 'tasks'),
   readState: () => opx4DeadState,
@@ -7352,10 +7374,44 @@ const opx4DeadConsume = await commandConsumeRatification({ root: tmp }, {
     opx4DeadProjectedPhase = phase;
     return { changed: true };
   },
-  projectLoopStation: async () => ({ action: 'loop-station-projected', no_op: false }),
+  projectLoopStation: async () => {
+    opx4DeadStationProjections++;
+    return { action: 'loop-station-projected', no_op: false };
+  },
   resolveWorktreeHead: () => OPX4_HEAD,
   now: () => '2026-07-26T15:41:00.000Z',
-});
+};
+await assert.rejects(() => commandConsumeRatification(
+  { root: tmp },
+  opx4DeadArgs,
+  {
+    ...opx4DeadDeps,
+    writeText: (_target, value) => {
+      if (String(value).includes('state: consumed')) {
+        throw new Error('injected deadend artifact finalize failure');
+      }
+    },
+  },
+), /injected deadend artifact finalize failure/,
+'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND preserves blocked authority when artifact finalization fails');
+count++;
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].phase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND stores the deadend before artifact finalization');
+eq(opx4DeadProjectedPhase, null,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND cannot project before interrupted artifact finalization');
+eq(opx4DeadStationProjections, 0,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND cannot project Loop Station before interrupted finalization');
+const opx4DeadConsume = await commandConsumeRatification(
+  { root: tmp },
+  opx4DeadArgs,
+  opx4DeadDeps,
+);
+eq(opx4DeadConsume.recovered, true,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal replay reports recovered finalization');
+eq(opx4DeadStationProjections, 1,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal recovery refreshes Loop Station exactly once');
+eq(testScalarField(fs.readFileSync(opx4DeadArtifact.absolute, 'utf8'), 'state'), 'consumed',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal recovery finalizes the artifact');
 eq(opx4DeadConsume.action, 'ratification-consumed-deadend',
   'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND emits a fail-loud consumption receipt');
 eq(opx4DeadState.cards[OPX4_DEAD_CARD].phase, 'blocked',

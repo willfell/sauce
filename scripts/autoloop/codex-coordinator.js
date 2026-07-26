@@ -313,6 +313,74 @@ function exactRatificationSection(markdown, heading) {
   return source.slice(selected.start, end);
 }
 
+function jsonDuplicateKeys(raw) {
+  let index = 0;
+  const duplicates = [];
+  const skip = () => { while (/\s/.test(raw[index] || '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (raw[index] !== '"') throw new Error('string');
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === '\\') { index += 2; continue; }
+      if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated string');
+  };
+  const value = () => {
+    skip();
+    if (raw[index] === '{') {
+      index += 1;
+      skip();
+      const keys = new Set();
+      if (raw[index] === '}') { index += 1; return; }
+      while (index < raw.length) {
+        const key = string();
+        if (keys.has(key) && !duplicates.includes(key)) duplicates.push(key);
+        keys.add(key);
+        skip();
+        if (raw[index] !== ':') throw new Error('colon');
+        index += 1;
+        value();
+        skip();
+        if (raw[index] === '}') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+        skip();
+      }
+      throw new Error('unterminated object');
+    }
+    if (raw[index] === '[') {
+      index += 1;
+      skip();
+      if (raw[index] === ']') { index += 1; return; }
+      while (index < raw.length) {
+        value();
+        skip();
+        if (raw[index] === ']') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+      }
+      throw new Error('unterminated array');
+    }
+    if (raw[index] === '"') { string(); return; }
+    const token = raw.slice(index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
+    if (!token) throw new Error('value');
+    index += token[0].length;
+  };
+  try {
+    value();
+    skip();
+    return index === raw.length ? duplicates : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsedErrors) {
   const current = Array.isArray(parsedErrors) ? parsedErrors : [];
   if (!current.some((issue) => issue && issue.code === 'ratification-field-unexpected')) return current;
@@ -341,6 +409,23 @@ function allUnexpectedRatificationPayloadErrors(markdown, sectionHeading, parsed
 }
 
 function consumeRatificationArtifact(markdown, sectionHeading, provenance, expected = {}) {
+  const section = exactRatificationSection(markdown, sectionHeading);
+  if (section) {
+    const blocks = [...section.matchAll(/^```delivery-ratification[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+    if (blocks.length === 1) {
+      const duplicates = jsonDuplicateKeys(blocks[0][1]);
+      if (duplicates && duplicates.length) return {
+        ok: false,
+        errors: duplicates.map((field) => ({
+          code: 'ratification-field-duplicate',
+          field,
+          message: `ratification payload contains duplicate field ${field}`,
+        })),
+        receipt: null,
+        contract_version: delivery.CONTRACT_VERSION,
+      };
+    }
+  }
   const parsed = delivery.parseRatificationArtifact(markdown, sectionHeading, provenance);
   if (!parsed.ok) return {
     ok: false,
@@ -614,6 +699,32 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
       const expectedState = artifactState === 'consumed' ? 'consumed' : 'pending';
       const frontmatterErrors = ratificationFrontmatterErrors(raw, operand.card, expectedState);
       const stored = record.ratification_receipt;
+      const finishRecovery = async () => {
+        const projection = await attemptProjection(ctx, record, boardPath, {
+          withLock: lock, projectCard: project, now, state,
+        });
+        persist(ctx, state, record);
+        const station = await attemptLoopStationProjection(ctx, state, 'consume-ratification-recovery', {
+          projectLoopStation: deps.projectLoopStation,
+          boardPath,
+          cardsRoot: deps.cardsRoot,
+        });
+        const deadend = record.phase === 'blocked' ? String(record.reason || '') : '';
+        return {
+          action: projection.ok
+            ? (deadend ? 'ratification-consumed-deadend' : 'ratification-consumed')
+            : 'ratification-consumed-projection-failed',
+          card: operand.card,
+          phase: record.phase,
+          no_op: false,
+          recovered: true,
+          receipt: stored,
+          artifact: operand.relative,
+          ...(deadend ? { blocked: true, deadend } : {}),
+          ...(projection.ok ? {} : { projection_error: projection.error, reconcile: reconcileRoute(operand.card) }),
+          loop_station: station.receipt,
+        };
+      };
       const verdict = consumeRatificationArtifact(
         raw,
         operand.sectionHeading,
@@ -645,15 +756,7 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
         record.ratification_consumption.artifact_state = 'consumed';
         record.ratification_consumption.artifact_finalized_at = consumedAt;
         persist(ctx, state, record);
-        return {
-          action: 'ratification-consumed',
-          card: operand.card,
-          phase: record.phase,
-          no_op: false,
-          recovered: true,
-          receipt: stored,
-          artifact: operand.relative,
-        };
+        return finishRecovery();
       }
       if (scalarField(raw, 'consumed_at') !== record.ratification_consumption.consumed_at) {
         throw new Error('settled ratification artifact consumed_at differs from the ledger');
@@ -662,15 +765,7 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
         record.ratification_consumption.artifact_state = 'consumed';
         record.ratification_consumption.artifact_finalized_at = record.ratification_consumption.consumed_at;
         persist(ctx, state, record);
-        return {
-          action: 'ratification-consumed',
-          card: operand.card,
-          phase: record.phase,
-          no_op: false,
-          recovered: true,
-          receipt: stored,
-          artifact: operand.relative,
-        };
+        return finishRecovery();
       }
       return {
         action: 'ratification-consumed',
