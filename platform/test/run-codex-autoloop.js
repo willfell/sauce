@@ -4475,6 +4475,31 @@ eq(projectionMetadataProblem({
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
 
 // BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
+async function captureFsMutationAttempts(run) {
+  const methods = ['writeFileSync', 'appendFileSync', 'renameSync', 'unlinkSync', 'rmSync'];
+  const originals = Object.fromEntries(methods.map((method) => [method, fs[method]]));
+  const calls = [];
+  for (const method of methods) {
+    fs[method] = (...args) => {
+      calls.push({
+        method,
+        path: args[0] == null ? null : String(args[0]),
+        target: args[1] == null || method !== 'renameSync' ? null : String(args[1]),
+      });
+      return undefined;
+    };
+  }
+  let result = null;
+  let error = null;
+  try {
+    try { result = await run(); }
+    catch (err) { error = err; }
+  } finally {
+    for (const method of methods) fs[method] = originals[method];
+  }
+  return { result, error, calls };
+}
+
 function parkedRebindHarness(id = 'happy') {
   const root = path.join(reconcileRoot, `parked-rebind-${id}`);
   fs.mkdirSync(root, { recursive: true });
@@ -4505,6 +4530,11 @@ function parkedRebindHarness(id = 'happy') {
       resume_condition: 'wait for bounded authority',
       head_sha: 'a'.repeat(40), branch: `preserved-${index}`, worktree: `/preserved-${index}`,
       gate_receipt: { fixture: `gate-${index}` }, reviews: { fixture: `reviews-${index}` },
+      parked_metadata_rebindings: [{
+        request: { prior_receipt: name, index },
+        spec: { prior_spec: name, index },
+        reconciled_at: `2026-07-24T00:00:${String(index).padStart(2, '0')}.000Z`,
+      }],
     };
   }
   let ledgerWrites = 0;
@@ -4512,19 +4542,23 @@ function parkedRebindHarness(id = 'happy') {
   let barrierCalls = 0;
   let barrierFailure = null;
   const locks = [];
-  const ctx = { root, statePath: path.join(root, 'state.json') };
+  const ctx = { root, statePath: path.join(root, 'state.json'), boardPath };
   let specRaw = '';
   const deps = {
     readState: () => state,
     writeState: () => { ledgerWrites++; },
     withLock: async (_ctx, name, fn) => { locks.push(name); return fn(); },
-    atomicWriteText: () => { cardWrites++; },
+    atomicWriteText: (target, raw) => {
+      cardWrites++;
+      fs.writeFileSync(target, raw);
+    },
     durablePathBarrier: () => {
       barrierCalls++;
       if (barrierFailure) throw new Error(barrierFailure);
     },
     readSpec: () => specRaw,
     cardsRoot: root,
+    boardPath,
     now: () => '2026-07-25T23:30:00.000Z',
   };
   const reason = 'rebind the exact eight canonical epic migrations';
@@ -4598,7 +4632,14 @@ for (const name of PARKED_METADATA_REBIND_CARDS) {
   }, before, `BGD-PARKED-REBIND-PRESERVES-AUTHORITY preserves ${name}`);
   eq(projectionMetadataProblem(record, parkedRebind.root), null,
     `BGD-PARKED-REBIND-PRESERVES-AUTHORITY clears ${name}`);
-  eq(record.parked_metadata_rebindings.length, 1, `parked rebind journals one audit for ${name}`);
+  eq(record.parked_metadata_rebindings, [
+    ...parkedLedgerBefore[name].parked_metadata_rebindings,
+    {
+      request: parkedRebindApplied.request,
+      spec: parkedRebindApplied.spec,
+      reconciled_at: parkedRebindApplied.reconciled_at,
+    },
+  ], `GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND preserves ${name}'s exact audit prefix and appends one receipt`);
 }
 const parkedLedgerAfterNormalized = deepCopy(parkedRebind.state.cards);
 for (const name of PARKED_METADATA_REBIND_CARDS) {
@@ -4621,6 +4662,10 @@ eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
 })), parkedCardHashesBefore,
   'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every card byte hash');
 const parkedRebindCountsAfterApply = parkedRebind.counts();
+const parkedAuditsAfterApply = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  deepCopy(parkedRebind.state.cards[name].parked_metadata_rebindings),
+]));
 const parkedRebindReplay = await commandReconcileMetadata(
   parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
 );
@@ -4630,6 +4675,11 @@ eq(parkedRebind.counts(), {
   barrierCalls: parkedRebindCountsAfterApply.barrierCalls + 1,
   locks: [...parkedRebindCountsAfterApply.locks, 'parked-metadata-rebind'],
 }, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS performs zero second ledger or card writes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  parkedRebind.state.cards[name].parked_metadata_rebindings,
+])), parkedAuditsAfterApply,
+  'GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND literal replay leaves every prior-plus-appended audit chain exact');
 for (const altered of [
   { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
   { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
@@ -4765,6 +4815,55 @@ for (const shape of ['missing', 'extra']) {
     /does not exactly match/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${shape} target set before writes`); count++;
   eq(refusal.counts().ledgerWrites, 0, `${shape} target-set refusal performs zero ledger writes`);
 }
+
+// GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED: instrument every filesystem
+// mutation seam while apply, replay, and refusal execute, then prove the probe
+// itself catches an injected board write without allowing it to reach disk.
+const boardSeamRebind = parkedRebindHarness('board-write-seam');
+const boardSeamPlan = await commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.dryRunArgs, boardSeamRebind.deps,
+);
+boardSeamRebind.setSpec(boardSeamPlan.spec);
+const boardSeamHash = testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8'));
+const boardApplyProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardApplyProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply completes under the filesystem mutation probe');
+eq(boardApplyProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply preserves the relevant board hash');
+const boardReplayProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardReplayProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay completes under the mutation probe');
+eq(boardReplayProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay preserves the relevant board hash');
+const boardRefusalProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx,
+  { ...boardSeamRebind.applyArgs, reason: `${boardSeamRebind.reason} substituted` },
+  boardSeamRebind.deps,
+));
+ok(boardRefusalProbe.error && /literal/.test(boardRefusalProbe.error.message),
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED substituted request reaches the expected refusal');
+eq(boardRefusalProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal preserves the relevant board hash');
+const injectedBoardMutation = await captureFsMutationAttempts(async () => {
+  fs.writeFileSync(boardSeamRebind.boardPath, 'injected board mutation');
+});
+eq(injectedBoardMutation.calls, [{
+  method: 'writeFileSync',
+  path: boardSeamRebind.boardPath,
+  target: null,
+}], 'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe turns red on a targeted board-write mutation');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe blocks the injected mutation from disk');
 
 // GA-OPS14A2-CLI-ROUTING-UNCOVERED: real parser + main dispatch reach the parked-rebind route.
 {
