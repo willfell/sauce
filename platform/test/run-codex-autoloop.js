@@ -25,7 +25,7 @@ const {
   buildLoopStationPayload, validateLoopStationPayload, projectLoopStation,
   consumeRatificationReceipt, consumeRatificationArtifact,
   scaffoldPendingRatifications, ratificationArtifactForCard, ratificationStatus,
-  commandBackfillRatifications, commandConsumeRatification,
+  commandBackfillRatifications, ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle,
   gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
   runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
@@ -7128,6 +7128,22 @@ const acceptedRaw = opx4PendingRaw
   .replace('"decision": ""', '"decision": "accepted"')
   .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:31:00-06:00"')
   .replace('"authority": ""', `"authority": ${JSON.stringify(authorityVerbatim)}`);
+const multiPayloadInvalidRaw = acceptedRaw.replace(
+  '  "scope": [',
+  '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
+);
+fs.writeFileSync(opx4Artifact.absolute, multiPayloadInvalidRaw);
+const multiPayloadInvalidConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  multiPayloadInvalidConsume.errors.filter((issue) => issue.code === 'ratification-field-unexpected')
+    .map((issue) => issue.field),
+  ['unexpected_one', 'unexpected_two'],
+  'OPX4-CONSUME-INCOMPLETE returns every unsupported receipt payload field',
+);
+eq(opx4Writes, 0,
+  'OPX4-CONSUME-INCOMPLETE multi-payload-error refusal performs zero ledger writes');
 fs.writeFileSync(opx4Artifact.absolute, acceptedRaw);
 await assert.rejects(() => commandConsumeRatification({ root: tmp }, opx4Args, {
   ...opx4Deps,
@@ -7208,6 +7224,36 @@ eq(opx4Digest.since.ratified, [{
   at: '2026-07-26T09:31:00-06:00',
   artifact_path: opx4Artifact.relative,
 }], 'OPX4-CONSUME-VALID successful consumption enters the digest ratified feed');
+const opx4OffsetDigest = deliveryStatusDigest.buildDigest({
+  active: [],
+  parked: [],
+  tracked: [],
+  ratified_recent: [{
+    card: OPX4_CARD,
+    authority: authorityVerbatim,
+    at: '2026-07-26T10:01:00-06:00',
+    artifact_path: opx4Artifact.relative,
+  }],
+}, '', [], { lastSeen: '2026-07-26T16:00:00.000Z' });
+eq(opx4OffsetDigest.since.ratified.length, 1,
+  'OPX4-CONSUME-VALID digest compares offset timestamps chronologically');
+
+const deliveryReviewTriage = require('../../scripts/autoloop/delivery-review-triage');
+for (const [label, wait, expectedBucket] of [
+  ['sibling', ratificationAcceptedWait({ sibling: { card: 'GA-SIBLING' } }), 'concurrency-wait'],
+  ['touch-zone', ratificationAcceptedWait({ conflict: { card: 'GA-CONFLICT' } }), 'concurrency-wait'],
+  ['dependency', ratificationAcceptedWait({ unmet: ['GA-DEP'] }), 'deploy-wait'],
+  ['capacity', ratificationAcceptedWait({ atCapacity: true }), 'concurrency-wait'],
+]) {
+  eq(
+    deliveryReviewTriage.classifyCard(
+      { card: `GA-WAIT-${label}`, status: 'parked', resume_condition: wait },
+      { activeIds: new Set(), tracked: [] },
+    ),
+    expectedBucket,
+    `OPX4-CONSUME-VALID accepted ${label} constraint remains a loop-owned wait`,
+  );
+}
 
 // GA-OPS19A2-CLI-DISPATCH-UNBOUND: execute both ratification verbs through
 // main(), rather than proving only the exported command functions.

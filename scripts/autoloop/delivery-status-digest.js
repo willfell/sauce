@@ -48,7 +48,14 @@ function parseSelfRatified(fidText) {
 // same-day amendments always show — over-inclusion is the safe side.
 function sinceLastLook(status, fidText, lastSeen) {
   const seen = lastSeen || null;
-  const afterTs = (ts) => !seen || String(ts || '') > seen;
+  const seenMs = seen ? Date.parse(seen) : NaN;
+  const afterTs = (ts) => {
+    if (!seen) return true;
+    const candidate = String(ts || '');
+    const candidateMs = Date.parse(candidate);
+    if (Number.isFinite(seenMs) && Number.isFinite(candidateMs)) return candidateMs > seenMs;
+    return candidate > seen;
+  };
   const seenDay = seen ? String(seen).slice(0, 10) : null;
   return {
     last_seen: seen,
