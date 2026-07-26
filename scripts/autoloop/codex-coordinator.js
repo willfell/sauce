@@ -3084,6 +3084,20 @@ function hasDeployedSupersedingSibling(card, tracked) {
   return Boolean(deployedSupersedingSibling(card, tracked));
 }
 
+// One lazy predicate owns both read-only status detection and reap healing:
+// a discarded ledger record whose resolved card note still exists. Laziness
+// preserves reap's per-item check after each prior deletion.
+function* tombstoneResidue(state, cardsRoot = CARDS_ROOT, exists = fs.existsSync) {
+  const discarded = Object.values((state && state.cards) || {})
+    .filter((record) => record.phase === 'discarded')
+    .sort((a, b) => String(a.card).localeCompare(String(b.card)));
+  for (const record of discarded) {
+    const notePath = resolveCardPath(record.card_path, record.card, cardsRoot);
+    if (!notePath || !exists(notePath)) continue;
+    yield { card: record.card, path: notePath, heal: 'reap' };
+  }
+}
+
 // Board-line grammar for the reap sweep: a checkbox line whose first wikilink
 // is the card it targets, optionally trailed by a planning-stub annotation
 // ("(decomposed → …)" / "(docs-only → …)").
@@ -3271,10 +3285,9 @@ async function commandReap(ctx, args, deps = {}) {
     // enforced per item. A corrupt entry is refused loudly in the receipt but
     // never aborts the batch — an abort would lose the whole receipt, and the
     // persistent corrupt entry would make every future reap throw.
-    for (const record of Object.values(state.cards || {})) {
-      if (record.phase !== 'discarded') continue;
-      const notePath = resolveCardPath(record.card_path, record.card, d.cardsRoot);
-      if (!notePath || !fs.existsSync(notePath)) continue;
+    for (const residue of tombstoneResidue(state, d.cardsRoot)) {
+      const record = state.cards[residue.card];
+      const notePath = residue.path;
       try {
         const entry = fs.lstatSync(notePath);
         if (entry.isSymbolicLink() || !entry.isFile()) {
@@ -4016,6 +4029,7 @@ function commandStatus(ctx, opts = {}) {
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
   const discarded = Object.values(state.cards || {}).filter((record) => record.phase === 'discarded');
   const cardsRoot = opts.cardsRoot || CARDS_ROOT;
+  const residue = [...tombstoneResidue(state, cardsRoot, opts.exists || fs.existsSync)];
   const boardMd = opts.boardMd ?? fs.readFileSync(BOARD, 'utf8');
   const loadCard = opts.loadCard || ((card) => {
     const p = findCard(CARDS_ROOT, card);
@@ -4073,6 +4087,7 @@ function commandStatus(ctx, opts = {}) {
         name: record.card, discarded_at: record.discarded_at || null,
         superseded_by: record.superseded_by || null, reason: record.discard_reason || null,
       })),
+    tombstone_residue: residue,
     active_count: active.length, capacity: MAX_ACTIVE, available_slots: Math.max(0, MAX_ACTIVE - active.length),
     cutover: state.cutover || null,
     cutover_history: state.cutover_history || [],
@@ -5166,7 +5181,7 @@ module.exports = {
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
-  stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, pruneCardWorkspace,
+  stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
