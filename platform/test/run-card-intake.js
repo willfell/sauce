@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
+  run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus, renderCard,
 } = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
 const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
@@ -82,8 +82,17 @@ function objectValuedFrontmatterKeys(raw) {
   for (let index = 0; index < lines.length; index += 1) {
     const field = lines[index].match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
     if (!field) continue;
-    if (field[2].trim().startsWith('{')) offenders.push(field[1]);
-    if (!field[2].trim()) {
+    const inline = field[2].trim();
+    if (inline.startsWith('{')) offenders.push(field[1]);
+    if (inline.startsWith('[')) {
+      try {
+        const value = JSON.parse(inline);
+        const containsObject = (item) => Boolean(item && typeof item === 'object'
+          && (!Array.isArray(item) || item.some(containsObject)));
+        if (containsObject(value)) offenders.push(field[1]);
+      } catch (_) {}
+    }
+    if (!inline) {
       const block = [];
       for (let cursor = index + 1; cursor < lines.length && /^\s+/.test(lines[cursor]); cursor += 1) block.push(lines[cursor]);
       if (block.some((entry) => /^\s{2}[A-Za-z_][A-Za-z0-9_-]*:\s*/.test(entry))) offenders.push(field[1]);
@@ -189,6 +198,14 @@ function localizedBug() {
     ok(!run({ ...spec, reproduction: '' }, false).ok, 'bug without reproduction is refused');
     delete spec.created_at;
     ok(run(spec, true).no_op, 'repeat bug intake is idempotent without restating generated created_at');
+    const cardFile = path.join(dir, 'tasks', card.title, `${card.title}.md`);
+    const stableSpec = { ...spec, created_at: JSON.parse((raw.match(/^created_at:\s*(.+)$/m) || [])[1]) };
+    fs.writeFileSync(cardFile, renderCard(card, stableSpec, { legacyStructuredFrontmatter: true }));
+    const legacyReplay = run(spec, true);
+    ok(legacyReplay.ok && legacyReplay.changed_paths.includes(cardFile),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS flat intake accepts and heals its byte-equivalent legacy writer preimage');
+    eq(objectValuedFrontmatterKeys(fs.readFileSync(cardFile, 'utf8')), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD healed flat replay restores object-free frontmatter');
   });
 }
 
@@ -435,6 +452,18 @@ function cutoverEpicIntake() {
     eq(fs.readFileSync(directSpec.board_path, 'utf8'), parentBefore, 'BGD-CUTOVER-PARENT-BOARD-PRESERVED leaves the parent board byte-identical');
     ok(fs.readFileSync(existingBoardPath, 'utf8').includes(`[[${direct.title}]]`), 'BGD-CUTOVER-EPIC-INTAKE-ROUTING inserts the slice on its epic board');
     ok(runEnabled(directSpec, true).no_op, 'BGD-CUTOVER-EPIC-INTAKE-ROUTING literal existing-epic replay is no_op');
+    fs.writeFileSync(directPath, renderCard(direct, directSpec, {
+      epicNative: true,
+      epicName: existingEpic,
+      boardRef: `project/tasks/${existingEpic}/board/${existingEpic}-board.md`,
+      atlasRef: `project/tasks/${existingEpic}/${existingEpic}.md`,
+      legacyStructuredFrontmatter: true,
+    }));
+    const legacyEpicReplay = runEnabled(directSpec, true);
+    ok(legacyEpicReplay.ok && legacyEpicReplay.changed_paths.includes(directPath),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS epic-native intake accepts and heals its byte-equivalent legacy writer preimage');
+    eq(objectValuedFrontmatterKeys(fs.readFileSync(directPath, 'utf8')), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD healed epic-native replay restores object-free frontmatter');
 
     const duplicate = execution('CUT-DUP Cross epic title', {
       model_profile: 'heavy', risk_flags: ['loader'],
@@ -651,6 +680,15 @@ function supersedeGovernance() {
     eq(applied.post_apply_instructions, [{ discard: { card: 'X Legacy card', superseded_by: 'SUP-1 Successor card' } }], 'BGR-INTAKE-SUPERSEDE-DISCARDS: apply receipt instructs predecessor discard without touching coordinator state');
     const raw = fs.readFileSync(findTaskFile(dir, 'SUP-1 Successor card') || path.join(dir, 'missing.md'), 'utf8');
     ok(raw.includes('supersedes: "X Legacy card"') && raw.includes('carried_findings: ["F1","F2"]') && raw.includes('binding_fixtures:'), 'BGR-INTAKE-SUPERSEDE-DISCARDS: supersede metadata materializes on the card note');
+    eq(structuredJsonScalar(raw, 'binding_fixtures'), successor().binding_fixtures,
+      'BGR-OBSY-WRITER-STRING-ENCODING object-bearing binding_fixtures use one JSON text scalar');
+    eq(objectValuedFrontmatterKeys(raw), [],
+      'BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD superseding intake emits no nested object in frontmatter');
+    const successorPath = findTaskFile(dir, 'SUP-1 Successor card');
+    fs.writeFileSync(successorPath, renderCard(successor(), spec, { legacyStructuredFrontmatter: true }));
+    const legacySupersedeReplay = run(spec, true);
+    ok(legacySupersedeReplay.ok && legacySupersedeReplay.changed_paths.includes(successorPath),
+      'BGR-OBSY-READERS-BOTH-ENCODINGS superseding intake accepts and heals its legacy object-bearing preimage');
 
     const replay = run(spec, true);
     ok(replay.ok && replay.no_op === true, 'BGR-INTAKE-SUPERSEDE-NOOP: literal replay of the applied superseding spec is a no_op');
