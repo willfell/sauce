@@ -4616,7 +4616,14 @@ function commandStatus(ctx, opts = {}) {
       })),
     ratified_recent: Object.values(state.cards || {})
       .filter((record) => record.ratification_receipt)
-      .sort((a, b) => String(b.ratification_receipt.accepted_at || '').localeCompare(String(a.ratification_receipt.accepted_at || '')))
+      .sort((a, b) => {
+        const acceptedA = String(a.ratification_receipt.accepted_at || '');
+        const acceptedB = String(b.ratification_receipt.accepted_at || '');
+        const timeA = Date.parse(acceptedA);
+        const timeB = Date.parse(acceptedB);
+        if (Number.isFinite(timeA) && Number.isFinite(timeB) && timeA !== timeB) return timeB - timeA;
+        return acceptedB.localeCompare(acceptedA);
+      })
       .slice(0, 20)
       .map((record) => ({
         card: record.card,
