@@ -745,6 +745,18 @@ ok('RRT-4 round-trips an empty/no-recurrence task unchanged', () => {
 const TaskTodayListClass = loadClass('mechanisms/task-entity/task-today-list.js', 'TaskTodayList');
 const TaskTodayList = new TaskTodayListClass();
 
+// TD-1a3: timezone-safe calendar arithmetic for quick reschedule.
+ok('TD1A-NEXT-DAY advances normalized dates across month + year boundaries', () => {
+  assert(typeof TaskTodayListClass.nextDay === 'function', 'static nextDay is present');
+  assert(typeof TaskTodayList.nextDay === 'function', 'instance nextDay delegator is present');
+  assert(TaskTodayList.nextDay('2026-01-31') === '2026-02-01',
+    'month boundary: ' + TaskTodayList.nextDay('2026-01-31'));
+  assert(TaskTodayList.nextDay('2026-12-31') === '2027-01-01',
+    'year boundary: ' + TaskTodayList.nextDay('2026-12-31'));
+  assert(TaskTodayList.nextDay('2026-02-29') === '',
+    'invalid calendar dates fail closed');
+});
+
 // ---------- TaskNoteView static helper (pure) ----------
 //
 // TaskNoteView is the clean task-note card rendered in a task note's body. Its
@@ -2457,9 +2469,151 @@ async function runRowActionTests() {
   global.Notice = prevNotice;
 }
 
+// ---------- TD-1a3 quick reschedule + completed-row exclusion ----------
+async function runTomorrowActionTests() {
+  const prevWindow = global.window;
+  const prevGlobalApp = global.app;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('TD1A-SHARED-OPEN-ROW writes nextDay(viewedDay) and removes only its row optimistically', async () => {
+    const viewedDay = '2026-01-31';
+    const path = 'spice/tasks/x.md';
+    const file = { path, _fm: { due: viewedDay, untouched: 'yes' } };
+    let resolveWrite;
+    const app = {
+      vault: { getAbstractFileByPath: (p) => (p === path ? file : null) },
+      fileManager: {
+        processFrontMatter(f, mutate) {
+          assert(f === file, 'processFrontMatter receives the exact resolved task file');
+          mutate(f._fm);
+          return new Promise((resolve) => { resolveWrite = resolve; });
+        },
+      },
+      workspace: { openLinkText() {} },
+    };
+    global.window = {
+      app,
+      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      moment: () => ({ format: () => '2099-12-31' }),
+    };
+    global.app = null;
+
+    const container = makeTreeNode('div');
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'x', path, due: viewedDay, status: 'open' },
+      null,
+      { viewedDay }
+    );
+    const sibling = container.createEl('div', { cls: 'sibling' });
+    const tomorrow = findByCls(row, 'sauce-task-action-tomorrow');
+    assert(tomorrow, 'open row exposes Move to tomorrow');
+    const pending = fireClick(tomorrow);
+    assert(file._fm.due === '2026-02-01',
+      'writes from viewed day rather than wall clock: ' + file._fm.due);
+    assert(file._fm.untouched === 'yes', 'unrelated frontmatter remains byte-identical');
+    assert(childIndex(container, row) < 0, 'activated row removed before write settles');
+    assert(childIndex(container, sibling) === 0, 'sibling remains present');
+    resolveWrite();
+    await pending;
+    assert(childIndex(container, row) < 0, 'row stays removed after success');
+  });
+
+  await okAsync('TD1A-SHARED-ROLLBACK restores the row at its exact position on mutation failure', async () => {
+    const path = 'spice/tasks/fail.md';
+    const file = { path, _fm: { due: '2026-12-31' } };
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: () => file },
+        fileManager: { processFrontMatter: async (f, mutate) => { mutate(f._fm); throw new Error('write failed'); } },
+        workspace: { openLinkText() {} },
+      },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+    };
+    const container = makeTreeNode('div');
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'fail', path, due: '2026-12-31', status: 'open' },
+      null,
+      { viewedDay: '2026-12-31' }
+    );
+    const sibling = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-tomorrow'));
+    assert(childIndex(container, row) === 0, 'failed row restored before its original sibling');
+    assert(childIndex(container, sibling) === 1, 'sibling order preserved');
+  });
+
+  await okAsync('TD1A-COLD-LOAD tomorrow activation is a silent no-op before TaskDialog readiness', async () => {
+    let writes = 0;
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: () => ({ path: 'spice/tasks/x.md' }) },
+        fileManager: { processFrontMatter: async () => { writes++; } },
+        workspace: { openLinkText() {} },
+      },
+      customJS: {},
+    };
+    const container = makeTreeNode('div');
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'x', path: 'spice/tasks/x.md', status: 'open' },
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+    let threw = false;
+    try { await fireClick(findByCls(row, 'sauce-task-action-tomorrow')); } catch (_e) { threw = true; }
+    assert(!threw, 'cold-load activation never throws');
+    assert(writes === 0, 'no frontmatter write before TaskDialog readiness');
+    assert(childIndex(container, row) === 0, 'cold-load activation leaves row intact');
+
+    global.window.customJS.TaskDialog = {};
+    try { await fireClick(findByCls(row, 'sauce-task-action-tomorrow')); } catch (_e) { threw = true; }
+    assert(!threw, 'partially registered TaskDialog never throws');
+    assert(writes === 0, 'no frontmatter write before TaskDialog.open is callable');
+    assert(childIndex(container, row) === 0, 'partial TaskDialog leaves row intact');
+  });
+
+  await okAsync('TD1A-COMPLETED-ROW-RESCHEDULE-LEAK excludes TaskDoneTodayList and archive-style completed rows', async () => {
+    let writes = 0;
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: (p) => ({ path: p }) },
+        fileManager: { processFrontMatter: async () => { writes++; } },
+        workspace: { openLinkText() {} },
+      },
+      customJS: { TaskDialog: { open() {} } },
+    };
+    const TaskDoneTodayListClass = loadClass(
+      'mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+    const TaskDoneArchiveClass = loadClass(
+      'blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive');
+    const doneToday = new TaskDoneTodayListClass().filterToday([
+      { title: 'Done today', path: 'spice/tasks/_done/today.md', status: 'done', due: '2026-07-27', completed_at: '2026-07-27' },
+    ], '2026-07-27');
+    const archived = new TaskDoneArchiveClass().groupByDate([
+      { title: 'Archived done', path: 'spice/tasks/_done/old.md', status: 'done', due: '2026-07-20', completed_at: '2026-07-20' },
+    ]).get('2026-07-20');
+    assert(doneToday.length === 1 && archived.length === 1,
+      'actual completed helpers select one row apiece');
+
+    for (const task of doneToday.concat(archived)) {
+      const container = makeTreeNode('div');
+      const row = TaskTodayList.renderTaskRow(container, task, null, { viewedDay: '2026-07-27' });
+      assert(!findByCls(row, 'sauce-task-action-tomorrow'),
+        'completed shared row has no tomorrow action: ' + task.path);
+    }
+    assert(writes === 0, 'completed/archive rows cannot mutate due');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+  global.Notice = prevNotice;
+}
+
 // ---------- Per-row inline wrench + trash icons (RTR-ICONS-1..2) ----------
-// renderTaskRow always renders two inline icons: wrench (edit) + trash (delete).
-// No more MenuPopover branching — these are always visible.
+// renderTaskRow always retains wrench (edit) + trash (delete). Open rows may
+// prepend tomorrow; there is still no MenuPopover/dots branching.
 async function runDotsMenuTests() {
   const prevWindow = global.window;
   const prevNotice = global.Notice;
@@ -3169,6 +3323,7 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
   await runRowActionTests();
+  await runTomorrowActionTests();
   await runDotsMenuTests();
   await runTaskDialogSauceModalTests();
   await runConfirmDeleteTests();

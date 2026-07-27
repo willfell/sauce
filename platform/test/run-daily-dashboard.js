@@ -18,7 +18,11 @@ const path = require('path');
 
 const WORKSHOP = path.resolve(__dirname, '..', '..');
 const SDD_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/helpers/space-daily-dashboard.js'), 'utf8');
+const SDD_MIRROR_SRC = fs.readFileSync(path.join(WORKSHOP, 'ranch/scripts/daily/space-daily-dashboard.js'), 'utf8');
+const DAILY_MANIFEST = JSON.parse(fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/manifest.json'), 'utf8'));
 const AF_SRC  = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/activity-feed/activity-feed.js'), 'utf8');
+const TTL_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8');
+const TE_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-entity.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, msg) { if (cond) { pass++; } else { fail++; console.log('  FAIL ' + msg); } }
@@ -58,13 +62,29 @@ function makeDashEl() {
     _text: '',
     _html: '',
     open: false,
-    createEl(tag, _opts) { const c = makeDashEl(); c._tag = tag; this._children.push(c); return c; },
+    parentNode: null,
+    attributes: {},
+    createEl(tag, opts) {
+      const c = makeDashEl();
+      c._tag = tag;
+      c.parentNode = this;
+      if (opts && opts.cls) c.className = opts.cls;
+      if (opts && opts.text != null) c.textContent = opts.text;
+      this._children.push(c);
+      return c;
+    },
     querySelector() { return null; },
     querySelectorAll() { return []; },
     _listeners: null,
     addEventListener(type, fn) { (this._listeners || (this._listeners = {}))[type] = fn; },
-    _fire(type) { const fn = this._listeners && this._listeners[type]; if (fn) fn(); },
-    remove() {},
+    _fire(type, event) { const fn = this._listeners && this._listeners[type]; if (fn) return fn(event || { target: this, stopPropagation() {} }); },
+    setAttribute(k, v) { this.attributes[k] = v; },
+    remove() {
+      if (!this.parentNode) return;
+      const i = this.parentNode._children.indexOf(this);
+      if (i >= 0) this.parentNode._children.splice(i, 1);
+      this.parentNode = null;
+    },
     get textContent() { return this._text + this._children.map(c => c.textContent).join(''); },
     set textContent(v) { this._text = String(v == null ? '' : v); this._children = []; },
     get innerHTML() { return this._html; },
@@ -90,6 +110,111 @@ function loadActivityFeed(windowShim) {
 
 (async () => {
   const TODAY = '2026-07-03';
+
+  await ok('TD1A2-DAILY-MIRROR-TOUCH-ZONE-TYPO canonical mirror bytes + manifest destination stay exact', async () => {
+    assert(SDD_SRC === SDD_MIRROR_SRC,
+      'platform helper and ranch/scripts/daily mirror must be byte-identical');
+    const entry = DAILY_MANIFEST.files.find((f) => f.source === 'helpers/space-daily-dashboard.js');
+    assert(entry && entry.dest === '{{scripts_path}}/daily/space-daily-dashboard.js',
+      'daily manifest must deploy the canonical daily mirror: ' + JSON.stringify(entry));
+  });
+
+  await ok('TD1A-DAILY-DASHBOARD-ACTION-ABSENT real open + overdue rows reschedule from the viewed day', async () => {
+    const prevWindow = global.window;
+    const prevApp = global.app;
+    const prevNotice = global.Notice;
+    global.Notice = function () {};
+
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
+    const TE = new TaskEntityClass();
+    const TTL = new TaskTodayListClass();
+    const openFile = { path: 'spice/tasks/open.md', _fm: { due: TODAY, untouched: 'open' } };
+    const overdueFile = { path: 'spice/tasks/late.md', _fm: { due: '2026-07-01', untouched: 'late' } };
+    const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
+    const app = {
+      vault: {
+        getAbstractFileByPath: (p) => files.get(p) || null,
+        adapter: { read: async () => { throw new Error('ENOENT'); } },
+      },
+      fileManager: {
+        processFrontMatter: async (file, mutate) => { mutate(file._fm); },
+      },
+      workspace: {
+        openLinkText() {},
+        getLeavesOfType() { return []; },
+      },
+    };
+    const windowShim = makeMomentWindow();
+    windowShim.app = app;
+    const customJS = {
+      TaskEntity: TE,
+      TaskTodayList: TTL,
+      TaskDialog: { open() {} },
+      RenderSafe: { captureScroll() {} },
+      ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
+      BeaconCards: { render: async () => {} },
+    };
+    windowShim.customJS = customJS;
+    global.window = windowShim;
+    global.app = app;
+
+    const taskPages = [
+      { type: 'task', status: 'open', title: 'Open', due: TODAY, file: { path: openFile.path } },
+      { type: 'task', status: 'open', title: 'Late', due: '2026-07-01', file: { path: overdueFile.path } },
+    ];
+    const chain = (items) => {
+      const out = items.slice();
+      out.array = () => items.slice();
+      out.where = (fn) => chain(items.filter(fn));
+      out.sort = () => out;
+      return out;
+    };
+    const root = makeDashEl();
+    const dv = {
+      container: root,
+      current: () => ({ file: { name: 'Journal-' + TODAY } }),
+      pages: (q) => chain(q === '"spice/tasks"' ? taskPages : []),
+      page: () => null,
+      el(tag, _text, opts) {
+        return root.createEl(tag, opts || {});
+      },
+    };
+    const Dash = loadDashboard(windowShim, customJS);
+    await new Dash().render(dv, undefined);
+
+    const allNodes = (node) => {
+      const out = [];
+      for (const child of (node && node._children) || []) {
+        out.push(child, ...allNodes(child));
+      }
+      return out;
+    };
+    const tomorrowButtons = allNodes(root).filter((n) =>
+      String(n.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
+    assert(tomorrowButtons.length === 2,
+      'real private renderer exposes one tomorrow action for open + overdue: ' + tomorrowButtons.length);
+    const rowsBefore = allNodes(root).filter((n) => n._tag === 'li');
+    assert(rowsBefore.length === 2, 'open and overdue private rows both rendered');
+
+    await tomorrowButtons[0]._fire('click', { target: tomorrowButtons[0], stopPropagation() {} });
+    assert(openFile._fm.due === '2026-07-04',
+      'open task due advances from viewed day, not wall clock: ' + openFile._fm.due);
+    assert(openFile._fm.untouched === 'open', 'open task unrelated frontmatter preserved');
+    assert(overdueFile._fm.due === '2026-07-01', 'non-activated overdue task stays byte-identical');
+    const rowsAfterOpen = allNodes(root).filter((n) => n._tag === 'li');
+    assert(rowsAfterOpen.length === 1, 'only activated private row is optimistically removed');
+
+    await tomorrowButtons[1]._fire('click', { target: tomorrowButtons[1], stopPropagation() {} });
+    assert(overdueFile._fm.due === '2026-07-04',
+      'overdue task also advances to nextDay(viewedDay): ' + overdueFile._fm.due);
+    assert(allNodes(root).filter((n) => n._tag === 'li').length === 0,
+      'overdue activation removes its own row');
+
+    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+    if (prevApp === undefined) delete global.app; else global.app = prevApp;
+    global.Notice = prevNotice;
+  });
 
   // Fixture (unchanged from the pre-2→1 DASH-L5-3 scenario): one direct project
   // hit (foo) + a project whose two task children roll up into its hub (bar).
