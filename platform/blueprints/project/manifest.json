@@ -97,6 +97,7 @@
     "ProjectCommandsInit",
     "ProjectDashboard",
     "EpicDashboard",
+    "OperatorStation",
     "EpicCreateAction"
   ],
   "pre_install": [
@@ -261,6 +262,10 @@
     {
       "source": "helpers/epic-dashboard.js",
       "dest": "{{scripts_path}}/project/epic-dashboard.js"
+    },
+    {
+      "source": "helpers/operator-station.js",
+      "dest": "{{scripts_path}}/project/operator-station.js"
     },
     {
       "source": "helpers/epic-create-action.js",
