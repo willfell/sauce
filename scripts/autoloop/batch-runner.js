@@ -63,8 +63,11 @@ function resolveContext(cwd = process.cwd()) {
   const stateDir = path.join(commonDir, 'sauce-autoloop');
   const batchesDir = path.join(stateDir, 'batches');
   const home = os.homedir();
-  const boardPath = path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
-  const cardsRoot = path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
+  // Same SAUCE_LOOP_* binding seam as the coordinator; defaults unchanged.
+  const boardPath = process.env.SAUCE_LOOP_BOARD
+    || path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
+  const cardsRoot = process.env.SAUCE_LOOP_CARDS_ROOT
+    || path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
   return {
     root, commonDir, stateDir, batchesDir,
     ledgerPath: path.join(batchesDir, 'current.json'),
