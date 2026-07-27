@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.265.0",
+  "workshop_version": "0.266.0",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -84,7 +84,7 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.5.0"
+      "version": "0.6.0"
     },
     {
       "name": "entity-create",

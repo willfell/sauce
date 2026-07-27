@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.265.0",
+  "workshop_version": "0.266.0",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -41,7 +41,7 @@
     "people-identity": "0.1.0",
     "styling": "0.3.0",
     "convenience": "0.6.0",
-    "platform-claude": "0.5.0",
+    "platform-claude": "0.6.0",
     "smart-connections-bridge": "0.3.0",
     "render-safe": "0.2.2",
     "sauce-plugin": "0.3.0",
