@@ -1,6 +1,6 @@
 {
   "name": "platform-claude",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "kind": "mechanism",
   "skills_dir": ".claude/skills/platform",
   "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture — subscribe in every consumer. v0.1.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'platform-claude' to canonical command body dest paths ('.claude/commands/<verb>.md') so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket. v0.1.3 PATCH (v0.102.0): adds spice/resources/ to DIRECTORY_MAP_SEEDS — registers the vault-default-paths namespace introduced by applyVaultDefaultPaths in install.js.",
