@@ -1404,7 +1404,12 @@ https.get = function (url, opts, callback) {
             const logPath = path.join(vaultPath, "ranch/bootstrap-last-install.log");
             const installed = readJson(installedPath);
             const history = installed.history || [];
-            const { modalInstall, taskEntityInstall } = selectModalTaskInstallIndices(history);
+            let realHistorySelectorCalls = 0;
+            const selectRealInstallIndices = (...args) => {
+                realHistorySelectorCalls += 1;
+                return selectModalTaskInstallIndices(...args);
+            };
+            const { modalInstall, taskEntityInstall } = selectRealInstallIndices(history);
             const dependencyFailures = history.filter((item) =>
                 (item.event === "error" || item.event === "skip") &&
                 (item.name === "modal" || item.name === "task-entity" || /modal|task-entity/i.test(item.reason || item.message || ""))
@@ -1416,6 +1421,8 @@ https.get = function (url, opts, callback) {
                 `${label}: real installer records released modal before task-entity`);
             assertTrue(dependencyFailures.length === 0,
                 `${label}: real installer history has no modal/task-entity dependency skip or error`);
+            assertTrue(realHistorySelectorCalls === 1,
+                `${label}: real installer history uses shared version-snapshot selector exactly once`);
             assertTrue(/clean run — exit 0/.test(cleanLog),
                 `${label}: runBootstrap installer log records clean completion`);
 
