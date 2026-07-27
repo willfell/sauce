@@ -854,17 +854,30 @@ eq(cutoverAbsentActual, cutoverAbsentLegacy, 'BGD-CUTOVER-PRE-COMPAT absent cuto
 // bindings) routes selection through the epic frontier even with NO cutover
 // history in the ledger; absent flag keeps the legacy pre-cutover path above.
 {
+  const topologyCoordinatorPath = require.resolve('../../scripts/autoloop/codex-coordinator');
+  const cachedTopologyCoordinator = require.cache[topologyCoordinatorPath];
+  const priorTopologyEnvironment = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY = 'epic';
+  delete require.cache[topologyCoordinatorPath];
   const topologyIo = shadowIo();
-  const topologySelection = selectCoordinatorCandidate({
-    boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
-    loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
-    cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
-    epicTopology: true,
-  });
+  let topologySelection;
+  try {
+    const boundSelectCoordinatorCandidate = require(topologyCoordinatorPath).selectCoordinatorCandidate;
+    topologySelection = boundSelectCoordinatorCandidate({
+      boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
+      loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
+      cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
+    });
+  } finally {
+    delete require.cache[topologyCoordinatorPath];
+    if (cachedTopologyCoordinator) require.cache[topologyCoordinatorPath] = cachedTopologyCoordinator;
+    if (priorTopologyEnvironment === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+    else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorTopologyEnvironment;
+  }
   eq(
     [topologySelection.action, topologySelection.card, topologySelection.source, topologySelection.epic],
     ['claim', 'A1', 'epic', 'Epic A'],
-    'LOOP-EPIC-TOPOLOGY forced epic topology selects the epic frontier on a cutover-null ledger',
+    'LOOP-EPIC-TOPOLOGY bound environment selects the epic frontier on a cutover-null ledger',
   );
 }
 const statusLockNames = [];
