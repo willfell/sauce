@@ -249,5 +249,41 @@ function mkRepo(config) {
   fs.rmSync(repo, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// LC-8 — merge-only gate knobs: verify_commands + gate config.
+// ---------------------------------------------------------------------------
+{
+  const c = baseConfig();
+  c.policy.verify_commands = ['./.venv/bin/python -m pytest -q', 'ruff check .'];
+  c.gate = { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'], test_command: './.venv/bin/python -m pytest -q {test}' };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8 verify_commands env', JSON.parse(r.config.env.SAUCE_LOOP_VERIFY_COMMANDS).length === 2);
+  ok('LC-8 gate env', JSON.parse(r.config.env.SAUCE_LOOP_GATE).test_globs[0] === 'tests/**');
+  ok('LC-8 gate in resolved config', r.config.gate && r.config.gate.test_command.includes('{test}'));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig();
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8 no gate env without knobs', !('SAUCE_LOOP_VERIFY_COMMANDS' in r.config.env) && !('SAUCE_LOOP_GATE' in r.config.env));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.policy.verify_commands = ['ok', 42];
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8 bad verify_commands refuses', r.ok === false && r.refusals.some((x) => /verify_commands/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.gate = { test_command: 'pytest -q' };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8 test_command without {test} refuses', r.ok === false && r.refusals.some((x) => /test_command/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
