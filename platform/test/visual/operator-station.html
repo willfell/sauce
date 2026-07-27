@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OperatorStation — responsive proof</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#d9dce3;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;gap:24px;justify-items:center;overflow-x:hidden}.theme-light,body.theme-light{--bg:#fff;--text:#25262a;--muted:#6d717a;--faint:#9296a0;--border:#dddfe5;--hover:#f0f1f4;--accent:#6b57d9;--blue:#3178c6;--green:#2b8a55;--orange:#c56b18;--red:#c43c45;--purple:#7357c9}.theme-dark,body.theme-dark{--bg:#202124;--text:#e7e7e7;--muted:#aaaeb7;--faint:#777b84;--border:#3b3d43;--hover:#303238;--accent:#9b87f5;--blue:#71a9e8;--green:#67bd8c;--orange:#e2a05f;--red:#e3757b;--purple:#ad96ee}.operator-fixture{width:min(100%,760px);padding:18px;background:var(--bg);color:var(--text);overflow:hidden}.operator-fixture.phone{width:min(100%,390px);min-height:760px;border-radius:24px;box-shadow:0 10px 30px #0002}.operator-root{display:grid;gap:10px;min-width:0}.headline{font-size:19px;font-weight:650;overflow-wrap:anywhere}.stale{border:1px solid color-mix(in srgb,var(--orange) 35%,transparent);background:color-mix(in srgb,var(--orange) 12%,transparent);border-radius:9px;padding:9px;overflow-wrap:anywhere}.label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.label:after{content:"";height:1px;background:var(--border);flex:1}.card,.rows,details{border:1px solid var(--border);border-radius:10px;min-width:0}.card{padding:11px;display:grid;gap:7px}.rows{overflow:hidden}.row{padding:10px 11px;display:grid;gap:6px;min-width:0;border-bottom:1px solid var(--border)}.row:last-child{border:0}.title{display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap;min-width:0}.title a,.row a,.stale a{color:var(--accent);text-decoration:none;overflow-wrap:anywhere;min-width:0}.why,.muted{color:var(--muted);overflow-wrap:anywhere}.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:.75em;font-weight:600;color:var(--chip);background:color-mix(in srgb,var(--chip) 12%,transparent);border:1px solid color-mix(in srgb,var(--chip) 35%,transparent)}summary{cursor:pointer;padding:10px 11px;color:var(--muted)}details .row{border-top:1px solid var(--border);border-bottom:0}.releases{display:flex;gap:6px;flex-wrap:wrap;min-width:0}.geometry-result{position:absolute;left:-10000px}
+</style>
+</head>
+<body>
+<main class="operator-fixture phone theme-light"><div class="operator-root">
+  <div class="headline">2 need you · active: GA-OPS18b</div>
+  <div class="stale"><b>1 tombstone residue detected</b><br><a>GA-X1a Residual note</a> · heal: reap</div>
+  <div class="stale">last projected 30h ago — run <code>/delivery-status</code> for live state</div>
+  <div class="label">Needs you</div>
+  <div class="rows"><div class="row"><div class="title"><a>GA-H1a Choose bounded path</a><span class="chip" style="--chip:var(--purple)">Host Ops</span></div><div class="why">Choose the bounded recovery path.</div><a>Ratify →</a></div></div>
+  <div class="label">Ratification inbox</div><div class="card"><a>GA-H1a</a><b>GA-H1a Choose bounded path</b><span class="muted">Decision needed for GA-H1a Choose bounded path</span></div>
+  <div class="label">Waiting — no action</div><details><summary>1 waiting — no action</summary><div class="row"><a>GA-W1a Await brew</a><span class="why">Homebrew promotion in progress.</span></div></details>
+  <div class="label">Since you last looked</div><div class="rows"><div class="row"><span class="muted">since your last delivery:status read (2026-07-24)</span><s>GA-X1a Old route</s><span>Superseded by the bounded route.</span><a>GA-X1b Bounded route</a></div></div>
+  <div class="label">Active now + recent releases</div><div class="card"><a>GA-OPS18b Operator Station</a><div class="releases"><span class="chip" style="--chip:var(--green)">v0.265.0</span><span class="chip" style="--chip:var(--green)">v0.264.1</span></div></div>
+</div></main>
+<main class="operator-fixture phone theme-dark"><div class="operator-root">
+  <div class="headline">2 need you · active: GA-OPS18b</div>
+  <div class="stale">last projected 30h ago — run <code>/delivery-status</code> for live state</div>
+  <div class="label">Needs you</div><div class="rows"><div class="row"><div class="title"><a>A deliberately long operator item that wraps without escaping the phone viewport</a><span class="chip" style="--chip:var(--purple)">Loop Ops</span></div><div class="why">Repair the failing contract with bounded evidence.</div></div></div>
+  <div class="label">Ratification inbox</div><div class="card"><a>GA-H1a</a><b>GA-H1a Choose bounded path</b><span class="muted">Decision needed for GA-H1a Choose bounded path</span></div>
+  <div class="label">Waiting — no action</div><details><summary>1 waiting — no action</summary></details>
+  <div class="label">Since you last looked</div><div class="card">Self-ratified: Bounded convergence</div>
+  <div class="label">Active now + recent releases</div><div class="card"><a>GA-OPS18b Operator Station</a></div>
+</div></main>
+<main class="operator-fixture desktop theme-light"><div class="operator-root">
+  <div class="headline">2 need you · active: GA-OPS18b</div><div class="label">Needs you</div><div class="card"><a>GA-H1a Choose bounded path</a><span class="why">Choose the bounded recovery path.</span></div>
+  <div class="label">Ratification inbox</div><div class="card"><a>GA-H1a</a></div><div class="label">Waiting — no action</div><details><summary>1 waiting — no action</summary></details>
+  <div class="label">Since you last looked</div><div class="card">since your last delivery:status read (2026-07-24)</div><div class="label">Active now + recent releases</div><div class="card">v0.265.0</div>
+</div></main>
+<main class="operator-fixture desktop theme-dark"><div class="operator-root">
+  <div class="headline">2 need you · active: GA-OPS18b</div><div class="label">Needs you</div><div class="card"><a>GA-H1a Choose bounded path</a><span class="why">Choose the bounded recovery path.</span></div>
+  <div class="label">Ratification inbox</div><div class="card"><a>GA-H1a</a></div><div class="label">Waiting — no action</div><details><summary>1 waiting — no action</summary></details>
+  <div class="label">Since you last looked</div><div class="card">since your last delivery:status read (2026-07-24)</div><div class="label">Active now + recent releases</div><div class="card">v0.265.0</div>
+</div></main>
+<output class="geometry-result" aria-live="polite"></output>
+<script>
+(() => {
+  const failures = [];
+  const tolerance = 0.5;
+  const expected = Number(new URLSearchParams(location.search).get('expectedViewport')) || 390;
+  if (window.innerWidth !== expected || document.documentElement.clientWidth !== expected) failures.push('effective-viewport');
+  if (document.documentElement.scrollWidth > document.documentElement.clientWidth + tolerance) failures.push('document-overflow');
+  const fixtures = document.querySelectorAll('.operator-fixture');
+  if (fixtures.length !== 4) failures.push('four-fixtures-required');
+  for (const fixture of fixtures) {
+    const rect = fixture.getBoundingClientRect();
+    if (fixture.scrollWidth > fixture.clientWidth + tolerance) failures.push('fixture-scroll-overflow');
+    if (rect.left < -tolerance || rect.right > document.documentElement.clientWidth + tolerance) failures.push('fixture-viewport-overflow');
+    for (const node of fixture.querySelectorAll('.operator-root,.card,.rows,.row,.title,.why,.releases,details,summary')) {
+      if (node.scrollWidth > node.clientWidth + tolerance) failures.push(`${node.className || node.tagName}-scroll-overflow`);
+    }
+  }
+  const result = document.querySelector('.geometry-result');
+  document.body.dataset.geometry = failures.length ? 'fail' : 'pass';
+  result.textContent = failures.length ? failures.join(',') : `${expected}px geometry pass`;
+  if (failures.length) throw new Error(`operator-station geometry: ${failures.join(',')}`);
+})();
+</script>
+</body>
+</html>
+
