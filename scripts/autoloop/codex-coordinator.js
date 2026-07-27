@@ -2744,6 +2744,14 @@ function checkRollup(items) {
   return { failed, pending, green: failed.length === 0 && pending.length === 0 && (items || []).length > 0 };
 }
 
+function releaseCheckFailureNames(reason) {
+  const match = String(reason || '').match(/^release PR checks failed: ([^\r\n]+)$/);
+  if (!match) return null;
+  const names = match[1].split(', ');
+  if (!names.length || names.some((name) => !name || name.trim() !== name || name.includes(','))) return null;
+  return names;
+}
+
 function ghJson(args, cwd) {
   const text = sh('gh', args, { cwd });
   return text ? JSON.parse(text) : null;
@@ -3113,6 +3121,67 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   const armAutoMerge = deps.armFeatureAutoMerge || armFeatureAutoMerge;
   const disableAutoMerge = deps.disableFeatureAutoMerge || disableFeatureAutoMerge;
   const persist = deps.writeState || writeState;
+  if (record.phase === 'blocked'
+    && Number.isInteger(record.release_pr)
+    && record.release_pr > 0
+    && releaseCheckFailureNames(record.reason)) {
+    if (!EXACT_SHA.test(String(record.feature_merge_sha || ''))) {
+      return { action: 'blocked', card: record.card, reason: record.reason };
+    }
+    let containingRelease;
+    let release;
+    try {
+      containingRelease = findRelease(record.feature_merge_sha, ctx.root);
+      release = viewPr(REPO, record.release_pr, ctx.root);
+    } catch (_) {
+      return { action: 'blocked', card: record.card, reason: record.reason };
+    }
+    const usableRelease = release
+      && containingRelease
+      && containingRelease.number === record.release_pr
+      && release.number === record.release_pr
+      && typeof release.url === 'string'
+      && release.url.length > 0;
+    if (!usableRelease) return { action: 'blocked', card: record.card, reason: record.reason };
+    if (release.state === 'MERGED') {
+      const releaseMergeSha = release.mergeCommit && release.mergeCommit.oid;
+      const requiredVersion = versionFrom(release.title);
+      if (!EXACT_SHA.test(String(releaseMergeSha || '')) || !requiredVersion) {
+        return { action: 'blocked', card: record.card, reason: record.reason };
+      }
+      record.release_url = release.url;
+      record.release_merge_sha = releaseMergeSha;
+      record.required_version = requiredVersion;
+      delete record.reason;
+      record.phase = 'release_merged';
+      persist(ctx, state, record);
+      return {
+        action: 'phase-change', phase: record.phase,
+        release_pr: release.number, version: record.required_version,
+      };
+    }
+    if (release.state === 'OPEN') {
+      if (!Array.isArray(release.statusCheckRollup)) {
+        return { action: 'blocked', card: record.card, reason: record.reason };
+      }
+      const releaseChecks = checkRollup(release.statusCheckRollup);
+      if (releaseChecks.failed.length) {
+        record.release_url = release.url;
+        record.reason = `release PR checks failed: ${releaseChecks.failed.join(', ')}`;
+        persist(ctx, state, record);
+        return { action: 'blocked-external', reason: record.reason, url: release.url };
+      }
+      record.release_url = release.url;
+      delete record.reason;
+      record.phase = 'release_pr';
+      persist(ctx, state, record);
+      return {
+        action: 'waiting', phase: 'release_pr',
+        release_pr: release.number, url: release.url,
+      };
+    }
+    return { action: 'blocked', card: record.card, reason: record.reason };
+  }
   if (record.phase === 'parked') {
     return {
       action: 'parked', card: record.card, phase: 'parked',
