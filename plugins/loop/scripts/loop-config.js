@@ -101,6 +101,27 @@ function validateRaw(raw) {
   if (raw.board.topology !== undefined && !['epic', 'flat'].includes(raw.board.topology)) {
     refusals.push(refusal('config_bad_value', `board.topology must be "epic" or "flat", got ${JSON.stringify(raw.board.topology)}`));
   }
+  if (raw.policy && raw.policy.verify_commands !== undefined) {
+    const vc = raw.policy.verify_commands;
+    if (!Array.isArray(vc) || !vc.every((c) => typeof c === 'string' && c.trim())) {
+      refusals.push(refusal('config_bad_value', 'policy.verify_commands must be an array of non-empty command strings'));
+    }
+  }
+  if (raw.gate !== undefined) {
+    if (!raw.gate || typeof raw.gate !== 'object' || Array.isArray(raw.gate)) {
+      refusals.push(refusal('config_bad_value', 'gate must be an object ({test_globs, exclude_globs, test_command})'));
+    } else {
+      for (const key of ['test_globs', 'exclude_globs']) {
+        if (raw.gate[key] !== undefined && (!Array.isArray(raw.gate[key]) || !raw.gate[key].every((g) => typeof g === 'string'))) {
+          refusals.push(refusal('config_bad_value', `gate.${key} must be an array of strings`));
+        }
+      }
+      if (raw.gate.test_command !== undefined
+        && (typeof raw.gate.test_command !== 'string' || !raw.gate.test_command.includes('{test}'))) {
+        refusals.push(refusal('config_bad_value', 'gate.test_command must be a string containing a {test} placeholder'));
+      }
+    }
+  }
   return refusals;
 }
 
@@ -153,6 +174,16 @@ function resolveBinding(repoRoot, opts = {}) {
       deployVaults.map((v) => ({ id: v.id, path: path.resolve(expandTilde(v.path, home)) })),
     );
   }
+  if (raw.policy && Array.isArray(raw.policy.verify_commands)) {
+    // The merge-only combined gate runs THESE in the card worktree instead of
+    // the sauce release preflights (this repo's local equivalent of its
+    // protected CI checks).
+    env.SAUCE_LOOP_VERIFY_COMMANDS = JSON.stringify(raw.policy.verify_commands);
+  }
+  if (raw.gate) {
+    // Gate B classification/exercise config for non-sauce repos (gate.js).
+    env.SAUCE_LOOP_GATE = JSON.stringify(raw.gate);
+  }
 
   return {
     ok: true,
@@ -170,6 +201,7 @@ function resolveBinding(repoRoot, opts = {}) {
       cards_root_abs: cardsRootAbs,
       id_prefix: (raw.ids && raw.ids.default_prefix) || null,
       policy: raw.policy ? { ...raw.policy } : {},
+      gate: raw.gate ? { ...raw.gate } : null,
       coordinator,
       fid_abs: fidAbs,
       codex: {

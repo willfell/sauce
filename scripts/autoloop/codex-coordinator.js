@@ -4884,13 +4884,25 @@ async function commandVerifyGates(ctx, args, deps = {}) {
     const outside = paths.filter((file) => !pathCoveredByTouchZones(file, record.touch_zones));
     if (outside.length) throw new Error(`diff exceeds declared touch zones: ${outside.join(', ')}`);
 
+    // Merge-only bindings (empty deployment vault list) verify with the
+    // installed gate script (absolute sibling — the worktree has no
+    // scripts/autoloop) and the binding's own verify commands instead of the
+    // sauce release preflights/self-install. Deploy-bound bindings (the
+    // default) are byte-identical to the historical path.
+    const deployVaults = deps.deployVaults || VAULTS;
+    const mergeOnly = deployVaults.length === 0;
+    const gateEnv = deps.env || process.env;
+
     const receipt = {
       status: 'fail', reason: 'gate verification did not finish', head_sha: headSha,
       base_ref: baseRef, base_sha: baseSha, paths,
       checks: {}, reviews: {}, started_at: new Date().toISOString(),
+      ...(mergeOnly ? { merge_only: true } : {}),
     };
     try {
-      const adequacyText = run('node', ['scripts/autoloop/gate.js', 'verify-adequacy', '--base', baseSha, '--json'], { cwd: record.worktree });
+      const adequacyText = mergeOnly
+        ? run('node', [path.join(__dirname, 'gate.js'), 'verify-adequacy', '--base', baseSha, '--cwd', record.worktree, '--json'], { cwd: record.worktree })
+        : run('node', ['scripts/autoloop/gate.js', 'verify-adequacy', '--base', baseSha, '--json'], { cwd: record.worktree });
       const adequacy = JSON.parse(adequacyText);
       receipt.behavioral = adequacy.behavioral === true;
       receipt.adequacy = adequacy;
@@ -4906,12 +4918,32 @@ async function commandVerifyGates(ctx, args, deps = {}) {
         receipt.review_panel = panel;
       }
 
-      run('npm', ['run', 'release:preflight'], { cwd: record.worktree, stdio: 'pipe' });
-      receipt.checks.release_preflight = 'pass';
-      runSelfInstall(ctx, headSha, run);
-      receipt.checks.workshop_self_install = 'pass';
-      run('npm', ['run', 'release:preflight-bumped'], { cwd: record.worktree, stdio: 'pipe' });
-      receipt.checks.release_preflight_bumped = 'pass';
+      if (mergeOnly) {
+        let verifyCommands = [];
+        if (gateEnv.SAUCE_LOOP_VERIFY_COMMANDS) {
+          let parsed;
+          try { parsed = JSON.parse(gateEnv.SAUCE_LOOP_VERIFY_COMMANDS); } catch (e) {
+            throw new Error(`SAUCE_LOOP_VERIFY_COMMANDS is not valid JSON: ${e.message}`);
+          }
+          if (!Array.isArray(parsed) || !parsed.every((c) => typeof c === 'string' && c.trim())) {
+            throw new Error('SAUCE_LOOP_VERIFY_COMMANDS must be a JSON array of non-empty command strings');
+          }
+          verifyCommands = parsed;
+        }
+        for (const commandLine of verifyCommands) {
+          run('/bin/sh', ['-c', commandLine], { cwd: record.worktree, stdio: 'pipe' });
+        }
+        receipt.checks.verify_commands = verifyCommands.length
+          ? { status: 'pass', commands: verifyCommands }
+          : { status: 'none-declared', note: 'protected CI checks gate the merge' };
+      } else {
+        run('npm', ['run', 'release:preflight'], { cwd: record.worktree, stdio: 'pipe' });
+        receipt.checks.release_preflight = 'pass';
+        runSelfInstall(ctx, headSha, run);
+        receipt.checks.workshop_self_install = 'pass';
+        run('npm', ['run', 'release:preflight-bumped'], { cwd: record.worktree, stdio: 'pipe' });
+        receipt.checks.release_preflight_bumped = 'pass';
+      }
       const finalDirty = run('git', ['status', '--short'], { cwd: record.worktree });
       const finalHead = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
       if (finalDirty || finalHead !== headSha) throw new Error('worktree or HEAD changed while gate verification was running');

@@ -4,17 +4,60 @@
  * dependency-injected mutation-check orchestration; the CLI wires real
  * git/node. Runs in live Phase C before a PR opens.
  *
- * Exports: splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck
- * CLI: node scripts/autoloop/gate.js verify-adequacy [--base main] [--json]
+ * Repo-agnostic mode (loop-plugin bindings): an optional gate config —
+ * `--cwd <worktree>` plus SAUCE_LOOP_GATE (JSON: test_globs[], exclude_globs[],
+ * test_command with a {test} placeholder) — lets the same verifier classify and
+ * exercise non-sauce repos (Python, IaC, …). With no config, behavior is
+ * byte-identical to the historical sauce rules.
+ *
+ * Exports: splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck, matchesGlob, parseGateConfig
+ * CLI: node scripts/autoloop/gate.js verify-adequacy [--base main] [--cwd <dir>] [--json]
  */
 'use strict';
 
-function splitDiff(paths) {
+// Minimal glob support for gate configs: `dir/**` (prefix), `*.ext` (suffix),
+// exact path. Deliberately tiny — binding configs use only these three shapes.
+function matchesGlob(file, glob) {
+  const g = String(glob);
+  if (g.endsWith('/**')) return file.startsWith(g.slice(0, -2));
+  if (g.startsWith('*.')) return file.endsWith(g.slice(1));
+  return file === g;
+}
+
+function parseGateConfig(raw) {
+  if (!raw) return null;
+  let parsed;
+  try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) {
+    throw new Error(`SAUCE_LOOP_GATE is not valid JSON: ${e.message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SAUCE_LOOP_GATE must be a JSON object');
+  }
+  for (const key of ['test_globs', 'exclude_globs']) {
+    if (parsed[key] !== undefined && (!Array.isArray(parsed[key]) || !parsed[key].every((g) => typeof g === 'string'))) {
+      throw new Error(`SAUCE_LOOP_GATE.${key} must be an array of strings`);
+    }
+  }
+  if (parsed.test_command !== undefined) {
+    if (typeof parsed.test_command !== 'string' || !parsed.test_command.includes('{test}')) {
+      throw new Error('SAUCE_LOOP_GATE.test_command must be a string containing a {test} placeholder');
+    }
+  }
+  return parsed;
+}
+
+function splitDiff(paths, config = null) {
   const testFiles = [];
   const sourceFiles = [];
   for (const raw of paths || []) {
     const f = String(raw).trim();
     if (!f) continue;
+    if (config && (config.test_globs || config.exclude_globs)) {
+      if ((config.test_globs || []).some((g) => matchesGlob(f, g))) { testFiles.push(f); continue; }
+      if ((config.exclude_globs || []).some((g) => matchesGlob(f, g))) continue;
+      sourceFiles.push(f);
+      continue;
+    }
     if (/^platform\/test\/run-.*\.js$/.test(f)) { testFiles.push(f); continue; }
     // Docs, the queue ledger, the package manifest/lockfile, and the generated
     // coverage-matrix snapshot are excluded from behavioral source: a package.json
@@ -58,8 +101,8 @@ function gateVerdict(o) {
 }
 
 function runAdequacyCheck(o) {
-  const { paths, runTest, mutate } = o || {};
-  const { testFiles, sourceFiles } = splitDiff(paths);
+  const { paths, runTest, mutate, config = null } = o || {};
+  const { testFiles, sourceFiles } = splitDiff(paths, config);
   if (!sourceFiles.length) return { behavioral: false, adequate: true, reason: 'no source change (doc/test-only) — Gate B not required' };
   if (!testFiles.length) return { behavioral: true, ...adequacyVerdict({ hasTest: false }) };
   const allPass = () => testFiles.every((t) => runTest(t));
@@ -76,29 +119,39 @@ function runAdequacyCheck(o) {
   return { behavioral: true, ...adequacyVerdict({ hasTest: true, redWithoutSource: red, greenWithSource: green }) };
 }
 
-module.exports = { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck };
+module.exports = { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck, matchesGlob, parseGateConfig };
 
 if (require.main === module) {
   const { execFileSync } = require('child_process');
   const path = require('path');
-  const ROOT = path.resolve(__dirname, '..', '..');
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   const args = {};
   for (let i = 1; i < argv.length; i++) { const a = argv[i]; if (a.startsWith('--')) { const k = a.slice(2); const v = argv[i + 1]; if (v && !v.startsWith('--')) { args[k] = v; i++; } else args[k] = true; } }
+  // --cwd binds the gate to an arbitrary worktree (loop-plugin bindings invoke
+  // this script by absolute path from the installed coordinator; __dirname
+  // ancestry only resolves the repo when the script lives INSIDE it).
+  const ROOT = args.cwd ? path.resolve(args.cwd) : path.resolve(__dirname, '..', '..');
   const sh = (c, a, opts = {}) => execFileSync(c, a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
   const out = (obj) => { console.log(JSON.stringify(obj, null, 2)); process.exit(0); };
 
-  if (cmd !== 'verify-adequacy') { console.error('usage: gate.js verify-adequacy [--base main] [--json]'); process.exit(2); }
+  if (cmd !== 'verify-adequacy') { console.error('usage: gate.js verify-adequacy [--base main] [--cwd <dir>] [--json]'); process.exit(2); }
+  const config = parseGateConfig(process.env.SAUCE_LOOP_GATE);
   const base = args.base || 'main';
   let paths = [];
   try { paths = sh('git', ['diff', '--name-only', `${base}...HEAD`]).split('\n').map((s) => s.trim()).filter(Boolean); } catch (_) {}
   const existsInBase = (f) => { try { sh('git', ['cat-file', '-e', `${base}:${f}`]); return true; } catch (_) { return false; } };
-  const runTest = (t) => { try { sh('node', [t], { stdio: 'ignore' }); return true; } catch (_) { return false; } };
+  const runTest = (t) => {
+    try {
+      if (config && config.test_command) sh('/bin/sh', ['-c', config.test_command.replaceAll('{test}', t)], { stdio: 'ignore' });
+      else sh('node', [t], { stdio: 'ignore' });
+      return true;
+    } catch (_) { return false; }
+  };
   const mutate = (action, files) => {
     if (action === 'revert') {
       for (const f of files) { if (existsInBase(f)) sh('git', ['checkout', base, '--', f]); else sh('git', ['rm', '-f', '--quiet', f]); }
     } else { sh('git', ['checkout', 'HEAD', '--', ...files]); }
   };
-  out(runAdequacyCheck({ paths, runTest, mutate }));
+  out(runAdequacyCheck({ paths, runTest, mutate, config }));
 }

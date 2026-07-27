@@ -8350,5 +8350,99 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   }
 }
 
+// LOOP-MERGE-ONLY-GATE: verify-gates on a merge-only binding (empty vault
+// list) uses the installed gate script by absolute path with --cwd, runs the
+// binding's verify commands instead of the sauce release preflights, and never
+// touches npm or the workshop self-install. Deploy-bound bindings keep the
+// historical checks byte-identically.
+{
+  const gateWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-gate-wt-'));
+  try {
+    const mkRecord = () => ({
+      card: 'PA-1 Merge-only slice', phase: 'implementing', worktree: gateWorktree,
+      touch_zones: ['src', 'tests'],
+      reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [
+        lens, { lens, verdict: 'pass', refuted: false, summary: 'ok', head_sha: 'headM' },
+      ])),
+    });
+    const mergeState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    const calls = [];
+    const gateSh = (cmd, cmdArgs, opts = {}) => {
+      calls.push({ cmd, args: cmdArgs, cwd: opts.cwd });
+      if (cmd === 'git' && cmdArgs[0] === 'status') return '';
+      if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+      if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+      if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
+      if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) {
+        return JSON.stringify({ behavioral: true, adequate: true, reason: 'ok' });
+      }
+      if (cmd === '/bin/sh' && cmdArgs[0] === '-c') return '';
+      if (cmd === 'npm') throw new Error('npm must never run on a merge-only binding');
+      throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+    };
+    const mergeOnlyResult = await commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => mergeState,
+      writeState: () => {},
+      sh: gateSh,
+      withLock: immediateCardLock,
+      deployVaults: [],
+      env: { SAUCE_LOOP_VERIFY_COMMANDS: JSON.stringify(['./venv/bin/pytest -q', 'echo lint']) },
+      runIsolatedWorkshopSelfInstall: () => { throw new Error('self-install must never run on a merge-only binding'); },
+    });
+    eq(mergeOnlyResult.action, 'gates-passed', 'LOOP-MERGE-ONLY-GATE merge-only verify-gates passes');
+    const gateCall = calls.find((c) => c.cmd === 'node' && String(c.args[0]).endsWith('gate.js'));
+    ok(path.isAbsolute(gateCall.args[0]), 'LOOP-MERGE-ONLY-GATE gate.js invoked by absolute installed path');
+    ok(gateCall.args.includes('--cwd') && gateCall.args[gateCall.args.indexOf('--cwd') + 1] === gateWorktree,
+      'LOOP-MERGE-ONLY-GATE gate.js bound to the card worktree via --cwd');
+    const shellCalls = calls.filter((c) => c.cmd === '/bin/sh');
+    eq(shellCalls.length, 2, 'LOOP-MERGE-ONLY-GATE both verify commands ran');
+    ok(!calls.some((c) => c.cmd === 'npm'), 'LOOP-MERGE-ONLY-GATE npm never invoked');
+    const mergeReceipt = mergeState.cards['PA-1 Merge-only slice'].gate_receipt;
+    eq(mergeReceipt.merge_only, true, 'LOOP-MERGE-ONLY-GATE receipt marked merge_only');
+    eq(mergeReceipt.checks.verify_commands.status, 'pass', 'LOOP-MERGE-ONLY-GATE receipt records verify commands');
+
+    // Malformed verify-commands env fails loud before any command runs.
+    const badState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    await assert.rejects(() => commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => badState,
+      writeState: () => {},
+      sh: gateSh,
+      withLock: immediateCardLock,
+      deployVaults: [],
+      env: { SAUCE_LOOP_VERIFY_COMMANDS: '{not json' },
+    }), /not valid JSON/, 'LOOP-MERGE-ONLY-GATE malformed verify-commands env fails loud');
+
+    // Deploy-bound guard: default vault list still runs the sauce checks.
+    const deployState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    const deployCalls = [];
+    let selfInstalls = 0;
+    const deployResult = await commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => deployState,
+      writeState: () => {},
+      sh: (cmd, cmdArgs, opts = {}) => {
+        deployCalls.push({ cmd, args: cmdArgs });
+        if (cmd === 'git' && cmdArgs[0] === 'status') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+        if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
+        if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) return JSON.stringify({ behavioral: true, adequate: true, reason: 'ok' });
+        if (cmd === 'npm') return '';
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      withLock: immediateCardLock,
+      deployVaults: [{ id: 'headspace', path: '/v/h' }],
+      runIsolatedWorkshopSelfInstall: () => { selfInstalls += 1; },
+    });
+    eq(deployResult.action, 'gates-passed', 'LOOP-MERGE-ONLY-GATE deploy-bound path still passes');
+    eq(deployCalls.filter((c) => c.cmd === 'npm').length, 2, 'LOOP-MERGE-ONLY-GATE deploy-bound path keeps both npm preflights');
+    eq(selfInstalls, 1, 'LOOP-MERGE-ONLY-GATE deploy-bound path keeps the workshop self-install');
+    const deployGateCall = deployCalls.find((c) => c.cmd === 'node' && String(c.args[0]).endsWith('gate.js'));
+    eq(deployGateCall.args[0], 'scripts/autoloop/gate.js', 'LOOP-MERGE-ONLY-GATE deploy-bound gate invocation is byte-identical (repo-relative, no --cwd)');
+    ok(!deployGateCall.args.includes('--cwd'), 'LOOP-MERGE-ONLY-GATE deploy-bound gate has no --cwd flag');
+  } finally {
+    fs.rmSync(gateWorktree, { recursive: true, force: true });
+  }
+}
+
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
 })().catch((err) => { console.error(err); process.exit(1); });
