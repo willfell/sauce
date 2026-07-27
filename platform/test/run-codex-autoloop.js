@@ -950,6 +950,210 @@ eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
 }, 'release branch preserves the durable phase and names the next phase');
 eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable state');
 
+// LOOP-RELEASE-CI-RERUN-DEADEND: a release PR can move after the coordinator
+// persisted its check failure. Only that exact blocked cause may re-enter the
+// release rail; every unrelated or unusable blocked record remains terminal.
+{
+  const releaseFailure = 'release PR checks failed: preflight (macos-latest)';
+  const releasePr = (overrides = {}) => ({
+    number: 646,
+    state: 'OPEN',
+    title: 'chore(release): v0.267.0',
+    url: 'https://example.test/pr/646',
+    mergeCommit: null,
+    statusCheckRollup: [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    ...overrides,
+  });
+  const blockedRelease = (overrides = {}) => ({
+    card: 'TD-1a9 Call-site-bound quick reschedule',
+    phase: 'blocked',
+    reason: releaseFailure,
+    release_pr: 646,
+    release_url: 'https://example.test/pr/646',
+    feature_merge_sha: 'f'.repeat(40),
+    ...overrides,
+  });
+  const withLineage = (deps = {}) => ({
+    findContainingRelease: () => releasePr(),
+    ...deps,
+  });
+
+  let mergedViews = 0; let mergedWrites = 0;
+  const mergedRecord = blockedRelease();
+  const mergedResult = await stepCard({ root: '/workshop' }, emptyState(), mergedRecord, {}, withLineage({
+    prView: (_repo, number) => {
+      mergedViews += 1;
+      eq(number, 646, 'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery views the exact recorded release PR');
+      return releasePr({ state: 'MERGED', mergeCommit: { oid: 'a'.repeat(40) }, statusCheckRollup: null });
+    },
+    writeState: () => { mergedWrites += 1; },
+  }));
+  eq(mergedResult, {
+    action: 'phase-change', phase: 'release_merged', release_pr: 646, version: '0.267.0',
+  }, 'LOOP-RELEASE-CI-RERUN-DEADEND merged green rerun rejoins the release_merged rail');
+  eq(mergedRecord.phase, 'release_merged',
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery advances durable phase');
+  eq(mergedRecord.release_merge_sha, 'a'.repeat(40),
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery records the release merge SHA');
+  eq(mergedRecord.required_version, '0.267.0',
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery derives the required version from the recorded PR title');
+  eq(mergedRecord.reason, undefined,
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery clears the stale release-check failure');
+  eq({ views: mergedViews, writes: mergedWrites }, { views: 1, writes: 1 },
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery reads and persists exactly once');
+
+  for (const [label, statusCheckRollup] of [
+    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+  ]) {
+    let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      prView: () => releasePr({ statusCheckRollup }),
+      writeState: () => { writes += 1; },
+    }));
+    eq(result, {
+      action: 'waiting', phase: 'release_pr', release_pr: 646, url: 'https://example.test/pr/646',
+    }, `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun matches the existing release_pr waiting rail`);
+    eq(record.phase, 'release_pr',
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun restores the durable release_pr phase`);
+    eq(record.reason, undefined,
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun clears the stale failure`);
+    eq(writes, 1,
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun persists exactly once`);
+  }
+
+  let failedWrites = 0;
+  const stillFailedRecord = blockedRelease();
+  const stillFailedDeps = withLineage({
+    prView: () => releasePr({
+      statusCheckRollup: [
+        { name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
+        { name: 'preflight (ubuntu-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    }),
+    writeState: () => { failedWrites += 1; },
+  });
+  const stillFailedResult = await stepCard(
+    { root: '/workshop' }, emptyState(), stillFailedRecord, {}, stillFailedDeps,
+  );
+  eq(stillFailedResult.action, 'blocked-external',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun remains externally blocked');
+  eq(stillFailedRecord.phase, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun cannot reopen the release rail');
+  eq(stillFailedRecord.reason,
+    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun refreshes the deterministic failure reason');
+  eq(failedWrites, 1,
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun persists current external evidence');
+  const stillFailedReplay = await stepCard(
+    { root: '/workshop' }, emptyState(), stillFailedRecord, {}, stillFailedDeps,
+  );
+  eq(stillFailedReplay, stillFailedResult,
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery returns a deterministic receipt');
+  eq(stillFailedRecord.reason,
+    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery keeps deterministic durable state');
+  eq(failedWrites, 2,
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery persists each current evidence read once');
+
+  const closedRecord = blockedRelease();
+  const closedResult = await stepCard({ root: '/workshop' }, emptyState(), closedRecord, {}, withLineage({
+    prView: () => releasePr({ state: 'CLOSED', statusCheckRollup: null }),
+    writeState: () => { throw new Error('closed non-merged recovery must not mutate blocked state'); },
+  }));
+  eq(closedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a closed non-merged release remains terminal');
+  eq(closedRecord, blockedRelease(),
+    'LOOP-RELEASE-CI-RERUN-DEADEND a closed non-merged release preserves blocked evidence byte-for-byte');
+
+  const malformedRecord = blockedRelease();
+  const malformedResult = await stepCard({ root: '/workshop' }, emptyState(), malformedRecord, {}, withLineage({
+    prView: () => releasePr({ state: 'MERGED', title: 'chore(release): malformed', mergeCommit: null }),
+    writeState: () => { throw new Error('malformed release recovery must fail closed without writes'); },
+  }));
+  eq(malformedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND malformed merged evidence fails closed');
+  eq(malformedRecord, blockedRelease(),
+    'LOOP-RELEASE-CI-RERUN-DEADEND malformed merged evidence preserves blocked state');
+
+  const mismatchedContainingRelease = () => releasePr({
+    number: 647,
+    title: 'chore(release): v0.267.1',
+    url: 'https://example.test/pr/647',
+  });
+  let mismatchedMergedWrites = 0;
+  const mismatchedMergedRecord = blockedRelease();
+  const mismatchedMergedResult = await stepCard(
+    { root: '/workshop' }, emptyState(), mismatchedMergedRecord, {}, withLineage({
+      findContainingRelease: mismatchedContainingRelease,
+      prView: () => releasePr({
+        state: 'MERGED',
+        title: 'chore(release): v9.9.9',
+        mergeCommit: { oid: '9'.repeat(40) },
+        statusCheckRollup: null,
+      }),
+      writeState: () => { mismatchedMergedWrites += 1; },
+    }),
+  );
+  eq(mismatchedMergedResult.action, 'blocked',
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR remains blocked');
+  eq(mismatchedMergedRecord, blockedRelease(),
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR cannot persist merge or version evidence');
+  eq(mismatchedMergedWrites, 0,
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR performs no ledger write');
+
+  for (const [label, statusCheckRollup] of [
+    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+  ]) {
+    let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      findContainingRelease: mismatchedContainingRelease,
+      prView: () => releasePr({ statusCheckRollup }),
+      writeState: () => { writes += 1; },
+    }));
+    eq(result.action, 'blocked',
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR remains blocked`);
+    eq(record, blockedRelease(),
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR preserves blocked evidence`);
+    eq(writes, 0,
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR performs no ledger write`);
+  }
+
+  for (const [label, findContainingRelease] of [
+    ['missing', () => null],
+    ['lookup-error', () => { throw new Error('release lookup unavailable'); }],
+  ]) {
+    let views = 0; let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      findContainingRelease,
+      prView: () => { views += 1; return releasePr(); },
+      writeState: () => { writes += 1; },
+    }));
+    eq(result.action, 'blocked',
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} containing-release evidence fails closed`);
+    eq(record, blockedRelease(),
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} lineage evidence preserves blocked state`);
+    eq({ views, writes }, { views: label === 'missing' ? 1 : 0, writes: 0 },
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} lineage failure has deterministic reads and no writes`);
+  }
+
+  let unrelatedViews = 0; let unrelatedWrites = 0;
+  const unrelatedRecord = blockedRelease({ reason: 'tap PR checks failed: bottles' });
+  const unrelatedResult = await stepCard({ root: '/workshop' }, emptyState(), unrelatedRecord, {}, {
+    findContainingRelease: () => { throw new Error('unrelated blocked reason must not inspect release lineage'); },
+    prView: () => { unrelatedViews += 1; throw new Error('unrelated blocked reason must not view a release PR'); },
+    writeState: () => { unrelatedWrites += 1; },
+  });
+  eq(unrelatedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND unrelated blocked causes remain terminal');
+  eq({ views: unrelatedViews, writes: unrelatedWrites }, { views: 0, writes: 0 },
+    'LOOP-RELEASE-CI-RERUN-DEADEND unrelated blocked causes cannot enter the recovery seam');
+}
+
 // LOOP-MERGE-ONLY: an EMPTY deployment vault list (merge-only binding, e.g.
 // ero's `deploy_vaults: []`) completes at feature_merged — no release chain.
 // The default (non-empty) vault list is byte-identical to the waitRecord case
