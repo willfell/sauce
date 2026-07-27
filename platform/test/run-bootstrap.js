@@ -17,6 +17,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const https = require("https");
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 let _passed = 0;
 let _failed = 0;
@@ -1386,8 +1387,8 @@ https.get = function (url, opts, callback) {
             const logPath = path.join(vaultPath, "ranch/bootstrap-last-install.log");
             const installed = readJson(installedPath);
             const history = installed.history || [];
-            const modalInstall = history.findIndex((item) => item.event === "install" && item.name === "modal" && item.version === "0.2.0");
-            const taskEntityInstall = history.findIndex((item) => item.event === "install" && item.name === "task-entity" && item.version === "0.15.5");
+            const modalInstall = history.findIndex((item) => item.event === "install" && item.name === "modal" && item.version === VERSION_SNAPSHOT.components.modal);
+            const taskEntityInstall = history.findIndex((item) => item.event === "install" && item.name === "task-entity" && item.version === VERSION_SNAPSHOT.components["task-entity"]);
             const dependencyFailures = history.filter((item) =>
                 (item.event === "error" || item.event === "skip") &&
                 (item.name === "modal" || item.name === "task-entity" || /modal|task-entity/i.test(item.reason || item.message || ""))
