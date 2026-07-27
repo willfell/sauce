@@ -10,6 +10,15 @@ const { AsyncLocalStorage, createHook } = require('async_hooks');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
+const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+let coordinator;
+try {
+  coordinator = require('../../scripts/autoloop/codex-coordinator');
+} finally {
+  if (priorImportedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorImportedBoardTopology;
+}
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
@@ -35,7 +44,7 @@ const {
   commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
-} = require('../../scripts/autoloop/codex-coordinator');
+} = coordinator;
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
   parseBoard, parseDependsOn,
@@ -686,7 +695,9 @@ const flagOn = selectClaimCandidate({
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
 const priorShadowFlag = process.env.SAUCE_EPIC_SELECTION_SHADOW;
+const priorBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 process.env.SAUCE_EPIC_SELECTION_SHADOW = '1';
+delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 let flaggedStatus;
 try {
   const statusIo = shadowIo();
@@ -698,7 +709,14 @@ try {
 } finally {
   if (priorShadowFlag === undefined) delete process.env.SAUCE_EPIC_SELECTION_SHADOW;
   else process.env.SAUCE_EPIC_SELECTION_SHADOW = priorShadowFlag;
+  if (priorBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorBoardTopology;
 }
+assert.deepStrictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorBoardTopology,
+  'ES3-STATUS-FLAG restores the caller topology environment byte-for-byte',
+);
 eq(flaggedStatus.next.shadow_selection.card, 'A1', 'ES3-STATUS-FLAG invokes the production commandStatus environment-flag wiring');
 eq(flaggedStatus.projection_problems, [], 'ES3-STATUS-FLAG remains observational and creates no tracked projection state');
 const shadowCapacityState = emptyState();
