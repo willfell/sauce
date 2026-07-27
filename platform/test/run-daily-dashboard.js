@@ -108,6 +108,90 @@ function loadActivityFeed(windowShim) {
     {}, { BeaconCards: { render() {} } }, function () {}, windowShim);
 }
 
+async function renderDailyTaskFixture(today) {
+  const prevWindow = global.window;
+  const prevApp = global.app;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+  const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
+  const TE = new TaskEntityClass();
+  const TTL = new TaskTodayListClass();
+  const openFile = { path: 'spice/tasks/open.md', _fm: { due: today, untouched: 'open' } };
+  const overdueFile = { path: 'spice/tasks/late.md', _fm: { due: '2026-07-01', untouched: 'late' } };
+  const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => files.get(p) || null,
+      adapter: { read: async () => { throw new Error('ENOENT'); } },
+    },
+    fileManager: {
+      processFrontMatter: async (file, mutate) => { mutate(file._fm); },
+    },
+    workspace: {
+      openLinkText() {},
+      getLeavesOfType() { return []; },
+    },
+  };
+  const windowShim = makeMomentWindow();
+  windowShim.app = app;
+  const customJS = {
+    TaskEntity: TE,
+    TaskTodayList: TTL,
+    TaskDialog: { open() {} },
+    RenderSafe: { captureScroll() {} },
+    ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
+    BeaconCards: { render: async () => {} },
+  };
+  windowShim.customJS = customJS;
+  global.window = windowShim;
+  global.app = app;
+
+  const taskPages = [
+    { type: 'task', status: 'open', title: 'Open', due: today, file: { path: openFile.path } },
+    { type: 'task', status: 'open', title: 'Late', due: '2026-07-01', file: { path: overdueFile.path } },
+  ];
+  const chain = (items) => {
+    const out = items.slice();
+    out.array = () => items.slice();
+    out.where = (fn) => chain(items.filter(fn));
+    out.sort = () => out;
+    return out;
+  };
+  const root = makeDashEl();
+  const dv = {
+    container: root,
+    current: () => ({ file: { name: 'Journal-' + today } }),
+    pages: (q) => chain(q === '"spice/tasks"' ? taskPages : []),
+    page: () => null,
+    el(tag, _text, opts) {
+      return root.createEl(tag, opts || {});
+    },
+  };
+  const Dash = loadDashboard(windowShim, customJS);
+  await new Dash().render(dv, undefined);
+
+  const allNodes = (node) => {
+    const out = [];
+    for (const child of (node && node._children) || []) {
+      out.push(child, ...allNodes(child));
+    }
+    return out;
+  };
+  return {
+    root,
+    openFile,
+    overdueFile,
+    allNodes,
+    cleanup() {
+      if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+      if (prevApp === undefined) delete global.app; else global.app = prevApp;
+      global.Notice = prevNotice;
+    },
+  };
+}
+
 (async () => {
   const TODAY = '2026-07-03';
 
@@ -119,77 +203,30 @@ function loadActivityFeed(windowShim) {
       'daily manifest must deploy the canonical daily mirror: ' + JSON.stringify(entry));
   });
 
-  await ok('TD1A-DAILY-DASHBOARD-ACTION-ABSENT real open + overdue rows reschedule from the viewed day', async () => {
-    const prevWindow = global.window;
-    const prevApp = global.app;
-    const prevNotice = global.Notice;
-    global.Notice = function () {};
-
-    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
-    const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
-    const TE = new TaskEntityClass();
-    const TTL = new TaskTodayListClass();
-    const openFile = { path: 'spice/tasks/open.md', _fm: { due: TODAY, untouched: 'open' } };
-    const overdueFile = { path: 'spice/tasks/late.md', _fm: { due: '2026-07-01', untouched: 'late' } };
-    const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
-    const app = {
-      vault: {
-        getAbstractFileByPath: (p) => files.get(p) || null,
-        adapter: { read: async () => { throw new Error('ENOENT'); } },
-      },
-      fileManager: {
-        processFrontMatter: async (file, mutate) => { mutate(file._fm); },
-      },
-      workspace: {
-        openLinkText() {},
-        getLeavesOfType() { return []; },
-      },
-    };
-    const windowShim = makeMomentWindow();
-    windowShim.app = app;
-    const customJS = {
-      TaskEntity: TE,
-      TaskTodayList: TTL,
-      TaskDialog: { open() {} },
-      RenderSafe: { captureScroll() {} },
-      ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
-      BeaconCards: { render: async () => {} },
-    };
-    windowShim.customJS = customJS;
-    global.window = windowShim;
-    global.app = app;
-
-    const taskPages = [
-      { type: 'task', status: 'open', title: 'Open', due: TODAY, file: { path: openFile.path } },
-      { type: 'task', status: 'open', title: 'Late', due: '2026-07-01', file: { path: overdueFile.path } },
-    ];
-    const chain = (items) => {
-      const out = items.slice();
-      out.array = () => items.slice();
-      out.where = (fn) => chain(items.filter(fn));
-      out.sort = () => out;
-      return out;
-    };
-    const root = makeDashEl();
-    const dv = {
-      container: root,
-      current: () => ({ file: { name: 'Journal-' + TODAY } }),
-      pages: (q) => chain(q === '"spice/tasks"' ? taskPages : []),
-      page: () => null,
-      el(tag, _text, opts) {
-        return root.createEl(tag, opts || {});
-      },
-    };
-    const Dash = loadDashboard(windowShim, customJS);
-    await new Dash().render(dv, undefined);
-
-    const allNodes = (node) => {
-      const out = [];
-      for (const child of (node && node._children) || []) {
-        out.push(child, ...allNodes(child));
+  await ok('TD1A3-DAILY-BULLET-LIST-REGRESSION real open + overdue li keep markers while child wrappers align contents', async () => {
+    const fixture = await renderDailyTaskFixture(TODAY);
+    try {
+      const rows = fixture.allNodes(fixture.root).filter((n) => n._tag === 'li');
+      assert(rows.length === 2, 'open and overdue private rows both rendered');
+      for (const row of rows) {
+        assert(/(^|;)\s*display\s*:\s*list-item\b/i.test(row.style.cssText),
+          'task li must explicitly retain browser list-item display semantics: ' + row.style.cssText);
+        assert(row._children.length === 1 && row._children[0]._tag === 'div'
+            && row._children[0].className === 'sauce-daily-task-row-content',
+          'task li owns one inner content wrapper, got ' + row._children.map((n) => n._tag).join(','));
+        const wrapper = row._children[0];
+        assert(/(^|;)\s*display\s*:\s*flex\b/i.test(wrapper.style.cssText),
+          'inner content wrapper owns flex alignment: ' + wrapper.style.cssText);
       }
-      return out;
-    };
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await ok('TD1A-DAILY-DASHBOARD-ACTION-ABSENT real open + overdue rows reschedule from the viewed day', async () => {
+    const fixture = await renderDailyTaskFixture(TODAY);
+    const { root, openFile, overdueFile, allNodes } = fixture;
+    try {
     const tomorrowButtons = allNodes(root).filter((n) =>
       String(n.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
     assert(tomorrowButtons.length === 2,
@@ -210,10 +247,9 @@ function loadActivityFeed(windowShim) {
       'overdue task also advances to nextDay(viewedDay): ' + overdueFile._fm.due);
     assert(allNodes(root).filter((n) => n._tag === 'li').length === 0,
       'overdue activation removes its own row');
-
-    if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
-    if (prevApp === undefined) delete global.app; else global.app = prevApp;
-    global.Notice = prevNotice;
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   // Fixture (unchanged from the pre-2→1 DASH-L5-3 scenario): one direct project
