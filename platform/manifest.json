@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.266.1",
+  "workshop_version": "0.267.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -179,7 +179,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.15.5",
+      "version": "0.16.0",
       "path": "mechanisms/task-entity"
     },
     {
@@ -221,7 +221,7 @@
     },
     {
       "name": "daily",
-      "version": "0.23.2",
+      "version": "0.24.0",
       "path": "blueprints/daily"
     },
     {

@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.266.1",
+  "workshop_version": "0.267.0",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -48,7 +48,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.15.5"
+      "version": "0.16.0"
     },
     {
       "name": "modal",
@@ -138,7 +138,7 @@
     },
     {
       "name": "daily",
-      "version": "0.23.2"
+      "version": "0.24.0"
     },
     {
       "name": "meetings",
