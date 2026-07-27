@@ -141,10 +141,14 @@ function resolveBinding(repoRoot, opts = {}) {
     DELIVERY_STATE: path.join(repoRoot, '.git', 'sauce-autoloop', 'state.json'),
     SAUCE_LOOP_BOARD: boardPathAbs,
     SAUCE_LOOP_CARDS_ROOT: cardsRootAbs,
+    SAUCE_LOOP_BOARD_TOPOLOGY: raw.board.topology || 'epic',
   };
   if (fidAbs) env.DELIVERY_FID = fidAbs;
   const deployVaults = raw.policy && raw.policy.deploy_vaults;
-  if (Array.isArray(deployVaults) && deployVaults.length) {
+  if (Array.isArray(deployVaults)) {
+    // An EXPLICIT empty array is meaningful: SAUCE_LOOP_VAULTS=[] tells the
+    // coordinator this binding is merge-only (no deploy chain). Absent field →
+    // no env → the coordinator keeps its default vault list.
     env.SAUCE_LOOP_VAULTS = JSON.stringify(
       deployVaults.map((v) => ({ id: v.id, path: path.resolve(expandTilde(v.path, home)) })),
     );

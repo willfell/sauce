@@ -831,6 +831,24 @@ eq(cutoverOffActual, cutoverOffLegacy, 'BGD-CUTOVER-PRE-COMPAT cutover-off selec
 const cutoverAbsentActual = selectCoordinatorCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
 const cutoverAbsentLegacy = selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
 eq(cutoverAbsentActual, cutoverAbsentLegacy, 'BGD-CUTOVER-PRE-COMPAT absent cutover selection is byte-for-byte legacy-compatible');
+
+// LOOP-EPIC-TOPOLOGY: SAUCE_LOOP_BOARD_TOPOLOGY=epic (fresh loop-plugin
+// bindings) routes selection through the epic frontier even with NO cutover
+// history in the ledger; absent flag keeps the legacy pre-cutover path above.
+{
+  const topologyIo = shadowIo();
+  const topologySelection = selectCoordinatorCandidate({
+    boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
+    loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
+    cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
+    epicTopology: true,
+  });
+  eq(
+    [topologySelection.action, topologySelection.card, topologySelection.source, topologySelection.epic],
+    ['claim', 'A1', 'epic', 'Epic A'],
+    'LOOP-EPIC-TOPOLOGY forced epic topology selects the epic frontier on a cutover-null ledger',
+  );
+}
 const statusLockNames = [];
 const lockedStatus = await commandStatusLocked({ root: '/tmp/bgd-cutover-locked', statePath: '/tmp/bgd-cutover-locked-state.json' }, {
   state: cutoverActualState, boardMd: shadowParent(), loadCard: cutoverActualIo.loadCard,
@@ -877,6 +895,46 @@ eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
   reason: 'containing release PR not created yet',
 }, 'release branch preserves the durable phase and names the next phase');
 eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable state');
+
+// LOOP-MERGE-ONLY: an EMPTY deployment vault list (merge-only binding, e.g.
+// ero's `deploy_vaults: []`) completes at feature_merged — no release chain.
+// The default (non-empty) vault list is byte-identical to the waitRecord case
+// above, which is the no-op guard for deploy-bound boards.
+{
+  let projected = 0; let persisted = 0;
+  const mergeOnlyRecord = { card: 'EM-X Merge-only slice', phase: 'feature_merged', feature_merge_sha: 'abc123' };
+  const result = await stepCard({ root: '/workshop' }, emptyState(), mergeOnlyRecord, {}, {
+    deployVaults: [],
+    attemptProjection: async () => { projected += 1; },
+    writeState: () => { persisted += 1; },
+    findContainingTag: () => { throw new Error('merge-only must not consult tags'); },
+    findContainingRelease: () => { throw new Error('merge-only must not consult release PRs'); },
+  });
+  eq(result.action, 'complete', 'LOOP-MERGE-ONLY empty vault list completes at feature_merged');
+  eq(result.deployment, 'deployed', 'LOOP-MERGE-ONLY completion reports deployed');
+  eq(mergeOnlyRecord.phase, 'deployed', 'LOOP-MERGE-ONLY durable phase advances to deployed');
+  eq(mergeOnlyRecord.merge_only, true, 'LOOP-MERGE-ONLY record is stamped merge_only');
+  ok(typeof mergeOnlyRecord.deployed_at === 'string' && mergeOnlyRecord.deployed_at.length > 0,
+    'LOOP-MERGE-ONLY deployed_at is stamped');
+  eq(projected, 1, 'LOOP-MERGE-ONLY completion attempts board projection exactly once');
+  eq(persisted, 1, 'LOOP-MERGE-ONLY completion persists exactly once');
+
+  const releasePrRecord = { card: 'EM-Y Merge-only from release_pr', phase: 'release_pr', feature_merge_sha: 'def456' };
+  const fromReleasePhase = await stepCard({ root: '/workshop' }, emptyState(), releasePrRecord, {}, {
+    deployVaults: [],
+    attemptProjection: async () => {},
+    writeState: () => {},
+  });
+  eq(fromReleasePhase.action, 'complete', 'LOOP-MERGE-ONLY release_pr phase also exits merge-only (stale phase from a deploy-bound past)');
+
+  const stillWaiting = await stepCard({ root: '/workshop' }, emptyState(),
+    { card: 'A', phase: 'feature_merged', feature_merge_sha: 'abc123' }, {}, {
+      deployVaults: [{ id: 'headspace', path: '/v/h' }],
+      findContainingTag: () => '',
+      findContainingRelease: () => null,
+    });
+  eq(stillWaiting.action, 'waiting', 'LOOP-MERGE-ONLY non-empty vault list keeps the release chain (byte-identical default)');
+}
 const parkedAdvanceRecord = {
   card: 'Parked work', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
 };
