@@ -10,6 +10,38 @@ const { AsyncLocalStorage, createHook } = require('async_hooks');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
+const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
+const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
+const priorImportedCoordinatorCache = require.cache[coordinatorModulePath];
+let coordinator;
+try {
+  delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  delete require.cache[coordinatorModulePath];
+  coordinator = require(coordinatorModulePath);
+} finally {
+  delete require.cache[coordinatorModulePath];
+  if (hadPriorImportedCoordinatorCache) require.cache[coordinatorModulePath] = priorImportedCoordinatorCache;
+  if (priorImportedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorImportedBoardTopology;
+}
+assert.strictEqual(
+  Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath),
+  hadPriorImportedCoordinatorCache,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache presence exactly',
+);
+if (hadPriorImportedCoordinatorCache) {
+  assert.strictEqual(
+    require.cache[coordinatorModulePath],
+    priorImportedCoordinatorCache,
+    'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache identity exactly',
+  );
+}
+assert.strictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorImportedBoardTopology,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller topology environment byte-for-byte',
+);
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
@@ -35,7 +67,7 @@ const {
   commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
-} = require('../../scripts/autoloop/codex-coordinator');
+} = coordinator;
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
   parseBoard, parseDependsOn,
@@ -686,7 +718,9 @@ const flagOn = selectClaimCandidate({
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
 const priorShadowFlag = process.env.SAUCE_EPIC_SELECTION_SHADOW;
+const priorBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 process.env.SAUCE_EPIC_SELECTION_SHADOW = '1';
+delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 let flaggedStatus;
 try {
   const statusIo = shadowIo();
@@ -698,7 +732,14 @@ try {
 } finally {
   if (priorShadowFlag === undefined) delete process.env.SAUCE_EPIC_SELECTION_SHADOW;
   else process.env.SAUCE_EPIC_SELECTION_SHADOW = priorShadowFlag;
+  if (priorBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorBoardTopology;
 }
+assert.deepStrictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorBoardTopology,
+  'ES3-STATUS-FLAG restores the caller topology environment byte-for-byte',
+);
 eq(flaggedStatus.next.shadow_selection.card, 'A1', 'ES3-STATUS-FLAG invokes the production commandStatus environment-flag wiring');
 eq(flaggedStatus.projection_problems, [], 'ES3-STATUS-FLAG remains observational and creates no tracked projection state');
 const shadowCapacityState = emptyState();
@@ -836,17 +877,30 @@ eq(cutoverAbsentActual, cutoverAbsentLegacy, 'BGD-CUTOVER-PRE-COMPAT absent cuto
 // bindings) routes selection through the epic frontier even with NO cutover
 // history in the ledger; absent flag keeps the legacy pre-cutover path above.
 {
+  const topologyCoordinatorPath = require.resolve('../../scripts/autoloop/codex-coordinator');
+  const cachedTopologyCoordinator = require.cache[topologyCoordinatorPath];
+  const priorTopologyEnvironment = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY = 'epic';
+  delete require.cache[topologyCoordinatorPath];
   const topologyIo = shadowIo();
-  const topologySelection = selectCoordinatorCandidate({
-    boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
-    loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
-    cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
-    epicTopology: true,
-  });
+  let topologySelection;
+  try {
+    const boundSelectCoordinatorCandidate = require(topologyCoordinatorPath).selectCoordinatorCandidate;
+    topologySelection = boundSelectCoordinatorCandidate({
+      boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
+      loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
+      cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
+    });
+  } finally {
+    delete require.cache[topologyCoordinatorPath];
+    if (cachedTopologyCoordinator) require.cache[topologyCoordinatorPath] = cachedTopologyCoordinator;
+    if (priorTopologyEnvironment === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+    else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorTopologyEnvironment;
+  }
   eq(
     [topologySelection.action, topologySelection.card, topologySelection.source, topologySelection.epic],
     ['claim', 'A1', 'epic', 'Epic A'],
-    'LOOP-EPIC-TOPOLOGY forced epic topology selects the epic frontier on a cutover-null ledger',
+    'LOOP-EPIC-TOPOLOGY bound environment selects the epic frontier on a cutover-null ledger',
   );
 }
 const statusLockNames = [];

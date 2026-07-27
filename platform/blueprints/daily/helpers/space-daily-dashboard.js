@@ -578,9 +578,18 @@ class SpaceDailyDashboard {
         // "Overdue" pill after the title.
         const renderTaskRow = (list, task, overdue) => {
           const li = list.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
+          if (TTL && typeof TTL.markTaskRow === "function") TTL.markTaskRow(li, task);
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere; display:list-item;";
 
-          const titleSpan = li.createEl("span");
+          // Keep flex off the li itself: changing a list item to display:flex
+          // suppresses its bullet marker. The child owns horizontal alignment
+          // while the li remains the stable click + rollback identity.
+          const rowContent = li.createEl("div");
+          rowContent.className = "sauce-daily-task-row-content";
+          rowContent.style.cssText = "display:flex; align-items:center; gap:8px; width:100%; min-width:0;";
+
+          const titleSpan = rowContent.createEl("span");
+          titleSpan.style.cssText = "flex:1 1 auto; min-width:0;";
           const titleText = (task && task.title) || "(untitled)";
           if (TTL && typeof TTL.renderInlineLinks === "function") {
             TTL.renderInlineLinks(titleSpan, titleText, task.path);
@@ -589,13 +598,33 @@ class SpaceDailyDashboard {
           }
 
           if (overdue) {
-            const badge = li.createEl("span");
+            const badge = rowContent.createEl("span");
             badge.textContent = "Overdue";
             badge.style.cssText = "margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 0.72em; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; background: color-mix(in srgb, var(--color-red) 13%, transparent); color: var(--color-red); border: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);";
           }
 
+          // TD-1a3: this dashboard owns a private row renderer, so it needs its
+          // own visible action control. The mutation itself stays canonical in
+          // TaskTodayList.rescheduleTomorrow. Pass the VIEWED daily-note date,
+          // not wall-clock today; cold load / missing TaskDialog is a no-op.
+          if (task && task.status === "open"
+              && TTL && typeof TTL.rescheduleTomorrow === "function") {
+            const tomorrow = rowContent.createEl("button");
+            tomorrow.className = "sauce-daily-task-tomorrow";
+            tomorrow.style.cssText = "display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:28px; height:24px; padding:0; border:none; border-radius:var(--radius-s, 4px); background:transparent; color:var(--text-faint); cursor:pointer;";
+            tomorrow.setAttribute("type", "button");
+            tomorrow.setAttribute("aria-label", "Move to tomorrow");
+            tomorrow.setAttribute("title", "Move to tomorrow");
+            tomorrow.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/></svg>';
+            tomorrow.addEventListener("click", async (event) => {
+              try { event.stopPropagation(); } catch (_e) {}
+              await TTL.rescheduleTomorrow(li, task, today);
+            });
+          }
+
           li.onclick = (e) => {
-            if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
+            if (e.target && (e.target.tagName === "A" || e.target.tagName === "BUTTON"
+                || (e.target.closest && (e.target.closest("a") || e.target.closest("button"))))) return;
             if (task && task.path) app.workspace.openLinkText(task.path, "");
           };
         };

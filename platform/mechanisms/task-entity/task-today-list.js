@@ -10,11 +10,12 @@
  * "Upcoming" band (future-due, rendered LAST), and draws each task as a row
  * with a functional done-checkbox + metadata chips.
  * Task CREATION lives in ToDoLeafActions' single nav-button "New Task" (this
- * widget renders no create button of its own). Every mutation is DELEGATED to
- * TaskDialog — the widget only READS the task notes; it never writes one
- * directly. That keeps the single-file-write invariant (a bad write can only
- * ever touch one task's file) entirely inside TaskDialog:
+ * widget renders no create button of its own). Mutations are either delegated
+ * to TaskDialog or, for the narrow move-to-tomorrow row action, use Obsidian's
+ * processFrontMatter rail against the resolved task file. Every gesture keeps
+ * the single-file-write invariant (a bad write can only ever touch one task):
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
+ *   - tomorrow action → processFrontMatter(file, fm => fm.due = nextDay(viewedDay))
  *   - title click     → app.workspace.openLinkText(path)  (opens the task NOTE;
  *                       its TaskNoteView carries the Edit button for editing)
  *
@@ -32,6 +33,7 @@
  * the statics, load via `new Function(src + "\nreturn TaskTodayList;")()`.
  *
  * Static API (Node-testable, pure):
+ *   TaskTodayList.nextDay(todayStr) → next YYYY-MM-DD calendar date
  *   TaskTodayList.buildBands(parsedTasks, todayStr) → { today, overdue, upcoming }
  *
  * Instance API (browser-side):
@@ -48,7 +50,10 @@ class TaskTodayList {
     // TaskEntity / TaskDialog).
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
-    renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
+    nextDay(todayStr) { return TaskTodayList.nextDay(todayStr); }
+    markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
+    rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
+    renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
     _parseInlineLinks(text) { return TaskTodayList._parseInlineLinks(text); }
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
@@ -56,6 +61,223 @@ class TaskTodayList {
     _projectChipText(v) { return TaskTodayList._projectChipText(v); }
 
     // ---------- Static pure helper ----------
+
+    /**
+     * Return the next calendar date after a normalized YYYY-MM-DD string.
+     * Calendar arithmetic is performed directly rather than through Date/Luxon,
+     * so the result cannot shift with the host timezone. Invalid dates fail
+     * closed with an empty string; never throws.
+     */
+    static nextDay(todayStr) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(todayStr || ''));
+        if (!match) return '';
+        let year = Number(match[1]);
+        let month = Number(match[2]);
+        let day = Number(match[3]);
+        const isLeap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+        const daysInMonth = (y, m) =>
+            [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] || 0;
+        const maxDay = daysInMonth(year, month);
+        if (!maxDay || day < 1 || day > maxDay) return '';
+        day += 1;
+        if (day > maxDay) {
+            day = 1;
+            month += 1;
+            if (month > 12) {
+                month = 1;
+                year += 1;
+            }
+        }
+        return String(year).padStart(4, '0') + '-'
+            + String(month).padStart(2, '0') + '-'
+            + String(day).padStart(2, '0');
+    }
+
+    /**
+     * Stamp a rendered row with stable task identity + render order. The identity
+     * prevents an in-flight rollback from duplicating a replacement row after a
+     * Dataview rerender. Render order lets concurrent adjacent failures recover
+     * correctly even when every original sibling anchor is temporarily detached.
+     */
+    static markTaskRow(row, task) {
+        try {
+            if (!row || !row.dataset || !task || !task.path) return row;
+            row.dataset.sauceTaskPath = String(task.path);
+            if (!row.dataset.sauceTaskOrder) {
+                TaskTodayList._rescheduleRowSequence =
+                    Number(TaskTodayList._rescheduleRowSequence || 0) + 1;
+                row.dataset.sauceTaskOrder = String(TaskTodayList._rescheduleRowSequence);
+            }
+        } catch (_e) {}
+        return row;
+    }
+
+    /**
+     * Reschedule one OPEN task to the day after `viewedDay`, using the canonical
+     * Obsidian processFrontMatter rail. This is shared by TaskTodayList's own
+     * row and SpaceDailyDashboard's private row renderer.
+     *
+     * The row is removed before awaiting the write for instant feedback. On
+     * failure, rollback selects only a still-valid anchor, falls back to stable
+     * render order when adjacent rows are also in flight, and recognizes a
+     * rerendered replacement so it never inserts a stale duplicate. TaskDialog
+     * remains the readiness boundary: before it or the app/file rail exists,
+     * this is a silent no-op. Completed/archive rows are rejected even if a
+     * caller invokes this method directly.
+     */
+    static async rescheduleTomorrow(row, task, viewedDay, TDref) {
+        try {
+            if (!row || !task || task.status !== 'open' || !task.path) return { ok: false, no_op: true };
+            const TD = TDref
+                || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog)
+                || null;
+            if (!TD || typeof TD.open !== 'function') return { ok: false, no_op: true };
+
+            const appRef = (typeof window !== 'undefined' && window.app)
+                || (typeof globalThis !== 'undefined' && globalThis.app)
+                || null;
+            if (!appRef || !appRef.vault || typeof appRef.vault.getAbstractFileByPath !== 'function'
+                || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') {
+                return { ok: false, no_op: true };
+            }
+
+            let baseDay = String(viewedDay || '');
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDay)) {
+                const momentRef = (typeof window !== 'undefined' && window.moment) || null;
+                baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+            }
+            const tomorrow = TaskTodayList.nextDay(baseDay);
+            const file = appRef.vault.getAbstractFileByPath(task.path);
+            if (!tomorrow || !file) return { ok: false, no_op: true };
+
+            const taskPath = String(task.path);
+            const inFlight = TaskTodayList._rescheduleInFlight
+                || (TaskTodayList._rescheduleInFlight = new Set());
+            // Claim synchronously before the row is detached or the first await
+            // yields. This makes double-clicks and duplicate dispatch from a
+            // rerendered row harmless while preserving concurrency by task path.
+            if (inFlight.has(taskPath)) {
+                return { ok: false, no_op: true, in_flight: true };
+            }
+            inFlight.add(taskPath);
+            try {
+                try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                TaskTodayList.markTaskRow(row, task);
+                const parent = row.parentNode;
+                const childList = (node) => {
+                    try { return Array.from((node && (node.childNodes || node.children)) || []); }
+                    catch (_e) { return []; }
+                };
+                const originalChildren = childList(parent);
+                const originalIndex = originalChildren.indexOf(row);
+                const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
+                const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
+                const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
+                const restore = () => {
+                    if (!parent || row.parentNode) return false;
+                    // A detached old render tree must not receive stale DOM after
+                    // Dataview has replaced it with a new connected tree.
+                    if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+
+                    const current = childList(parent);
+                    const replacementExists = current.some((node) =>
+                        node !== row && node && node.dataset
+                        && String(node.dataset.sauceTaskPath || '') === taskPath);
+                    if (replacementExists) return true;
+
+                    const insert = (anchor) => {
+                        if (anchor != null && anchor.parentNode !== parent) return false;
+                        try {
+                            parent.insertBefore(row, anchor || null);
+                            return row.parentNode === parent;
+                        } catch (_e) {
+                            return false;
+                        }
+                    };
+
+                    // Prefer the nearest surviving original anchor. Saving the full
+                    // suffix (not only nextSibling) handles adjacent removals.
+                    const next = following.find((node) => node && node.parentNode === parent);
+                    if (next && insert(next)) return true;
+
+                    // If every original following sibling is detached, stable render
+                    // order still locates this row relative to concurrently restored
+                    // task rows (including when these were the final two rows).
+                    if (Number.isFinite(rowOrder)) {
+                        const orderedRows = childList(parent).filter((node) =>
+                            node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+                        const later = orderedRows.find((node) =>
+                            Number(node.dataset.sauceTaskOrder) > rowOrder);
+                        if (later && insert(later)) return true;
+                        const earlier = orderedRows.filter((node) =>
+                            Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
+                        if (earlier) {
+                            const afterEarlier = earlier.nextSibling;
+                            if ((afterEarlier == null || afterEarlier.parentNode === parent)
+                                && insert(afterEarlier)) return true;
+                        }
+                    }
+
+                    const previous = preceding.find((node) => node && node.parentNode === parent);
+                    if (previous) {
+                        const afterPrevious = previous.nextSibling;
+                        if ((afterPrevious == null || afterPrevious.parentNode === parent)
+                            && insert(afterPrevious)) return true;
+                    }
+
+                    // Final deterministic fallback for a still-live container. Clamp
+                    // the original ordinal to its current child count, then append if
+                    // a host-specific insertBefore implementation still rejects it.
+                    const now = childList(parent);
+                    const ordinal = Math.max(0, Math.min(
+                        originalIndex >= 0 ? originalIndex : now.length,
+                        now.length
+                    ));
+                    if (insert(now[ordinal] || null)) return true;
+                    if (!row.parentNode && typeof parent.appendChild === 'function') {
+                        try { parent.appendChild(row); } catch (_e) {}
+                    }
+                    return row.parentNode === parent;
+                };
+                try { row.remove(); } catch (_e) {}
+                let liveStatus = null;
+                let liveStatusChecked = false;
+                let mutationApplied = false;
+                const staleOpenNoOp = () => ({
+                    ok: false,
+                    no_op: true,
+                    reason: 'task is no longer open',
+                    live_status: liveStatus || 'missing'
+                });
+                try {
+                    await appRef.fileManager.processFrontMatter(file, (fm) => {
+                        liveStatusChecked = true;
+                        liveStatus = fm && typeof fm.status === 'string' ? fm.status : null;
+                        // The rendered task object can be stale by the time the
+                        // optimistic action reaches the file. Revalidate and
+                        // mutate within the same atomic frontmatter callback.
+                        if (!fm || fm.status !== 'open') return;
+                        fm.due = tomorrow;
+                        mutationApplied = true;
+                    });
+                    if (!mutationApplied) {
+                        restore();
+                        return staleOpenNoOp();
+                    }
+                    return { ok: true, due: tomorrow };
+                } catch (e) {
+                    restore();
+                    if (liveStatusChecked && !mutationApplied) return staleOpenNoOp();
+                    try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                    return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
+                }
+            } finally {
+                inFlight.delete(taskPath);
+            }
+        } catch (_e) {
+            return { ok: false, no_op: true };
+        }
+    }
 
     /**
      * Partition a list of ALREADY-PARSED task objects (parseNote output, or any
@@ -269,7 +491,7 @@ class TaskTodayList {
      * `window.customJS.TaskDialog` at click-time (both markDone + open are lazily
      * resolved so a cold-load TDZ never throws out of the row build). Never throws.
      */
-    static renderTaskRow(container, task, TDref) {
+    static renderTaskRow(container, task, TDref, options) {
         if (!container || typeof container.createEl !== 'function') return null;
         // Resolve TaskDialog lazily at click-time so a passed ref OR the global
         // both work; a cold-load (customJS not ready) just no-ops the gesture.
@@ -282,6 +504,7 @@ class TaskTodayList {
         };
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+        TaskTodayList.markTaskRow(row, task);
         // The right cluster (chips + action icons) sits beside the title when the
         // row is wide enough, and WRAPS to its own right-aligned line when the title
         // is long — flex-wrap + a title min-width floor. Without the floor a long
@@ -430,13 +653,9 @@ class TaskTodayList {
             addChip(task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
         }
 
-        // Row actions at the FAR-RIGHT end of the cluster. When the shared
-        // MenuPopover primitive is available we collapse the row's three controls
-        // (checkbox stays; Open-note + Edit + Delete) into ONE subtle `⋯` button
-        // that opens an anchored popover — Open note / Edit / Delete (danger). When
-        // it is NOT available (cold load, customJS not ready) we fall back to the
-        // LEGACY two inline icons (pencil = edit, trash = delete) so nothing
-        // regresses. Either way the controls live in a fixed 1.5em-tall flex box
+        // Row actions at the FAR-RIGHT end of the cluster. Open rows render
+        // tomorrow + edit + delete; completed/archive rows render edit + delete
+        // only. The controls live in a fixed 1.5em-tall flex box
         // that vertically centers them against the FIRST line of the
         // (line-height:1.5) title — the same trick the checkbox wrapper uses — so
         // the row stays aligned even when a long title wraps, and every button is
@@ -444,12 +663,14 @@ class TaskTodayList {
         //   - Open note → app.workspace.openLinkText(path) (same as the title click)
         //   - Edit      → TaskDialog.open({ edit: path })   (the edit dialog, NOT
         //                 the note — the note opens via the title click)
+        //   - Tomorrow  → rescheduleTomorrow(row, task, viewedDay)
         //   - Delete    → TaskDialog.confirmDelete(path)     (yes/no modal; on
         //                 confirm the row is removed optimistically)
         // Every gesture is lazily resolved (getTD() / window at click-time) + fully
         // guarded, so a cold-load just no-ops the tap. Never throws.
         const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const ICON = {
+            tomorrow: svg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/>'),
             wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
             trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
         };
@@ -469,10 +690,14 @@ class TaskTodayList {
             return b;
         };
 
-        // The two row gestures, factored out so BOTH the `⋯` popover entries and the
-        // legacy inline icons share one wiring (edit dialog / confirm-delete +
-        // optimistic row removal). Each is lazily resolved via getTD() + fully
-        // guarded → a cold-load tap is a silent no-op.
+        // Row gestures share lazy dependency resolution. A cold-load tap is a
+        // silent no-op; only status:open rows receive the tomorrow control.
+        const doTomorrow = async () => {
+            const viewedDay = options && typeof options.viewedDay === 'string'
+                ? options.viewedDay
+                : '';
+            return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref);
+        };
         const doEdit = () => {
             const TD = getTD();
             if (!path || !TD || typeof TD.open !== 'function') return;
@@ -493,6 +718,13 @@ class TaskTodayList {
             }
         };
 
+        if (task && task.status === 'open') {
+            const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', 'Move to tomorrow', ICON.tomorrow, false);
+            tomorrowBtn.addEventListener('click', async (ev) => {
+                try { ev.stopPropagation(); } catch (_e) {}
+                await doTomorrow();
+            });
+        }
         const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
         editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
         const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
