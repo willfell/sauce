@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Intake"
+  short_description: "Loop intake via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-intake — follow .agents/skills/loop-intake/SKILL.md."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Brainstorm"
+  short_description: "Loop brainstorm via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-brainstorm — follow .agents/skills/loop-brainstorm/SKILL.md."

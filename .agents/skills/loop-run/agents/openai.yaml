@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Run"
+  short_description: "Loop run via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-run — follow .agents/skills/loop-run/SKILL.md."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Plan"
+  short_description: "Loop plan via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-plan — follow .agents/skills/loop-plan/SKILL.md."
