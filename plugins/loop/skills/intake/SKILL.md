@@ -26,7 +26,7 @@ Completion mode: `release` requires full execution metadata and an explicit depl
 
 ## Build and validate the plan
 
-Create a temporary JSON spec for the intake script. Bind it to the config: `project_root` = `config.project_root_abs`, `board_path` = `config.board_path_abs`, `cards_root` = `config.cards_root_abs`; set `evidence_roots` to the narrow source/vault roots needed to verify `path:line`, and `link_roots` to the narrow folders needed to resolve emitted wikilinks.
+Create a temporary JSON spec for the intake script. Bind it to the config: `project_root` = `config.project_root_abs`, `board_path` = `config.board_path_abs`, `cards_root` = `config.cards_root_abs`; set `evidence_roots` to the narrow source/vault roots needed to verify `path:line`, and `link_roots` to the narrow folders needed to resolve emitted wikilinks. **Set `epic_native: true` whenever `config.board_topology` is `epic` (the default)** — it forces the canonical epic topology (epic atlas + epic board + flat slices, clean parent-board line) on fresh boards whose ledger has no cutover history; without it a fresh board silently falls back to the legacy flat parent/children shape.
 
 ```bash
 node <intake> --spec <spec.json> --json          # dry-run

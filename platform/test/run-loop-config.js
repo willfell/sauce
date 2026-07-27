@@ -216,5 +216,29 @@ function mkRepo(config) {
   ok('LC-6 CLI requires --json (usage exit 2)', code === 2 && /json/.test(body));
 }
 
+// ---------------------------------------------------------------------------
+// LC-7 — board topology: epic-native is the default for fresh bindings.
+// ---------------------------------------------------------------------------
+{
+  const repo = mkRepo(baseConfig());
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 default topology is epic', r.ok === true && r.config.board_topology === 'epic');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.board.topology = 'flat';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 explicit flat honored', r.ok === true && r.config.board_topology === 'flat');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.board.topology = 'pyramid';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 invalid topology refuses', r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /board\.topology/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }

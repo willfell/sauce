@@ -98,6 +98,9 @@ function validateRaw(raw) {
     const shapeOk = Array.isArray(dv) && dv.every((v) => v && typeof v.id === 'string' && typeof v.path === 'string');
     if (!shapeOk) refusals.push(refusal('config_bad_value', 'policy.deploy_vaults must be an array of {id, path}'));
   }
+  if (raw.board.topology !== undefined && !['epic', 'flat'].includes(raw.board.topology)) {
+    refusals.push(refusal('config_bad_value', `board.topology must be "epic" or "flat", got ${JSON.stringify(raw.board.topology)}`));
+  }
   return refusals;
 }
 
@@ -157,6 +160,7 @@ function resolveBinding(repoRoot, opts = {}) {
       vault_root: vaultRoot,
       vault_mcp_server: (raw.vault && raw.vault.mcp_server) || null,
       board: { ...raw.board },
+      board_topology: raw.board.topology || 'epic',
       project_root_abs: projectRootAbs,
       board_path_abs: boardPathAbs,
       cards_root_abs: cardsRootAbs,

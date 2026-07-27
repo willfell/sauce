@@ -954,7 +954,14 @@ function run(spec, apply = false, deps = {}) {
     return { ok: false, errors: [`fresh installed coordinator status failed: ${error.message}`] };
   }
   const boardRaw = fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : '';
-  const cutoverEnabled = Boolean(coordinatorStatus && coordinatorStatus.cutover && coordinatorStatus.cutover.enabled === true);
+  if (spec.epic_native !== undefined && typeof spec.epic_native !== 'boolean') {
+    return { ok: false, errors: ['epic_native must be a boolean when present'] };
+  }
+  // Fresh boards (loop-plugin bindings) force epic-native topology via
+  // spec.epic_native; the ledger cutover flag remains the sauce board's own
+  // migration-era switch. Absent both, the legacy flat path is preserved.
+  const cutoverEnabled = spec.epic_native === true
+    || Boolean(coordinatorStatus && coordinatorStatus.cutover && coordinatorStatus.cutover.enabled === true);
   const validation = validateSpec(spec, boardRaw, { cutoverEnabled });
   if (validation.errors.length) return {
     ok: false, errors: validation.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
@@ -980,6 +987,7 @@ function run(spec, apply = false, deps = {}) {
   return {
     ok: true, applied: apply, no_op: changed.length === 0,
     ...(cutoverEnabled ? { cutover_enabled: true } : {}),
+    ...(spec.epic_native === true ? { epic_native: true } : {}),
     plan_fingerprint: crypto.createHash('sha256').update(JSON.stringify(cutoverEnabled ? { spec, cutover_enabled: true } : spec)).digest('hex'),
     changed_paths: changed.map((item) => item.path),
     ...(discardInstructions.length ? { post_apply_instructions: discardInstructions } : {}),
