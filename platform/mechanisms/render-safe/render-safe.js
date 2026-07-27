@@ -61,6 +61,243 @@ class RenderSafe {
   filePath(dv) { const p = this.page(dv); return (p && p.file && p.file.path) || null; }
   fileName(dv) { const p = this.page(dv); return (p && p.file && p.file.name) || null; }
 
+  // ---------- Gesture mutation lifecycle ----------
+  // One lifecycle for gesture-time frontmatter/vault writes. It captures scroll
+  // before any visible or persisted work, applies optimistic UI before starting
+  // the write, and reconciles only the active/create surface after Dataview's
+  // authoritative index is current. Background changes are intentionally left
+  // to the platform reconciler.
+  //
+  // Returns { ok: true, value } or { ok: false, error }. Operational helpers
+  // (scroll, Notice, metadata, Dataview, commands, timers) are best-effort and
+  // never mask the original write failure. All seams are injectable so the same
+  // instance-method contract works in CustomJS and deterministic harnesses.
+  async mutate(opts) {
+    opts = opts || {};
+    const appRef = opts.app || this._runtimeApp();
+    const path = typeof opts.path === 'string' ? opts.path : '';
+    const mode = this._mutationMode(opts.mode, appRef, path);
+    const dv = opts.dv || this._dataviewApi(appRef);
+
+    // Capture is always the first effect, even for background/create/failure.
+    try { this.captureScroll(opts.scroll || opts); } catch (_e) {}
+
+    // Active forced refresh is opt-in: only the caller knows which indexed
+    // value proves this particular mutation current. When no mutation-specific
+    // predicate is supplied, finish after the write and leave reconciliation
+    // to Dataview instead of polling a generic page delta. Create remains
+    // existence-authoritative and independent of isCurrent.
+    const activeAuthority = mode === 'active' && typeof opts.isCurrent === 'function';
+    const beforePage = activeAuthority ? this._dvPage(dv, path) : null;
+    const reconcile = (mode === 'create' || activeAuthority)
+      ? this._prepareMutationReconcile({
+          app: appRef,
+          dv,
+          path,
+          mode,
+          timers: opts.timers,
+          setTimeout: opts.setTimeout,
+          clearTimeout: opts.clearTimeout,
+          signalTimeout: opts.signalTimeout,
+          pollInterval: opts.pollInterval,
+          pollAttempts: opts.pollAttempts,
+          isCurrent: opts.isCurrent,
+          beforePage,
+        })
+      : null;
+
+    try {
+      if (typeof opts.optimistic === 'function') await opts.optimistic();
+      if (typeof opts.write !== 'function') throw new Error('RenderSafe.mutate requires write');
+      const value = await opts.write();
+      if (reconcile) await reconcile.start();
+      return { ok: true, value };
+    } catch (error) {
+      if (reconcile) reconcile.cancel();
+      if (typeof opts.revert === 'function') {
+        try { await opts.revert(error); } catch (_e) {}
+      }
+      this._mutationNotice(opts, error);
+      return { ok: false, error };
+    }
+  }
+
+  _runtimeApp() {
+    try {
+      if (typeof window !== 'undefined' && window.app) return window.app;
+      if (typeof globalThis !== 'undefined' && globalThis.app) return globalThis.app;
+      if (typeof app !== 'undefined') return app;
+    } catch (_e) {}
+    return null;
+  }
+
+  _mutationMode(mode, appRef, path) {
+    if (mode === 'active' || mode === 'background' || mode === 'create') return mode;
+    try {
+      const active = appRef && appRef.workspace && typeof appRef.workspace.getActiveFile === 'function'
+        ? appRef.workspace.getActiveFile() : null;
+      return path && active && active.path === path ? 'active' : 'background';
+    } catch (_e) { return 'background'; }
+  }
+
+  _dataviewApi(appRef) {
+    try {
+      const plugin = appRef && appRef.plugins && appRef.plugins.plugins
+        ? appRef.plugins.plugins.dataview : null;
+      return plugin && plugin.api ? plugin.api : null;
+    } catch (_e) { return null; }
+  }
+
+  _dvPage(dv, path) {
+    try { return dv && typeof dv.page === 'function' && path ? (dv.page(path) || null) : null; }
+    catch (_e) { return null; }
+  }
+
+  _mutationNotice(opts, error) {
+    try {
+      const NoticeClass = opts.Notice
+        || (typeof window !== 'undefined' && window.Notice)
+        || (typeof Notice !== 'undefined' ? Notice : null);
+      if (typeof NoticeClass !== 'function') return;
+      const reason = error && error.message ? error.message : String(error || 'Unknown error');
+      new NoticeClass(opts.failureMessage || ('Update failed: ' + reason));
+    } catch (_e) {}
+  }
+
+  _prepareMutationReconcile(opts) {
+    const appRef = opts.app;
+    const metadata = appRef && appRef.metadataCache;
+    const path = opts.path;
+    const timers = opts.timers || {};
+    const setT = timers.setTimeout || opts.setTimeout
+      || (appRef && appRef._setTimeout)
+      || (typeof window !== 'undefined' && window.setTimeout)
+      || (typeof setTimeout !== 'undefined' ? setTimeout : null);
+    const clearT = timers.clearTimeout || opts.clearTimeout
+      || (appRef && appRef._clearTimeout)
+      || (typeof window !== 'undefined' && window.clearTimeout)
+      || (typeof clearTimeout !== 'undefined' ? clearTimeout : null);
+    const signalTimeout = Number.isFinite(opts.signalTimeout) ? Math.max(0, opts.signalTimeout) : 1200;
+    const pollInterval = Number.isFinite(opts.pollInterval) ? Math.max(0, opts.pollInterval) : 150;
+    const pollAttempts = Number.isFinite(opts.pollAttempts) ? Math.max(0, Math.floor(opts.pollAttempts)) : 20;
+    let ref = null;
+    let listener = null;
+    let signaled = false;
+    let started = false;
+    let done = false;
+    let resolveDone = null;
+    const timerIds = [];
+
+    const detach = () => {
+      if (!metadata || !ref) return;
+      try {
+        if (typeof metadata.offref === 'function') metadata.offref(ref);
+        else if (typeof metadata.off === 'function' && listener) metadata.off('changed', listener);
+      } catch (_e) {}
+      ref = null;
+    };
+    const clearTimers = () => {
+      if (typeof clearT === 'function') {
+        while (timerIds.length) {
+          try { clearT(timerIds.pop()); } catch (_e) {}
+        }
+      } else {
+        timerIds.length = 0;
+      }
+    };
+    const schedule = (fn, delay) => {
+      if (typeof setT !== 'function' || done) return false;
+      try {
+        const id = setT(fn, delay);
+        timerIds.push(id);
+        return true;
+      } catch (_e) { return false; }
+    };
+    const forceRefresh = () => {
+      try {
+        const commands = appRef && appRef.commands;
+        if (!commands || typeof commands.executeCommandById !== 'function') return false;
+        commands.executeCommandById('dataview:dataview-force-refresh-views');
+        return true;
+      } catch (_e) { return false; }
+    };
+    const finish = (refresh) => {
+      if (done) return;
+      done = true;
+      detach();
+      clearTimers();
+      const refreshed = refresh ? forceRefresh() : false;
+      if (resolveDone) resolveDone(refreshed);
+    };
+    const current = () => {
+      const page = this._dvPage(opts.dv, path);
+      // Create reconciliation has exactly two authorities: the page now exists,
+      // or its bounded polling window expires below. Keep this branch ahead of
+      // every active-only escape hatch. An injected isCurrent predicate cannot
+      // prove creation, and missing/unusable Dataview cannot be treated as a
+      // current index when there is no page to observe.
+      if (opts.mode === 'create') return !!page;
+      // Active reconciliation is only constructed when mutate received an
+      // explicit mutation-specific authority. Keep this fail-closed guard in
+      // the private seam so direct/mutated calls can never fall back to page
+      // shape, metadata volatility, or an unrelated same-file semantic delta.
+      if (typeof opts.isCurrent !== 'function') return false;
+      try {
+        const verdict = opts.isCurrent(page, opts.beforePage);
+        if (verdict === true) return true;
+        // isCurrent is deliberately synchronous and boolean-only. An async
+        // predicate is itself a contract violation, never freshness evidence.
+        // Observe promise/thenable rejection so fail-closed handling cannot leak
+        // an unhandled rejection into Obsidian or the test runner.
+        if (verdict && (typeof verdict === 'object' || typeof verdict === 'function')) {
+          try { Promise.resolve(verdict).catch(() => {}); } catch (_e) {}
+        }
+        return false;
+      } catch (_e) { return false; }
+    };
+    const poll = (attemptsLeft) => {
+      if (done) return;
+      if (current()) { finish(true); return; }
+      // Create must surface a newly-written page even if Dataview misses the
+      // bounded window. Active updates must never redraw known-stale data.
+      if (attemptsLeft <= 0) { finish(opts.mode === 'create'); return; }
+      if (!schedule(() => poll(attemptsLeft - 1), pollInterval)) finish(false);
+    };
+    const beginPoll = () => {
+      if (done) return;
+      clearTimers();
+      poll(pollAttempts);
+    };
+
+    listener = (file) => {
+      if (done || signaled || !file || file.path !== path) return;
+      signaled = true;
+      if (started) beginPoll();
+    };
+    try {
+      if (metadata && typeof metadata.on === 'function' && path) {
+        ref = metadata.on('changed', listener);
+      }
+    } catch (_e) { ref = null; }
+
+    return {
+      start: () => {
+        if (done) return Promise.resolve(false);
+        started = true;
+        return new Promise((resolve) => {
+          resolveDone = resolve;
+          if (signaled || !ref) {
+            beginPoll();
+          } else if (!schedule(beginPoll, signalTimeout)) {
+            // No timer means we cannot safely prove Dataview freshness.
+            finish(false);
+          }
+        });
+      },
+      cancel: () => finish(false),
+    };
+  }
+
   // ---------- L3: scroll preservation across a write→re-render ----------
   // Find the active Reading-view scroll container. Robust: known reading-view
   // selector, then a bare preview-view, then null. Never throws.

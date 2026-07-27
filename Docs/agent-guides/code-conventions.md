@@ -32,6 +32,26 @@ Mechanisms are exempt — they install under `ranch/...`. See landmine #11 + `Do
 - **Startup-script registration vector matters.** Templater `startup_templates[]` may not fire reliably at consumer boot; customjs `startupScriptNames[]` (`customjs_startup_scripts[]` in manifest) is the L2 fix. v0.48.0 → v0.49.0 cycle history documents the swap.
 - **Dataview returns `DataArray`, not `Array`.** Use `.where()` / `.array()` rather than assuming Array methods like `.filter()`. Codebase precedent: `getTasks()` + `cowork-readiness.js`. Bit us in v0.67.x (FLN-v67-2).
 
+## Gesture write lifecycle
+
+User gestures must route frontmatter and vault writes through the instance
+method `customJS.RenderSafe.mutate(...)`; a gesture handler must not end in a
+bare `processFrontMatter`, `vault.modify`, or `vault.create` write. The shared
+lifecycle owns pre-write scroll capture, optimistic UI, failure reversion, and
+active/create Dataview reconciliation while leaving background writes to the
+platform reconciler. Active forced refresh is opt-in and requires an explicit,
+mutation-specific `isCurrent(currentPage, beforePage)` predicate. This predicate
+is synchronous and boolean-only: literal `true` authorizes refresh; promises,
+thenables, exceptions, and all other values fail closed (rejections are safely
+observed). Without that authority, `mutate` completes after the write without
+polling or refreshing:
+no generic page shape, whole-page semantic delta, volatile file metadata,
+unreadable value, hostile key, or raw-frontmatter collision can prove that this
+particular mutation was indexed. With `isCurrent`, the lifecycle pre-arms the
+metadata signal, polls after the write, refreshes exactly once only when the
+predicate returns true, and cleans its bounded wait. Create mode remains
+existence-based and never consults active-only `isCurrent`.
+
 ## Skill / command override seam
 
 Direct edits to canonical `.claude/commands/<x>.md` or `.claude/skills/<bp>/**/SKILL.md` in any consumer vault are **REVERTED on next install** per landmine #22. Use `.claude/commands.local/` or `.claude/skills.local/` as the override seam instead. `/audit` surfaces direct-canonical edits as `consumer_edit_at_risk` before work is lost.
