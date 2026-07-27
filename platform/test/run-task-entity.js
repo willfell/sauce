@@ -2544,6 +2544,107 @@ async function runTomorrowActionTests() {
     assert(childIndex(container, sibling) === 1, 'sibling order preserved');
   });
 
+  await okAsync('TD1A-SHARED-CONCURRENT-ROLLBACK restores adjacent failures when the saved anchor is detached', async () => {
+    const paths = ['spice/tasks/first.md', 'spice/tasks/second.md'];
+    const files = new Map(paths.map((path) => [path, { path, _fm: { due: '2026-07-27' } }]));
+    const rejectWrites = new Map();
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: (path) => files.get(path) || null },
+        fileManager: {
+          processFrontMatter: (file, mutate) => {
+            mutate(file._fm);
+            return new Promise((_resolve, reject) => { rejectWrites.set(file.path, reject); });
+          },
+        },
+        workspace: { openLinkText() {} },
+      },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+    };
+
+    const container = makeTreeNode('div');
+    const permissiveInsertBefore = container.insertBefore;
+    container.insertBefore = function strictInsertBefore(node, ref) {
+      if (ref != null && ref.parentNode !== this) {
+        throw new Error('NotFoundError: reference node is not a child');
+      }
+      return permissiveInsertBefore.call(this, node, ref);
+    };
+    const first = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'first', path: paths[0], due: '2026-07-27', status: 'open' },
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+    const second = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'second', path: paths[1], due: '2026-07-27', status: 'open' },
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+
+    const firstPending = fireClick(findByCls(first, 'sauce-task-action-tomorrow'));
+    const secondPending = fireClick(findByCls(second, 'sauce-task-action-tomorrow'));
+    assert(container.children.length === 0,
+      'both adjacent final rows are removed while their writes are pending');
+
+    // Fail the first write while its immediate saved anchor (second) is still
+    // detached. A real DOM insertBefore throws here; rollback must find a valid
+    // surviving anchor instead of swallowing the error and losing the row.
+    rejectWrites.get(paths[0])(new Error('first write failed'));
+    await firstPending;
+    assert(childIndex(container, first) === 0,
+      'first failed row restores even though its immediate anchor is detached');
+
+    rejectWrites.get(paths[1])(new Error('second write failed'));
+    await secondPending;
+    assert(container.children.length === 2,
+      'both failed rows restore exactly once: ' + container.children.length);
+    assert(container.children[0] === first && container.children[1] === second,
+      'concurrent rollback preserves original first, second order without a surviving anchor');
+  });
+
+  await okAsync('TD1A-SHARED-RERENDER-ROLLBACK does not duplicate a replacement row after rerender', async () => {
+    const path = 'spice/tasks/rerendered.md';
+    const file = { path, _fm: { due: '2026-07-27' } };
+    let rejectWrite;
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: () => file },
+        fileManager: {
+          processFrontMatter: (resolved, mutate) => {
+            mutate(resolved._fm);
+            return new Promise((_resolve, reject) => { rejectWrite = reject; });
+          },
+        },
+        workspace: { openLinkText() {} },
+      },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+    };
+
+    const container = makeTreeNode('div');
+    const original = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'rerendered', path, due: '2026-07-27', status: 'open' },
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+    const pending = fireClick(findByCls(original, 'sauce-task-action-tomorrow'));
+    assert(container.children.length === 0, 'original row is removed while write is pending');
+
+    // Simulate Dataview rebuilding this list while the write is in flight.
+    const replacement = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'rerendered', path, due: '2026-07-27', status: 'open' },
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+    rejectWrite(new Error('write failed after rerender'));
+    await pending;
+    assert(container.children.length === 1 && container.children[0] === replacement,
+      'rollback recognizes the rerendered replacement and never inserts a stale duplicate');
+  });
+
   await okAsync('TD1A-COLD-LOAD tomorrow activation is a silent no-op before TaskDialog readiness', async () => {
     let writes = 0;
     global.window = {

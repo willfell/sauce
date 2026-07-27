@@ -578,6 +578,7 @@ class SpaceDailyDashboard {
         // "Overdue" pill after the title.
         const renderTaskRow = (list, task, overdue) => {
           const li = list.createEl("li");
+          if (TTL && typeof TTL.markTaskRow === "function") TTL.markTaskRow(li, task);
           li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere; display:flex; align-items:center; gap:8px;";
 
           const titleSpan = li.createEl("span");

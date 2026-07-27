@@ -51,6 +51,7 @@ class TaskTodayList {
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
     nextDay(todayStr) { return TaskTodayList.nextDay(todayStr); }
+    markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
     rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
     renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
@@ -93,15 +94,36 @@ class TaskTodayList {
     }
 
     /**
+     * Stamp a rendered row with stable task identity + render order. The identity
+     * prevents an in-flight rollback from duplicating a replacement row after a
+     * Dataview rerender. Render order lets concurrent adjacent failures recover
+     * correctly even when every original sibling anchor is temporarily detached.
+     */
+    static markTaskRow(row, task) {
+        try {
+            if (!row || !row.dataset || !task || !task.path) return row;
+            row.dataset.sauceTaskPath = String(task.path);
+            if (!row.dataset.sauceTaskOrder) {
+                TaskTodayList._rescheduleRowSequence =
+                    Number(TaskTodayList._rescheduleRowSequence || 0) + 1;
+                row.dataset.sauceTaskOrder = String(TaskTodayList._rescheduleRowSequence);
+            }
+        } catch (_e) {}
+        return row;
+    }
+
+    /**
      * Reschedule one OPEN task to the day after `viewedDay`, using the canonical
      * Obsidian processFrontMatter rail. This is shared by TaskTodayList's own
      * row and SpaceDailyDashboard's private row renderer.
      *
-     * The row is removed before awaiting the write for instant feedback and
-     * restored at its exact DOM position if the write fails. TaskDialog remains
-     * the readiness boundary: before it or the app/file rail exists, this is a
-     * silent no-op. Completed/archive rows are rejected even if a caller invokes
-     * this method directly.
+     * The row is removed before awaiting the write for instant feedback. On
+     * failure, rollback selects only a still-valid anchor, falls back to stable
+     * render order when adjacent rows are also in flight, and recognizes a
+     * rerendered replacement so it never inserts a stale duplicate. TaskDialog
+     * remains the readiness boundary: before it or the app/file rail exists,
+     * this is a silent no-op. Completed/archive rows are rejected even if a
+     * caller invokes this method directly.
      */
     static async rescheduleTomorrow(row, task, viewedDay, TDref) {
         try {
@@ -129,12 +151,83 @@ class TaskTodayList {
             if (!tomorrow || !file) return { ok: false, no_op: true };
 
             try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+            TaskTodayList.markTaskRow(row, task);
             const parent = row.parentNode;
-            const next = row.nextSibling;
+            const childList = (node) => {
+                try { return Array.from((node && (node.childNodes || node.children)) || []); }
+                catch (_e) { return []; }
+            };
+            const originalChildren = childList(parent);
+            const originalIndex = originalChildren.indexOf(row);
+            const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
+            const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
+            const taskPath = String(task.path);
+            const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
             const restore = () => {
-                if (parent) {
-                    try { parent.insertBefore(row, next); } catch (_e) {}
+                if (!parent || row.parentNode) return false;
+                // A detached old render tree must not receive stale DOM after
+                // Dataview has replaced it with a new connected tree.
+                if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+
+                const current = childList(parent);
+                const replacementExists = current.some((node) =>
+                    node !== row && node && node.dataset
+                    && String(node.dataset.sauceTaskPath || '') === taskPath);
+                if (replacementExists) return true;
+
+                const insert = (anchor) => {
+                    if (anchor != null && anchor.parentNode !== parent) return false;
+                    try {
+                        parent.insertBefore(row, anchor || null);
+                        return row.parentNode === parent;
+                    } catch (_e) {
+                        return false;
+                    }
+                };
+
+                // Prefer the nearest surviving original anchor. Saving the full
+                // suffix (not only nextSibling) handles adjacent removals.
+                const next = following.find((node) => node && node.parentNode === parent);
+                if (next && insert(next)) return true;
+
+                // If every original following sibling is detached, stable render
+                // order still locates this row relative to concurrently restored
+                // task rows (including when these were the final two rows).
+                if (Number.isFinite(rowOrder)) {
+                    const orderedRows = childList(parent).filter((node) =>
+                        node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+                    const later = orderedRows.find((node) =>
+                        Number(node.dataset.sauceTaskOrder) > rowOrder);
+                    if (later && insert(later)) return true;
+                    const earlier = orderedRows.filter((node) =>
+                        Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
+                    if (earlier) {
+                        const afterEarlier = earlier.nextSibling;
+                        if ((afterEarlier == null || afterEarlier.parentNode === parent)
+                            && insert(afterEarlier)) return true;
+                    }
                 }
+
+                const previous = preceding.find((node) => node && node.parentNode === parent);
+                if (previous) {
+                    const afterPrevious = previous.nextSibling;
+                    if ((afterPrevious == null || afterPrevious.parentNode === parent)
+                        && insert(afterPrevious)) return true;
+                }
+
+                // Final deterministic fallback for a still-live container. Clamp
+                // the original ordinal to its current child count, then append if
+                // a host-specific insertBefore implementation still rejects it.
+                const now = childList(parent);
+                const ordinal = Math.max(0, Math.min(
+                    originalIndex >= 0 ? originalIndex : now.length,
+                    now.length
+                ));
+                if (insert(now[ordinal] || null)) return true;
+                if (!row.parentNode && typeof parent.appendChild === 'function') {
+                    try { parent.appendChild(row); } catch (_e) {}
+                }
+                return row.parentNode === parent;
             };
             try { row.remove(); } catch (_e) {}
             try {
@@ -375,6 +468,7 @@ class TaskTodayList {
         };
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+        TaskTodayList.markTaskRow(row, task);
         // The right cluster (chips + action icons) sits beside the title when the
         // row is wide enough, and WRAPS to its own right-aligned line when the title
         // is long — flex-wrap + a title min-width floor. Without the floor a long
