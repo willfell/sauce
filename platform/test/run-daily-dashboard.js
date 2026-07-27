@@ -118,8 +118,8 @@ async function renderDailyTaskFixture(today) {
   const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
   const TE = new TaskEntityClass();
   const TTL = new TaskTodayListClass();
-  const openFile = { path: 'spice/tasks/open.md', _fm: { due: today, untouched: 'open' } };
-  const overdueFile = { path: 'spice/tasks/late.md', _fm: { due: '2026-07-01', untouched: 'late' } };
+  const openFile = { path: 'spice/tasks/open.md', _fm: { status: 'open', due: today, untouched: 'open' } };
+  const overdueFile = { path: 'spice/tasks/late.md', _fm: { status: 'open', due: '2026-07-01', untouched: 'late' } };
   const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
   const app = {
     vault: {

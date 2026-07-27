@@ -240,11 +240,34 @@ class TaskTodayList {
                     return row.parentNode === parent;
                 };
                 try { row.remove(); } catch (_e) {}
+                let liveStatus = null;
+                let liveStatusChecked = false;
+                let mutationApplied = false;
+                const staleOpenNoOp = () => ({
+                    ok: false,
+                    no_op: true,
+                    reason: 'task is no longer open',
+                    live_status: liveStatus || 'missing'
+                });
                 try {
-                    await appRef.fileManager.processFrontMatter(file, (fm) => { fm.due = tomorrow; });
+                    await appRef.fileManager.processFrontMatter(file, (fm) => {
+                        liveStatusChecked = true;
+                        liveStatus = fm && typeof fm.status === 'string' ? fm.status : null;
+                        // The rendered task object can be stale by the time the
+                        // optimistic action reaches the file. Revalidate and
+                        // mutate within the same atomic frontmatter callback.
+                        if (!fm || fm.status !== 'open') return;
+                        fm.due = tomorrow;
+                        mutationApplied = true;
+                    });
+                    if (!mutationApplied) {
+                        restore();
+                        return staleOpenNoOp();
+                    }
                     return { ok: true, due: tomorrow };
                 } catch (e) {
                     restore();
+                    if (liveStatusChecked && !mutationApplied) return staleOpenNoOp();
                     try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
                     return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
                 }

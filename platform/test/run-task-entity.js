@@ -2479,7 +2479,7 @@ async function runTomorrowActionTests() {
   await okAsync('TD1A-SHARED-OPEN-ROW writes nextDay(viewedDay) and removes only its row optimistically', async () => {
     const viewedDay = '2026-01-31';
     const path = 'spice/tasks/x.md';
-    const file = { path, _fm: { due: viewedDay, untouched: 'yes' } };
+    const file = { path, _fm: { status: 'open', due: viewedDay, untouched: 'yes' } };
     let resolveWrite;
     const app = {
       vault: { getAbstractFileByPath: (p) => (p === path ? file : null) },
@@ -2522,7 +2522,7 @@ async function runTomorrowActionTests() {
 
   await okAsync('TD1A-SHARED-ROLLBACK restores the row at its exact position on mutation failure', async () => {
     const path = 'spice/tasks/fail.md';
-    const file = { path, _fm: { due: '2026-12-31' } };
+    const file = { path, _fm: { status: 'open', due: '2026-12-31' } };
     global.window = {
       app: {
         vault: { getAbstractFileByPath: () => file },
@@ -2547,7 +2547,7 @@ async function runTomorrowActionTests() {
   await okAsync('TD1A4-DUPLICATE-ACTIVATION-MIXED-OUTCOME suppresses a second same-task write and permits retry after failure', async () => {
     const path = 'spice/tasks/duplicate-activation.md';
     const task = { title: 'duplicate activation', path, due: '2026-07-27', status: 'open' };
-    const file = { path, _fm: { due: '2026-07-27' } };
+    const file = { path, _fm: { status: 'open', due: '2026-07-27' } };
     let writes = 0;
     let rejectFirst;
     global.window = {
@@ -2677,9 +2677,77 @@ async function runTomorrowActionTests() {
       'direct done/archive calls leave frontmatter unchanged');
   });
 
+  await okAsync('TD1A8-STALE-OPEN-COMPLETION-RACE revalidates live status atomically and releases ownership', async () => {
+    const liveStatuses = ['done', 'deleted', null];
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+
+    for (const liveStatus of liveStatuses) {
+      const suffix = liveStatus || 'missing';
+      const path = `spice/tasks/stale-open-${suffix}.md`;
+      const liveFrontmatter = {
+        status: liveStatus,
+        due: '2026-07-27',
+        untouched: `keep-${suffix}`,
+      };
+      if (liveStatus === null) delete liveFrontmatter.status;
+      const file = { path, _fm: liveFrontmatter };
+      let writes = 0;
+      global.window = {
+        app: {
+          vault: { getAbstractFileByPath: (candidate) => (candidate === path ? file : null) },
+          fileManager: {
+            processFrontMatter: async (resolved, mutate) => {
+              writes++;
+              mutate(resolved._fm);
+            },
+          },
+          workspace: { openLinkText() {} },
+        },
+        customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      };
+      const task = { title: `stale ${suffix}`, path, due: '2026-07-27', status: 'open' };
+      const container = makeTreeNode('div');
+      const row = TaskTodayList.renderTaskRow(
+        container,
+        task,
+        null,
+        { viewedDay: '2026-07-27' }
+      );
+      const sibling = container.createEl('div');
+      const before = JSON.stringify(file._fm);
+
+      const result = await TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+
+      assert(writes === 1, `stale ${suffix} reaches exactly one atomic frontmatter callback`);
+      assert(JSON.stringify(file._fm) === before,
+        `stale ${suffix} leaves due and all live frontmatter unchanged: ${JSON.stringify(file._fm)}`);
+      assert(result && result.ok === false && result.no_op === true
+        && result.reason === 'task is no longer open'
+        && result.live_status === suffix,
+      `stale ${suffix} reports a clear silent no-op: ${JSON.stringify(result)}`);
+      assert(childIndex(container, row) === 0 && childIndex(container, sibling) === 1,
+        `stale ${suffix} restores the optimistically removed row at its exact position`);
+      assert(notices.length === 0, `stale ${suffix} emits no failure Notice`);
+
+      // A live transition back to open is deliberately synthetic, but proves
+      // the no-op settled and released same-path in-flight ownership.
+      file._fm.status = 'open';
+      const retry = await TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+      assert(writes === 2 && retry && retry.ok === true,
+        `stale ${suffix} releases ownership for a later valid retry: ${JSON.stringify(retry)}`);
+      assert(file._fm.due === '2026-07-28',
+        `valid retry after stale ${suffix} writes tomorrow`);
+      assert(childIndex(container, row) < 0 && childIndex(container, sibling) === 0,
+        `valid retry after stale ${suffix} removes only its task row`);
+    }
+
+    global.Notice = function () {};
+  });
+
   await okAsync('TD1A-SHARED-CONCURRENT-ROLLBACK restores adjacent failures when the saved anchor is detached', async () => {
     const paths = ['spice/tasks/first.md', 'spice/tasks/second.md'];
-    const files = new Map(paths.map((path) => [path, { path, _fm: { due: '2026-07-27' } }]));
+    const files = new Map(paths.map((path) => [path, { path, _fm: { status: 'open', due: '2026-07-27' } }]));
     const rejectWrites = new Map();
     global.window = {
       app: {
@@ -2739,7 +2807,7 @@ async function runTomorrowActionTests() {
 
   await okAsync('TD1A-SHARED-RERENDER-ROLLBACK does not duplicate a replacement row after rerender', async () => {
     const path = 'spice/tasks/rerendered.md';
-    const file = { path, _fm: { due: '2026-07-27' } };
+    const file = { path, _fm: { status: 'open', due: '2026-07-27' } };
     let rejectWrite;
     global.window = {
       app: {
@@ -2781,7 +2849,7 @@ async function runTomorrowActionTests() {
   await okAsync('TD1A4-DETACHED-TREE-ROLLBACK-UNBOUND never restores into a disconnected old Dataview tree', async () => {
     const path = 'spice/tasks/detached-tree.md';
     const task = { title: 'detached tree', path, due: '2026-07-27', status: 'open' };
-    const file = { path, _fm: { due: '2026-07-27' } };
+    const file = { path, _fm: { status: 'open', due: '2026-07-27' } };
     let rejectWrite;
     let writes = 0;
     global.window = {
