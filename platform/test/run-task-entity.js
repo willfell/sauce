@@ -2544,6 +2544,78 @@ async function runTomorrowActionTests() {
     assert(childIndex(container, sibling) === 1, 'sibling order preserved');
   });
 
+  await okAsync('TD1A4-DUPLICATE-ACTIVATION-MIXED-OUTCOME suppresses a second same-task write and permits retry after failure', async () => {
+    const path = 'spice/tasks/duplicate-activation.md';
+    const task = { title: 'duplicate activation', path, due: '2026-07-27', status: 'open' };
+    const file = { path, _fm: { due: '2026-07-27' } };
+    let writes = 0;
+    let rejectFirst;
+    global.window = {
+      app: {
+        vault: { getAbstractFileByPath: (candidate) => (candidate === path ? file : null) },
+        fileManager: {
+          processFrontMatter: (resolved, mutate) => {
+            writes++;
+            mutate(resolved._fm);
+            if (writes === 1) {
+              return new Promise((_resolve, reject) => { rejectFirst = reject; });
+            }
+            return Promise.resolve();
+          },
+        },
+        workspace: { openLinkText() {} },
+      },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+    };
+
+    // Browser-strict: inserting against a detached saved anchor throws instead
+    // of silently appending, matching real DOM insertBefore semantics.
+    const container = makeTreeNode('div');
+    const permissiveInsertBefore = container.insertBefore;
+    container.insertBefore = function strictInsertBefore(node, ref) {
+      if (ref != null && ref.parentNode !== this) {
+        throw new Error('NotFoundError: reference node is not a child');
+      }
+      return permissiveInsertBefore.call(this, node, ref);
+    };
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      task,
+      null,
+      { viewedDay: '2026-07-27' }
+    );
+    const sibling = container.createEl('div');
+
+    const firstPending = TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+    assert(writes === 1 && childIndex(container, row) < 0,
+      'first activation starts one write and removes the row optimistically');
+
+    // Invoke the canonical method again while the first write is unresolved.
+    // Without synchronous ownership this starts a second write that succeeds,
+    // then the first failure restores a stale row despite that mixed success.
+    const duplicateResult = await TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+    rejectFirst(new Error('first write failed after duplicate activation'));
+    const firstResult = await firstPending;
+
+    assert(writes === 1,
+      'duplicate activation is a no-op while the same task path is in flight: writes=' + writes);
+    assert(duplicateResult && duplicateResult.no_op === true,
+      'duplicate activation reports a no-op instead of a mixed success: ' + JSON.stringify(duplicateResult));
+    assert(firstResult && firstResult.ok === false,
+      'the authoritative first failure is reported: ' + JSON.stringify(firstResult));
+    assert(childIndex(container, row) === 0 && childIndex(container, sibling) === 1,
+      'authoritative failure restores the original row exactly once');
+
+    // The failed operation must release ownership synchronously on settlement:
+    // a deliberate retry is a real write and becomes the authoritative success.
+    const retryResult = await TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+    assert(writes === 2, 'legitimate retry starts exactly one new write: writes=' + writes);
+    assert(retryResult && retryResult.ok === true,
+      'legitimate retry succeeds after failure: ' + JSON.stringify(retryResult));
+    assert(childIndex(container, row) < 0 && childIndex(container, sibling) === 0,
+      'successful retry removes only the retried task row');
+  });
+
   await okAsync('TD1A-SHARED-CONCURRENT-ROLLBACK restores adjacent failures when the saved anchor is detached', async () => {
     const paths = ['spice/tasks/first.md', 'spice/tasks/second.md'];
     const files = new Map(paths.map((path) => [path, { path, _fm: { due: '2026-07-27' } }]));

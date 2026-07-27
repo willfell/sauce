@@ -150,93 +150,106 @@ class TaskTodayList {
             const file = appRef.vault.getAbstractFileByPath(task.path);
             if (!tomorrow || !file) return { ok: false, no_op: true };
 
-            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-            TaskTodayList.markTaskRow(row, task);
-            const parent = row.parentNode;
-            const childList = (node) => {
-                try { return Array.from((node && (node.childNodes || node.children)) || []); }
-                catch (_e) { return []; }
-            };
-            const originalChildren = childList(parent);
-            const originalIndex = originalChildren.indexOf(row);
-            const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
-            const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
             const taskPath = String(task.path);
-            const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
-            const restore = () => {
-                if (!parent || row.parentNode) return false;
-                // A detached old render tree must not receive stale DOM after
-                // Dataview has replaced it with a new connected tree.
-                if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
-
-                const current = childList(parent);
-                const replacementExists = current.some((node) =>
-                    node !== row && node && node.dataset
-                    && String(node.dataset.sauceTaskPath || '') === taskPath);
-                if (replacementExists) return true;
-
-                const insert = (anchor) => {
-                    if (anchor != null && anchor.parentNode !== parent) return false;
-                    try {
-                        parent.insertBefore(row, anchor || null);
-                        return row.parentNode === parent;
-                    } catch (_e) {
-                        return false;
-                    }
-                };
-
-                // Prefer the nearest surviving original anchor. Saving the full
-                // suffix (not only nextSibling) handles adjacent removals.
-                const next = following.find((node) => node && node.parentNode === parent);
-                if (next && insert(next)) return true;
-
-                // If every original following sibling is detached, stable render
-                // order still locates this row relative to concurrently restored
-                // task rows (including when these were the final two rows).
-                if (Number.isFinite(rowOrder)) {
-                    const orderedRows = childList(parent).filter((node) =>
-                        node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
-                    const later = orderedRows.find((node) =>
-                        Number(node.dataset.sauceTaskOrder) > rowOrder);
-                    if (later && insert(later)) return true;
-                    const earlier = orderedRows.filter((node) =>
-                        Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
-                    if (earlier) {
-                        const afterEarlier = earlier.nextSibling;
-                        if ((afterEarlier == null || afterEarlier.parentNode === parent)
-                            && insert(afterEarlier)) return true;
-                    }
-                }
-
-                const previous = preceding.find((node) => node && node.parentNode === parent);
-                if (previous) {
-                    const afterPrevious = previous.nextSibling;
-                    if ((afterPrevious == null || afterPrevious.parentNode === parent)
-                        && insert(afterPrevious)) return true;
-                }
-
-                // Final deterministic fallback for a still-live container. Clamp
-                // the original ordinal to its current child count, then append if
-                // a host-specific insertBefore implementation still rejects it.
-                const now = childList(parent);
-                const ordinal = Math.max(0, Math.min(
-                    originalIndex >= 0 ? originalIndex : now.length,
-                    now.length
-                ));
-                if (insert(now[ordinal] || null)) return true;
-                if (!row.parentNode && typeof parent.appendChild === 'function') {
-                    try { parent.appendChild(row); } catch (_e) {}
-                }
-                return row.parentNode === parent;
-            };
-            try { row.remove(); } catch (_e) {}
+            const inFlight = TaskTodayList._rescheduleInFlight
+                || (TaskTodayList._rescheduleInFlight = new Set());
+            // Claim synchronously before the row is detached or the first await
+            // yields. This makes double-clicks and duplicate dispatch from a
+            // rerendered row harmless while preserving concurrency by task path.
+            if (inFlight.has(taskPath)) {
+                return { ok: false, no_op: true, in_flight: true };
+            }
+            inFlight.add(taskPath);
             try {
-                await appRef.fileManager.processFrontMatter(file, (fm) => { fm.due = tomorrow; });
-                return { ok: true, due: tomorrow };
-            } catch (e) {
-                restore();
-                try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
-                return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
+                try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                TaskTodayList.markTaskRow(row, task);
+                const parent = row.parentNode;
+                const childList = (node) => {
+                    try { return Array.from((node && (node.childNodes || node.children)) || []); }
+                    catch (_e) { return []; }
+                };
+                const originalChildren = childList(parent);
+                const originalIndex = originalChildren.indexOf(row);
+                const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
+                const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
+                const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
+                const restore = () => {
+                    if (!parent || row.parentNode) return false;
+                    // A detached old render tree must not receive stale DOM after
+                    // Dataview has replaced it with a new connected tree.
+                    if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+
+                    const current = childList(parent);
+                    const replacementExists = current.some((node) =>
+                        node !== row && node && node.dataset
+                        && String(node.dataset.sauceTaskPath || '') === taskPath);
+                    if (replacementExists) return true;
+
+                    const insert = (anchor) => {
+                        if (anchor != null && anchor.parentNode !== parent) return false;
+                        try {
+                            parent.insertBefore(row, anchor || null);
+                            return row.parentNode === parent;
+                        } catch (_e) {
+                            return false;
+                        }
+                    };
+
+                    // Prefer the nearest surviving original anchor. Saving the full
+                    // suffix (not only nextSibling) handles adjacent removals.
+                    const next = following.find((node) => node && node.parentNode === parent);
+                    if (next && insert(next)) return true;
+
+                    // If every original following sibling is detached, stable render
+                    // order still locates this row relative to concurrently restored
+                    // task rows (including when these were the final two rows).
+                    if (Number.isFinite(rowOrder)) {
+                        const orderedRows = childList(parent).filter((node) =>
+                            node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+                        const later = orderedRows.find((node) =>
+                            Number(node.dataset.sauceTaskOrder) > rowOrder);
+                        if (later && insert(later)) return true;
+                        const earlier = orderedRows.filter((node) =>
+                            Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
+                        if (earlier) {
+                            const afterEarlier = earlier.nextSibling;
+                            if ((afterEarlier == null || afterEarlier.parentNode === parent)
+                                && insert(afterEarlier)) return true;
+                        }
+                    }
+
+                    const previous = preceding.find((node) => node && node.parentNode === parent);
+                    if (previous) {
+                        const afterPrevious = previous.nextSibling;
+                        if ((afterPrevious == null || afterPrevious.parentNode === parent)
+                            && insert(afterPrevious)) return true;
+                    }
+
+                    // Final deterministic fallback for a still-live container. Clamp
+                    // the original ordinal to its current child count, then append if
+                    // a host-specific insertBefore implementation still rejects it.
+                    const now = childList(parent);
+                    const ordinal = Math.max(0, Math.min(
+                        originalIndex >= 0 ? originalIndex : now.length,
+                        now.length
+                    ));
+                    if (insert(now[ordinal] || null)) return true;
+                    if (!row.parentNode && typeof parent.appendChild === 'function') {
+                        try { parent.appendChild(row); } catch (_e) {}
+                    }
+                    return row.parentNode === parent;
+                };
+                try { row.remove(); } catch (_e) {}
+                try {
+                    await appRef.fileManager.processFrontMatter(file, (fm) => { fm.due = tomorrow; });
+                    return { ok: true, due: tomorrow };
+                } catch (e) {
+                    restore();
+                    try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                    return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
+                }
+            } finally {
+                inFlight.delete(taskPath);
             }
         } catch (_e) {
             return { ok: false, no_op: true };
