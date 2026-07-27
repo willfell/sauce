@@ -108,7 +108,8 @@ function loadActivityFeed(windowShim) {
     {}, { BeaconCards: { render() {} } }, function () {}, windowShim);
 }
 
-async function renderDailyTaskFixture(today) {
+async function renderDailyTaskFixture(today, options) {
+  options = options || {};
   const prevWindow = global.window;
   const prevApp = global.app;
   const prevNotice = global.Notice;
@@ -121,13 +122,18 @@ async function renderDailyTaskFixture(today) {
   const openFile = { path: 'spice/tasks/open.md', _fm: { status: 'open', due: today, untouched: 'open' } };
   const overdueFile = { path: 'spice/tasks/late.md', _fm: { status: 'open', due: '2026-07-01', untouched: 'late' } };
   const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
+  const writes = { adapter: 0, frontmatter: 0 };
   const app = {
     vault: {
       getAbstractFileByPath: (p) => files.get(p) || null,
-      adapter: { read: async () => { throw new Error('ENOENT'); } },
+      adapter: {
+        read: async () => { throw new Error('ENOENT'); },
+        write: async () => { writes.adapter++; },
+        mkdir: async () => {},
+      },
     },
     fileManager: {
-      processFrontMatter: async (file, mutate) => { mutate(file._fm); },
+      processFrontMatter: async (file, mutate) => { writes.frontmatter++; mutate(file._fm); },
     },
     workspace: {
       openLinkText() {},
@@ -135,6 +141,9 @@ async function renderDailyTaskFixture(today) {
     },
   };
   const windowShim = makeMomentWindow();
+  if (Object.prototype.hasOwnProperty.call(options, 'storage')) {
+    windowShim.localStorage = options.storage;
+  }
   windowShim.app = app;
   const customJS = {
     TaskEntity: TE,
@@ -148,7 +157,7 @@ async function renderDailyTaskFixture(today) {
   global.window = windowShim;
   global.app = app;
 
-  const taskPages = [
+  const taskPages = options.taskPages || [
     { type: 'task', status: 'open', title: 'Open', due: today, file: { path: openFile.path } },
     { type: 'task', status: 'open', title: 'Late', due: '2026-07-01', file: { path: overdueFile.path } },
   ];
@@ -183,6 +192,8 @@ async function renderDailyTaskFixture(today) {
     root,
     openFile,
     overdueFile,
+    taskPages,
+    writes,
     allNodes,
     cleanup() {
       if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
@@ -195,12 +206,170 @@ async function renderDailyTaskFixture(today) {
 (async () => {
   const TODAY = '2026-07-03';
 
-  await ok('TD1A2-DAILY-MIRROR-TOUCH-ZONE-TYPO canonical mirror bytes + manifest destination stay exact', async () => {
+  await ok('TD1B-DAILY-MIRROR-TOUCH-ZONE-TYPO canonical mirror bytes + manifest destination stay exact', async () => {
     assert(SDD_SRC === SDD_MIRROR_SRC,
       'platform helper and ranch/scripts/daily mirror must be byte-identical');
     const entry = DAILY_MANIFEST.files.find((f) => f.source === 'helpers/space-daily-dashboard.js');
     assert(entry && entry.dest === '{{scripts_path}}/daily/space-daily-dashboard.js',
       'daily manifest must deploy the canonical daily mirror: ' + JSON.stringify(entry));
+  });
+
+  await ok('TD1B-SORT-PURE Due/Priority comparators are deterministic, stable, null-safe, and non-mutating', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const tasks = Object.freeze([
+      { title: 'low-old', due: '2026-07-01', priority: 'low' },
+      { title: 'highest-new', due: '2026-07-03', priority: 'highest' },
+      { title: 'high-new-a', due: '2026-07-02', priority: 'high' },
+      { title: 'high-new-b', due: '2026-07-02', priority: 'HIGH' },
+      { title: 'unset', due: '', priority: '' },
+      { title: 'missing' },
+    ]);
+    const snapshot = JSON.stringify(tasks);
+    const due = Dash.sortTasks(tasks, 'due').map((t) => t.title);
+    assert(JSON.stringify(due) === JSON.stringify([
+      'low-old', 'high-new-a', 'high-new-b', 'highest-new', 'unset', 'missing',
+    ]), 'Due ordering is date asc, missing last, stable ties: ' + JSON.stringify(due));
+    const priority = Dash.sortTasks(tasks, 'priority').map((t) => t.title);
+    assert(JSON.stringify(priority) === JSON.stringify([
+      'highest-new', 'high-new-a', 'high-new-b', 'low-old', 'unset', 'missing',
+    ]), 'Priority ordering is vocabulary rank then Due then stable ties: ' + JSON.stringify(priority));
+    assert(JSON.stringify(tasks) === snapshot, 'sortTasks must not mutate its source array/items');
+    assert(Dash.compareTasksByDue(null, undefined) === 0, 'Due comparator null/null is a stable tie');
+    assert(Dash.compareTasksByPriority(null, {}) === 0, 'Priority comparator null/unset is a stable tie');
+    assert(Dash.sortTasks(null, 'priority').length === 0, 'sortTasks is null-safe');
+    assert(Dash.normalizeTaskSortMode('not-a-mode') === 'due', 'unknown mode safely defaults Due');
+  });
+
+  await ok('TD1B-SORT-STORAGE client-only namespaced persistence is guarded and defaults Due', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const data = new Map();
+    const storage = {
+      getItem(key) { return data.has(key) ? data.get(key) : null; },
+      setItem(key, value) { data.set(key, value); },
+    };
+    assert(Dash.readTaskSortMode(null) === 'due', 'missing localStorage falls back Due');
+    assert(Dash.readTaskSortMode(storage) === 'due', 'empty localStorage falls back Due');
+    assert(Dash.writeTaskSortMode(storage, 'priority') === 'priority', 'Priority selection normalizes');
+    assert(data.size === 1 && data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
+      'selection writes exactly the namespaced client key: ' + JSON.stringify(Array.from(data.entries())));
+    assert(Dash.readTaskSortMode(storage) === 'priority', 'persisted Priority reloads');
+    const throwing = {
+      getItem() { throw new Error('blocked'); },
+      setItem() { throw new Error('blocked'); },
+    };
+    assert(Dash.readTaskSortMode(throwing) === 'due', 'throwing localStorage read falls back Due');
+    assert(Dash.writeTaskSortMode(throwing, 'priority') === 'priority',
+      'throwing localStorage write does not break current Priority selection');
+  });
+
+  await ok('TD1B-NONEXISTENT-UPCOMING-BAND real control sorts Today/Overdue independently and excludes future tasks', async () => {
+    const data = new Map();
+    const storage = {
+      getItem(key) { return data.has(key) ? data.get(key) : null; },
+      setItem(key, value) { data.set(key, value); },
+    };
+    const taskPages = [
+      { type: 'task', status: 'open', title: 'Today Low', due: TODAY, priority: 'low', file: { path: 'spice/tasks/today-low.md' } },
+      { type: 'task', status: 'open', title: 'Today Highest', due: TODAY, priority: 'highest', file: { path: 'spice/tasks/today-highest.md' } },
+      { type: 'task', status: 'open', title: 'Today Unset', due: TODAY, priority: '', file: { path: 'spice/tasks/today-unset.md' } },
+      { type: 'task', status: 'open', title: 'Overdue High', due: '2026-07-02', priority: 'high', file: { path: 'spice/tasks/overdue-high.md' } },
+      { type: 'task', status: 'open', title: 'Overdue Low', due: '2026-07-01', priority: 'low', file: { path: 'spice/tasks/overdue-low.md' } },
+      { type: 'task', status: 'open', title: 'Future Highest', due: '2026-07-04', priority: 'highest', file: { path: 'spice/tasks/future-highest.md' } },
+    ];
+    const fixture = await renderDailyTaskFixture(TODAY, { storage, taskPages });
+    const pathOrder = (list) => fixture.allNodes(list)
+      .filter((node) => node._tag === 'li')
+      .map((node) => node.dataset.sauceTaskPath);
+    const byClass = (cls) => fixture.allNodes(fixture.root)
+      .filter((node) => String(node.className || '').split(/\s+/).includes(cls));
+    try {
+      const controls = byClass('sauce-daily-task-sort');
+      assert(controls.length === 1, 'one always-present sort control renders at Tasks top');
+      assert(controls[0].attributes.role === 'group'
+          && controls[0].attributes['aria-label'] === 'Sort daily tasks',
+        'control has accessible group semantics: ' + JSON.stringify(controls[0].attributes));
+      const buttons = controls[0]._children.filter((node) => node._tag === 'button');
+      assert(buttons.length === 2 && buttons.map((b) => b.textContent).join(',') === 'Due,Priority',
+        'control exposes labeled Due/Priority buttons');
+      const dueButton = buttons.find((b) => b.textContent === 'Due');
+      const priorityButton = buttons.find((b) => b.textContent === 'Priority');
+      assert(dueButton.attributes['aria-pressed'] === 'true'
+          && priorityButton.attributes['aria-pressed'] === 'false',
+        'Due is the default pressed state');
+
+      let todayLists = byClass('sauce-daily-task-today-list');
+      let overdueLists = byClass('sauce-section-overdue-list');
+      assert(todayLists.length === 1 && overdueLists.length === 1,
+        'actual Today and Overdue bands render separately');
+      assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
+        'spice/tasks/today-low.md', 'spice/tasks/today-highest.md', 'spice/tasks/today-unset.md',
+      ]), 'Due keeps same-day Today source order: ' + JSON.stringify(pathOrder(todayLists[0])));
+      assert(JSON.stringify(pathOrder(overdueLists[0])) === JSON.stringify([
+        'spice/tasks/overdue-low.md', 'spice/tasks/overdue-high.md',
+      ]), 'Due orders Overdue by date without crossing bands: ' + JSON.stringify(pathOrder(overdueLists[0])));
+      assert(!fixture.allNodes(fixture.root).some((node) =>
+        node.dataset && node.dataset.sauceTaskPath === 'spice/tasks/future-highest.md'),
+      'future task stays excluded by real selectTasks/queryToday');
+      assert(byClass('sauce-section-upcoming-list').length === 0,
+        'Daily does not invent an Upcoming band');
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'render performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
+
+      await priorityButton._fire('click', {
+        target: priorityButton, preventDefault() {}, stopPropagation() {},
+      });
+      assert(dueButton.attributes['aria-pressed'] === 'false'
+          && priorityButton.attributes['aria-pressed'] === 'true',
+        'selection updates accessible pressed state');
+      assert(data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
+        'selection persists Priority in namespaced localStorage');
+      assert(byClass('sauce-daily-task-sort').length === 1,
+        'mode rerender retains one control/listener owner');
+      todayLists = byClass('sauce-daily-task-today-list');
+      overdueLists = byClass('sauce-section-overdue-list');
+      assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
+        'spice/tasks/today-highest.md', 'spice/tasks/today-low.md', 'spice/tasks/today-unset.md',
+      ]), 'Priority reorders Today only: ' + JSON.stringify(pathOrder(todayLists[0])));
+      assert(JSON.stringify(pathOrder(overdueLists[0])) === JSON.stringify([
+        'spice/tasks/overdue-high.md', 'spice/tasks/overdue-low.md',
+      ]), 'Priority reorders Overdue only: ' + JSON.stringify(pathOrder(overdueLists[0])));
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'sort selection performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
+    } finally {
+      fixture.cleanup();
+    }
+
+    const reload = await renderDailyTaskFixture(TODAY, { storage, taskPages });
+    try {
+      const control = reload.allNodes(reload.root).find((node) =>
+        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+      const buttons = control._children.filter((node) => node._tag === 'button');
+      assert(buttons.find((b) => b.textContent === 'Priority').attributes['aria-pressed'] === 'true',
+        'persisted Priority survives a fresh dashboard render');
+      assert(reload.writes.adapter === 0 && reload.writes.frontmatter === 0,
+        'reload persistence remains client-only');
+    } finally {
+      reload.cleanup();
+    }
+  });
+
+  await ok('TD1B-SORT-STORAGE throwing browser storage safely renders Due without vault writes', async () => {
+    const throwing = {
+      getItem() { throw new Error('blocked'); },
+      setItem() { throw new Error('blocked'); },
+    };
+    const fixture = await renderDailyTaskFixture(TODAY, { storage: throwing });
+    try {
+      const control = fixture.allNodes(fixture.root).find((node) =>
+        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+      const buttons = control._children.filter((node) => node._tag === 'button');
+      assert(buttons.find((b) => b.textContent === 'Due').attributes['aria-pressed'] === 'true',
+        'throwing storage renders safe Due state');
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'throwing storage does not fall back to a vault write');
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   await ok('TD1A3-DAILY-BULLET-LIST-REGRESSION real open + overdue li keep markers while child wrappers align contents', async () => {
@@ -223,14 +392,18 @@ async function renderDailyTaskFixture(today) {
     }
   });
 
-  await ok('TD1A-DAILY-DASHBOARD-ACTION-ABSENT real open + overdue rows reschedule from the viewed day', async () => {
+  await ok('TD1B-REDUNDANT-QUICK-RESCHEDULE-OUTCOME existing open + overdue tomorrow actions remain viewed-day-bound', async () => {
     const fixture = await renderDailyTaskFixture(TODAY);
     const { root, openFile, overdueFile, allNodes } = fixture;
     try {
+    const sortControl = allNodes(root).find((n) =>
+      String(n.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+    const priorityButton = sortControl._children.find((n) => n._tag === 'button' && n.textContent === 'Priority');
+    await priorityButton._fire('click', { target: priorityButton, preventDefault() {}, stopPropagation() {} });
     const tomorrowButtons = allNodes(root).filter((n) =>
       String(n.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
     assert(tomorrowButtons.length === 2,
-      'real private renderer exposes one tomorrow action for open + overdue: ' + tomorrowButtons.length);
+      'Priority rerender retains one tomorrow action for open + overdue: ' + tomorrowButtons.length);
     const rowsBefore = allNodes(root).filter((n) => n._tag === 'li');
     assert(rowsBefore.length === 2, 'open and overdue private rows both rendered');
 

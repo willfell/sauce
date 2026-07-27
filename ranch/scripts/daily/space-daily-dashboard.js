@@ -111,6 +111,78 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
+  static get _TASK_SORT_STORAGE_KEY() {
+    return "sauce-daily-dashboard:task-sort-mode";
+  }
+
+  /**
+   * Daily task sort policy. These comparators intentionally return zero for
+   * equal values; sortTasks decorates with the source index so ties stay stable
+   * even in hosts whose Array#sort stability differs.
+   */
+  static compareTasksByDue(a, b) {
+    const due = (task) => String(task && task.due != null ? task.due : "").trim();
+    const ad = due(a);
+    const bd = due(b);
+    if (ad === bd) return 0;
+    if (!ad) return 1;
+    if (!bd) return -1;
+    return ad < bd ? -1 : 1;
+  }
+
+  static compareTasksByPriority(a, b) {
+    const ranks = { highest: 4, high: 3, medium: 2, low: 1 };
+    const rank = (task) => ranks[String(task && task.priority || "").trim().toLowerCase()] || 0;
+    const byPriority = rank(b) - rank(a);
+    return byPriority || SpaceDailyDashboard.compareTasksByDue(a, b);
+  }
+
+  static normalizeTaskSortMode(value) {
+    return String(value == null ? "" : value).trim().toLowerCase() === "priority"
+      ? "priority"
+      : "due";
+  }
+
+  static sortTasks(tasks, mode) {
+    const comparator = SpaceDailyDashboard.normalizeTaskSortMode(mode) === "priority"
+      ? SpaceDailyDashboard.compareTasksByPriority
+      : SpaceDailyDashboard.compareTasksByDue;
+    const source = Array.isArray(tasks) ? tasks : [];
+    return source
+      .map((task, index) => ({ task, index }))
+      .sort((a, b) => comparator(a.task, b.task) || a.index - b.index)
+      .map((entry) => entry.task);
+  }
+
+  static readTaskSortMode(storage) {
+    try {
+      if (!storage || typeof storage.getItem !== "function") return "due";
+      return SpaceDailyDashboard.normalizeTaskSortMode(
+        storage.getItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY)
+      );
+    } catch (_e) {
+      return "due";
+    }
+  }
+
+  static writeTaskSortMode(storage, mode) {
+    const normalized = SpaceDailyDashboard.normalizeTaskSortMode(mode);
+    try {
+      if (storage && typeof storage.setItem === "function") {
+        storage.setItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY, normalized);
+      }
+    } catch (_e) { /* client-only preference persistence is best-effort */ }
+    return normalized;
+  }
+
+  static taskSortStorage() {
+    try {
+      return (typeof window !== "undefined" && window) ? window.localStorage : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
   /**
    * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
    * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
@@ -563,7 +635,38 @@ class SpaceDailyDashboard {
       // at the bottom, each overdue row carrying its own red "Overdue" pill.
       // Done tasks stay surfaced via header count only; their notes stay in
       // spice/tasks/_done/.
-      if (openTasks.length > 0 || overdueCount > 0) {
+      {
+        const taskSortStorage = SpaceDailyDashboard.taskSortStorage();
+        let taskSortMode = SpaceDailyDashboard.readTaskSortMode(taskSortStorage);
+
+        // Client-only sort control. The preference never enters the vault:
+        // localStorage is the sole persistence rail and every access is guarded.
+        const sortControl = tasksBody.createEl("div");
+        sortControl.className = "sauce-daily-task-sort";
+        sortControl.style.cssText = "display:flex; align-items:center; gap:4px; margin:0 0 8px; font-size:0.78em;";
+        sortControl.setAttribute("role", "group");
+        sortControl.setAttribute("aria-label", "Sort daily tasks");
+
+        const sortLabel = sortControl.createEl("span");
+        sortLabel.textContent = "Sort";
+        sortLabel.style.cssText = "margin-right:2px; color:var(--text-muted);";
+
+        const sortButtons = {};
+        const updateSortButtonState = () => {
+          for (const mode of ["due", "priority"]) {
+            const active = mode === taskSortMode;
+            const button = sortButtons[mode];
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+            button.style.cssText = "border:1px solid var(--background-modifier-border); border-radius:999px; padding:2px 8px; font:inherit; cursor:pointer;"
+              + (active
+                ? " background:var(--interactive-accent); color:var(--text-on-accent);"
+                : " background:transparent; color:var(--text-muted);");
+          }
+        };
+
+        const taskLists = tasksBody.createEl("div");
+        taskLists.className = "sauce-daily-task-lists";
+
         // Deterministic inline-link renderer from the task-entity mechanism — real
         // <a> for [[wl]] / [md](url) / bare URLs (task titles can carry links). NOT
         // MarkdownRenderer (absent in the customJS eval context → raw text). Falls
@@ -629,21 +732,47 @@ class SpaceDailyDashboard {
           };
         };
 
-        if (openTasks.length > 0) {
-          const tasksList = tasksBody.createEl("ul");
-          tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-          for (const task of openTasks) renderTaskRow(tasksList, task, false);
-        }
+        const renderTaskLists = () => {
+          // Clear only the row host: the control and its listeners remain singular
+          // across mode changes. sortTasks always returns a fresh array, so the
+          // TaskEntity/queryToday source bands are never mutated.
+          taskLists.textContent = "";
+          const sortedOpen = SpaceDailyDashboard.sortTasks(openTasks, taskSortMode);
+          const sortedOverdue = SpaceDailyDashboard.sortTasks(overdueTasks, taskSortMode);
 
-        if (overdueCount > 0) {
-          // Same list style as the open list (no left bar) so open + overdue read
-          // as one continuous list, overdue at the bottom, each overdue row
-          // tagged with its own red "Overdue" pill.
-          const overdueList = tasksBody.createEl("ul");
-          overdueList.className = "sauce-section-overdue-list";
-          overdueList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-          for (const task of overdueTasks) renderTaskRow(overdueList, task, true);
+          if (sortedOpen.length > 0) {
+            const tasksList = taskLists.createEl("ul");
+            tasksList.className = "sauce-daily-task-today-list";
+            tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+            for (const task of sortedOpen) renderTaskRow(tasksList, task, false);
+          }
+
+          if (sortedOverdue.length > 0) {
+            // Same list style as the open list (no left bar) so open + overdue read
+            // as one continuous list, overdue at the bottom, each overdue row
+            // tagged with its own red "Overdue" pill.
+            const overdueList = taskLists.createEl("ul");
+            overdueList.className = "sauce-section-overdue-list";
+            overdueList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+            for (const task of sortedOverdue) renderTaskRow(overdueList, task, true);
+          }
+        };
+
+        for (const mode of ["due", "priority"]) {
+          const button = sortControl.createEl("button");
+          sortButtons[mode] = button;
+          button.textContent = mode === "due" ? "Due" : "Priority";
+          button.setAttribute("type", "button");
+          button.setAttribute("aria-label", `Sort daily tasks by ${mode}`);
+          button.addEventListener("click", (event) => {
+            try { event.preventDefault(); } catch (_e) {}
+            taskSortMode = SpaceDailyDashboard.writeTaskSortMode(taskSortStorage, mode);
+            updateSortButtonState();
+            renderTaskLists();
+          });
         }
+        updateSortButtonState();
+        renderTaskLists();
       }
     }
 
