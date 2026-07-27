@@ -10,15 +10,38 @@ const { AsyncLocalStorage, createHook } = require('async_hooks');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
+const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
-delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
+const priorImportedCoordinatorCache = require.cache[coordinatorModulePath];
 let coordinator;
 try {
-  coordinator = require('../../scripts/autoloop/codex-coordinator');
+  delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  delete require.cache[coordinatorModulePath];
+  coordinator = require(coordinatorModulePath);
 } finally {
+  delete require.cache[coordinatorModulePath];
+  if (hadPriorImportedCoordinatorCache) require.cache[coordinatorModulePath] = priorImportedCoordinatorCache;
   if (priorImportedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
   else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorImportedBoardTopology;
 }
+assert.strictEqual(
+  Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath),
+  hadPriorImportedCoordinatorCache,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache presence exactly',
+);
+if (hadPriorImportedCoordinatorCache) {
+  assert.strictEqual(
+    require.cache[coordinatorModulePath],
+    priorImportedCoordinatorCache,
+    'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache identity exactly',
+  );
+}
+assert.strictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorImportedBoardTopology,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller topology environment byte-for-byte',
+);
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
