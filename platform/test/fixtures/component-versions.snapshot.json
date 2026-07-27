@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.268.1",
+  "workshop_version": "0.269.0",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -43,7 +43,7 @@
     "convenience": "0.6.0",
     "platform-claude": "0.6.0",
     "smart-connections-bridge": "0.3.0",
-    "render-safe": "0.2.2",
+    "render-safe": "0.3.0",
     "sauce-plugin": "0.3.0",
     "task-entity": "0.16.0",
     "modal": "0.2.0",
