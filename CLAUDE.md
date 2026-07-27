@@ -4,7 +4,7 @@ The workshop for the **Sauce** platform: ships mechanisms (cross-cutting code) a
 
 ## Vault identity check (pre-write)
 
-Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
+Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
 
 ## Further reading
 
@@ -18,6 +18,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 - [`Docs/agent-guides/note-chrome.md`](Docs/agent-guides/note-chrome.md) — vault-wide chrome standard (breadcrumb/nav grammar, dividers, migration posture). **New features (all blueprints) follow this grammar.**
 - [`Docs/agent-guides/dev-workflow.md`](Docs/agent-guides/dev-workflow.md) — day-to-day workflow: `npm run status` first; local-clone vs brew; per-vault sync; the four scripts (workshop-status, regen-cycle-status, scaffold-behavioral-harness, dev-sync).
 - [`Docs/agent-guides/delivery-board.md`](Docs/agent-guides/delivery-board.md) — epic-centric delivery board topology, `discarded` tombstone governance, supersede-at-mint, reap/restructure/cutover, retroactive digest. Read before touching the board, coordinator lifecycle, or intake supersession.
+- [`Docs/agent-guides/loop-plugin.md`](Docs/agent-guides/loop-plugin.md) — the loop plugin (`plugins/loop/`): install/reload for Claude + Codex, `.loop/config.json` binding contract, skill surface, Codex router generation. Read before touching the plugin, the binding resolver, or the loop skill surface.
 - [`Docs/agent-guides/finance-blueprint.md`](Docs/agent-guides/finance-blueprint.md) — canonical finance reference (entities, `FinanceMath` engine, Finance Plan, widgets, install heals). Read before any finance work.
 - [`Docs/agent-guides/wiki-blueprint.md`](Docs/agent-guides/wiki-blueprint.md) — canonical wiki reference (folder-is-truth, render helpers, chrome, move dialog, install heal). Read before any wiki work.
 - [`Docs/agent-guides/trips-blueprint.md`](Docs/agent-guides/trips-blueprint.md) — canonical trips reference (folder-is-truth, collision-free naming, launcher nav, conformance heal). Read before any trips work.

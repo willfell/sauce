@@ -80,7 +80,7 @@ Git commit SHA becomes the plugin version (documented Claude Code behavior). Eve
 
 - `vault.root` and `fid` accept `~`; board paths are vault-relative. Resolver enforces the intake coupling invariant `project_root == dirname(board_path)` and refuses on missing file, invalid JSON, missing required fields, or coupling violations (fixture-tested).
 - `coordinator.resolve`: `"brew"` (default; `$(brew --prefix sauce)/libexec/scripts/autoloop/codex-coordinator.js` — matches run-loose law: installed coordinator only) or `"path"` with explicit `coordinator.path`.
-- `policy` knobs absorb the ERO divergences that are *configuration* (batch policy vocabulary, deploy list — empty list = merge-only completion). Divergences that are *governance* (lenses, tombstones) are law, not config; ERO round one is bind-and-observe only.
+- `policy` knobs absorb the ERO divergences that are *configuration* (batch policy vocabulary, deploy list — empty list = merge-only completion). An optional `policy.deploy_vaults` (`[{id, path}]`) feeds the coordinator's vault list (`SAUCE_LOOP_VAULTS`); `deploy_subscriptions` (ids) stays the intake vocabulary. An optional `policy.observe_only: true` marks a bind-and-observe repo — write-path skills refuse. Divergences that are *governance* (lenses, tombstones) are law, not config; ERO round one is bind-and-observe only.
 - Names follow the intake spec/ERO `LoopConfig` vocabulary so the fields map 1:1 onto existing tools.
 - Alternatives rejected: extending `ranch/platform-config.json` (that file is the installer's path map and exists only in vaults — the binding must live in arbitrary repos); env-vars-only (not committed, not discoverable, defeats "onboard a repo once").
 
