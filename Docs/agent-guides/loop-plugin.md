@@ -48,6 +48,11 @@ From the repo you want on the loop:
 
 Binding a repo that another loop implementation still drives (e.g. ERO's `ero_loop`) is **bind-and-observe**: set `policy.observe_only: true`; read skills work, write skills refuse.
 
+Two knobs every fresh binding should know:
+
+- **`board.topology`** (default `"epic"`) — the plan/intake skills pass `epic_native: true` to the intake rail, so mints produce canonical epic scaffolds (atlas with dashboard + epic board + clean one-link parent-board line) even on a ledger with no cutover history. `"flat"` opts a legacy board out.
+- **`policy.deploy_vaults: []`** (explicit empty array) — declares a **merge-only** board: the resolver emits `SAUCE_LOOP_VAULTS=[]` and the coordinator completes a card at `feature_merged` with green protected checks, skipping the release/tag/tap/brew/deploy chain entirely. Absent field = the coordinator's default deploy-bound vault list (the sauce three). Cards still carry the contract's three-key `deploy_subscriptions` map (all-empty arrays).
+
 ## The skill surface
 
 | Slash | Codex | Does |

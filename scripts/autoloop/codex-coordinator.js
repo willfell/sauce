@@ -68,12 +68,21 @@ function loopBindingEnv(env = process.env) {
     board: env.SAUCE_LOOP_BOARD || null,
     cardsRoot: env.SAUCE_LOOP_CARDS_ROOT || null,
     vaults,
+    // Epic-native board topology (fresh loop-plugin bindings): routes selection
+    // through the two-level epic frontier even when the ledger has no cutover
+    // history. Absent env → the ledger's cutover flag remains the only switch.
+    epicTopology: env.SAUCE_LOOP_BOARD_TOPOLOGY === 'epic',
   };
 }
 const LOOP_BINDING = loopBindingEnv();
 const DEPLOYMENT_VAULT_IDS = LOOP_BINDING.vaults
   ? LOOP_BINDING.vaults.map((v) => v.id)
   : ['headspace', 'accuris', 'ero'];
+// Contract vocabulary vs deployment binding: a card's deploy_subscriptions map
+// always carries the contract's required_vaults keys; the BINDING's vault list
+// (SAUCE_LOOP_VAULTS) decides which vaults this board actually deploys to. An
+// empty binding list ([]) means merge-only completion. Identical by default.
+const CONTRACT_VAULT_IDS = delivery.registry.policies.required_vaults;
 const DELIVERY_STABLE_FIELDS = Object.freeze(
   delivery.registry.types['execution-card'].fields.map((field) => field.name),
 );
@@ -1089,12 +1098,12 @@ function normalizeDeploymentMap(value, opts = {}) {
     throw new Error(`${opts.label || 'deployment map'} must be a JSON object`);
   }
   const keys = Object.keys(value).sort();
-  const expectedKeys = [...DEPLOYMENT_VAULT_IDS].sort();
+  const expectedKeys = [...CONTRACT_VAULT_IDS].sort();
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
     throw new Error(`${opts.label || 'deployment map'} requires exactly headspace, accuris, and ero arrays`);
   }
   const normalized = {};
-  for (const vault of DEPLOYMENT_VAULT_IDS) {
+  for (const vault of CONTRACT_VAULT_IDS) {
     if (!Array.isArray(value[vault])) {
       throw new Error(`${opts.label || 'deployment map'}.${vault} must be an array`);
     }
@@ -1282,7 +1291,7 @@ function validateExecutionMeta(meta) {
   if (!meta.touchZones.length) errors.push('touch_zones must be non-empty');
   if (meta.status !== undefined && meta.status !== 'planning') errors.push(`status must normalize to planning for eligibility (got ${meta.status || 'unknown'})`);
   if (!meta.deploySubscriptions) errors.push('deploy_subscriptions is required');
-  else for (const id of VAULTS.map((v) => v.id)) if (!Array.isArray(meta.deploySubscriptions[id])) errors.push(`deploy_subscriptions.${id} is required`);
+  else for (const id of CONTRACT_VAULT_IDS) if (!Array.isArray(meta.deploySubscriptions[id])) errors.push(`deploy_subscriptions.${id} is required`);
   return errors;
 }
 
@@ -1626,8 +1635,9 @@ function selectClaimCandidate({
 function selectCoordinatorCandidate({
   boardMd, state, loadCard, supervised = false, epicShadow = false,
   cardsRoot = CARDS_ROOT, readFile, readDir, exists, loadEpicCard,
+  epicTopology = LOOP_BINDING.epicTopology,
 }) {
-  if (state && state.cutover && state.cutover.enabled === true) {
+  if (epicTopology || (state && state.cutover && state.cutover.enabled === true)) {
     return selectEpicCandidate({
       boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
     });
@@ -2924,7 +2934,7 @@ function vaultLedgerProof(vault, requiredVersion, now = () => new Date().toISOSt
 }
 
 function hasDeploymentAdditions(record) {
-  return DEPLOYMENT_VAULT_IDS.some((vault) => Array.isArray(record.deploy_subscriptions && record.deploy_subscriptions[vault])
+  return CONTRACT_VAULT_IDS.some((vault) => Array.isArray(record.deploy_subscriptions && record.deploy_subscriptions[vault])
     && record.deploy_subscriptions[vault].length > 0);
 }
 
@@ -3144,6 +3154,19 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   }
 
   if (record.phase === 'feature_merged' || record.phase === 'release_pr') {
+    // Merge-only binding: an EMPTY deployment vault list (SAUCE_LOOP_VAULTS=[]
+    // via .loop/config.json policy.deploy_vaults: []) means this board has no
+    // release/tag/tap/brew/deploy chain — a merged feature PR with green
+    // protected checks IS completion. Deploy-bound bindings (the default three
+    // sauce vaults) never enter this branch and behave byte-identically.
+    const deployVaults = deps.deployVaults || VAULTS;
+    if (deployVaults.length === 0) {
+      record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
+      record.merge_only = true;
+      await (deps.attemptProjection || attemptProjection)(ctx, record, deps.board || BOARD, { state });
+      persist(ctx, state, record);
+      return completionResult(record);
+    }
     const tag = findTag(record.feature_merge_sha, ctx.root);
     if (tag) {
       record.tag = tag; record.required_version = versionFrom(tag); record.phase = 'tagged'; persist(ctx, state, record);

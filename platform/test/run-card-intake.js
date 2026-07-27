@@ -834,8 +834,75 @@ async function exactHeadMaterialization() {
   }
 }
 
+function epicNativeForcedIntake() {
+  console.log('\n--- LOOP-EPIC-NATIVE forced routing: fresh boards without cutover ---');
+  tempCase((dir) => {
+    const nullStatus = () => ({ action: 'status', cutover: null });
+    const runFresh = (spec, apply = false) => run(spec, apply, { readCoordinatorStatus: nullStatus });
+    const epicTitle = 'Fresh Epic';
+    const parent = { title: epicTitle, role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] };
+    const childA = execution('FE-1 First slice', { parent_title: epicTitle, slice: 'FE-1' });
+    const childB = execution('FE-2 Second slice', { parent_title: epicTitle, slice: 'FE-2', depends_on: [`[[${childA.title}]]`] });
+    const spec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme', epic_native: true,
+      outcome: 'Scaffold a canonical epic on a fresh board that has no cutover history.',
+      cards: [parent, childA, childB],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'Fresh Epic.md'),
+      roadmap_key: 'fresh-epic', roadmap_section: '## Fresh Epic plan\n\n1. Slices',
+    });
+
+    const dry = runFresh(spec, false);
+    ok(dry.ok && dry.epic_native === true && dry.cutover_enabled === true,
+      'LOOP-EPIC-NATIVE spec.epic_native forces epic routing on a cutover-null ledger');
+    const applied = runFresh(spec, true);
+    ok(applied.ok, `LOOP-EPIC-NATIVE apply succeeds — ${JSON.stringify(applied.errors || [])}`);
+
+    const epicRoot = path.join(dir, 'tasks', epicTitle);
+    const atlasRaw = fs.readFileSync(path.join(epicRoot, `${epicTitle}.md`), 'utf8');
+    ok(/^type: epic$/m.test(atlasRaw), 'LOOP-EPIC-NATIVE scaffold writes a canonical epic atlas (type: epic)');
+    const epicBoardPath = path.join(epicRoot, 'board', `${epicTitle}-board.md`);
+    ok(fs.existsSync(epicBoardPath), 'LOOP-EPIC-NATIVE scaffold writes the epic board');
+    ok(fs.existsSync(path.join(epicRoot, 'board', `${childA.title}.md`))
+      && fs.existsSync(path.join(epicRoot, 'board', `${childB.title}.md`)),
+    'LOOP-EPIC-NATIVE slices land flat in the epic board directory');
+    ok(/^type: slice$/m.test(fs.readFileSync(path.join(epicRoot, 'board', `${childA.title}.md`), 'utf8')),
+      'LOOP-EPIC-NATIVE slices carry the slice contract type');
+
+    const parentBoard = fs.readFileSync(spec.board_path, 'utf8');
+    ok(parentBoard.includes(`[[${epicTitle}]]`), 'LOOP-EPIC-NATIVE parent board carries the epic line');
+    ok(!parentBoard.includes('decomposed'),
+      'LOOP-EPIC-NATIVE parent board line carries NO decomposed slice-chain suffix');
+    ok(!parentBoard.includes(`[[${childA.title}]]`),
+      'LOOP-EPIC-NATIVE slices never reach the parent board');
+
+    ok(runFresh(spec, true).no_op === true, 'LOOP-EPIC-NATIVE literal replay is no_op');
+
+    const badSpec = { ...spec, epic_native: 'yes' };
+    const badResult = runFresh(badSpec, false);
+    ok(!badResult.ok && (badResult.errors || []).some((e) => e.includes('epic_native must be a boolean')),
+      'LOOP-EPIC-NATIVE non-boolean epic_native refuses before any read');
+
+    // Absent epic_native on the same fresh ledger preserves the legacy flat path.
+    const legacySpec = base(dir, {
+      mode: 'roadmap', classification: 'roadmap_theme',
+      outcome: 'Legacy flat routing stays byte-stable when epic_native is absent.',
+      cards: [
+        { title: 'Legacy Parent', role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] },
+        execution('LG-1 Legacy child', { parent_title: 'Legacy Parent', slice: 'LG-1' }),
+      ],
+      roadmap_path: path.join(dir, 'docs', 'roadmap', 'Legacy.md'),
+      roadmap_key: 'legacy', roadmap_section: '## Legacy plan\n\n1. Child',
+    });
+    const legacyApplied = runFresh(legacySpec, true);
+    ok(legacyApplied.ok && legacyApplied.epic_native === undefined && legacyApplied.cutover_enabled === undefined,
+      'LOOP-EPIC-NATIVE absent flag on a cutover-null ledger keeps legacy routing');
+    ok(fs.readFileSync(legacySpec.board_path, 'utf8').includes('decomposed → [[LG-1 Legacy child]]'),
+      'LOOP-EPIC-NATIVE legacy path still annotates decomposition (unchanged behavior)');
+  });
+}
+
 async function main() {
-  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); supersedeGovernance(); await exactHeadMaterialization();
+  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

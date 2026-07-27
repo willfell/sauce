@@ -117,6 +117,7 @@ function mkRepo(config) {
   ok('LC-3 DELIVERY_STATE under repo git', env.DELIVERY_STATE === path.join(repo, '.git', 'sauce-autoloop', 'state.json'));
   ok('LC-3 SAUCE_LOOP_BOARD', env.SAUCE_LOOP_BOARD === r.config.board_path_abs);
   ok('LC-3 SAUCE_LOOP_CARDS_ROOT', env.SAUCE_LOOP_CARDS_ROOT === r.config.cards_root_abs);
+  ok('LC-3 SAUCE_LOOP_BOARD_TOPOLOGY defaults epic', env.SAUCE_LOOP_BOARD_TOPOLOGY === 'epic');
   ok('LC-3 no vaults env without deploy_vaults', !('SAUCE_LOOP_VAULTS' in env));
   fs.rmSync(repo, { recursive: true, force: true });
 }
@@ -127,6 +128,14 @@ function mkRepo(config) {
   const r = LC.resolveBinding(repo, { home: HOME });
   const vaults = JSON.parse(r.config.env.SAUCE_LOOP_VAULTS);
   ok('LC-3 SAUCE_LOOP_VAULTS expanded', vaults.length === 1 && vaults[0].id === 'demo' && vaults[0].path === path.join(HOME, 'vaults/demo-vault'));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig();
+  c.policy.deploy_vaults = [];
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-3 explicit empty deploy_vaults emits merge-only env', r.config.env.SAUCE_LOOP_VAULTS === '[]');
   fs.rmSync(repo, { recursive: true, force: true });
 }
 
@@ -214,6 +223,30 @@ function mkRepo(config) {
     execFileSync(process.execPath, [CLI, 'resolve'], { encoding: 'utf8' });
   } catch (e) { code = e.status; body = String(e.stdout || ''); }
   ok('LC-6 CLI requires --json (usage exit 2)', code === 2 && /json/.test(body));
+}
+
+// ---------------------------------------------------------------------------
+// LC-7 — board topology: epic-native is the default for fresh bindings.
+// ---------------------------------------------------------------------------
+{
+  const repo = mkRepo(baseConfig());
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 default topology is epic', r.ok === true && r.config.board_topology === 'epic');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.board.topology = 'flat';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 explicit flat honored', r.ok === true && r.config.board_topology === 'flat');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.board.topology = 'pyramid';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-7 invalid topology refuses', r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /board\.topology/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

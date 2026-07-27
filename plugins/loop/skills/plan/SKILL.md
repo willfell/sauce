@@ -31,7 +31,7 @@ Ask BOTH, as one question each:
 
 ## Mint through the rail
 
-1. Build the intake spec JSON bound to the config (`project_root`/`board_path`/`cards_root` from the resolve receipt, `protected_cards` from status, `evidence_roots`/`link_roots` narrow). Epic + slices with full execution contracts: touch zones, dependency wikilinks, deployment map for every id in `config.policy.deploy_subscriptions`, acceptance tests, guides, traps, normalized status, batch policy from `config.policy`.
+1. Build the intake spec JSON bound to the config (`project_root`/`board_path`/`cards_root` from the resolve receipt, `protected_cards` from status, `evidence_roots`/`link_roots` narrow, **`epic_native: true` when `config.board_topology` is `epic` — the default; this guarantees the canonical epic shape (atlas with dashboard + epic board + clean parent-board line) even on a fresh ledger with no cutover history**). Epic + slices with full execution contracts: touch zones, dependency wikilinks, deployment map for every id in `config.policy.deploy_subscriptions`, acceptance tests, guides, traps, normalized status, batch policy from `config.policy`.
 2. `node <intake> --spec <spec.json> --json` (dry-run) → review the ENTIRE plan against the refusal list (never alters protected cards; no claimable epic; no backwards dependencies; no placeholder acceptance tests).
 3. Present the dry-run summary and get explicit approval.
 4. `node <intake> --spec <spec.json> --apply --json` → replay for `no_op: true` → remove the spec file.
