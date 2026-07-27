@@ -23,11 +23,6 @@
       "dest": ".claude/commands/bootstrap.md"
     },
     {
-      "kind": "command",
-      "source": "commands/card-intake.md",
-      "dest": ".claude/commands/card-intake.md"
-    },
-    {
       "kind": "skill",
       "source": "skills/install/SKILL.md",
       "dest": "{{skills_dir}}/install/SKILL.md"
@@ -41,11 +36,6 @@
       "kind": "skill",
       "source": "skills/bootstrap/SKILL.md",
       "dest": "{{skills_dir}}/bootstrap/SKILL.md"
-    },
-    {
-      "kind": "skill",
-      "source": "skills/card-intake/SKILL.md",
-      "dest": "{{skills_dir}}/card-intake/SKILL.md"
     },
     {
       "kind": "claude_md_row",
@@ -72,50 +62,6 @@
         "topic": "Bootstrap",
         "path": ".claude/commands/bootstrap.md",
         "command": "/bootstrap"
-      }
-    },
-    {
-      "kind": "claude_md_row",
-      "table": "resolvers",
-      "row": {
-        "topic": "Card Intake",
-        "path": ".claude/commands/card-intake.md",
-        "command": "/card-intake"
-      }
-    },
-    {
-      "kind": "claude_md_row",
-      "table": "skills-index",
-      "row": {
-        "command": "/card-intake",
-        "skill_path": ".claude/skills/platform/card-intake/SKILL.md"
-      }
-    },
-    {
-      "kind": "command",
-      "source": "commands/slice-plan.md",
-      "dest": ".claude/commands/slice-plan.md"
-    },
-    {
-      "kind": "skill",
-      "source": "skills/slice-plan/SKILL.md",
-      "dest": "{{skills_dir}}/slice-plan/SKILL.md"
-    },
-    {
-      "kind": "claude_md_row",
-      "table": "resolvers",
-      "row": {
-        "topic": "Slice Plan",
-        "path": ".claude/commands/slice-plan.md",
-        "command": "/slice-plan"
-      }
-    },
-    {
-      "kind": "claude_md_row",
-      "table": "skills-index",
-      "row": {
-        "command": "/slice-plan",
-        "skill_path": ".claude/skills/platform/slice-plan/SKILL.md"
       }
     }
   ],

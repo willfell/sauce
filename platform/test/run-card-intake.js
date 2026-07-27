@@ -175,25 +175,24 @@ function tempCase(fn) {
 }
 
 function validateSkillSurface() {
-  console.log('\n--- skill metadata and surface registration ---');
-  const codexSkill = path.join(ROOT, '.agents/skills/card-intake/SKILL.md');
-  const claudeSkill = path.join(ROOT, 'platform/mechanisms/platform-claude/skills/card-intake/SKILL.md');
-  const command = path.join(ROOT, 'platform/mechanisms/platform-claude/commands/card-intake.md');
+  console.log('\n--- skill metadata and surface registration (loop plugin is the sole surface) ---');
+  const canonical = path.join(ROOT, 'plugins/loop/skills/intake/SKILL.md');
+  const alias = path.join(ROOT, '.agents/skills/card-intake/SKILL.md');
+  const router = path.join(ROOT, '.agents/skills/loop-intake/SKILL.md');
   const metadata = path.join(ROOT, '.agents/skills/card-intake/agents/openai.yaml');
-  for (const file of [codexSkill, claudeSkill, command, metadata]) ok(fs.existsSync(file), `${path.relative(ROOT, file)} exists`);
-  for (const file of [codexSkill, claudeSkill]) {
-    const body = fs.readFileSync(file, 'utf8');
-    ok(/^---\nname: card-intake\ndescription: .+\n---/s.test(body), `${path.relative(ROOT, file)} has valid frontmatter`);
-    ok(Buffer.byteLength(body) < 8192, `${path.relative(ROOT, file)} stays under 8 KB`);
-    ok(body.includes('[[Loop System with Codex]]'), `${path.relative(ROOT, file)} links the execution contract`);
-    ok(/Delivery public contract|delivery\/index\.js/.test(body), `${path.relative(ROOT, file)} routes authoring through the Delivery public contract`);
-  }
+  for (const file of [canonical, alias, router, metadata]) ok(fs.existsSync(file), `${path.relative(ROOT, file)} exists`);
+  const body = fs.readFileSync(canonical, 'utf8');
+  ok(/^---\nname: intake\ndescription: .+\n---/s.test(body), 'canonical plugin body has valid frontmatter');
+  ok(/Delivery public contract|delivery\/index\.js/.test(body), 'canonical body routes authoring through the Delivery public contract');
+  ok(/supersede_coverage_missing/.test(body) && /supersede_missing_fields/.test(body), 'canonical body carries the supersede refusal contract');
+  ok(/card-intake\.js/.test(body), 'canonical body wraps the deterministic intake script');
+  const aliasBody = fs.readFileSync(alias, 'utf8');
+  ok(/^---\nname: card-intake\ndescription: .+\n---/s.test(aliasBody), 'deprecated alias keeps its $card-intake frontmatter name');
+  ok(/deprecated/i.test(aliasBody) && /loop-intake/.test(aliasBody), 'alias points at the loop-intake router');
   ok(fs.readFileSync(metadata, 'utf8').includes('default_prompt: "Use $card-intake'), 'openai.yaml names $card-intake');
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/mechanisms/platform-claude/manifest.json'), 'utf8'));
-  ok(manifest.claude_surface.some((e) => e.kind === 'command' && e.dest === '.claude/commands/card-intake.md'), 'manifest registers command');
-  ok(manifest.claude_surface.some((e) => e.kind === 'skill' && e.dest === '{{skills_dir}}/card-intake/SKILL.md'), 'manifest registers skill');
-  ok(manifest.claude_surface.some((e) => e.kind === 'claude_md_row' && e.table === 'resolvers' && e.row.command === '/card-intake'), 'manifest registers resolver');
-  ok(manifest.claude_surface.some((e) => e.kind === 'claude_md_row' && e.table === 'skills-index' && e.row.command === '/card-intake'), 'manifest registers skills index');
+  ok(!manifest.claude_surface.some((e) => /card-intake/.test(JSON.stringify(e))), 'platform-claude no longer registers card-intake (retired to the loop plugin)');
+  ok(!fs.existsSync(path.join(ROOT, 'platform/mechanisms/platform-claude/skills/card-intake')), 'mirror skill body removed');
 }
 
 function sharedDeliveryFixtures() {
@@ -823,11 +822,12 @@ async function exactHeadMaterialization() {
     await materializeClaudeSurface(aggregate.materializeList, tpStub(dir), ROOT, history, { commit: 'HEAD', tag: null, dirty: false });
     fs.writeFileSync(path.join(dir, 'CLAUDE.md'), ['# Fixture', '<!-- @claude-surface:resolvers BEGIN -->', '<!-- @claude-surface:resolvers END -->', '<!-- @claude-surface:directory-map BEGIN -->', '<!-- @claude-surface:directory-map END -->', '<!-- @claude-surface:skills-index BEGIN -->', '<!-- @claude-surface:skills-index END -->', ''].join('\n'));
     await regenerateClaudeMd(aggregate.rows, tpStub(dir), history, { commit: 'HEAD', tag: null, dirty: false });
-    ok(fs.existsSync(path.join(dir, '.claude/commands/card-intake.md')), 'command materializes');
-    ok(fs.existsSync(path.join(dir, '.claude/skills/platform/card-intake/SKILL.md')), 'skill materializes');
+    ok(!fs.existsSync(path.join(dir, '.claude/commands/card-intake.md')), 'retired card-intake command no longer materializes');
+    ok(!fs.existsSync(path.join(dir, '.claude/skills/platform/card-intake/SKILL.md')), 'retired card-intake skill no longer materializes');
+    ok(fs.existsSync(path.join(dir, '.claude/commands/install.md')), 'remaining platform commands still materialize');
     const router = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
-    ok(router.includes('| Card Intake | .claude/commands/card-intake.md | /card-intake |'), 'resolver row materializes');
-    ok(router.includes('| /card-intake | .claude/skills/platform/card-intake/SKILL.md | platform-claude |'), 'skills-index row materializes');
+    ok(!/card-intake|slice-plan/.test(router), 'no retired rows reach the CLAUDE.md tables');
+    ok(router.includes('| Install | .claude/commands/install.md | /install |'), 'remaining resolver rows materialize');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     ok(!fs.existsSync(dir), 'surface fixture cleaned');

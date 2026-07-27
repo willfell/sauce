@@ -358,18 +358,11 @@ async function caseCSSUB1PlatformClaudeIncluded() {
   assertEq("CS-SUB-1: resolver count matches manifest", platRows.length,
     surface.filter((e) => e.kind === "claude_md_row" && e.table === "resolvers").length);
   const topics = platRows.map((r) => r.topic).sort();
-  assertEq("CS-SUB-1: resolver topics include Card Intake",
-    topics, ["Bootstrap", "Card Intake", "Install", "Slice Plan", "Upgrade"]);
+  assertEq("CS-SUB-1: resolver topics are the platform lifecycle set (loop skills retired to the plugin)",
+    topics, ["Bootstrap", "Install", "Upgrade"]);
   const skillRows = out.rows["skills-index"].filter((r) => r.owner === "platform-claude");
-  assertEq("CS-SUB-1: Card Intake + Slice Plan skills-index rows registered", skillRows, [{
-    command: "/card-intake",
-    skill_path: ".claude/skills/platform/card-intake/SKILL.md",
-    owner: "platform-claude",
-  }, {
-    command: "/slice-plan",
-    skill_path: ".claude/skills/platform/slice-plan/SKILL.md",
-    owner: "platform-claude",
-  }]);
+  assertEq("CS-SUB-1: no loop-skill skills-index rows remain (card-intake/slice-plan live in the loop plugin)",
+    skillRows.filter((r) => /card-intake|slice-plan/.test(r.command)), []);
 }
 
 // ============================================================

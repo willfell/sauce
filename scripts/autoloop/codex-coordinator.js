@@ -48,7 +48,32 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   ],
   'record-pr': ['json', 'card', 'pr'],
 });
-const DEPLOYMENT_VAULT_IDS = ['headspace', 'accuris', 'ero'];
+// Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
+// resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
+// is byte-identical to the historical hardcoded defaults; malformed values
+// fail loud at load rather than silently retargeting board writes.
+function loopBindingEnv(env = process.env) {
+  let vaults = null;
+  if (env.SAUCE_LOOP_VAULTS) {
+    let parsed;
+    try { parsed = JSON.parse(env.SAUCE_LOOP_VAULTS); } catch (e) {
+      throw new Error(`SAUCE_LOOP_VAULTS is not valid JSON: ${e.message}`);
+    }
+    if (!Array.isArray(parsed) || !parsed.every((v) => v && typeof v.id === 'string' && typeof v.path === 'string')) {
+      throw new Error('SAUCE_LOOP_VAULTS must be a JSON array of {id, path}');
+    }
+    vaults = parsed;
+  }
+  return {
+    board: env.SAUCE_LOOP_BOARD || null,
+    cardsRoot: env.SAUCE_LOOP_CARDS_ROOT || null,
+    vaults,
+  };
+}
+const LOOP_BINDING = loopBindingEnv();
+const DEPLOYMENT_VAULT_IDS = LOOP_BINDING.vaults
+  ? LOOP_BINDING.vaults.map((v) => v.id)
+  : ['headspace', 'accuris', 'ero'];
 const DELIVERY_STABLE_FIELDS = Object.freeze(
   delivery.registry.types['execution-card'].fields.map((field) => field.name),
 );
@@ -84,9 +109,11 @@ const EXACT_SHA = /^[0-9a-f]{40}$/;
 const RATIFICATION_SCHEMA_VERSION = '1.0.0';
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
-const BOARD = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
-const CARDS_ROOT = path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
-const VAULTS = [
+const BOARD = LOOP_BINDING.board
+  || path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
+const CARDS_ROOT = LOOP_BINDING.cardsRoot
+  || path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
+const VAULTS = LOOP_BINDING.vaults || [
   { id: 'headspace', path: path.join(HOME, 'notes/sauce/headspace-sauce') },
   { id: 'accuris', path: path.join(HOME, 'notes/sauce/accuris-sauce') },
   { id: 'ero', path: path.join(HOME, 'notes/sauce/ero-sauce') },
@@ -6471,6 +6498,7 @@ module.exports = {
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
   PARKED_METADATA_REBIND_CARDS,
+  loopBindingEnv, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS,
 };
 
 if (require.main === module) {

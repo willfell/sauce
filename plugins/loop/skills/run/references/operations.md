@@ -89,11 +89,7 @@ Do not use the globally newest PR or tag. Record the feature merge SHA, then sel
 
 ## Deployment
 
-Acquire one host promotion lock, recheck the installed formula, then run `brew update` and `brew upgrade sauce` only if needed. Deploy three independent child processes:
-
-- headspace: `/Users/willfellhoelter/notes/sauce/headspace-sauce`
-- accuris: `/Users/willfellhoelter/notes/sauce/accuris-sauce`
-- ero: `/Users/willfellhoelter/notes/sauce/ero-sauce`
+Acquire one host promotion lock, recheck the installed formula, then run `brew update` and `brew upgrade sauce` only if needed. Deploy one independent child process per vault in the binding's deploy list (`.loop/config.json` → `policy.deploy_vaults`, surfaced to the coordinator as `SAUCE_LOOP_VAULTS`; the sauce workshop's binding lists headspace, accuris, and ero).
 
 Each verifies identity and the brew workshop path, applies only explicit subscription additions, runs `sauce update --bump-pins`, checks the new install-history segment for errors, verifies the installed version floor, and returns a receipt. Retry only failed/behind vaults.
 
