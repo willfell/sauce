@@ -1794,6 +1794,31 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
   const localCommitFromTree = (cwd, tree, parent, title) => realRun('git', [
     'commit-tree', tree, '-p', parent, '-m', title,
   ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
+  const resolveOrdinaryReleaseTitle = (
+    cwd, headSha, env = process.env, readEvent = fs.readFileSync,
+  ) => {
+    const checkedOutTitle = realRun('git', ['show', '-s', '--format=%s', headSha], { cwd });
+    if (env.GITHUB_EVENT_NAME !== 'pull_request') return checkedOutTitle;
+    if (!env.GITHUB_SHA || env.GITHUB_SHA !== headSha) {
+      throw new Error(
+        `pull-request title binding does not match checked-out HEAD (${env.GITHUB_SHA || 'missing'} != ${headSha})`,
+      );
+    }
+    if (!env.GITHUB_EVENT_PATH) {
+      throw new Error('pull-request title binding requires GITHUB_EVENT_PATH');
+    }
+    let event;
+    try {
+      event = JSON.parse(readEvent(env.GITHUB_EVENT_PATH, 'utf8'));
+    } catch (error) {
+      throw new Error(`pull-request title binding could not read GITHUB_EVENT_PATH: ${error.message}`);
+    }
+    const title = event && event.pull_request && event.pull_request.title;
+    if (typeof title !== 'string' || !title || title !== title.trim()) {
+      throw new Error('pull-request title binding requires one exact non-empty PR title');
+    }
+    return title;
+  };
 
   // Actions checks out PRs at depth 1. Prove the ordinary release fixture can
   // build a complete local base/feature pair from that one exact HEAD without
@@ -2155,10 +2180,195 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
     ok(borrowedDisposable.length === 1 && !fs.existsSync(borrowedDisposable[0]),
       'GA-P1I-AMBIENT-FEATURE-BORROWING-MUTANT-KILLED wrong-anchor success still target-cleans');
 
+    // GitHub Actions checks pull requests out at a synthetic merge commit.
+    // Its subject is not the future squash title, so bind the ordinary gate
+    // fixture to the exact PR title in the event payload after proving that
+    // GITHUB_SHA names this exact checkout. The isolated base below has the
+    // pre-feature tree, while the merge checkout has the exact raised-floor
+    // feature tree and the same base-first/feature-second parent topology as
+    // Actions. Release attribution still uses mergeRefBase explicitly, so it
+    // cannot borrow the feature commit through the merge checkout's ancestry.
+    const mergeRefTree = realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const mergeRefBaseTree = realRun('git', ['rev-parse', `${fixtureStart}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const mergeRefBase = realRun('git', [
+      'commit-tree', mergeRefBaseTree,
+      '-m', 'test(autoloop): isolate merge-ref prospective release range',
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    const mergeRefSubject = 'Merge pull request #663 from willfell/codex-autoloop/ga-p1b12';
+    const mergeRefHead = realRun('git', [
+      'commit-tree', mergeRefTree,
+      '-p', mergeRefBase,
+      '-p', fixtureBase,
+      '-m', mergeRefSubject,
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    eq(realRun('git', ['show', '-s', '--format=%s', mergeRefHead], { cwd: fixtureRoot }),
+      mergeRefSubject,
+      'GA-P1J-MERGE-REF fixture HEAD carries the non-conventional synthetic merge subject');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^{tree}`], { cwd: fixtureRoot }), mergeRefTree,
+      'GA-P1J-MERGE-REF fixture preserves the exact feature tree');
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', mergeRefHead], { cwd: fixtureRoot }),
+      `${mergeRefHead} ${mergeRefBase} ${fixtureBase}`,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE fixture is exactly base-first/feature-second two-parent merge');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^1`], { cwd: fixtureRoot }), mergeRefBase,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE first parent is the isolated exact base');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^2`], { cwd: fixtureRoot }), fixtureBase,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE second parent is the exact feature commit');
+    assert.throws(
+      () => realRun('git', ['rev-parse', `${mergeRefHead}^3`], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE fixture has no third parent',
+    );
+    count++;
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', mergeRefBase], { cwd: fixtureRoot }),
+      mergeRefBase,
+      'GA-P1J-MERGE-REF isolated range base has no ambient feature ancestry');
+    assert.throws(
+      () => realRun('git', ['merge-base', '--is-ancestor', fixtureBase, mergeRefBase], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED isolated range excludes the ambient feature',
+    );
+    count++;
+
+    const exactFeatureTitle = 'feat(task-entity): adopt RenderSafe mutation lifecycle';
+    const mergeEventPath = path.join(os.tmpdir(), 'ga-p1j-event.json');
+    let eventReads = 0;
+    const eventReader = (eventPath, encoding) => {
+      eq(eventPath, mergeEventPath,
+        'GA-P1J-EXACT-EVENT-PATH reads the repository-native Actions event seam');
+      eq(encoding, 'utf8', 'GA-P1J-EXACT-EVENT-PATH decodes the payload as UTF-8');
+      eventReads++;
+      return JSON.stringify({ pull_request: { title: exactFeatureTitle } });
+    };
+    const mergeRefEnv = {
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_EVENT_PATH: mergeEventPath,
+      GITHUB_SHA: mergeRefHead,
+    };
+    const resolvedFeatureTitle = resolveOrdinaryReleaseTitle(
+      fixtureRoot, mergeRefHead, mergeRefEnv, eventReader,
+    );
+    eq(resolvedFeatureTitle, exactFeatureTitle,
+      'GA-P1J-EXACT-PR-TITLE binds the merge checkout to its exact future squash title');
+    eq(eventReads, 1, 'GA-P1J-EXACT-PR-TITLE reads the exact event payload once');
+    ok(resolvedFeatureTitle !== mergeRefSubject,
+      'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED rejects the synthetic merge subject as release attribution');
+
+    const alternateTitle = 'fix(autoloop): alternate exact pull-request title';
+    eq(resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, mergeRefEnv, () => JSON.stringify({
+      pull_request: { title: alternateTitle },
+    })), alternateTitle,
+    'GA-P1J-HARDCODED-FEATURE-TITLE-MUTANT-KILLED resolves the event title rather than one fixture literal');
+    assert.throws(
+      () => resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {
+        ...mergeRefEnv, GITHUB_SHA: fixtureHead,
+      }, eventReader),
+      /title binding does not match checked-out HEAD/,
+      'GA-P1J-EXACT-CHECKOUT-BINDING-MUTANT-KILLED rejects a stale event/checkout pairing',
+    );
+    count++;
+    assert.throws(
+      () => resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {
+        ...mergeRefEnv, GITHUB_EVENT_PATH: '',
+      }, eventReader),
+      /requires GITHUB_EVENT_PATH/,
+      'GA-P1J-EVENT-BYPASS-MUTANT-KILLED refuses a pull-request checkout without its exact title seam',
+    );
+    count++;
+    eq(resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {}, eventReader), mergeRefSubject,
+      'GA-P1J-NON-PR-FALLBACK preserves the exact HEAD-subject behavior outside pull-request CI');
+
+    const [homeMajor, homeMinor] = homeManifest.version.split('.').map(Number);
+    const computedHomeVersion = `${homeMajor}.${homeMinor + 1}.0`;
+    const mergeRefDisposable = [];
+    let computedMergeState = null;
+    const computedMergeRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        mergeRefDisposable.push(args[3]);
+      }
+      const output = realRun(cmd, args, opts);
+      if (cmd === 'node'
+          && args[0] === 'scripts/release/compute-release.js'
+          && args[1] === '--write') {
+        const subscription = JSON.parse(fs.readFileSync(
+          path.join(opts.cwd, 'ranch/platform-subscription.json'), 'utf8',
+        ));
+        computedMergeState = {
+          task: JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'platform/mechanisms/task-entity/manifest.json'), 'utf8',
+          )).version,
+          home: JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'platform/blueprints/home/manifest.json'), 'utf8',
+          )).version,
+          taskPin: subscription.mechanisms.find((item) => item.name === 'task-entity').version,
+          homePin: subscription.blueprints.find((item) => item.name === 'home').version,
+        };
+      }
+      return output;
+    };
+    runIsolatedWorkshopSelfInstall(
+      { root: fixtureRoot }, mergeRefHead, mergeRefBase,
+      resolvedFeatureTitle, computedMergeRun,
+    );
+    eq(computedMergeState, {
+      task: computedTaskVersion,
+      home: computedHomeVersion,
+      taskPin: computedTaskVersion,
+      homePin: computedHomeVersion,
+    }, 'GA-P1J-MERGE-REF-COMPUTED-STATE writes exact version-relative TaskEntity/Home manifests and pins');
+    ok(mergeRefDisposable.length === 1 && !fs.existsSync(mergeRefDisposable[0]),
+      'GA-P1J-MERGE-REF-COMPUTED-STATE exact-title release install succeeds and target-cleans');
+
+    const mergeTitleDisposable = [];
+    const isolatedMergeTitleOracle = (rangeBase, disposable) => {
+      let mergeTitleError = null;
+      try {
+        runIsolatedWorkshopSelfInstall(
+          { root: fixtureRoot }, mergeRefHead, rangeBase, mergeRefSubject,
+          (cmd, args, opts = {}) => {
+            if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+              disposable.push(args[3]);
+            }
+            return realRun(cmd, args, opts);
+          },
+        );
+      } catch (error) {
+        mergeTitleError = error;
+      }
+      const output = `${mergeTitleError && mergeTitleError.message || ''}\n`
+        + `${mergeTitleError && mergeTitleError.stdout || ''}\n`
+        + `${mergeTitleError && mergeTitleError.stderr || ''}`;
+      assert(
+        mergeTitleError
+          && /depends on task-entity .* but subscription pins task-entity@/.test(output),
+        'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED isolated merge subject must fail the exact TaskEntity floor',
+      );
+      assert(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED failed release worktree is target-cleaned');
+    };
+    isolatedMergeTitleOracle(mergeRefBase, mergeTitleDisposable);
+    count += 2;
+    const mergeBorrowedDisposable = [];
+    assert.throws(
+      () => isolatedMergeTitleOracle(fixtureBase, mergeBorrowedDisposable),
+      /isolated merge subject must fail the exact TaskEntity floor/,
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED rejects a merge-title result that borrows fixtureBase feat attribution',
+    );
+    count++;
+    ok(mergeBorrowedDisposable.length === 1 && !fs.existsSync(mergeBorrowedDisposable[0]),
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED borrowed-attribution worktree still target-cleans');
+
     const workshopRoot = path.resolve(__dirname, '../..');
     const workshopHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot });
     const workshopTree = realRun('git', ['rev-parse', `${workshopHead}^{tree}`], { cwd: workshopRoot });
-    const ordinaryTitle = realRun('git', ['show', '-s', '--format=%s', workshopHead], { cwd: workshopRoot });
+    const ordinaryTitle = resolveOrdinaryReleaseTitle(workshopRoot, workshopHead);
     const ordinaryBase = localCommitFromTree(
       workshopRoot, workshopTree, workshopHead, 'test(autoloop): local ordinary base',
     );
