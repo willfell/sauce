@@ -11,6 +11,11 @@ const { execFileSync, spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const Module = require('module');
 const { PassThrough } = require('stream');
+const {
+  parseCommit: parseReleaseCommit,
+  bumpLevel: releaseBumpLevel,
+} = require('../../scripts/release/lib/conventional');
+const { inc: incrementReleaseVersion } = require('../../scripts/release/lib/semver-inc');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
@@ -2423,25 +2428,354 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
     ok(mergeBorrowedDisposable.length === 1 && !fs.existsSync(mergeBorrowedDisposable[0]),
       'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED borrowed-attribution worktree still target-cleans');
 
+    // Reproduce PR #668's depth-one failure exactly: the event supplies the
+    // future feat title, but an unchanged synthetic feature tree gives
+    // compute-release no TaskEntity or Home path attribution.
+    const unchangedOrdinaryBase = localCommitFromTree(
+      fixtureRoot, mergeRefTree, mergeRefBase, 'test(autoloop): unchanged shallow ordinary base',
+    );
+    const unchangedOrdinaryHead = localCommitFromTree(
+      fixtureRoot, mergeRefTree, unchangedOrdinaryBase, exactFeatureTitle,
+    );
+    eq(realRun('git', ['diff', '--name-only', unchangedOrdinaryBase, unchangedOrdinaryHead], {
+      cwd: fixtureRoot,
+    }), '', 'GA-P1L-UNCHANGED-TREE-REPRO has the exact empty component attribution from PR 668');
+    const unchangedOrdinaryDisposable = [];
+    const unchangedOrdinaryCalls = [];
+    let unchangedOrdinaryError = null;
+    try {
+      runIsolatedWorkshopSelfInstall(
+        { root: fixtureRoot }, unchangedOrdinaryHead, unchangedOrdinaryBase, exactFeatureTitle,
+        (cmd, args, opts = {}) => {
+          unchangedOrdinaryCalls.push([cmd, ...args]);
+          if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+            unchangedOrdinaryDisposable.push(args[3]);
+          }
+          return realRun(cmd, args, opts);
+        },
+      );
+    } catch (error) {
+      unchangedOrdinaryError = error;
+    }
+    const unchangedOrdinaryOutput = `${unchangedOrdinaryError && unchangedOrdinaryError.message || ''}\n`
+      + `${unchangedOrdinaryError && unchangedOrdinaryError.stdout || ''}\n`
+      + `${unchangedOrdinaryError && unchangedOrdinaryError.stderr || ''}`;
+    ok(unchangedOrdinaryError
+        && /depends on task-entity .* but subscription pins task-entity@/.test(unchangedOrdinaryOutput),
+    'GA-P1L-TITLE-ONLY-ATTRIBUTION-MUTANT-KILLED exact feat title cannot replace component paths');
+    ok(unchangedOrdinaryDisposable.length === 1 && !fs.existsSync(unchangedOrdinaryDisposable[0]),
+      'GA-P1L-UNCHANGED-TREE-REPRO failed disposable release worktree target-cleans');
+    ok(!unchangedOrdinaryCalls.some(([cmd, operation]) => cmd === 'git'
+        && ['fetch', 'pull', 'remote'].includes(operation)),
+    'GA-P1L-PARENT-FETCH-MUTANT-KILLED unchanged-tree reproduction uses no network or parent fetch');
+
     const workshopRoot = path.resolve(__dirname, '../..');
     const workshopHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot });
     const workshopTree = realRun('git', ['rev-parse', `${workshopHead}^{tree}`], { cwd: workshopRoot });
     const ordinaryTitle = resolveOrdinaryReleaseTitle(workshopRoot, workshopHead);
-    const ordinaryBase = localCommitFromTree(
-      workshopRoot, workshopTree, workshopHead, 'test(autoloop): local ordinary base',
+    const ordinaryReleaseTitle = isReleasableTitle(ordinaryTitle)
+      ? ordinaryTitle
+      : exactFeatureTitle;
+    const ordinaryPlumbingCalls = [];
+    const ordinaryPlumbingRun = (cmd, args, opts = {}) => {
+      ordinaryPlumbingCalls.push([cmd, ...args]);
+      return realRun(cmd, args, opts);
+    };
+    const ordinaryTaskPath = 'platform/mechanisms/task-entity/README.md';
+    const ordinaryHomePath = 'platform/blueprints/home/manifest.json';
+    const ordinaryTreeMode = (root, tree, sourcePath) => {
+      const entry = ordinaryPlumbingRun('git', ['ls-tree', tree, '--', sourcePath], { cwd: root });
+      const match = entry.match(/^([0-7]{6})\s+blob\s+[0-9a-f]{40}\t/);
+      if (!match) throw new Error(`ordinary release tree lacks ${sourcePath}`);
+      return match[1];
+    };
+    const ordinaryTreeWithContents = (root, sourceTree, contentsByPath) => {
+      const indexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1l-index-'));
+      const indexPath = path.join(indexRoot, 'normalized.index');
+      const indexEnv = { ...releaseGateCommitEnv, GIT_INDEX_FILE: indexPath };
+      try {
+        ordinaryPlumbingRun('git', ['read-tree', sourceTree], {
+          cwd: root, stdio: 'pipe', env: indexEnv,
+        });
+        for (const [sourcePath, contents] of contentsByPath) {
+          const blob = ordinaryPlumbingRun('git', ['hash-object', '-w', '--stdin'], {
+            cwd: root, stdio: 'pipe', env: indexEnv, input: contents,
+          });
+          ordinaryPlumbingRun('git', [
+            'update-index', '--add', '--cacheinfo',
+            `${ordinaryTreeMode(root, sourceTree, sourcePath)},${blob},${sourcePath}`,
+          ], { cwd: root, stdio: 'pipe', env: indexEnv });
+        }
+        return ordinaryPlumbingRun('git', ['write-tree'], {
+          cwd: root, stdio: 'pipe', env: indexEnv,
+        });
+      } finally {
+        fs.rmSync(indexRoot, { recursive: true, force: true });
+      }
+    };
+    const ordinaryHomeBaseMarker = '[GA-P1l normalized ordinary base]';
+    const buildOrdinaryBaseTree = (
+      root, featureTree, sourceTaskVersion, {
+        homeDelta = true, homeMarker = true, taskDelta = true,
+      } = {},
+    ) => {
+      const contentsByPath = [];
+      if (homeDelta) {
+        const normalizedHome = JSON.parse(ordinaryPlumbingRun('git', [
+          'show', `${featureTree}:${ordinaryHomePath}`,
+        ], { cwd: root }));
+        normalizeFixtureTaskFloor(normalizedHome, sourceTaskVersion);
+        if (homeMarker) {
+          normalizedHome.description = `${normalizedHome.description || ''} ${ordinaryHomeBaseMarker}`
+            .trim();
+        }
+        contentsByPath.push([ordinaryHomePath, `${JSON.stringify(normalizedHome, null, 2)}\n`]);
+      }
+      if (taskDelta) {
+        const featureTask = ordinaryPlumbingRun('git', [
+          'show', `${featureTree}:${ordinaryTaskPath}`,
+        ], { cwd: root });
+        contentsByPath.push([
+          ordinaryTaskPath,
+          `${featureTask}\n\n<!-- GA-P1l normalized ordinary base -->\n`,
+        ]);
+      }
+      return ordinaryTreeWithContents(root, featureTree, contentsByPath);
+    };
+    const ordinaryFloorAt = (treeish) => JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${treeish}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot })).depends_on.find((dep) => dep.name === 'task-entity').range;
+    const ordinaryTransitionOracle = (
+      baseTree, featureTree, sourceTaskVersion = taskManifest.version,
+    ) => {
+      assert.notStrictEqual(
+        baseTree,
+        featureTree,
+        'shallow ordinary release requires a non-empty exact-tree transition',
+      );
+      assert.strictEqual(
+        ordinaryFloorAt(baseTree),
+        `>=${sourceTaskVersion}`,
+        'shallow ordinary base normalizes Home to the live TaskEntity source version',
+      );
+      assert.deepStrictEqual(
+        ordinaryPlumbingRun('git', ['diff', '--name-only', baseTree, featureTree], {
+          cwd: workshopRoot,
+        }).split('\n').filter(Boolean).sort(),
+        [ordinaryHomePath, ordinaryTaskPath],
+        'shallow ordinary release attributes exactly Home and TaskEntity',
+      );
+    };
+    const ordinaryBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, workshopTree, taskManifest.version,
     );
-    const ordinaryHead = localCommitFromTree(workshopRoot, workshopTree, ordinaryBase, ordinaryTitle);
+    ordinaryTransitionOracle(ordinaryBaseTree, workshopTree);
+    count++;
+    const equalFloorHome = JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${workshopTree}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot }));
+    normalizeFixtureTaskFloor(equalFloorHome, taskManifest.version);
+    const equalFloorFeatureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+      ordinaryHomePath, `${JSON.stringify(equalFloorHome, null, 2)}\n`,
+    ]]);
+    eq(ordinaryFloorAt(equalFloorFeatureTree), `>=${taskManifest.version}`,
+      'GA-P1L-BUMPED-RELEASE-HEAD fixture starts with Home already at the live TaskEntity floor');
+    const equalFloorBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, equalFloorFeatureTree, taskManifest.version,
+    );
+    ordinaryTransitionOracle(equalFloorBaseTree, equalFloorFeatureTree);
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(
+          workshopRoot, equalFloorFeatureTree, taskManifest.version, { homeMarker: false },
+        ),
+        equalFloorFeatureTree,
+      ),
+      /attributes exactly Home and TaskEntity/,
+      'GA-P1L-RELEASE-PR-HOME-DELTA-COLLAPSE-MUTANT-KILLED floor-only normalization cannot omit Home',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(workshopTree, workshopTree),
+      /non-empty exact-tree transition/,
+      'GA-P1L-UNCHANGED-TREE-MUTANT-KILLED rejects reuse of the workshop tree as range base',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, taskManifest.version, {
+          taskDelta: false,
+        }),
+        workshopTree,
+      ),
+      /attributes exactly Home and TaskEntity/,
+      'GA-P1L-MISSING-TASK-DELTA-MUTANT-KILLED requires TaskEntity file attribution',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, taskManifest.version, {
+          homeDelta: false,
+        }),
+        workshopTree,
+      ),
+      /normalizes Home|attributes exactly Home and TaskEntity/,
+      'GA-P1L-MISSING-HOME-DELTA-MUTANT-KILLED requires Home file attribution',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, alternateSourceVersion),
+        workshopTree,
+      ),
+      /live TaskEntity source version/,
+      'GA-P1L-HISTORICAL-VERSION-MUTANT-KILLED rejects a stale normalization version',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(buildOrdinaryBaseTree.toString())
+        && !/\d+\.\d+\.\d+/.test(ordinaryTransitionOracle.toString()),
+    'GA-P1L-VERSION-RELATIVE-ORDINARY-RANGE contains no historical component versions');
+    ok(!ordinaryPlumbingCalls.some(([cmd, operation]) => cmd === 'git'
+        && ['fetch', 'pull', 'remote'].includes(operation)),
+    'GA-P1L-PARENT-FETCH-MUTANT-KILLED normalized range uses local plumbing only');
+
+    const ordinaryBase = localCommitFromTree(
+      workshopRoot, ordinaryBaseTree, workshopHead, 'test(autoloop): normalized ordinary base',
+    );
+    const ordinaryHead = localCommitFromTree(
+      workshopRoot, workshopTree, ordinaryBase, ordinaryReleaseTitle,
+    );
     eq(realRun('git', ['rev-parse', `${ordinaryHead}^{tree}`], { cwd: workshopRoot }), workshopTree,
       'GA-P1G3-SHALLOW-ORDINARY ordinary release binds the exact workshop HEAD tree');
     const ordinaryStatus = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot });
-    runIsolatedWorkshopSelfInstall({ root: workshopRoot }, ordinaryHead, ordinaryBase, ordinaryTitle, (cmd, args, opts = {}) => {
-      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') ordinaryDisposable.push(args[3]);
-      return realRun(cmd, args, opts);
-    });
+    const ordinaryHomeBefore = fs.readFileSync(path.join(workshopRoot, ordinaryHomePath));
+    const ordinaryTaskBefore = fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath));
+    const nextOrdinaryVersion = (version, title, {
+      parse = parseReleaseCommit,
+      level = releaseBumpLevel,
+      increment = incrementReleaseVersion,
+    } = {}) => {
+      const parsed = parse(title);
+      return increment(version, level(parsed, String(version).startsWith('0.')));
+    };
+    const expectedOrdinaryState = (title, hooks) => {
+      const task = nextOrdinaryVersion(taskManifest.version, title, hooks);
+      const home = nextOrdinaryVersion(homeManifest.version, title, hooks);
+      return {
+        task,
+        home,
+        taskPin: task,
+        homePin: home,
+      };
+    };
+    const computeOrdinaryState = (head, title, disposable) => {
+      let computed = null;
+      const trackedRun = (cmd, args, opts = {}) => {
+        if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+          disposable.push(args[3]);
+        }
+        const output = realRun(cmd, args, opts);
+        if (cmd === 'node'
+            && args[0] === 'scripts/release/compute-release.js'
+            && args[1] === '--write') {
+          const subscription = JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'ranch/platform-subscription.json'), 'utf8',
+          ));
+          computed = {
+            task: JSON.parse(fs.readFileSync(
+              path.join(opts.cwd, 'platform/mechanisms/task-entity/manifest.json'), 'utf8',
+            )).version,
+            home: JSON.parse(fs.readFileSync(
+              path.join(opts.cwd, ordinaryHomePath), 'utf8',
+            )).version,
+            taskPin: subscription.mechanisms.find((item) => item.name === 'task-entity').version,
+            homePin: subscription.blueprints.find((item) => item.name === 'home').version,
+          };
+        }
+        return output;
+      };
+      runIsolatedWorkshopSelfInstall(
+        { root: workshopRoot }, head, ordinaryBase, title, trackedRun,
+      );
+      return computed;
+    };
+    const computedOrdinaryState = computeOrdinaryState(
+      ordinaryHead, ordinaryReleaseTitle, ordinaryDisposable,
+    );
+    eq(computedOrdinaryState, expectedOrdinaryState(ordinaryReleaseTitle),
+      'GA-P1L2-SHALLOW-COMPUTED-STATE writes canonically classified TaskEntity/Home versions and pins');
+    eq(nextOrdinaryVersion(taskManifest.version, exactFeatureTitle), computedTaskVersion,
+      'GA-P1L2-FUTURE-FEAT-COMPUTED-STATE computes TaskEntity next minor without a historical literal');
+    eq(nextOrdinaryVersion(homeManifest.version, exactFeatureTitle), computedHomeVersion,
+      'GA-P1L2-FUTURE-FEAT-COMPUTED-STATE computes Home next minor without a historical literal');
+
+    const ordinaryTitleCases = [
+      ['FEAT', exactFeatureTitle],
+      ['FIX', 'fix(task-entity): preserve shallow component attribution'],
+      ['BREAKING-FIX', 'fix(task-entity)!: replace the shallow component contract'],
+      ['BREAKING-PERF', 'perf(task-entity)!: replace the shallow performance contract'],
+      ['BREAKING-REFACTOR', 'refactor(task-entity)!: replace the shallow ownership contract'],
+    ];
+    const computedOrdinaryCases = new Map();
+    for (const [label, title] of ordinaryTitleCases) {
+      ok(isReleasableTitle(title),
+        `GA-P1L2-${label}-TITLE is accepted by the production release-title classifier`);
+      const fixtureHead = localCommitFromTree(
+        workshopRoot, workshopTree, ordinaryBase, title,
+      );
+      const disposable = [];
+      computedOrdinaryCases.set(label, computeOrdinaryState(fixtureHead, title, disposable));
+      eq(computedOrdinaryCases.get(label), expectedOrdinaryState(title),
+        `GA-P1L2-${label}-CANONICAL-STATE predicts exact production TaskEntity/Home versions and pins`);
+      ok(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        `GA-P1L2-${label}-CANONICAL-STATE target-cleans its disposable release worktree`);
+    }
+    const breakingFixTitle = ordinaryTitleCases.find(([label]) => label === 'BREAKING-FIX')[1];
+    const canonicalBreakingState = computedOrdinaryCases.get('BREAKING-FIX');
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          parse: () => parseReleaseCommit('fix(task-entity): parser bypass'),
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-CANONICAL-PARSE-MUTANT-KILLED bypassing parseCommit loses the breaking marker',
+    );
+    count++;
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          level: (parsed) => (parsed && parsed.type === 'feat' ? 'minor' : 'patch'),
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-NONFEAT-PATCH-MUTANT-KILLED the predecessor feat-versus-patch shortcut misclassifies breaking fix',
+    );
+    count++;
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          increment: (version) => version,
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-CANONICAL-INCREMENT-MUTANT-KILLED bypassing semver inc cannot predict computed release state',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(nextOrdinaryVersion.toString())
+        && !/\d+\.\d+\.\d+/.test(expectedOrdinaryState.toString()),
+    'GA-P1L2-CANONICAL-SEMVER-BINDING contains no historical component versions');
     eq(realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot }), workshopHead,
       'GA-P1G-ORDINARY-RELEASE ordinary exact HEAD remains unchanged');
     eq(realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot }), ordinaryStatus,
       'GA-P1G-ORDINARY-RELEASE ordinary claimed worktree remains byte-clean');
+    ok(fs.readFileSync(path.join(workshopRoot, ordinaryHomePath)).equals(ordinaryHomeBefore)
+        && fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath)).equals(ordinaryTaskBefore),
+    'GA-P1L-SOURCE-BYTE-CLEAN normalized base and computed release preserve exact source bytes');
     ok(ordinaryDisposable.length === 1 && !fs.existsSync(ordinaryDisposable[0]),
       'GA-P1G-ORDINARY-RELEASE ordinary release install still succeeds and cleans up');
   } finally {
