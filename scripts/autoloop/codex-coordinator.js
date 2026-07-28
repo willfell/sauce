@@ -2795,7 +2795,7 @@ function assertReleasableTitle(title) {
   }
 }
 
-function gateReceiptStatus(record, headSha, baseSha = null) {
+function gateReceiptStatus(record, headSha, baseSha = null, prTitle = null) {
   const receipt = record && record.gate_receipt;
   if (!receipt) return { valid: false, reason: 'required gate receipt is missing' };
   if (receipt.head_sha !== headSha) {
@@ -2807,6 +2807,15 @@ function gateReceiptStatus(record, headSha, baseSha = null) {
   }
   if (baseSha && receipt.base_sha !== baseSha) {
     return { valid: false, reason: `gate receipt base is stale (${receipt.base_sha} != ${baseSha})` };
+  }
+  if (!receipt.prospective_pr_title || !isReleasableTitle(receipt.prospective_pr_title)) {
+    return { valid: false, reason: 'gate receipt has no releasable prospective PR title' };
+  }
+  if (prTitle !== null && prTitle !== receipt.prospective_pr_title) {
+    return {
+      valid: false,
+      reason: `PR title "${prTitle}" != gate-verified prospective title "${receipt.prospective_pr_title}"`,
+    };
   }
   const required = ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped'];
   const missing = required.filter((name) => !receipt.checks || receipt.checks[name] !== 'pass');
@@ -2827,34 +2836,87 @@ function pathCoveredByTouchZones(file, zones) {
   return pathZones.some((zone) => normalized === zone || normalized.startsWith(`${zone}/`));
 }
 
-function runIsolatedWorkshopSelfInstall(ctx, headSha, run = sh) {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-autoloop-self-install-'));
-  fs.rmSync(temp, { recursive: true, force: true });
+function runIsolatedWorkshopSelfInstall(ctx, headSha, baseSha, prospectiveTitle, run = sh) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-autoloop-self-install-'));
+  let temp = null;
+  let setupComplete = false;
   let added = false;
   let failure = null;
+  const appendFailure = (err) => {
+    failure = failure ? new Error(`${failure.message}; ${err.message}`) : err;
+  };
   try {
+    temp = fs.realpathSync.native(tempRoot);
+    fs.rmSync(temp, { recursive: true, force: true });
+    setupComplete = true;
     run('git', ['worktree', 'add', '--detach', temp, headSha], { cwd: ctx.root, stdio: 'pipe' });
     added = true;
+    const headTree = run('git', ['rev-parse', `${headSha}^{tree}`], { cwd: temp, stdio: 'pipe' });
+    const syntheticSha = run('git', ['commit-tree', headTree, '-p', baseSha, '-m', prospectiveTitle], {
+      cwd: temp,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Sauce Release Gate',
+        GIT_AUTHOR_EMAIL: 'sauce-release-gate@example.invalid',
+        GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+        GIT_COMMITTER_NAME: 'Sauce Release Gate',
+        GIT_COMMITTER_EMAIL: 'sauce-release-gate@example.invalid',
+        GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
+      },
+    });
+    run('git', ['reset', '--hard', syntheticSha], { cwd: temp, stdio: 'pipe' });
+    run('node', ['scripts/release/compute-release.js', '--write'], { cwd: temp, stdio: 'pipe' });
     run('node', ['platform/install.js', '--vault', '.', '--auto-approve'], { cwd: temp, stdio: 'pipe' });
   } catch (err) {
     failure = err;
   } finally {
-    let registered = added;
-    if (!registered) {
+    if (!setupComplete) {
       try {
-        const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
-        registered = String(listed).split('\n').some((line) => line === `worktree ${temp}`);
+        fs.rmSync(tempRoot, { recursive: true, force: true });
       } catch (err) {
-        failure = failure ? new Error(`${failure.message}; could not inspect disposable worktree registration: ${err.message}`) : err;
+        appendFailure(new Error(`failed to delete disposable self-install setup path ${tempRoot}: ${err.message}`));
+        try {
+          fs.rmSync(tempRoot, { recursive: true, force: true });
+        } catch (retryErr) {
+          appendFailure(new Error(`failed target-safe retry for disposable self-install setup path ${tempRoot}: ${retryErr.message}`));
+        }
+      }
+    } else {
+      let registered = added;
+      let registrationInspectionFailed = false;
+      if (!registered) {
+        try {
+          const listed = run('git', ['worktree', 'list', '--porcelain'], { cwd: ctx.root, stdio: 'pipe' });
+          registered = String(listed).split('\n').some((line) => line === `worktree ${temp}`);
+        } catch (err) {
+          registrationInspectionFailed = true;
+          appendFailure(new Error(`could not inspect disposable worktree registration: ${err.message}`));
+        }
+      }
+      if (registered) {
+        try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }
+        catch (err) {
+          appendFailure(new Error(`failed to remove disposable self-install worktree ${temp}: ${err.message}`));
+          try {
+            run('git', ['worktree', 'remove', '--force', '--force', temp], { cwd: ctx.root, stdio: 'pipe' });
+          } catch (retryErr) {
+            appendFailure(new Error(`failed target-safe retry for disposable self-install worktree ${temp}: ${retryErr.message}`));
+          }
+        }
+      } else if (registrationInspectionFailed) {
+        try {
+          run('git', ['worktree', 'remove', '--force', '--force', temp], { cwd: ctx.root, stdio: 'pipe' });
+        } catch (err) {
+          appendFailure(new Error(`failed target-safe cleanup for uninspectable disposable worktree ${temp}: ${err.message}`));
+        }
+      } else {
+        try { fs.rmSync(temp, { recursive: true, force: true }); }
+        catch (err) {
+          appendFailure(new Error(`failed to delete disposable self-install path ${temp}: ${err.message}`));
+        }
       }
     }
-    if (registered) {
-      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }
-      catch (err) {
-        const cleanup = new Error(`failed to remove disposable self-install worktree ${temp}: ${err.message}`);
-        failure = failure ? new Error(`${failure.message}; ${cleanup.message}`) : cleanup;
-      }
-    } else fs.rmSync(temp, { recursive: true, force: true });
   }
   if (failure) throw failure;
 }
@@ -3191,7 +3253,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
   }
   if (record.phase === 'feature_pr') {
     const pr = viewPr(REPO, record.feature_pr, ctx.root);
-    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);
+    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid, pr.title);
     if (pr.state === 'MERGED') {
       if (!gateStatus.valid) {
         record.phase = 'needs-inspection';
@@ -4880,6 +4942,8 @@ async function commandVerifyGates(ctx, args, deps = {}) {
     const baseRef = 'origin/main';
     run('git', ['fetch', 'origin', 'main', '--quiet'], { cwd: record.worktree, stdio: 'pipe' });
     const baseSha = run('git', ['rev-parse', baseRef], { cwd: record.worktree });
+    const prospectiveTitle = run('git', ['show', '-s', '--format=%s', headSha], { cwd: record.worktree, stdio: 'pipe' });
+    assertReleasableTitle(prospectiveTitle);
     const paths = run('git', ['diff', '--name-only', `${baseSha}...${headSha}`], { cwd: record.worktree }).split('\n').map((s) => s.trim()).filter(Boolean);
     const outside = paths.filter((file) => !pathCoveredByTouchZones(file, record.touch_zones));
     if (outside.length) throw new Error(`diff exceeds declared touch zones: ${outside.join(', ')}`);
@@ -4895,7 +4959,7 @@ async function commandVerifyGates(ctx, args, deps = {}) {
 
     const receipt = {
       status: 'fail', reason: 'gate verification did not finish', head_sha: headSha,
-      base_ref: baseRef, base_sha: baseSha, paths,
+      base_ref: baseRef, base_sha: baseSha, prospective_pr_title: prospectiveTitle, paths,
       checks: {}, reviews: {}, started_at: new Date().toISOString(),
       ...(mergeOnly ? { merge_only: true } : {}),
     };
@@ -4939,7 +5003,7 @@ async function commandVerifyGates(ctx, args, deps = {}) {
       } else {
         run('npm', ['run', 'release:preflight'], { cwd: record.worktree, stdio: 'pipe' });
         receipt.checks.release_preflight = 'pass';
-        runSelfInstall(ctx, headSha, run);
+        runSelfInstall(ctx, headSha, baseSha, prospectiveTitle, run);
         receipt.checks.workshop_self_install = 'pass';
         run('npm', ['run', 'release:preflight-bumped'], { cwd: record.worktree, stdio: 'pipe' });
         receipt.checks.release_preflight_bumped = 'pass';
@@ -4950,7 +5014,10 @@ async function commandVerifyGates(ctx, args, deps = {}) {
       receipt.status = 'pass'; receipt.reason = 'all required gates passed for this commit'; receipt.completed_at = new Date().toISOString();
       record.gate_receipt = receipt;
       persist(ctx, state, record);
-      return { action: 'gates-passed', card, head_sha: headSha, base_sha: baseSha, behavioral: receipt.behavioral, checks: receipt.checks };
+      return {
+        action: 'gates-passed', card, head_sha: headSha, base_sha: baseSha,
+        prospective_pr_title: prospectiveTitle, behavioral: receipt.behavioral, checks: receipt.checks,
+      };
     } catch (err) {
       receipt.reason = err.message; receipt.completed_at = new Date().toISOString();
       record.gate_receipt = receipt;
@@ -5005,6 +5072,10 @@ async function commandRecordPr(ctx, args, deps = {}) {
     const gateStatus = gateReceiptStatus(record, localHead, pr.baseRefOid);
     if (!gateStatus.valid) {
       refuse('record-pr-refused', 'gate_invalid', `record-pr refused: ${gateStatus.reason}`);
+    }
+    if (pr.title !== record.gate_receipt.prospective_pr_title) {
+      refuse('record-pr-refused', 'title_mismatch',
+        `PR title "${pr.title}" != gate-verified prospective title "${record.gate_receipt.prospective_pr_title}"`);
     }
     record.feature_pr = number; record.feature_url = pr.url; record.phase = 'feature_pr'; record.pr_recorded_at = new Date().toISOString();
     persist(ctx, state, record);
