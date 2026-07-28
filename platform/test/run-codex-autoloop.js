@@ -7,8 +7,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { AsyncLocalStorage, createHook } = require('async_hooks');
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const Module = require('module');
 const { PassThrough } = require('stream');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
@@ -922,14 +923,19 @@ ok(isReleasableTitle('feat!: replace the loop contract'), 'breaking feature titl
 ok(isReleasableTitle('perf(coordinator): reduce status latency'), 'release classifier accepts other patch types');
 ok(!isReleasableTitle('test(preflight): guard orphan harnesses'), 'test-only title cannot enter the deploy loop');
 ok(!isReleasableTitle('docs(autoloop): explain mobile prompts'), 'docs-only title cannot enter the deploy loop');
-const passingReceipt = (head = 'head42', behavioral = true) => ({
+const passingReceipt = (head = 'head42', behavioral = true, prospectiveTitle = 'fix(x): y') => ({
   status: 'pass', head_sha: head, base_ref: 'origin/main', base_sha: 'base42', behavioral,
+  prospective_pr_title: prospectiveTitle,
   checks: { adequacy: 'pass', release_preflight: 'pass', workshop_self_install: 'pass', release_preflight_bumped: 'pass' },
   reviews: behavioral ? Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, head_sha: head, verdict: 'pass' }])) : {},
 });
 ok(gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42').valid, 'complete current gate receipt is valid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt('old') }, 'head42').valid, 'stale gate receipt is invalid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'new-base').valid, 'stale base receipt is invalid for an open PR');
+ok(!gateReceiptStatus({ gate_receipt: { ...passingReceipt(), prospective_pr_title: undefined } }, 'head42').valid,
+  'gate receipt without a prospective PR title is invalid');
+ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'base42', 'fix(x): changed').valid,
+  'gate receipt is invalid after the PR title changes');
 ok(pathCoveredByTouchZones('platform/mechanisms/x/a.js', ['platform/mechanisms/x']), 'touch zone covers descendants');
 ok(!pathCoveredByTouchZones('platform/test/run-x.js', ['platform/mechanisms/x']), 'touch zone rejects undeclared files');
 ok(pathCoveredByTouchZones('scripts/autoloop/gate.js', ['scripts']), 'top-level directory touch zone covers descendants');
@@ -1378,7 +1384,7 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, 
   withLock: immediateCardLock,
 }), /gate receipt is missing/, 'record-pr refuses a clean matching PR without gate receipts');
 
-recordState.cards.A.gate_receipt = passingReceipt();
+recordState.cards.A.gate_receipt = passingReceipt('head42', true, 'fix(autoloop): guard release triggering');
 await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, baseRefOid: 'new-base', title: 'fix(autoloop): require gate receipts' }),
@@ -1389,6 +1395,14 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, 
 
 const events = [];
 const prLocks = [];
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => ({ ...basePr, title: 'fix(autoloop): edited after verification' }),
+  sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
+  writeState: () => { writes++; },
+  withLock: immediateCardLock,
+}), (error) => error.code === 'title_mismatch',
+'GA-P1G-TITLE-BINDING record-pr refuses a releasable title that differs byte-for-byte from the gate receipt');
 const accepted = await commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
@@ -1643,15 +1657,20 @@ reviewState.cards.Review.reviews = Object.fromEntries(['correctness', 'regressio
   lens, verdict: 'pass', refuted: false, summary: `${lens} review found no release-blocking defect.`, head_sha: 'review-head',
 }]));
 const gateCalls = [];
+let selfInstallOperands = null;
 const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review', base: 'HEAD' }, {
   readState: () => reviewState,
   writeState: () => {},
   withLock: async (_ctx, name, fn) => { gateCalls.push(name); return fn(); },
-  runIsolatedWorkshopSelfInstall: () => { gateCalls.push('self-install'); },
+  runIsolatedWorkshopSelfInstall: (_ctx, head, base, title) => {
+    gateCalls.push('self-install');
+    selfInstallOperands = { head, base, title };
+  },
   sh: (cmd, args) => {
     if (cmd === 'git' && args[0] === 'status') return '';
     if (cmd === 'git' && args[0] === 'fetch') { gateCalls.push('fetch-main'); return ''; }
     if (cmd === 'git' && args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'base-current' : 'review-head';
+    if (cmd === 'git' && args[0] === 'show') return 'fix(autoloop): verify release provenance';
     if (cmd === 'git' && args[0] === 'diff') return 'scripts/autoloop/codex-coordinator.js\nplatform/test/run-codex-autoloop.js';
     if (cmd === 'node' && args[0] === 'scripts/autoloop/gate.js') {
       eq(args[args.indexOf('--base') + 1], 'base-current', 'verify-gates ignores caller base overrides and uses fetched origin/main');
@@ -1666,6 +1685,11 @@ eq(gateCalls, [legacyCardGateLockName('Review'), cardGateLockName('Review'), 'fe
   'verify-gates serializes through migration-compatible and exact card identity, fetches main, and owns every deterministic release check');
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
+eq(reviewState.cards.Review.gate_receipt.prospective_pr_title, 'fix(autoloop): verify release provenance',
+  'combined receipt records the exact prospective squash title');
+eq(selfInstallOperands, {
+  head: 'review-head', base: 'base-current', title: 'fix(autoloop): verify release provenance',
+}, 'verify-gates binds self-install to exact head, fetched base, and prospective title');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
 
 const advanceState = emptyState();
@@ -1722,14 +1746,18 @@ eq((await commandAdvance({ root: '/workshop' }, { card: 'Parked', 'lease-seconds
   withLock: immediateCardLock, readState: () => parkedAdvanceState, emit: () => {},
 })).action, 'parked', 'advance command refuses to treat a parked card as implementation');
 
-assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+assert.throws(() => runIsolatedWorkshopSelfInstall(
+  { root: '/workshop' }, 'head42', 'base42', 'fix(x): y', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');
+  if (cmd === 'git' && args[0] === 'rev-parse') return 'tree42';
+  if (cmd === 'git' && args[0] === 'commit-tree') return 'synthetic42';
   return '';
 }), /failed to remove disposable self-install worktree .*cleanup denied/, 'self-install gate surfaces disposable worktree cleanup failures');
 
 let partialRemoved = false;
 let partialPath = '';
-assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+assert.throws(() => runIsolatedWorkshopSelfInstall(
+  { root: '/workshop' }, 'head42', 'base42', 'fix(x): y', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
     partialPath = args[3];
     throw new Error('checkout failed after registration');
@@ -1741,6 +1769,736 @@ assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head4
   return '';
 }), /checkout failed after registration/, 'self-install preserves the original partial-add failure');
 ok(partialRemoved, 'self-install unregisters a partially-added disposable worktree');
+
+// GA-P1g — the deploy-bound workshop gate validates exactly the state the
+// release bumper will publish. The real fixture below starts from an exact
+// detached HEAD, raises Home's TaskEntity floor one minor, and commits a real
+// TaskEntity feature. Raw installation must reject that source state; the
+// production helper must compute the release in a second disposable worktree,
+// run the real installer there, and leave the claimed fixture byte-clean.
+{
+  const realRun = (cmd, args, opts = {}) => execFileSync(cmd, args, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...opts,
+  }).trim();
+  const releaseGateCommitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Sauce Release Gate',
+    GIT_AUTHOR_EMAIL: 'sauce-release-gate@example.invalid',
+    GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+    GIT_COMMITTER_NAME: 'Sauce Release Gate',
+    GIT_COMMITTER_EMAIL: 'sauce-release-gate@example.invalid',
+    GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
+  };
+  const localCommitFromTree = (cwd, tree, parent, title) => realRun('git', [
+    'commit-tree', tree, '-p', parent, '-m', title,
+  ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
+
+  // Actions checks out PRs at depth 1. Prove the ordinary release fixture can
+  // build a complete local base/feature pair from that one exact HEAD without
+  // fetching its absent parent or changing the checked-out branch.
+  const shallowSource = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-shallow-source-'));
+  const shallowClone = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-shallow-clone-'));
+  fs.rmSync(shallowClone, { recursive: true, force: true });
+  try {
+    realRun('git', ['init', '--quiet', '--initial-branch=main'], { cwd: shallowSource, stdio: 'pipe' });
+    fs.writeFileSync(path.join(shallowSource, 'fixture.txt'), 'base\n');
+    realRun('git', ['add', 'fixture.txt'], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test', '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '--quiet', '-m', 'fix(test): shallow base',
+    ], { cwd: shallowSource, stdio: 'pipe' });
+    fs.writeFileSync(path.join(shallowSource, 'fixture.txt'), 'feature\n');
+    realRun('git', ['add', 'fixture.txt'], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test', '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '--quiet', '-m', 'fix(test): shallow feature',
+    ], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', ['clone', '--quiet', '--depth=1', '--no-local', shallowSource, shallowClone], {
+      cwd: os.tmpdir(), stdio: 'pipe',
+    });
+    eq(realRun('git', ['rev-parse', '--is-shallow-repository'], { cwd: shallowClone }), 'true',
+      'GA-P1G3-SHALLOW-ORDINARY oracle executes in a real depth-1 clone');
+    assert.throws(
+      () => realRun('git', ['rev-parse', 'HEAD^'], { cwd: shallowClone, stdio: 'pipe' }),
+      /Command failed/,
+      'GA-P1G3-SHALLOW-ORDINARY confirms the checkout parent object is absent',
+    );
+    count++;
+    const shallowHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: shallowClone });
+    const shallowTree = realRun('git', ['rev-parse', `${shallowHead}^{tree}`], { cwd: shallowClone });
+    const localBase = localCommitFromTree(
+      shallowClone, shallowTree, shallowHead, 'test(autoloop): local ordinary base',
+    );
+    const localFeature = localCommitFromTree(
+      shallowClone, shallowTree, localBase, 'fix(autoloop): local ordinary feature',
+    );
+    ok(/^[0-9a-f]{40}$/.test(localBase),
+      'GA-P1G3-SHALLOW-ORDINARY creates a valid local base commit');
+    eq(realRun('git', ['rev-parse', `${localBase}^`], { cwd: shallowClone }), shallowHead,
+      'GA-P1G3-SHALLOW-ORDINARY local base extends the only available exact HEAD');
+    eq(realRun('git', ['rev-parse', `${localFeature}^`], { cwd: shallowClone }), localBase,
+      'GA-P1G3-SHALLOW-ORDINARY local feature has the constructed base as its exact parent');
+    eq(realRun('git', ['rev-parse', `${localFeature}^{tree}`], { cwd: shallowClone }), shallowTree,
+      'GA-P1G3-SHALLOW-ORDINARY local feature preserves the exact checked-out tree');
+    eq(localCommitFromTree(
+      shallowClone, shallowTree, localBase, 'fix(autoloop): local ordinary feature',
+    ), localFeature, 'GA-P1G3-SHALLOW-ORDINARY local feature construction is deterministic');
+  } finally {
+    fs.rmSync(shallowClone, { recursive: true, force: true });
+    fs.rmSync(shallowSource, { recursive: true, force: true });
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-claim-'));
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  const rawRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-raw-'));
+  fs.rmSync(rawRoot, { recursive: true, force: true });
+  const ordinaryDisposable = [];
+  const releaseDisposable = [];
+  const mismatchedDisposable = [];
+  let fixtureAdded = false;
+  let rawAdded = false;
+  try {
+    realRun('git', ['worktree', 'add', '--detach', fixtureRoot, 'HEAD'], {
+      cwd: path.resolve(__dirname, '../..'), stdio: 'pipe',
+    });
+    fixtureAdded = true;
+    const fixtureBase = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    const homeManifestPath = path.join(fixtureRoot, 'platform/blueprints/home/manifest.json');
+    const taskManifestPath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/manifest.json');
+    const taskReadmePath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/README.md');
+    const homeManifest = JSON.parse(fs.readFileSync(homeManifestPath, 'utf8'));
+    const taskManifest = JSON.parse(fs.readFileSync(taskManifestPath, 'utf8'));
+    const [taskMajor, taskMinor] = taskManifest.version.split('.').map(Number);
+    const computedTaskVersion = `${taskMajor}.${taskMinor + 1}.0`;
+    const taskDependency = homeManifest.depends_on.find((dep) => dep.name === 'task-entity');
+    ok(taskDependency && /^\d+\.\d+\.\d+$/.test(taskManifest.version),
+      'GA-P1G-REAL-RELEASE-FIXTURE starts from a versioned shipping TaskEntity dependency');
+    fs.appendFileSync(taskReadmePath, '\n<!-- GA-P1g computed-release fixture -->\n');
+    realRun('git', ['add', 'platform/mechanisms/task-entity/README.md'], { cwd: fixtureRoot, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'fix(task-entity): prepare multi-commit release fixture',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    taskDependency.range = `>=${computedTaskVersion}`;
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    realRun('git', ['add', 'platform/blueprints/home/manifest.json'], { cwd: fixtureRoot, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'feat(task-entity): exercise computed release floor',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixtureHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    const claimedHeadBefore = fixtureHead;
+    const claimedStatusBefore = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: fixtureRoot });
+    const claimedHomeBefore = fs.readFileSync(homeManifestPath);
+    const claimedTaskBefore = fs.readFileSync(taskReadmePath);
+    eq(claimedStatusBefore, '', 'GA-P1G-CLAIM-BYTE-CLEAN fixture claim starts clean');
+
+    realRun('git', ['worktree', 'add', '--detach', rawRoot, fixtureHead], {
+      cwd: fixtureRoot, stdio: 'pipe',
+    });
+    rawAdded = true;
+    let rawInstallError = null;
+    try {
+      realRun('node', ['platform/install.js', '--vault', '.', '--auto-approve'], {
+        cwd: rawRoot, stdio: 'pipe',
+      });
+    } catch (error) {
+      rawInstallError = error;
+    }
+    const rawInstallOutput = `${rawInstallError && rawInstallError.stdout || ''}\n${rawInstallError && rawInstallError.stderr || ''}`;
+    ok(rawInstallError && rawInstallError.status === 1,
+      'GA-P1G-RAW-FLOOR-FAIL real installer rejects the uncomputed same-release floor');
+    ok(rawInstallOutput.includes(`depends on task-entity >=${computedTaskVersion} but subscription pins task-entity@${taskManifest.version}`),
+      'GA-P1G-RAW-FLOOR-FAIL rejection is the exact TaskEntity dependency floor');
+    realRun('git', ['worktree', 'remove', '--force', rawRoot], { cwd: fixtureRoot, stdio: 'pipe' });
+    rawAdded = false;
+
+    const releaseRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') releaseDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    runIsolatedWorkshopSelfInstall(
+      { root: fixtureRoot }, fixtureHead, fixtureBase,
+      'feat(task-entity): exercise computed release floor', releaseRun,
+    );
+    eq(releaseDisposable.length, 1,
+      'GA-P1G-COMPUTED-RELEASE-INSTALL production gate creates one disposable release worktree');
+    ok(!fs.existsSync(releaseDisposable[0]),
+      'GA-P1G-COMPUTED-RELEASE-INSTALL successful release-state worktree is removed');
+    ok(!realRun('git', ['worktree', 'list', '--porcelain'], { cwd: fixtureRoot }).includes(`worktree ${releaseDisposable[0]}`),
+      'GA-P1G-COMPUTED-RELEASE-INSTALL successful release-state registration is removed');
+    eq(realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot }), claimedHeadBefore,
+      'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed HEAD unchanged');
+    eq(realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: fixtureRoot }), claimedStatusBefore,
+      'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed status unchanged');
+    ok(fs.readFileSync(homeManifestPath).equals(claimedHomeBefore)
+        && fs.readFileSync(taskReadmePath).equals(claimedTaskBefore),
+    'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed source bytes unchanged');
+
+    const mismatchedRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') mismatchedDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    let mismatchError = null;
+    try {
+      runIsolatedWorkshopSelfInstall(
+        { root: fixtureRoot }, fixtureHead, fixtureBase,
+        'fix(task-entity): misclassified prospective squash', mismatchedRun,
+      );
+    } catch (error) {
+      mismatchError = error;
+    }
+    const mismatchOutput = `${mismatchError && mismatchError.message || ''}\n`
+      + `${mismatchError && mismatchError.stdout || ''}\n${mismatchError && mismatchError.stderr || ''}`;
+    ok(mismatchError && /depends on task-entity .* but subscription pins task-entity@/.test(mismatchOutput),
+      'GA-P1G-PROVENANCE-MISMATCH feature-bearing branch history cannot make a fix-title synthetic squash pass');
+    ok(mismatchedDisposable.length === 1 && !fs.existsSync(mismatchedDisposable[0]),
+      'GA-P1G-PROVENANCE-MISMATCH failed synthetic release worktree is target-cleaned');
+
+    const workshopRoot = path.resolve(__dirname, '../..');
+    const workshopHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot });
+    const workshopTree = realRun('git', ['rev-parse', `${workshopHead}^{tree}`], { cwd: workshopRoot });
+    const ordinaryTitle = realRun('git', ['show', '-s', '--format=%s', workshopHead], { cwd: workshopRoot });
+    const ordinaryBase = localCommitFromTree(
+      workshopRoot, workshopTree, workshopHead, 'test(autoloop): local ordinary base',
+    );
+    const ordinaryHead = localCommitFromTree(workshopRoot, workshopTree, ordinaryBase, ordinaryTitle);
+    eq(realRun('git', ['rev-parse', `${ordinaryHead}^{tree}`], { cwd: workshopRoot }), workshopTree,
+      'GA-P1G3-SHALLOW-ORDINARY ordinary release binds the exact workshop HEAD tree');
+    const ordinaryStatus = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot });
+    runIsolatedWorkshopSelfInstall({ root: workshopRoot }, ordinaryHead, ordinaryBase, ordinaryTitle, (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') ordinaryDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    });
+    eq(realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot }), workshopHead,
+      'GA-P1G-ORDINARY-RELEASE ordinary exact HEAD remains unchanged');
+    eq(realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot }), ordinaryStatus,
+      'GA-P1G-ORDINARY-RELEASE ordinary claimed worktree remains byte-clean');
+    ok(ordinaryDisposable.length === 1 && !fs.existsSync(ordinaryDisposable[0]),
+      'GA-P1G-ORDINARY-RELEASE ordinary release install still succeeds and cleans up');
+  } finally {
+    if (rawAdded) {
+      try { realRun('git', ['worktree', 'remove', '--force', rawRoot], { cwd: fixtureRoot, stdio: 'pipe' }); } catch (_) {}
+    }
+    if (fixtureAdded) {
+      try {
+        realRun('git', ['worktree', 'remove', '--force', fixtureRoot], {
+          cwd: path.resolve(__dirname, '../..'), stdio: 'pipe',
+        });
+      } catch (_) {}
+    }
+    fs.rmSync(rawRoot, { recursive: true, force: true });
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+// Production-bound failure and semantic-mutation contract. The shell model
+// distinguishes feature-branch history from the one prospective squash, and
+// keeps an unrelated worktree registration as a cleanup-side-effect sentinel.
+{
+  const p1gCoordinatorPath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  const productionSource = fs.readFileSync(p1gCoordinatorPath, 'utf8');
+  const loadMutatedCoordinator = (label, before, after) => {
+    eq(productionSource.split(before).length - 1, 1,
+      `GA-P1G-${label} mutation anchor matches production exactly once`);
+    const mutantPath = path.join(path.dirname(p1gCoordinatorPath), `ga-p1g-${label.toLowerCase()}.js`);
+    const mutantModule = new Module(mutantPath);
+    mutantModule.filename = mutantPath;
+    mutantModule.paths = Module._nodeModulePaths(path.dirname(p1gCoordinatorPath));
+    mutantModule._compile(productionSource.replace(before, after), mutantPath);
+    return mutantModule.exports;
+  };
+  const partialAddCanonicalPathOracle = (helper) => {
+    const originalTmpdir = os.tmpdir;
+    let aliasFixtureRoot = null;
+    let aliasTmpRoot;
+    let physicalTmpRoot;
+    if (process.platform === 'darwin') {
+      aliasTmpRoot = '/var/tmp';
+      physicalTmpRoot = fs.realpathSync.native(aliasTmpRoot);
+      assert.strictEqual(physicalTmpRoot, '/private/var/tmp',
+        'GA-P1G2-MACOS-WORKTREE-PATH-ALIAS uses the real /var -> /private/var alias');
+    } else {
+      aliasFixtureRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'ga-p1g2-path-alias-'));
+      physicalTmpRoot = path.join(aliasFixtureRoot, 'private-var');
+      aliasTmpRoot = path.join(aliasFixtureRoot, 'var');
+      fs.mkdirSync(physicalTmpRoot);
+      fs.symlinkSync(physicalTmpRoot, aliasTmpRoot, 'dir');
+    }
+    const state = {
+      registered: false, registeredPath: '', addTarget: '', removeTarget: '',
+    };
+    const physicalRegistration = (target) => {
+      if (target === aliasTmpRoot || target.startsWith(`${aliasTmpRoot}${path.sep}`)) {
+        return path.join(physicalTmpRoot, path.relative(aliasTmpRoot, target));
+      }
+      return target;
+    };
+    const run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.addTarget = args[3];
+        state.registeredPath = physicalRegistration(state.addTarget);
+        state.registered = true;
+        throw new Error('checkout failed after canonical registration');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return state.registered
+          ? `worktree ${state.registeredPath}\nHEAD head42\ndetached\n`
+          : '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.removeTarget = args[args.length - 1];
+        if (state.removeTarget !== state.registeredPath) throw new Error('noncanonical exact-target removal');
+        state.registered = false;
+        return '';
+      }
+      throw new Error(`unexpected canonical-path fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    os.tmpdir = () => aliasTmpRoot;
+    try {
+      assert.throws(() => helper(
+        { root: '/claimed' }, 'head42', 'base42', 'fix(autoloop): canonical cleanup', run,
+      ), /checkout failed after canonical registration/);
+    } finally {
+      os.tmpdir = originalTmpdir;
+      if (aliasFixtureRoot) fs.rmSync(aliasFixtureRoot, { recursive: true, force: true });
+    }
+    assert.strictEqual(state.registered, false,
+      'partial registration leaked through the worktree path alias');
+    assert.strictEqual(state.addTarget, state.registeredPath,
+      'worktree add must receive the canonical physical target');
+    assert.strictEqual(state.removeTarget, state.registeredPath,
+      'partial-add cleanup must remove the exact canonical registered target');
+  };
+  partialAddCanonicalPathOracle(runIsolatedWorkshopSelfInstall);
+  count += 3;
+  const canonicalTempLine = '    temp = fs.realpathSync.native(tempRoot);';
+  const lexicalTempMutant = loadMutatedCoordinator(
+    'MACOS-WORKTREE-PATH-ALIAS-MUTANT-KILLED', canonicalTempLine,
+    '    temp = tempRoot;',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => partialAddCanonicalPathOracle(lexicalTempMutant),
+    /partial registration leaked through the worktree path alias/,
+    'GA-P1G2-MACOS-WORKTREE-PATH-ALIAS-MUTANT-KILLED requires physical target identity');
+  count++;
+  const registrationInspectionFailureOracle = (helper, cleanupFails = false) => {
+    const state = {
+      registered: false, registeredPath: '', addTarget: '', cleanupArgs: null,
+    };
+    const run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.addTarget = args[3];
+        state.registeredPath = args[3];
+        state.registered = true;
+        throw new Error('partial add failed after registration');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        throw new Error('registration inspection failed');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.cleanupArgs = args.slice();
+        state.registered = false;
+        if (cleanupFails) throw new Error('target-safe double-force cleanup failed');
+        return '';
+      }
+      throw new Error(`unexpected inspection-failure fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    let failure = null;
+    try {
+      helper(
+        { root: '/claimed' }, 'head42', 'base42',
+        'fix(autoloop): inspection-failure cleanup', run,
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.match(failure && failure.message || '',
+      /partial add failed after registration; could not inspect disposable worktree registration: registration inspection failed/,
+      'GA-P1G3-INSPECTION-FAILURE aggregates the original add and registration-inspection errors');
+    assert.strictEqual(state.registered, false,
+      'GA-P1G3-INSPECTION-FAILURE leaves zero disposable registration residue');
+    assert.deepStrictEqual(state.cleanupArgs,
+      ['worktree', 'remove', '--force', '--force', state.registeredPath],
+      'GA-P1G3-INSPECTION-FAILURE uses exact canonical double-force removal');
+    assert.strictEqual(state.cleanupArgs[state.cleanupArgs.length - 1], state.addTarget,
+      'GA-P1G3-INSPECTION-FAILURE removes the exact canonical partial-add target');
+    if (cleanupFails) {
+      assert.match(failure.message,
+        /failed target-safe cleanup for uninspectable disposable worktree .*target-safe double-force cleanup failed/,
+        'GA-P1G3-INSPECTION-FAILURE cleanup failure remains failure-loud');
+    }
+  };
+  registrationInspectionFailureOracle(runIsolatedWorkshopSelfInstall);
+  registrationInspectionFailureOracle(runIsolatedWorkshopSelfInstall, true);
+  count += 9;
+  const omittedRegistrationInspectionCleanup = loadMutatedCoordinator(
+    'OMITTED-REGISTRATION-INSPECTION-CLEANUP-MUTANT-KILLED',
+    '      } else if (registrationInspectionFailed) {',
+    '      } else if (false && registrationInspectionFailed) {',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(
+    () => registrationInspectionFailureOracle(omittedRegistrationInspectionCleanup),
+    /leaves zero disposable registration residue/,
+    'GA-P1G3-OMITTED-REGISTRATION-INSPECTION-CLEANUP-MUTANT-KILLED uninspectable partial adds require target-safe cleanup',
+  );
+  count++;
+  const setupFailureResidueOracle = (helper, failAt) => {
+    const originalMkdtempSync = fs.mkdtempSync;
+    const originalRealpathNative = fs.realpathSync.native;
+    const originalRmSync = fs.rmSync;
+    let tempRoot = '';
+    let physicalTarget = '';
+    let initialRmFaultInjected = false;
+    let setupCleanupFaultInjected = false;
+    let setupCleanupTarget = '';
+    let runCalls = 0;
+    fs.mkdtempSync = (prefix, ...args) => {
+      const created = originalMkdtempSync(prefix, ...args);
+      if (String(prefix).endsWith('sauce-autoloop-self-install-')) tempRoot = created;
+      return created;
+    };
+    fs.realpathSync.native = (target, ...args) => {
+      if (failAt === 'realpath' && target === tempRoot) throw new Error('injected setup realpath failure');
+      return originalRealpathNative(target, ...args);
+    };
+    fs.rmSync = (target, opts) => {
+      if (failAt === 'initial-rm'
+          && path.basename(target).startsWith('sauce-autoloop-self-install-')) {
+        if (!initialRmFaultInjected) {
+          initialRmFaultInjected = true;
+          physicalTarget = target;
+          throw new Error('injected initial placeholder removal failure');
+        }
+        if (!setupCleanupFaultInjected) {
+          setupCleanupFaultInjected = true;
+          setupCleanupTarget = target;
+          throw new Error('injected setup cleanup failure');
+        }
+      }
+      return originalRmSync(target, opts);
+    };
+    let setupError = null;
+    try {
+      try {
+        helper(
+          { root: '/claimed' }, 'head42', 'base42', 'fix(autoloop): guarded setup',
+          () => { runCalls++; throw new Error('git must not run after setup failure'); },
+        );
+      } catch (error) {
+        setupError = error;
+      }
+    } finally {
+      fs.mkdtempSync = originalMkdtempSync;
+      fs.realpathSync.native = originalRealpathNative;
+      fs.rmSync = originalRmSync;
+    }
+    assert.match(setupError && setupError.message || '', failAt === 'realpath'
+      ? /injected setup realpath failure/
+      : /injected initial placeholder removal failure/);
+    const residuePaths = [...new Set([tempRoot, physicalTarget].filter(Boolean))]
+      .filter((target) => fs.existsSync(target));
+    for (const target of residuePaths) originalRmSync(target, { recursive: true, force: true });
+    assert.deepStrictEqual(residuePaths, [],
+      `GA-P1G2-SETUP-${failAt.toUpperCase()} leaves zero disposable path residue`);
+    assert.strictEqual(runCalls, 0,
+      `GA-P1G2-SETUP-${failAt.toUpperCase()} fails before every Git operation`);
+    if (failAt === 'initial-rm') {
+      assert.match(setupError.message, /failed to delete disposable self-install setup path .*injected setup cleanup failure/,
+        'GA-P1G2-SETUP-INITIAL-RM aggregates setup and cleanup failures');
+      assert.strictEqual(setupCleanupTarget, tempRoot,
+        'GA-P1G2-SETUP-INITIAL-RM retries the exact lexical mkdtemp target');
+    }
+  };
+  setupFailureResidueOracle(runIsolatedWorkshopSelfInstall, 'realpath');
+  setupFailureResidueOracle(runIsolatedWorkshopSelfInstall, 'initial-rm');
+  count += 8;
+  const guardedRealpathPrefix = `  try {
+    temp = fs.realpathSync.native(tempRoot);`;
+  const unguardedRealpathMutant = loadMutatedCoordinator(
+    'UNGUARDED-REALPATH-MUTANT-KILLED', guardedRealpathPrefix,
+    `  temp = fs.realpathSync.native(tempRoot);
+  try {`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => setupFailureResidueOracle(unguardedRealpathMutant, 'realpath'),
+    /leaves zero disposable path residue/,
+    'GA-P1G2-UNGUARDED-REALPATH-MUTANT-KILLED requires setup cleanup after realpath failure');
+  count++;
+  const guardedInitialRemovalPrefix = `  try {
+    temp = fs.realpathSync.native(tempRoot);
+    fs.rmSync(temp, { recursive: true, force: true });`;
+  const unguardedInitialRemovalMutant = loadMutatedCoordinator(
+    'UNGUARDED-INITIAL-RM-MUTANT-KILLED', guardedInitialRemovalPrefix,
+    `  temp = fs.realpathSync.native(tempRoot);
+  fs.rmSync(temp, { recursive: true, force: true });
+  try {`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => setupFailureResidueOracle(unguardedInitialRemovalMutant, 'initial-rm'),
+    /leaves zero disposable path residue/,
+    'GA-P1G2-UNGUARDED-INITIAL-RM-MUTANT-KILLED requires setup cleanup after placeholder removal failure');
+  count++;
+  const shellFixture = (failAt = '') => {
+    const state = {
+      calls: [], registered: false, unrelatedRegistered: true, temp: '',
+      currentCommit: '', computedCommit: '', computedCwd: '', syntheticTitle: '', removeAttempts: 0,
+    };
+    const run = (cmd, args, opts = {}) => {
+      state.calls.push({ cmd, args: args.slice(), cwd: opts.cwd });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.temp = args[3];
+        state.registered = true;
+        state.currentCommit = args[4];
+        if (failAt === 'checkout') throw new Error('checkout exploded after registration');
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return state.registered ? `worktree ${state.temp}\nHEAD head42\ndetached\n` : '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.removeAttempts += 1;
+        if (failAt === 'remove' && state.removeAttempts === 1) throw new Error('remove exploded');
+        state.registered = false;
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
+        state.unrelatedRegistered = false;
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'rev-parse') return 'tree42';
+      if (cmd === 'git' && args[0] === 'commit-tree') {
+        eq(args.slice(0, 4), ['commit-tree', 'tree42', '-p', 'base42'],
+          'GA-P1G-SYNTHETIC-SQUASH commit-tree binds exact feature tree to exact fetched base');
+        state.syntheticTitle = args[args.indexOf('-m') + 1];
+        return 'synthetic42';
+      }
+      if (cmd === 'git' && args[0] === 'reset' && args[1] === '--hard') {
+        state.currentCommit = args[2];
+        return '';
+      }
+      if (cmd === 'node' && args[0] === 'scripts/release/compute-release.js') {
+        if (failAt === 'compute') throw new Error('compute exploded');
+        state.computedCommit = state.currentCommit;
+        state.computedCwd = opts.cwd;
+        return '';
+      }
+      if (cmd === 'node' && args[0] === 'platform/install.js') {
+        if (failAt === 'install') throw new Error('install exploded');
+        if (!state.computedCommit || state.computedCwd !== state.temp || opts.cwd !== state.temp) {
+          throw new Error('uncomputed dependency floor');
+        }
+        if (state.computedCommit === 'synthetic42' && state.syntheticTitle.startsWith('fix(')) {
+          throw new Error('synthetic fix leaves dependency floor unsatisfied');
+        }
+        return '';
+      }
+      throw new Error(`unexpected self-install fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    return { state, run };
+  };
+  const successOracle = (helper) => {
+    const fixture = shellFixture();
+    helper({ root: '/claimed' }, 'head42', 'base42', 'feat(task-entity): release floor', fixture.run);
+    assert.strictEqual(fixture.state.registered, false, 'disposable registration must be removed');
+    assert.strictEqual(fixture.state.unrelatedRegistered, true, 'cleanup must preserve unrelated worktree registrations');
+    assert.strictEqual(fixture.state.computedCommit, 'synthetic42',
+      'compute-release must consume the prospective synthetic squash');
+    const compute = fixture.state.calls.find((call) => call.cmd === 'node'
+      && call.args[0] === 'scripts/release/compute-release.js');
+    assert(compute && compute.cwd === fixture.state.temp,
+      'compute-release must run in the disposable worktree');
+  };
+  const provenanceMismatchOracle = (helper) => {
+    const fixture = shellFixture();
+    assert.throws(() => helper(
+      { root: '/claimed' }, 'head42', 'base42', 'fix(task-entity): wrong squash bump', fixture.run,
+    ), /synthetic fix leaves dependency floor unsatisfied/);
+    assert.strictEqual(fixture.state.registered, false, 'provenance mismatch must clean target registration');
+    assert.strictEqual(fixture.state.unrelatedRegistered, true,
+      'provenance mismatch cleanup must preserve unrelated registrations');
+  };
+  const failureOracle = (helper, failAt, message) => {
+    const fixture = shellFixture(failAt);
+    assert.throws(() => helper(
+      { root: '/claimed' }, 'head42', 'base42', 'feat(task-entity): release floor', fixture.run,
+    ), new RegExp(message));
+    assert.strictEqual(fixture.state.registered, false, `${failAt} failure must clean registration`);
+    assert.strictEqual(fixture.state.unrelatedRegistered, true,
+      `${failAt} failure must preserve unrelated registrations`);
+  };
+
+  successOracle(runIsolatedWorkshopSelfInstall);
+  provenanceMismatchOracle(runIsolatedWorkshopSelfInstall);
+  count += 6;
+  for (const [failAt, message] of [
+    ['checkout', 'checkout exploded after registration'],
+    ['compute', 'compute exploded'],
+    ['install', 'install exploded'],
+    ['remove', 'failed to remove disposable self-install worktree .*remove exploded'],
+  ]) {
+    failureOracle(runIsolatedWorkshopSelfInstall, failAt, message);
+    count += 2;
+  }
+
+  const computeLine = "    run('node', ['scripts/release/compute-release.js', '--write'], { cwd: temp, stdio: 'pipe' });";
+  const installLine = "    run('node', ['platform/install.js', '--vault', '.', '--auto-approve'], { cwd: temp, stdio: 'pipe' });";
+  const syntheticResetLine = "    run('git', ['reset', '--hard', syntheticSha], { cwd: temp, stdio: 'pipe' });";
+  const removeLine = "      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }";
+  const omittedCompute = loadMutatedCoordinator(
+    'OMITTED-COMPUTE-MUTANT-KILLED', computeLine, '    // mutant: release computation omitted',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(omittedCompute), /uncomputed dependency floor/,
+    'GA-P1G-OMITTED-COMPUTE-MUTANT-KILLED release-floor oracle turns red');
+  count++;
+  const claimedCompute = loadMutatedCoordinator(
+    'CLAIMED-CWD-MUTANT-KILLED', computeLine,
+    "    run('node', ['scripts/release/compute-release.js', '--write'], { cwd: ctx.root, stdio: 'pipe' });",
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(claimedCompute), /uncomputed dependency floor/,
+    'GA-P1G-CLAIMED-CWD-MUTANT-KILLED exact-disposable oracle turns red');
+  count++;
+  const swallowedCompute = loadMutatedCoordinator(
+    'SWALLOWED-COMPUTE-MUTANT-KILLED', computeLine,
+    `    try { ${computeLine.trim()} } catch (_) {}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => failureOracle(swallowedCompute, 'compute', 'compute exploded'),
+    /Missing expected exception|did not match the regular expression/,
+    'GA-P1G-SWALLOWED-COMPUTE-MUTANT-KILLED failure-loud oracle turns red');
+  count++;
+  const swallowedInstall = loadMutatedCoordinator(
+    'SWALLOWED-INSTALL-MUTANT-KILLED', installLine,
+    `    try { ${installLine.trim()} } catch (_) {}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => failureOracle(swallowedInstall, 'install', 'install exploded'),
+    /Missing expected exception/,
+    'GA-P1G-SWALLOWED-INSTALL-MUTANT-KILLED failure-loud oracle turns red');
+  count++;
+  const leakedWorktree = loadMutatedCoordinator(
+    'LEAKED-WORKTREE-MUTANT-KILLED', removeLine,
+    '      try { /* mutant: disposable worktree removal omitted */ }',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(leakedWorktree), /disposable registration must be removed/,
+    'GA-P1G-LEAKED-WORKTREE-MUTANT-KILLED cleanup oracle turns red');
+  count++;
+  const branchHistoryCompute = loadMutatedCoordinator(
+    'BRANCH-HISTORY-COMPUTE-MUTANT-KILLED', computeLine,
+    `    run('git', ['reset', '--hard', headSha], { cwd: temp, stdio: 'pipe' });
+${computeLine}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => provenanceMismatchOracle(branchHistoryCompute), /Missing expected exception/,
+    'GA-P1G-BRANCH-HISTORY-COMPUTE-MUTANT-KILLED multi-commit branch history cannot determine the release plan');
+  count++;
+  const noSyntheticSquash = loadMutatedCoordinator(
+    'NO-SYNTHETIC-SQUASH-MUTANT-KILLED', syntheticResetLine,
+    '    // mutant: prospective synthetic squash is never checked out',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => provenanceMismatchOracle(noSyntheticSquash), /Missing expected exception/,
+    'GA-P1G-NO-SYNTHETIC-SQUASH-MUTANT-KILLED exact prospective squash is required');
+  count++;
+  const relaxedTitleBinding = loadMutatedCoordinator(
+    'RELAXED-RECORD-PR-TITLE-MUTANT-KILLED',
+    '    if (pr.title !== record.gate_receipt.prospective_pr_title) {',
+    '    if (false && pr.title !== record.gate_receipt.prospective_pr_title) {',
+  ).commandRecordPr;
+  const titleBindingOracle = async (recordPr) => {
+    const state = emptyState();
+    state.cards.A = {
+      card: 'A', branch: 'autoloop/a', worktree: '/workshop/a', phase: 'implementing',
+      gate_receipt: passingReceipt('head42', false, 'fix(autoloop): verified title'),
+    };
+    await assert.rejects(() => recordPr({ root: '/workshop' }, {
+      json: true, card: 'A', pr: '42',
+    }, {
+      readState: () => state,
+      prView: () => ({
+        number: 42, headRefName: 'autoloop/a', baseRefName: 'main',
+        headRefOid: 'head42', baseRefOid: 'base42',
+        title: 'fix(autoloop): edited title', url: 'https://example.invalid/pr/42',
+      }),
+      sh: (_cmd, args) => args[0] === 'status' ? '' : 'head42',
+      writeState: () => {},
+      withLock: immediateCardLock,
+    }), (error) => error.code === 'title_mismatch');
+  };
+  await titleBindingOracle(commandRecordPr);
+  await assert.rejects(() => titleBindingOracle(relaxedTitleBinding), /Missing expected rejection/,
+    'GA-P1G-RELAXED-RECORD-PR-TITLE-MUTANT-KILLED byte-exact title binding is required');
+  count += 2;
+  const omittedAdvanceTitleBinding = loadMutatedCoordinator(
+    'OMITTED-ADVANCE-PR-TITLE-MUTANT-KILLED',
+    '    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid, pr.title);',
+    '    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);',
+  ).stepCard;
+  const advanceVerifiedTitle = 'fix(autoloop): gate-verified title';
+  const advanceActualTitle = 'fix(autoloop): byte-different actual title';
+  assert.notStrictEqual(advanceActualTitle, advanceVerifiedTitle,
+    'GA-P1G3-ADVANCE-TITLE-BINDING fixtures use byte-different verified and actual titles');
+  count++;
+  const openAdvanceTitleBindingOracle = async (advanceStep) => {
+    const record = {
+      card: 'A', phase: 'feature_pr', feature_pr: 42,
+      gate_receipt: passingReceipt('head42', true, advanceVerifiedTitle),
+    };
+    let armed = 0;
+    const result = await advanceStep({ root: '/workshop' }, emptyState(), record, {}, {
+      prView: () => ({
+        ...basePr, title: advanceActualTitle, statusCheckRollup: [
+          { name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        ],
+      }),
+      armFeatureAutoMerge: () => { armed++; },
+    });
+    assert.strictEqual(armed, 0,
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift never arms auto-merge');
+    assert.strictEqual(result.action, 'verify-gates',
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift returns to verify-gates');
+    assert.strictEqual(record.phase, 'feature_pr',
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift preserves feature_pr');
+  };
+  await openAdvanceTitleBindingOracle(stepCard);
+  count += 3;
+  await assert.rejects(
+    () => openAdvanceTitleBindingOracle(omittedAdvanceTitleBinding),
+    /open title drift never arms auto-merge/,
+    'GA-P1G3-OMITTED-ADVANCE-PR-TITLE-OPEN-MUTANT-KILLED production call-site binding is required',
+  );
+  count++;
+  const mergedAdvanceTitleBindingOracle = async (advanceStep) => {
+    const record = {
+      card: 'A', phase: 'feature_pr', feature_pr: 42,
+      gate_receipt: passingReceipt('head42', true, advanceVerifiedTitle),
+    };
+    const result = await advanceStep({ root: '/workshop' }, emptyState(), record, {}, {
+      prView: () => ({
+        ...basePr, state: 'MERGED', title: advanceActualTitle,
+        mergeCommit: { oid: 'merge42' },
+      }),
+      writeState: () => {},
+    });
+    assert.notStrictEqual(record.phase, 'feature_merged',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift never transitions feature_merged');
+    assert.strictEqual(record.phase, 'needs-inspection',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift persists needs-inspection');
+    assert.strictEqual(result.action, 'needs-inspection',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift returns needs-inspection');
+  };
+  await mergedAdvanceTitleBindingOracle(stepCard);
+  count += 3;
+  await assert.rejects(
+    () => mergedAdvanceTitleBindingOracle(omittedAdvanceTitleBinding),
+    /merged title drift never transitions feature_merged/,
+    'GA-P1G3-OMITTED-ADVANCE-PR-TITLE-MERGED-MUTANT-KILLED production call-site binding is required',
+  );
+  count++;
+  const unrelatedPrune = loadMutatedCoordinator(
+    'UNRELATED-PRUNE-SIDE-EFFECT-MUTANT-KILLED', removeLine,
+    "      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); run('git', ['worktree', 'prune'], { cwd: ctx.root, stdio: 'pipe' }); }",
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(unrelatedPrune), /cleanup must preserve unrelated worktree registrations/,
+    'GA-P1G-UNRELATED-PRUNE-SIDE-EFFECT-MUTANT-KILLED cleanup never prunes unrelated registrations');
+  count++;
+}
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');
@@ -8371,6 +9129,7 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
       calls.push({ cmd, args: cmdArgs, cwd: opts.cwd });
       if (cmd === 'git' && cmdArgs[0] === 'status') return '';
       if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+      if (cmd === 'git' && cmdArgs[0] === 'show') return 'fix(loop): merge-only fixture';
       if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
       if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
       if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) {
@@ -8423,6 +9182,7 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
         deployCalls.push({ cmd, args: cmdArgs });
         if (cmd === 'git' && cmdArgs[0] === 'status') return '';
         if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+        if (cmd === 'git' && cmdArgs[0] === 'show') return 'fix(loop): deploy-bound fixture';
         if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
         if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
         if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) return JSON.stringify({ behavioral: true, adequate: true, reason: 'ok' });
