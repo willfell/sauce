@@ -10,10 +10,11 @@
  * "Upcoming" band (future-due, rendered LAST), and draws each task as a row
  * with a functional done-checkbox + metadata chips.
  * Task CREATION lives in ToDoLeafActions' single nav-button "New Task" (this
- * widget renders no create button of its own). Mutations are either delegated
- * to TaskDialog or, for the narrow move-to-tomorrow row action, use Obsidian's
- * processFrontMatter rail against the resolved task file. Every gesture keeps
- * the single-file-write invariant (a bad write can only ever touch one task):
+ * widget renders no create button of its own). Gesture mutations use the shared
+ * RenderSafe.mutate lifecycle; their deferred write is delegated to TaskDialog
+ * or, for the narrow move-to-tomorrow row action, Obsidian's processFrontMatter
+ * rail against the resolved task file. Every gesture keeps the single-file-write
+ * invariant (a bad write can only ever touch one task):
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
  *   - tomorrow action → processFrontMatter(file, fm => fm.due = nextDay(viewedDay))
  *   - title click     → app.workspace.openLinkText(path)  (opens the task NOTE;
@@ -52,6 +53,7 @@ class TaskTodayList {
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
     nextDay(todayStr) { return TaskTodayList.nextDay(todayStr); }
     markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
+    _optimisticRowRemoval(row, task) { return TaskTodayList._optimisticRowRemoval(row, task); }
     rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
     renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
@@ -113,6 +115,105 @@ class TaskTodayList {
     }
 
     /**
+     * Acquire synchronous per-task ownership for row mutations. Completion and
+     * confirmed deletion share this set, so a duplicate gesture or competing
+     * row for the same task cannot cross the first await and perform a second
+     * write. The returned idempotent release must run from a finally block.
+     */
+    static _claimRowMutation(path) {
+        const key = String(path || '');
+        if (!key) return null;
+        const inFlight = TaskTodayList._rowMutationInFlight
+            || (TaskTodayList._rowMutationInFlight = new Set());
+        if (inFlight.has(key)) return null;
+        inFlight.add(key);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            inFlight.delete(key);
+        };
+    }
+
+    /**
+     * Detach one rendered task row and return an idempotent exact-position
+     * rollback. The saved suffix plus stable render order preserves adjacent
+     * concurrent rollbacks; task identity prevents stale duplication after a
+     * Dataview rerender.
+     */
+    static _optimisticRowRemoval(row, task) {
+        TaskTodayList.markTaskRow(row, task);
+        const parent = row && row.parentNode;
+        const taskPath = String((task && task.path) || '');
+        const childList = (node) => {
+            try { return Array.from((node && (node.childNodes || node.children)) || []); }
+            catch (_e) { return []; }
+        };
+        const originalChildren = childList(parent);
+        const originalIndex = originalChildren.indexOf(row);
+        const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
+        const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
+        const rowOrder = Number(row && row.dataset && row.dataset.sauceTaskOrder);
+        const restore = () => {
+            if (!parent || !row || row.parentNode) return false;
+            if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+
+            const current = childList(parent);
+            const replacementExists = current.some((node) =>
+                node !== row && node && node.dataset
+                && String(node.dataset.sauceTaskPath || '') === taskPath);
+            if (replacementExists) return true;
+
+            const insert = (anchor) => {
+                if (anchor != null && anchor.parentNode !== parent) return false;
+                try {
+                    parent.insertBefore(row, anchor || null);
+                    return row.parentNode === parent;
+                } catch (_e) {
+                    return false;
+                }
+            };
+
+            const next = following.find((node) => node && node.parentNode === parent);
+            if (next && insert(next)) return true;
+            if (Number.isFinite(rowOrder)) {
+                const orderedRows = childList(parent).filter((node) =>
+                    node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+                const later = orderedRows.find((node) =>
+                    Number(node.dataset.sauceTaskOrder) > rowOrder);
+                if (later && insert(later)) return true;
+                const earlier = orderedRows.filter((node) =>
+                    Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
+                if (earlier) {
+                    const afterEarlier = earlier.nextSibling;
+                    if ((afterEarlier == null || afterEarlier.parentNode === parent)
+                        && insert(afterEarlier)) return true;
+                }
+            }
+
+            const previous = preceding.find((node) => node && node.parentNode === parent);
+            if (previous) {
+                const afterPrevious = previous.nextSibling;
+                if ((afterPrevious == null || afterPrevious.parentNode === parent)
+                    && insert(afterPrevious)) return true;
+            }
+
+            const now = childList(parent);
+            const ordinal = Math.max(0, Math.min(
+                originalIndex >= 0 ? originalIndex : now.length,
+                now.length
+            ));
+            if (insert(now[ordinal] || null)) return true;
+            if (!row.parentNode && typeof parent.appendChild === 'function') {
+                try { parent.appendChild(row); } catch (_e) {}
+            }
+            return row.parentNode === parent;
+        };
+        try { if (row && typeof row.remove === 'function') row.remove(); } catch (_e) {}
+        return restore;
+    }
+
+    /**
      * Reschedule one OPEN task to the day after `viewedDay`, using the canonical
      * Obsidian processFrontMatter rail. This is shared by TaskTodayList's own
      * row and SpaceDailyDashboard's private row renderer.
@@ -149,6 +250,9 @@ class TaskTodayList {
             const tomorrow = TaskTodayList.nextDay(baseDay);
             const file = appRef.vault.getAbstractFileByPath(task.path);
             if (!tomorrow || !file) return { ok: false, no_op: true };
+            const RS = (typeof window !== 'undefined' && window.customJS)
+                ? window.customJS.RenderSafe : null;
+            if (!RS || typeof RS.mutate !== 'function') return { ok: false, no_op: true };
 
             const taskPath = String(task.path);
             const inFlight = TaskTodayList._rescheduleInFlight
@@ -160,117 +264,63 @@ class TaskTodayList {
                 return { ok: false, no_op: true, in_flight: true };
             }
             inFlight.add(taskPath);
+            let restore = () => false;
+            let liveStatus = null;
+            let liveStatusChecked = false;
+            let mutationApplied = false;
+            const staleOpenNoOp = () => ({
+                ok: false,
+                no_op: true,
+                reason: 'task is no longer open',
+                live_status: liveStatus || 'missing'
+            });
             try {
-                try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                TaskTodayList.markTaskRow(row, task);
-                const parent = row.parentNode;
-                const childList = (node) => {
-                    try { return Array.from((node && (node.childNodes || node.children)) || []); }
-                    catch (_e) { return []; }
-                };
-                const originalChildren = childList(parent);
-                const originalIndex = originalChildren.indexOf(row);
-                const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
-                const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
-                const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
-                const restore = () => {
-                    if (!parent || row.parentNode) return false;
-                    // A detached old render tree must not receive stale DOM after
-                    // Dataview has replaced it with a new connected tree.
-                    if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
-
-                    const current = childList(parent);
-                    const replacementExists = current.some((node) =>
-                        node !== row && node && node.dataset
-                        && String(node.dataset.sauceTaskPath || '') === taskPath);
-                    if (replacementExists) return true;
-
-                    const insert = (anchor) => {
-                        if (anchor != null && anchor.parentNode !== parent) return false;
-                        try {
-                            parent.insertBefore(row, anchor || null);
-                            return row.parentNode === parent;
-                        } catch (_e) {
-                            return false;
-                        }
-                    };
-
-                    // Prefer the nearest surviving original anchor. Saving the full
-                    // suffix (not only nextSibling) handles adjacent removals.
-                    const next = following.find((node) => node && node.parentNode === parent);
-                    if (next && insert(next)) return true;
-
-                    // If every original following sibling is detached, stable render
-                    // order still locates this row relative to concurrently restored
-                    // task rows (including when these were the final two rows).
-                    if (Number.isFinite(rowOrder)) {
-                        const orderedRows = childList(parent).filter((node) =>
-                            node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
-                        const later = orderedRows.find((node) =>
-                            Number(node.dataset.sauceTaskOrder) > rowOrder);
-                        if (later && insert(later)) return true;
-                        const earlier = orderedRows.filter((node) =>
-                            Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
-                        if (earlier) {
-                            const afterEarlier = earlier.nextSibling;
-                            if ((afterEarlier == null || afterEarlier.parentNode === parent)
-                                && insert(afterEarlier)) return true;
-                        }
-                    }
-
-                    const previous = preceding.find((node) => node && node.parentNode === parent);
-                    if (previous) {
-                        const afterPrevious = previous.nextSibling;
-                        if ((afterPrevious == null || afterPrevious.parentNode === parent)
-                            && insert(afterPrevious)) return true;
-                    }
-
-                    // Final deterministic fallback for a still-live container. Clamp
-                    // the original ordinal to its current child count, then append if
-                    // a host-specific insertBefore implementation still rejects it.
-                    const now = childList(parent);
-                    const ordinal = Math.max(0, Math.min(
-                        originalIndex >= 0 ? originalIndex : now.length,
-                        now.length
-                    ));
-                    if (insert(now[ordinal] || null)) return true;
-                    if (!row.parentNode && typeof parent.appendChild === 'function') {
-                        try { parent.appendChild(row); } catch (_e) {}
-                    }
-                    return row.parentNode === parent;
-                };
-                try { row.remove(); } catch (_e) {}
-                let liveStatus = null;
-                let liveStatusChecked = false;
-                let mutationApplied = false;
-                const staleOpenNoOp = () => ({
-                    ok: false,
-                    no_op: true,
-                    reason: 'task is no longer open',
-                    live_status: liveStatus || 'missing'
-                });
-                try {
-                    await appRef.fileManager.processFrontMatter(file, (fm) => {
-                        liveStatusChecked = true;
-                        liveStatus = fm && typeof fm.status === 'string' ? fm.status : null;
-                        // The rendered task object can be stale by the time the
-                        // optimistic action reaches the file. Revalidate and
-                        // mutate within the same atomic frontmatter callback.
-                        if (!fm || fm.status !== 'open') return;
-                        fm.due = tomorrow;
-                        mutationApplied = true;
-                    });
-                    if (!mutationApplied) {
+                const mutation = await RS.mutate({
+                    app: appRef,
+                    path: taskPath,
+                    mode: 'background',
+                    failureMessage: 'Could not reschedule task',
+                    optimistic: () => {
+                        restore = TaskTodayList._optimisticRowRemoval(row, task);
+                    },
+                    revert: () => {
                         restore();
-                        return staleOpenNoOp();
-                    }
-                    return { ok: true, due: tomorrow };
-                } catch (e) {
-                    restore();
+                    },
+                    write: async () => {
+                        await appRef.fileManager.processFrontMatter(file, (fm) => {
+                            liveStatusChecked = true;
+                            liveStatus = fm && typeof fm.status === 'string' ? fm.status : null;
+                            // The rendered task object can be stale by the time the
+                            // optimistic action reaches the file. Revalidate and
+                            // mutate within the same atomic frontmatter callback.
+                            if (!fm || fm.status !== 'open') return;
+                            fm.due = tomorrow;
+                            mutationApplied = true;
+                        });
+                        if (!mutationApplied) {
+                            restore();
+                            return staleOpenNoOp();
+                        }
+                        return { ok: true, due: tomorrow };
+                    },
+                });
+                if (!mutation || mutation.ok === false) {
+                    const error = mutation && mutation.error;
                     if (liveStatusChecked && !mutationApplied) return staleOpenNoOp();
-                    try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
-                    return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
+                    return {
+                        ok: false,
+                        reason: String(error && (error.message || error) || 'write failed')
+                    };
                 }
+                return mutation.value;
+            } catch (e) {
+                // RenderSafe is never expected to throw, but preserve the old
+                // never-throw surface if a hostile injected implementation does.
+                restore();
+                if (liveStatusChecked && !mutationApplied) {
+                    return staleOpenNoOp();
+                }
+                return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
             } finally {
                 inFlight.delete(taskPath);
             }
@@ -502,6 +552,12 @@ class TaskTodayList {
                     || null;
             } catch (_e) { return null; }
         };
+        const getRS = () => {
+            try {
+                return (typeof window !== 'undefined' && window.customJS
+                    && window.customJS.RenderSafe) || null;
+            } catch (_e) { return null; }
+        };
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         TaskTodayList.markTaskRow(row, task);
@@ -553,30 +609,43 @@ class TaskTodayList {
         cb.addEventListener('click', (ev) => { ev.stopPropagation(); });
         cb.addEventListener('change', async () => {
             const TD = getTD();
-            if (!path || !TD || typeof TD.markDone !== 'function') { cb.checked = false; return; }
-            // Optimistic (L2): preserve scroll, then detach the row NOW so the
-            // gesture feels instant — do NOT wait for the write + Dataview's
-            // re-render. Re-insert at the original DOM index on failure. The
-            // eventual re-render (natural or forced) reconciles authoritatively;
-            // RenderSafe holds the scroll across it.
-            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-            const parent = row.parentNode;
-            const next = row.nextSibling;
-            const revert = () => {
+            const RS = getRS();
+            if (!path || !TD || typeof TD.markDone !== 'function'
+                || !RS || typeof RS.mutate !== 'function') {
                 cb.checked = false;
-                if (parent) { try { parent.insertBefore(row, next); } catch (_e) {} }
-            };
-            try { row.remove(); } catch (_e) {}
+                return;
+            }
+            const releaseOwnership = TaskTodayList._claimRowMutation(path);
+            if (!releaseOwnership) return { ok: false, no_op: true, in_flight: true };
+            let restore = () => false;
             try {
-                const res = await TD.markDone(path);
-                if (res && res.ok === false) {
-                    revert();
-                    try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
-                }
-                // On success the file moves to _done/; the row is already gone.
+                return await RS.mutate({
+                    app: (typeof window !== 'undefined' && window.app) || null,
+                    path,
+                    mode: 'background',
+                    failureMessage: 'Could not complete task',
+                    optimistic: () => {
+                        restore = TaskTodayList._optimisticRowRemoval(row, task);
+                    },
+                    revert: () => {
+                        cb.checked = false;
+                        restore();
+                    },
+                    write: async () => {
+                        const res = await TD.markDone(path);
+                        if (res && res.ok === false) {
+                            throw new Error(res.reason || 'completion failed');
+                        }
+                        return res;
+                    },
+                });
             } catch (e) {
-                revert();
+                cb.checked = false;
+                restore();
                 try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                return { ok: false, error: e };
+            } finally {
+                releaseOwnership();
             }
         });
 
@@ -706,15 +775,41 @@ class TaskTodayList {
         };
         const doDelete = async () => {
             const TD = getTD();
-            if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
+            const RS = getRS();
+            if (!path || !TD || typeof TD.confirmDelete !== 'function'
+                || typeof TD.markDeleted !== 'function'
+                || !RS || typeof RS.mutate !== 'function') return;
+            const releaseOwnership = TaskTodayList._claimRowMutation(path);
+            if (!releaseOwnership) return { ok: false, no_op: true, in_flight: true };
+            let restore = () => false;
             try {
-                const res = await TD.confirmDelete(path);
-                if (res && res.ok) {
-                    try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                    try { row.remove(); } catch (_e) {}
-                }
+                const confirmed = await TD.confirmDelete(path, { deferWrite: true });
+                if (!confirmed || !confirmed.ok) return confirmed || { ok: false, cancelled: true };
+                return await RS.mutate({
+                    app: (typeof window !== 'undefined' && window.app) || null,
+                    path,
+                    mode: 'background',
+                    failureMessage: 'Could not delete task',
+                    optimistic: () => {
+                        restore = TaskTodayList._optimisticRowRemoval(row, task);
+                    },
+                    revert: () => {
+                        restore();
+                    },
+                    write: async () => {
+                        const res = await TD.markDeleted(path);
+                        if (res && res.ok === false) {
+                            throw new Error(res.reason || 'delete failed');
+                        }
+                        return res;
+                    },
+                });
             } catch (e) {
+                restore();
                 try { new Notice('Could not delete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                return { ok: false, error: e };
+            } finally {
+                releaseOwnership();
             }
         };
 
@@ -728,7 +823,10 @@ class TaskTodayList {
         const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
         editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
         const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
-        delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
+        delBtn.addEventListener('click', async (ev) => {
+            try { ev.stopPropagation(); } catch (_e) {}
+            return doDelete();
+        });
 
         return row;
     }

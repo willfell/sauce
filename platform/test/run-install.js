@@ -1140,6 +1140,280 @@ async function caseV0801A1InstallJsCliHandler() {
     }
 }
 
+// GA-P1B4-HOME-TASKENTITY-FLOOR — Home consumes the explicit createQuick
+// ownership result introduced by task-entity 0.17.0. Exercise the production
+// dependency checker through the real headless installer so mixed component
+// versions cannot silently install a Home helper against the old undefined
+// result contract.
+function runHomeTaskEntityFloorInstall(taskEntityVersion) {
+    const { spawnSync } = require("child_process");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `sauce-home-task-floor-${taskEntityVersion}-`));
+    const workshopDir = path.join(tmp, "workshop");
+    const vaultDir = path.join(tmp, "vault");
+    try {
+        const sourcePlatformDir = path.join(__dirname, "..");
+        const sourceHomeDir = path.join(sourcePlatformDir, "blueprints", "home");
+        const homeManifest = JSON.parse(
+            fs.readFileSync(path.join(sourceHomeDir, "manifest.json"), "utf8"),
+        );
+
+        fs.mkdirSync(path.join(workshopDir, "platform", "blueprints"), { recursive: true });
+        fs.mkdirSync(path.join(workshopDir, "platform", "mechanisms"), { recursive: true });
+        fs.mkdirSync(path.join(workshopDir, "platform", "fixtures"), { recursive: true });
+        fs.copyFileSync(
+            path.join(sourcePlatformDir, "install.js"),
+            path.join(workshopDir, "platform", "install.js"),
+        );
+        fs.symlinkSync(
+            sourceHomeDir,
+            path.join(workshopDir, "platform", "blueprints", "home"),
+            "dir",
+        );
+        fs.symlinkSync(
+            path.join(sourcePlatformDir, "mechanisms", "platform-claude"),
+            path.join(workshopDir, "platform", "mechanisms", "platform-claude"),
+            "dir",
+        );
+
+        const mechanisms = [];
+        const blueprints = [{
+            name: "home",
+            version: homeManifest.version,
+            path: "blueprints/home",
+        }];
+        const subMechanisms = [];
+        const subBlueprints = [{
+            name: "home",
+            version: homeManifest.version,
+        }];
+        const installedMechanisms = [];
+        const installedBlueprints = [{
+            name: "home",
+            version: homeManifest.version,
+            installed_at: "2026-07-27T00:00:00.000Z",
+        }];
+
+        for (const dep of homeManifest.depends_on) {
+            const version = dep.name === "task-entity"
+                ? taskEntityVersion
+                : String(dep.range).replace(/^>=/, "");
+            const kind = dep.name === "daily" ? "blueprint" : "mechanism";
+            const fixtureDir = path.join(workshopDir, "platform", "fixtures", dep.name);
+            fs.mkdirSync(fixtureDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(fixtureDir, "manifest.json"),
+                JSON.stringify({
+                    name: dep.name,
+                    version,
+                    kind,
+                    ...(kind === "blueprint" ? { module_directory: dep.name } : {}),
+                    files: [],
+                }, null, 2),
+            );
+            const catalogueEntry = {
+                name: dep.name,
+                version,
+                path: `fixtures/${dep.name}`,
+            };
+            const subscriptionEntry = { name: dep.name, version };
+            const installedEntry = {
+                name: dep.name,
+                version,
+                installed_at: "2026-07-27T00:00:00.000Z",
+            };
+            if (kind === "blueprint") {
+                blueprints.push(catalogueEntry);
+                subBlueprints.push(subscriptionEntry);
+                installedBlueprints.push(installedEntry);
+            } else {
+                mechanisms.push(catalogueEntry);
+                subMechanisms.push(subscriptionEntry);
+                installedMechanisms.push(installedEntry);
+            }
+        }
+
+        const workshopVersion = "0.269.0";
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: workshopVersion, mechanisms, blueprints }, null, 2),
+        );
+        spawnSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], { cwd: workshopDir });
+        spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=test", "add", "-A"], { cwd: workshopDir });
+        spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "fixture"], { cwd: workshopDir });
+
+        fs.mkdirSync(path.join(vaultDir, "ranch", "templater"), { recursive: true });
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({
+                workshop_path: workshopDir,
+                workshop_relative_path: path.relative(vaultDir, workshopDir),
+                variables: {
+                    scripts_path: "ranch/scripts",
+                    templates_path: "ranch/templates",
+                    views_path: "ranch/views",
+                },
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({
+                workshop_version: workshopVersion,
+                mechanisms: subMechanisms,
+                blueprints: subBlueprints,
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({
+                workshop_version: workshopVersion,
+                mechanisms: installedMechanisms,
+                blueprints: installedBlueprints,
+                history: [],
+            }, null, 2),
+        );
+        fs.copyFileSync(
+            path.join(sourcePlatformDir, "installer-stub.js"),
+            path.join(vaultDir, "ranch", "templater", "platformInstall.js"),
+        );
+
+        const result = spawnSync(
+            process.execPath,
+            [__filename, vaultDir, "--auto-approve"],
+            { encoding: "utf8" },
+        );
+        const installed = JSON.parse(
+            fs.readFileSync(path.join(vaultDir, "ranch", "platform-installed.json"), "utf8"),
+        );
+        return {
+            status: result.status,
+            output: (result.stdout || "") + (result.stderr || ""),
+            history: installed.history || [],
+        };
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+async function caseGAP1B4HomeTaskEntityVersionFloor() {
+    const label = "GA-P1B4-HOME-TASKENTITY-FLOOR";
+    const homeManifest = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "..", "blueprints", "home", "manifest.json"), "utf8"),
+    );
+    const taskDependency = homeManifest.depends_on.find((dep) => dep.name === "task-entity");
+    assertEqual(taskDependency && taskDependency.range, ">=0.17.0",
+        `${label} production Home manifest declares explicit-result floor`);
+
+    const rejected = runHomeTaskEntityFloorInstall("0.16.0");
+    const rejection = rejected.history.find(
+        (entry) => entry.event === "skip"
+            && entry.name === "home"
+            && entry.reason === "depends on task-entity >=0.17.0 but subscription pins task-entity@0.16.0",
+    );
+    assertEqual(rejected.status, 1,
+        `${label} real headless installer rejects task-entity 0.16.0`);
+    assertTrue(Boolean(rejection),
+        `${label} rejection comes from the production dependency checker`
+            + (rejection ? "" : `; history=${JSON.stringify(rejected.history)}`));
+
+    const accepted = runHomeTaskEntityFloorInstall("0.17.0");
+    const homeSkip = accepted.history.find(
+        (entry) => entry.event === "skip" && entry.name === "home",
+    );
+    assertEqual(accepted.status, 0,
+        `${label} real headless installer accepts task-entity 0.17.0`
+            + (accepted.status === 0 ? "" : `; history=${JSON.stringify(accepted.history)} output=${accepted.output.slice(-1500)}`));
+    assertTrue(!homeSkip,
+        `${label} accepted floor records no Home dependency skip`);
+}
+
+async function caseGAP1B5SquashTitleVersionFloor() {
+    const label = "GA-P1B5-SQUASH-TITLE-VERSION-FLOOR";
+    const computeRelease = require("../../scripts/release/compute-release.js");
+    const productionManifest = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"),
+    );
+    const baselineManifest = JSON.parse(JSON.stringify(productionManifest));
+    baselineManifest.workshop_version = "0.269.0";
+    const homeCatalogue = baselineManifest.blueprints.find((entry) => entry.name === "home");
+    const taskCatalogue = baselineManifest.mechanisms.find((entry) => entry.name === "task-entity");
+    homeCatalogue.version = "0.8.6";
+    taskCatalogue.version = "0.16.0";
+
+    // The coordinator squash-merges the feature branch with the PR title as
+    // the sole release commit. Keep this list equal to the complete P1b5
+    // production/test diff so path-based component attribution is exercised
+    // exactly as it will be after merge.
+    const squashFiles = [
+        "platform/blueprints/home/helpers/space-home.js",
+        "platform/blueprints/home/manifest.json",
+        "platform/mechanisms/task-entity/README.md",
+        "platform/mechanisms/task-entity/manifest.json",
+        "platform/mechanisms/task-entity/task-dialog.js",
+        "platform/mechanisms/task-entity/task-note-view.js",
+        "platform/mechanisms/task-entity/task-today-list.js",
+        "platform/test/run-daily-dashboard.js",
+        "platform/test/run-home.js",
+        "platform/test/run-install.js",
+        "platform/test/run-task-entity.js",
+    ];
+    const releaseTitle = "feat(task-entity): adopt RenderSafe mutation lifecycle";
+    const releasePlan = computeRelease.computePlan(
+        [{ hash: "squash", message: releaseTitle, files: squashFiles }],
+        baselineManifest,
+    );
+    const releaseByName = Object.fromEntries(
+        releasePlan.components.map((component) => [component.name, component]),
+    );
+
+    assertEqual(releaseByName["task-entity"] && releaseByName["task-entity"].to, "0.17.0",
+        `${label} exact squash title releases the explicit-result TaskEntity floor`);
+    assertEqual(releaseByName["task-entity"] && releaseByName["task-entity"].level, "minor",
+        `${label} TaskEntity receives the production feat bump`);
+    assertEqual(releaseByName.home && releaseByName.home.to, "0.9.0",
+        `${label} Home coherently receives the same squash feat bump`);
+    assertEqual(releasePlan.workshop.to, "0.270.0",
+        `${label} workshop coherently receives the squash minor bump`);
+
+    const accepted = runHomeTaskEntityFloorInstall(releaseByName["task-entity"].to);
+    const acceptedHomeSkip = accepted.history.find(
+        (entry) => entry.event === "skip" && entry.name === "home",
+    );
+    assertEqual(accepted.status, 0,
+        `${label} planned TaskEntity release satisfies the real Home dependency checker`);
+    assertTrue(!acceptedHomeSkip,
+        `${label} planned one-squash release records no Home compatibility skip`);
+
+    // Mutant: the old tip/PR title made the squash a patch for every
+    // path-attributed component. The real planner yields task-entity 0.16.1,
+    // and the real installer must reject that computed version below Home's
+    // >=0.17.0 contract.
+    const mutantPlan = computeRelease.computePlan(
+        [{ hash: "mutant", message: "fix(home): enforce task result version floor", files: squashFiles }],
+        baselineManifest,
+    );
+    const mutantByName = Object.fromEntries(
+        mutantPlan.components.map((component) => [component.name, component]),
+    );
+    assertEqual(mutantByName["task-entity"] && mutantByName["task-entity"].to, "0.16.1",
+        `${label} killed fix(home) title mutant strands TaskEntity below the floor`);
+    assertEqual(mutantByName.home && mutantByName.home.to, "0.8.7",
+        `${label} killed mutant produces only a Home patch`);
+    assertEqual(mutantPlan.workshop.to, "0.269.1",
+        `${label} killed mutant produces only a workshop patch`);
+
+    const rejected = runHomeTaskEntityFloorInstall(mutantByName["task-entity"].to);
+    const rejection = rejected.history.find(
+        (entry) => entry.event === "skip"
+            && entry.name === "home"
+            && entry.reason === "depends on task-entity >=0.17.0 but subscription pins task-entity@0.16.1",
+    );
+    assertEqual(rejected.status, 1,
+        `${label} real installer rejects the mutant planner's task-entity 0.16.1`);
+    assertTrue(Boolean(rejection),
+        `${label} mutant is killed by the production dependency checker`
+            + (rejection ? "" : `; history=${JSON.stringify(rejected.history)}`));
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
@@ -1151,6 +1425,8 @@ async function runUnitTests() {
         caseV0790F1PerMcpMicroscopePreserved,
         caseV0800F1SiblingPreserved,
         caseV0801A1InstallJsCliHandler,
+        caseGAP1B4HomeTaskEntityVersionFloor,
+        caseGAP1B5SquashTitleVersionFloor,
     ];
     for (const c of cases) {
         try { await c(); }

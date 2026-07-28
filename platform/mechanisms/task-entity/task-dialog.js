@@ -9,7 +9,7 @@
  * can only ever touch one task's file, never wipe a whole day's list.
  *
  * SAFE single-file primitives (no read+rewrite of the whole file, ever):
- *   - create → app.vault.create(path, content)                (one NEW file)
+ *   - create → RenderSafe.mutate({mode:"create", write:vault.create}) (one NEW file)
  *   - edit   → app.fileManager.processFrontMatter(file, mut)  (that file's FM only)
  *   - done   → processFrontMatter(status=done, completed_at) + renameFile → _done/
  *   - delete → processFrontMatter(status=deleted)            + renameFile → _trash/
@@ -60,6 +60,10 @@ class TaskDialog {
     _recurrencePickerValid(state) { return TaskDialog._recurrencePickerValid(state); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
+    _quickCreatePayload(opts) { return TaskDialog._quickCreatePayload(opts); }
+    _quickCreateKey(payload) { return TaskDialog._quickCreateKey(payload); }
+    _runtimeOwnership(app) { return TaskDialog._runtimeOwnership(app); }
+    _reserveCreatePath(app, taskEntity, base) { return TaskDialog._reserveCreatePath(app, taskEntity, base); }
 
     // ---------- Static pure helpers ----------
 
@@ -108,6 +112,142 @@ class TaskDialog {
      */
     static donePath(path) {
         return TaskDialog._rebase(path, '_done');
+    }
+
+    /**
+     * Return the reload-stable ownership scope for one active Obsidian app.
+     *
+     * CustomJS can evaluate TaskDialog again while an earlier class instance is
+     * still reconciling a mutation. Constructor statics and instance fields do
+     * not cross that reload boundary, so both logical-payload claims and path
+     * reservations live on the shared app authority instead. Symbol.for gives
+     * every realm the same collision-resistant key while the app object keeps
+     * separate vault runtimes isolated.
+     *
+     * The own-property descriptor and scope brand are validated before use.
+     * A malformed, inherited, non-extensible, or colliding authority fails
+     * closed rather than silently falling back to realm- or class-local
+     * ownership (which would reopen duplicate writes on reload).
+     */
+    static _runtimeOwnership(app) {
+        if (!app || (typeof app !== 'object' && typeof app !== 'function')) {
+            throw new Error('TaskDialog ownership requires an active app');
+        }
+        if (typeof Symbol === 'undefined' || typeof Symbol.for !== 'function') {
+            throw new Error('TaskDialog reload-stable ownership unavailable');
+        }
+
+        const authority = app;
+        const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+        const scopeBrand = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.scope.v2');
+        let descriptor;
+        try {
+            descriptor = Object.getOwnPropertyDescriptor(authority, ownershipKey);
+        } catch (_e) {
+            throw new Error('TaskDialog ownership authority collision');
+        }
+
+        if (!descriptor) {
+            let inherited = false;
+            let extensible = false;
+            try {
+                inherited = ownershipKey in authority;
+                extensible = Object.isExtensible(authority);
+            } catch (_e) {
+                throw new Error('TaskDialog ownership authority collision');
+            }
+            if (inherited || !extensible) {
+                throw new Error('TaskDialog ownership authority collision');
+            }
+            const scope = Object.freeze({
+                brand: scopeBrand,
+                claims: new Map(),
+                reservations: new Map(),
+            });
+            try {
+                Object.defineProperty(authority, ownershipKey, {
+                    value: scope,
+                    enumerable: false,
+                    configurable: false,
+                    writable: false,
+                });
+            } catch (_e) {
+                throw new Error('TaskDialog ownership authority collision');
+            }
+            try {
+                descriptor = Object.getOwnPropertyDescriptor(authority, ownershipKey);
+            } catch (_e) {
+                throw new Error('TaskDialog ownership authority collision');
+            }
+        }
+
+        if (!TaskDialog._validOwnershipDescriptor(descriptor, scopeBrand)) {
+            throw new Error('TaskDialog ownership authority collision');
+        }
+        return descriptor.value;
+    }
+
+    static _validOwnershipDescriptor(descriptor, scopeBrand) {
+        if (!descriptor
+            || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+            || Object.prototype.hasOwnProperty.call(descriptor, 'get')
+            || Object.prototype.hasOwnProperty.call(descriptor, 'set')
+            || descriptor.enumerable !== false
+            || descriptor.configurable !== false
+            || descriptor.writable !== false) {
+            return false;
+        }
+        try {
+            const scope = descriptor.value;
+            return !!scope
+                && Object.isFrozen(scope)
+                && scope.brand === scopeBrand
+                && TaskDialog._isRuntimeMap(scope.claims)
+                && TaskDialog._isRuntimeMap(scope.reservations);
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    static _isRuntimeMap(value) {
+        try {
+            Map.prototype.has.call(value, value);
+            return true;
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    /**
+     * Claim one collision-free task path before create reaches its first await.
+     *
+     * Vault metadata can lag a successful create, and concurrent creates can
+     * both choose the same readable filename before either file is visible to
+     * getAbstractFileByPath. The per-app runtime map closes that window across
+     * every TaskDialog instance, entrypoint, and CustomJS class reload. A
+     * token-owned release prevents an old finally from deleting a newer
+     * claimant should ownership ever be recycled.
+     */
+    static _reserveCreatePath(app, taskEntity, base) {
+        const reservations = TaskDialog._runtimeOwnership(app).reservations;
+        const token = Object.freeze({});
+        const finalName = taskEntity._uniqueName(base, (candidatePath) => {
+            if (reservations.has(candidatePath)) return true;
+            return !!(app && app.vault
+                && typeof app.vault.getAbstractFileByPath === 'function'
+                && app.vault.getAbstractFileByPath(candidatePath));
+        });
+        const path = 'spice/tasks/' + finalName;
+        reservations.set(path, token);
+        let released = false;
+        return {
+            path,
+            release() {
+                if (released) return;
+                released = true;
+                if (reservations.get(path) === token) reservations.delete(path);
+            },
+        };
     }
 
     /** Shared prefix-rewriter for donePath / trashPath. */
@@ -240,6 +380,55 @@ class TaskDialog {
         if (s.notes && String(s.notes).trim()) return true;
         if (Array.isArray(s.links) && s.links.length > 0) return true;
         return false;
+    }
+
+    /**
+     * Canonicalize every behaviorally-material quick-create input before it is
+     * used either for ownership or for the note payload. The key and the write
+     * therefore cannot drift (for example, two spellings of the same parent
+     * wikilink cannot own separate creates). Pure apart from consulting the
+     * already-loaded TaskEntity normalizers; every fallback is deterministic.
+     */
+    static _quickCreatePayload(opts) {
+        const o = opts || {};
+        const TE = TaskDialog._taskEntity();
+        const rawDue = o.due != null ? o.due : o.today;
+        let due = String(rawDue == null ? '' : rawDue).trim();
+        let parentTask = String(o.parent_task == null ? '' : o.parent_task).trim();
+        let links = Array.isArray(o.links)
+            ? o.links.map((entry) => String(entry == null ? '' : entry).trim()).filter(Boolean)
+            : [];
+        try {
+            if (TE && typeof TE._toDateStr === 'function') due = TE._toDateStr(rawDue) || '';
+            if (TE && typeof TE._linkText === 'function') {
+                const parentName = TE._linkText(o.parent_task);
+                parentTask = parentName ? '[[' + parentName + ']]' : '';
+            }
+            if (TE && typeof TE._normLinks === 'function') links = TE._normLinks(o.links);
+        } catch (_e) { /* deterministic local normalizations above remain valid */ }
+        return {
+            title: String(o.title == null ? '' : o.title).trim(),
+            due,
+            source: String(o.source == null ? '' : o.source).trim() || 'daily',
+            parent_task: parentTask,
+            links,
+        };
+    }
+
+    /**
+     * Collision-free logical ownership key. Array positions are fixed so
+     * object insertion order cannot affect identity; links retain their order
+     * because that order is persisted in the task note.
+     */
+    static _quickCreateKey(payload) {
+        const p = payload || {};
+        return JSON.stringify([
+            p.title || '',
+            p.due || '',
+            p.source || '',
+            p.parent_task || '',
+            Array.isArray(p.links) ? p.links : [],
+        ]);
     }
 
     /**
@@ -452,8 +641,8 @@ class TaskDialog {
             const { app, file } = this._resolveFile(path);
             if (!app) return { ok: false, reason: 'app unavailable' };
             if (!file) return { ok: false, reason: 'task file not found' };
-            await this._markDone(app, file);
-            return { ok: true };
+            const outcome = await this._markDone(app, file);
+            return { ok: true, outcome: outcome || null };
         } catch (e) {
             return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
         }
@@ -490,7 +679,7 @@ class TaskDialog {
      * recoverable. Fully guarded — never throws (resolves a reason instead). Reuses
      * the recoverable-delete so nothing is hard-deleted.
      */
-    async confirmDelete(path) {
+    async confirmDelete(path, opts) {
         return new Promise((resolve) => {
             let settled = false;
             const done = (r) => { if (settled) return; settled = true; resolve(r); };
@@ -543,6 +732,11 @@ class TaskDialog {
                             onClick: async (api, event) => {
                                 const button = event && (event.currentTarget || event.target);
                                 try { if (button) button.disabled = true; } catch (_e) {}
+                                if (opts && opts.deferWrite === true) {
+                                    done({ ok: true, confirmed: true });
+                                    api.close('delete');
+                                    return;
+                                }
                                 let res;
                                 try { res = await this.markDeleted(path); }
                                 catch (e) { res = { ok: false, reason: (e && (e.message || String(e))) || 'unknown' }; }
@@ -1157,7 +1351,10 @@ class TaskDialog {
             if (saveBtn.disabled) return false;
             try {
                 if (editPath) await this._saveEdit(app, editFile, buildPayload(), state.notes);
-                else await this._create(app, buildPayload(), state.notes);
+                else {
+                    const created = await this._create(app, buildPayload(), state.notes);
+                    if (created && created.ok === false) return false;
+                }
                 closeOverlay();
                 return true;
             } catch (e) {
@@ -1197,9 +1394,11 @@ class TaskDialog {
      * CREATE — write ONE new file. Compose via TaskEntity, validate, then build
      * the final body as CHROME (TaskChromeBar + TaskNoteView + marker) with the
      * typed user notes appended BELOW the `<!-- TASK_NOTES -->` marker. The
-     * filename is the readable "<title>.md"; since titles can collide, dedupe the
-     * base against the vault (" 2", " 3", …) so we never clobber an existing task.
-     * Never touches any other note.
+     * filename is the readable "<title>.md"; since titles can collide, reserve a
+     * unique candidate against both the vault and synchronous in-flight creates
+     * (" 2", " 3", …) so we never clobber an existing task. The reservation is
+     * held through RenderSafe reconciliation and released in finally on every
+     * outcome. Never touches any other note.
      */
     async _create(app, payload, notes) {
         const TE = TaskDialog._taskEntity();
@@ -1210,85 +1409,40 @@ class TaskDialog {
         const v = TE.validatePayload(payloadWithMoment);
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         const { frontmatter, body } = TE.composeNote(payloadWithMoment);
-        // Human-readable filename, deduped against the vault (title collisions).
+        // Human-readable filename, synchronously reserved across all _create
+        // callers before the first integration await.
         const base = TE.taskFilename(payloadWithMoment);
-        const finalName = TE._uniqueName(base, (pp) => !!(app.vault
-            && typeof app.vault.getAbstractFileByPath === 'function'
-            && app.vault.getAbstractFileByPath(pp)));
-        const path = 'spice/tasks/' + finalName;
-        // Chrome first (from composeNote), then the typed notes below the marker.
-        const chromeBody = body || '';
-        const userNotes = String(notes == null ? '' : notes);
-        const finalBody = userNotes ? chromeBody + userNotes + '\n' : chromeBody;
-        const content = TaskDialog.renderNote(frontmatter, finalBody);
-        await this._ensureFolder(app, 'spice/tasks');
-        await app.vault.create(path, content);
-        try { new Notice('Task created'); } catch (_e) {}
-        try { this._reconcileAfterCreate(app, path); } catch (_e) {}
-    }
-
-    /**
-     * L4: after a create, reconcile the surface WITHOUT waiting for Dataview's
-     * ~2.5s refresh tick. The metadataCache 'changed' event only tells us
-     * Obsidian re-parsed the file's frontmatter — Dataview's OWN index update
-     * is a separate, later async step, so firing the force-refresh command
-     * right on 'changed' can still race Dataview and redraw the list from its
-     * stale (pre-create) index, permanently — nothing re-triggers afterward.
-     * So: on 'changed' (or the 1200ms fallback if it's missed), POLL
-     * `dv.page(path)` until Dataview itself reports the new page indexed
-     * (bounded retries), THEN force-refresh. If the Dataview API is
-     * unavailable, degrades immediately to the old fire-on-signal behavior.
-     * Preserves scroll first. NEVER throws — degrades to the natural tick.
-     */
-    _reconcileAfterCreate(app, path) {
-        try { (typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe
-            && window.customJS.RenderSafe.captureScroll && window.customJS.RenderSafe.captureScroll()); } catch (_e) {}
+        const reservation = TaskDialog._reserveCreatePath(app, TE, base);
+        const path = reservation.path;
         try {
-            if (!app) return;
-            const fire = () => {
-                try {
-                    if (app.commands && typeof app.commands.executeCommandById === 'function') {
-                        app.commands.executeCommandById('dataview:dataview-force-refresh-views');
-                    }
-                } catch (_e) { /* ignore */ }
-            };
-            const dvHasPage = () => {
-                try {
-                    const dv = app.plugins && app.plugins.plugins && app.plugins.plugins.dataview
-                        ? app.plugins.plugins.dataview.api : null;
-                    if (!dv || typeof dv.page !== 'function') return true;
-                    return !!dv.page(path);
-                } catch (_e) { return true; }
-            };
-            const setT = app._setTimeout
-                || (typeof window !== 'undefined' && window.setTimeout)
-                || (typeof setTimeout !== 'undefined' ? setTimeout : null);
-            if (typeof setT !== 'function') return;
-
-            let fired = false;
-            let ref = null;
-            const detachMeta = () => {
-                try { if (ref && app.metadataCache && typeof app.metadataCache.offref === 'function') app.metadataCache.offref(ref); } catch (_e) {}
-            };
-            const finish = () => {
-                if (fired) return;
-                fired = true;
-                detachMeta();
-                fire();
-            };
-            const poll = (attemptsLeft) => {
-                if (fired) return;
-                if (dvHasPage() || attemptsLeft <= 0) { finish(); return; }
-                setT(() => poll(attemptsLeft - 1), 150);
-            };
-            if (app.metadataCache && typeof app.metadataCache.on === 'function') {
-                ref = app.metadataCache.on('changed', (f) => {
-                    if (fired) return;
-                    if (f && f.path === path) poll(20);
-                });
+            // Chrome first (from composeNote), then the typed notes below the marker.
+            const chromeBody = body || '';
+            const userNotes = String(notes == null ? '' : notes);
+            const finalBody = userNotes ? chromeBody + userNotes + '\n' : chromeBody;
+            const content = TaskDialog.renderNote(frontmatter, finalBody);
+            const RS = (typeof window !== 'undefined' && window.customJS)
+                ? window.customJS.RenderSafe : null;
+            if (!RS || typeof RS.mutate !== 'function') {
+                try { new Notice('Could not create task: render-safe mechanism unavailable', 6000); } catch (_e) {}
+                return { ok: false, error: new Error('render-safe mechanism unavailable') };
             }
-            setT(() => poll(20), 1200);
-        } catch (_e) { /* never throw */ }
+            const result = await RS.mutate({
+                app,
+                path,
+                mode: 'create',
+                failureMessage: 'Could not create task',
+                write: async () => {
+                    await this._ensureFolder(app, 'spice/tasks');
+                    return app.vault.create(path, content);
+                },
+            });
+            if (result && result.ok) {
+                try { new Notice('Task created'); } catch (_e) {}
+            }
+            return result;
+        } finally {
+            reservation.release();
+        }
     }
 
     /**
@@ -1299,21 +1453,53 @@ class TaskDialog {
      * one-file-write invariant holds and the note appears in the Tasks panel on
      * the caller's re-render. `app` is grabbed from the runtime global (as
      * open()/_render do). A blank / whitespace-only title, or a cold-load with no
-     * app, is a silent no-op. Returns a Promise (the caller awaits before it
-     * re-renders). Never touches any surface note.
+     * app, is a silent no-op. A canonical logical-payload claim is installed
+     * synchronously before _create can enter its first integration await; an
+     * identical in-flight activation resolves as an explicit {ok:false,
+     * duplicate:true} no-op. The owner holds the claim through RenderSafe
+     * reconciliation and releases it in finally on every outcome. Returns a
+     * Promise (the caller awaits before it re-renders). Never touches any
+     * surface note.
      */
-    async createQuick(opts) {
+    createQuick(opts) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
-        const title = String((opts && opts.title) || '').trim();
-        if (!app || !title) return;
-        const payload = {
-            title,
-            due: (opts && opts.today) || '',
-            source: (opts && opts.source) || 'daily',
-            parent_task: (opts && opts.parent_task) || '',
-            links: [],
-        };
-        await this._create(app, payload, '');
+        const payload = TaskDialog._quickCreatePayload(opts);
+        if (!app || !payload.title) return Promise.resolve();
+
+        const key = TaskDialog._quickCreateKey(payload);
+        const claims = TaskDialog._runtimeOwnership(app).claims;
+        if (claims.has(key)) {
+            return Promise.resolve({
+                ok: false,
+                duplicate: true,
+                reason: 'identical task create already in flight',
+            });
+        }
+
+        // Install ownership before invoking _create: _create synchronously
+        // composes/dedupes the path before its first await, and may itself enter
+        // integration code. A deferred promise lets even that re-entrancy see
+        // this claim while preserving the original async createQuick contract.
+        let resolveClaim;
+        let rejectClaim;
+        const pending = new Promise((resolve, reject) => {
+            resolveClaim = resolve;
+            rejectClaim = reject;
+        });
+        const token = Object.freeze({});
+        const entry = Object.freeze({ token, pending });
+        claims.set(key, entry);
+        (async () => {
+            try {
+                resolveClaim(await this._create(app, payload, ''));
+            } catch (error) {
+                rejectClaim(error);
+            } finally {
+                const current = claims.get(key);
+                if (current && current.token === token) claims.delete(key);
+            }
+        })();
+        return pending;
     }
 
     /**
@@ -1412,7 +1598,7 @@ class TaskDialog {
                     fmw.completed_at = '';
                 });
                 try { new Notice('Task rolled to ' + nextDate); } catch (_e) {}
-                return;
+                return { recurring: true, status: 'open', due: nextDate, completed_at: '' };
             }
             // Grammar unsupported / never fires within the horizon — fall through
             // to normal one-shot archiving rather than silently doing nothing.
@@ -1426,8 +1612,10 @@ class TaskDialog {
             fm2.completed_at = iso;
         });
         await this._ensureFolder(app, 'spice/tasks/_done');
-        await app.fileManager.renameFile(file, TaskDialog.donePath(file.path));
+        const movedTo = TaskDialog.donePath(file.path);
+        await app.fileManager.renameFile(file, movedTo);
         try { new Notice('Task done'); } catch (_e) {}
+        return { recurring: false, status: 'done', completed_at: iso, moved_to: movedTo };
     }
 
     /**
