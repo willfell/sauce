@@ -2183,17 +2183,75 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
     // GitHub Actions checks pull requests out at a synthetic merge commit.
     // Its subject is not the future squash title, so bind the ordinary gate
     // fixture to the exact PR title in the event payload after proving that
-    // GITHUB_SHA names this exact checkout. The isolated base below has the
-    // pre-feature tree, while the merge checkout has the exact raised-floor
-    // feature tree and the same base-first/feature-second parent topology as
-    // Actions. Release attribution still uses mergeRefBase explicitly, so it
+    // GITHUB_SHA names this exact checkout. Normalize the isolated base to the
+    // exact source TaskEntity version even when the checked-out source already
+    // carries the next-minor Home floor, then use the exact raised-floor tree
+    // as the merge checkout. The base/feature delta stays non-empty in both
+    // component touch zones and preserves Actions' base-first/feature-second
+    // topology. Release attribution still uses mergeRefBase explicitly, so it
     // cannot borrow the feature commit through the merge checkout's ancestry.
     const mergeRefTree = realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], {
       cwd: fixtureRoot,
     });
-    const mergeRefBaseTree = realRun('git', ['rev-parse', `${fixtureStart}^{tree}`], {
+    const mergeRefBaseTree = realRun('git', ['rev-parse', `${fixturePreparation}^{tree}`], {
       cwd: fixtureRoot,
     });
+    const mergeRefFloorAt = (treeish) => JSON.parse(realRun('git', [
+      'show', `${treeish}:platform/blueprints/home/manifest.json`,
+    ], { cwd: fixtureRoot })).depends_on.find((dep) => dep.name === 'task-entity').range;
+    const mergeRefTransitionOracle = (
+      baseTree, featureTree, sourceTaskVersion = taskManifest.version,
+    ) => {
+      assert.notStrictEqual(
+        baseTree,
+        featureTree,
+        'merge-ref release transition must preserve a non-empty exact feature tree',
+      );
+      assert.strictEqual(
+        mergeRefFloorAt(baseTree),
+        `>=${sourceTaskVersion}`,
+        'merge-ref release base must normalize Home to the exact source TaskEntity version',
+      );
+      assert.strictEqual(
+        mergeRefFloorAt(featureTree),
+        `>=${computedTaskVersion}`,
+        'merge-ref feature tree must raise Home to the computed next TaskEntity minor',
+      );
+      assert.deepStrictEqual(
+        realRun('git', ['diff', '--name-only', baseTree, featureTree], { cwd: fixtureRoot })
+          .split('\n').filter(Boolean).sort(),
+        [
+          'platform/blueprints/home/manifest.json',
+          'platform/mechanisms/task-entity/README.md',
+        ],
+        'merge-ref release transition must touch exactly Home and TaskEntity fixture paths',
+      );
+    };
+    mergeRefTransitionOracle(mergeRefBaseTree, mergeRefTree);
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(
+        realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], { cwd: fixtureRoot }),
+        realRun('git', ['rev-parse', `${fixtureHead}^{tree}`], { cwd: fixtureRoot }),
+      ),
+      /merge-ref release base must normalize Home/,
+      'GA-P1K-ALREADY-RAISED-BASE-MUTANT-KILLED rejects reuse of the raised source tree',
+    );
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(mergeRefBaseTree, mergeRefBaseTree),
+      /non-empty exact feature tree/,
+      'GA-P1K-EMPTY-TRANSITION-MUTANT-KILLED rejects an empty normalized merge range',
+    );
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(mergeRefBaseTree, mergeRefTree, alternateSourceVersion),
+      /exact source TaskEntity version/,
+      'GA-P1K-HISTORICAL-VERSION-MUTANT-KILLED binds normalization to the live source version',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(mergeRefTransitionOracle.toString()),
+      'GA-P1K-VERSION-RELATIVE-MERGE-STATE contains no historical component literal');
     const mergeRefBase = realRun('git', [
       'commit-tree', mergeRefBaseTree,
       '-m', 'test(autoloop): isolate merge-ref prospective release range',
@@ -2214,7 +2272,7 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       `${mergeRefHead} ${mergeRefBase} ${fixtureBase}`,
       'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE fixture is exactly base-first/feature-second two-parent merge');
     eq(realRun('git', ['rev-parse', `${mergeRefHead}^1`], { cwd: fixtureRoot }), mergeRefBase,
-      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE first parent is the isolated exact base');
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE first parent is the normalized isolated exact base');
     eq(realRun('git', ['rev-parse', `${mergeRefHead}^2`], { cwd: fixtureRoot }), fixtureBase,
       'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE second parent is the exact feature commit');
     assert.throws(
