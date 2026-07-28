@@ -1863,33 +1863,164 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       cwd: path.resolve(__dirname, '../..'), stdio: 'pipe',
     });
     fixtureAdded = true;
-    const fixtureBase = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    const fixtureStart = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
     const homeManifestPath = path.join(fixtureRoot, 'platform/blueprints/home/manifest.json');
     const taskManifestPath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/manifest.json');
     const taskReadmePath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/README.md');
     const homeManifest = JSON.parse(fs.readFileSync(homeManifestPath, 'utf8'));
     const taskManifest = JSON.parse(fs.readFileSync(taskManifestPath, 'utf8'));
-    const [taskMajor, taskMinor] = taskManifest.version.split('.').map(Number);
+    const [taskMajor, taskMinor, taskPatch] = taskManifest.version.split('.').map(Number);
     const computedTaskVersion = `${taskMajor}.${taskMinor + 1}.0`;
     const taskDependency = homeManifest.depends_on.find((dep) => dep.name === 'task-entity');
     ok(taskDependency && /^\d+\.\d+\.\d+$/.test(taskManifest.version),
       'GA-P1G-REAL-RELEASE-FIXTURE starts from a versioned shipping TaskEntity dependency');
+    const normalizeFixtureTaskFloor = (manifest, sourceVersion) => {
+      const dependency = manifest.depends_on.find((dep) => dep.name === 'task-entity');
+      if (!dependency) throw new Error('fixture Home manifest lacks task-entity dependency');
+      dependency.range = `>=${sourceVersion}`;
+      return dependency;
+    };
+    const normalizationOracle = (normalizer, sourceVersion) => {
+      const candidate = JSON.parse(JSON.stringify(homeManifest));
+      const candidateDependency = candidate.depends_on.find((dep) => dep.name === 'task-entity');
+      candidateDependency.range = `>=${taskMajor}.${taskMinor + 1}.0`;
+      normalizer(candidate, sourceVersion);
+      assert.strictEqual(
+        candidateDependency.range,
+        `>=${sourceVersion}`,
+        'fixture normalization must bind Home to the exact source TaskEntity version',
+      );
+    };
+    normalizationOracle(normalizeFixtureTaskFloor, taskManifest.version);
+    count++;
+    assert.throws(
+      () => normalizationOracle(() => {}, taskManifest.version),
+      /fixture normalization must bind Home to the exact source TaskEntity version/,
+      'GA-P1H-OMITTED-NORMALIZATION-MUTANT-KILLED requires the preparation floor rewrite',
+    );
+    count++;
+    const alternateSourceVersion = `${taskMajor}.${taskMinor}.${taskPatch + 1}`;
+    normalizationOracle(normalizeFixtureTaskFloor, alternateSourceVersion);
+    count++;
+    assert.throws(
+      () => normalizationOracle(
+        (manifest) => normalizeFixtureTaskFloor(manifest, taskManifest.version),
+        alternateSourceVersion,
+      ),
+      /fixture normalization must bind Home to the exact source TaskEntity version/,
+      'GA-P1H-HISTORICAL-FLOOR-MUTANT-KILLED rejects a fixture pinned to one source release',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(normalizeFixtureTaskFloor.toString()),
+      'GA-P1H-VERSION-RELATIVE-NORMALIZATION contains no historical TaskEntity literal');
+
+    // Reproduce the post-floor source that blocked GA-P1b10: TaskEntity is
+    // still at the shipping version while Home already requires its next
+    // minor. This synthetic source commit is the exact base of the prospective
+    // squash, so the preparation + feature pair below must net back to its
+    // raised floor without borrowing a bump from branch history.
+    taskDependency.range = `>=${computedTaskVersion}`;
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    const raisedSourceMarker = '<!-- GA-P1h raised-floor source fixture -->';
+    fs.appendFileSync(taskReadmePath, `\n${raisedSourceMarker}\n`);
+    const raisedSourcePaths = realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot })
+      .split('\n').filter(Boolean).sort();
+    ok(raisedSourcePaths.includes('platform/mechanisms/task-entity/README.md'),
+      'GA-P1H-ALREADY-RAISED-SOURCE-MUTANT-KILLED setup stays non-empty when Home already has the computed floor');
+    ok(raisedSourcePaths.every((sourcePath) => [
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ].includes(sourcePath)), 'GA-P1H-RAISED-SOURCE setup changes only its two fixture-owned paths');
+    realRun('git', [
+      'add',
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    const raisedSourceCommitArgs = [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'test(autoloop): reproduce shipped task-entity floor',
+    ];
+    ok(!raisedSourceCommitArgs.includes('--allow-empty'),
+      'GA-P1H-RAISED-SOURCE-ALLOW-EMPTY-MUTANT-KILLED source setup rejects empty commits');
+    realRun('git', raisedSourceCommitArgs, { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixtureBase = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixtureBase}^`], { cwd: fixtureRoot }), fixtureStart,
+      'GA-P1H-RAISED-SOURCE base extends the exact checked-out source');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureBase}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${computedTaskVersion}`,
+      'GA-P1H-RAISED-SOURCE reproduces Home already requiring the computed next minor',
+    );
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureBase}:platform/mechanisms/task-entity/manifest.json`], {
+        cwd: fixtureRoot,
+      })).version,
+      taskManifest.version,
+      'GA-P1H-RAISED-SOURCE keeps TaskEntity at the exact shipping source version',
+    );
+    ok(realRun('git', [
+      'show', `${fixtureBase}:platform/mechanisms/task-entity/README.md`,
+    ], { cwd: fixtureRoot }).includes(raisedSourceMarker),
+    'GA-P1H-RAISED-SOURCE base carries the independent non-empty fixture marker');
+
+    normalizeFixtureTaskFloor(homeManifest, taskManifest.version);
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
     fs.appendFileSync(taskReadmePath, '\n<!-- GA-P1g computed-release fixture -->\n');
-    realRun('git', ['add', 'platform/mechanisms/task-entity/README.md'], { cwd: fixtureRoot, stdio: 'pipe' });
+    eq(
+      realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot }).split('\n').filter(Boolean).sort(),
+      ['platform/blueprints/home/manifest.json', 'platform/mechanisms/task-entity/README.md'],
+      'GA-P1H-NORMALIZED-PREP is non-empty and binds the exact floor plus feature fixture',
+    );
+    realRun('git', [
+      'add',
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
     realRun('git', [
       '-c', 'user.name=Sauce Test',
       '-c', 'user.email=sauce-test@example.invalid',
       'commit', '-m', 'fix(task-entity): prepare multi-commit release fixture',
     ], { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixturePreparation = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixturePreparation}^`], { cwd: fixtureRoot }), fixtureBase,
+      'GA-P1H-NORMALIZED-PREP extends the exact raised-floor base');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixturePreparation}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${taskManifest.version}`,
+      'GA-P1H-NORMALIZED-PREP lowers Home to the exact source TaskEntity version',
+    );
     taskDependency.range = `>=${computedTaskVersion}`;
     fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    eq(realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot }),
+      'platform/blueprints/home/manifest.json',
+      'GA-P1H-NONEMPTY-FEATURE-MUTANT-KILLED requires a real computed-floor tree transition');
     realRun('git', ['add', 'platform/blueprints/home/manifest.json'], { cwd: fixtureRoot, stdio: 'pipe' });
-    realRun('git', [
+    const featureCommitArgs = [
       '-c', 'user.name=Sauce Test',
       '-c', 'user.email=sauce-test@example.invalid',
       'commit', '-m', 'feat(task-entity): exercise computed release floor',
-    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    ];
+    ok(!featureCommitArgs.includes('--allow-empty'),
+      'GA-P1H-ALLOW-EMPTY-COMMIT-MUTANT-KILLED feature fixture rejects empty commits');
+    realRun('git', featureCommitArgs, { cwd: fixtureRoot, stdio: 'pipe' });
     const fixtureHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixtureHead}^`], { cwd: fixtureRoot }), fixturePreparation,
+      'GA-P1H-NONEMPTY-FEATURE commit extends the normalized preparation');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureHead}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${computedTaskVersion}`,
+      'GA-P1H-NONEMPTY-FEATURE raises Home to the computed next TaskEntity minor',
+    );
+    ok(realRun('git', ['rev-parse', `${fixtureHead}^{tree}`], { cwd: fixtureRoot })
+        !== realRun('git', ['rev-parse', `${fixturePreparation}^{tree}`], { cwd: fixtureRoot }),
+    'GA-P1H-NONEMPTY-FEATURE feature and preparation trees differ');
     const claimedHeadBefore = fixtureHead;
     const claimedStatusBefore = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: fixtureRoot });
     const claimedHomeBefore = fs.readFileSync(homeManifestPath);
