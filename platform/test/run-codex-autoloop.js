@@ -1856,6 +1856,7 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
   const ordinaryDisposable = [];
   const releaseDisposable = [];
   const mismatchedDisposable = [];
+  const borrowedDisposable = [];
   let fixtureAdded = false;
   let rawAdded = false;
   try {
@@ -1939,7 +1940,7 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
     const raisedSourceCommitArgs = [
       '-c', 'user.name=Sauce Test',
       '-c', 'user.email=sauce-test@example.invalid',
-      'commit', '-m', 'test(autoloop): reproduce shipped task-entity floor',
+      'commit', '-m', 'feat(task-entity): reproduce ambient release provenance',
     ];
     ok(!raisedSourceCommitArgs.includes('--allow-empty'),
       'GA-P1H-RAISED-SOURCE-ALLOW-EMPTY-MUTANT-KILLED source setup rejects empty commits');
@@ -1965,6 +1966,53 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       'show', `${fixtureBase}:platform/mechanisms/task-entity/README.md`,
     ], { cwd: fixtureRoot }).includes(raisedSourceMarker),
     'GA-P1H-RAISED-SOURCE base carries the independent non-empty fixture marker');
+    eq(realRun('git', ['show', '-s', '--format=%s', fixtureBase], { cwd: fixtureRoot }),
+      'feat(task-entity): reproduce ambient release provenance',
+      'GA-P1I-AMBIENT-FEATURE fixture carries a real releasable feature before the prospective squash');
+
+    // The real feature above deliberately reproduces the history present at
+    // GA-P1b10's preserved product HEAD. Give the prospective squash a
+    // parent with the exact same base tree but independent ancestry, so
+    // compute-release can see only that prospective title. This stays valid
+    // in Actions' depth-1 checkout because it does not need a fetched tag or
+    // the checked-out commit's absent parent.
+    const releaseRangeTree = realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const releaseRangeBase = realRun('git', [
+      'commit-tree', releaseRangeTree,
+      '-m', 'test(autoloop): isolate prospective release range',
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    eq(realRun('git', ['rev-parse', `${releaseRangeBase}^{tree}`], { cwd: fixtureRoot }),
+      releaseRangeTree,
+      'GA-P1I-RANGE-BASE preserves the exact fixture base tree');
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', releaseRangeBase], { cwd: fixtureRoot }),
+      releaseRangeBase,
+      'GA-P1I-RANGE-BASE is an ancestry-isolated root that needs no fetched history');
+    assert.throws(
+      () => realRun('git', ['merge-base', '--is-ancestor', fixtureBase, releaseRangeBase], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1I-RANGE-BASE excludes the ambient feature from prospective release ancestry',
+    );
+    count++;
+    const rangeAnchorOracle = (selectRangeBase) => {
+      const selected = selectRangeBase({ isolated: releaseRangeBase, ambient: fixtureBase });
+      assert.strictEqual(
+        selected,
+        releaseRangeBase,
+        'prospective release must use the ancestry-isolated exact-tree base',
+      );
+    };
+    rangeAnchorOracle(({ isolated }) => isolated);
+    count++;
+    assert.throws(
+      () => rangeAnchorOracle(({ ambient }) => ambient),
+      /prospective release must use the ancestry-isolated exact-tree base/,
+      'GA-P1I-WRONG-RANGE-ANCHOR-MUTANT-KILLED rejects the ambient feature-bearing parent',
+    );
+    count++;
 
     normalizeFixtureTaskFloor(homeManifest, taskManifest.version);
     fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
@@ -2052,7 +2100,7 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       return realRun(cmd, args, opts);
     };
     runIsolatedWorkshopSelfInstall(
-      { root: fixtureRoot }, fixtureHead, fixtureBase,
+      { root: fixtureRoot }, fixtureHead, releaseRangeBase,
       'feat(task-entity): exercise computed release floor', releaseRun,
     );
     eq(releaseDisposable.length, 1,
@@ -2073,21 +2121,39 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') mismatchedDisposable.push(args[3]);
       return realRun(cmd, args, opts);
     };
-    let mismatchError = null;
-    try {
-      runIsolatedWorkshopSelfInstall(
-        { root: fixtureRoot }, fixtureHead, fixtureBase,
-        'fix(task-entity): misclassified prospective squash', mismatchedRun,
+    const provenanceMismatchOracle = (rangeBase, trackedRun, disposable) => {
+      let mismatchError = null;
+      try {
+        runIsolatedWorkshopSelfInstall(
+          { root: fixtureRoot }, fixtureHead, rangeBase,
+          'fix(task-entity): misclassified prospective squash', trackedRun,
+        );
+      } catch (error) {
+        mismatchError = error;
+      }
+      const mismatchOutput = `${mismatchError && mismatchError.message || ''}\n`
+        + `${mismatchError && mismatchError.stdout || ''}\n${mismatchError && mismatchError.stderr || ''}`;
+      assert(
+        mismatchError && /depends on task-entity .* but subscription pins task-entity@/.test(mismatchOutput),
+        'GA-P1G-PROVENANCE-MISMATCH isolated fix-title synthetic squash must fail the exact TaskEntity dependency floor',
       );
-    } catch (error) {
-      mismatchError = error;
-    }
-    const mismatchOutput = `${mismatchError && mismatchError.message || ''}\n`
-      + `${mismatchError && mismatchError.stdout || ''}\n${mismatchError && mismatchError.stderr || ''}`;
-    ok(mismatchError && /depends on task-entity .* but subscription pins task-entity@/.test(mismatchOutput),
-      'GA-P1G-PROVENANCE-MISMATCH feature-bearing branch history cannot make a fix-title synthetic squash pass');
-    ok(mismatchedDisposable.length === 1 && !fs.existsSync(mismatchedDisposable[0]),
-      'GA-P1G-PROVENANCE-MISMATCH failed synthetic release worktree is target-cleaned');
+      assert(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        'GA-P1G-PROVENANCE-MISMATCH failed synthetic release worktree is target-cleaned');
+    };
+    provenanceMismatchOracle(releaseRangeBase, mismatchedRun, mismatchedDisposable);
+    count += 2;
+    const borrowedRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') borrowedDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    assert.throws(
+      () => provenanceMismatchOracle(fixtureBase, borrowedRun, borrowedDisposable),
+      /GA-P1G-PROVENANCE-MISMATCH isolated fix-title synthetic squash must fail the exact TaskEntity dependency floor/,
+      'GA-P1I-AMBIENT-FEATURE-BORROWING-MUTANT-KILLED proves the wrong parent borrows the ambient feat bump',
+    );
+    count++;
+    ok(borrowedDisposable.length === 1 && !fs.existsSync(borrowedDisposable[0]),
+      'GA-P1I-AMBIENT-FEATURE-BORROWING-MUTANT-KILLED wrong-anchor success still target-cleans');
 
     const workshopRoot = path.resolve(__dirname, '../..');
     const workshopHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot });
