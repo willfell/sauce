@@ -9669,5 +9669,88 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   }
 }
 
+// LOOP-AMEND-PARK: bounded supervised repair for parked-card metadata (wrong
+// dependency recorded at park time, e.g. the ero OC-1/EM-1 knot). Compare-and-
+// swap on the preserved worktree HEAD, audit trail, literal replay no_op;
+// never touches receipts, worktrees, or non-parked cards.
+{
+  const parkWt = fs.mkdtempSync(path.join(os.tmpdir(), 'amend-park-wt-'));
+  try {
+    const HEAD40 = 'a'.repeat(40);
+    const mkParked = () => ({
+      card: 'OC-1 Parked slice', phase: 'parked', worktree: parkWt, branch: 'x/oc-1',
+      dependencies: ['[[EM-4 Wrong dependency]]'], resume_condition: 'blocked on EM-4',
+      reviews: { correctness: { lens: 'correctness', verdict: 'pass', head_sha: HEAD40 } },
+    });
+    const amendDeps = (state, extra = {}) => ({
+      readState: () => state,
+      writeState: () => {},
+      withLock: immediateCardLock,
+      sh: (cmd, cmdArgs) => {
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return HEAD40;
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      findCard: () => '/vault/tasks/somewhere.md',
+      projectCard: () => {},
+      boardPath: '/vault/board.md',
+      cardsRoot: '/vault/tasks',
+      now: () => '2026-07-28T00:00:00.000Z',
+      ...extra,
+    });
+
+    const amendState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    const amended = await coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'park recorded an impossible dependency; prerequisite shipped upstream',
+      'clear-dependencies': true, 'resume-condition': 'ready to resume — upstream fix deployed',
+    }, amendDeps(amendState));
+    eq(amended.action, 'park-amended', 'LOOP-AMEND-PARK amend succeeds');
+    const rec = amendState.cards['OC-1 Parked slice'];
+    eq(rec.dependencies, [], 'LOOP-AMEND-PARK dependencies cleared');
+    eq(rec.resume_condition, 'ready to resume — upstream fix deployed', 'LOOP-AMEND-PARK resume condition replaced');
+    eq(rec.park_amendments.length, 1, 'LOOP-AMEND-PARK audit record appended');
+    eq(rec.park_amendments[0].previous.dependencies, ['[[EM-4 Wrong dependency]]'], 'LOOP-AMEND-PARK audit preserves the previous metadata');
+    ok(rec.reviews.correctness.verdict === 'pass', 'LOOP-AMEND-PARK preserved receipts untouched');
+    eq(rec.phase, 'parked', 'LOOP-AMEND-PARK card stays parked (resume is a separate explicit command)');
+
+    const replay = await coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'park recorded an impossible dependency; prerequisite shipped upstream',
+      'clear-dependencies': true, 'resume-condition': 'ready to resume — upstream fix deployed',
+    }, amendDeps(amendState));
+    eq(replay.no_op, true, 'LOOP-AMEND-PARK literal replay is no_op');
+    eq(amendState.cards['OC-1 Parked slice'].park_amendments.length, 1, 'LOOP-AMEND-PARK replay appends no second audit record');
+
+    const headMismatchState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': 'b'.repeat(40),
+      reason: 'stale head', 'clear-dependencies': true,
+    }, amendDeps(headMismatchState)), /head_mismatch|expected HEAD/, 'LOOP-AMEND-PARK refuses a stale expected head');
+    eq(headMismatchState.cards['OC-1 Parked slice'].dependencies, ['[[EM-4 Wrong dependency]]'],
+      'LOOP-AMEND-PARK refused amend leaves metadata untouched');
+
+    const notParkedState = { schema_version: 1, cards: { 'OC-1 Parked slice': { ...mkParked(), phase: 'implementing' } } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'wrong phase', 'clear-dependencies': true,
+    }, amendDeps(notParkedState)), /phase_ineligible|only amends parked/, 'LOOP-AMEND-PARK refuses non-parked cards');
+
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'both operands', 'clear-dependencies': true, 'depends-on': 'EM-2 Other',
+    }, amendDeps({ schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } })),
+    /exactly one of/, 'LOOP-AMEND-PARK refuses --clear-dependencies combined with --depends-on');
+
+    const missingDepState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'swap dependency', 'depends-on': 'EM-9 Ghost card',
+    }, amendDeps(missingDepState, { findCard: () => null })), /dependency_missing|does not exist/,
+    'LOOP-AMEND-PARK refuses a replacement dependency that does not exist');
+  } finally {
+    fs.rmSync(parkWt, { recursive: true, force: true });
+  }
+}
+
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
 })().catch((err) => { console.error(err); process.exit(1); });

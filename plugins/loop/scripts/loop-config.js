@@ -52,6 +52,16 @@ function defaultBrewPrefix() {
   return execFileSync('brew', ['--prefix', 'sauce'], { encoding: 'utf8' }).trim();
 }
 
+function defaultGitRemote(repoRoot) {
+  return execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
+}
+
+// Parse owner/name from an origin remote URL (ssh or https, .git optional).
+function parseRepoSlug(remoteUrl) {
+  const match = String(remoteUrl || '').trim().match(/(?:[:/])([^/:]+\/[^/:]+?)(?:\.git)?$/);
+  return match ? match[1] : null;
+}
+
 function readRawConfig(repoRoot) {
   const configPath = path.join(repoRoot, CONFIG_RELPATH);
   if (!fs.existsSync(configPath)) {
@@ -165,6 +175,14 @@ function resolveBinding(repoRoot, opts = {}) {
     SAUCE_LOOP_BOARD_TOPOLOGY: raw.board.topology || 'epic',
   };
   if (fidAbs) env.DELIVERY_FID = fidAbs;
+  // The GitHub repo record-pr/advance query — derived from the bound repo's
+  // origin remote so the coordinator never inspects another repo's PR numbers.
+  // No remote / unparseable remote → env omitted → coordinator default (sauce).
+  try {
+    const remote = (opts.gitRemote || defaultGitRemote)(repoRoot);
+    const slug = parseRepoSlug(remote);
+    if (slug) env.SAUCE_LOOP_REPO = slug;
+  } catch (_) { /* repo without an origin remote — leave the default */ }
   const deployVaults = raw.policy && raw.policy.deploy_vaults;
   if (Array.isArray(deployVaults)) {
     // An EXPLICIT empty array is meaningful: SAUCE_LOOP_VAULTS=[] tells the
@@ -269,4 +287,4 @@ function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { resolveBinding, checkBinding, expandTilde, validateRaw, CONFIG_RELPATH, EXIT_CODES };
+module.exports = { resolveBinding, checkBinding, expandTilde, validateRaw, parseRepoSlug, CONFIG_RELPATH, EXIT_CODES };

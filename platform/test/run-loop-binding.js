@@ -101,5 +101,14 @@ const HOME = os.homedir();
   ok('LB-5 batch intakeRoots follow the binding', JSON.stringify(out2.ir) === JSON.stringify(['/v/demo/spice/projects/demo', '/v/demo/spice/projects/demo/tasks']));
 }
 
+// LB-6: SAUCE_LOOP_REPO retargets record-pr/advance PR lookups; default is the
+// historical sauce repo.
+{
+  const def = nodeEvalClean(`console.log(require(${JSON.stringify(COORD)}).REPO);`);
+  ok('LB-6 default REPO unchanged', def === 'willfell/sauce');
+  const bound = nodeEvalClean(`console.log(require(${JSON.stringify(COORD)}).REPO);`, { SAUCE_LOOP_REPO: 'willfell/ero-copilot-iac' });
+  ok('LB-6 REPO override honored', bound === 'willfell/ero-copilot-iac');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
