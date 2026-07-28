@@ -285,5 +285,20 @@ function mkRepo(config) {
   fs.rmSync(repo, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// LC-9 — GitHub repo slug derived from the bound repo's origin remote.
+// ---------------------------------------------------------------------------
+{
+  const repo = mkRepo(baseConfig());
+  const ssh = LC.resolveBinding(repo, { home: HOME, gitRemote: () => 'git@github-personal:willfell/egnyte-mcp.git' });
+  ok('LC-9 ssh remote → slug', ssh.config.env.SAUCE_LOOP_REPO === 'willfell/egnyte-mcp');
+  const https = LC.resolveBinding(repo, { home: HOME, gitRemote: () => 'https://github.com/willfell/ero-copilot-iac' });
+  ok('LC-9 https remote → slug', https.config.env.SAUCE_LOOP_REPO === 'willfell/ero-copilot-iac');
+  const none = LC.resolveBinding(repo, { home: HOME, gitRemote: () => { throw new Error('no remote'); } });
+  ok('LC-9 no remote → env omitted (coordinator default)', !('SAUCE_LOOP_REPO' in none.config.env));
+  ok('LC-9 parseRepoSlug drops .git', LC.parseRepoSlug('git@github.com:o/r.git') === 'o/r' && LC.parseRepoSlug('garbage') === null);
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }

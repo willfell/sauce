@@ -55,6 +55,11 @@ Four knobs every fresh binding should know:
 - **`policy.verify_commands`** (merge-only repos) — the repo's own local check suite (e.g. `["./.venv/bin/python -m pytest -q", "ruff check ."]`). The merge-only combined gate (`verify-gates`) runs THESE in the card worktree instead of the sauce release preflights + workshop self-install. Empty/absent = the receipt records `none-declared` and the protected CI checks gate the merge.
 - **`gate`** (merge-only repos) — Gate B classification for non-JS repos: `{"test_globs": ["tests/**"], "exclude_globs": ["docs/**", "*.md"], "test_command": "./.venv/bin/python -m pytest -q {test}"}`. Without it, gate.js falls back to the sauce rules (which misclassify non-sauce trees). The coordinator invokes the installed gate.js by absolute path with `--cwd <worktree>` on merge-only bindings, so the diff is always computed in the bound repo.
 
+Two derived/repair facts:
+
+- **GitHub repo derivation** — the resolver reads the bound repo's `origin` remote and emits `SAUCE_LOOP_REPO` (owner/name) so `record-pr`/`advance` query the RIGHT repository's PRs; no remote → the coordinator's sauce default. Nothing to configure.
+- **`amend-park`** — bounded supervised repair when a parked card's recorded metadata is wrong (e.g. parked on a dependency that later proves impossible or already satisfied upstream): `amend-park --card "<exact>" --expected-head <preserved 40-hex HEAD> --reason "<audit>" (--clear-dependencies | --depends-on "<card>"...) [--resume-condition "<text>"] --json`. Parked cards only; compare-and-swap on the preserved HEAD; appends an audit record; literal replay is `no_op`; never touches receipts, worktrees, or any non-parked card. Discard/supersession remains the only path that deletes work.
+
 ## The skill surface
 
 | Slash | Codex | Does |

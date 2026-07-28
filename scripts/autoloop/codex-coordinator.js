@@ -33,7 +33,10 @@ const {
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
-const REPO = 'willfell/sauce';
+// SAUCE_LOOP_REPO (loop-plugin bindings): the GitHub repo record-pr/advance
+// query. Derived by the resolver from the bound repo's origin remote; absent
+// env keeps the historical sauce default.
+const REPO = process.env.SAUCE_LOOP_REPO || 'willfell/sauce';
 const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
 const DEFAULT_LEASE_SECONDS = 600;
@@ -41,6 +44,7 @@ const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const STRICT_CLI_OPTIONS = Object.freeze({
   park: ['json', 'card', 'depends-on', 'resume-condition'],
+  'amend-park': ['json', 'card', 'expected-head', 'reason', 'depends-on', 'clear-dependencies', 'resume-condition'],
   resume: ['json', 'card'],
   'record-review': [
     'json', 'card', 'lens', 'verdict', 'summary', 'expected-head',
@@ -3647,6 +3651,102 @@ async function commandPark(ctx, args, deps = {}) {
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
 }
 
+// amend-park — bounded supervised repair for a parked card whose recorded park
+// metadata (dependencies / resume condition) is wrong, e.g. a park recorded
+// against a dependency that later proves impossible or already-satisfied.
+// Compare-and-swap on the preserved worktree HEAD, full audit trail on the
+// record, literal replay is no_op. Never touches receipts, reviews, the
+// worktree, or any non-parked card; discard/supersession remains the only
+// path that deletes work.
+async function commandAmendPark(ctx, args, deps = {}) {
+  requireJson(args, 'amend-park');
+  requireOnlyOptions(args, 'amend-park', STRICT_CLI_OPTIONS['amend-park']);
+  const card = String(args.card || '').trim();
+  const expectedHead = String(args['expected-head'] || '').trim();
+  const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
+  const clearDependencies = args['clear-dependencies'] === true;
+  const dependencies = [...new Set(argumentValues(args['depends-on']))];
+  const resumeCondition = Array.isArray(args['resume-condition']) ? '' : String(args['resume-condition'] || '').trim();
+  if (!card) usage('amend-park-refused', 'invalid_arguments', 'amend-park requires --card');
+  if (!EXACT_SHA.test(expectedHead)) {
+    usage('amend-park-refused', 'invalid_arguments',
+      'amend-park requires --expected-head as one exact lowercase 40-hex SHA of the preserved worktree HEAD');
+  }
+  if (!reason) usage('amend-park-refused', 'invalid_arguments', 'amend-park requires a non-empty audit --reason');
+  if (clearDependencies === (dependencies.length > 0)) {
+    usage('amend-park-refused', 'invalid_arguments',
+      'amend-park requires exactly one of --clear-dependencies or one-or-more --depends-on');
+  }
+  if (dependencies.some((dependency) => normalizeCardLink(dependency) === normalizeCardLink(card))) {
+    refuse('amend-park-refused', 'self_dependency', `${card} cannot depend on itself`);
+  }
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const transitionLock = deps.withLock || withLock;
+  const find = deps.findCard || findCard;
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const project = deps.projectCard || projectCard;
+  const run = deps.sh || sh;
+  const now = deps.now || (() => new Date().toISOString());
+  return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
+    const state = loadState(ctx); const record = state.cards[card];
+    if (!record) refuse('amend-park-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    if (record.phase !== 'parked') {
+      refuse('amend-park-refused', 'phase_ineligible',
+        `amend-park only amends parked cards; ${card} is ${record.phase}`);
+    }
+    if (!record.worktree || !fs.existsSync(record.worktree)) {
+      refuse('amend-park-refused', 'worktree_missing', `worktree is missing for ${card}`);
+    }
+    const headSha = run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+    if (headSha !== expectedHead) {
+      refuse('amend-park-refused', 'head_mismatch',
+        `amend-park expected HEAD ${expectedHead} but the preserved worktree is ${headSha}`);
+    }
+    const nextDependencies = clearDependencies ? [] : dependencies;
+    const nextResumeCondition = resumeCondition || record.resume_condition || '';
+    if (!nextResumeCondition) {
+      usage('amend-park-refused', 'invalid_arguments',
+        'amend-park requires --resume-condition when the parked record has none');
+    }
+    if (JSON.stringify(record.dependencies || []) === JSON.stringify(nextDependencies)
+      && (record.resume_condition || '') === nextResumeCondition) {
+      return successReceipt('park-amended', {
+        no_op: true, card, phase: record.phase,
+        dependencies: nextDependencies, resume_condition: nextResumeCondition,
+      });
+    }
+    for (const dependency of nextDependencies) {
+      if (!find(cardsRoot, dependency)) {
+        refuse('amend-park-refused', 'dependency_missing', `prerequisite card ${dependency} does not exist`);
+      }
+    }
+    record.park_amendments = [...(record.park_amendments || []), {
+      at: now(), reason, expected_head: expectedHead,
+      previous: { dependencies: record.dependencies || [], resume_condition: record.resume_condition || '' },
+      next: { dependencies: nextDependencies, resume_condition: nextResumeCondition },
+    }];
+    record.dependencies = nextDependencies;
+    record.resume_condition = nextResumeCondition;
+    persist(ctx, state, record);
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now, state,
+    });
+    persist(ctx, state, record);
+    const result = successReceipt(projection.ok ? 'park-amended' : 'park-amended-projection-failed', {
+      card, phase: record.phase, reason,
+      dependencies: nextDependencies, resume_condition: nextResumeCondition,
+      amendments: record.park_amendments.length,
+    });
+    if (!projection.ok) {
+      result.projection_error = projection.error;
+      result.reconcile = `reconcile --card ${card}`;
+    }
+    return result;
+  }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
+}
+
 async function commandResume(ctx, args, deps = {}) {
   requireJson(args, 'resume');
   requireOnlyOptions(args, 'resume', STRICT_CLI_OPTIONS.resume);
@@ -6639,6 +6739,7 @@ async function main() {
   else if (command === 'claim') result = await commandClaim(ctx, args);
   else if (command === 'amend-contract') result = await commandAmendContract(ctx, args);
   else if (command === 'park') result = await commandPark(ctx, args);
+  else if (command === 'amend-park') result = await commandAmendPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
   else if (command === 'backfill-ratifications') result = await commandBackfillRatifications(ctx, args);
   else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
@@ -6658,7 +6759,7 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -6684,7 +6785,7 @@ module.exports = {
   ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandResume, commandDiscard, commandReap, commandRestructure,
+  commandAmendContract, commandPark, commandAmendPark, commandResume, commandDiscard, commandReap, commandRestructure,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
@@ -6693,7 +6794,7 @@ module.exports = {
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
   PARKED_METADATA_REBIND_CARDS,
-  loopBindingEnv, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS,
+  loopBindingEnv, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
 };
 
 if (require.main === module) {
