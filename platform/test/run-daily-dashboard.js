@@ -23,6 +23,7 @@ const DAILY_MANIFEST = JSON.parse(fs.readFileSync(path.join(WORKSHOP, 'platform/
 const AF_SRC  = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/activity-feed/activity-feed.js'), 'utf8');
 const TTL_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8');
 const TE_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-entity.js'), 'utf8');
+const RS_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/render-safe/render-safe.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, msg) { if (cond) { pass++; } else { fail++; console.log('  FAIL ' + msg); } }
@@ -117,8 +118,25 @@ async function renderDailyTaskFixture(today, options) {
 
   const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
   const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
+  const RenderSafeClass = new Function(`${RS_SRC}; return RenderSafe;`)();
   const TE = new TaskEntityClass();
   const TTL = new TaskTodayListClass();
+  const lifecycle = { calls: [], captures: 0 };
+  let RS = new RenderSafeClass();
+  RS.captureScroll = () => { lifecycle.captures++; };
+  const realMutate = RS.mutate.bind(RS);
+  RS.mutate = async (mutation) => {
+    lifecycle.calls.push(mutation);
+    return realMutate(mutation);
+  };
+  // Explicit test-only mutants. The production fixture above always injects a
+  // real RenderSafe instance; these variants prove the Tomorrow oracle rejects
+  // both ways the stale capture-only fixture can return.
+  if (options.renderSafeMutant === 'missing-mutate') {
+    RS.mutate = undefined;
+  } else if (options.renderSafeMutant === 'capture-only') {
+    RS = { captureScroll() { lifecycle.captures++; } };
+  }
   const openFile = { path: 'spice/tasks/open.md', _fm: { status: 'open', due: today, untouched: 'open' } };
   const overdueFile = { path: 'spice/tasks/late.md', _fm: { status: 'open', due: '2026-07-01', untouched: 'late' } };
   const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
@@ -139,6 +157,9 @@ async function renderDailyTaskFixture(today, options) {
       openLinkText() {},
       getLeavesOfType() { return []; },
     },
+    _setTimeout() {
+      throw new Error('background Tomorrow mutation must not schedule reconciliation timers');
+    },
   };
   const windowShim = makeMomentWindow();
   if (Object.prototype.hasOwnProperty.call(options, 'storage')) {
@@ -149,7 +170,7 @@ async function renderDailyTaskFixture(today, options) {
     TaskEntity: TE,
     TaskTodayList: TTL,
     TaskDialog: { open() {} },
-    RenderSafe: { captureScroll() {} },
+    RenderSafe: RS,
     ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
     BeaconCards: { render: async () => {} },
   };
@@ -194,6 +215,9 @@ async function renderDailyTaskFixture(today, options) {
     overdueFile,
     taskPages,
     writes,
+    lifecycle,
+    renderSafe: RS,
+    RenderSafeClass,
     allNodes,
     cleanup() {
       if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
@@ -392,9 +416,11 @@ async function renderDailyTaskFixture(today, options) {
     }
   });
 
-  await ok('TD1B-REDUNDANT-QUICK-RESCHEDULE-OUTCOME existing open + overdue tomorrow actions remain viewed-day-bound', async () => {
+  await ok('GA-P1B2-DAILY-RENDERSAFE real lifecycle keeps private open + overdue Tomorrow rows viewed-day-bound', async () => {
     const fixture = await renderDailyTaskFixture(TODAY);
-    const { root, openFile, overdueFile, allNodes } = fixture;
+    const {
+      root, openFile, overdueFile, allNodes, lifecycle, renderSafe, RenderSafeClass,
+    } = fixture;
     try {
     const sortControl = allNodes(root).find((n) =>
       String(n.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
@@ -406,6 +432,8 @@ async function renderDailyTaskFixture(today, options) {
       'Priority rerender retains one tomorrow action for open + overdue: ' + tomorrowButtons.length);
     const rowsBefore = allNodes(root).filter((n) => n._tag === 'li');
     assert(rowsBefore.length === 2, 'open and overdue private rows both rendered');
+    assert(renderSafe instanceof RenderSafeClass && typeof renderSafe.mutate === 'function',
+      'fixture injects the real instance RenderSafe API, never a capture-only fallback');
 
     await tomorrowButtons[0]._fire('click', { target: tomorrowButtons[0], stopPropagation() {} });
     assert(openFile._fm.due === '2026-07-04',
@@ -413,15 +441,49 @@ async function renderDailyTaskFixture(today, options) {
     assert(openFile._fm.untouched === 'open', 'open task unrelated frontmatter preserved');
     assert(overdueFile._fm.due === '2026-07-01', 'non-activated overdue task stays byte-identical');
     const rowsAfterOpen = allNodes(root).filter((n) => n._tag === 'li');
-    assert(rowsAfterOpen.length === 1, 'only activated private row is optimistically removed');
+    assert(rowsAfterOpen.length === 1
+        && rowsAfterOpen[0].dataset.sauceTaskPath === overdueFile.path,
+      'only activated open row is optimistically removed; overdue row remains');
+    assert(lifecycle.calls.length === 1
+        && lifecycle.calls[0].mode === 'background'
+        && lifecycle.calls[0].path === openFile.path
+        && lifecycle.captures === 1,
+      'open Tomorrow gesture uses one real RenderSafe.mutate lifecycle: '
+        + JSON.stringify({ calls: lifecycle.calls.length, captures: lifecycle.captures }));
 
     await tomorrowButtons[1]._fire('click', { target: tomorrowButtons[1], stopPropagation() {} });
     assert(overdueFile._fm.due === '2026-07-04',
       'overdue task also advances to nextDay(viewedDay): ' + overdueFile._fm.due);
     assert(allNodes(root).filter((n) => n._tag === 'li').length === 0,
       'overdue activation removes its own row');
+    assert(lifecycle.calls.length === 2
+        && lifecycle.calls[1].mode === 'background'
+        && lifecycle.calls[1].path === overdueFile.path
+        && lifecycle.captures === 2,
+      'overdue Tomorrow gesture independently uses the real RenderSafe.mutate lifecycle');
     } finally {
       fixture.cleanup();
+    }
+  });
+
+  await ok('GA-P1B2-DAILY-MUTANTS missing mutate and capture-only fixture are independently killed', async () => {
+    for (const mutant of ['missing-mutate', 'capture-only']) {
+      const fixture = await renderDailyTaskFixture(TODAY, { renderSafeMutant: mutant });
+      try {
+        const tomorrow = fixture.allNodes(fixture.root).find((node) =>
+          String(node.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
+        const rowsBefore = fixture.allNodes(fixture.root).filter((node) => node._tag === 'li');
+        await tomorrow._fire('click', { target: tomorrow, stopPropagation() {} });
+        const rowsAfter = fixture.allNodes(fixture.root).filter((node) => node._tag === 'li');
+        const productionOracle = fixture.openFile._fm.due === '2026-07-04'
+          && rowsAfter.length === rowsBefore.length - 1;
+        assert(!productionOracle,
+          mutant + ' unexpectedly satisfies the real viewed-day/write/optimism oracle');
+        assert(fixture.openFile._fm.due === TODAY && rowsAfter.length === rowsBefore.length,
+          mutant + ' is killed: without real mutate there is no write or optimistic removal');
+      } finally {
+        fixture.cleanup();
+      }
     }
   });
 

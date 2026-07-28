@@ -27,15 +27,35 @@
 
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 
 const WORKSHOP = path.resolve(__dirname, "..", "..");
 const SPACE_HOME_FILE = path.join(WORKSHOP, "platform", "blueprints", "home", "helpers", "space-home.js");
 const SPACE_HOME_SRC = fs.readFileSync(SPACE_HOME_FILE, "utf8");
+const TASK_DIALOG_FILE = path.join(WORKSHOP, "platform", "mechanisms", "task-entity", "task-dialog.js");
+const TASK_ENTITY_FILE = path.join(WORKSHOP, "platform", "mechanisms", "task-entity", "task-entity.js");
+const RENDER_SAFE_FILE = path.join(WORKSHOP, "platform", "mechanisms", "render-safe", "render-safe.js");
 
 // Load the bare class (mirrors the CustomJS loader's single-expression eval).
 function loadSpaceHome() {
   const fn = new Function(`${SPACE_HOME_SRC}\n; return SpaceHome;`);
   return fn();
+}
+
+function loadSpaceHomeFromSource(src) {
+  return new Function(`${src}\n; return SpaceHome;`)();
+}
+
+function loadBareClass(file, className) {
+  const src = fs.readFileSync(file, "utf8");
+  return new Function(`${src}\n; return ${className};`)();
+}
+
+function loadBareClassInRealm(file, className, globals) {
+  const src = fs.readFileSync(file, "utf8");
+  const context = vm.createContext(Object.assign({ console }, globals || {}));
+  const Klass = new vm.Script(`${src}\n; ${className}`).runInContext(context);
+  return { Klass, context, instance: new Klass() };
 }
 
 // ── DOM stub (mirrors run-renderer.js) ─────────────────────────────────────
@@ -151,6 +171,98 @@ function installMoment(frozenIso, frozenHour) {
   global.window.moment = m;
 }
 
+async function flushMicrotasks(turns) {
+  for (let i = 0; i < (turns || 16); i++) await Promise.resolve();
+}
+
+function makeNoIndexQuickCreateRuntime(TaskDialog, TaskEntity, RenderSafe) {
+  const timers = [];
+  const creates = [];
+  const createAttempts = [];
+  const commandIds = [];
+  const notices = [];
+  let failNextCreate = false;
+
+  const app = {
+    _setTimeout: (fn, delay) => {
+      const timer = { fn, delay, active: true };
+      timers.push(timer);
+      return timer;
+    },
+    _clearTimeout: (timer) => { if (timer) timer.active = false; },
+    vault: {
+      getAbstractFileByPath: (p) => (p === "spice/tasks" ? { path: p } : null),
+      createFolder: async () => {},
+      create: async (p, content) => {
+        createAttempts.push({ path: p, content });
+        if (failNextCreate) {
+          failNextCreate = false;
+          throw new Error("injected create failure");
+        }
+        const file = { path: p, content };
+        creates.push(file);
+        return file;
+      },
+      adapter: { read: async () => { throw new Error("ENOENT"); } },
+    },
+    plugins: {
+      plugins: {
+        dataview: {
+          // Deliberately never indexes the newly-created task. The real
+          // RenderSafe instance must retain ownership until its bounded
+          // create-reconciliation window expires.
+          api: { page: () => null },
+        },
+      },
+    },
+    workspace: {
+      onLayoutReady: (cb) => cb(),
+      on: () => ({}),
+      getActiveFile: () => ({ path: "spice/home/Home.md" }),
+    },
+    commands: { executeCommandById: (id) => commandIds.push(id) },
+  };
+
+  const taskEntity = new TaskEntity();
+  const renderSafe = new RenderSafe();
+  const runtime = {
+    app,
+    creates,
+    createAttempts,
+    commandIds,
+    notices,
+    TaskDialog: new TaskDialog(),
+    TaskEntity: taskEntity,
+    RenderSafe: renderSafe,
+    makeTaskDialogRealm(authority) {
+      const realmApp = authority || app;
+      return loadBareClassInRealm(TASK_DIALOG_FILE, "TaskDialog", {
+        window: {
+          app: realmApp,
+          customJS: { TaskEntity: taskEntity, RenderSafe: renderSafe },
+          moment: global.moment,
+        },
+        Notice: function (message) { notices.push(String(message)); },
+      });
+    },
+    setFailNextCreate() { failNextCreate = true; },
+    async drainReconciliation() {
+      // RenderSafe create mode polls 20 times after the initial current()
+      // check. Keep draining the injected queue rather than sleeping so this
+      // is deterministic and still exercises the production timer lifecycle.
+      let guard = 0;
+      while (timers.length && guard++ < 100) {
+        const timer = timers.shift();
+        if (timer && timer.active && typeof timer.fn === "function") timer.fn();
+        await Promise.resolve();
+      }
+      if (guard >= 100) throw new Error("RenderSafe reconciliation timers did not settle");
+      await flushMicrotasks();
+    },
+  };
+  return runtime;
+}
+
 // ── verdict scaffolding ────────────────────────────────────────────────────
 const results = [];
 function assertTrue(name, cond, detail) {
@@ -179,6 +291,9 @@ function descendants(el) {
 
 (async () => {
   const SpaceHome = loadSpaceHome();
+  const TaskDialog = loadBareClass(TASK_DIALOG_FILE, "TaskDialog");
+  const TaskEntity = loadBareClass(TASK_ENTITY_FILE, "TaskEntity");
+  const RenderSafe = loadBareClass(RENDER_SAFE_FILE, "RenderSafe");
   // customJS stores an INSTANCE under window.customJS.SpaceHome and the guard
   // calls `render` on it (klass[method].call(klass, dv, …)). Mirror that: statics
   // are called on the class; render() is called on an instance.
@@ -645,6 +760,385 @@ function descendants(el) {
 
     delete global.customJS;
     delete global.app;
+  }
+
+  // ── GA-P1B4-HOME: real Home + real TaskDialog/TaskEntity/RenderSafe ────────
+  // Bind the production submit handler to the production quick-create result
+  // contract. Dataview deliberately never indexes the new task; injected timer
+  // plumbing holds the real RenderSafe create reconciliation without wall-clock
+  // sleeps. An Add immediately followed by Enter therefore exercises the exact
+  // duplicate interval that previously let Home close/re-render too early.
+  {
+    installMoment("2026-07-27", 9);
+    const runtime = makeNoIndexQuickCreateRuntime(TaskDialog, TaskEntity, RenderSafe);
+    const ownerRealm = runtime.makeTaskDialogRealm();
+    const reloadedRealm = runtime.makeTaskDialogRealm();
+    global.Notice = function (message) { runtime.notices.push(String(message)); };
+    global.app = runtime.app;
+    global.customJS = {
+      TaskDialog: ownerRealm.instance,
+      TaskEntity: runtime.TaskEntity,
+      RenderSafe: runtime.RenderSafe,
+      SpaceDailyDashboard: {
+        computeCounts: () => ({
+          today: runtime.creates.length,
+          overdue: 0,
+          done: 0,
+          meetings: 0,
+        }),
+      },
+    };
+    global.window.app = global.app;
+    global.window.customJS = global.customJS;
+    global.window.Notice = global.Notice;
+    global.window.__sauceHomeLayoutReady = true;
+    global.window.__sauceHomeLastSig = undefined;
+
+    const home = new SpaceHome();
+    const dv = makeDv();
+    await home.render(dv, {});
+    const hasCls = (n, cls) => (n && (n.cls || "").split(/\s+/).indexOf(cls) >= 0);
+    const firstHome = dv.container.querySelector(".sauce-home");
+    const firstAll = firstHome ? descendants(firstHome) : [];
+    const addToggle = firstAll.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    const menu = firstAll.find((n) => hasCls(n, "sauce-home-add-menu"));
+    const menuDesc = menu ? descendants(menu) : [];
+    const input = menuDesc.find((n) => n.tag === "input");
+    const addCapture = menuDesc.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+    const dashboardCalls = () => dv._viewCalls.filter(
+      (call) => call.input && call.input.class === "SpaceDailyDashboard"
+    ).length;
+    const isOpen = (n) => hasCls(n, "is-open");
+
+    assertTrue("GA-P1B4-HOME-1 real Home capture controls render",
+      !!addToggle && !!menu && !!input && !!addCapture,
+      "expected the production + menu, jot input, and Add control");
+    assertTrue("GA-P1B7-HOME-REALMS two distinct TaskDialog source realms drive one real SpaceHome input",
+      ownerRealm.Klass !== reloadedRealm.Klass,
+      "expected separate vm constructors for the Add owner and reloaded Enter duplicate");
+    addToggle.onclick({});
+    input.value = "Capture exactly once";
+
+    // The real Add handler resolves TaskDialog from realm A and owns the create.
+    // Simulate a CustomJS reload by swapping only that production dependency;
+    // the same real SpaceHome input's Enter handler now resolves realm B while
+    // RenderSafe is still in its no-index wait.
+    addCapture.onclick({});
+    global.customJS.TaskDialog = reloadedRealm.instance;
+    input.dispatch("keydown", {
+      key: "Enter",
+      isComposing: false,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+    await flushMicrotasks(32);
+
+    assertEq("GA-P1B4-HOME-2 Add + Enter write exactly once while no-index reconciliation is pending",
+      runtime.creates.length, 1);
+    assertEq("GA-P1B7-HOME-WRITE two TaskDialog realms attempt exactly one file",
+      runtime.createAttempts.length, 1);
+    assertEq("GA-P1B4-HOME-3 Add + Enter emit no early success Notice", runtime.notices.length, 0);
+    assertEq("GA-P1B4-HOME-4 duplicate no-op does not clear the shared input",
+      input.value, "Capture exactly once");
+    assertTrue("GA-P1B4-HOME-5 duplicate no-op leaves the real menu open", isOpen(menu),
+      "the duplicate result must not close Home while the owner is pending");
+    assertEq("GA-P1B4-HOME-6 duplicate no-op causes zero early Home re-renders",
+      dashboardCalls(), 1);
+
+    await runtime.drainReconciliation();
+    await flushMicrotasks(64);
+
+    assertEq("GA-P1B4-HOME-7 owning success clears the submitted input exactly after settlement",
+      input.value, "");
+    assertTrue("GA-P1B4-HOME-8 owning success closes the real menu exactly after settlement", !isOpen(menu),
+      "the menu should close only after the owner returns {ok:true}");
+    assertEq("GA-P1B4-HOME-9 owning success causes exactly one final Home re-render",
+      dashboardCalls(), 2);
+    assertEq("GA-P1B4-HOME-10 Add + Enter produce one success Notice",
+      JSON.stringify(runtime.notices), JSON.stringify(["Task created"]));
+    assertEq("GA-P1B4-HOME-11 idempotent final render leaves exactly one Home root",
+      dv.container.children.filter((node) => hasCls(node, "sauce-home")).length, 1);
+
+    delete global.Notice;
+    delete global.app;
+    delete global.customJS;
+    global.window.app = undefined;
+    global.window.customJS = undefined;
+    global.window.Notice = undefined;
+    global.window.__sauceHomeLastSig = undefined;
+  }
+
+  // A failed owner is also a non-success result: Home keeps the draft/menu and
+  // does not render. TaskDialog's finally-release then permits a safe retry of
+  // the identical logical payload; only that successful retry transitions UI.
+  {
+    installMoment("2026-07-27", 9);
+    const runtime = makeNoIndexQuickCreateRuntime(TaskDialog, TaskEntity, RenderSafe);
+    const failingRealm = runtime.makeTaskDialogRealm();
+    const retryRealm = runtime.makeTaskDialogRealm();
+    runtime.setFailNextCreate();
+    global.Notice = function (message) { runtime.notices.push(String(message)); };
+    global.app = runtime.app;
+    global.customJS = {
+      TaskDialog: failingRealm.instance,
+      TaskEntity: runtime.TaskEntity,
+      RenderSafe: runtime.RenderSafe,
+      SpaceDailyDashboard: {
+        computeCounts: () => ({
+          today: runtime.creates.length,
+          overdue: 0,
+          done: 0,
+          meetings: 0,
+        }),
+      },
+    };
+    global.window.app = global.app;
+    global.window.customJS = global.customJS;
+    global.window.Notice = global.Notice;
+    global.window.__sauceHomeLayoutReady = true;
+    global.window.__sauceHomeLastSig = undefined;
+
+    const home = new SpaceHome();
+    const dv = makeDv();
+    await home.render(dv, {});
+    const hasCls = (n, cls) => (n && (n.cls || "").split(/\s+/).indexOf(cls) >= 0);
+    const root = dv.container.querySelector(".sauce-home");
+    const all = root ? descendants(root) : [];
+    const toggle = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
+    const md = menu ? descendants(menu) : [];
+    const input = md.find((n) => n.tag === "input");
+    const addCapture = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+    const dashboardCalls = () => dv._viewCalls.filter(
+      (call) => call.input && call.input.class === "SpaceDailyDashboard"
+    ).length;
+    toggle.onclick({});
+    input.value = "Retry safely";
+
+    addCapture.onclick({});
+    await flushMicrotasks(32);
+    assertEq("GA-P1B4-HOME-FAIL-1 failed owner attempts one write", runtime.createAttempts.length, 1);
+    assertEq("GA-P1B4-HOME-FAIL-2 failed owner persists no task", runtime.creates.length, 0);
+    assertEq("GA-P1B4-HOME-FAIL-3 failed owner preserves the draft", input.value, "Retry safely");
+    assertTrue("GA-P1B4-HOME-FAIL-4 failed owner leaves the menu open", hasCls(menu, "is-open"));
+    assertEq("GA-P1B4-HOME-FAIL-5 failed owner does not re-render Home", dashboardCalls(), 1);
+    assertEq("GA-P1B4-HOME-FAIL-6 failed owner reports one failure Notice",
+      JSON.stringify(runtime.notices), JSON.stringify(["Could not create task"]));
+
+    // Same input after a real TaskDialog reload: if the failed claim leaked,
+    // this is an immediate duplicate and never writes. A real retry from the
+    // second realm must start a new attempt and remain visually pending until
+    // RenderSafe settles.
+    global.customJS.TaskDialog = retryRealm.instance;
+    addCapture.onclick({});
+    await flushMicrotasks(32);
+    assertEq("GA-P1B4-HOME-FAIL-7 identical retry starts a fresh write", runtime.createAttempts.length, 2);
+    assertEq("GA-P1B4-HOME-FAIL-8 retry creates one task", runtime.creates.length, 1);
+    assertEq("GA-P1B4-HOME-FAIL-9 retry stays visually pending during no-index reconciliation",
+      input.value, "Retry safely");
+    assertTrue("GA-P1B4-HOME-FAIL-10 retry keeps menu open before settlement", hasCls(menu, "is-open"));
+    assertEq("GA-P1B4-HOME-FAIL-11 retry causes no early re-render", dashboardCalls(), 1);
+
+    await runtime.drainReconciliation();
+    await flushMicrotasks(64);
+    assertEq("GA-P1B4-HOME-FAIL-12 successful retry clears only after settlement", input.value, "");
+    assertTrue("GA-P1B4-HOME-FAIL-13 successful retry closes only after settlement", !hasCls(menu, "is-open"));
+    assertEq("GA-P1B4-HOME-FAIL-14 successful retry causes one final re-render", dashboardCalls(), 2);
+    assertEq("GA-P1B4-HOME-FAIL-15 retry adds exactly one success Notice",
+      JSON.stringify(runtime.notices), JSON.stringify(["Could not create task", "Task created"]));
+
+    delete global.Notice;
+    delete global.app;
+    delete global.customJS;
+    global.window.app = undefined;
+    global.window.customJS = undefined;
+    global.window.Notice = undefined;
+    global.window.__sauceHomeLastSig = undefined;
+  }
+
+  // Proxy authorities must fail closed through the real SpaceHome submit
+  // handler too. Add uses realm A; the same live input's Enter uses realm B
+  // after a simulated TaskDialog reload. Neither trapping authority may consume
+  // the draft, close the menu, render, write, Notice, overwrite, or delete.
+  for (const trapKind of ["descriptor", "define"]) {
+    installMoment("2026-07-27", 9);
+    const runtime = makeNoIndexQuickCreateRuntime(TaskDialog, TaskEntity, RenderSafe);
+    const target = runtime.app;
+    const ownershipKey = Symbol.for("sauce.task-entity.TaskDialog.runtime-ownership.v2");
+    let descriptorTraps = 0;
+    let defineTraps = 0;
+    let deleteTraps = 0;
+    const authority = new Proxy(target, {
+      getOwnPropertyDescriptor(inner, key) {
+        if (trapKind === "descriptor" && key === ownershipKey) {
+          descriptorTraps += 1;
+          throw new Error("injected descriptor trap");
+        }
+        return Reflect.getOwnPropertyDescriptor(inner, key);
+      },
+      defineProperty(inner, key, descriptor) {
+        if (trapKind === "define" && key === ownershipKey) {
+          defineTraps += 1;
+          throw new Error("injected define trap");
+        }
+        return Reflect.defineProperty(inner, key, descriptor);
+      },
+      deleteProperty(inner, key) {
+        deleteTraps += 1;
+        return Reflect.deleteProperty(inner, key);
+      },
+    });
+    const ownerRealm = runtime.makeTaskDialogRealm(authority);
+    const reloadedRealm = runtime.makeTaskDialogRealm(authority);
+    global.Notice = function (message) { runtime.notices.push(String(message)); };
+    global.app = authority;
+    global.customJS = {
+      TaskDialog: ownerRealm.instance,
+      TaskEntity: runtime.TaskEntity,
+      RenderSafe: runtime.RenderSafe,
+      SpaceDailyDashboard: {
+        computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }),
+      },
+    };
+    global.window.app = authority;
+    global.window.customJS = global.customJS;
+    global.window.Notice = global.Notice;
+    global.window.__sauceHomeLayoutReady = true;
+    global.window.__sauceHomeLastSig = undefined;
+
+    const dv = makeDv();
+    await new SpaceHome().render(dv, {});
+    const hasCls = (node, cls) => (node && (node.cls || "").split(/\s+/).indexOf(cls) >= 0);
+    const root = dv.container.querySelector(".sauce-home");
+    const all = root ? descendants(root) : [];
+    const toggle = all.find((node) => node.tag === "button" && hasCls(node, "sauce-home-add"));
+    const menu = all.find((node) => hasCls(node, "sauce-home-add-menu"));
+    const menuDesc = menu ? descendants(menu) : [];
+    const input = menuDesc.find((node) => node.tag === "input");
+    const addCapture = menuDesc.find(
+      (node) => node.tag === "button" && hasCls(node, "sauce-home-capture-add")
+    );
+    const dashboardCalls = () => dv._viewCalls.filter(
+      (call) => call.input && call.input.class === "SpaceDailyDashboard"
+    ).length;
+    toggle.onclick({});
+    input.value = `Proxy ${trapKind} draft`;
+    addCapture.onclick({});
+    global.customJS.TaskDialog = reloadedRealm.instance;
+    input.dispatch("keydown", {
+      key: "Enter",
+      isComposing: false,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+    await flushMicrotasks(64);
+
+    assertEq(`GA-P1B7-HOME-PROXY-${trapKind}-1 two realms perform zero storage attempts`,
+      runtime.createAttempts.length, 0);
+    assertEq(`GA-P1B7-HOME-PROXY-${trapKind}-2 trapping authority emits zero Notices`,
+      runtime.notices.length, 0);
+    assertEq(`GA-P1B7-HOME-PROXY-${trapKind}-3 real draft remains`,
+      input.value, `Proxy ${trapKind} draft`);
+    assertTrue(`GA-P1B7-HOME-PROXY-${trapKind}-4 real menu remains open`,
+      hasCls(menu, "is-open"));
+    assertEq(`GA-P1B7-HOME-PROXY-${trapKind}-5 real Home performs zero transitions`,
+      dashboardCalls(), 1);
+    assertTrue(`GA-P1B7-HOME-PROXY-${trapKind}-6 exact trap runs once per source realm`,
+      trapKind === "descriptor" ? descriptorTraps === 2 : defineTraps === 2,
+      `descriptor=${descriptorTraps} define=${defineTraps}`);
+    assertTrue(`GA-P1B7-HOME-PROXY-${trapKind}-7 authority is not overwritten or deleted`,
+      !Object.prototype.hasOwnProperty.call(target, ownershipKey) && deleteTraps === 0);
+
+    delete global.Notice;
+    delete global.app;
+    delete global.customJS;
+    global.window.app = undefined;
+    global.window.customJS = undefined;
+    global.window.Notice = undefined;
+    global.window.__sauceHomeLastSig = undefined;
+  }
+
+  // Mutation adequacy: each tempting weakening independently demonstrates the
+  // early transition that the real GA-P1B4 fixtures reject.
+  {
+    const resultGuard = "if (!result || result.ok !== true) return;";
+    assertTrue("GA-P1B4-HOME-MUTANT-0 production result guard is mutation-addressable",
+      SPACE_HOME_SRC.includes(resultGuard),
+      "the focused mutants must target the exact production success boundary");
+
+    const exerciseMutant = async (MutantSpaceHome, result) => {
+      installMoment("2026-07-27", 9);
+      let submitted = false;
+      global.customJS = {
+        TaskDialog: {
+          createQuick: async () => {
+            submitted = true;
+            return result;
+          },
+        },
+        TaskEntity: {},
+        SpaceDailyDashboard: {
+          computeCounts: () => ({
+            today: submitted ? 1 : 0,
+            overdue: 0,
+            done: 0,
+            meetings: 0,
+          }),
+        },
+      };
+      global.window.customJS = global.customJS;
+      global.window.__sauceHomeLayoutReady = true;
+      global.window.__sauceHomeLastSig = undefined;
+      const dv = makeDv();
+      const mutantHome = new MutantSpaceHome();
+      await mutantHome.render(dv, {});
+      const hasCls = (n, cls) => (n && (n.cls || "").split(/\s+/).indexOf(cls) >= 0);
+      const root = dv.container.querySelector(".sauce-home");
+      const all = root ? descendants(root) : [];
+      const toggle = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const md = menu ? descendants(menu) : [];
+      const input = md.find((n) => n.tag === "input");
+      const addCapture = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+      toggle.onclick({});
+      input.value = "Must survive";
+      addCapture.onclick({});
+      await flushMicrotasks(32);
+      const state = {
+        inputValue: input.value,
+        menuOpen: hasCls(menu, "is-open"),
+        dashboardCalls: dv._viewCalls.filter(
+          (call) => call.input && call.input.class === "SpaceDailyDashboard"
+        ).length,
+      };
+      delete global.customJS;
+      global.window.customJS = undefined;
+      global.window.__sauceHomeLastSig = undefined;
+      return state;
+    };
+
+    const IgnoreResultMutant = loadSpaceHomeFromSource(
+      SPACE_HOME_SRC.replace(resultGuard, "if (false) return;")
+    );
+    const ignored = await exerciseMutant(IgnoreResultMutant, {
+      ok: false,
+      duplicate: true,
+      reason: "identical task create already in flight",
+    });
+    assertTrue("GA-P1B4-HOME-MUTANT-1 deleting result handling causes an early duplicate transition",
+      ignored.inputValue === "" && ignored.menuOpen === false && ignored.dashboardCalls === 2,
+      `ignore-result mutant should clear/close/render early; got ${JSON.stringify(ignored)}`);
+
+    const DuplicateOnlyMutant = loadSpaceHomeFromSource(
+      SPACE_HOME_SRC.replace(resultGuard, "if (result && result.duplicate) return;")
+    );
+    const failed = await exerciseMutant(DuplicateOnlyMutant, {
+      ok: false,
+      error: new Error("create failed"),
+    });
+    assertTrue("GA-P1B4-HOME-MUTANT-2 closing only on non-duplicate failure causes an early failure transition",
+      failed.inputValue === "" && failed.menuOpen === false && failed.dashboardCalls === 2,
+      `failure mutant should clear/close/render early; got ${JSON.stringify(failed)}`);
   }
 
   // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─

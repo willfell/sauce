@@ -686,10 +686,8 @@ class TaskNoteView {
                         const TD = window.customJS && window.customJS.TaskDialog;
                         if (!TD || typeof TD.createQuick !== 'function') return;
                         try {
-                            await TD.createQuick({ title, parent_task: '[[' + thisBasename + ']]' });
-                            addInput.value = '';
-                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                            try { window.app && window.app.commands && window.app.commands.executeCommandById && window.app.commands.executeCommandById('dataview:dataview-force-refresh-views'); } catch (_e) {}
+                            const created = await TD.createQuick({ title, parent_task: '[[' + thisBasename + ']]' });
+                            if (!created || created.ok !== false) addInput.value = '';
                         } catch (_e) { /* best-effort */ }
                     };
                     addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
@@ -746,17 +744,65 @@ class TaskNoteView {
                 doneBtn.addEventListener('click', async () => {
                     try {
                         const TD = window.customJS && window.customJS.TaskDialog;
-                        if (TD && typeof TD.markDone === 'function' && filePath) {
-                            doneBtn.disabled = true;
-                            doneBtn.textContent = 'Marking done…';
-                            await TD.markDone(filePath);
-                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                            try {
-                                if (window.app && window.app.commands && typeof window.app.commands.executeCommandById === 'function') {
-                                    window.app.commands.executeCommandById('dataview:dataview-force-refresh-views');
+                        const RS = window.customJS && window.customJS.RenderSafe;
+                        if (!TD || typeof TD.markDone !== 'function' || !filePath
+                            || !RS || typeof RS.mutate !== 'function') return;
+                        let outcome = null;
+                        await RS.mutate({
+                            app: window.app || null,
+                            dv,
+                            path: filePath,
+                            mode: 'active',
+                            failureMessage: 'Could not complete task',
+                            optimistic: () => {
+                                doneBtn.disabled = true;
+                                doneBtn.textContent = 'Marking done…';
+                            },
+                            revert: () => {
+                                doneBtn.disabled = false;
+                                doneBtn.textContent = 'Mark done';
+                            },
+                            write: async () => {
+                                const res = await TD.markDone(filePath);
+                                if (res && res.ok === false) {
+                                    throw new Error(res.reason || 'completion failed');
                                 }
-                            } catch (_e) {}
-                        }
+                                outcome = (res && res.outcome) || { recurring: false, status: 'done' };
+                                return res;
+                            },
+                            isCurrent: (currentPage, beforePage) => {
+                                if (!outcome) return false;
+                                if (outcome.recurring) {
+                                    return !!currentPage
+                                        && String(currentPage.status || 'open') === 'open'
+                                        && String(currentPage.due || '') === String(outcome.due || '')
+                                        && String(currentPage.completed_at || '') === '';
+                                }
+                                const wasOpen = !!beforePage
+                                    && String(beforePage.status || 'open') === 'open';
+                                if (currentPage) {
+                                    if (!wasOpen || String(currentPage.status || '') !== 'done') return false;
+                                    return !outcome.completed_at
+                                        || String(currentPage.completed_at || '') === String(outcome.completed_at);
+                                }
+                                // A missing current page is authoritative only
+                                // after the original open page was actually
+                                // observed. Prefer the moved destination when it
+                                // is indexed; otherwise the old-path
+                                // present→absent transition proves the move.
+                                let movedPage = null;
+                                try {
+                                    movedPage = outcome.moved_to && dv && typeof dv.page === 'function'
+                                        ? dv.page(outcome.moved_to) : null;
+                                } catch (_e) { movedPage = null; }
+                                if (movedPage) {
+                                    if (String(movedPage.status || '') !== 'done') return false;
+                                    return !outcome.completed_at
+                                        || String(movedPage.completed_at || '') === String(outcome.completed_at);
+                                }
+                                return wasOpen;
+                            },
+                        });
                     } catch (e) {
                         doneBtn.disabled = false;
                         doneBtn.textContent = 'Mark done';

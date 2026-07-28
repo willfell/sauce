@@ -8,6 +8,27 @@ notes rather than parsing checkbox lines out of a shared markdown file.
 Ships `customJS.TaskEntity` — a pure, deterministic, side-effect-free class that
 owns the shared task grammar so every consumer produces byte-identical output.
 
+Gesture-time task creation, completion, rescheduling, and confirmed deletion
+route through the shared `customJS.RenderSafe.mutate(...)` lifecycle. RenderSafe
+is the authority for capture-before-optimism ordering, deferred writes,
+failure rollback/Notice behavior, and create/active Dataview reconciliation;
+TaskEntity retains only task-specific writes and freshness predicates.
+Quick create also claims its canonical logical payload (title, date, source,
+parent, and ordered links) synchronously. An identical activation is an explicit
+no-op until RenderSafe finishes reconciliation, so it cannot write, notify, or
+clear a caller's UI twice; every settlement releases the claim for retry.
+Distinct payloads with the same title remain concurrent: the shared `_create`
+path synchronously reserves its readable filename against both vault state and
+all in-flight TaskDialog creates, then releases that reservation in `finally`.
+That class-wide reservation covers modal, Home, and subtask entrypoints even
+while vault/Dataview metadata is delayed.
+Quick-create claims and path reservations are reload-stable across JavaScript
+realms because the exact Obsidian app object owns one non-enumerable,
+non-configurable, non-writable symbol-keyed scope. The authority is fail-closed:
+Proxy descriptor/definition traps, revoked proxies, accessors, inherited or
+foreign descriptors, and non-extensible apps are rejected without invoking
+getters, overwriting state, or falling back to realm-local ownership.
+
 ## Frontmatter schema
 
 ```yaml

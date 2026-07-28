@@ -13,6 +13,7 @@
 // way run-render-safe.js does, via new Function(src + "; return TaskEntity;").
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 let passes = 0, fails = 0;
 function ok(name, fn) { try { fn(); console.log('ok ' + name); passes++; } catch (e) { console.error('FAIL ' + name + ': ' + (e && e.message)); fails++; } }
@@ -21,6 +22,22 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
 function loadClass(relPath, className) {
   const src = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8');
   return new Function(`${src}; return ${className};`)();
+}
+function loadMutatedClass(relPath, className, mutateSource) {
+  const src = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8');
+  const mutated = mutateSource(src);
+  assert(mutated !== src, `mutant transformation applied to ${relPath}`);
+  return new Function(`${mutated}; return ${className};`)();
+}
+function loadClassInRealm(relPath, className, globals, mutateSource) {
+  const src = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8');
+  const evaluated = typeof mutateSource === 'function' ? mutateSource(src) : src;
+  if (typeof mutateSource === 'function') {
+    assert(evaluated !== src, `realm mutant transformation applied to ${relPath}`);
+  }
+  const context = vm.createContext(Object.assign({ console }, globals || {}));
+  const Klass = new vm.Script(`${evaluated}; ${className}`).runInContext(context);
+  return { Klass, context };
 }
 // customJS stores classes as INSTANCES (customJS.TaskEntity = new TaskEntity()),
 // and cross-class consumers call customJS.TaskEntity.x(). Exercise the SAME
@@ -38,6 +55,13 @@ const TaskEntity = new TaskEntityClass();
 const TaskDialogClass = loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog');
 const TaskDialog = new TaskDialogClass();
 const SauceModalClass = loadClass('mechanisms/modal/sauce-modal.js', 'SauceModal');
+const RenderSafeClass = loadClass('mechanisms/render-safe/render-safe.js', 'RenderSafe');
+
+function makeRenderSafe(capture) {
+  const rs = new RenderSafeClass();
+  if (typeof capture === 'function') rs.captureScroll = capture;
+  return rs;
+}
 
 const TaskChromeBarClass = loadClass('mechanisms/task-entity/task-chrome-bar.js', 'TaskChromeBar');
 const TaskChromeBar = new TaskChromeBarClass();
@@ -1992,7 +2016,7 @@ async function okAsync(name, fn) {
 function makeQuickApp(taken) {
   const creates = [];
   const folders = [];
-  return {
+  const app = {
     _creates: creates,
     _folders: folders,
     vault: {
@@ -2000,7 +2024,86 @@ function makeQuickApp(taken) {
       createFolder: async (p) => { folders.push(p); },
       create: async (p, content) => { creates.push({ path: p, content }); return { path: p }; },
     },
+    plugins: {
+      plugins: {
+        dataview: {
+          api: { page: (p) => creates.some((entry) => entry.path === p) ? { file: { path: p } } : null },
+        },
+      },
+    },
   };
+  return app;
+}
+
+// Model the real collision window more strictly than makeQuickApp: vault
+// metadata visibility and the storage namespace are separate. A successful
+// create owns its disk path immediately, while getAbstractFileByPath can remain
+// stale. Without a synchronous in-flight reservation, two callers can both
+// select the same readable name and the second write rejects.
+function makeCollisionAwareQuickApp(opts) {
+  const o = opts || {};
+  const creates = [];
+  const attempts = [];
+  const folders = [];
+  const diskPaths = new Set();
+  const visiblePaths = new Set(Array.isArray(o.visiblePaths) ? o.visiblePaths : []);
+  let failuresRemaining = Number.isInteger(o.failures) ? o.failures : 0;
+  const app = {
+    _creates: creates,
+    _attempts: attempts,
+    _folders: folders,
+    vault: {
+      getAbstractFileByPath: (p) => visiblePaths.has(p) ? { path: p } : null,
+      createFolder: async (p) => { folders.push(p); },
+      create: async (p, content) => {
+        attempts.push({ path: p, content });
+        if (failuresRemaining > 0) {
+          failuresRemaining -= 1;
+          throw new Error('injected create failure');
+        }
+        if (diskPaths.has(p)) throw new Error('file already exists: ' + p);
+        diskPaths.add(p);
+        creates.push({ path: p, content });
+        if (o.publishCreates !== false) visiblePaths.add(p);
+        return { path: p };
+      },
+    },
+    plugins: {
+      plugins: {
+        dataview: {
+          api: {
+            page: (p) => visiblePaths.has(p) ? { file: { path: p } } : null,
+          },
+        },
+      },
+    },
+  };
+  return app;
+}
+
+function makeHeldCreateRenderSafe() {
+  const rs = makeRenderSafe();
+  const releases = [];
+  rs.mutate = async (opts) => {
+    let release;
+    const reconciled = new Promise((resolve) => { release = resolve; });
+    releases.push(release);
+    const value = await opts.write();
+    await reconciled;
+    return { ok: true, value };
+  };
+  return {
+    rs,
+    release(index) {
+      const fn = releases[index == null ? 0 : index];
+      if (fn) fn();
+    },
+    count() { return releases.length; },
+  };
+}
+
+async function flushQuickCreate() {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 async function runCreateQuickTests() {
@@ -2016,7 +2119,7 @@ async function runCreateQuickTests() {
 
   await okAsync('HC-TQC-1 createQuick writes exactly ONE file at spice/tasks/<title>.md', async () => {
     const app = makeQuickApp(() => false);
-    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    global.window = { app, customJS: { TaskEntity: TE, RenderSafe: makeRenderSafe() }, moment: momentStub };
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
     assert(app._creates.length === 1, 'exactly one vault.create: got ' + app._creates.length);
@@ -2031,7 +2134,7 @@ async function runCreateQuickTests() {
 
   await okAsync('HC-TQC-2 blank / whitespace title → zero creates (no-op)', async () => {
     const app = makeQuickApp(() => false);
-    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    global.window = { app, customJS: { TaskEntity: TE, RenderSafe: makeRenderSafe() }, moment: momentStub };
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: '', today: '2026-07-02', source: 'daily' });
     await TD.createQuick({ title: '   ', today: '2026-07-02', source: 'daily' });
@@ -2042,7 +2145,7 @@ async function runCreateQuickTests() {
   await okAsync('HC-TQC-3 filename collision dedupes to " 2.md"', async () => {
     // The base name is taken once → _uniqueName bumps to "call dentist 2.md".
     const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
-    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    global.window = { app, customJS: { TaskEntity: TE, RenderSafe: makeRenderSafe() }, moment: momentStub };
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
     assert(app._creates.length === 1, 'still one create: got ' + app._creates.length);
@@ -2060,6 +2163,1149 @@ async function runCreateQuickTests() {
   // Restore globals so nothing leaks into later modules.
   if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+}
+
+// ---------- GA-P1b3: quick-create logical-payload ownership ----------
+async function runQuickCreateOwnershipTests() {
+  const prevWindow = global.window;
+  const prevGlobalApp = global.app;
+  const prevNotice = global.Notice;
+  const momentStub = () => ({
+    format: (f) => (f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-07-27T09:00:00-06:00' : '2026-07-27'),
+  });
+
+  await okAsync('GA-P1B3-HOME-DUPLICATE delayed/no-index identical capture writes and notices once', async () => {
+    const app = makeQuickApp(() => false);
+    app.plugins.plugins.dataview.api.page = () => null;
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: held.rs },
+      moment: momentStub,
+    };
+    const TD = new TaskDialogClass();
+    const opts = { title: 'Capture once', today: '2026-07-27', source: 'daily' };
+    const first = TD.createQuick(opts);
+    const duplicate = await TD.createQuick(opts);
+    await flushQuickCreate();
+    assert(duplicate && duplicate.ok === false && duplicate.duplicate === true,
+      'duplicate is an explicit UI-safe no-op: ' + JSON.stringify(duplicate));
+    assert(app._creates.length === 1, 'one vault write while reconciliation is held');
+    assert(notices.length === 0, 'success Notice waits for reconciliation');
+
+    // Ownership must remain held for the whole RenderSafe create settlement,
+    // not merely until vault.create resolves.
+    const stillDuplicate = await TD.createQuick(opts);
+    assert(stillDuplicate && stillDuplicate.duplicate === true,
+      'no-index interval remains synchronously owned');
+    held.release(0);
+    const result = await first;
+    assert(result && result.ok === true, 'original capture succeeds');
+    assert(app._creates.length === 1, 'identical Home-equivalent activations write once');
+    assert(notices.length === 1 && notices[0] === 'Task created',
+      'identical activations emit one success Notice: ' + JSON.stringify(notices));
+
+    // Success finally-release permits a later identical create.
+    const retry = TD.createQuick(opts);
+    await flushQuickCreate();
+    assert(app._creates.length === 2, 'later identical retry writes after settlement');
+    held.release(1);
+    await retry;
+  });
+
+  await okAsync('GA-P1B3-SUBTASK-DUPLICATE TaskNoteView Enter re-entry clears once after the owner succeeds', async () => {
+    const app = makeQuickApp(() => false);
+    app.plugins.plugins.dataview.api.page = () => null;
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    const TD = new TaskDialogClass();
+    global.window = {
+      app,
+      customJS: {
+        TaskEntity: new TaskEntityClass(),
+        TaskDialog: TD,
+        TaskTodayList,
+        RenderSafe: held.rs,
+      },
+      moment: momentStub,
+    };
+    const page = {
+      type: 'task',
+      title: 'Parent',
+      status: 'open',
+      file: { path: 'spice/tasks/Parent.md', name: 'Parent.md' },
+    };
+    const container = makeTreeNode('div');
+    const emptyPages = { where: () => ({ array: () => [] }) };
+    const dv = {
+      container,
+      current: () => page,
+      page: () => null,
+      pages: () => emptyPages,
+    };
+    await new TaskNoteViewClass().render(dv);
+    const input = findInput(container);
+    assert(input && input.placeholder === '+ Add subtask…', 'real subtask input rendered');
+    input.value = 'One child';
+    const keydown = input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'real TaskNoteView Enter handler bound');
+    const event = { key: 'Enter', isComposing: false, preventDefault() {} };
+    keydown(event);
+    keydown(event);
+    await flushQuickCreate();
+    assert(app._creates.length === 1, 'duplicate subtask Enter writes once');
+    assert(input.value === 'One child',
+      'duplicate no-op cannot clear the shared input before owner success');
+    held.release(0);
+    await flushQuickCreate();
+    assert(input.value === '', 'owner success clears the subtask input once');
+    assert(notices.length === 1, 'subtask duplicate emits one success Notice');
+    assert(app._creates[0].content.includes('\nparent_task: "[[Parent]]"\n'),
+      'created child retains canonical parent wikilink');
+  });
+
+  await okAsync('GA-P1B3-SYNC-CLAIM re-entrant _create observes ownership before integration code runs', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const opts = { title: 'Re-enter', today: '2026-07-27', source: 'daily' };
+    let nested = null;
+    TD._create = async () => {
+      nested = TD.createQuick(opts);
+      return { ok: true };
+    };
+    const first = TD.createQuick(opts);
+    const duplicate = await nested;
+    assert(duplicate && duplicate.duplicate === true,
+      'claim exists before _create can synchronously re-enter');
+    await first;
+  });
+
+  await okAsync('GA-P1B3-KEY-DISCRIMINATES due, source, parent, and links remain concurrent', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const calls = [];
+    TD._create = (runtimeApp, payload) => new Promise((resolve) => {
+      calls.push({ runtimeApp, payload, resolve });
+    });
+    const variants = [
+      { title: 'Same title', today: '2026-07-27', source: 'daily' },
+      { title: 'Same title', today: '2026-07-28', source: 'daily' },
+      { title: 'Same title', today: '2026-07-27', source: 'meeting' },
+      { title: 'Same title', today: '2026-07-27', source: 'daily', parent_task: '[[Parent]]' },
+      { title: 'Same title', today: '2026-07-27', source: 'daily', links: ['[[Context]]'] },
+    ];
+    const pending = variants.map((opts) => TD.createQuick(opts));
+    assert(calls.length === variants.length,
+      'same-title distinct logical payloads all start concurrently: ' + calls.length);
+    calls.forEach((call) => call.resolve({ ok: true }));
+    await Promise.all(pending);
+  });
+
+  await okAsync('GA-P1B4-PATH-RESERVATION real cross-entrypoint same-title creates claim base and suffix', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: held.rs },
+      moment: momentStub,
+    };
+
+    // Modal submission and quick-create both funnel through the real _create
+    // implementation. Use separate instances to prove the reservation is
+    // class-wide, not confined to quick-create's per-instance payload claims.
+    const modalDialog = new TaskDialogClass();
+    const quickDialog = new TaskDialogClass();
+    const modalCreate = modalDialog._create(app, {
+      title: 'Same title',
+      due: '2026-07-27',
+      source: 'manual',
+    }, '');
+    const quickCreate = quickDialog.createQuick({
+      title: 'Same title',
+      today: '2026-07-28',
+      source: 'daily',
+    });
+    await flushQuickCreate();
+
+    assert(held.count() === 2, 'both distinct payloads reach RenderSafe concurrently');
+    assert(app._creates.length === 2, 'both real vault writes succeed before reconciliation');
+    assert(app._creates[0].path === 'spice/tasks/Same title.md',
+      'first caller owns readable base: ' + app._creates[0].path);
+    assert(app._creates[1].path === 'spice/tasks/Same title 2.md',
+      'second caller owns reserved suffix: ' + app._creates[1].path);
+    assert(notices.length === 0, 'no success or failure Notice before reconciliation');
+
+    held.release(0);
+    held.release(1);
+    const results = await Promise.all([modalCreate, quickCreate]);
+    assert(results.every((result) => result && result.ok === true),
+      'both distinct creates settle ok: ' + JSON.stringify(results));
+    assert(notices.length === 2 && notices.every((message) => message === 'Task created'),
+      'two successes and no failure Notice: ' + JSON.stringify(notices));
+    assert(TaskDialogClass._runtimeOwnership(app).reservations.size === 0,
+      'all successful path reservations release after reconciliation');
+  });
+
+  await okAsync('GA-P1B4-PATH-FINALLY failed create releases base for retry then vault state advances suffix', async () => {
+    const app = makeCollisionAwareQuickApp({ failures: 1 });
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: makeRenderSafe() },
+      moment: momentStub,
+    };
+    const TD = new TaskDialogClass();
+    const samePayload = {
+      title: 'Reusable path',
+      today: '2026-07-27',
+      source: 'daily',
+    };
+
+    const failed = await TD.createQuick(samePayload);
+    assert(failed && failed.ok === false, 'injected write failure is returned');
+    assert(app._attempts[0].path === 'spice/tasks/Reusable path.md',
+      'failed attempt initially owns base');
+    assert(TaskDialogClass._runtimeOwnership(app).reservations.size === 0,
+      'failure finally releases reservation');
+
+    const retry = await TD.createQuick(samePayload);
+    assert(retry && retry.ok === true, 'identical retry succeeds');
+    assert(app._attempts[1].path === 'spice/tasks/Reusable path.md',
+      'retry safely reuses released base');
+
+    const advanced = await TD.createQuick({
+      title: 'Reusable path',
+      today: '2026-07-28',
+      source: 'meeting',
+    });
+    assert(advanced && advanced.ok === true, 'distinct later create succeeds');
+    assert(app._attempts[2].path === 'spice/tasks/Reusable path 2.md',
+      'visible successful base advances later create to suffix');
+    assert(app._creates.length === 2, 'one failed attempt plus two successful writes');
+    assert(notices[0] === 'Could not create task',
+      'failure retains RenderSafe failure Notice: ' + JSON.stringify(notices));
+    assert(notices.slice(1).every((message) => message === 'Task created'),
+      'retries emit only success Notices: ' + JSON.stringify(notices));
+    assert(TaskDialogClass._runtimeOwnership(app).reservations.size === 0,
+      'retry and advance reservations both release');
+  });
+
+  await okAsync('GA-P1B3-KEY-CANONICAL trimmed title and equivalent parent link share ownership', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    let release;
+    let calls = 0;
+    TD._create = () => {
+      calls += 1;
+      return new Promise((resolve) => { release = resolve; });
+    };
+    const first = TD.createQuick({ title: '  Canonical  ', parent_task: 'Parent' });
+    const duplicate = await TD.createQuick({ title: 'Canonical', parent_task: '[[Parent]]' });
+    assert(calls === 1 && duplicate && duplicate.duplicate === true,
+      'canonical logical equivalents share one owner');
+    release({ ok: true });
+    await first;
+  });
+
+  await okAsync('GA-P1B3-FINALLY resolved failure, throw, and success all release for retry', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    let attempt = 0;
+    TD._create = async () => {
+      attempt += 1;
+      if (attempt === 1) return { ok: false, reason: 'resolved failure' };
+      if (attempt === 2) throw new Error('thrown failure');
+      return { ok: true };
+    };
+    const opts = { title: 'Retry me', today: '2026-07-27', source: 'daily' };
+    const failed = await TD.createQuick(opts);
+    assert(failed && failed.ok === false, 'resolved failure returned');
+    let threw = false;
+    try { await TD.createQuick(opts); } catch (e) { threw = e && e.message === 'thrown failure'; }
+    assert(threw, 'thrown failure is delivered to the owner');
+    assert((await TD.createQuick(opts)).ok === true, 'retry after throw starts a fresh create');
+    assert((await TD.createQuick(opts)).ok === true, 'retry after success also starts fresh');
+    assert(attempt === 4, 'no settled promise remains retained: ' + attempt);
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+  global.Notice = prevNotice;
+}
+
+// ---------- GA-P1b6: reload-stable, app-scoped ownership ----------
+//
+// Each realm evaluates the production TaskDialog source into a distinct global
+// object and constructor, matching separate browser/CustomJS evaluation realms.
+// Only the exact shared app authority may carry ownership across that boundary.
+async function runReloadStableOwnershipTests() {
+  const prevWindow = global.window;
+  const prevGlobalApp = global.app;
+  const prevNotice = global.Notice;
+  const momentStub = () => ({
+    format: (f) => (f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-07-27T09:00:00-06:00' : '2026-07-27'),
+  });
+  const realm = (app, held, notices) => loadClassInRealm(
+    'mechanisms/task-entity/task-dialog.js',
+    'TaskDialog',
+    {
+      window: {
+        app,
+        customJS: Object.assign(
+          { TaskEntity: new TaskEntityClass() },
+          held ? { RenderSafe: held.rs } : {}
+        ),
+        moment: momentStub,
+      },
+      Notice: function (message) { if (notices) notices.push(String(message)); },
+    }
+  ).Klass;
+
+  await okAsync('GA-P1B5-HOT-RELOAD-CLAIM-ISOLATION two actual realms share identical ownership through no-index settlement', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    const FirstTaskDialog = realm(app, held, notices);
+    const ReloadedTaskDialog = realm(app, held, notices);
+    assert(FirstTaskDialog !== ReloadedTaskDialog, 'fixture evaluates two distinct production constructors');
+
+    const opts = { title: 'Reload once', source: 'daily' };
+    const first = new FirstTaskDialog().createQuick(opts);
+    await flushQuickCreate();
+    assert(app._creates.length === 1, 'first owner completes the real vault write before reconciliation');
+    const duplicate = await new ReloadedTaskDialog().createQuick(opts);
+    assert(duplicate && duplicate.ok === false && duplicate.duplicate === true,
+      'reloaded identical activation is an explicit duplicate');
+    assert(app._attempts.length === 1 && app._creates.length === 1,
+      'two source loads still attempt and persist exactly one file');
+    assert(notices.length === 0, 'no success Notice occurs before owner settlement');
+
+    held.release(0);
+    const owner = await first;
+    assert(owner && owner.ok === true, 'original owner succeeds');
+    assert(notices.length === 1 && notices[0] === 'Task created',
+      'two reload activations emit one success Notice');
+    const scope = ReloadedTaskDialog._runtimeOwnership(app);
+    assert(scope.claims.size === 0 && scope.reservations.size === 0,
+      'owner settlement releases both reload-stable maps');
+  });
+
+  await okAsync('GA-P1B6-HOT-RELOAD-DISTINCT two realms reserve deterministic base plus suffix for distinct payloads', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const FirstTaskDialog = realm(app, held);
+    const ReloadedTaskDialog = realm(app, held);
+    const first = new FirstTaskDialog().createQuick({
+      title: 'Reload collision',
+      today: '2026-07-27',
+      source: 'daily',
+    });
+    const second = new ReloadedTaskDialog().createQuick({
+      title: 'Reload collision',
+      today: '2026-07-28',
+      source: 'meeting',
+    });
+    await flushQuickCreate();
+    assert(app._creates.length === 2, 'distinct reload-bound payloads both write');
+    assert(app._creates[0].path === 'spice/tasks/Reload collision.md'
+        && app._creates[1].path === 'spice/tasks/Reload collision 2.md',
+      'shared path reservations assign base plus suffix: ' + JSON.stringify(app._creates.map((x) => x.path)));
+    held.release(0);
+    held.release(1);
+    const results = await Promise.all([first, second]);
+    assert(results.every((result) => result && result.ok === true),
+      'both distinct owners settle successfully');
+  });
+
+  await okAsync('GA-P1B6-APP-SCOPE identical payloads in separate app/vault objects and realms remain isolated', async () => {
+    const appA = makeCollisionAwareQuickApp({ publishCreates: false });
+    const appB = makeCollisionAwareQuickApp({ publishCreates: false });
+    const heldA = makeHeldCreateRenderSafe();
+    const heldB = makeHeldCreateRenderSafe();
+    const FirstTaskDialog = realm(appA, heldA);
+    const ReloadedTaskDialog = realm(appB, heldB);
+    const first = new FirstTaskDialog().createQuick({ title: 'Vault local', source: 'daily' });
+    const second = new ReloadedTaskDialog().createQuick({ title: 'Vault local', source: 'daily' });
+    await flushQuickCreate();
+    assert(appA._creates.length === 1 && appB._creates.length === 1,
+      'separate app objects each own one create');
+    assert(appA._creates[0].path === 'spice/tasks/Vault local.md'
+        && appB._creates[0].path === 'spice/tasks/Vault local.md',
+      'per-vault storage namespaces may each use the readable base');
+    assert(FirstTaskDialog._runtimeOwnership(appA) !== ReloadedTaskDialog._runtimeOwnership(appB),
+      'distinct app authorities return isolated ownership scopes');
+    heldA.release(0);
+    heldB.release(0);
+    await Promise.all([first, second]);
+  });
+
+  await okAsync('GA-P1B6-TOKEN-OWNERSHIP stale cross-realm cleanup cannot delete a newer owner', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const FirstTaskDialog = realm(app, held);
+    const ReloadedTaskDialog = realm(app, held);
+    const opts = { title: 'Token owner', source: 'daily' };
+    const pending = new FirstTaskDialog().createQuick(opts);
+    await flushQuickCreate();
+    const scope = ReloadedTaskDialog._runtimeOwnership(app);
+    const key = ReloadedTaskDialog._quickCreateKey(ReloadedTaskDialog._quickCreatePayload(opts));
+    const path = 'spice/tasks/Token owner.md';
+    const newerClaim = Object.freeze({ token: Object.freeze({}), pending: Promise.resolve() });
+    const newerReservation = Object.freeze({});
+    scope.claims.set(key, newerClaim);
+    scope.reservations.set(path, newerReservation);
+    held.release(0);
+    await pending;
+    assert(scope.claims.get(key) === newerClaim,
+      'stale quick-create finally preserves replacement claim token');
+    assert(scope.reservations.get(path) === newerReservation,
+      'stale path finally preserves replacement reservation token');
+    scope.claims.delete(key);
+    scope.reservations.delete(path);
+  });
+
+  await okAsync('GA-P1B6-CLEANUP missing lifecycle dependency releases cross-realm claim and reservation', async () => {
+    const app = makeQuickApp(() => false);
+    const ReloadedTaskDialog = realm(app);
+    const result = await new ReloadedTaskDialog().createQuick({ title: 'Missing lifecycle' });
+    const scope = ReloadedTaskDialog._runtimeOwnership(app);
+    assert(result && result.ok === false, 'missing RenderSafe fails closed');
+    assert(scope.claims.size === 0 && scope.reservations.size === 0,
+      'missing dependency releases both ownership maps');
+  });
+
+  await okAsync('GA-P1B6-CLEANUP thrown write releases both maps and permits an identical retry from another realm', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false, failures: 1 });
+    const held = makeHeldCreateRenderSafe();
+    const FirstTaskDialog = realm(app, held);
+    const ReloadedTaskDialog = realm(app, held);
+    const opts = { title: 'Throw retry', source: 'daily' };
+    let threw = false;
+    try { await new FirstTaskDialog().createQuick(opts); } catch (error) {
+      threw = /injected create failure/.test(String(error));
+    }
+    const scope = ReloadedTaskDialog._runtimeOwnership(app);
+    assert(threw, 'real thrown write reaches the owning caller');
+    assert(scope.claims.size === 0 && scope.reservations.size === 0,
+      'throw cleanup releases claim and reservation');
+    const retry = new ReloadedTaskDialog().createQuick(opts);
+    await flushQuickCreate();
+    assert(app._creates.length === 1
+        && app._creates[0].path === 'spice/tasks/Throw retry.md',
+      'identical retry safely reclaims the released base');
+    held.release(1);
+    assert((await retry).ok === true, 'retry settles successfully');
+  });
+
+  await okAsync('GA-P1B6-CLEANUP reservation release is idempotent and token-owned', async () => {
+    const app = makeQuickApp(() => false);
+    const ReloadedTaskDialog = realm(app);
+    const reservation = ReloadedTaskDialog._reserveCreatePath(
+      app,
+      new TaskEntityClass(),
+      'Idempotent.md'
+    );
+    const scope = ReloadedTaskDialog._runtimeOwnership(app);
+    assert(scope.reservations.get(reservation.path), 'reservation is installed synchronously');
+    reservation.release();
+    reservation.release();
+    assert(scope.reservations.size === 0, 'repeated release is a safe no-op');
+  });
+
+  await okAsync('GA-P1B6-GUARD malformed own authority value fails closed without overwrite', async () => {
+    const app = makeQuickApp(() => false);
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const sentinel = Object.freeze({ claims: new Map(), reservations: new Map() });
+    Object.defineProperty(app, ownershipKey, {
+      value: sentinel,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    const before = Object.getOwnPropertyDescriptor(app, ownershipKey);
+    const ReloadedTaskDialog = realm(app);
+    let threw = false;
+    try { ReloadedTaskDialog._runtimeOwnership(app); } catch (error) {
+      threw = /ownership authority collision/.test(String(error));
+    }
+    const after = Object.getOwnPropertyDescriptor(app, ownershipKey);
+    assert(threw, 'malformed authority value cannot be silently accepted');
+    assert(after.value === sentinel
+        && after.enumerable === before.enumerable
+        && after.configurable === before.configurable
+        && after.writable === before.writable,
+      'malformed authority descriptor is not overwritten or normalized');
+  });
+
+  await okAsync('GA-P1B6-GUARD non-extensible authority fails closed without realm-local fallback', async () => {
+    const app = makeQuickApp(() => false);
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    Object.preventExtensions(app);
+    const ReloadedTaskDialog = realm(app);
+    let threw = false;
+    try { ReloadedTaskDialog._runtimeOwnership(app); } catch (error) {
+      threw = /ownership authority collision/.test(String(error));
+    }
+    assert(threw, 'non-extensible app without a scope fails closed');
+    assert(!Object.prototype.hasOwnProperty.call(app, ownershipKey),
+      'non-extensible authority receives no partial ownership state');
+  });
+
+  await okAsync('GA-P1B6-GUARD inherited authority collision fails closed without masking prototype state', async () => {
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const sentinel = Object.freeze({ unrelated: true });
+    const proto = {};
+    Object.defineProperty(proto, ownershipKey, { value: sentinel });
+    const app = Object.assign(Object.create(proto), makeQuickApp(() => false));
+    const ReloadedTaskDialog = realm(app);
+    let threw = false;
+    try { ReloadedTaskDialog._runtimeOwnership(app); } catch (error) {
+      threw = /ownership authority collision/.test(String(error));
+    }
+    assert(threw, 'inherited symbol collision fails closed');
+    assert(!Object.prototype.hasOwnProperty.call(app, ownershipKey)
+        && app[ownershipKey] === sentinel,
+      'prototype state remains visible and unmodified');
+  });
+
+  await okAsync('GA-P1B7-PROXY getOwnPropertyDescriptor trap fails closed in both actual realms', async () => {
+    const target = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    let descriptorTraps = 0;
+    let defineTraps = 0;
+    let deleteTraps = 0;
+    const app = new Proxy(target, {
+      getOwnPropertyDescriptor(inner, key) {
+        if (key === ownershipKey) {
+          descriptorTraps += 1;
+          throw new Error('descriptor trap');
+        }
+        return Reflect.getOwnPropertyDescriptor(inner, key);
+      },
+      defineProperty(inner, key, descriptor) {
+        defineTraps += 1;
+        return Reflect.defineProperty(inner, key, descriptor);
+      },
+      deleteProperty(inner, key) {
+        deleteTraps += 1;
+        return Reflect.deleteProperty(inner, key);
+      },
+    });
+    const FirstTaskDialog = realm(app, held, notices);
+    const ReloadedTaskDialog = realm(app, held, notices);
+    let failures = 0;
+    for (const Klass of [FirstTaskDialog, ReloadedTaskDialog]) {
+      try { new Klass().createQuick({ title: 'Proxy descriptor trap', source: 'daily' }); }
+      catch (error) {
+        if (/ownership authority collision/.test(String(error))) failures += 1;
+      }
+    }
+    assert(failures === 2 && descriptorTraps === 2,
+      'both actual source realms fail at the same descriptor-trapping app authority');
+    assert(target._attempts.length === 0 && target._creates.length === 0 && notices.length === 0,
+      'descriptor trap permits zero storage attempts, writes, or Notices');
+    assert(!Object.prototype.hasOwnProperty.call(target, ownershipKey)
+        && defineTraps === 0 && deleteTraps === 0,
+      'descriptor failure cannot overwrite, define, or delete authority state');
+  });
+
+  await okAsync('GA-P1B7-PROXY defineProperty trap fails closed in both actual realms', async () => {
+    const target = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const notices = [];
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    let defineTraps = 0;
+    let deleteTraps = 0;
+    const app = new Proxy(target, {
+      defineProperty(inner, key, descriptor) {
+        if (key === ownershipKey) {
+          defineTraps += 1;
+          throw new Error('define trap');
+        }
+        return Reflect.defineProperty(inner, key, descriptor);
+      },
+      deleteProperty(inner, key) {
+        deleteTraps += 1;
+        return Reflect.deleteProperty(inner, key);
+      },
+    });
+    const FirstTaskDialog = realm(app, held, notices);
+    const ReloadedTaskDialog = realm(app, held, notices);
+    let failures = 0;
+    for (const Klass of [FirstTaskDialog, ReloadedTaskDialog]) {
+      try { new Klass().createQuick({ title: 'Proxy define trap', source: 'daily' }); }
+      catch (error) {
+        if (/ownership authority collision/.test(String(error))) failures += 1;
+      }
+    }
+    assert(failures === 2 && defineTraps === 2,
+      'both actual source realms fail at the same define-trapping app authority');
+    assert(target._attempts.length === 0 && target._creates.length === 0 && notices.length === 0,
+      'define trap permits zero storage attempts, writes, or Notices');
+    assert(!Object.prototype.hasOwnProperty.call(target, ownershipKey) && deleteTraps === 0,
+      'failed definitions leave the exact target authority untouched');
+  });
+
+  await okAsync('GA-P1B7-PROXY revoked authority fails closed without touching its target', async () => {
+    const target = makeCollisionAwareQuickApp({ publishCreates: false });
+    const notices = [];
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const revocable = Proxy.revocable(target, {});
+    const FirstTaskDialog = realm(revocable.proxy, null, notices);
+    const ReloadedTaskDialog = realm(revocable.proxy, null, notices);
+    revocable.revoke();
+    let failures = 0;
+    for (const Klass of [FirstTaskDialog, ReloadedTaskDialog]) {
+      try { new Klass().createQuick({ title: 'Revoked proxy', source: 'daily' }); }
+      catch (error) {
+        if (/ownership authority collision/.test(String(error))) failures += 1;
+      }
+    }
+    assert(failures === 2, 'both realms reject the same revoked authority');
+    assert(target._attempts.length === 0 && target._creates.length === 0 && notices.length === 0,
+      'revoked authority permits zero storage or Notice side effects');
+    assert(!Object.prototype.hasOwnProperty.call(target, ownershipKey),
+      'revoked authority cannot receive ownership state');
+  });
+
+  await okAsync('GA-P1B7-GUARD own accessor authority is rejected without invoking its getter', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const setterCalls = [];
+    let getterCalls = 0;
+    const getter = () => {
+      getterCalls += 1;
+      return Object.freeze({ claims: new Map(), reservations: new Map() });
+    };
+    const setter = (value) => { setterCalls.push(value); };
+    Object.defineProperty(app, ownershipKey, {
+      get: getter,
+      set: setter,
+      enumerable: false,
+      configurable: false,
+    });
+    const before = Object.getOwnPropertyDescriptor(app, ownershipKey);
+    const ReloadedTaskDialog = realm(app);
+    let threw = false;
+    try { ReloadedTaskDialog._runtimeOwnership(app); } catch (error) {
+      threw = /ownership authority collision/.test(String(error));
+    }
+    const after = Object.getOwnPropertyDescriptor(app, ownershipKey);
+    assert(threw && getterCalls === 0 && setterCalls.length === 0,
+      'accessor collision fails closed without invoking user code');
+    assert(after.get === before.get && after.set === before.set
+        && after.enumerable === before.enumerable
+        && after.configurable === before.configurable,
+      'accessor descriptor remains byte-for-byte authoritative');
+  });
+
+  await okAsync('GA-P1B7-GUARD foreign branded data descriptor is not accepted or overwritten', async () => {
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const foreign = Object.freeze({
+      brand: Symbol.for('foreign.task-entity.scope'),
+      claims: new Map(),
+      reservations: new Map(),
+    });
+    Object.defineProperty(app, ownershipKey, {
+      value: foreign,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    const ReloadedTaskDialog = realm(app);
+    let threw = false;
+    try { ReloadedTaskDialog._runtimeOwnership(app); } catch (error) {
+      threw = /ownership authority collision/.test(String(error));
+    }
+    const after = Object.getOwnPropertyDescriptor(app, ownershipKey);
+    assert(threw, 'foreign branded scope is rejected');
+    assert(after.value === foreign && after.configurable === false && after.writable === false,
+      'foreign non-configurable descriptor remains untouched');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
+  global.Notice = prevNotice;
+}
+
+async function runQuickCreateOwnershipMutants() {
+  const prevWindow = global.window;
+  const momentStub = () => ({ format: () => '2026-07-27T09:00:00-06:00' });
+
+  await okAsync('GA-P1B6-MUTANT-INSTANCE-CLAIM class-instance fallback reopens identical create after reload', async () => {
+    const mutateToInstanceClaim = (src) => src.replace(
+      'const claims = TaskDialog._runtimeOwnership(app).claims;',
+      `const claims = this._quickCreateInFlight instanceof Map
+            ? this._quickCreateInFlight
+            : (this._quickCreateInFlight = new Map());`
+    );
+    const FirstMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToInstanceClaim
+    );
+    const ReloadedMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToInstanceClaim
+    );
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const calls = [];
+    const firstDialog = new FirstMutant();
+    const reloadedDialog = new ReloadedMutant();
+    firstDialog._create = () => new Promise((resolve) => calls.push(resolve));
+    reloadedDialog._create = () => new Promise((resolve) => calls.push(resolve));
+    const first = firstDialog.createQuick({ title: 'Reload duplicate' });
+    const second = reloadedDialog.createQuick({ title: 'Reload duplicate' });
+    assert(calls.length === 2,
+      'instance-local P1b5 posture starts two identical owners across source reload');
+    calls.forEach((resolve) => resolve({ ok: true }));
+    await Promise.all([first, second]);
+  });
+
+  await okAsync('GA-P1B6-MUTANT-STATIC-RESERVATION constructor fallback collides reload-bound distinct writes', async () => {
+    const mutateToStaticReservations = (src) => src.replace(
+      'const reservations = TaskDialog._runtimeOwnership(app).reservations;',
+      `const reservations = TaskDialog._createPathReservations instanceof Map
+            ? TaskDialog._createPathReservations
+            : (TaskDialog._createPathReservations = new Map());`
+    );
+    const FirstMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToStaticReservations
+    );
+    const ReloadedMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToStaticReservations
+    );
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: held.rs },
+      moment: momentStub,
+    };
+    const first = new FirstMutant().createQuick({
+      title: 'Static collision',
+      today: '2026-07-27',
+      source: 'daily',
+    });
+    const second = new ReloadedMutant().createQuick({
+      title: 'Static collision',
+      today: '2026-07-28',
+      source: 'meeting',
+    });
+    await flushQuickCreate();
+    held.release(0);
+    held.release(1);
+    const settled = await Promise.allSettled([first, second]);
+    assert(app._attempts.length === 2
+        && app._attempts.every((attempt) => attempt.path === 'spice/tasks/Static collision.md'),
+      'constructor-local maps select the same stale base across reload');
+    assert(app._creates.length === 1 && settled.some((result) => result.status === 'rejected'),
+      'real storage collision kills the static-reservation fallback');
+  });
+
+  await okAsync('GA-P1B7-MUTANT-DESCRIPTOR-FALLBACK trap catch cannot return realm-local ownership', async () => {
+    const mutateDescriptorTrapFallback = (src) => src.replace(
+      `        } catch (_e) {
+            throw new Error('TaskDialog ownership authority collision');
+        }
+
+        if (!descriptor) {`,
+      `        } catch (_e) {
+            const fallbackKey = Symbol.for('sauce.task-entity.TaskDialog.mutant-descriptor-fallback');
+            if (!globalThis[fallbackKey]) {
+                globalThis[fallbackKey] = Object.freeze({
+                    brand: scopeBrand,
+                    claims: new Map(),
+                    reservations: new Map(),
+                });
+            }
+            return globalThis[fallbackKey];
+        }
+
+        if (!descriptor) {`
+    );
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const target = makeQuickApp(() => false);
+    const app = new Proxy(target, {
+      getOwnPropertyDescriptor(inner, key) {
+        if (key === ownershipKey) throw new Error('descriptor trap');
+        return Reflect.getOwnPropertyDescriptor(inner, key);
+      },
+    });
+    const FirstMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      { window: { app }, Notice: function () {} },
+      mutateDescriptorTrapFallback
+    ).Klass;
+    const ReloadedMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      { window: { app }, Notice: function () {} },
+      mutateDescriptorTrapFallback
+    ).Klass;
+    const firstScope = FirstMutant._runtimeOwnership(app);
+    const secondScope = ReloadedMutant._runtimeOwnership(app);
+    assert(firstScope !== secondScope,
+      'descriptor-trap fallback mutant creates separate realm-local ownership scopes');
+    assert(!Object.prototype.hasOwnProperty.call(target, ownershipKey),
+      'mutant bypasses the exact shared app authority instead of establishing ownership');
+  });
+
+  await okAsync('GA-P1B7-MUTANT-DEFINE-FALLBACK define trap cannot return realm-local ownership', async () => {
+    const mutateDefineTrapFallback = (src) => src.replace(
+      `            try {
+                Object.defineProperty(authority, ownershipKey, {
+                    value: scope,
+                    enumerable: false,
+                    configurable: false,
+                    writable: false,
+                });
+            } catch (_e) {
+                throw new Error('TaskDialog ownership authority collision');
+            }`,
+      `            try {
+                Object.defineProperty(authority, ownershipKey, {
+                    value: scope,
+                    enumerable: false,
+                    configurable: false,
+                    writable: false,
+                });
+            } catch (_e) {
+                const fallbackKey = Symbol.for('sauce.task-entity.TaskDialog.mutant-define-fallback');
+                if (!globalThis[fallbackKey]) globalThis[fallbackKey] = scope;
+                return globalThis[fallbackKey];
+            }`
+    );
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const target = makeQuickApp(() => false);
+    const app = new Proxy(target, {
+      defineProperty(inner, key, descriptor) {
+        if (key === ownershipKey) throw new Error('define trap');
+        return Reflect.defineProperty(inner, key, descriptor);
+      },
+    });
+    const FirstMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      { window: { app }, Notice: function () {} },
+      mutateDefineTrapFallback
+    ).Klass;
+    const ReloadedMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      { window: { app }, Notice: function () {} },
+      mutateDefineTrapFallback
+    ).Klass;
+    const firstScope = FirstMutant._runtimeOwnership(app);
+    const secondScope = ReloadedMutant._runtimeOwnership(app);
+    assert(firstScope !== secondScope,
+      'define-trap fallback mutant creates separate realm-local ownership scopes');
+    assert(!Object.prototype.hasOwnProperty.call(target, ownershipKey),
+      'define failure leaves no shared scope while mutant continues');
+  });
+
+  await okAsync('GA-P1B6-MUTANT-REALM-LOCAL globalThis ownership reopens identical create across realms', async () => {
+    const mutateToRealmLocal = (src) => src.replace(
+      'const authority = app;',
+      `const authority = typeof globalThis !== 'undefined'
+            ? globalThis
+            : window;`
+    );
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    const globals = () => ({
+      window: {
+        app,
+        customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: held.rs },
+        moment: momentStub,
+      },
+      Notice: function () {},
+    });
+    const FirstMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      globals(),
+      mutateToRealmLocal
+    ).Klass;
+    const ReloadedMutant = loadClassInRealm(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      globals(),
+      mutateToRealmLocal
+    ).Klass;
+    const first = new FirstMutant().createQuick({ title: 'Realm duplicate' });
+    const second = new ReloadedMutant().createQuick({ title: 'Realm duplicate' });
+    await flushQuickCreate();
+    assert(app._attempts.length === 2
+        && app._attempts.every((attempt) => attempt.path === 'spice/tasks/Realm duplicate.md'),
+      'realm-local ownership starts two identical writes against stale metadata');
+    held.release(0);
+    held.release(1);
+    const settled = await Promise.allSettled([first, second]);
+    assert(app._creates.length === 1 && settled.some((result) => result.status === 'rejected'),
+      'real storage collision kills the realm-local ownership mutant');
+  });
+
+  await okAsync('GA-P1B6-MUTANT-UNSCOPED-REGISTRY global authority couples separate app/vault objects', async () => {
+    const mutateToUnscoped = (src) => src.replace(
+      'const authority = app;',
+      'const authority = globalThis;'
+    );
+    const FirstMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToUnscoped
+    );
+    const ReloadedMutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      mutateToUnscoped
+    );
+    const appA = makeQuickApp(() => false);
+    const appB = makeQuickApp(() => false);
+    let releaseA;
+    const firstDialog = new FirstMutant();
+    firstDialog._create = () => new Promise((resolve) => { releaseA = resolve; });
+    global.window = { app: appA, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const first = firstDialog.createQuick({ title: 'Per vault' });
+    global.window = { app: appB, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const duplicate = await new ReloadedMutant().createQuick({ title: 'Per vault' });
+    assert(duplicate && duplicate.duplicate === true,
+      'unscoped registry wrongly treats a separate vault activation as duplicate');
+    releaseA({ ok: true });
+    await first;
+  });
+
+  await okAsync('GA-P1B6-MUTANT-UNGUARDED-OVERWRITE malformed authority state is not replaced', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src
+        .replace('if (!descriptor) {', 'if (true) {')
+        .replace(
+          'if (inherited || !extensible) {',
+          'if (false) {'
+        )
+    );
+    const app = makeQuickApp(() => false);
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const sentinel = Object.freeze({ unrelated: true });
+    Object.defineProperty(app, ownershipKey, {
+      value: sentinel,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    const scope = Mutant._runtimeOwnership(app);
+    assert(scope !== sentinel && app[ownershipKey] === scope,
+      'unguarded mutant overwrites the unrelated configurable authority value');
+  });
+
+  await okAsync('GA-P1B6-MUTANT-COLLISION-BYPASS malformed authority descriptor cannot be accepted', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        'if (!TaskDialog._validOwnershipDescriptor(descriptor, scopeBrand)) {',
+        'if (false) {'
+      )
+    );
+    const app = makeQuickApp(() => false);
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    const sentinel = Object.freeze({ claims: new Map(), reservations: new Map() });
+    Object.defineProperty(app, ownershipKey, {
+      value: sentinel,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    assert(Mutant._runtimeOwnership(app) === sentinel,
+      'validation-bypass mutant accepts malformed unbranded authority state');
+  });
+
+  await okAsync('GA-P1B7-MUTANT-ACCESSOR-INVOCATION ownership validation cannot execute an accessor', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        'if (!TaskDialog._validOwnershipDescriptor(descriptor, scopeBrand)) {',
+        `if (descriptor
+            && !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+            && typeof descriptor.get === 'function') {
+            descriptor.get();
+        }
+        if (!TaskDialog._validOwnershipDescriptor(descriptor, scopeBrand)) {`
+      )
+    );
+    const app = makeQuickApp(() => false);
+    const ownershipKey = Symbol.for('sauce.task-entity.TaskDialog.runtime-ownership.v2');
+    let getterCalls = 0;
+    Object.defineProperty(app, ownershipKey, {
+      get() {
+        getterCalls += 1;
+        return Object.freeze({ claims: new Map(), reservations: new Map() });
+      },
+      enumerable: false,
+      configurable: false,
+    });
+    try { Mutant._runtimeOwnership(app); } catch (_error) {}
+    assert(getterCalls === 1,
+      'accessor-invocation mutant executes foreign getter code before failing validation');
+  });
+
+  await okAsync('GA-P1B3-MUTANT-NO-CLAIM deleting duplicate ownership permits two identical writes', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace('if (claims.has(key)) {', 'if (false) {')
+    );
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new Mutant();
+    const calls = [];
+    TD._create = () => new Promise((resolve) => calls.push(resolve));
+    const first = TD.createQuick({ title: 'Duplicate' });
+    const second = TD.createQuick({ title: 'Duplicate' });
+    assert(calls.length === 2, 'no-claim mutant starts two identical creates');
+    calls.forEach((resolve) => resolve({ ok: true }));
+    await Promise.all([first, second]);
+  });
+
+  await okAsync('GA-P1B4-MUTANT-NO-PATH-RESERVATION real collision rejects one distinct payload', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        'if (reservations.has(candidatePath)) return true;',
+        'if (false) return true;'
+      )
+    );
+    const app = makeCollisionAwareQuickApp({ publishCreates: false });
+    const held = makeHeldCreateRenderSafe();
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: held.rs },
+      moment: momentStub,
+    };
+    const modalCreate = new Mutant()._create(app, {
+      title: 'Collision',
+      due: '2026-07-27',
+      source: 'manual',
+    }, '');
+    const quickCreate = new Mutant().createQuick({
+      title: 'Collision',
+      today: '2026-07-28',
+      source: 'daily',
+    });
+    await flushQuickCreate();
+    held.release(0);
+    held.release(1);
+    const settled = await Promise.allSettled([modalCreate, quickCreate]);
+    assert(app._attempts.length === 2
+        && app._attempts.every((attempt) => attempt.path === 'spice/tasks/Collision.md'),
+      'mutant selects the same stale base twice: ' + JSON.stringify(app._attempts));
+    assert(app._creates.length === 1 && settled.some((result) => result.status === 'rejected'),
+      'storage collision rejects one real _create path');
+  });
+
+  await okAsync('GA-P1B3-MUTANT-TITLE-KEY title-only ownership collapses distinct logical payloads', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        `return JSON.stringify([
+            p.title || '',
+            p.due || '',
+            p.source || '',
+            p.parent_task || '',
+            Array.isArray(p.links) ? p.links : [],
+        ]);`,
+        `return JSON.stringify([p.title || '']);`
+      )
+    );
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new Mutant();
+    const calls = [];
+    TD._create = () => new Promise((resolve) => calls.push(resolve));
+    const first = TD.createQuick({ title: 'Same', today: '2026-07-27', source: 'daily' });
+    const collapsed = await TD.createQuick({
+      title: 'Same',
+      today: '2026-07-28',
+      source: 'meeting',
+      parent_task: '[[Parent]]',
+      links: ['[[Context]]'],
+    });
+    assert(calls.length === 1 && collapsed && collapsed.duplicate === true,
+      'title-only mutant wrongly serializes distinct payloads');
+    calls[0]({ ok: true });
+    await first;
+  });
+
+  await okAsync('GA-P1B3-MUTANT-EARLY-RELEASE releasing before reconciliation reopens identical create', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        `resolveClaim(await this._create(app, payload, ''));`,
+        `const creating = this._create(app, payload, '');
+                claims.delete(key);
+                resolveClaim(await creating);`
+      )
+    );
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new Mutant();
+    const calls = [];
+    TD._create = () => new Promise((resolve) => calls.push(resolve));
+    const first = TD.createQuick({ title: 'Held' });
+    const second = TD.createQuick({ title: 'Held' });
+    assert(calls.length === 2, 'early-release mutant starts a second create before settlement');
+    calls.forEach((resolve) => resolve({ ok: true }));
+    await Promise.all([first, second]);
+  });
+
+  await okAsync('GA-P1B3-MUTANT-RETAIN-REJECT rejected owner retained in the map blocks retry', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        'if (current && current.token === token) claims.delete(key);',
+        'if (false) claims.delete(key);'
+      )
+    );
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: new TaskEntityClass() }, moment: momentStub };
+    const TD = new Mutant();
+    let calls = 0;
+    TD._create = async () => { calls += 1; throw new Error('reject once'); };
+    try { await TD.createQuick({ title: 'Rejected' }); } catch (_e) {}
+    const retained = await TD.createQuick({ title: 'Rejected' });
+    assert(calls === 1 && retained && retained.duplicate === true,
+      'retained-rejection mutant prevents the required retry');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
 }
 
 // ---------- TaskDialog.markDone / markDeleted (path-based, no dialog) ----------
@@ -2086,6 +3332,9 @@ function makeDialogApp(taskPath, initialFm) {
       processFrontMatter: async (f, fn) => { await fn(f._fm); },
       renameFile: async (f, newPath) => { app._renamed = { from: f.path, to: newPath }; f.path = newPath; },
     },
+    metadataCache: {
+      getFileCache: (f) => ({ frontmatter: f._fm }),
+    },
   };
   return app;
 }
@@ -2110,6 +3359,28 @@ async function runMarkDoneDeletedTests() {
     assert(app._renamed && app._renamed.to === 'spice/tasks/_done/task-x.md',
       'renamed into _done via donePath: ' + JSON.stringify(app._renamed));
     assert(app._createdFolders.includes('spice/tasks/_done'), '_done folder ensured: ' + JSON.stringify(app._createdFolders));
+  });
+
+  await okAsync('GA-P1B-RECURRING markDone preserves same-file roll-forward and returns freshness evidence', async () => {
+    const app = makeDialogApp('spice/tasks/recur.md', {
+      title: 'repeat', status: 'open', recurrence: 'every day',
+      due: '2026-07-03', created_at: '2026-07-01T08:00:00-06:00',
+    });
+    global.window = {
+      app,
+      moment: momentStub,
+      customJS: {
+        TaskEntity: new TaskEntityClass(),
+        RecurrenceParser: { matches: () => true },
+      },
+    };
+    global.app = null;
+    const res = await new TaskDialogClass().markDone('spice/tasks/recur.md');
+    assert(res && res.ok === true && res.outcome && res.outcome.recurring === true,
+      'recurring outcome identifies the same-file roll-forward: ' + JSON.stringify(res));
+    assert(app._file._fm.status === 'open' && app._file._fm.due === '2026-07-04'
+      && app._file._fm.completed_at === '', 'recurring task rolls forward in place');
+    assert(app._renamed === null, 'recurring task is never archived');
   });
 
   await okAsync('TD-SE-trip _saveEdit persists trip / trip_slug (parallel project), clears when absent', async () => {
@@ -2287,13 +3558,15 @@ async function runOptimisticRemovalTests() {
   const prevNotice = global.Notice;
 
   await okAsync('RTR-4 complete detaches the row BEFORE markDone is awaited, stays removed on ok', async () => {
-    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.window = { customJS: { RenderSafe: makeRenderSafe() } };
     const container = makeTreeNode('div');
     let removedAtCall = null, resolveMD;
     const TD = { markDone: () => { removedAtCall = (container.children.indexOf(row) < 0); return new Promise((r) => { resolveMD = () => r({ ok: true }); }); } };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'spice/tasks/x.md' }, TD);
     const cb = findInput(row); cb.checked = true;
     const p = fireChange(cb);
+    assert(container.children.indexOf(row) < 0, 'optimistic row detach is synchronous');
+    await Promise.resolve();
     assert(removedAtCall === true, 'row detached BEFORE markDone awaited');
     resolveMD(); await p;
     assert(container.children.indexOf(row) < 0, 'row stays removed on success');
@@ -2301,7 +3574,7 @@ async function runOptimisticRemovalTests() {
 
   await okAsync('RTR-5 {ok:false} re-inserts the row at its original index + unchecks + Notice', async () => {
     const notices = [];
-    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.window = { customJS: { RenderSafe: makeRenderSafe() } };
     global.Notice = function (m) { notices.push(String(m)); };
     const container = makeTreeNode('div');
     let resolveMD;
@@ -2311,6 +3584,7 @@ async function runOptimisticRemovalTests() {
     const cb = findInput(row); cb.checked = true;
     const p = fireChange(cb);
     assert(container.children.indexOf(row) < 0, 'row removed during the pending write');
+    await Promise.resolve();
     resolveMD(); await p;
     assert(container.children.indexOf(row) === 0, 're-inserted at original index (before sibling)');
     assert(container.children.indexOf(sib) === 1, 'sibling order preserved');
@@ -2319,7 +3593,7 @@ async function runOptimisticRemovalTests() {
   });
 
   await okAsync('RTR-6 markDone throwing re-inserts + unchecks (no unhandled rejection)', async () => {
-    global.window = { customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.window = { customJS: { RenderSafe: makeRenderSafe() } };
     global.Notice = function () {};
     const container = makeTreeNode('div');
     const TD = { markDone: async () => { throw new Error('boom'); } };
@@ -2340,13 +3614,50 @@ async function runOptimisticRemovalTests() {
 
   await okAsync('RTR-CAP captureScroll is invoked before markDone', async () => {
     const events = [];
-    global.window = { customJS: { RenderSafe: { captureScroll: () => events.push('capture') } } };
+    global.window = { customJS: { RenderSafe: makeRenderSafe(() => events.push('capture')) } };
     const container = makeTreeNode('div');
     const TD = { markDone: async () => { events.push('markDone'); return { ok: true }; } };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
     const cb = findInput(row); cb.checked = true;
     await fireChange(cb);
     assert(events[0] === 'capture' && events.indexOf('markDone') > 0, 'captureScroll ran before markDone: ' + JSON.stringify(events));
+  });
+
+  await okAsync('GA-P1B-ROW-COMPLETE-OWNERSHIP duplicate change writes once and releases for retry', async () => {
+    global.window = { customJS: { RenderSafe: makeRenderSafe() } };
+    const container = makeTreeNode('div');
+    let writes = 0;
+    const resolvers = [];
+    const TD = {
+      markDone: () => {
+        writes++;
+        return new Promise((resolve) => resolvers.push(resolve));
+      },
+    };
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'owned completion', path: 'spice/tasks/owned-completion.md' },
+      TD
+    );
+    const cb = findInput(row);
+    cb.checked = true;
+    const first = fireChange(cb);
+    const duplicate = await fireChange(cb);
+    await Promise.resolve();
+    assert(writes === 1 && resolvers.length === 1,
+      'duplicate change cannot cross ownership into a second write: ' + writes);
+    assert(duplicate && duplicate.no_op === true && duplicate.in_flight === true,
+      'duplicate change reports an in-flight no-op: ' + JSON.stringify(duplicate));
+    resolvers.shift()({ ok: true });
+    await first;
+
+    cb.checked = true;
+    const retry = fireChange(cb);
+    await Promise.resolve();
+    assert(writes === 2 && resolvers.length === 1,
+      'finally releases ownership so a later completion retry can write');
+    resolvers.shift()({ ok: true });
+    await retry;
   });
 
   global.window = prevWindow;
@@ -2366,6 +3677,15 @@ function findByCls(node, cls) {
     const classes = String((c && (c.className || c.cls)) || '').split(/\s+/);
     if (c && classes.includes(cls)) return c;
     const d = findByCls(c, cls); if (d) return d;
+  }
+  return null;
+}
+function findButtonByText(node, text) {
+  if (!node) return null;
+  if (node.tagName === 'BUTTON' && node.textContent === text) return node;
+  for (const child of node.children || []) {
+    const found = findButtonByText(child, text);
+    if (found) return found;
   }
   return null;
 }
@@ -2409,7 +3729,10 @@ async function runRowActionTests() {
 
   await okAsync('RACT-2 edit click opens the edit DIALOG (TD.open{edit}), not the note, not confirmDelete', async () => {
     const opened = [], openedNote = [], confirmed = [];
-    global.window = { app: { workspace: { openLinkText: (t) => openedNote.push(t) } } };
+    global.window = {
+      app: { workspace: { openLinkText: (t) => openedNote.push(t) } },
+      customJS: { RenderSafe: makeRenderSafe() },
+    };
     const container = makeTreeNode('div');
     const path = 'spice/tasks/go through mail.md';
     const TD = { open: (a) => opened.push(a), confirmDelete: async (p) => { confirmed.push(p); return { ok: false }; } };
@@ -2422,10 +3745,17 @@ async function runRowActionTests() {
 
   await okAsync('RACT-3 delete click routes to TD.confirmDelete(path), not TD.open, not the note', async () => {
     const opened = [], openedNote = [], confirmed = [];
-    global.window = { app: { workspace: { openLinkText: (t) => openedNote.push(t) } } };
+    global.window = {
+      app: { workspace: { openLinkText: (t) => openedNote.push(t) } },
+      customJS: { RenderSafe: makeRenderSafe() },
+    };
     const container = makeTreeNode('div');
     const path = 'spice/tasks/x.md';
-    const TD = { open: (a) => opened.push(a), confirmDelete: async (p) => { confirmed.push(p); return { ok: false, cancelled: true }; } };
+    const TD = {
+      open: (a) => opened.push(a),
+      confirmDelete: async (p) => { confirmed.push(p); return { ok: false, cancelled: true }; },
+      markDeleted: async () => ({ ok: true }),
+    };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path }, TD);
     await fireClick(findByCls(row, 'sauce-task-action-delete'));
     assert(confirmed.length === 1 && confirmed[0] === path, 'delete → confirmDelete(path): ' + JSON.stringify(confirmed));
@@ -2434,9 +3764,9 @@ async function runRowActionTests() {
   });
 
   await okAsync('RACT-4 delete CONFIRMED (ok:true) removes the row; sibling preserved', async () => {
-    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: makeRenderSafe() } };
     const container = makeTreeNode('div');
-    const TD = { open() {}, confirmDelete: async () => ({ ok: true }) };
+    const TD = { open() {}, confirmDelete: async () => ({ ok: true }), markDeleted: async () => ({ ok: true }) };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
     const sib = container.createEl('div');
     assert(childIndex(container, row) === 0, 'row present before delete');
@@ -2446,12 +3776,72 @@ async function runRowActionTests() {
   });
 
   await okAsync('RACT-5 delete CANCELLED (ok:false) leaves the row in place', async () => {
-    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: { captureScroll: () => {} } } };
+    global.window = { app: { workspace: { openLinkText() {} } }, customJS: { RenderSafe: makeRenderSafe() } };
     const container = makeTreeNode('div');
-    const TD = { open() {}, confirmDelete: async () => ({ ok: false, cancelled: true }) };
+    const TD = { open() {}, confirmDelete: async () => ({ ok: false, cancelled: true }), markDeleted: async () => ({ ok: true }) };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
     await fireClick(findByCls(row, 'sauce-task-action-delete'));
     assert(childIndex(container, row) === 0, 'row stays after cancel');
+  });
+
+  await okAsync('GA-P1B-DELETE-FAIL confirmed resolved delete failure restores exact row position and notices once', async () => {
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = { app: {}, customJS: { RenderSafe: makeRenderSafe() } };
+    const container = makeTreeNode('div');
+    const TD = {
+      open() {},
+      confirmDelete: async (_path, opts) => ({ ok: opts && opts.deferWrite === true }),
+      markDeleted: async () => ({ ok: false, reason: 'delete rejected' }),
+    };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'p.md' }, TD);
+    const sibling = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(childIndex(container, row) === 0 && childIndex(container, sibling) === 1,
+      'shared revert restores the original row position');
+    assert(notices.length === 1 && /delete/i.test(notices[0]),
+      'resolved {ok:false} is coerced into exactly one shared Notice: ' + JSON.stringify(notices));
+  });
+
+  await okAsync('GA-P1B-ROW-DELETE-OWNERSHIP duplicate trash click confirms/writes once and releases for retry', async () => {
+    global.window = { app: {}, customJS: { RenderSafe: makeRenderSafe() } };
+    const container = makeTreeNode('div');
+    let confirms = 0;
+    let writes = 0;
+    const confirmResolvers = [];
+    const TD = {
+      open() {},
+      confirmDelete: () => {
+        confirms++;
+        return new Promise((resolve) => confirmResolvers.push(resolve));
+      },
+      markDeleted: async () => {
+        writes++;
+        return { ok: true };
+      },
+    };
+    const row = TaskTodayList.renderTaskRow(
+      container,
+      { title: 'owned delete', path: 'spice/tasks/owned-delete.md' },
+      TD
+    );
+    const trash = findByCls(row, 'sauce-task-action-delete');
+    const first = fireClick(trash);
+    const duplicate = await fireClick(trash);
+    assert(confirms === 1 && writes === 0,
+      'duplicate trash click cannot open a second confirmation or write');
+    assert(duplicate && duplicate.no_op === true && duplicate.in_flight === true,
+      'duplicate trash click reports an in-flight no-op: ' + JSON.stringify(duplicate));
+    confirmResolvers.shift()({ ok: true });
+    await first;
+    assert(writes === 1, 'first confirmed delete performs exactly one underlying write');
+
+    const retry = fireClick(trash);
+    assert(confirms === 2 && confirmResolvers.length === 1,
+      'finally releases delete ownership so a later retry can confirm');
+    confirmResolvers.shift()({ ok: true });
+    await retry;
+    assert(writes === 2, 'later confirmed delete retry can perform its own write');
   });
 
   await okAsync('RACT-6 cold load (no TaskDialog) — edit + delete clicks no-op, never throw', async () => {
@@ -2494,7 +3884,7 @@ async function runTomorrowActionTests() {
     };
     global.window = {
       app,
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
       moment: () => ({ format: () => '2099-12-31' }),
     };
     global.app = null;
@@ -2510,6 +3900,7 @@ async function runTomorrowActionTests() {
     const tomorrow = findByCls(row, 'sauce-task-action-tomorrow');
     assert(tomorrow, 'open row exposes Move to tomorrow');
     const pending = fireClick(tomorrow);
+    await Promise.resolve();
     assert(file._fm.due === '2026-02-01',
       'writes from viewed day rather than wall clock: ' + file._fm.due);
     assert(file._fm.untouched === 'yes', 'unrelated frontmatter remains byte-identical');
@@ -2523,13 +3914,15 @@ async function runTomorrowActionTests() {
   await okAsync('TD1A-SHARED-ROLLBACK restores the row at its exact position on mutation failure', async () => {
     const path = 'spice/tasks/fail.md';
     const file = { path, _fm: { status: 'open', due: '2026-12-31' } };
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
     global.window = {
       app: {
         vault: { getAbstractFileByPath: () => file },
         fileManager: { processFrontMatter: async (f, mutate) => { mutate(f._fm); throw new Error('write failed'); } },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
     const container = makeTreeNode('div');
     const row = TaskTodayList.renderTaskRow(
@@ -2542,6 +3935,9 @@ async function runTomorrowActionTests() {
     await fireClick(findByCls(row, 'sauce-task-action-tomorrow'));
     assert(childIndex(container, row) === 0, 'failed row restored before its original sibling');
     assert(childIndex(container, sibling) === 1, 'sibling order preserved');
+    assert(notices.length === 1 && /reschedule/i.test(notices[0]),
+      'shared lifecycle emits one reschedule failure Notice: ' + JSON.stringify(notices));
+    global.Notice = function () {};
   });
 
   await okAsync('TD1A4-DUPLICATE-ACTIVATION-MIXED-OUTCOME suppresses a second same-task write and permits retry after failure', async () => {
@@ -2565,7 +3961,7 @@ async function runTomorrowActionTests() {
         },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
 
     // Browser-strict: inserting against a detached saved anchor throws instead
@@ -2587,6 +3983,7 @@ async function runTomorrowActionTests() {
     const sibling = container.createEl('div');
 
     const firstPending = TaskTodayList.rescheduleTomorrow(row, task, '2026-07-27');
+    await Promise.resolve();
     assert(writes === 1 && childIndex(container, row) < 0,
       'first activation starts one write and removes the row optimistically');
 
@@ -2633,7 +4030,7 @@ async function runTomorrowActionTests() {
         },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
     const TD = global.window.customJS.TaskDialog;
     const TaskDoneTodayListClass = loadClass(
@@ -2704,7 +4101,7 @@ async function runTomorrowActionTests() {
           },
           workspace: { openLinkText() {} },
         },
-        customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+        customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
       };
       const task = { title: `stale ${suffix}`, path, due: '2026-07-27', status: 'open' };
       const container = makeTreeNode('div');
@@ -2760,7 +4157,7 @@ async function runTomorrowActionTests() {
         },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
 
     const container = makeTreeNode('div');
@@ -2786,6 +4183,7 @@ async function runTomorrowActionTests() {
 
     const firstPending = fireClick(findByCls(first, 'sauce-task-action-tomorrow'));
     const secondPending = fireClick(findByCls(second, 'sauce-task-action-tomorrow'));
+    await Promise.resolve();
     assert(container.children.length === 0,
       'both adjacent final rows are removed while their writes are pending');
 
@@ -2820,7 +4218,7 @@ async function runTomorrowActionTests() {
         },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
 
     const container = makeTreeNode('div');
@@ -2832,6 +4230,7 @@ async function runTomorrowActionTests() {
     );
     const pending = fireClick(findByCls(original, 'sauce-task-action-tomorrow'));
     assert(container.children.length === 0, 'original row is removed while write is pending');
+    await Promise.resolve();
 
     // Simulate Dataview rebuilding this list while the write is in flight.
     const replacement = TaskTodayList.renderTaskRow(
@@ -2864,7 +4263,7 @@ async function runTomorrowActionTests() {
         },
         workspace: { openLinkText() {} },
       },
-      customJS: { TaskDialog: { open() {} }, RenderSafe: { captureScroll() {} } },
+      customJS: { TaskDialog: { open() {} }, RenderSafe: makeRenderSafe() },
     };
 
     const oldContainer = makeTreeNode('div');
@@ -2876,6 +4275,7 @@ async function runTomorrowActionTests() {
       { viewedDay: '2026-07-27' }
     );
     const pending = TaskTodayList.rescheduleTomorrow(original, task, '2026-07-27');
+    await Promise.resolve();
     assert(writes === 1 && oldContainer.children.length === 0,
       'write starts while the connected old row is optimistically removed');
 
@@ -2998,13 +4398,14 @@ async function runDotsMenuTests() {
     const deletePaths = [];
     global.window = {
       app: { workspace: { openLinkText() {} } },
-      customJS: { RenderSafe: { captureScroll: () => {} } },
+      customJS: { RenderSafe: makeRenderSafe() },
     };
     const container = makeTreeNode('div');
     const path = 'spice/tasks/x.md';
     const TD = {
       open: (opts) => { editPaths.push(opts && opts.edit); },
       confirmDelete: async (p) => { deletePaths.push(p); return { ok: true }; },
+      markDeleted: async () => ({ ok: true }),
     };
     const row = TaskTodayList.renderTaskRow(container, { title: 'x', path }, TD);
     const edit = findByCls(row, 'sauce-task-action-edit');
@@ -3408,79 +4809,395 @@ async function runTaskDialogSauceModalTests() {
   global.Notice = prevNotice;
 }
 
-// ---------- L4: metadataCache-gated reconcile after add (TD-REC-1..4) ----------
-// _reconcileAfterCreate registers a one-shot metadataCache 'changed' listener for
-// the new file's path (or a 1200ms fallback if it's missed), then POLLS Dataview's
-// own `dv.page(path)` until Dataview itself reports the new page indexed before
-// firing the force-refresh command — metadataCache 'changed' only means Obsidian
-// re-parsed frontmatter, not that Dataview's separate async index caught up, so
-// firing on 'changed' alone can redraw from a stale index and never retrigger
-// (TD-REC-4 guards this). Absent Dataview API degrades to fire-on-signal. Never
-// throws (absent APIs degrade to the natural ~2.5s tick).
-function runReconcileTests() {
-  ok('TD-REC-1 reconcile force-refreshes when the new file is indexed, then detaches', () => {
-    const calls = { cmd: [], on: 0, off: 0 };
-    let handler = null;
-    const app = {
-      metadataCache: { on: (ev, fn) => { calls.on++; handler = { ev, fn }; return { ev }; }, offref: () => { calls.off++; } },
-      commands: { executeCommandById: (id) => { calls.cmd.push(id); return true; } },
-      _setTimeout: () => 0,   // never auto-fire the fallback in this case
+// ---------- GA-P1b: TaskDialog adopts RenderSafe create lifecycle ----------
+async function runReconcileTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+
+  await okAsync('GA-P1B-CREATE-REAL TaskDialog create delegates mode:create to the real RenderSafe instance', async () => {
+    const app = makeQuickApp(() => false);
+    const rs = makeRenderSafe();
+    const events = [];
+    rs.captureScroll = () => events.push('capture');
+    const realMutate = rs.mutate.bind(rs);
+    let observed = null;
+    rs.mutate = async (opts) => {
+      observed = opts;
+      return realMutate(opts);
     };
-    new TaskDialogClass()._reconcileAfterCreate(app, 'spice/tasks/x.md');
-    assert(calls.on === 1 && handler && handler.ev === 'changed', 'one changed-listener registered');
-    handler.fn({ path: 'spice/tasks/other.md' });
-    assert(calls.cmd.length === 0, 'no refresh for a different path');
-    handler.fn({ path: 'spice/tasks/x.md' });
-    assert(calls.cmd.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh fired on the matching path');
-    assert(calls.off === 1, 'listener detached after firing');
-  });
-
-  ok('TD-REC-2 timeout fallback force-refreshes if the event never fires', () => {
-    const calls = [];
-    const app = {
-      metadataCache: { on: () => ({}), offref: () => {} },
-      commands: { executeCommandById: (id) => calls.push(id) },
-      _setTimeout: (fn) => { fn(); return 0; },   // fire the fallback immediately
+    global.Notice = function () {};
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: rs },
+      moment: () => ({ format: () => '2026-07-27T09:00:00-06:00' }),
     };
-    new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');
-    assert(calls.indexOf('dataview:dataview-force-refresh-views') >= 0, 'fallback fired the force-refresh');
+    const result = await new TaskDialogClass().createQuick({ title: 'Shared lifecycle' });
+    assert(result && result.ok === true, 'create succeeds through mutate');
+    assert(observed && observed.mode === 'create', 'mode:create supplied');
+    assert(observed.path === 'spice/tasks/Shared lifecycle.md', 'mutation path is the new file');
+    assert(events[0] === 'capture', 'real RenderSafe captures before its deferred write');
+    assert(app._creates.length === 1, 'exactly one vault.create');
   });
 
-  ok('TD-REC-3 absent commands/API → no throw', () => {
-    const app = { metadataCache: { on: () => ({}), offref: () => {} }, _setTimeout: () => 0 };
-    new TaskDialogClass()._reconcileAfterCreate(app, 'p.md');   // must not throw
-    new TaskDialogClass()._reconcileAfterCreate(null, 'p.md');  // null app → no throw
-    assert(true, 'no throw');
-  });
-
-  ok('TD-REC-4 waits for Dataview to actually index the page before force-refreshing (root-cause regression)', () => {
-    const calls = { cmd: [] };
-    let handler = null;
+  await okAsync('GA-P1B-CREATE-TIMEOUT create waits through the bounded no-signal/no-index timeout then refreshes once', async () => {
     const timers = [];
-    let pollCount = 0;
-    const indexedAfter = 2; // dv.page reports the new page only from the 3rd poll onward
-    const app = {
-      metadataCache: { on: (ev, fn) => { handler = { ev, fn }; return { ev }; }, offref: () => {} },
-      commands: { executeCommandById: (id) => calls.cmd.push(id) },
-      plugins: { plugins: { dataview: { api: { page: (p) => {
-        pollCount++;
-        return pollCount > indexedAfter ? { file: { path: p } } : null;
-      } } } } },
-      _setTimeout: (fn) => { timers.push(fn); return timers.length; },  // queued, drained manually below
+    const commands = [];
+    const app = makeQuickApp(() => false);
+    app.metadataCache = { on: () => ({}), offref() {} };
+    app.plugins.plugins.dataview.api.page = () => null;
+    app.commands = { executeCommandById: (id) => commands.push(id) };
+    app._setTimeout = (fn) => { timers.push(fn); return timers.length; };
+    app._clearTimeout = () => {};
+    global.Notice = function () {};
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: makeRenderSafe() },
+      moment: () => ({ format: () => '2026-07-27T09:00:00-06:00' }),
     };
-    new TaskDialogClass()._reconcileAfterCreate(app, 'spice/tasks/x.md');
-    handler.fn({ path: 'spice/tasks/x.md' }); // metadataCache fires — starts polling
-    assert(calls.cmd.length === 0, 'must NOT force-refresh before dv.page reports the new page indexed');
-    let guard = 0;
-    while (calls.cmd.length === 0 && guard < 30) {
-      const t = timers.shift();
-      assert(t, 'a retry timer should be queued while waiting for the index');
-      t();
-      guard++;
+    let settled = false;
+    const pending = new TaskDialogClass().createQuick({ title: 'Bounded create' })
+      .then((value) => { settled = true; return value; });
+    for (let guard = 0; !settled && guard < 80; guard++) {
+      await Promise.resolve();
+      const timer = timers.shift();
+      if (timer) timer();
     }
-    assert(calls.cmd.indexOf('dataview:dataview-force-refresh-views') >= 0, 'force-refresh eventually fired once dv.page reported the new page');
-    assert(pollCount === indexedAfter + 1, 'polled dv.page exactly until it succeeded: ' + pollCount);
+    const result = await pending;
+    assert(result && result.ok === true, 'bounded timeout still completes create');
+    assert(commands.length === 1, 'create timeout refreshes exactly once');
+    assert(app._creates.length === 1, 'timeout path still creates one file');
+    const scope = TaskDialogClass._runtimeOwnership(app);
+    assert(scope.claims.size === 0 && scope.reservations.size === 0,
+      'bounded reconciliation timeout releases reload-stable ownership');
   });
+
+  ok('GA-P1B-CREATE-PRIVATE private _reconcileAfterCreate implementation and direct tests are deleted', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'mechanisms/task-entity/task-dialog.js'), 'utf8');
+    assert(typeof new TaskDialogClass()._reconcileAfterCreate === 'undefined', 'private method absent');
+    assert(!source.includes('_reconcileAfterCreate'), 'no source reference remains');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  global.Notice = prevNotice;
+}
+
+async function runRenderSafeAdoptionTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+
+  await okAsync('GA-P1B-NOTE-ACTIVE active-note completion supplies synchronous mutation-specific authority and refreshes once', async () => {
+    const path = 'spice/tasks/Active.md';
+    const movedPath = 'spice/tasks/_done/Active.md';
+    const completedAt = '2026-07-27T09:00:00-06:00';
+    const page = {
+      type: 'task', title: 'Active', status: 'open', parent_task: '[[Parent]]',
+      due: '2026-07-27', file: { path, name: 'Active' },
+    };
+    let indexed = page;
+    let movedIndexed = null;
+    const events = [];
+    const commands = [];
+    const rs = makeRenderSafe(() => events.push('capture'));
+    const app = {
+      commands: { executeCommandById: (id) => { events.push('refresh'); commands.push(id); } },
+    };
+    const TD = {
+      markDone: async () => {
+        events.push('write');
+        indexed = null;
+        movedIndexed = {
+          type: 'task', title: 'Active', status: 'done', completed_at: completedAt,
+          file: { path: movedPath, name: 'Active' },
+        };
+        return {
+          ok: true,
+          outcome: {
+            recurring: false, status: 'done', completed_at: completedAt, moved_to: movedPath,
+          },
+        };
+      },
+    };
+    const container = makeTreeNode('div');
+    const dv = {
+      container,
+      current: () => page,
+      page: (candidate) => candidate === movedPath ? movedIndexed : indexed,
+    };
+    global.Notice = function () {};
+    global.window = {
+      app,
+      moment: () => ({ format: () => '2026-07-27' }),
+      customJS: { RenderSafe: rs, TaskEntity: new TaskEntityClass(), TaskDialog: TD },
+    };
+    await new TaskNoteViewClass().render(dv);
+    const done = findButtonByText(container, 'Mark done');
+    assert(done, 'active Mark done control rendered');
+    await fireClick(done);
+    assert(events[0] === 'capture' && events[1] === 'write',
+      'capture precedes optimistic/deferred write: ' + JSON.stringify(events));
+    assert(commands.length === 1, 'mutation-specific current state refreshes exactly once');
+    assert(typeof rs.mutate === 'function', 'real RenderSafe instance was exercised');
+  });
+
+  await okAsync('GA-P1B-COLD-NULL-FALSE-FRESH null-before/null-after stays fail-closed with no refresh', async () => {
+    const path = 'spice/tasks/Cold.md';
+    const movedPath = 'spice/tasks/_done/Cold.md';
+    const page = {
+      type: 'task', title: 'Cold', status: 'open', parent_task: '[[Parent]]',
+      file: { path, name: 'Cold' },
+    };
+    const timers = [];
+    const commands = [];
+    const app = {
+      commands: { executeCommandById: (id) => commands.push(id) },
+      _setTimeout: (fn) => { timers.push(fn); return timers.length; },
+      _clearTimeout() {},
+    };
+    const container = makeTreeNode('div');
+    const dv = { container, current: () => page, page: () => null };
+    global.Notice = function () {};
+    global.window = {
+      app,
+      moment: () => ({ format: () => '2026-07-27' }),
+      customJS: {
+        RenderSafe: makeRenderSafe(),
+        TaskEntity: new TaskEntityClass(),
+        TaskDialog: {
+          markDone: async () => ({
+            ok: true,
+            outcome: {
+              recurring: false,
+              status: 'done',
+              completed_at: '2026-07-27T09:00:00-06:00',
+              moved_to: movedPath,
+            },
+          }),
+        },
+      },
+    };
+    await new TaskNoteViewClass().render(dv);
+    const done = findButtonByText(container, 'Mark done');
+    let settled = false;
+    const pending = Promise.resolve(fireClick(done)).then((value) => {
+      settled = true;
+      return value;
+    });
+    for (let guard = 0; !settled && guard < 80; guard++) {
+      await Promise.resolve();
+      const timer = timers.shift();
+      if (timer) timer();
+    }
+    await pending;
+    assert(commands.length === 0,
+      'unindexed null-before/null-after cannot authorize a stale active refresh');
+  });
+
+  await okAsync('GA-P1B-NOTE-FAIL resolved completion failure restores button and emits one Notice without refresh', async () => {
+    const path = 'spice/tasks/Failure.md';
+    const page = {
+      type: 'task', title: 'Failure', status: 'open', parent_task: '[[Parent]]',
+      file: { path, name: 'Failure' },
+    };
+    const notices = [];
+    const commands = [];
+    const container = makeTreeNode('div');
+    const dv = { container, current: () => page, page: () => page };
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = {
+      app: { commands: { executeCommandById: (id) => commands.push(id) } },
+      moment: () => ({ format: () => '2026-07-27' }),
+      customJS: {
+        RenderSafe: makeRenderSafe(),
+        TaskEntity: new TaskEntityClass(),
+        TaskDialog: { markDone: async () => ({ ok: false, reason: 'write rejected' }) },
+      },
+    };
+    await new TaskNoteViewClass().render(dv);
+    const done = findButtonByText(container, 'Mark done');
+    await fireClick(done);
+    assert(done.disabled === false && done.textContent === 'Mark done',
+      'failure restores button state');
+    assert(notices.length === 1 && /complete/i.test(notices[0]),
+      'resolved {ok:false} enters exactly one shared Notice rail: ' + JSON.stringify(notices));
+    assert(commands.length === 0, 'failed mutation never refreshes');
+  });
+
+  ok('GA-P1B-NO-DUPLICATE-REFRESH TaskNoteView has no private capture/force-refresh after create or completion', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'mechanisms/task-entity/task-note-view.js'), 'utf8');
+    assert(!source.includes('RenderSafe?.captureScroll'), 'no direct capture duplicate remains');
+    assert(!source.includes("executeCommandById('dataview:dataview-force-refresh-views')"),
+      'no direct force-refresh duplicate remains');
+    assert(/isCurrent:\s*\(currentPage,\s*beforePage\)\s*=>/.test(source),
+      'active completion declares a synchronous mutation-specific predicate');
+  });
+
+  ok('GA-P1B-MANIFEST-README task-entity declares render-safe >=0.3.0 and documents shared authority', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'mechanisms/task-entity/manifest.json'), 'utf8'));
+    const dep = manifest.depends_on.find((entry) => entry.name === 'render-safe');
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'mechanisms/task-entity/README.md'), 'utf8');
+    assert(dep && dep.range === '>=0.3.0', 'compatible deployed dependency declared');
+    assert(/RenderSafe\.mutate/.test(readme) && /authority/.test(readme),
+      'README names RenderSafe lifecycle authority');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  global.Notice = prevNotice;
+}
+
+async function runRenderSafeAdoptionMutants() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('GA-P1B-MUTANT-DIALOG-CALL deleting TaskDialog mutate call is killed by the one-create behavior', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace(
+        'const result = await RS.mutate({',
+        'const result = await (async () => ({ ok: true }))({'
+      )
+    );
+    const app = makeQuickApp(() => false);
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: makeRenderSafe() },
+      moment: () => ({ format: () => '2026-07-27T09:00:00-06:00' }),
+    };
+    const result = await new Mutant().createQuick({ title: 'mutant' });
+    assert(result && result.ok === true && app._creates.length === 0,
+      'deleted-call mutant violates the required one-file create and is killed');
+  });
+
+  await okAsync('GA-P1B-MUTANT-CREATE-MODE changing create to background is killed by reconciliation behavior', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-dialog.js',
+      'TaskDialog',
+      (src) => src.replace("mode: 'create',", "mode: 'background',")
+    );
+    const commands = [];
+    const app = makeQuickApp(() => false);
+    app.commands = { executeCommandById: (id) => commands.push(id) };
+    global.window = {
+      app,
+      customJS: { TaskEntity: new TaskEntityClass(), RenderSafe: makeRenderSafe() },
+      moment: () => ({ format: () => '2026-07-27T09:00:00-06:00' }),
+    };
+    await new Mutant().createQuick({ title: 'background mutant' });
+    assert(app._creates.length === 1 && commands.length === 0,
+      'background mutant skips the required create reconciliation and is killed');
+  });
+
+  await okAsync('GA-P1B-MUTANT-ORDER moving optimism after the deferred write is killed by row timing', async () => {
+    const MutantRenderSafe = loadMutatedClass(
+      'mechanisms/render-safe/render-safe.js',
+      'RenderSafe',
+      (src) => src.replace(
+        "if (typeof opts.optimistic === 'function') await opts.optimistic();\n      if (typeof opts.write !== 'function') throw new Error('RenderSafe.mutate requires write');\n      const value = await opts.write();",
+        "if (typeof opts.write !== 'function') throw new Error('RenderSafe.mutate requires write');\n      const value = await opts.write();\n      if (typeof opts.optimistic === 'function') await opts.optimistic();"
+      )
+    );
+    const container = makeTreeNode('div');
+    let presentAtWrite = null;
+    global.window = { customJS: { RenderSafe: new MutantRenderSafe() } };
+    const TD = {
+      markDone: async () => {
+        presentAtWrite = childIndex(container, row) >= 0;
+        return { ok: true };
+      },
+    };
+    const row = TaskTodayList.renderTaskRow(container, { title: 'x', path: 'x.md' }, TD);
+    const cb = findInput(row);
+    cb.checked = true;
+    await fireChange(cb);
+    assert(presentAtWrite === true,
+      'write-before-optimism mutant exposes the still-present row and is killed');
+  });
+
+  await okAsync('GA-P1B-MUTANT-REVERT bypassing the completion revert is killed by exact rollback behavior', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-today-list.js',
+      'TaskTodayList',
+      (src) => src.replace(
+        "revert: () => {\n                        cb.checked = false;\n                        restore();\n                    },",
+        "revert: () => {},"
+      )
+    );
+    const container = makeTreeNode('div');
+    global.window = { customJS: { RenderSafe: makeRenderSafe() } };
+    const row = Mutant.renderTaskRow(
+      container,
+      { title: 'x', path: 'x.md' },
+      { markDone: async () => ({ ok: false, reason: 'failure' }) }
+    );
+    const sibling = container.createEl('div');
+    const cb = findInput(row);
+    cb.checked = true;
+    await fireChange(cb);
+    assert(childIndex(container, row) < 0 && childIndex(container, sibling) === 0,
+      'no-revert mutant loses the row and is killed');
+  });
+
+  const runNoteMutant = async (Mutant, injectDirectRefresh) => {
+    const taskPath = 'spice/tasks/mutant-note.md';
+    const page = {
+      type: 'task', title: 'mutant note', status: 'open',
+      parent_task: '[[Parent]]', file: { path: taskPath, name: 'mutant-note' },
+    };
+    let indexed = page;
+    const commands = [];
+    const container = makeTreeNode('div');
+    const app = { commands: { executeCommandById: (id) => commands.push(id) } };
+    const dv = { container, current: () => page, page: () => indexed };
+    global.window = {
+      app,
+      moment: () => ({ format: () => '2026-07-27' }),
+      customJS: {
+        RenderSafe: makeRenderSafe(),
+        TaskEntity: new TaskEntityClass(),
+        TaskDialog: {
+          markDone: async () => {
+            indexed = null;
+            return { ok: true, outcome: { recurring: false, status: 'done' } };
+          },
+        },
+      },
+    };
+    await new Mutant().render(dv);
+    await fireClick(findButtonByText(container, 'Mark done'));
+    return { commands, injectDirectRefresh };
+  };
+
+  await okAsync('GA-P1B-MUTANT-AUTHORITY removing active freshness predicate is killed by zero-refresh behavior', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-note-view.js',
+      'TaskNoteView',
+      (src) => src.replace(
+        'isCurrent: (currentPage, beforePage) => {',
+        'notCurrent: (currentPage, beforePage) => {'
+      )
+    );
+    const result = await runNoteMutant(Mutant, false);
+    assert(result.commands.length === 0,
+      'no-authority mutant cannot reconcile the completed active note and is killed');
+  });
+
+  await okAsync('GA-P1B-MUTANT-DIRECT-REFRESH restoring direct force-refresh is killed by duplicate refresh behavior', async () => {
+    const Mutant = loadMutatedClass(
+      'mechanisms/task-entity/task-note-view.js',
+      'TaskNoteView',
+      (src) => src.replace(
+        'const res = await TD.markDone(filePath);',
+        "const res = await TD.markDone(filePath);\n                                window.app.commands.executeCommandById('dataview:dataview-force-refresh-views');"
+      )
+    );
+    const result = await runNoteMutant(Mutant, true);
+    assert(result.commands.length === 2,
+      'direct-refresh mutant duplicates the shared refresh and is killed');
+  });
+
+  if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+  global.Notice = prevNotice;
 }
 
 // ---------- TDTL: TaskDoneTodayList static helpers ----------
@@ -3677,6 +5394,9 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
 
 (async () => {
   await runCreateQuickTests();
+  await runQuickCreateOwnershipTests();
+  await runReloadStableOwnershipTests();
+  await runQuickCreateOwnershipMutants();
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
   await runRowActionTests();
@@ -3684,7 +5404,9 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
   await runDotsMenuTests();
   await runTaskDialogSauceModalTests();
   await runConfirmDeleteTests();
-  runReconcileTests();
+  await runReconcileTests();
+  await runRenderSafeAdoptionTests();
+  await runRenderSafeAdoptionMutants();
   runTaskDoneTodayListTests();
   runTaskDoneArchiveTests();
   await runToDoLeafActionsCompletedTests();

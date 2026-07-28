@@ -488,11 +488,18 @@ class SpaceHome {
         || (typeof window !== "undefined" && window.customJS)
         || null;
       const td = cjsNow && cjsNow.TaskDialog;
+      let result = null;
       try {
         if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, source: "daily" });
+          result = await td.createQuick({ title: text, source: "daily" });
         }
       } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
+      // createQuick resolves duplicate in-flight activations and operational
+      // failures as explicit non-success results. Only the owning successful
+      // activation may consume the draft or transition Home; otherwise a fast
+      // duplicate would close/re-render before the real create reconciles.
+      if (!result || result.ok !== true) return;
+      input.value = "";
       setMenu(false);
       await self.render(dv, params);
     };
