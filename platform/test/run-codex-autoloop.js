@@ -1799,6 +1799,9 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
   const localCommitFromTree = (cwd, tree, parent, title) => realRun('git', [
     'commit-tree', tree, '-p', parent, '-m', title,
   ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
+  const localRootCommitFromTree = (cwd, tree, title) => realRun('git', [
+    'commit-tree', tree, '-m', title,
+  ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
   const resolveOrdinaryReleaseTitle = (
     cwd, headSha, env = process.env, readEvent = fs.readFileSync,
   ) => {
@@ -2640,17 +2643,6 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
         && ['fetch', 'pull', 'remote'].includes(operation)),
     'GA-P1L-PARENT-FETCH-MUTANT-KILLED normalized range uses local plumbing only');
 
-    const ordinaryBase = localCommitFromTree(
-      workshopRoot, ordinaryBaseTree, workshopHead, 'test(autoloop): normalized ordinary base',
-    );
-    const ordinaryHead = localCommitFromTree(
-      workshopRoot, workshopTree, ordinaryBase, ordinaryReleaseTitle,
-    );
-    eq(realRun('git', ['rev-parse', `${ordinaryHead}^{tree}`], { cwd: workshopRoot }), workshopTree,
-      'GA-P1G3-SHALLOW-ORDINARY ordinary release binds the exact workshop HEAD tree');
-    const ordinaryStatus = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot });
-    const ordinaryHomeBefore = fs.readFileSync(path.join(workshopRoot, ordinaryHomePath));
-    const ordinaryTaskBefore = fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath));
     const nextOrdinaryVersion = (version, title, {
       parse = parseReleaseCommit,
       level = releaseBumpLevel,
@@ -2669,7 +2661,35 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
         homePin: home,
       };
     };
-    const computeOrdinaryState = (head, title, disposable) => {
+    const ordinaryExpected = expectedOrdinaryState(ordinaryReleaseTitle);
+    const ordinaryFeatureHome = JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${workshopTree}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot }));
+    normalizeFixtureTaskFloor(ordinaryFeatureHome, ordinaryExpected.task);
+    const ordinaryFeatureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+      ordinaryHomePath, `${JSON.stringify(ordinaryFeatureHome, null, 2)}\n`,
+    ]]);
+    const ordinaryComputedBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, ordinaryFeatureTree, taskManifest.version,
+    );
+    ordinaryTransitionOracle(ordinaryComputedBaseTree, ordinaryFeatureTree);
+    const ordinaryBase = localRootCommitFromTree(
+      workshopRoot, ordinaryComputedBaseTree, 'test(autoloop): isolated ordinary base',
+    );
+    const ordinaryHead = localCommitFromTree(
+      workshopRoot, ordinaryFeatureTree, ordinaryBase, ordinaryReleaseTitle,
+    );
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', ordinaryBase], {
+      cwd: workshopRoot,
+    }), ordinaryBase,
+    'GA-P1M-SHALLOW-COMPUTED-STATE ordinary base has no ambient workshop ancestry');
+    eq(realRun('git', ['rev-parse', `${ordinaryHead}^{tree}`], { cwd: workshopRoot }),
+      ordinaryFeatureTree,
+      'GA-P1G3-SHALLOW-ORDINARY ordinary release binds its title-specific feature tree');
+    const ordinaryStatus = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot });
+    const ordinaryHomeBefore = fs.readFileSync(path.join(workshopRoot, ordinaryHomePath));
+    const ordinaryTaskBefore = fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath));
+    const computeOrdinaryState = (head, title, disposable, rangeBase = ordinaryBase) => {
       let computed = null;
       const trackedRun = (cmd, args, opts = {}) => {
         if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
@@ -2696,14 +2716,14 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
         return output;
       };
       runIsolatedWorkshopSelfInstall(
-        { root: workshopRoot }, head, ordinaryBase, title, trackedRun,
+        { root: workshopRoot }, head, rangeBase, title, trackedRun,
       );
       return computed;
     };
     const computedOrdinaryState = computeOrdinaryState(
       ordinaryHead, ordinaryReleaseTitle, ordinaryDisposable,
     );
-    eq(computedOrdinaryState, expectedOrdinaryState(ordinaryReleaseTitle),
+    eq(computedOrdinaryState, ordinaryExpected,
       'GA-P1L2-SHALLOW-COMPUTED-STATE writes canonically classified TaskEntity/Home versions and pins');
     eq(nextOrdinaryVersion(taskManifest.version, exactFeatureTitle), computedTaskVersion,
       'GA-P1L2-FUTURE-FEAT-COMPUTED-STATE computes TaskEntity next minor without a historical literal');
@@ -2717,20 +2737,78 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
       ['BREAKING-PERF', 'perf(task-entity)!: replace the shallow performance contract'],
       ['BREAKING-REFACTOR', 'refactor(task-entity)!: replace the shallow ownership contract'],
     ];
+    const buildCanonicalOrdinaryCase = (title) => {
+      const expected = expectedOrdinaryState(title);
+      const featureHome = JSON.parse(ordinaryPlumbingRun('git', [
+        'show', `${workshopTree}:${ordinaryHomePath}`,
+      ], { cwd: workshopRoot }));
+      normalizeFixtureTaskFloor(featureHome, expected.task);
+      const featureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+        ordinaryHomePath, `${JSON.stringify(featureHome, null, 2)}\n`,
+      ]]);
+      const baseTree = buildOrdinaryBaseTree(
+        workshopRoot, featureTree, taskManifest.version,
+      );
+      ordinaryTransitionOracle(baseTree, featureTree);
+      const base = localRootCommitFromTree(
+        workshopRoot, baseTree, 'test(autoloop): isolated canonical-state base',
+      );
+      const head = localCommitFromTree(workshopRoot, featureTree, base, title);
+      return { base, head, expected };
+    };
     const computedOrdinaryCases = new Map();
     for (const [label, title] of ordinaryTitleCases) {
       ok(isReleasableTitle(title),
         `GA-P1L2-${label}-TITLE is accepted by the production release-title classifier`);
-      const fixtureHead = localCommitFromTree(
-        workshopRoot, workshopTree, ordinaryBase, title,
-      );
+      const fixture = buildCanonicalOrdinaryCase(title);
+      eq(realRun('git', ['rev-list', '--parents', '-n', '1', fixture.base], {
+        cwd: workshopRoot,
+      }), fixture.base,
+      `GA-P1M-${label}-CANONICAL-STATE base has no ambient workshop ancestry`);
       const disposable = [];
-      computedOrdinaryCases.set(label, computeOrdinaryState(fixtureHead, title, disposable));
-      eq(computedOrdinaryCases.get(label), expectedOrdinaryState(title),
+      computedOrdinaryCases.set(
+        label,
+        computeOrdinaryState(fixture.head, title, disposable, fixture.base),
+      );
+      eq(computedOrdinaryCases.get(label), fixture.expected,
         `GA-P1L2-${label}-CANONICAL-STATE predicts exact production TaskEntity/Home versions and pins`);
       ok(disposable.length === 1 && !fs.existsSync(disposable[0]),
         `GA-P1L2-${label}-CANONICAL-STATE target-cleans its disposable release worktree`);
     }
+    const fixTitle = ordinaryTitleCases.find(([label]) => label === 'FIX')[1];
+    const fixFixture = buildCanonicalOrdinaryCase(fixTitle);
+    const simulatedAmbientBase = localRootCommitFromTree(
+      workshopRoot, ordinaryBaseTree, 'test(autoloop): simulated ambient base',
+    );
+    const simulatedAmbientWorkshopHead = localCommitFromTree(
+      workshopRoot, workshopTree, simulatedAmbientBase, exactFeatureTitle,
+    );
+    const borrowedBase = localCommitFromTree(
+      workshopRoot,
+      realRun('git', ['rev-parse', `${fixFixture.base}^{tree}`], { cwd: workshopRoot }),
+      simulatedAmbientWorkshopHead,
+      'test(autoloop): canonical-state base borrowing ambient workshop head',
+    );
+    const borrowedHead = localCommitFromTree(
+      workshopRoot,
+      realRun('git', ['rev-parse', `${fixFixture.head}^{tree}`], { cwd: workshopRoot }),
+      borrowedBase,
+      fixTitle,
+    );
+    const borrowedCanonicalDisposable = [];
+    const borrowedFixState = computeOrdinaryState(
+      borrowedHead, fixTitle, borrowedCanonicalDisposable, borrowedBase,
+    );
+    eq(borrowedFixState, expectedOrdinaryState(exactFeatureTitle),
+      'GA-P1M-ACTIVE-FEAT-BORROWED-BY-P1L2-FIXTURE control observes the ambient feature bump');
+    assert.throws(
+      () => assert.deepStrictEqual(borrowedFixState, fixFixture.expected),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1M-AMBIENT-WORKSHOP-HEAD-MUTANT-KILLED reusing ambient workshopHead fails FIX canonical state',
+    );
+    count++;
+    ok(borrowedCanonicalDisposable.length === 1 && !fs.existsSync(borrowedCanonicalDisposable[0]),
+      'GA-P1M-AMBIENT-WORKSHOP-HEAD-MUTANT-KILLED borrowed control target-cleans its release worktree');
     const breakingFixTitle = ordinaryTitleCases.find(([label]) => label === 'BREAKING-FIX')[1];
     const canonicalBreakingState = computedOrdinaryCases.get('BREAKING-FIX');
     assert.throws(
