@@ -300,5 +300,29 @@ function mkRepo(config) {
   fs.rmSync(repo, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// LC-10 — run_scope: normalized default, passthrough, invalid refusal.
+// ---------------------------------------------------------------------------
+{
+  const repo = mkRepo(baseConfig());
+  const def = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-10 run_scope defaults to board', def.config.run_scope === 'board');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.policy.run_scope = 'epic';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-10 run_scope epic honored', r.config.run_scope === 'epic' && r.config.policy.run_scope === 'epic');
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig(); c.policy.run_scope = 'sprint';
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-10 invalid run_scope refuses', r.ok === false && r.refusals.some((x) => /run_scope/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }

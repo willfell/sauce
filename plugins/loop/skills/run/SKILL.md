@@ -5,7 +5,15 @@ description: One bounded autonomous turn of the delivery loop against the bound 
 
 # loop:run
 
-Run one resumable loop turn against whatever board this repo is bound to. Let deterministic scripts own operational state; spend model context only on implementation, repair, and review. This is the run-loose engine as a skill: same laws, config-driven paths.
+Drive whatever board this repo is bound to. Let deterministic scripts own operational state; spend model context only on implementation, repair, and review. This is the run-loose engine as a skill: same laws, config-driven paths.
+
+The universal start prompt is IDENTICAL for every bound repo:
+
+```text
+Use $loop-run --live. Start NOW — do not stop after acknowledging.
+```
+
+Everything that used to vary by prompt comes from the binding and this skill: scope from `config.run_scope`, deploy posture from `policy.deploy_vaults`, gates/quorum/receipts from the laws below. Acknowledging the plan without acting is a violation — the first action of a live run is always resolve + status.
 
 ## Bind
 
@@ -17,11 +25,16 @@ Run one resumable loop turn against whatever board this repo is bound to. Let de
 
 Infer the mode from the prompt. Default to `dry-run`; only `--live` (or an explicitly autonomous session) authorizes mutations:
 
-- `run --live`: resume eligible active work first, otherwise claim one slice.
+- `run --live`: resume eligible active work first, otherwise claim — then KEEP GOING per `config.run_scope`:
+  - `board` (default): after each `complete` + reconcile, take the next eligible slice in coordinator/board order, epic by epic, until `status.next` is `no-work` (report `first_blocker` and stop) or a ceiling/halt applies.
+  - `epic`: finish the current epic (all its eligible slices), then stop with the receipt.
+  - `turn`: one bounded claim-or-resume turn, then stop.
 - `resume <card>` / `park <card>`: operate only on that card, only through the coordinator verbs.
 - `status`: read-only; do not claim.
 - `dry-run` (default): read-only claim and release/deploy plan.
 - `recover`: inspect interrupted state; never delete dirty work automatically.
+
+Deploy posture is the binding's, never the prompt's: `policy.deploy_vaults: []` (merge-only) means a slice completes when its feature PR merges with green checks — there is no release/tag/tap/brew/deploy chain, never wait for one. Absent/non-empty `deploy_vaults` means the full deploy-bound chain runs through `advance`. The coordinator's receipts already encode the right chain — trust them over any prompt text.
 
 ## Orient and repair (every turn)
 

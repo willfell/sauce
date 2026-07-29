@@ -19,6 +19,8 @@ The full quorum is non-negotiable: Gate B adequacy, then correctness → regress
 
 ## The slice loop
 
+The target epic is whichever the Director named; when none is named, the coordinator's board-order frontier decides (`status.next` names it) — never ask the Director to pick and never hand-pick. After the target epic completes, continue to the next epic in board order when `config.run_scope` is `board` (the default); stop after one epic when it is `epic`.
+
 For each eligible slice of the target epic, in coordinator order (its eligibility answer is authoritative — never hand-pick):
 
 1. **Claim**: `node <coordinator> claim --json` (dry-run first if the Director wants a preview). Work ONLY in the returned worktree and branch.
@@ -33,7 +35,7 @@ For each eligible slice of the target epic, in coordinator order (its eligibilit
    Uncertain evidence is a refutation. Stop at the first refutation.
 5. **Refutation path**: ONE same-card repair, which invalidates the entire quorum — rerun Gate B and all three lenses from scratch. A second refutation → supersede via `/loop:intake` (`supersedes` + `carried_findings` + `binding_fixtures`) and execute the returned discard instruction through the coordinator; never a third patch.
 6. **Verify-gates + PR**: `node <coordinator> verify-gates --card "<card>" --json` (full preflight at exact head), then push, open the PR against main with the same conventional title, and `node <coordinator> record-pr --card "<card>" --pr <n> --json`. Never arm auto-merge yourself.
-7. **Advance**: `node <coordinator> advance --card "<card>" --lease-seconds 600 --jsonl` — the coordinator polls CI/merge/release/deploy per the binding's `execution_mode` and deploy list. On `complete`, `node <coordinator> reconcile --card "<card>" --json`, then take the next eligible slice.
+7. **Advance**: `node <coordinator> advance --card "<card>" --lease-seconds 600 --jsonl` — the coordinator polls CI/merge/release/deploy per the binding's `execution_mode` and deploy list. Merge-only bindings (`policy.deploy_vaults: []`) complete when the feature PR merges with green checks — no release/tag/tap/brew/deploy chain exists, never wait for one. On `complete`, `node <coordinator> reconcile --card "<card>" --json`, then take the next eligible slice.
 8. **Blockers**: park only through the coordinator with explicit `--depends-on` + `--resume-condition`; `fix-ci` → repair in the worktree and rerun the quorum; `blocked-external` → report the URL, no manual release escape hatches.
 
 ## Ceilings and honesty

@@ -117,6 +117,9 @@ function validateRaw(raw) {
       refusals.push(refusal('config_bad_value', 'policy.verify_commands must be an array of non-empty command strings'));
     }
   }
+  if (raw.policy && raw.policy.run_scope !== undefined && !['board', 'epic', 'turn'].includes(raw.policy.run_scope)) {
+    refusals.push(refusal('config_bad_value', `policy.run_scope must be "board", "epic", or "turn", got ${JSON.stringify(raw.policy.run_scope)}`));
+  }
   if (raw.gate !== undefined) {
     if (!raw.gate || typeof raw.gate !== 'object' || Array.isArray(raw.gate)) {
       refusals.push(refusal('config_bad_value', 'gate must be an object ({test_globs, exclude_globs, test_command})'));
@@ -214,6 +217,9 @@ function resolveBinding(repoRoot, opts = {}) {
       vault_mcp_server: (raw.vault && raw.vault.mcp_server) || null,
       board: { ...raw.board },
       board_topology: raw.board.topology || 'epic',
+      // How far a live run drives the board before stopping: the whole board
+      // in order (default), one epic, or one bounded turn.
+      run_scope: (raw.policy && raw.policy.run_scope) || 'board',
       project_root_abs: projectRootAbs,
       board_path_abs: boardPathAbs,
       cards_root_abs: cardsRootAbs,

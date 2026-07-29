@@ -48,7 +48,9 @@ From the repo you want on the loop:
 
 Binding a repo that another loop implementation still drives (e.g. ERO's `ero_loop`) is **bind-and-observe**: set `policy.observe_only: true`; read skills work, write skills refuse.
 
-Four knobs every fresh binding should know:
+Five knobs every fresh binding should know:
+
+- **`policy.run_scope`** (default `"board"`) — how far a live `/loop:run` drives the board before stopping: `"board"` keeps taking eligible work in board order, epic by epic, until the frontier drains or a ceiling/halt applies; `"epic"` completes one epic then stops; `"turn"` is one bounded claim-or-resume turn. With the default, the start prompt is IDENTICAL for every bound repo: `Use $loop-run --live. Start NOW — do not stop after acknowledging.` — scope, deploy posture, and gates all come from the binding and the skill bodies, never the prompt.
 
 - **`board.topology`** (default `"epic"`) — the plan/intake skills pass `epic_native: true` to the intake rail, so mints produce canonical epic scaffolds (atlas with dashboard + epic board + clean one-link parent-board line) even on a ledger with no cutover history. `"flat"` opts a legacy board out.
 - **`policy.deploy_vaults: []`** (explicit empty array) — declares a **merge-only** board: the resolver emits `SAUCE_LOOP_VAULTS=[]` and the coordinator completes a card at `feature_merged` with green protected checks, skipping the release/tag/tap/brew/deploy chain entirely. Absent field = the coordinator's default deploy-bound vault list (the sauce three). Cards still carry the contract's three-key `deploy_subscriptions` map (all-empty arrays).
