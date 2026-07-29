@@ -86,6 +86,20 @@ const EXPECTED_SKILLS = ['brainstorm', 'execute', 'init', 'intake', 'plan', 'rev
   }
 }
 
+// LP-7: universal-prompt contract — the drive skills encode scope + deploy
+// posture themselves so the start prompt can be identical for every repo.
+{
+  const run = fs.readFileSync(path.join(PLUGIN, 'skills', 'run', 'SKILL.md'), 'utf8');
+  ok('LP-7 run documents the universal prompt', /Use \$loop-run --live\. Start NOW/.test(run));
+  ok('LP-7 run honors run_scope', /run_scope/.test(run) && /`board` \(default\)/.test(run));
+  ok('LP-7 run encodes merge-only posture', /deploy_vaults: \[\]/.test(run) && /never wait/.test(run));
+  const execute = fs.readFileSync(path.join(PLUGIN, 'skills', 'execute', 'SKILL.md'), 'utf8');
+  ok('LP-7 execute defaults to the board-order frontier', /board-order frontier/.test(execute) && /run_scope/.test(execute));
+  ok('LP-7 execute encodes merge-only posture', /deploy_vaults: \[\]/.test(execute) && /never wait/.test(execute));
+  const init = fs.readFileSync(path.join(PLUGIN, 'skills', 'init', 'SKILL.md'), 'utf8');
+  ok('LP-7 init interviews run_scope', /run_scope/.test(init));
+}
+
 // LP-6: the workshop repo is itself bound (dogfood) with routers enabled.
 {
   const cfgPath = path.join(REPO, '.loop', 'config.json');
