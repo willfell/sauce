@@ -941,6 +941,23 @@ ok(!gateReceiptStatus({ gate_receipt: { ...passingReceipt(), prospective_pr_titl
   'gate receipt without a prospective PR title is invalid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'base42', 'fix(x): changed').valid,
   'gate receipt is invalid after the PR title changes');
+// Merge-only receipts (verify-gates on deploy_vaults:[] bindings) record
+// verify_commands instead of the sauce release checks; record-pr/advance must
+// accept them while deploy-bound validation stays byte-identical.
+const mergeOnlyReceipt = (checks) => ({
+  ...passingReceipt(), merge_only: true,
+  checks: checks || { adequacy: 'pass', verify_commands: { status: 'pass', commands: ['uv run pytest'] } },
+});
+ok(gateReceiptStatus({ gate_receipt: mergeOnlyReceipt() }, 'head42').valid,
+  'merge-only receipt with passing verify_commands is valid');
+ok(gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ adequacy: 'pass', verify_commands: { status: 'none-declared' } }) }, 'head42').valid,
+  'merge-only receipt with none-declared verify_commands is valid (protected CI gates the merge)');
+ok(!gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ adequacy: 'pass' }) }, 'head42').valid,
+  'merge-only receipt without verify_commands is incomplete');
+ok(!gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ verify_commands: { status: 'pass', commands: [] } }) }, 'head42').valid,
+  'merge-only receipt without adequacy is incomplete');
+ok(!gateReceiptStatus({ gate_receipt: { ...passingReceipt(), checks: { adequacy: 'pass', verify_commands: { status: 'pass', commands: ['x'] } } } }, 'head42').valid,
+  'deploy-bound receipt still requires the release checks (merge_only flag absent)');
 ok(pathCoveredByTouchZones('platform/mechanisms/x/a.js', ['platform/mechanisms/x']), 'touch zone covers descendants');
 ok(!pathCoveredByTouchZones('platform/test/run-x.js', ['platform/mechanisms/x']), 'touch zone rejects undeclared files');
 ok(pathCoveredByTouchZones('scripts/autoloop/gate.js', ['scripts']), 'top-level directory touch zone covers descendants');
@@ -10161,6 +10178,67 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
     'LOOP-AMEND-PARK refuses a replacement dependency that does not exist');
   } finally {
     fs.rmSync(parkWt, { recursive: true, force: true });
+  }
+}
+
+// LOOP-RESUME-CLEARED-PARK: a parked card whose dependencies were cleared by
+// amend-park (audit trail present) is resumable; the same empty list WITHOUT
+// the audit trail stays refused as malformed park metadata.
+{
+  const resumeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-cleared-park-'));
+  try {
+    const HEAD40 = 'c'.repeat(40);
+    const resumeWt = path.join(resumeRoot, 'wt'); fs.mkdirSync(resumeWt);
+    const cardPath = path.join(resumeRoot, 'OC-1 Cleared slice.md');
+    fs.writeFileSync(cardPath, '---\ntype: slice\nstatus: parked\nresume_condition: ready — upstream merge-only support deployed\n---\nbody\n');
+    const resumeBoard = path.join(resumeRoot, 'board.md');
+    fs.writeFileSync(resumeBoard, '## In Planning\n\n## Completed\n');
+    const mkCleared = (audited) => ({
+      card: 'OC-1 Cleared slice', phase: 'parked', worktree: resumeWt, branch: 'x/oc-1',
+      card_path: cardPath, dependencies: [], touch_zones: ['some/zone'],
+      resume_condition: 'ready — upstream merge-only support deployed',
+      ...(audited ? {
+        park_amendments: [{
+          at: '2026-07-29T00:00:00.000Z', reason: 'wrong dependency recorded at park',
+          previous: { dependencies: ['[[EM-4 Wrong dependency]]'], resume_condition: 'blocked' },
+          next: { dependencies: [], resume_condition: 'ready — upstream merge-only support deployed' },
+        }],
+      } : {}),
+    });
+    const resumeDeps = (state) => ({
+      readState: () => state,
+      writeState: () => {},
+      withLock: immediateCardLock,
+      findCard: () => cardPath,
+      sh: (cmd, cmdArgs) => {
+        if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return HEAD40;
+        if (cmd === 'git' && cmdArgs[0] === 'merge-base') return '';
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      boardPath: resumeBoard,
+      projectCard: () => {},
+      now: () => '2026-07-29T00:00:00.000Z',
+    });
+
+    const clearedState = { schema_version: 1, cards: { 'OC-1 Cleared slice': mkCleared(true) } };
+    const resumed = await coordinator.commandResume({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Cleared slice',
+    }, resumeDeps(clearedState));
+    ok(resumed.action !== 'resume-refused', 'LOOP-RESUME-CLEARED-PARK audited empty dependencies resume');
+    eq(clearedState.cards['OC-1 Cleared slice'].phase, 'implementing',
+      'LOOP-RESUME-CLEARED-PARK resumed card is implementing');
+    eq(clearedState.cards['OC-1 Cleared slice'].gate_receipt, null,
+      'LOOP-RESUME-CLEARED-PARK resume still invalidates receipts');
+
+    const unauditedState = { schema_version: 1, cards: { 'OC-1 Cleared slice': mkCleared(false) } };
+    const refused = await coordinator.commandResume({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Cleared slice',
+    }, resumeDeps(unauditedState));
+    eq(refused.action, 'resume-refused', 'LOOP-RESUME-CLEARED-PARK unaudited empty dependencies stay refused');
+    ok(/missing or malformed/.test(refused.reason), 'LOOP-RESUME-CLEARED-PARK refusal names malformed park metadata');
+  } finally {
+    fs.rmSync(resumeRoot, { recursive: true, force: true });
   }
 }
 

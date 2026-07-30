@@ -1194,9 +1194,18 @@ function amendmentReplayMatches(record, request, currentContract) {
     && sameJson(audit.new_contract, currentContract));
 }
 
+// A parked card may legitimately hold ZERO dependencies only when amend-park
+// cleared them: its audit trail is the proof the empty list was supervised,
+// not corrupted park metadata.
+function parkDependenciesClearedByAudit(record) {
+  return Array.isArray(record.park_amendments) && record.park_amendments.some((amendment) => amendment
+    && amendment.next && Array.isArray(amendment.next.dependencies) && amendment.next.dependencies.length === 0);
+}
+
 function parkedAmendmentProblem(record) {
-  if (!Array.isArray(record.dependencies) || !record.dependencies.length
-    || record.dependencies.some((dependency) => !normalizeCardLink(dependency))) {
+  if (!Array.isArray(record.dependencies)
+    || record.dependencies.some((dependency) => !normalizeCardLink(dependency))
+    || (!record.dependencies.length && !parkDependenciesClearedByAudit(record))) {
     return 'amend-contract requires parked work to retain non-empty dependencies';
   }
   if (typeof record.resume_condition !== 'string' || !record.resume_condition.trim()) {
@@ -2821,9 +2830,21 @@ function gateReceiptStatus(record, headSha, baseSha = null, prTitle = null) {
       reason: `PR title "${prTitle}" != gate-verified prospective title "${receipt.prospective_pr_title}"`,
     };
   }
-  const required = ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped'];
-  const missing = required.filter((name) => !receipt.checks || receipt.checks[name] !== 'pass');
-  if (missing.length) return { valid: false, reason: `gate receipt is incomplete: ${missing.join(', ')}` };
+  if (receipt.merge_only === true) {
+    // Merge-only bindings run the repo's own verify_commands instead of the
+    // sauce release preflights; verify-gates records that under verify_commands.
+    if (!receipt.checks || receipt.checks.adequacy !== 'pass') {
+      return { valid: false, reason: 'gate receipt is incomplete: adequacy' };
+    }
+    const vc = receipt.checks.verify_commands;
+    if (!vc || !['pass', 'none-declared'].includes(vc.status)) {
+      return { valid: false, reason: 'gate receipt is incomplete: verify_commands' };
+    }
+  } else {
+    const required = ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped'];
+    const missing = required.filter((name) => !receipt.checks || receipt.checks[name] !== 'pass');
+    if (missing.length) return { valid: false, reason: `gate receipt is incomplete: ${missing.join(', ')}` };
+  }
   if (receipt.behavioral) {
     const reviews = receipt.reviews || {};
     const stale = REVIEW_LENSES.filter((lens) => !reviews[lens] || reviews[lens].head_sha !== headSha);
@@ -3787,8 +3808,9 @@ async function commandResume(ctx, args, deps = {}) {
         reconcile: `reconcile --card ${card}`,
       });
     }
-    if (!Array.isArray(record.dependencies) || !record.dependencies.length
-      || record.dependencies.some((dependency) => typeof dependency !== 'string' || !normalizeCardLink(dependency))) {
+    if (!Array.isArray(record.dependencies)
+      || record.dependencies.some((dependency) => typeof dependency !== 'string' || !normalizeCardLink(dependency))
+      || (!record.dependencies.length && !parkDependenciesClearedByAudit(record))) {
       return resumeRefused(record, 'parked dependency metadata is missing or malformed');
     }
     if (record.dependencies.some((dependency) => normalizeCardLink(dependency) === normalizeCardLink(card))) {
