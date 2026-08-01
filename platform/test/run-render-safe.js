@@ -1892,6 +1892,7 @@ async function readerButtonRollbackOutcome(Klass) {
         let visibleText = '';
         let visibleHtml = '';
         const visibleHistory = [];
+        const initialHtml = `<span>${opts.label}</span>`;
         Object.defineProperties(button, {
           textContent: {
             configurable: true,
@@ -1910,12 +1911,14 @@ async function readerButtonRollbackOutcome(Klass) {
             get() { return visibleHtml; },
             set(value) {
               visibleHtml = String(value);
-              visibleText = visibleHtml.replace(/<[^>]*>/g, '');
+              // The fixture has one known markup value; do not model general
+              // HTML parsing or sanitization in this bounded DOM double.
+              visibleText = visibleHtml === initialHtml ? String(opts.label) : visibleHtml;
               visibleHistory.push(visibleText);
             },
           },
         });
-        button.innerHTML = `<span>${opts.label}</span>`;
+        button.innerHTML = initialHtml;
         button.onclick = opts.onClick;
         button._label = opts.label;
         button._visibleHistory = visibleHistory;
