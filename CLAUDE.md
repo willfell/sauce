@@ -4,7 +4,7 @@ The workshop for the **Sauce** platform: ships mechanisms (cross-cutting code) a
 
 ## Vault identity check (pre-write)
 
-Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
+Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
 
 ## Further reading
 

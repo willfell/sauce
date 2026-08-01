@@ -78,10 +78,32 @@ function loopBindingEnv(env = process.env) {
     epicTopology: env.SAUCE_LOOP_BOARD_TOPOLOGY === 'epic',
   };
 }
+// Self-resolve board/cards/vault defaults from the bound repo's committed
+// .loop/config.json via the loop plugin resolver. Returns null (→ literal
+// fallback) when the repo is unbound, the resolver is absent, or resolution
+// refuses. brewPrefix is stubbed because only the vault-layout fields are
+// consumed here, never the coordinator path.
+function resolveBoundDefaults(cwd) {
+  try {
+    const resolver = require(path.join(__dirname, '..', '..', 'plugins', 'loop', 'scripts', 'loop-config.js'));
+    const res = resolver.resolveBinding(cwd, { brewPrefix: () => '' });
+    if (!res || !res.ok) return null;
+    const c = res.config;
+    let vaults = null;
+    if (c.env && c.env.SAUCE_LOOP_VAULTS) {
+      try { vaults = JSON.parse(c.env.SAUCE_LOOP_VAULTS); } catch (_) { vaults = null; }
+    }
+    return { board: c.board_path_abs, cardsRoot: c.cards_root_abs, vaults };
+  } catch (_) { return null; }
+}
 const LOOP_BINDING = loopBindingEnv();
-const DEPLOYMENT_VAULT_IDS = LOOP_BINDING.vaults
-  ? LOOP_BINDING.vaults.map((v) => v.id)
-  : ['headspace', 'accuris', 'ero'];
+// When the SAUCE_LOOP_* env seam is unset, self-resolve the bound repo's own
+// committed .loop/config.json (process.cwd()) so the coordinator's board, cards
+// root and vault list track the binding rather than a machine-specific literal.
+// The ~/obsidian/<vault> literals below are the last resort for an unbound cwd.
+const BOUND_DEFAULTS = (LOOP_BINDING.board && LOOP_BINDING.cardsRoot && LOOP_BINDING.vaults)
+  ? null
+  : resolveBoundDefaults(process.cwd());
 // Contract vocabulary vs deployment binding: a card's deploy_subscriptions map
 // always carries the contract's required_vaults keys; the BINDING's vault list
 // (SAUCE_LOOP_VAULTS) decides which vaults this board actually deploys to. An
@@ -122,15 +144,18 @@ const EXACT_SHA = /^[0-9a-f]{40}$/;
 const RATIFICATION_SCHEMA_VERSION = '1.0.0';
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
 const HOME = os.homedir();
-const BOARD = LOOP_BINDING.board
-  || path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
-const CARDS_ROOT = LOOP_BINDING.cardsRoot
-  || path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
-const VAULTS = LOOP_BINDING.vaults || [
-  { id: 'headspace', path: path.join(HOME, 'notes/sauce/headspace-sauce') },
-  { id: 'accuris', path: path.join(HOME, 'notes/sauce/accuris-sauce') },
-  { id: 'ero', path: path.join(HOME, 'notes/sauce/ero-sauce') },
+const BOARD = LOOP_BINDING.board || (BOUND_DEFAULTS && BOUND_DEFAULTS.board)
+  || path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md');
+const CARDS_ROOT = LOOP_BINDING.cardsRoot || (BOUND_DEFAULTS && BOUND_DEFAULTS.cardsRoot)
+  || path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce/tasks');
+const VAULTS = LOOP_BINDING.vaults || (BOUND_DEFAULTS && BOUND_DEFAULTS.vaults) || [
+  { id: 'headspace', path: path.join(HOME, 'obsidian/headspace-sauce') },
+  { id: 'accuris', path: path.join(HOME, 'obsidian/accuris-sauce') },
+  { id: 'ero', path: path.join(HOME, 'obsidian/ero-sauce') },
 ];
+// Deployment vault ids follow whichever source populated VAULTS (env binding,
+// self-resolved binding, or literal fallback).
+const DEPLOYMENT_VAULT_IDS = VAULTS.map((v) => v.id);
 
 function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: MAXBUF, ...opts }).trim();
@@ -6816,7 +6841,7 @@ module.exports = {
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
   PARKED_METADATA_REBIND_CARDS,
-  loopBindingEnv, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
+  loopBindingEnv, resolveBoundDefaults, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
 };
 
 if (require.main === module) {

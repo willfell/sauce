@@ -6,8 +6,8 @@
 
      Install:  cp sauce-autoloop.plist.sample ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
                launchctl load ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
-     Halt:     touch ~/projects/repos/sauce/.autoloop-halt   (or: launchctl unload …)
-     Logs:     tail -f ~/projects/repos/sauce/.autoloop.log
+     Halt:     touch ~/Documents/GitHub/sauce/.autoloop-halt   (or: launchctl unload …)
+     Logs:     tail -f ~/Documents/GitHub/sauce/.autoloop.log
 
      Stays DRY-RUN (select + propose only, near-zero cost) until you flip the
      prompt to "/sauce-autoloop --live" after the assessment window. Uses a
@@ -16,12 +16,12 @@
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.will.sauce-autoloop</string>
-  <key>WorkingDirectory</key><string>/Users/willfellhoelter/projects/repos/sauce</string>
+  <key>WorkingDirectory</key><string>/Users/willfell/Documents/GitHub/sauce</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>caffeinate -i claude -p "/sauce-autoloop --dry-run" --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Workflow" --model claude-sonnet-4-6 --max-turns 40 >> /Users/willfellhoelter/projects/repos/sauce/.autoloop.log 2>&1</string>
+    <string>caffeinate -i claude -p "/sauce-autoloop --dry-run" --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Workflow" --model claude-sonnet-4-6 --max-turns 40 >> /Users/willfell/Documents/GitHub/sauce/.autoloop.log 2>&1</string>
   </array>
   <key>StartInterval</key><integer>7200</integer>
   <key>RunAtLoad</key><false/>

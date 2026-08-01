@@ -256,7 +256,7 @@ These are flipped on manually in the GitHub UI under **Settings → Branches →
 
 ## Sauce Pipeline
 
-The **Sauce Pipeline** is an endless self-pacing loop that picks one card off the project board at `~/notes/sauce/headspace-sauce/spice/projects/sauce/`, runs a full Sauce cycle on it, and writes a handoff for the next round. Full design rationale: `Docs/plans/2026-05-15-sauce-pipeline-design.md`. Slash command body: `.claude/commands/sauce-pipeline.md`.
+The **Sauce Pipeline** is an endless self-pacing loop that picks one card off the project board at `~/obsidian/headspace-sauce/spice/projects/sauce/`, runs a full Sauce cycle on it, and writes a handoff for the next round. Full design rationale: `Docs/plans/2026-05-15-sauce-pipeline-design.md`. Slash command body: `.claude/commands/sauce-pipeline.md`.
 
 ### Start the loop
 
@@ -304,8 +304,8 @@ A round is 5 phases. See `.claude/commands/sauce-pipeline.md` for the operationa
 
 The first time you run `/loop /sauce-pipeline`, verify each phase fires correctly. Do this with a small card to keep the cycle short.
 
-1. **Confirm board state.** Open `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md` in Obsidian. Confirm at least one card is in the In Planning column. Recommended pick for first smoke: **"Frontmatter Default Doesn't Show"** under the Convenience Functionality workstream — narrow scope, single setting flip.
-2. **Open a fresh chat in the workshop repo.** `cd ~/projects/repos/sauce` and start a new Claude Code session.
+1. **Confirm board state.** Open `~/obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md` in Obsidian. Confirm at least one card is in the In Planning column. Recommended pick for first smoke: **"Frontmatter Default Doesn't Show"** under the Convenience Functionality workstream — narrow scope, single setting flip.
+2. **Open a fresh chat in the workshop repo.** `cd ~/Documents/GitHub/sauce` and start a new Claude Code session.
 3. **Type `/loop /sauce-pipeline`.** The loop starts.
 4. **Phase A check.** Claude reports: "No prior handoff found (first round). Planning column has: [list of cards]." (For first-ever invocation only.)
 5. **Phase B check.** Claude calls `AskUserQuestion` with each Planning card as an option + a recommendation marked. Pick the small card. Claude moves it to In Progress on both the project board AND the workstream sub-board, and sets `status: in_progress` on the card frontmatter.

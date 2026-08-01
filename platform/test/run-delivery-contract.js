@@ -322,7 +322,7 @@ const fullReceipt = {
     headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'],
   },
   release_ancestry_receipt: {
-    ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfellhoelter/sauce',
+    ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfell/sauce',
     checked_at: '2026-07-16T17:51:05Z', verifier_revision: 'c'.repeat(40),
     feature_pr: 9, feature_merge_sha: 'a'.repeat(40),
     release_pr: 10, release_merge_sha: 'b'.repeat(40), tag: 'v1.2.3',
