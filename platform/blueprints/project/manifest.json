@@ -97,6 +97,7 @@
     "ProjectCommandsInit",
     "ProjectDashboard",
     "EpicDashboard",
+    "GraphLayout",
     "OperatorStation",
     "EpicCreateAction"
   ],
@@ -262,6 +263,10 @@
     {
       "source": "helpers/epic-dashboard.js",
       "dest": "{{scripts_path}}/project/epic-dashboard.js"
+    },
+    {
+      "source": "helpers/graph-layout.js",
+      "dest": "{{scripts_path}}/project/graph-layout.js"
     },
     {
       "source": "helpers/operator-station.js",
