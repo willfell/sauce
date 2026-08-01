@@ -290,11 +290,12 @@ function makeDv(embed, currentVal) {
         const rs = new RenderSafeClass();
         rs.captureScroll = () => { captures++; };
         let mutationAlwaysCurrent = false;
-        global.customJS.RenderSafe = {
+        const renderSafeFacade = {
             mutate: (opts) => rs.mutate(mutationAlwaysCurrent
                 ? Object.assign({}, opts, { isCurrent: () => true })
                 : opts),
         };
+        global.customJS.RenderSafe = renderSafeFacade;
         global.window.customJS = global.customJS;
         const dv = { current: () => page, page: () => page };
         const list = new TripEntryList();
@@ -340,6 +341,28 @@ function makeDv(embed, currentVal) {
             captures === 2 && failedCheckbox.checked === false
             && !failedRow.classList.contains('sauce-trip-entry-checked')
             && failedRow.style.textDecoration === '' && refreshes === 1);
+
+        // CustomJS can briefly lose RenderSafe during reload. Persistence must
+        // fail closed, but the browser-toggled control must still be restored.
+        page = { file: { path: pathName }, packing_items: [{ category: 'Clothes', item: 'Coat', checked: false }] };
+        file.fm.packing_items = page.packing_items;
+        failWrite = false;
+        const unavailableHost = trackedEl('div');
+        list._row(unavailableHost, dv, {
+            key: 'packing_items', checkbox: true,
+            title: (entry) => entry.item, subtitle: () => '',
+        }, page.packing_items, page.packing_items[0], 0);
+        const unavailableRow = unavailableHost.children[0];
+        const unavailableCheckbox = unavailableRow.children[0];
+        global.customJS.RenderSafe = null;
+        unavailableCheckbox.checked = true;
+        await unavailableCheckbox.listeners.change();
+        ok('GA-P2B-PACKING-RENDERSAFE-UNAVAILABLE restores browser-toggled UI without persistence',
+            unavailableCheckbox.checked === false
+            && !unavailableRow.classList.contains('sauce-trip-entry-checked')
+            && unavailableRow.style.textDecoration === ''
+            && file.fm.packing_items[0].checked === false);
+        global.customJS.RenderSafe = renderSafeFacade;
 
         // Flat Flights/Stay writes and atlas link writes share the same active
         // mutation-specific poll authority rather than waiting for Dataview's

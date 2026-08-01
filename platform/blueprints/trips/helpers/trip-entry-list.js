@@ -623,6 +623,9 @@ class TripEntryList {
     if (!file) { new Notice("Could not resolve this note to save."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
     if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      if (ui && typeof ui.revert === "function") {
+        try { await ui.revert(); } catch (_e) {}
+      }
       new Notice("Could not save: RenderSafe is unavailable.", 6000);
       return false;
     }
