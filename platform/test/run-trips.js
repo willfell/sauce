@@ -247,6 +247,9 @@ function makeDv(embed, currentVal) {
         let writeGate = deferred();
         let failWrite = false;
         let indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
+        let traceLifecycle = false;
+        const lifecycleEvents = [];
+        const lifecycleIsOrdered = (events) => JSON.stringify(events) === JSON.stringify(['capture', 'optimistic', 'write']);
         const scheduled = [];
         const scheduleTimer = (fn, delay) => {
             const handle = { fn, delay, cancelled: false };
@@ -275,6 +278,7 @@ function makeDv(embed, currentVal) {
             commands: { executeCommandById() { refreshes++; } },
             fileManager: {
                 async processFrontMatter(target, mutate) {
+                    if (traceLifecycle) lifecycleEvents.push('write');
                     await writeGate.promise;
                     if (failWrite) throw new Error('trip write failed');
                     mutate(target.fm);
@@ -288,17 +292,33 @@ function makeDv(embed, currentVal) {
         };
         global.window.app = global.app;
         const rs = new RenderSafeClass();
-        rs.captureScroll = () => { captures++; };
+        rs.captureScroll = () => {
+            if (traceLifecycle) lifecycleEvents.push('capture');
+            captures++;
+        };
         let mutationAlwaysCurrent = false;
+        let mutationOptimisticBeforeCapture = false;
         const renderSafeFacade = {
-            mutate: (opts) => rs.mutate(mutationAlwaysCurrent
-                ? Object.assign({}, opts, { isCurrent: () => true })
-                : opts),
+            mutate: async (opts) => {
+                let next = mutationAlwaysCurrent
+                    ? Object.assign({}, opts, { isCurrent: () => true })
+                    : opts;
+                if (mutationOptimisticBeforeCapture && typeof next.optimistic === 'function') {
+                    await next.optimistic();
+                    next = Object.assign({}, next, { optimistic: undefined });
+                }
+                return rs.mutate(next);
+            },
         };
         global.customJS.RenderSafe = renderSafeFacade;
         global.window.customJS = global.customJS;
         const dv = { current: () => page, page: () => page };
         const list = new TripEntryList();
+        const setCheckedRow = list._setCheckedRow.bind(list);
+        list._setCheckedRow = (...args) => {
+            if (traceLifecycle) lifecycleEvents.push('optimistic');
+            return setCheckedRow(...args);
+        };
         const host = trackedEl('div');
         list._row(host, dv, {
             key: 'packing_items', checkbox: true,
@@ -307,13 +327,17 @@ function makeDv(embed, currentVal) {
         const row = host.children[0];
         const checkbox = row.children[0];
         checkbox.checked = true; // browser toggles the control before change fires
+        lifecycleEvents.length = 0;
+        traceLifecycle = true;
         const pendingToggle = checkbox.listeners.change();
         await Promise.resolve();
         ok('GA-P2-PACKING-OPTIMISTIC checkbox + strikethrough apply before the write resolves',
             captures === 1 && checkbox.checked === true
             && row.classList.contains('sauce-trip-entry-checked')
             && row.style.textDecoration === 'line-through');
-        ok('GA-P2-PACKING-CAPTURE scroll capture is the first shared lifecycle effect', captures === 1);
+        ok('GA-P2C-PACKING-LIFECYCLE capture precedes optimistic UI and write invocation',
+            lifecycleIsOrdered(lifecycleEvents));
+        traceLifecycle = false;
         writeGate.resolve();
         await pendingToggle;
         ok('GA-P2-PACKING-POLL successful active write refreshes after the indexed value is current',
@@ -363,6 +387,32 @@ function makeDv(embed, currentVal) {
             && unavailableRow.style.textDecoration === ''
             && file.fm.packing_items[0].checked === false);
         global.customJS.RenderSafe = renderSafeFacade;
+
+        // Mutation control for the lifecycle order: simulate a helper that
+        // applies optimistic UI before delegating to RenderSafe. The same event
+        // trace must reject that implementation.
+        page = { file: { path: pathName }, packing_items: [{ category: 'Clothes', item: 'Gloves', checked: false }] };
+        file.fm.packing_items = page.packing_items;
+        indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
+        writeGate = deferred();
+        const orderMutantHost = trackedEl('div');
+        list._row(orderMutantHost, dv, {
+            key: 'packing_items', checkbox: true,
+            title: (entry) => entry.item, subtitle: () => '',
+        }, page.packing_items, page.packing_items[0], 0);
+        const orderMutantCheckbox = orderMutantHost.children[0].children[0];
+        orderMutantCheckbox.checked = true;
+        lifecycleEvents.length = 0;
+        mutationOptimisticBeforeCapture = true;
+        traceLifecycle = true;
+        const orderMutantSave = orderMutantCheckbox.listeners.change();
+        await new Promise(setImmediate);
+        const orderMutantPassed = lifecycleIsOrdered(lifecycleEvents);
+        traceLifecycle = false;
+        writeGate.resolve();
+        await orderMutantSave;
+        mutationOptimisticBeforeCapture = false;
+        ok('GA-P2C-OPTIMISM-BEFORE-CAPTURE-MUTANT ordered lifecycle assertion turns red', !orderMutantPassed);
 
         // Flat Flights/Stay writes and atlas link writes share the same active
         // mutation-specific poll authority rather than waiting for Dataview's
@@ -441,14 +491,43 @@ function makeDv(embed, currentVal) {
         }
 
         const links = new TripLinks();
+        const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
         page = { file: { path: pathName }, links: [] };
         file.fm.links = [];
-        indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
+        scheduled.length = 0;
+        indexPage = () => ({
+            file: { path: pathName },
+            links: [{ url: 'https://stale.example', text: 'Stale' }],
+        });
         writeGate = deferred(); writeGate.resolve();
         const beforeLinks = refreshes;
-        const linksSaved = await links._write(dv, [{ url: 'https://example.com', text: 'Example' }]);
-        ok('GA-P2-TRIP-LINKS-POLL atlas link write refreshes from indexed links',
-            linksSaved && refreshes === beforeLinks + 1 && file.fm.links[0].text === 'Example');
+        const pendingLinks = links._write(dv, nextLinks);
+        await new Promise(setImmediate);
+        ok('GA-P2C-TRIP-LINKS-STALE-SIGNAL does not refresh mismatched indexed links',
+            refreshes === beforeLinks && scheduled.some((handle) => !handle.cancelled));
+        page = { file: { path: pathName }, links: nextLinks };
+        const linksPolled = await runNextTimer();
+        const linksSaved = await pendingLinks;
+        ok('GA-P2C-TRIP-LINKS-CURRENT-POLL refreshes matching indexed links exactly once',
+            linksPolled && linksSaved && refreshes === beforeLinks + 1 && file.fm.links[0].text === 'Example');
+
+        page = { file: { path: pathName }, links: [] };
+        file.fm.links = [];
+        scheduled.length = 0;
+        indexPage = () => ({
+            file: { path: pathName },
+            links: [{ url: 'https://stale.example', text: 'Stale' }],
+        });
+        writeGate = deferred(); writeGate.resolve();
+        mutationAlwaysCurrent = true;
+        const beforeLinksMutant = refreshes;
+        const linksMutantSave = links._write(dv, nextLinks);
+        await new Promise(setImmediate);
+        const linksMutantPassedStaleCheckpoint = refreshes === beforeLinksMutant;
+        const linksMutantSaved = await linksMutantSave;
+        mutationAlwaysCurrent = false;
+        ok('GA-P2C-TRIP-LINKS-ALWAYS-TRUE-MUTANT stale checkpoint turns red',
+            linksMutantSaved && !linksMutantPassedStaleCheckpoint && refreshes === beforeLinksMutant + 1);
 
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));
