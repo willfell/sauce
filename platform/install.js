@@ -5199,6 +5199,7 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
   const adapter = tp.app.vault.adapter;
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const dashboardBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```';
+  const graphViewBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView" });\n```';
   const createBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicCreateAction" });\n```';
   try {
     const projectsRoot = "spice/projects";
@@ -5235,13 +5236,24 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
         }
       }
       const before = await adapter.read(epic.atlas);
-      if (before.includes('class: "EpicDashboard"')) continue;
-      const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
-      const after = chrome.test(before)
-        ? before.replace(chrome, `$1\n\n${dashboardBlock}`)
-        : `${before.trimEnd()}\n\n${dashboardBlock}\n`;
+      let after = before;
+      const needsDashboard = !after.includes('class: "EpicDashboard"');
+      if (needsDashboard) {
+        const chrome = /(```dataviewjs[\s\S]*?class:\s*"ProjectChromeBar"[\s\S]*?```)/;
+        after = chrome.test(after)
+          ? after.replace(chrome, `$1\n\n${dashboardBlock}`)
+          : `${after.trimEnd()}\n\n${dashboardBlock}\n`;
+      }
+      const needsGraphView = !after.includes('class: "GraphView"');
+      if (needsGraphView) {
+        const dashboard = /(```dataviewjs[\s\S]*?class:\s*"EpicDashboard"[\s\S]*?```)/;
+        after = dashboard.test(after)
+          ? after.replace(dashboard, `$1\n\n${graphViewBlock}`)
+          : `${after.trimEnd()}\n\n${graphViewBlock}\n`;
+      }
       if (await _epicBackupWrite(adapter, epic.atlas, before, after, ts)) {
-        history?.push({ event: "info", step: "epic_scaffold_heal", target: epic.atlas, action: "dashboard_injected",
+        history?.push({ event: "info", step: "epic_scaffold_heal", target: epic.atlas,
+          action: needsDashboard ? "dashboard_injected" : "graph_view_injected",
           git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
       }
     }
