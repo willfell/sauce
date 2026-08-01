@@ -247,6 +247,24 @@ function makeDv(embed, currentVal) {
         let writeGate = deferred();
         let failWrite = false;
         let indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
+        const scheduled = [];
+        const scheduleTimer = (fn, delay) => {
+            const handle = { fn, delay, cancelled: false };
+            scheduled.push(handle);
+            return handle;
+        };
+        const clearTimer = (handle) => { if (handle) handle.cancelled = true; };
+        const runNextTimer = async () => {
+            let handle = null;
+            while (scheduled.length && !handle) {
+                const candidate = scheduled.shift();
+                if (!candidate.cancelled) handle = candidate;
+            }
+            if (!handle) return false;
+            handle.fn();
+            await Promise.resolve();
+            return true;
+        };
         global.app = {
             workspace: { getActiveFile: () => file },
             vault: { getAbstractFileByPath: (p) => p === pathName ? file : null },
@@ -265,11 +283,18 @@ function makeDv(embed, currentVal) {
                 },
             },
             plugins: { plugins: {} },
+            _setTimeout: scheduleTimer,
+            _clearTimeout: clearTimer,
         };
         global.window.app = global.app;
         const rs = new RenderSafeClass();
         rs.captureScroll = () => { captures++; };
-        global.customJS.RenderSafe = rs;
+        let mutationAlwaysCurrent = false;
+        global.customJS.RenderSafe = {
+            mutate: (opts) => rs.mutate(mutationAlwaysCurrent
+                ? Object.assign({}, opts, { isCurrent: () => true })
+                : opts),
+        };
         global.window.customJS = global.customJS;
         const dv = { current: () => page, page: () => page };
         const list = new TripEntryList();
@@ -318,30 +343,78 @@ function makeDv(embed, currentVal) {
 
         // Flat Flights/Stay writes and atlas link writes share the same active
         // mutation-specific poll authority rather than waiting for Dataview's
-        // natural tick.
+        // natural tick. The typed fixtures deliberately signal metadata while
+        // Dataview is stale, then become current only on a later poll.
         failWrite = false;
         for (const fixture of [
-            { key: 'flights', value: [{ flight_no: 'UA1', depart_date: '2026-08-14' }], dateKey: 'depart_date' },
-            { key: 'stays', value: [{ name: 'Hotel', check_in: '2026-08-15' }], dateKey: 'check_in' },
+            { key: 'flights', value: [{ flight_no: 'UA1', depart_date: '2026-08-14' }], dateKey: 'depart_date', identityKey: 'flight_no' },
+            { key: 'stays', value: [{ name: 'Hotel', check_in: '2026-08-15' }], dateKey: 'check_in', identityKey: 'name' },
         ]) {
-            page = { file: { path: pathName }, [fixture.key]: [] };
-            file.fm[fixture.key] = [];
-            indexPage = (target) => {
-                const indexedEntry = Object.assign({}, target.fm[fixture.key][0], {
+            const indexedPage = (entry) => {
+                const indexedEntry = Object.assign({}, entry, {
                     [fixture.dateKey]: {
                         isLuxonDateTime: true,
-                        toISODate: () => target.fm[fixture.key][0][fixture.dateKey],
-                        toJSON: () => target.fm[fixture.key][0][fixture.dateKey] + 'T00:00:00.000Z',
+                        toISODate: () => entry[fixture.dateKey],
+                        toJSON: () => entry[fixture.dateKey] + 'T00:00:00.000Z',
                     },
                 });
                 const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
                 return { file: { path: pathName }, [fixture.key]: dataArray };
             };
+            page = { file: { path: pathName }, [fixture.key]: [] };
+            file.fm[fixture.key] = [];
+            scheduled.length = 0;
+            indexPage = (target) => indexedPage(Object.assign({}, target.fm[fixture.key][0], {
+                [fixture.identityKey]: 'STALE',
+            }));
             writeGate = deferred(); writeGate.resolve();
             const before = refreshes;
-            const saved = await list._write(dv, { key: fixture.key }, fixture.value);
-            ok(`GA-P2-${fixture.key.toUpperCase()}-POLL active edit/delete refreshes from DataArray + Luxon date`,
-                saved && refreshes === before + 1 && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
+            const pendingSave = list._write(dv, { key: fixture.key }, fixture.value);
+            await new Promise(setImmediate);
+            ok(`GA-P2B-${fixture.key.toUpperCase()}-STALE-SIGNAL matching metadata signal does not refresh stale DataArray`,
+                refreshes === before && scheduled.some((handle) => !handle.cancelled));
+            page = indexedPage(file.fm[fixture.key][0]);
+            const polled = await runNextTimer();
+            const saved = await pendingSave;
+            ok(`GA-P2B-${fixture.key.toUpperCase()}-CURRENT-POLL later DataArray + Luxon value refreshes exactly once`,
+                polled && saved && refreshes === before + 1
+                && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
+        }
+
+        // Mutation control: replacing the exact field predicate with an
+        // always-true authority must fail the stale checkpoint above. This
+        // proves the test is sensitive to premature refresh, not merely to the
+        // eventual presence of one refresh.
+        {
+            const fixture = {
+                key: 'flights',
+                value: [{ flight_no: 'UA2', depart_date: '2026-08-16' }],
+            };
+            const indexedPage = (entry) => {
+                const indexedEntry = Object.assign({}, entry, {
+                    depart_date: {
+                        isLuxonDateTime: true,
+                        toISODate: () => entry.depart_date,
+                        toJSON: () => entry.depart_date + 'T00:00:00.000Z',
+                    },
+                });
+                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
+                return { file: { path: pathName }, flights: dataArray };
+            };
+            page = { file: { path: pathName }, flights: [] };
+            file.fm.flights = [];
+            scheduled.length = 0;
+            indexPage = (target) => indexedPage(Object.assign({}, target.fm.flights[0], { flight_no: 'STALE' }));
+            writeGate = deferred(); writeGate.resolve();
+            mutationAlwaysCurrent = true;
+            const before = refreshes;
+            const mutantSave = list._write(dv, { key: fixture.key }, fixture.value);
+            await new Promise(setImmediate);
+            const mutantPassedStaleCheckpoint = refreshes === before;
+            const mutantSaved = await mutantSave;
+            mutationAlwaysCurrent = false;
+            ok('GA-P2B-ALWAYS-TRUE-MUTANT stale checkpoint turns red for premature authority',
+                mutantSaved && !mutantPassedStaleCheckpoint && refreshes === before + 1);
         }
 
         const links = new TripLinks();
