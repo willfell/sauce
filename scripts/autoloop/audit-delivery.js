@@ -13,7 +13,7 @@ const {
   durablePathBarrier,
 } = require('./codex-coordinator');
 
-const DEFAULT_PROJECT = path.join(os.homedir(), 'notes/sauce/headspace-sauce/spice/projects/sauce');
+const DEFAULT_PROJECT = path.join(os.homedir(), 'obsidian/headspace-sauce/spice/projects/sauce');
 const DEFAULT_BOARD = path.join(DEFAULT_PROJECT, 'sauce-board.md');
 const DEFAULT_CARDS = path.join(DEFAULT_PROJECT, 'tasks');
 

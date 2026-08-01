@@ -94,7 +94,7 @@ Run in a fresh Claude session in the sauce workshop repo:
 
 Run in the egnyte-mcp repo (`~/projects/repos/egnyte-mcp`). Do NOT migrate ero's boards or touch its `ero_loop` — round one only proves the binding reads the ero board.
 
-1. `/loop:init` — vault root `~/notes/sauce/ero-sauce`, slug `ero-egnyte-mcp`, board `spice/projects/ero-egnyte-mcp/ero-egnyte-mcp-board.md`, cards `spice/projects/ero-egnyte-mcp/tasks`, prefix (e.g. `EM`), **`observe_only: true`**, deploy subscriptions empty (ero completes on merge), coordinator `brew`, routers yes.
+1. `/loop:init` — vault root `~/obsidian/ero-sauce`, slug `ero-egnyte-mcp`, board `spice/projects/ero-egnyte-mcp/ero-egnyte-mcp-board.md`, cards `spice/projects/ero-egnyte-mcp/tasks`, prefix (e.g. `EM`), **`observe_only: true`**, deploy subscriptions empty (ero completes on merge), coordinator `brew`, routers yes.
 2. `/loop:status` — expect a digest of the ero board with an empty/near-empty ledger (ero's Python loop owns its state; the coordinator has no claims here). That's the correct round-one answer.
 3. Confirm `/loop:plan` REFUSES (observe_only) — the guard that protects ero's existing loop.
 4. Commit `.loop/config.json` + routers to egnyte-mcp when satisfied.

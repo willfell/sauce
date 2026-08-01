@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "project": { "slug": "sauce", "name": "Sauce" },
-  "vault": { "root": "~/notes/sauce/headspace-sauce", "mcp_server": "headspace-obsidian" },
+  "vault": { "root": "~/obsidian/headspace-sauce", "mcp_server": "headspace-obsidian" },
   "board": {
     "project_root": "spice/projects/sauce",
     "board_path": "spice/projects/sauce/sauce-board.md",
@@ -13,12 +13,12 @@
     "execution_mode": "release",
     "deploy_subscriptions": ["headspace", "accuris", "ero"],
     "deploy_vaults": [
-      { "id": "headspace", "path": "~/notes/sauce/headspace-sauce" },
-      { "id": "accuris", "path": "~/notes/sauce/accuris-sauce" },
-      { "id": "ero", "path": "~/notes/sauce/ero-sauce" }
+      { "id": "headspace", "path": "~/obsidian/headspace-sauce" },
+      { "id": "accuris", "path": "~/obsidian/accuris-sauce" },
+      { "id": "ero", "path": "~/obsidian/ero-sauce" }
     ]
   },
   "coordinator": { "resolve": "brew" },
-  "fid": "~/notes/sauce/headspace-sauce/spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md",
+  "fid": "~/obsidian/headspace-sauce/spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md",
   "codex": { "routers": true, "plugin_root": "/opt/homebrew/opt/sauce/libexec/plugins/loop" }
 }

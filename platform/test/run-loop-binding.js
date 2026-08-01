@@ -2,9 +2,11 @@
 /**
  * run-loop-binding — preflight harness for the SAUCE_LOOP_* binding seam in
  * codex-coordinator.js and batch-runner.js. The seam's contract: with no
- * SAUCE_LOOP_* env set, every derived constant is byte-identical to the
- * historical hardcoded defaults (the live loop is untouched); with env set,
- * the binding is honored; malformed env fails loud. Zero-dep.
+ * SAUCE_LOOP_* env set, every derived constant is self-resolved from THIS
+ * repo's committed .loop/config.json (the binding-derived default, →
+ * ~/obsidian/<vault>); with env set, the binding is honored; malformed env
+ * fails loud. The literal ~/obsidian fallback only applies to an unbound cwd.
+ * Zero-dep.
  */
 'use strict';
 const path = require('path');
@@ -42,14 +44,15 @@ function nodeEvalClean(script, extra = {}) {
 
 const HOME = os.homedir();
 
-// LB-1: no env → historical defaults, byte-identical.
+// LB-1: no env → self-resolved from this repo's committed .loop/config.json
+// (the binding-derived default, ~/obsidian/<vault>).
 {
   const out = JSON.parse(nodeEvalClean(
     `const c = require(${JSON.stringify(COORD)}); console.log(JSON.stringify({ b: c.BOARD, cr: c.CARDS_ROOT, v: c.VAULTS, ids: c.DEPLOYMENT_VAULT_IDS }));`));
-  ok('LB-1 default BOARD unchanged', out.b === path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md'));
-  ok('LB-1 default CARDS_ROOT unchanged', out.cr === path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks'));
-  ok('LB-1 default VAULTS unchanged', out.v.length === 3 && out.v[0].id === 'headspace' && out.v[2].path === path.join(HOME, 'notes/sauce/ero-sauce'));
-  ok('LB-1 default DEPLOYMENT_VAULT_IDS unchanged', JSON.stringify(out.ids) === JSON.stringify(['headspace', 'accuris', 'ero']));
+  ok('LB-1 default BOARD binding-derived', out.b === path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md'));
+  ok('LB-1 default CARDS_ROOT binding-derived', out.cr === path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce/tasks'));
+  ok('LB-1 default VAULTS binding-derived', out.v.length === 3 && out.v[0].id === 'headspace' && out.v[2].path === path.join(HOME, 'obsidian/ero-sauce'));
+  ok('LB-1 default DEPLOYMENT_VAULT_IDS binding-derived', JSON.stringify(out.ids) === JSON.stringify(['headspace', 'accuris', 'ero']));
 }
 
 // LB-2: env overrides honored (coordinator).
@@ -92,7 +95,7 @@ const HOME = os.homedir();
 {
   const out = JSON.parse(nodeEvalClean(
     `const b = require(${JSON.stringify(BATCH)}); const ctx = b.resolveContext(${JSON.stringify(REPO)}); console.log(JSON.stringify({ bp: ctx.boardPath, cr: ctx.cardsRoot }));`));
-  ok('LB-5 batch default boardPath unchanged', out.bp === path.join(HOME, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md'));
+  ok('LB-5 batch default boardPath binding-derived', out.bp === path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md'));
   const out2 = JSON.parse(nodeEvalClean(
     `const b = require(${JSON.stringify(BATCH)}); const ctx = b.resolveContext(${JSON.stringify(REPO)}); console.log(JSON.stringify({ bp: ctx.boardPath, cr: ctx.cardsRoot, ir: ctx.intakeRoots }));`,
     { SAUCE_LOOP_BOARD: '/v/demo/spice/projects/demo/demo-board.md', SAUCE_LOOP_CARDS_ROOT: '/v/demo/spice/projects/demo/tasks' }));

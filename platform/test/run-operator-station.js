@@ -127,7 +127,7 @@ async function renderGeometry(chrome, profile, viewportWidth) {
 
 async function main() {
   const OperatorStation = loadClass();
-  const vaultRoot = '/Users/willfellhoelter/notes/sauce/headspace-sauce';
+  const vaultRoot = '/Users/willfell/obsidian/headspace-sauce';
   const stationPath = 'spice/projects/sauce/Loop Station.md';
   const ratificationDir = 'spice/projects/sauce/ratifications';
   const markdownFiles = [

@@ -839,7 +839,7 @@ If you want to trace a specific path through the system:
 - **Sentinel parsing + weight update math:** `platform/blueprints/cowork/helpers/learn-from-checks-helper.js`
 - **Sidecar shape + write-guards:** `platform/blueprints/cowork/helpers/write-atomic-note-helper.js`
 - **Per-cadence sidecar schemas:** `platform/blueprints/cowork/data/schemas/<cadence>@1.0.0.json`
-- **How a real EOD looks:** `/Users/willfellhoelter/notes/sauce/headspace-sauce/spice/cowork/daily/<recent-date>/eod-review.md`
+- **How a real EOD looks:** `/Users/willfell/obsidian/headspace-sauce/spice/cowork/daily/<recent-date>/eod-review.md`
 - **What ships on update:** `platform/blueprints/cowork/manifest.json` § `files[]`
 - **Why decisions were made the way they were:** `Docs/cowork-vision.md` (North Star + locked decisions)
 - **What changed when:** `Docs/cycle-history.md`

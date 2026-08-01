@@ -5,7 +5,7 @@ Create a new wiki page in the correct section folder.
 ## Pre-write vault-identity self-check
 
 Before creating any file, verify you are in the workshop vault:
-`ls /Users/willfellhoelter/projects/repos/sauce` — expected root entries include `platform/`, `ranch/`, `CLAUDE.md`. If you see `Boards/`, `Finance/`, or `Resources/` at root, STOP — you are in a consumer vault.
+`ls /Users/willfell/Documents/GitHub/sauce` — expected root entries include `platform/`, `ranch/`, `CLAUDE.md`. If you see `Boards/`, `Finance/`, or `Resources/` at root, STOP — you are in a consumer vault.
 
 ## Usage
 

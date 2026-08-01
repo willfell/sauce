@@ -97,11 +97,11 @@ function descendants(root, className) {
 function visualUrlFor(filePath) { return pathToFileURL(filePath).href; }
 function deploymentHostFor(identity, env, io = fs) {
   return env.SAUCE_DEPLOYMENT_HOST === 'true'
-    || (identity.username === 'willfellhoelter'
-      && io.existsSync(path.join(identity.homedir, 'projects/repos/sauce/.git')));
+    || (identity.username === 'willfell'
+      && io.existsSync(path.join(identity.homedir, 'Documents/GitHub/sauce/.git')));
 }
 function deploymentVaultsFor(identity, vaults) {
-  return vaults.map((vault) => ({ name: vault.name, path: path.join(identity.homedir, 'notes/sauce', vault.name) }));
+  return vaults.map((vault) => ({ name: vault.name, path: path.join(identity.homedir, 'obsidian', vault.name) }));
 }
 function verifyDeploymentHost({ identity, env, io, vaults, verify }) {
   const required = deploymentHostFor(identity, env, io);
@@ -677,11 +677,11 @@ async function main() {
       env: { SAUCE_DEPLOYMENT_HOST: 'true', HOME: '/mutable-home' }, marker: false, expected: true, markerReads: 0,
     },
     {
-      name: 'canonical identity with checkout marker', identity: { username: 'willfellhoelter', homedir: '/canonical-home' },
+      name: 'canonical identity with checkout marker', identity: { username: 'willfell', homedir: '/canonical-home' },
       env: {}, marker: true, expected: true, markerReads: 1,
     },
     {
-      name: 'canonical identity missing checkout marker', identity: { username: 'willfellhoelter', homedir: '/canonical-home' },
+      name: 'canonical identity missing checkout marker', identity: { username: 'willfell', homedir: '/canonical-home' },
       env: {}, marker: false, expected: false, markerReads: 1,
     },
     {
@@ -689,12 +689,12 @@ async function main() {
       env: {}, marker: true, expected: false, markerReads: 0,
     },
     {
-      name: 'canonical identity ignores mutable HOME', identity: { username: 'willfellhoelter', homedir: '/stable-home' },
+      name: 'canonical identity ignores mutable HOME', identity: { username: 'willfell', homedir: '/stable-home' },
       env: { HOME: '/mutable-home' }, marker: true, expected: true, markerReads: 1,
     },
   ];
   for (const fixture of hostCases) {
-    const marker = path.join(fixture.identity.homedir, 'projects/repos/sauce/.git');
+    const marker = path.join(fixture.identity.homedir, 'Documents/GitHub/sauce/.git');
     const reads = [];
     let verifierCalls = 0;
     const decision = verifyDeploymentHost({
@@ -713,7 +713,7 @@ async function main() {
     assert.deepStrictEqual(reads, Array(fixture.markerReads).fill(marker),
       `${fixture.name} performs the exact expected checkout-marker reads`);
     const expectedVaultPaths = fixture.expected
-      ? VAULTS.map((vault) => path.join(fixture.identity.homedir, 'notes/sauce', vault.name)) : [];
+      ? VAULTS.map((vault) => path.join(fixture.identity.homedir, 'obsidian', vault.name)) : [];
     assert.deepStrictEqual(decision.vaults.map((vault) => vault.path), expectedVaultPaths,
       `${fixture.name} derives vaults only from stable identity homedir, never env.HOME`);
     assert.deepStrictEqual(decision.receipt?.vaults || [], expectedVaultPaths,
@@ -730,7 +730,7 @@ async function main() {
     assert.strictEqual(hostDecision.receipt?.artifacts.length, 9,
       'deployment host records all nine real installed artifacts');
     assert.deepStrictEqual(hostDecision.vaults.map((vault) => vault.path),
-      VAULTS.map((vault) => path.join(deploymentIdentity.homedir, 'notes/sauce', vault.name)),
+      VAULTS.map((vault) => path.join(deploymentIdentity.homedir, 'obsidian', vault.name)),
       'deployment host receipt binds the exact stable-homedir vault set');
   }
   for (const vault of fixtureVaults) {

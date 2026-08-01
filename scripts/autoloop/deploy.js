@@ -25,9 +25,9 @@
 // vaults on this dev machine. All three deploy together (no canary tier).
 const HOME = require('os').homedir();
 const VAULTS = [
-  { name: 'ero-sauce', path: `${HOME}/notes/sauce/ero-sauce` },
-  { name: 'accuris-sauce', path: `${HOME}/notes/sauce/accuris-sauce` },
-  { name: 'headspace-sauce', path: `${HOME}/notes/sauce/headspace-sauce` },
+  { name: 'ero-sauce', path: `${HOME}/obsidian/ero-sauce` },
+  { name: 'accuris-sauce', path: `${HOME}/obsidian/accuris-sauce` },
+  { name: 'headspace-sauce', path: `${HOME}/obsidian/headspace-sauce` },
 ];
 
 // Compare dotted numeric versions ("0.145.1"). → -1 | 0 | 1.
