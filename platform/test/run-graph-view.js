@@ -57,6 +57,7 @@ function svgPaths(root, className) {
   const svg = byClass(root, 'graph-view-edges').map((node) => node.innerHTML).join('');
   return svg.split('<path').slice(1).filter((chunk) => chunk.includes(`graph-view-edge ${className}`));
 }
+function dOf(chunk) { return (chunk.match(/\sd="([^"]+)"/) || [])[1] || ''; }
 function memoryAdapter(initial) {
   const store = new Map(Object.entries(initial));
   const dirs = new Set();
@@ -113,7 +114,9 @@ async function main() {
     [`${board}/GV-D Blocked.md`, { type: 'slice', status: 'blocked', depends_on: ['GV-B Widget'] }],
     [`${board}/GV-E Stale.md`, { type: 'slice', status: 'planning', depends_on: [`[[${staleTarget}]]`] }],
     [`${board}/GV-F Malformed.md`, { type: 'slice', status: 'archived', depends_on: [] }],
-    [`${board}/GV-G LongPark.md`, { type: 'slice', status: 'parked', depends_on: [], resume_condition: longReason }],
+    // GV-G depends on GV-A so depends (3) vs order (2) edge counts stay
+    // ASYMMETRIC — a kind→style swap can never hide behind matching totals.
+    [`${board}/GV-G LongPark.md`, { type: 'slice', status: 'parked', depends_on: ['[[GV-A Base]]'], resume_condition: longReason }],
     [`${board}/nested/Hidden.md`, { type: 'slice', status: 'planning' }],
     [`${board}/Not a Slice.md`, { type: 'task', status: 'planning' }],
   ]);
@@ -220,16 +223,80 @@ async function main() {
   assert.deepStrictEqual(opened.at(-1), [`${board}/GV-B Widget`, epicPath, false],
     'case 3: chip click opens the card through the standard internal-link mechanism');
 
-  // Case 4: solid depends edges (arrowheads, no dash) vs dashed low-opacity order edges.
+  // Case 4: solid depends edges (arrowheads, no dash) vs dashed low-opacity
+  // order edges. The fixture's counts are asymmetric on purpose (3 vs 2): a
+  // kind→style swap flips the per-class totals and fails here.
   const dependsPaths = svgPaths(root, 'edge-depends');
   const orderPaths = svgPaths(root, 'edge-order');
-  assert.strictEqual(dependsPaths.length, 2, 'case 4: exactly the two real depends edges render');
+  assert.strictEqual(dependsPaths.length, 3, 'case 4: exactly the three real depends edges render');
   assert(dependsPaths.every((chunk) => chunk.includes('marker-end') && !chunk.includes('stroke-dasharray')),
     'case 4: depends edges are solid arrowed strokes');
   assert.strictEqual(orderPaths.length, 2, 'case 4: exactly the two ghost order edges render');
   assert(orderPaths.every((chunk) => chunk.includes('stroke-dasharray') && chunk.includes('opacity')
     && !chunk.includes('marker-end')),
   'case 4: order edges are dashed, low-opacity, and arrowless');
+
+  // Case 11: pin the SVG layer to the widget's REAL position math. The
+  // fixture is deterministic, so every value is exact (no tolerances):
+  //   chip x = pad + rank*colW (rank is the HORIZONTAL axis)
+  //   chip y = pad + row*rowH  (row is the VERTICAL axis)
+  // with pad 12, colW 200, rowH 74, chipW 172, chipH 56, and known layout
+  //   GV-E Stale (0,0)  GV-F Malformed (0,1)  GV-C Parked (0,2)
+  //   GV-A Base (0,3)   GV-B Widget (1,0)     GV-G LongPark (1,1)
+  //   GV-D Blocked (2,0)
+  const G = { colW: 200, rowH: 74, chipW: 172, chipH: 56, pad: 12 };
+  const posOf = (rank, row) => ({ x: G.pad + rank * G.colW, y: G.pad + row * G.rowH });
+
+  // 11a — chip geometry: rank must land on the horizontal axis and row on the
+  // vertical axis (a rank↔row transposition moves GV-A Base to 612,12).
+  for (const [id, rank, row] of [['GV-A', 0, 3], ['GV-G', 1, 1], ['GV-D', 2, 0]]) {
+    const { x, y } = posOf(rank, row);
+    assert(chipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`),
+      `case 11a: ${id} chip (rank ${rank}, row ${row}) sits at left:${x}px;top:${y}px — rank horizontal, row vertical`);
+  }
+
+  // 11b — kind→endpoint binding + direction for the KNOWN depends edge
+  // GV-A Base → GV-B Widget: the path starts at the prerequisite chip's
+  // right-edge midpoint and ends at the dependent chip's left-edge midpoint,
+  // and THIS element carries the solid arrowed depends markup.
+  const gvA = posOf(0, 3);
+  const gvB = posOf(1, 0);
+  const x1 = gvA.x + G.chipW;
+  const y1 = gvA.y + G.chipH / 2;
+  const x2 = gvB.x;
+  const y2 = gvB.y + G.chipH / 2;
+  const bend = Math.max(24, (x2 - x1) / 2);
+  const dependsD = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+  const dependsEdge = dependsPaths.find((chunk) => dOf(chunk) === dependsD);
+  assert(dependsEdge,
+    'case 11b: the GV-A Base→GV-B Widget depends path runs prerequisite chip (184,262) → dependent chip (212,40)');
+  assert(dependsEdge.includes('marker-end="url(#graph-view-arrow)"') && !dependsEdge.includes('stroke-dasharray'),
+    'case 11b: the GV-A Base→GV-B Widget element itself carries the solid arrowed depends markup');
+
+  // 11c — direction: the reversed drawing (dependent → prerequisite) of that
+  // same edge must not exist anywhere in the SVG layer.
+  const rx1 = gvB.x + G.chipW;
+  const ry1 = gvB.y + G.chipH / 2;
+  const rx2 = gvA.x;
+  const ry2 = gvA.y + G.chipH / 2;
+  const rbend = Math.max(24, (rx2 - rx1) / 2);
+  const reversedD = `M ${rx1} ${ry1} C ${rx1 + rbend} ${ry1}, ${rx2 - rbend} ${ry2}, ${rx2} ${ry2}`;
+  assert(!dependsPaths.some((chunk) => dOf(chunk) === reversedD)
+    && !orderPaths.some((chunk) => dOf(chunk) === reversedD),
+  'case 11c: no edge renders GV-B Widget → GV-A Base (depends direction is prerequisite → dependent)');
+
+  // 11d — the KNOWN order edge GV-E Stale → GV-F Malformed (same rank,
+  // vertical drop) leaves the upper chip's bottom edge at the shared column
+  // center and lands on the lower chip's top edge, with dashed markup.
+  const gvE = posOf(0, 0);
+  const gvF = posOf(0, 1);
+  const orderX = gvE.x + G.chipW / 2;
+  const orderD = `M ${orderX} ${gvE.y + G.chipH} L ${orderX} ${gvF.y}`;
+  const orderEdge = orderPaths.find((chunk) => dOf(chunk) === orderD);
+  assert(orderEdge,
+    'case 11d: the GV-E Stale→GV-F Malformed order path drops upper chip bottom (98,68) → lower chip top (98,86)');
+  assert(orderEdge.includes('stroke-dasharray') && !orderEdge.includes('marker-end'),
+    'case 11d: the GV-E Stale→GV-F Malformed element itself carries the dashed arrowless order markup');
 
   // Case 5: wait badges — parked resume_condition verbatim; blocked unmet dep names;
   // long reasons truncate to ~60 chars with the full text in the title attribute.
