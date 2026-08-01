@@ -79,6 +79,11 @@ class MeetingLeafActions {
     }
     return { attendees, people: attendees.slice() };
   }
+  static canonicalLinkNames(values) {
+    if (!values || typeof values[Symbol.iterator] !== "function") return [];
+    try { return Array.from(values).map((value) => MeetingLeafActions.cleanProjectName(value)).filter(Boolean); }
+    catch (_e) { return []; }
+  }
   static personStubBody(name, isoNow) {
     return `---\ntype: person\ncreated_at: "${isoNow}"\naliases: []\n---\n\n# [[${name}]]\n\n## Notes\n-\n`;
   }
@@ -129,6 +134,23 @@ class MeetingLeafActions {
         .filter((f) => f.path.startsWith("spice/people/") && f.basename !== "People")
         .map((f) => f.basename).sort();
     } catch (_e) { return []; }
+  }
+
+  async _mutateFrontmatter(dv, file, opts) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      new Notice((opts.failureMessage || "Could not update meeting") + ": RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      failureMessage: opts.failureMessage || "Could not update meeting",
+      write: () => app.fileManager.processFrontMatter(file, opts.write),
+      isCurrent: opts.isCurrent,
+    });
+    return result.ok === true;
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
@@ -187,10 +209,14 @@ class MeetingLeafActions {
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin-top:10px;";
       const choose = async (name) => {
-        try {
-          await app.fileManager.processFrontMatter(file, (fm) => { fm.project = name ? `[[${name}]]` : ""; });
+        const saved = await this._mutateFrontmatter(dv, file, {
+          failureMessage: "Could not set project",
+          write: (fm) => { fm.project = name ? `[[${name}]]` : ""; },
+          isCurrent: (page) => MeetingLeafActions.cleanProjectName(page && page.project) === name,
+        });
+        if (saved) {
           new Notice(name ? `Added to ${name}` : "Cleared project");
-        } catch (e) { new Notice("Could not set project: " + (e.message || e), 6000); }
+        }
         close();
       };
       for (const opt of ["(none)", ...projects.map((p) => p.name)]) {
@@ -260,11 +286,17 @@ class MeetingLeafActions {
       const save = panel.createEl("button", { text: "Save attendees" });
       save.style.cssText = "margin-top:12px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
       save.onclick = async () => {
-        try {
-          const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter([...selected]);
-          await app.fileManager.processFrontMatter(file, (fm) => { fm.attendees = attendees; fm.people = ppl; });
+        const selectedNames = [...selected];
+        const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter(selectedNames);
+        const expected = JSON.stringify(selectedNames);
+        const saved = await this._mutateFrontmatter(dv, file, {
+          failureMessage: "Could not update attendees",
+          write: (fm) => { fm.attendees = attendees; fm.people = ppl; },
+          isCurrent: (page) => JSON.stringify(MeetingLeafActions.canonicalLinkNames(page && page.attendees)) === expected,
+        });
+        if (saved) {
           new Notice(`Attendees updated (${attendees.length})`);
-        } catch (e) { new Notice("Could not update attendees: " + (e.message || e), 6000); }
+        }
         close();
       };
     }});

@@ -2,7 +2,7 @@
  * Project Workstream Manager (CustomJS)
  * Renders Add/Remove buttons + workstream cards with progress bars.
  * Reads the kanban board to cross-reference task status per workstream.
- * Uses app.fileManager.processFrontMatter() for safe YAML serialization.
+ * Routes gesture writes through RenderSafe.mutate for immediate reconciliation.
  *
  * Usage in DataviewJS (atlas note):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
@@ -32,22 +32,46 @@ class ProjectWorkstreamManager {
         };
         const getWorkstreams = () => parseWorkstreams(current.workstreams);
 
-        const findMapNote = () => {
+        const findProjectNote = (type) => {
             return app.vault.getFiles().find(f =>
-                f.path.startsWith(projectDir + "/") &&
-                !f.path.includes("/tasks/") &&
+                f.path.substring(0, f.path.lastIndexOf("/")) === projectDir &&
                 (() => {
                     const cache = app.metadataCache.getFileCache(f);
-                    return cache?.frontmatter?.type === "map";
+                    return cache?.frontmatter?.type === type;
                 })()
             );
         };
 
         const updateWorkstreams = async (newWs) => {
-            const atlasFile = app.vault.getAbstractFileByPath(filePath);
-            if (atlasFile) await app.fileManager.processFrontMatter(atlasFile, fm => { fm.workstreams = newWs; });
-            const mapFile = findMapNote();
-            if (mapFile) await app.fileManager.processFrontMatter(mapFile, fm => { fm.workstreams = newWs; });
+            const atlasFile = findProjectNote("project");
+            const mapFile = findProjectNote("map");
+            const targets = [atlasFile, mapFile].filter((file, index, all) =>
+                file && all.findIndex((candidate) => candidate && candidate.path === file.path) === index
+            );
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            if (!renderSafe || typeof renderSafe.mutate !== "function") {
+                new Notice("Could not update workstreams: RenderSafe is unavailable.", 6000);
+                return false;
+            }
+            const expected = JSON.stringify(newWs);
+            const result = await renderSafe.mutate({
+                app,
+                dv,
+                path: filePath,
+                failureMessage: "Could not update workstreams",
+                write: async () => {
+                    for (const target of targets) {
+                        await app.fileManager.processFrontMatter(target, fm => { fm.workstreams = newWs; });
+                    }
+                },
+                isCurrent: (page) => {
+                    const value = page && page.workstreams;
+                    if (!value || typeof value[Symbol.iterator] !== "function") return false;
+                    try { return JSON.stringify(Array.from(value)) === expected; }
+                    catch (_e) { return false; }
+                },
+            });
+            return result.ok === true;
         };
 
         const slugify = (str) => {
@@ -99,8 +123,9 @@ class ProjectWorkstreamManager {
                 const cur = getWorkstreams();
                 if (cur.some(w => w.id === id)) { new Notice(`"${id}" already exists.`); close(); return; }
                 close();
-                await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }]);
-                new Notice(`Added workstream: ${name}`);
+                if (await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }])) {
+                    new Notice(`Added workstream: ${name}`);
+                }
             };
             okBtn.onclick = submit;
             nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); descInput.focus(); } });
@@ -131,8 +156,9 @@ class ProjectWorkstreamManager {
                 item.createEl("code", { text: w.id }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: 4px;";
                 item.onclick = async () => {
                     close();
-                    await updateWorkstreams(cur.filter(x => x.id !== w.id));
-                    new Notice(`Removed: ${w.name}`);
+                    if (await updateWorkstreams(cur.filter(x => x.id !== w.id))) {
+                        new Notice(`Removed: ${w.name}`);
+                    }
                 };
             }
             const cancelBtn = dialog.createEl("button", { text: "Cancel" });
@@ -175,8 +201,8 @@ class ProjectWorkstreamManager {
             const tasks = [];
             let currentLane = "";
             for (const line of content.split("\n")) {
-                if (line.startsWith("## ")) {
-                    currentLane = line.replace("## ", "").trim();
+                if (line.startsWith("## ")) { // lint-display-markers:allow kanban column syntax
+                    currentLane = line.replace("## ", "").trim(); // lint-display-markers:allow kanban column syntax
                 }
                 const linked = line.match(/- \[[ x]\] \[\[([^\]|]+)/);
                 if (linked) {

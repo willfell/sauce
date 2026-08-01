@@ -239,12 +239,17 @@ class BudgetAllocationsEditor {
         const amount = await this._promptForAmount((row && (row.name || row.slug)) || "", row && row.planned);
         if (amount == null) return;
         const written = await this._mutateCapture(file, (fm) => this._upsertOverride(fm, kind, row, amount));
-        await this.render(dv, this._authoritativeView(dv, written));
+        await this._rerender(dv, this._authoritativeView(dv, written));
     }
 
     async _resetFlow(file, dv, kind, row) {
         const written = await this._mutateCapture(file, (fm) => this._removeOverride(fm, kind, row));
-        await this.render(dv, this._authoritativeView(dv, written));
+        await this._rerender(dv, this._authoritativeView(dv, written));
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv, authoritative);
     }
 
     // Run the mutator, then capture the freshly-written override arrays so the

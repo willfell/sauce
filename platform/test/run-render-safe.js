@@ -1452,6 +1452,652 @@ ok('GA-P1-GESTURE-CONVENTION code guide routes gesture writes through RenderSafe
   assert(/must not end in a[\s\S]*bare `processFrontMatter`, `vault\.modify`, or `vault\.create` write/.test(guide), 'bare gesture writes prohibited');
 });
 
+// GA-P3 sweep contract: every audited active-note gesture delegates its write
+// through RenderSafe.mutate, while Finance's authoritative self-renders capture
+// scroll first. These source-bound cases are intentionally one-per surface so a
+// future helper can neither bypass the lifecycle nor hide in an aggregate count.
+function helperSource(rel) {
+  return fs.readFileSync(path.join(__dirname, '..', 'blueprints', rel), 'utf8');
+}
+
+ok('GA-P3-PROJECT-STATUS status pick routes through mutate with optimistic rollback', () => {
+  const src = helperSource('project/helpers/project-status-widget.js');
+  assert(/_writeStatus\([\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'status mutation lifecycle');
+});
+
+ok('GA-P3-PROJECT-WORKSTREAM add and remove share mutate authority', () => {
+  const src = helperSource('project/helpers/project-workstream-manager.js');
+  assert(/updateWorkstreams = async[\s\S]*renderSafe\.mutate\(\{[\s\S]*write: async[\s\S]*processFrontMatter/.test(src), 'workstream mutation lifecycle');
+  assert((src.match(/updateWorkstreams\(/g) || []).length === 2, 'add and remove both call the shared writer');
+});
+
+ok('GA-P3-PROJECT-LINKS add edit delete route through mutate', () => {
+  const src = helperSource('project/helpers/project-links-manager.js');
+  assert(/async _write\([\s\S]*renderSafe\.mutate\(\{[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'links mutation lifecycle');
+  assert((src.match(/this\._write\(dv, res\.links\)/g) || []).length === 3, 'add edit delete share the writer');
+});
+
+ok('GA-P3-MEETINGS project and attendees route through mutate', () => {
+  const src = helperSource('meetings/helpers/meeting-leaf-actions.js');
+  assert(/_mutateFrontmatter\([\s\S]*renderSafe\.mutate\(\{[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'meeting mutation lifecycle');
+  assert((src.match(/this\._mutateFrontmatter\(dv, file/g) || []).length === 2, 'project and attendee saves share the writer');
+});
+
+ok('GA-P3-READER leaf status routes through mutate with optimistic label rollback', () => {
+  const src = helperSource('reader/helpers/reader-article-actions.js');
+  assert(/async _setStatus\([\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*isCurrent:/.test(src), 'reader status mutation lifecycle');
+  assert(/statusBtn\.textContent = 'Status: '/.test(src), 'reader leaf swaps the visible status optimistically');
+});
+
+ok('GA-P3-STICKY title rename routes through mutate with banner rollback', () => {
+  const src = helperSource('sticky-notes/helpers/sticky-chrome-bar.js');
+  const rename = src.slice(src.indexOf('async _writeTitle'), src.indexOf('_openMoveDayDialog'));
+  assert(/renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*isCurrent:/.test(rename), 'sticky rename mutation lifecycle');
+  assert(!/current, \(\) => \{\}\)/.test(src), 'overflow rename supplies a visible banner callback');
+});
+
+ok('GA-P3-JOURNAL title rename routes through mutate with banner rollback', () => {
+  const src = helperSource('journal/helpers/journal-chrome-bar.js');
+  const rename = src.slice(src.indexOf('async _writeTitle'), src.indexOf('_openDeleteDialog'));
+  assert(/renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*isCurrent:/.test(rename), 'journal rename mutation lifecycle');
+  assert(!/current, \(\) => \{\}\)/.test(src), 'overflow rename supplies a visible banner callback');
+});
+
+ok('GA-P3-TODAY-CAPTURE native checkbox routes through mutate capture and revert', () => {
+  const src = helperSource('to-do/helpers/today-capture-editable-list.js');
+  assert(/addEventListener\('change'[\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*replaceTaskAt/.test(src), 'today capture mutation lifecycle');
+});
+
+for (const financeEditor of ['budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js']) {
+  ok(`GA-P3-FINANCE-SCROLL ${financeEditor} captures before authoritative self-render`, () => {
+    const src = helperSource('finance/helpers/' + financeEditor);
+    const start = src.indexOf('async _rerender');
+    const rerender = src.slice(start, src.indexOf('\n    }', start) + 6);
+    assert(/try\s*\{\s*customJS\.RenderSafe\?\.captureScroll\?\.\(\);\s*\}\s*catch\s*\(_e\)\s*\{\}\s*return await this\.render\(dv, authoritative\);/.test(rerender),
+      'capture is immediately adjacent to authoritative self-render with only its fail-closed catch between');
+    assert((src.match(/await this\.render/g) || []).length === 1, 'all direct self-renders are centralized');
+  });
+}
+
+function makeGestureFacade(calls) {
+  return {
+    async mutate(opts) {
+      calls.push(opts);
+      if (opts.optimistic) await opts.optimistic();
+      try { return { ok: true, value: await opts.write() }; }
+      catch (error) {
+        if (opts.revert) await opts.revert(error);
+        return { ok: false, error };
+      }
+    },
+  };
+}
+
+function iterableOf(values) {
+  return {
+    *[Symbol.iterator]() { yield* values; },
+  };
+}
+
+function makeRuntimeEl(text) {
+  const el = {
+    style: { cssText: '' },
+    textContent: text || '',
+    innerHTML: '',
+    _tag: '',
+    value: '',
+    checked: false,
+    disabled: false,
+    _children: [],
+    _listeners: {},
+    createEl(tag, opts) {
+      const child = makeRuntimeEl(opts && opts.text != null ? String(opts.text) : '');
+      child._tag = tag;
+      child.type = opts && opts.type || '';
+      child.placeholder = opts && opts.placeholder || '';
+      this._children.push(child);
+      return child;
+    },
+    addEventListener(event, handler) { this._listeners[event] = handler; },
+    appendChild(child) { this._children.push(child); return child; },
+    focus() {},
+    remove() { this.removed = true; },
+    querySelector() { return null; },
+    closest() { return null; },
+    removeChild(child) {
+      this._children = this._children.filter((candidate) => candidate !== child);
+    },
+  };
+  Object.defineProperty(el, 'firstChild', {
+    get() { return this._children[0] || null; },
+  });
+  return el;
+}
+
+async function withGestureRuntime(appRef, renderSafe, run) {
+  const previous = {
+    app: global.app, customJS: global.customJS, window: global.window,
+    Notice: global.Notice, document: global.document,
+  };
+  global.app = appRef;
+  global.customJS = { RenderSafe: renderSafe };
+  global.window = { app: appRef, customJS: global.customJS };
+  global.Notice = function () {};
+  try { return await run(); }
+  finally {
+    global.app = previous.app;
+    global.customJS = previous.customJS;
+    global.window = previous.window;
+    global.Notice = previous.Notice;
+    global.document = previous.document;
+  }
+}
+
+okAsync('GA-P3-PROJECT-STATUS-RUNTIME invokes mutate and optimistic chip path', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-status-widget.js', 'ProjectStatusWidget');
+  const file = { path: 'Project.md', fm: { status: 'idea' } };
+  const calls = [], ui = [];
+  const appRef = { fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) } };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const saved = await new Klass()._writeStatus({}, file, 'planning', {
+      optimistic: () => ui.push('planning'), revert: () => ui.push('idea'),
+    });
+    assert(saved && calls.length === 1, 'status delegates exactly once');
+    assert(file.fm.status === 'planning' && ui.join(',') === 'planning', 'status write and optimism execute');
+    assert(calls[0].isCurrent({ status: 'idea' }) === false, 'status authority rejects stale indexed state');
+    assert(calls[0].isCurrent({ status: 'planning' }) === true, 'status authority accepts only the target state');
+  });
+});
+
+okAsync('GA-P3-PROJECT-STATUS-PICKER-ROLLBACK executes the rendered chip and picker callbacks', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-status-widget.js', 'ProjectStatusWidget');
+  const file = { path: 'Project.md', fm: { status: 'idea' } };
+  const calls = [];
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const body = makeRuntimeEl();
+    global.document = {
+      body,
+      createElement: () => makeRuntimeEl(),
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const container = makeRuntimeEl();
+    const dv = {
+      container,
+      current: () => ({ file: { path: file.path }, status: 'idea' }),
+    };
+    await new Klass().render(dv);
+    const nodes = [];
+    const walk = (node) => {
+      nodes.push(node);
+      for (const child of node._children || []) walk(child);
+    };
+    walk(container);
+    const chip = nodes.find((node) => node._tag === 'button' && typeof node.onclick === 'function');
+    assert(chip, 'rendered project status chip has its production click callback');
+    let chipHtml = chip.innerHTML;
+    const chipHistory = [];
+    Object.defineProperty(chip, 'innerHTML', {
+      get() { return chipHtml; },
+      set(value) { chipHtml = String(value); chipHistory.push(chipHtml); },
+    });
+    chip.onclick();
+    const pickerNodes = [];
+    walk(body);
+    for (const node of nodes) {
+      if (!pickerNodes.includes(node)) pickerNodes.push(node);
+    }
+    const planning = nodes.find((node) => node._tag === ''
+      && typeof node.onclick === 'function' && /<span>planning<\/span>/.test(node.innerHTML || ''));
+    assert(planning, 'rendered project picker exposes the planning choice');
+    await planning.onclick();
+    assert(calls.length === 1, 'rendered picker delegates once through mutate');
+    assert(chipHistory.length >= 2
+      && /planning/.test(chipHistory[chipHistory.length - 2])
+      && /idea/.test(chipHistory[chipHistory.length - 1]),
+    'rendered chip visibly applies planning then restores idea after rejection');
+  });
+});
+
+okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root atlas and map', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-workstream-manager.js', 'ProjectWorkstreamManager');
+  const docsAtlas = { path: 'spice/projects/x/docs/Docs.md', fm: { type: 'project', workstreams: [{ id: 'docs' }] } };
+  const docsBefore = JSON.stringify(docsAtlas.fm);
+  const atlas = { path: 'spice/projects/x/X.md', fm: { type: 'project', workstreams: [] } };
+  const map = { path: 'spice/projects/x/Project Map.md', fm: { type: 'map', workstreams: [] } };
+  const calls = [];
+  const appRef = {
+    vault: {
+      getFiles: () => [docsAtlas, atlas, map],
+    },
+    metadataCache: { getFileCache: (file) => ({ frontmatter: file.fm }) },
+    fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    let indexed = [];
+    const dv = { current: () => ({ file: { path: map.path }, workstreams: indexed }) };
+    const inst = new Klass();
+    let pending = null;
+    inst._showModal = (build) => {
+      const dialog = makeRuntimeEl();
+      build(dialog, () => {});
+      const nodes = [];
+      const walk = (node) => {
+        nodes.push(node);
+        for (const child of node._children || []) walk(child);
+      };
+      walk(dialog);
+      const name = nodes.find((node) => node.placeholder === 'Name (e.g. Terraform)');
+      const description = nodes.find((node) => node.placeholder === 'Description (optional)');
+      const add = nodes.find((node) => node.textContent === 'Add');
+      assert(name && description && add, 'add flow exposes its inputs and submit gesture');
+      name.value = 'API';
+      description.value = '';
+      pending = add.onclick();
+    };
+    inst.addWorkstream(dv);
+    await pending;
+    assert(calls.length === 1, 'add workstream delegates through one mutate call');
+    assert(atlas.fm.workstreams[0].id === 'api', 'shared writer persists the project atlas');
+    assert(map.fm.workstreams[0].id === 'api', 'shared writer persists the project map');
+    assert(JSON.stringify(docsAtlas.fm) === docsBefore, 'shared writer keeps the complete nested docs atlas unchanged');
+    assert(calls[0].isCurrent({ workstreams: iterableOf([{ id: 'stale' }]) }) === false,
+      'workstream authority rejects stale iterable state');
+    assert(calls[0].isCurrent({ workstreams: iterableOf([{ id: 'api', name: 'API', description: '' }]) }) === true,
+      'workstream authority accepts a non-Array iterable with the exact target');
+    assert(calls[0].isCurrent({ workstreams: { 0: { id: 'api' }, length: 1 } }) === false,
+      'workstream authority fails closed for non-iterable array-like state');
+
+    indexed = [{ id: 'api', name: 'API', description: '' }];
+    inst._showModal = (build) => {
+      const dialog = makeRuntimeEl();
+      build(dialog, () => {});
+      const nodes = [];
+      const walk = (node) => {
+        nodes.push(node);
+        for (const child of node._children || []) walk(child);
+      };
+      walk(dialog);
+      const remove = nodes.find((node) => typeof node.onclick === 'function'
+        && (node._children || []).some((child) => child.textContent === 'API'));
+      assert(remove, 'remove flow exposes the API removal gesture');
+      pending = remove.onclick();
+    };
+    inst.removeWorkstream(dv);
+    await pending;
+    assert(calls.length === 2, 'remove workstream delegates through one additional mutate call');
+    assert(atlas.fm.workstreams.length === 0 && map.fm.workstreams.length === 0,
+      'remove persists the same empty target to root atlas and map');
+    assert(JSON.stringify(docsAtlas.fm) === docsBefore, 'remove also keeps the complete nested docs atlas unchanged');
+    assert(calls[1].isCurrent({ workstreams: iterableOf([{ id: 'api' }]) }) === false,
+      'remove authority rejects the stale pre-remove iterable');
+    assert(calls[1].isCurrent({ workstreams: iterableOf([]) }) === true,
+      'remove authority accepts the exact empty iterable');
+  });
+});
+
+okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutate for link persistence', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
+  const file = { path: 'Links Hub.md', fm: { links: [] } };
+  const calls = [];
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const saved = await new Klass()._write({ current: () => ({ file: { path: file.path } }) }, [{ url: 'https://x', text: 'X' }]);
+    assert(saved && calls.length === 1, 'links delegate exactly once');
+    assert(file.fm.links[0].text === 'X', 'links persist through the delegated write');
+    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://stale', text: 'Stale' }]) }) === false,
+      'links authority rejects stale iterable state');
+    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://x', text: 'X' }]) }) === true,
+      'links authority accepts exact non-Array DataArray-shaped state');
+    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://x' }]) }) === false,
+      'links authority rejects a label that does not match the exact target');
+  });
+});
+
+okAsync('GA-P3-MEETINGS-RUNTIME invokes mutate for frontmatter persistence', async () => {
+  const Klass = loadClass('blueprints/meetings/helpers/meeting-leaf-actions.js', 'MeetingLeafActions');
+  const file = { path: 'Meeting.md', fm: {} };
+  const calls = [];
+  const appRef = { fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) } };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const saved = await new Klass()._mutateFrontmatter({}, file, {
+      write: (fm) => { fm.project = '[[Sauce]]'; }, isCurrent: () => true,
+    });
+    assert(saved && calls.length === 1 && file.fm.project === '[[Sauce]]', 'meeting delegates exactly once');
+  });
+});
+
+okAsync('GA-P3-MEETING-PROJECT-AUTHORITY executes the handler predicate against Link objects', async () => {
+  const Klass = loadClass('blueprints/meetings/helpers/meeting-leaf-actions.js', 'MeetingLeafActions');
+  const file = { path: 'Meeting.md', fm: {} };
+  const calls = [];
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const inst = new Klass();
+    inst._listProjects = () => [{ name: 'Sauce', slug: 'sauce' }];
+    let choosePromise = null;
+    inst._openModal = ({ build }) => {
+      const panel = makeRuntimeEl();
+      build(panel, () => {});
+      const buttons = [];
+      const walk = (node) => {
+        if (typeof node.onclick === 'function') buttons.push(node);
+        for (const child of node._children || []) walk(child);
+      };
+      walk(panel);
+      const sauce = buttons.find((button) => button.textContent === 'Sauce');
+      assert(sauce, 'project handler exposes the Sauce choice');
+      choosePromise = sauce.onclick();
+    };
+    inst._onAddToProject({ current: () => ({ file: { path: file.path } }) });
+    await choosePromise;
+    assert(calls.length === 1, 'project handler delegates exactly once');
+    const authority = calls[0].isCurrent;
+    assert(authority({ project: { path: 'spice/projects/sauce/Sauce.md', display: 'Sauce' } }) === true,
+      'project authority accepts the exact Obsidian Link object');
+    assert(authority({ project: { path: 'spice/projects/other/Other.md', display: 'Other' } }) === false,
+      'project authority rejects an unrelated Link object');
+  });
+});
+
+okAsync('GA-P3-MEETING-ATTENDEE-AUTHORITY executes the handler predicate against iterable Link values', async () => {
+  const Klass = loadClass('blueprints/meetings/helpers/meeting-leaf-actions.js', 'MeetingLeafActions');
+  const file = { path: 'Meeting.md', fm: {} };
+  const calls = [];
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file, getMarkdownFiles: () => [] },
+    fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const inst = new Klass();
+    inst._listPeople = () => ['Alice'];
+    let savePromise = null;
+    inst._openModal = ({ build }) => {
+      const panel = makeRuntimeEl();
+      build(panel, () => {});
+      const nodes = [];
+      const walk = (node) => {
+        nodes.push(node);
+        for (const child of node._children || []) walk(child);
+      };
+      walk(panel);
+      const save = nodes.find((node) => node.textContent === 'Save attendees');
+      assert(save && typeof save.onclick === 'function', 'attendee handler exposes Save attendees');
+      savePromise = save.onclick();
+    };
+    inst._onEditAttendees({
+      current: () => ({ file: { path: file.path }, attendees: ['[[Alice]]'] }),
+    });
+    await savePromise;
+    assert(calls.length === 1, 'attendee handler delegates exactly once');
+    const authority = calls[0].isCurrent;
+    assert(authority({ attendees: iterableOf([{ path: 'spice/people/Alice.md', display: 'Alice' }]) }) === true,
+      'attendee authority accepts an exact non-Array iterable of Link objects');
+    assert(authority({ attendees: iterableOf([{ path: 'spice/people/Bob.md', display: 'Bob' }]) }) === false,
+      'attendee authority rejects stale iterable Link state');
+    assert(authority({ attendees: { 0: '[[Alice]]', length: 1 } }) === false,
+      'attendee authority fails closed for a non-iterable array-like value');
+  });
+});
+
+okAsync('GA-P3-READER-RUNTIME invokes mutate for leaf status persistence', async () => {
+  const Klass = loadClass('blueprints/reader/helpers/reader-article-actions.js', 'ReaderArticleActions');
+  const file = { path: 'Article.md', fm: { status: 'unread' } };
+  const calls = [], ui = [];
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const saved = await new Klass()._setStatus(file.path, 'reading', {}, {
+      optimistic: () => ui.push('reading'), revert: () => ui.push('unread'),
+    });
+    assert(saved && calls.length === 1, 'reader delegates exactly once');
+    assert(file.fm.status === 'reading' && ui.join(',') === 'reading', 'reader status and optimistic label execute');
+    assert(calls[0].isCurrent({ status: 'unread' }) === false, 'reader authority rejects stale status');
+    assert(calls[0].isCurrent({ status: 'READING' }) === true, 'reader authority canonicalizes exact status');
+  });
+});
+
+async function readerButtonRollbackOutcome(Klass) {
+  const file = { path: 'Article.md', fm: { status: 'unread' } };
+  const calls = [], buttons = [];
+  let settle;
+  const settled = new Promise((resolve) => { settle = resolve; });
+  const facade = makeGestureFacade(calls);
+  const mutate = facade.mutate;
+  facade.mutate = async (opts) => {
+    const result = await mutate(opts);
+    settle();
+    return result;
+  };
+  const appRef = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
+  };
+  return await withGestureRuntime(appRef, facade, async () => {
+    global.customJS.AccentButton = {
+      render: (_row, opts) => {
+        const button = makeRuntimeEl();
+        let visibleText = '';
+        let visibleHtml = '';
+        const visibleHistory = [];
+        const initialHtml = `<span>${opts.label}</span>`;
+        Object.defineProperties(button, {
+          textContent: {
+            configurable: true,
+            get() { return visibleText; },
+            set(value) {
+              visibleText = String(value);
+              // This bounded fixture writes only the fixed plain status label.
+              // Mirror it directly so the fake models textContent replacing
+              // innerHTML without pretending to be a general HTML sanitizer.
+              visibleHtml = visibleText;
+              visibleHistory.push(visibleText);
+            },
+          },
+          innerHTML: {
+            configurable: true,
+            get() { return visibleHtml; },
+            set(value) {
+              visibleHtml = String(value);
+              // The fixture has one known markup value; do not model general
+              // HTML parsing or sanitization in this bounded DOM double.
+              visibleText = visibleHtml === initialHtml ? String(opts.label) : visibleHtml;
+              visibleHistory.push(visibleText);
+            },
+          },
+        });
+        button.innerHTML = initialHtml;
+        button.onclick = opts.onClick;
+        button._label = opts.label;
+        button._visibleHistory = visibleHistory;
+        buttons.push(button);
+        return button;
+      },
+    };
+    const container = makeRuntimeEl();
+    const dv = {
+      container,
+      current: () => ({
+        type: 'reader-article', file: { path: file.path }, status: 'unread', url: '',
+      }),
+    };
+    new Klass().render(dv);
+    const reading = buttons.find((button) => button._label === 'Mark reading');
+    assert(reading, 'rendered reader row exposes the Mark reading button');
+    const priorHtml = reading.innerHTML;
+    reading.onclick();
+    await settled;
+    return {
+      calls: calls.length,
+      visibleHistory: reading._visibleHistory,
+      priorHtml,
+      finalHtml: reading.innerHTML,
+      disabled: reading.disabled,
+    };
+  });
+}
+
+okAsync('GA-P3-READER-BUTTON-ROLLBACK executes the rendered status-button callbacks', async () => {
+  const Klass = loadClass('blueprints/reader/helpers/reader-article-actions.js', 'ReaderArticleActions');
+  const outcome = await readerButtonRollbackOutcome(Klass);
+  assert(outcome.calls === 1, 'rendered reader button delegates once through mutate');
+  assert(outcome.visibleHistory.includes('Status: Reading'), 'reader button visibly applies the optimistic status');
+  assert(outcome.finalHtml === outcome.priorHtml && outcome.disabled === false,
+      'reader button restores its exact prior markup and enabled state after rejection');
+});
+
+okAsync('GA-P3C-READER-BUTTON-DOM-LABEL-ROLLBACK-MUTANT turns red', async () => {
+  const src = helperSource('reader/helpers/reader-article-actions.js');
+  const restoration = 'statusBtn.innerHTML = priorHtml;';
+  assert(src.includes(restoration), 'reader label-restoration mutation anchor exists');
+  const mutantSource = src.replace(restoration, '/* mutant: label restoration removed */');
+  const MutantClass = new Function(`${mutantSource}; return ReaderArticleActions;`)();
+  const outcome = await readerButtonRollbackOutcome(MutantClass);
+  const rollbackFixturePasses = outcome.finalHtml === outcome.priorHtml && outcome.disabled === false;
+  assert(outcome.visibleHistory.includes('Status: Reading'), 'mutant still reaches the visible optimistic label');
+  assert(outcome.disabled === false, 'mutant still restores enabled state');
+  assert(rollbackFixturePasses === false,
+    'DOM-faithful rollback fixture turns red when visible-label restoration is removed');
+});
+
+for (const [rel, name, label] of [
+  ['blueprints/sticky-notes/helpers/sticky-chrome-bar.js', 'StickyChromeBar', 'sticky'],
+  ['blueprints/journal/helpers/journal-chrome-bar.js', 'JournalChromeBar', 'journal'],
+]) {
+  okAsync(`GA-P3-${label.toUpperCase()}-RUNTIME invokes mutate for title persistence`, async () => {
+    const Klass = loadClass(rel, name);
+    const file = { path: `${label}.md`, fm: { title: 'Old' } };
+    const calls = [], ui = [];
+    const appRef = { fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) } };
+    await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+      const saved = await new Klass()._writeTitle({}, file, 'Old', 'New', (value) => ui.push(value));
+      assert(saved && calls.length === 1, `${label} delegates exactly once`);
+      assert(file.fm.title === 'New' && ui.join(',') === 'New', `${label} title and optimism execute`);
+    });
+  });
+}
+
+for (const [rel, name, label, bannerClass] of [
+  ['blueprints/sticky-notes/helpers/sticky-chrome-bar.js', 'StickyChromeBar', 'sticky', 'sticky-title-banner'],
+  ['blueprints/journal/helpers/journal-chrome-bar.js', 'JournalChromeBar', 'journal', 'journal-title-banner'],
+]) {
+  okAsync(`GA-P3-${label.toUpperCase()}-OVERFLOW-ROLLBACK executes real dispatch callback and rejected-write revert`, async () => {
+    const Klass = loadClass(rel, name);
+    const file = { path: `${label}.md`, fm: { title: 'Old' } };
+    const calls = [], history = [];
+    const titleEl = { style: { cssText: '' } };
+    Object.defineProperty(titleEl, 'textContent', {
+      get() { return history.length ? history[history.length - 1] : 'Old'; },
+      set(value) { history.push(String(value)); },
+    });
+    const banner = {
+      firstElementChild: titleEl,
+      querySelector: () => titleEl,
+    };
+    const dv = {
+      container: { querySelectorAll: (selector) => selector === `.${bannerClass}` ? [banner] : [] },
+      current: () => ({ file: { path: file.path }, title: 'Old' }),
+    };
+    const appRef = {
+      vault: { getAbstractFileByPath: () => file },
+      fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
+    };
+    await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+      global.customJS.RenderSafe.page = () => ({ file: { path: file.path }, title: 'Old' });
+      const inst = new Klass();
+      let overflowCallback = null;
+      inst._openRenameDialog = (_dv, _file, current, onDone) => {
+        assert(current === 'Old', `${label} overflow dispatch carries the current title`);
+        overflowCallback = onDone;
+      };
+      inst._config().dispatch(dv, { context: `${label}-entry`, path: file.path }, 'rename');
+      assert(typeof overflowCallback === 'function', `${label} overflow dispatch exposes a real banner callback`);
+      const saved = await inst._writeTitle(dv, file, 'Old', 'New', overflowCallback);
+      assert(saved === false && calls.length === 1, `${label} rejected write settles false through mutate`);
+      assert(history.join(',') === 'New,Old', `${label} banner applies optimism then restores the prior title`);
+      assert(calls[0].isCurrent({ title: 'Old' }) === false, `${label} title authority rejects stale state`);
+      assert(calls[0].isCurrent({ title: 'New' }) === true, `${label} title authority accepts exact state`);
+
+      const clickHistory = [];
+      const clickTitle = {
+        style: { cssText: '' },
+        _listeners: {},
+        addEventListener(event, handler) { this._listeners[event] = handler; },
+      };
+      Object.defineProperty(clickTitle, 'textContent', {
+        get() { return clickHistory.length ? clickHistory[clickHistory.length - 1] : 'Old'; },
+        set(value) { clickHistory.push(String(value)); },
+      });
+      const clickBanner = {
+        style: { cssText: '' },
+        firstElementChild: clickTitle,
+        querySelector: () => clickTitle,
+        createEl: () => clickTitle,
+        remove() {},
+      };
+      let mounted = false;
+      const clickContainer = {
+        querySelectorAll: (selector) => selector === `.${bannerClass}` && mounted ? [clickBanner] : [],
+        createEl: (_tag, opts) => {
+          assert(opts && opts.cls === bannerClass, `${label} click path creates the expected banner`);
+          mounted = true;
+          return clickBanner;
+        },
+      };
+      const clickDv = { ...dv, container: clickContainer };
+      let clickCallback = null;
+      inst._openRenameDialog = (_dv, _file, current, onDone) => {
+        assert(current === 'Old', `${label} click dispatch carries the current title`);
+        clickCallback = onDone;
+      };
+      inst._renderTitleBanner(clickContainer, { title: 'Old', file: { name: `${label}.md` } }, file, clickDv);
+      assert(typeof clickTitle._listeners.click === 'function', `${label} title banner has a click gesture`);
+      clickTitle._listeners.click();
+      assert(typeof clickCallback === 'function', `${label} click gesture exposes the visible banner callback`);
+      const clickSaved = await inst._writeTitle(clickDv, file, 'Old', 'New', clickCallback);
+      assert(clickSaved === false && calls.length === 2, `${label} click-path rejected write settles false`);
+      assert(clickHistory.join(',') === 'New,Old', `${label} click path applies optimism then restores the prior title`);
+    });
+  });
+}
+
+for (const [rel, name, method, label, args] of [
+  ['blueprints/project/helpers/project-status-widget.js', 'ProjectStatusWidget', '_writeStatus', 'project status',
+    (file, ui) => [{}, file, 'planning', ui]],
+  ['blueprints/reader/helpers/reader-article-actions.js', 'ReaderArticleActions', '_setStatus', 'reader status',
+    (file, ui) => [file.path, 'reading', {}, ui]],
+]) {
+  okAsync(`GA-P3-${label.toUpperCase().replace(/ /g, '-')}-ROLLBACK restores visible state after write failure`, async () => {
+    const Klass = loadClass(rel, name);
+    const file = { path: `${label}.md`, fm: {} };
+    const calls = [], ui = [];
+    const appRef = {
+      vault: { getAbstractFileByPath: () => file },
+      fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
+    };
+    await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+      const saved = await new Klass()[method](...args(file, {
+        optimistic: () => ui.push('next'),
+        revert: () => ui.push('prior'),
+      }));
+      assert(saved === false && calls.length === 1, `${label} rejected write settles false`);
+      assert(ui.join(',') === 'next,prior', `${label} executes optimism then the exact revert callback`);
+    });
+  });
+}
+
 (async () => {
   for (const test of asyncCases) {
     try {

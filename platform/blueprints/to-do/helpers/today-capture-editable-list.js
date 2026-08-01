@@ -223,12 +223,32 @@ class TodayCaptureEditableList {
             cb.addEventListener('change', async () => {
                 const want = cb.checked;
                 const newLine = TodayCaptureEditableList._setChecked(entry.line, want);
-                const res = await ti.replaceTaskAt(filePath, entry.idx, newLine);
-                if (!res || !res.ok) {
-                    cb.checked = !want;
-                    new Notice('Could not update task: ' + ((res && res.reason) || 'unknown'), 6000);
+                const renderSafe = globalThis.customJS?.RenderSafe;
+                const setUi = (checked) => {
+                    cb.checked = checked;
+                    title.style.textDecoration = checked ? 'line-through' : '';
+                    title.style.color = checked ? 'var(--text-muted)' : 'var(--text-normal)';
+                };
+                if (!renderSafe || typeof renderSafe.mutate !== 'function') {
+                    setUi(!want);
+                    new Notice('Could not update task: RenderSafe is unavailable.', 6000);
+                    return;
                 }
-                // On success, vault.modify re-renders this block with fresh state.
+                await renderSafe.mutate({
+                    app: window.app,
+                    dv,
+                    path: filePath,
+                    optimistic: () => setUi(want),
+                    revert: () => setUi(!want),
+                    failureMessage: 'Could not update task',
+                    write: async () => {
+                        const res = await ti.replaceTaskAt(filePath, entry.idx, newLine);
+                        if (!res || !res.ok) throw new Error((res && res.reason) || 'unknown');
+                        return res;
+                    },
+                });
+                // Body-markdown authority remains the existing vault event path;
+                // RenderSafe owns capture, optimism, and rollback for the gesture.
             });
 
             // Title — render inline markdown so `[label](url)` external links and

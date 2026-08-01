@@ -5,8 +5,8 @@
  * buttons stretch to fill the width evenly (mirrors WikiLeafActions):
  *   [ Open article ↗ ] [ Mark reading ] [ Mark read ] [ Reader hub ]
  * The status buttons shown depend on the article's current status; a status write
- * routes through `_setStatus(path, next)` (processFrontMatter, this file only —
- * mirrors the to-do markDone write). An owned top+bottom hairline gives the row
+ * routes through `_setStatus(path, next)` and RenderSafe.mutate. An owned
+ * top+bottom hairline gives the row
  * breathing room so the template needs no literal `---`.
  *
  * Article creation is owned by the nav chrome-bar's "+ New article" button
@@ -121,8 +121,8 @@ class ReaderArticleActions {
 
         const AB = window.customJS && window.customJS.AccentButton;
         const addBtn = (label, icon, onClick) => {
-            if (!AB || typeof AB.render !== 'function') return;
-            this._styleLeafBtn(AB.render(row, { label: label, icon: icon, onClick: onClick }));
+            if (!AB || typeof AB.render !== 'function') return null;
+            return this._styleLeafBtn(AB.render(row, { label: label, icon: icon, onClick: onClick }));
         };
         const open = (target) => {
             if (!target) return;
@@ -152,7 +152,22 @@ class ReaderArticleActions {
         const transitions = ReaderArticleActions.statusTransitions(status);
         for (const t of transitions) {
             const icon = (t.next === 'reading') ? bookIcon : (t.next === 'archived') ? checkIcon : bookIcon;
-            addBtn(t.label, icon, () => { this._setStatus(filePath, t.next); });
+            let statusBtn = null;
+            statusBtn = addBtn(t.label, icon, () => {
+                const priorHtml = statusBtn && statusBtn.innerHTML;
+                this._setStatus(filePath, t.next, dv, {
+                    optimistic: () => {
+                        if (!statusBtn) return;
+                        statusBtn.textContent = 'Status: ' + this._statusLabel(t.next);
+                        statusBtn.disabled = true;
+                    },
+                    revert: () => {
+                        if (!statusBtn) return;
+                        statusBtn.innerHTML = priorHtml;
+                        statusBtn.disabled = false;
+                    },
+                });
+            });
         }
 
         // Reader hub — openLink to spice/reader/Reader.md (mirrors WikiLeafActions
@@ -165,14 +180,14 @@ class ReaderArticleActions {
 
     /**
      * async _setStatus(path, next) — write the article's status frontmatter (this
-     * file only) via processFrontMatter (mirrors the to-do markDone write). Resolve
+     * file only) via RenderSafe.mutate. Resolve
      * the TFile from `path` (getAbstractFileByPath), then
      * app.fileManager.processFrontMatter(file, fm => { fm.status = next; }). Rely on
      * Obsidian reactivity to re-render the page/queue. Best-effort — cold-load /
      * missing file / missing app just no-ops. Never throws.
      */
-    async _setStatus(path, next) {
-        if (!path) return;
+    async _setStatus(path, next, dv, ui) {
+        if (!path) return false;
         try {
             const appRef = (typeof window !== 'undefined' && window.app)
                 || (typeof app !== 'undefined' && app)
@@ -180,15 +195,39 @@ class ReaderArticleActions {
             const file = (appRef && appRef.vault && typeof appRef.vault.getAbstractFileByPath === 'function')
                 ? appRef.vault.getAbstractFileByPath(String(path))
                 : null;
-            if (!appRef || !file || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') return;
-            await appRef.fileManager.processFrontMatter(file, (fm) => {
-                fm.status = next;
-                try { fm.status_changed_at = new Date().toISOString(); } catch (_e) {}
+            if (!appRef || !file || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') return false;
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            if (!renderSafe || typeof renderSafe.mutate !== 'function') {
+                if (ui && typeof ui.revert === 'function') await ui.revert();
+                try { new Notice('Could not update status: RenderSafe is unavailable.', 6000); } catch (_e) {}
+                return false;
+            }
+            const result = await renderSafe.mutate({
+                app: appRef,
+                dv,
+                path: String(path),
+                optimistic: ui && ui.optimistic,
+                revert: ui && ui.revert,
+                failureMessage: 'Could not update status',
+                write: () => appRef.fileManager.processFrontMatter(file, (fm) => {
+                    fm.status = next;
+                    try { fm.status_changed_at = new Date().toISOString(); } catch (_e) {}
+                }),
+                isCurrent: (page) => String(page && page.status || '').trim().toLowerCase() === next,
             });
-            try { new Notice('Status: ' + next); } catch (_e) {}
+            if (result.ok === true) try { new Notice('Status: ' + next); } catch (_e) {}
+            return result.ok === true;
         } catch (e) {
             try { new Notice('Could not update status: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            return false;
         }
+    }
+
+    _statusLabel(status) {
+        const s = String(status == null ? '' : status).trim().toLowerCase();
+        if (s === 'reading') return 'Reading';
+        if (s === 'archived') return 'Archived';
+        return 'Unread';
     }
 
     // Each button stretches to an equal share of the centered row (flex: 1) with a

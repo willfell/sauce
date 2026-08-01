@@ -333,7 +333,7 @@ class BudgetCategoriesEditor {
             fm.categories = (fm.categories || []).concat([result]);
             next = fm.categories.slice();
         });
-        await this.render(dv, next);
+        await this._rerender(dv, next);
     }
 
     async _editFlow(file, dv, index, current, groups) {
@@ -347,7 +347,7 @@ class BudgetCategoriesEditor {
             fm.categories = list;
             next = list.slice();
         });
-        await this.render(dv, next);
+        await this._rerender(dv, next);
     }
 
     async _deleteFlow(file, dv, index, current) {
@@ -359,7 +359,12 @@ class BudgetCategoriesEditor {
             fm.categories = list;
             next = list.slice();
         });
-        await this.render(dv, next);
+        await this._rerender(dv, next);
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv, authoritative);
     }
 
     async _mutate(file, mutator) {
