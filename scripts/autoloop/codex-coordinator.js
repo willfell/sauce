@@ -5414,10 +5414,18 @@ function ratificationStatus(record, state, deps = {}) {
 
 const LOOP_STATION_SCHEMA_VERSION = '1.0.0';
 const LOOP_STATION_LIST_CAP = 20;
+// Scaffold-if-absent body only: existing station bodies are NEVER rewritten
+// by the coordinator (that guarantee is asserted by run-codex-autoloop.js);
+// existing stations gain the project-scope GraphView block via the install
+// heal (platform/install.js applyLoopStationGraphHeal), not here.
 const LOOP_STATION_BODY = [
   '',
   '```dataviewjs',
   'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });',
+  '```',
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "GraphView", args: [{ scope: "project" }] });',
   '```',
   '',
 ].join('\n');
