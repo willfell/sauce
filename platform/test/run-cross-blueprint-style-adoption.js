@@ -175,7 +175,14 @@ function loadHarness() {
             },
         },
         SectionLabel: { divider(parent) { (parent.container || parent).createEl("div", { cls: "fixture-divider" }); } },
-        RenderSafe: { page: (dv) => dv.current() },
+        RenderSafe: {
+            page: (dv) => dv.current(),
+            async mutate(opts) {
+                if (opts.optimistic) await opts.optimistic();
+                try { return { ok: true, value: await opts.write() }; }
+                catch (error) { if (opts.revert) await opts.revert(error); return { ok: false, error }; }
+            },
+        },
     };
     vm.runInContext(`${fs.readFileSync(SECTION_EXPLORER, "utf8")}\nthis.__SectionExplorer = SectionExplorer;`, sandbox);
     sandbox.customJS.SectionExplorer = new sandbox.__SectionExplorer();

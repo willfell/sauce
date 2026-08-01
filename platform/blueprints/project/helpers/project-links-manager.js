@@ -2,7 +2,7 @@
 //
 // Add / edit / delete link dialogs on the per-project Link Hub note. Renders an
 // "Add link" + "Manage links" button row; the modals write the note's `links`
-// frontmatter via app.fileManager.processFrontMatter. The read-only list stays
+// frontmatter via RenderSafe.mutate. The read-only list stays
 // owned by ProjectLinksPanel (rendered below this in the Link Hub template).
 //
 // Option B (PR1 decision): NO project->`links` mechanism dependency. The link
@@ -10,7 +10,7 @@
 // fallback), so this ships to every vault with zero subscription churn.
 //
 // The pure link-mutation logic (addLink / updateLink / deleteLink) is static so
-// the Node harness exercises it directly; the modals + processFrontMatter are
+// the Node harness exercises it directly; the modals + mutation lifecycle are
 // dogfood-only (untestable in the harness), mirroring ProjectWorkstreamManager.
 //
 // customJS stores classes as INSTANCES (customJS.ProjectLinksManager = new …),
@@ -103,10 +103,31 @@ class ProjectLinksManager {
   async _write(dv, links) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the Link Hub note."); return false; }
-    try {
-      await app.fileManager.processFrontMatter(file, (fm) => { fm.links = links.map((l) => ({ url: l.url, text: l.text })); });
-      return true;
-    } catch (e) { new Notice("Could not save links: " + (e.message || e), 6000); return false; }
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      new Notice("Could not save links: RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const next = links.map((l) => ({ url: l.url, text: l.text }));
+    const expected = JSON.stringify(next);
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      failureMessage: "Could not save links",
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
+      isCurrent: (page) => {
+        const value = page && page.links;
+        if (!value || typeof value[Symbol.iterator] !== "function") return false;
+        try {
+          return JSON.stringify(Array.from(value).map((link) => ({
+            url: String(link && link.url || ""),
+            text: String(link && (link.text || link.url) || ""),
+          }))) === expected;
+        } catch (_e) { return false; }
+      },
+    });
+    return result.ok === true;
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────

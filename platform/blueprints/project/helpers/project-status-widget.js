@@ -1,7 +1,7 @@
 /**
  * Project Status Widget (CustomJS)
  * Renders a colored status chip on the project hub; click → 7-option
- * popup → writes back status + status_changed_at via processFrontMatter.
+ * popup → writes back status + status_changed_at via RenderSafe.mutate.
  *
  * Usage in DataviewJS (atlas note):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
@@ -57,35 +57,38 @@ class ProjectStatusWidget {
 
         row.createEl("span", { text: "Status:" }).style.cssText = "font-size: 0.82em; color: var(--text-muted);";
 
-        const chipColor = COLORS[currentStatus] || "var(--text-muted)";
         const chip = row.createEl("button");
-        chip.innerHTML = `<span>${currentStatus}</span><span style="margin-left:6px;opacity:0.7;">▼</span>`;
-        chip.style.cssText = `
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            background: ${chipColor}1A;
-            color: ${chipColor};
-            border: 1px solid ${chipColor}40;
-            border-radius: 10px;
-            padding: 2px 10px;
-            font-size: 0.85em;
-            font-weight: 600;
-            white-space: nowrap;
-            transition: all 0.15s ease;
-        `;
-        chip.onmouseenter = () => { chip.style.background = `${chipColor}33`; };
-        chip.onmouseleave = () => { chip.style.background = `${chipColor}1A`; };
+        const applyChipStatus = (status) => {
+            const color = COLORS[status] || "var(--text-muted)";
+            chip.innerHTML = `<span>${status}</span><span style="margin-left:6px;opacity:0.7;">▼</span>`;
+            chip.style.cssText = `
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                background: ${color}1A;
+                color: ${color};
+                border: 1px solid ${color}40;
+                border-radius: 10px;
+                padding: 2px 10px;
+                font-size: 0.85em;
+                font-weight: 600;
+                white-space: nowrap;
+                transition: all 0.15s ease;
+            `;
+            chip.onmouseenter = () => { chip.style.background = `${color}33`; };
+            chip.onmouseleave = () => { chip.style.background = `${color}1A`; };
+        };
+        applyChipStatus(currentStatus);
 
         if (updatedAt) {
             const upd = row.createEl("span", { text: `Updated ${updatedAt}` });
             upd.style.cssText = "font-size: 0.75em; color: var(--text-muted); margin-left: 4px;";
         }
 
-        chip.onclick = () => this._openPicker(file, currentStatus, STATUSES, COLORS);
+        chip.onclick = () => this._openPicker(dv, file, currentStatus, STATUSES, COLORS, applyChipStatus);
     }
 
-    _openPicker(file, currentStatus, STATUSES, COLORS) {
+    _openPicker(dv, file, currentStatus, STATUSES, COLORS, applyChipStatus) {
         const overlay = document.createElement("div");
         overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
 
@@ -119,7 +122,10 @@ class ProjectStatusWidget {
                 btn.onmouseleave = () => { btn.style.background = `${c}1A`; };
                 btn.onclick = async () => {
                     overlay.remove();
-                    await this._writeStatus(file, s);
+                    await this._writeStatus(dv, file, s, {
+                        optimistic: () => applyChipStatus(s),
+                        revert: () => applyChipStatus(currentStatus),
+                    });
                 };
             }
             dialog.appendChild(btn);
@@ -158,16 +164,28 @@ class ProjectStatusWidget {
         return fm;
     }
 
-    async _writeStatus(file, newStatus) {
+    async _writeStatus(dv, file, newStatus, ui) {
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-        try {
-            await app.fileManager.processFrontMatter(file, fm => {
-                ProjectStatusWidget._applyStatusChange(fm, newStatus, today);
-            });
-        } catch (e) {
-            const msg = (e && e.message) ? e.message : String(e);
-            console.error("ProjectStatusWidget: failed to write status — " + msg);
-            new Notice("Failed to update project status: " + msg, 8000);
+        const renderSafe = globalThis.customJS?.RenderSafe;
+        if (!renderSafe || typeof renderSafe.mutate !== "function") {
+            if (ui && typeof ui.revert === "function") {
+                try { await ui.revert(); } catch (_e) {}
+            }
+            new Notice("Failed to update project status: RenderSafe is unavailable.", 8000);
+            return false;
         }
+        const result = await renderSafe.mutate({
+            app,
+            dv,
+            path: file.path,
+            optimistic: ui && ui.optimistic,
+            revert: ui && ui.revert,
+            failureMessage: "Failed to update project status",
+            write: () => app.fileManager.processFrontMatter(file, fm => {
+                ProjectStatusWidget._applyStatusChange(fm, newStatus, today);
+            }),
+            isCurrent: (page) => String(page && page.status || "").trim() === newStatus,
+        });
+        return result.ok === true;
     }
 }

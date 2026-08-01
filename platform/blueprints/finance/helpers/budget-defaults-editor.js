@@ -180,7 +180,7 @@ class BudgetDefaultsEditor {
             next.push(name);
             fm.groups = next;
         });
-        await this.render(dv);
+        await this._rerender(dv);
     }
 
     async _editGroupFlow(file, dv, index, current) {
@@ -202,7 +202,7 @@ class BudgetDefaultsEditor {
                 }
             }
         });
-        await this.render(dv);
+        await this._rerender(dv);
     }
 
     async _deleteGroupFlow(file, dv, index, groupName, categories) {
@@ -230,7 +230,7 @@ class BudgetDefaultsEditor {
                 fm.groups = next;
             });
         }
-        await this.render(dv);
+        await this._rerender(dv);
     }
 
     _promptForReassign(groupName, count, categories) {
@@ -303,7 +303,7 @@ class BudgetDefaultsEditor {
             next[t] = tmp;
             fm.groups = next;
         });
-        await this.render(dv);
+        await this._rerender(dv);
     }
 
     // -------------------------- Categories pane (grouped) --------------------
@@ -513,7 +513,7 @@ class BudgetDefaultsEditor {
             fm.categories = next;
             captured = next.slice();
         });
-        await this.render(dv, captured);
+        await this._rerender(dv, captured);
     }
 
     async _editCategoryFlow(file, dv, index, current) {
@@ -530,7 +530,7 @@ class BudgetDefaultsEditor {
             fm.categories = next;
             captured = next.slice();
         });
-        await this.render(dv, captured);
+        await this._rerender(dv, captured);
     }
 
     async _deleteCategoryFlow(file, dv, index, current) {
@@ -542,13 +542,18 @@ class BudgetDefaultsEditor {
             fm.categories = next;
             captured = next.slice();
         });
-        await this.render(dv, captured);
+        await this._rerender(dv, captured);
     }
 
     // ------------------------------ Mutate helpers --------------------------
 
     _mutateRead(file) {
         return app.metadataCache.getFileCache(file)?.frontmatter || null;
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv, authoritative);
     }
 
     async _mutate(file, mutator) {
