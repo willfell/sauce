@@ -35,6 +35,24 @@ class TripEntryList {
     for (const k of Object.keys(entry || {})) out[k] = typeof entry[k] === "string" ? entry[k].trim() : entry[k];
     return out;
   }
+  // Dataview rehydrates YAML dates as Luxon DateTime values. Mutation
+  // authority compares the indexed value with the plain frontmatter value, so
+  // normalize date-like values (and object key order) before stringifying.
+  static _mutationComparable(value) {
+    if (value && typeof value.toISODate === "function") {
+      try {
+        const isoDate = value.toISODate();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(isoDate || ""))) return String(isoDate);
+      } catch (_e) {}
+    }
+    if (Array.isArray(value)) return value.map((item) => TripEntryList._mutationComparable(item));
+    if (value && typeof value === "object") {
+      const out = {};
+      for (const key of Object.keys(value).sort()) out[key] = TripEntryList._mutationComparable(value[key]);
+      return out;
+    }
+    return value;
+  }
   static addEntry(list, entry) {
     const l = Array.isArray(list) ? list.slice() : [];
     const e = TripEntryList._norm(entry);
@@ -608,7 +626,7 @@ class TripEntryList {
       new Notice("Could not save: RenderSafe is unavailable.", 6000);
       return false;
     }
-    const expected = JSON.stringify(Array.isArray(list) ? list : []);
+    const expected = JSON.stringify(TripEntryList._mutationComparable(Array.isArray(list) ? list : []));
     const result = await renderSafe.mutate({
       app,
       dv,
@@ -619,7 +637,7 @@ class TripEntryList {
       isCurrent: (page) => {
         const current = page && page[spec.key];
         if (!current || typeof current[Symbol.iterator] !== "function") return false;
-        try { return JSON.stringify(Array.from(current)) === expected; }
+        try { return JSON.stringify(TripEntryList._mutationComparable(Array.from(current))) === expected; }
         catch (_e) { return false; }
       },
     });

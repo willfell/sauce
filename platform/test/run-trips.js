@@ -246,6 +246,7 @@ function makeDv(embed, currentVal) {
         let captures = 0;
         let writeGate = deferred();
         let failWrite = false;
+        let indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
         global.app = {
             workspace: { getActiveFile: () => file },
             vault: { getAbstractFileByPath: (p) => p === pathName ? file : null },
@@ -259,7 +260,7 @@ function makeDv(embed, currentVal) {
                     await writeGate.promise;
                     if (failWrite) throw new Error('trip write failed');
                     mutate(target.fm);
-                    page = Object.assign({ file: { path: pathName } }, target.fm);
+                    page = indexPage(target);
                     if (metadataListener) metadataListener(target);
                 },
             },
@@ -320,21 +321,33 @@ function makeDv(embed, currentVal) {
         // natural tick.
         failWrite = false;
         for (const fixture of [
-            { key: 'flights', value: [{ flight_no: 'UA1' }] },
-            { key: 'stays', value: [{ name: 'Hotel' }] },
+            { key: 'flights', value: [{ flight_no: 'UA1', depart_date: '2026-08-14' }], dateKey: 'depart_date' },
+            { key: 'stays', value: [{ name: 'Hotel', check_in: '2026-08-15' }], dateKey: 'check_in' },
         ]) {
             page = { file: { path: pathName }, [fixture.key]: [] };
             file.fm[fixture.key] = [];
+            indexPage = (target) => {
+                const indexedEntry = Object.assign({}, target.fm[fixture.key][0], {
+                    [fixture.dateKey]: {
+                        isLuxonDateTime: true,
+                        toISODate: () => target.fm[fixture.key][0][fixture.dateKey],
+                        toJSON: () => target.fm[fixture.key][0][fixture.dateKey] + 'T00:00:00.000Z',
+                    },
+                });
+                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
+                return { file: { path: pathName }, [fixture.key]: dataArray };
+            };
             writeGate = deferred(); writeGate.resolve();
             const before = refreshes;
             const saved = await list._write(dv, { key: fixture.key }, fixture.value);
-            ok(`GA-P2-${fixture.key.toUpperCase()}-POLL active edit/delete path refreshes from indexed value`,
+            ok(`GA-P2-${fixture.key.toUpperCase()}-POLL active edit/delete refreshes from DataArray + Luxon date`,
                 saved && refreshes === before + 1 && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
         }
 
         const links = new TripLinks();
         page = { file: { path: pathName }, links: [] };
         file.fm.links = [];
+        indexPage = (target) => Object.assign({ file: { path: pathName } }, target.fm);
         writeGate = deferred(); writeGate.resolve();
         const beforeLinks = refreshes;
         const linksSaved = await links._write(dv, [{ url: 'https://example.com', text: 'Example' }]);
