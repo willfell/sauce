@@ -185,10 +185,26 @@ class TripLinks {
   async _write(dv, links) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the trip atlas note."); return false; }
-    try {
-      await app.fileManager.processFrontMatter(file, (fm) => { fm.links = links.map((l) => ({ url: l.url, text: l.text })); });
-      return true;
-    } catch (e) { new Notice("Could not save links: " + (e.message || e), 6000); return false; }
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      new Notice("Could not save links: RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const next = links.map((l) => ({ url: l.url, text: l.text }));
+    const expected = JSON.stringify(next);
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
+      isCurrent: (page) => {
+        const current = page && page.links;
+        if (!current || typeof current[Symbol.iterator] !== "function") return false;
+        try { return JSON.stringify(Array.from(current).map((l) => ({ url: l.url, text: l.text }))) === expected; }
+        catch (_e) { return false; }
+      },
+    });
+    return result.ok === true;
   }
 
   // ── entry points (wired from the atlas nav bar) ──────────────────────────
