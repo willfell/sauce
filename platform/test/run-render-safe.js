@@ -1898,8 +1898,10 @@ async function readerButtonRollbackOutcome(Klass) {
             get() { return visibleText; },
             set(value) {
               visibleText = String(value);
-              visibleHtml = visibleText
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              // This bounded fixture writes only the fixed plain status label.
+              // Mirror it directly so the fake models textContent replacing
+              // innerHTML without pretending to be a general HTML sanitizer.
+              visibleHtml = visibleText;
               visibleHistory.push(visibleText);
             },
           },
