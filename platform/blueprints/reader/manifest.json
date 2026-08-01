@@ -1,6 +1,6 @@
 {
   "name": "reader",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "kind": "blueprint",
   "module_directory": "reader",
   "skills_dir": ".claude/skills/reader",
