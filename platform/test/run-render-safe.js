@@ -1869,8 +1869,7 @@ okAsync('GA-P3-READER-RUNTIME invokes mutate for leaf status persistence', async
   });
 });
 
-okAsync('GA-P3-READER-BUTTON-ROLLBACK executes the rendered status-button callbacks', async () => {
-  const Klass = loadClass('blueprints/reader/helpers/reader-article-actions.js', 'ReaderArticleActions');
+async function readerButtonRollbackOutcome(Klass) {
   const file = { path: 'Article.md', fm: { status: 'unread' } };
   const calls = [], buttons = [];
   let settle;
@@ -1886,13 +1885,38 @@ okAsync('GA-P3-READER-BUTTON-ROLLBACK executes the rendered status-button callba
     vault: { getAbstractFileByPath: () => file },
     fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
   };
-  await withGestureRuntime(appRef, facade, async () => {
+  return await withGestureRuntime(appRef, facade, async () => {
     global.customJS.AccentButton = {
       render: (_row, opts) => {
-        const button = makeRuntimeEl(opts.label);
+        const button = makeRuntimeEl();
+        let visibleText = '';
+        let visibleHtml = '';
+        const visibleHistory = [];
+        Object.defineProperties(button, {
+          textContent: {
+            configurable: true,
+            get() { return visibleText; },
+            set(value) {
+              visibleText = String(value);
+              visibleHtml = visibleText
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              visibleHistory.push(visibleText);
+            },
+          },
+          innerHTML: {
+            configurable: true,
+            get() { return visibleHtml; },
+            set(value) {
+              visibleHtml = String(value);
+              visibleText = visibleHtml.replace(/<[^>]*>/g, '');
+              visibleHistory.push(visibleText);
+            },
+          },
+        });
         button.innerHTML = `<span>${opts.label}</span>`;
         button.onclick = opts.onClick;
         button._label = opts.label;
+        button._visibleHistory = visibleHistory;
         buttons.push(button);
         return button;
       },
@@ -1908,19 +1932,39 @@ okAsync('GA-P3-READER-BUTTON-ROLLBACK executes the rendered status-button callba
     const reading = buttons.find((button) => button._label === 'Mark reading');
     assert(reading, 'rendered reader row exposes the Mark reading button');
     const priorHtml = reading.innerHTML;
-    const visibleHistory = [];
-    let visibleText = reading.textContent;
-    Object.defineProperty(reading, 'textContent', {
-      get() { return visibleText; },
-      set(value) { visibleText = String(value); visibleHistory.push(visibleText); },
-    });
     reading.onclick();
     await settled;
-    assert(calls.length === 1, 'rendered reader button delegates once through mutate');
-    assert(visibleHistory.includes('Status: Reading'), 'reader button visibly applies the optimistic status');
-    assert(reading.innerHTML === priorHtml && reading.disabled === false,
-      'reader button restores its exact prior markup and enabled state after rejection');
+    return {
+      calls: calls.length,
+      visibleHistory: reading._visibleHistory,
+      priorHtml,
+      finalHtml: reading.innerHTML,
+      disabled: reading.disabled,
+    };
   });
+}
+
+okAsync('GA-P3-READER-BUTTON-ROLLBACK executes the rendered status-button callbacks', async () => {
+  const Klass = loadClass('blueprints/reader/helpers/reader-article-actions.js', 'ReaderArticleActions');
+  const outcome = await readerButtonRollbackOutcome(Klass);
+  assert(outcome.calls === 1, 'rendered reader button delegates once through mutate');
+  assert(outcome.visibleHistory.includes('Status: Reading'), 'reader button visibly applies the optimistic status');
+  assert(outcome.finalHtml === outcome.priorHtml && outcome.disabled === false,
+      'reader button restores its exact prior markup and enabled state after rejection');
+});
+
+okAsync('GA-P3C-READER-BUTTON-DOM-LABEL-ROLLBACK-MUTANT turns red', async () => {
+  const src = helperSource('reader/helpers/reader-article-actions.js');
+  const restoration = 'statusBtn.innerHTML = priorHtml;';
+  assert(src.includes(restoration), 'reader label-restoration mutation anchor exists');
+  const mutantSource = src.replace(restoration, '/* mutant: label restoration removed */');
+  const MutantClass = new Function(`${mutantSource}; return ReaderArticleActions;`)();
+  const outcome = await readerButtonRollbackOutcome(MutantClass);
+  const rollbackFixturePasses = outcome.finalHtml === outcome.priorHtml && outcome.disabled === false;
+  assert(outcome.visibleHistory.includes('Status: Reading'), 'mutant still reaches the visible optimistic label');
+  assert(outcome.disabled === false, 'mutant still restores enabled state');
+  assert(rollbackFixturePasses === false,
+    'DOM-faithful rollback fixture turns red when visible-label restoration is removed');
 });
 
 for (const [rel, name, label] of [
