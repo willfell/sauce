@@ -5,7 +5,7 @@
  * customjs-guard block. Epic scope only in this slice: gathers type:slice
  * direct children of the atlas's sibling board/ directory (the same
  * folder-is-authoritative logic as EpicDashboard._slicePages), reads lane
- * order from the epic board note's "## In Planning" / "## In Progress"
+ * order from the epic board note's "## In Planning" / "## In Progress"  // lint-display-markers:allow doc comment names the real lane headings _laneOrder anchors on
  * checklist wikilinks, delegates ALL layout to customJS.GraphLayout, and
  * delegates status presentation (Delivery lifecycle API + the shared
  * EpicDashboard status-color buckets) — no duplicated color table, no
