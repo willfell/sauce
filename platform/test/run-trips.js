@@ -24,6 +24,11 @@ function ok(label, cond, detail) {
     if (cond) { passes++; console.log('ok ' + label); }
     else { fails++; console.error('FAIL ' + label + (detail ? ' — ' + detail : '')); }
 }
+function deferred() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+}
 async function okNoThrow(label, fn) {
     try { await fn(); passes++; console.log('ok ' + label); }
     catch (e) { fails++; console.error('FAIL ' + label + ': ' + (e && e.message ? e.message : e)); }
@@ -200,6 +205,149 @@ function makeDv(embed, currentVal) {
             ['Flights', 'Stay', 'Packing List', 'To Do', 'Notes']
                 .every(label => wrote.includes(`spice/trips/reunion/Reunion — ${label}.md`)), wrote.join('\n'));
         global.app.vault = savedVault;
+    }
+
+    // ---------- GA-P2 gesture writes: optimistic packing + active poll-refresh ----------
+    {
+        const TripEntryList = loadWidget('platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
+        const TripLinks = loadWidget('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+        const originalApp = global.app;
+        const originalRenderSafe = global.customJS.RenderSafe;
+        const originalNotice = global.Notice;
+        const notices = [];
+        global.Notice = function (message) { notices.push(String(message)); };
+
+        function trackedEl(tag) {
+            const classes = new Set();
+            const listeners = {};
+            const el = {
+                tag, children: [], style: makeStyle(), listeners, classes,
+                classList: {
+                    toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
+                    contains(name) { return classes.has(name); },
+                },
+                createEl(childTag, opts) {
+                    const child = trackedEl(childTag);
+                    child.textContent = opts && opts.text ? opts.text : '';
+                    this.children.push(child);
+                    return child;
+                },
+                addEventListener(name, fn) { listeners[name] = fn; },
+                remove() {},
+            };
+            return el;
+        }
+
+        const pathName = 'spice/trips/demo/Demo — Packing List.md';
+        const file = { path: pathName, fm: { packing_items: [{ category: 'Clothes', item: 'Socks', checked: false }] } };
+        let page = { file: { path: pathName }, packing_items: file.fm.packing_items };
+        let metadataListener = null;
+        let refreshes = 0;
+        let captures = 0;
+        let writeGate = deferred();
+        let failWrite = false;
+        global.app = {
+            workspace: { getActiveFile: () => file },
+            vault: { getAbstractFileByPath: (p) => p === pathName ? file : null },
+            metadataCache: {
+                on(_event, listener) { metadataListener = listener; return { id: 'trip-write' }; },
+                offref() {},
+            },
+            commands: { executeCommandById() { refreshes++; } },
+            fileManager: {
+                async processFrontMatter(target, mutate) {
+                    await writeGate.promise;
+                    if (failWrite) throw new Error('trip write failed');
+                    mutate(target.fm);
+                    page = Object.assign({ file: { path: pathName } }, target.fm);
+                    if (metadataListener) metadataListener(target);
+                },
+            },
+            plugins: { plugins: {} },
+        };
+        global.window.app = global.app;
+        const rs = new RenderSafeClass();
+        rs.captureScroll = () => { captures++; };
+        global.customJS.RenderSafe = rs;
+        global.window.customJS = global.customJS;
+        const dv = { current: () => page, page: () => page };
+        const list = new TripEntryList();
+        const host = trackedEl('div');
+        list._row(host, dv, {
+            key: 'packing_items', checkbox: true,
+            title: (entry) => entry.item, subtitle: () => '',
+        }, page.packing_items, page.packing_items[0], 0);
+        const row = host.children[0];
+        const checkbox = row.children[0];
+        checkbox.checked = true; // browser toggles the control before change fires
+        const pendingToggle = checkbox.listeners.change();
+        await Promise.resolve();
+        ok('GA-P2-PACKING-OPTIMISTIC checkbox + strikethrough apply before the write resolves',
+            captures === 1 && checkbox.checked === true
+            && row.classList.contains('sauce-trip-entry-checked')
+            && row.style.textDecoration === 'line-through');
+        ok('GA-P2-PACKING-CAPTURE scroll capture is the first shared lifecycle effect', captures === 1);
+        writeGate.resolve();
+        await pendingToggle;
+        ok('GA-P2-PACKING-POLL successful active write refreshes after the indexed value is current',
+            refreshes === 1 && file.fm.packing_items[0].checked === true);
+
+        // A rejected save must undo the browser's already-toggled checkbox and
+        // optimistic row decoration, without forcing a stale refresh.
+        page = { file: { path: pathName }, packing_items: [{ category: 'Clothes', item: 'Hat', checked: false }] };
+        file.fm.packing_items = page.packing_items;
+        writeGate = deferred();
+        failWrite = true;
+        const failedHost = trackedEl('div');
+        list._row(failedHost, dv, {
+            key: 'packing_items', checkbox: true,
+            title: (entry) => entry.item, subtitle: () => '',
+        }, page.packing_items, page.packing_items[0], 0);
+        const failedRow = failedHost.children[0];
+        const failedCheckbox = failedRow.children[0];
+        failedCheckbox.checked = true;
+        const failedToggle = failedCheckbox.listeners.change();
+        await Promise.resolve();
+        writeGate.reject(new Error('trip write failed'));
+        await failedToggle;
+        ok('GA-P2-PACKING-REVERT failed write restores checkbox + row decoration',
+            captures === 2 && failedCheckbox.checked === false
+            && !failedRow.classList.contains('sauce-trip-entry-checked')
+            && failedRow.style.textDecoration === '' && refreshes === 1);
+
+        // Flat Flights/Stay writes and atlas link writes share the same active
+        // mutation-specific poll authority rather than waiting for Dataview's
+        // natural tick.
+        failWrite = false;
+        for (const fixture of [
+            { key: 'flights', value: [{ flight_no: 'UA1' }] },
+            { key: 'stays', value: [{ name: 'Hotel' }] },
+        ]) {
+            page = { file: { path: pathName }, [fixture.key]: [] };
+            file.fm[fixture.key] = [];
+            writeGate = deferred(); writeGate.resolve();
+            const before = refreshes;
+            const saved = await list._write(dv, { key: fixture.key }, fixture.value);
+            ok(`GA-P2-${fixture.key.toUpperCase()}-POLL active edit/delete path refreshes from indexed value`,
+                saved && refreshes === before + 1 && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
+        }
+
+        const links = new TripLinks();
+        page = { file: { path: pathName }, links: [] };
+        file.fm.links = [];
+        writeGate = deferred(); writeGate.resolve();
+        const beforeLinks = refreshes;
+        const linksSaved = await links._write(dv, [{ url: 'https://example.com', text: 'Example' }]);
+        ok('GA-P2-TRIP-LINKS-POLL atlas link write refreshes from indexed links',
+            linksSaved && refreshes === beforeLinks + 1 && file.fm.links[0].text === 'Example');
+
+        ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
+            notices.some((message) => message.includes('trip write failed')));
+        global.app = originalApp;
+        global.window.app = originalApp;
+        global.customJS.RenderSafe = originalRenderSafe;
+        global.window.customJS = global.customJS;
+        global.Notice = originalNotice;
     }
 
     // ---------- TripSectionsCards frontmatter grouping (behavioral) ----------

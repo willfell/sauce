@@ -534,20 +534,28 @@ class TripEntryList {
   _row(c, dv, spec, items, entry, absIndex) {
     const rowEl = c.createEl("div");
     rowEl.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 8px; margin-top:6px; border:1px solid var(--background-modifier-border); border-radius:6px;";
+    let checkbox = null;
     if (spec.checkbox) {
-      const cb = rowEl.createEl("input");
-      cb.type = "checkbox";
-      cb.checked = !!(entry && entry.checked);
-      if (cb.style) cb.style.cssText = "flex:0 0 auto; margin:0;";
-      cb.addEventListener("change", async () => {
+      checkbox = rowEl.createEl("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !!(entry && entry.checked);
+      if (checkbox.style) checkbox.style.cssText = "flex:0 0 auto; margin:0;";
+      checkbox.addEventListener("change", async () => {
         const res = TripEntryList.toggleChecked(items, absIndex);
-        if (res.changed) await this._write(dv, spec, res.list);
+        if (!res.changed) return;
+        const previous = !!(entry && entry.checked);
+        const next = !!(res.list[absIndex] && res.list[absIndex].checked);
+        await this._write(dv, spec, res.list, {
+          optimistic: () => this._setCheckedRow(rowEl, checkbox, next),
+          revert: () => this._setCheckedRow(rowEl, checkbox, previous),
+        });
       });
     }
     const label = rowEl.createEl("div");
     label.style.cssText = "flex:1; min-width:0;";
     const title = label.createEl("div", { text: TripEntryList._rowTitle(spec, entry) });
     title.style.cssText = "font-weight:600; font-size:0.9em; overflow:hidden; text-overflow:ellipsis;";
+    if (checkbox) this._setCheckedRow(rowEl, checkbox, checkbox.checked);
     const subText = TripEntryList._rowSubtitle(spec, entry);
     if (subText) {
       const sub = label.createEl("div", { text: subText });
@@ -573,6 +581,15 @@ class TripEntryList {
     return btn;
   }
 
+  _setCheckedRow(rowEl, checkbox, checked) {
+    const on = checked === true;
+    if (checkbox) checkbox.checked = on;
+    if (rowEl && rowEl.classList && typeof rowEl.classList.toggle === "function") {
+      rowEl.classList.toggle("sauce-trip-entry-checked", on);
+    }
+    if (rowEl && rowEl.style) rowEl.style.textDecoration = on ? "line-through" : "";
+  }
+
   // ── read + write ──────────────────────────────────────────────────────────
   _items(dv, spec) {
     const cur = dv.current && dv.current();
@@ -583,16 +600,30 @@ class TripEntryList {
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
   }
-  async _write(dv, spec, list) {
+  async _write(dv, spec, list, ui) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve this note to save."); return false; }
-    try {
-      await app.fileManager.processFrontMatter(file, (fm) => { fm[spec.key] = list; });
-      return true;
-    } catch (e) {
-      new Notice("Save failed: " + (e && e.message ? e.message : e), 6000);
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      new Notice("Could not save: RenderSafe is unavailable.", 6000);
       return false;
     }
+    const expected = JSON.stringify(Array.isArray(list) ? list : []);
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      optimistic: ui && ui.optimistic,
+      revert: ui && ui.revert,
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm[spec.key] = list; }),
+      isCurrent: (page) => {
+        const current = page && page[spec.key];
+        if (!current || typeof current[Symbol.iterator] !== "function") return false;
+        try { return JSON.stringify(Array.from(current)) === expected; }
+        catch (_e) { return false; }
+      },
+    });
+    return result.ok === true;
   }
 
   // ── distinct existing categories (for the grouped Add-item <select>) ──────
