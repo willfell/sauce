@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.275.0",
+  "workshop_version": "0.275.1",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -39,7 +39,7 @@
     "entity-create": "0.9.1",
     "people-rendering": "0.1.0",
     "people-identity": "0.1.0",
-    "styling": "0.3.0",
+    "styling": "0.3.1",
     "convenience": "0.6.0",
     "platform-claude": "0.6.0",
     "smart-connections-bridge": "0.3.0",
@@ -48,7 +48,7 @@
     "task-entity": "0.16.0",
     "modal": "0.2.0",
     "menu-popover": "0.3.0",
-    "chrome-bar": "0.4.2",
+    "chrome-bar": "0.4.3",
     "section-explorer": "0.6.1",
     "delivery": "0.4.1"
   }
