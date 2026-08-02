@@ -56,7 +56,7 @@ test('case 3: stubs propagate while stub/completed nodes are excluded from gates
   // Mutation guard: counting completed dependents changes A.gates from 1 to 2.
   const result = insights.analyzeGraph([
     node('A', 'blocked'),
-    node('S', null, { isStub: true }),
+    node('S', 'planning', { isStub: true }),
     node('B', 'planning'),
     node('C', 'completed'),
   ], [depends('A', 'S'), depends('S', 'B'), depends('B', 'C')]);
@@ -208,6 +208,16 @@ test('case 12: required behavioral mutants are executable and turn red', () => {
     [node('X', 'blocked'), node('Y', 'parked')],
     [depends('X', 'Y')],
     (result) => assert.deepStrictEqual(result.summary.rootBlockers, ['X']),
+  );
+  expectRed(
+    'conflate explicit stubs with null-status nodes',
+    mutated(
+      'node.isStub === true || status === null',
+      'status === null',
+    ),
+    [node('A', 'blocked'), node('S', 'planning', { isStub: true }), node('B', 'planning')],
+    [depends('A', 'S'), depends('S', 'B')],
+    (result) => assert.strictEqual(result.perNode.A.gates, 1),
   );
 });
 
