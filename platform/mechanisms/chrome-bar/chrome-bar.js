@@ -33,21 +33,16 @@ class ChromeBar {
   // opts: { cls, label?, icon?, onClick }.
   renderChromeButton(parent, opts) {
     const o = opts || {};
-    const btn = parent.createEl("button", { cls: o.cls || "sc-chrome-btn" });
     const hasLabel = !!o.label;
+    const classes = [o.cls || "sc-chrome-btn", "sauce-btn", "sauce-chrome-btn"];
+    if (!hasLabel) classes.push("sauce-btn-icon");
+    const btn = parent.createEl("button", { cls: classes.join(" ") });
     const iconHtml = o.icon || "";
     const labelHtml = hasLabel
       ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${o.label}</span>`
       : "";
     btn.innerHTML = iconHtml + labelHtml;
     const hasClassList = btn.classList && typeof btn.classList.add === "function";
-    if (hasClassList) {
-      btn.classList.add("sauce-btn", "sauce-chrome-btn");
-      if (!hasLabel) btn.classList.add("sauce-btn-icon");
-    } else if (btn.style) {
-      // Compatibility for minimal/legacy DOM facades that cannot consume classes.
-      btn.style.cssText = "transition: none;";
-    }
     btn.onmouseenter = () => {
       if (btn.disabled) return;
       if (hasClassList) btn.classList.add("is-hovered");

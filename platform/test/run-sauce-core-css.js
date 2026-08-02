@@ -10,6 +10,7 @@ const { execFileSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "../..");
 const CSS_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/snippets/sauce-core.css");
 const CHROME_BAR_PATH = path.join(ROOT, "platform/mechanisms/chrome-bar/chrome-bar.js");
+const CHROME_BAR_MANIFEST_PATH = path.join(ROOT, "platform/mechanisms/chrome-bar/manifest.json");
 const MANIFEST_PATH = path.join(ROOT, "platform/mechanisms/styling/manifest.json");
 const THEME_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/themes/Baseline/theme.css");
 const DAILY_CSS_PATH = path.join(ROOT, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
@@ -21,6 +22,7 @@ const theme = fs.readFileSync(THEME_PATH, "utf8");
 const dailyCss = fs.readFileSync(DAILY_CSS_PATH, "utf8");
 const chromeBarSource = fs.readFileSync(CHROME_BAR_PATH, "utf8");
 const ChromeBar = new Function(`${chromeBarSource}\nreturn ChromeBar;`)();
+const chromeBarManifest = JSON.parse(fs.readFileSync(CHROME_BAR_MANIFEST_PATH, "utf8"));
 
 let passed = 0;
 let failed = 0;
@@ -253,6 +255,13 @@ test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter sna
     assert.ok(parent.children.filter((button) => !button.innerHTML.includes("New")).every((button) => button.className.includes("sauce-btn-icon")), surface + " icon buttons lack the icon/+ modifier");
     assert.ok(parent.children.every((button) => button.style.cssText === ""), surface + " ChromeBar still owns inline presentation");
   }
+});
+
+test("CSS1 ChromeBar declares the styling mechanism that owns sauce-core", () => {
+  assert.ok(
+    chromeBarManifest.depends_on.some((dependency) => dependency.name === "styling" && dependency.range === ">=0.3.0"),
+    "chrome-bar must require the styling mechanism before emitting sauce-core classes",
+  );
 });
 
 test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption", () => {
