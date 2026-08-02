@@ -6854,6 +6854,70 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   }, { card }, lock);
 }
 
+// One-time audit/repair verb: scans planning cards for dangling depends_on
+// pointers and repoints them to the live supersession tail (auto, repoint-only
+// — never clears). Dead-end tombstones, cycles, and never-minted refs escalate
+// as needs_decision. Director-authorized --clear <name> is the only path that
+// removes a dep, and only for that exact dead pointer.
+async function commandReconcileDependencies(ctx, args, deps = {}) {
+  if (args.json !== true) throw new Error('reconcile-dependencies requires --json');
+  const single = args.card ? normalizeCardLink(String(args.card)) : null;
+  const all = args.all === true;
+  const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
+  if (single === null && !all) throw new Error('reconcile-dependencies requires --card or --all');
+  if (single !== null && all) throw new Error('reconcile-dependencies accepts --card or --all, not both');
+  if (!reason) throw new Error('reconcile-dependencies requires a non-empty --reason');
+  const apply = args.apply === true;
+  const clearName = args.clear ? normalizeCardLink(String(args.clear)) : null;
+  const loadState = deps.readState || readState;
+  const writeText = deps.writeText || atomicWriteText;
+  const lock = deps.withLock || withLock;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  return lock(ctx, 'selector', async () => {
+    const state = loadState(ctx);
+    const plan = [];
+    const reports = [];
+    const needsDecision = [];
+    const stack = [cardsRoot];
+    while (stack.length) {
+      const dir = stack.pop();
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) { stack.push(full); continue; }
+        if (!ent.name.endsWith('.md')) continue;
+        const depName = ent.name.replace(/\.md$/, '');
+        if (single && depName !== single) continue;
+        let raw = fs.readFileSync(full, 'utf8');
+        const record = state.cards[depName];
+        const phase = record ? record.phase : null;
+        const inFlight = record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked');
+        for (const ref of parseDependsOn(raw)) {
+          // Director-authorized explicit clear takes precedence over any auto-classification.
+          if (clearName && ref === clearName) {
+            if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
+            plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
+            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
+            continue;
+          }
+          if (state.cards[ref] && state.cards[ref].phase !== 'discarded') continue; // live dep, fine
+          if (!state.cards[ref]) { needsDecision.push({ card: depName, from: ref }); continue; } // never-minted
+          if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
+          const resolved = resolveSupersessionTail(ref, state);
+          if (resolved.cycle || resolved.deadEnd) { needsDecision.push({ card: depName, from: ref }); continue; }
+          const to = resolved.tail;
+          plan.push({ card: depName, from: ref, to, classification: 'repoint', path: full });
+          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); } }
+        }
+      }
+    }
+    return successReceipt('reconcile-dependencies', {
+      apply, no_op: apply ? plan.length === 0 : true, reason,
+      plan: plan.map(({ path: _p, ...rest }) => rest),
+      reports, needs_decision: needsDecision,
+    });
+  });
+}
+
 function commandRecover(ctx, opts = {}) {
   const state = opts.state || readState(ctx); const inspections = [];
   const run = opts.sh || sh;
@@ -6895,13 +6959,14 @@ async function main() {
   else if (command === 'recover-deployed') result = await commandRecoverDeployed(ctx, args);
   else if (command === 'reconcile-metadata') result = await commandReconcileMetadata(ctx, args);
   else if (command === 'reconcile') result = await commandReconcile(ctx, args);
+  else if (command === 'reconcile-dependencies') result = await commandReconcileDependencies(ctx, args);
   else if (command === 'cutover') result = await commandCutover(ctx, args);
   else if (command === 'deploy') {
     const state = readState(ctx); const record = state.cards[args.card];
     if (!record) throw new Error('deploy requires a known --card');
     result = await promoteAndDeploy(ctx, state, record);
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -6912,7 +6977,7 @@ module.exports = {
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem, resolveSupersessionTail,
   resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
-  summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
+  summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandReconcileDependencies, commandCutover, commandRecover,
   buildLoopStationPayload, validateLoopStationPayload, projectLoopStation, attemptLoopStationProjection,
   commandRecoverDeployed, commandReconcileMetadata, commandRebindParkedMetadata,
   commandRestampContractFrontmatter,

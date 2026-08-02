@@ -8064,6 +8064,63 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
 }
 
+// A4 reconcile-dependencies — classify + apply across mixed fates
+{
+  const root = path.join(tmp, 'a4-reconcile');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['DEP-repoint', 'DEP-deployed', 'DEP-orphan'] }));
+  const mk = (name, dep) => {
+    const p = path.join(cardsRoot, `${name}.md`);
+    fs.writeFileSync(p, ['---', 'type: slice', 'status: in-planning', 'depends_on:', `  - "[[${dep}]]"`, '---', 'x'].join('\n'));
+    return p;
+  };
+  const pRepoint = mk('DEP-repoint', 'GA-R1a');    // superseded → pending GA-R1a2
+  const pDeployed = mk('DEP-deployed', 'BL-4');     // superseded → deployed BL-4c (still repoint)
+  const pOrphan = mk('DEP-orphan', 'GA-M1');        // never minted
+  const state = emptyState();
+  state.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  state.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'planned' };
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const deps = {
+    readState: () => state, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot,
+    now: () => '2026-08-02T00:00:00.000Z',
+  };
+  // dry-run: plan only, no writes
+  const dry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(dry.apply, false, 'A4 dry-run by default');
+  ok(/\[\[GA-R1a\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 dry-run writes nothing');
+  const byCard = Object.fromEntries(dry.plan.map((p) => [p.card, p]));
+  eq(byCard['DEP-repoint'].classification, 'repoint', 'A4 pending tail ⇒ repoint');
+  eq(byCard['DEP-repoint'].to, 'GA-R1a2', 'A4 repoint targets the live tail');
+  eq(byCard['DEP-deployed'].classification, 'repoint', 'A4 deployed tail ⇒ still repoint');
+  eq(byCard['DEP-deployed'].to, 'BL-4c', 'A4 repoint targets the deployed live tail');
+  eq(dry.needs_decision, [{ card: 'DEP-orphan', from: 'GA-M1' }], 'A4 never-minted ⇒ needs-decision');
+
+  // apply
+  const applied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(applied.apply === true && applied.no_op === false, 'A4 apply executes');
+  ok(/\[\[GA-R1a2\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 apply repoints the pending tail on disk');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(pDeployed, 'utf8')), 'A4 apply repoints the deployed tail on disk');
+  ok(/\[\[GA-M1\]\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 never-minted left untouched for escalation');
+
+  // Director-authorized explicit clear of the never-minted dep
+  const cleared = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-orphan', clear: 'GA-M1', reason: 'director confirms GA-M1 obsolete', apply: true, json: true,
+  }, deps);
+  const clearedPlan = cleared.plan.find((p) => p.card === 'DEP-orphan');
+  eq(clearedPlan.classification, 'clear', 'A4 --clear classifies as clear');
+  eq(clearedPlan.to, null, 'A4 --clear has no target');
+  ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
+}
+
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
 // residue that reap heals, but performs no mutation while doing so.
 const opx5Root = path.join(tmp, 'opx5-residue');
