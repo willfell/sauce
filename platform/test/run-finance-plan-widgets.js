@@ -146,6 +146,34 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         try { await w._writeAll(ps.applyPlan.debtTargets.map(t => ({ kind: "debt", slug: t.slug, before: 0, after: t.planned_monthly_payment }))); } catch (e) { writeErr = e; }
         ok("HC-V0128-WIDGET-DASH-9 _writeAll writes via FinanceFrontmatter without throwing", writeErr === null, writeErr && writeErr.message);
 
+        // A later entity rejection compensates every earlier successful write,
+        // so the RenderSafe UI rollback never lies about partially-applied plan data.
+        const originalUpdate = customJS.FinanceFrontmatter.update;
+        const stored = { "Debt-First": 100, "Debt-Second": 200 };
+        let rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            const state = { planned_monthly_payment: stored[slug] };
+            await mutator(state);
+            stored[slug] = state.planned_monthly_payment;
+        };
+        let compensated = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 100, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+            ]);
+        } catch (_e) {
+            compensated = stored["Debt-First"] === 100 && stored["Debt-Second"] === 200;
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF-3-WIDGET-DASH plan apply compensates prior writes after a later rejection", compensated);
+
         // no-plan degrade: current is the plan page but NOT in pages → ok:false
         const dv2 = makeDv(DEBTS, PLAN);
         const w2 = new Dash();

@@ -21,12 +21,14 @@ class BudgetDefaultsEditor {
         const previous = dv.container.querySelector(":scope > .bde-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
 
-        const groups = Array.isArray(page.groups) ? page.groups.slice() : [];
+        const groups = override && Array.isArray(override.groups)
+            ? override.groups.slice()
+            : (Array.isArray(page.groups) ? page.groups.slice() : []);
         // Render-from-authoritative: the category flows capture the freshly-written
         // categories[] and pass it as override so the re-render reflects the true
         // post-write state instead of Dataview's lagging dv.current() cache. Group
@@ -34,6 +36,8 @@ class BudgetDefaultsEditor {
         // they mutate; the category cascade is the data-loss risk this closes).
         const categories = Array.isArray(override)
             ? override
+            : (override && Array.isArray(override.categories))
+                ? override.categories
             : (Array.isArray(page.categories) ? page.categories.slice() : []);
 
         const root = dv.container.createEl("div", { cls: "bde-root" });
@@ -175,12 +179,11 @@ class BudgetDefaultsEditor {
         const groups = Array.isArray(current?.groups) ? current.groups : [];
         const name = await this._promptForGroup(null, groups);
         if (!name) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.groups) ? fm.groups.slice() : [];
             next.push(name);
             fm.groups = next;
         });
-        await this._rerender(dv);
     }
 
     async _editGroupFlow(file, dv, index, current) {
@@ -188,7 +191,7 @@ class BudgetDefaultsEditor {
         const groups = Array.isArray(cur?.groups) ? cur.groups : [];
         const newName = await this._promptForGroup(current, groups);
         if (!newName || newName === current) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.groups) ? fm.groups.slice() : [];
             const oldName = next[index];
             next[index] = newName;
@@ -202,7 +205,6 @@ class BudgetDefaultsEditor {
                 }
             }
         });
-        await this._rerender(dv);
     }
 
     async _deleteGroupFlow(file, dv, index, groupName, categories) {
@@ -210,7 +212,7 @@ class BudgetDefaultsEditor {
         if (referenced.length > 0) {
             const reassignTo = await this._promptForReassign(groupName, referenced.length, categories);
             if (reassignTo === null) return; // user cancelled
-            await this._mutate(file, (fm) => {
+            await this._mutateRender(file, dv, (fm) => {
                 if (Array.isArray(fm.categories)) {
                     for (const cat of fm.categories) {
                         if (cat && typeof cat === "object" && cat.group === groupName) {
@@ -224,13 +226,12 @@ class BudgetDefaultsEditor {
             });
         } else {
             if (!window.confirm(`Delete group "${groupName}"?`)) return;
-            await this._mutate(file, (fm) => {
+            await this._mutateRender(file, dv, (fm) => {
                 const next = Array.isArray(fm.groups) ? fm.groups.slice() : [];
                 next.splice(index, 1);
                 fm.groups = next;
             });
         }
-        await this._rerender(dv);
     }
 
     _promptForReassign(groupName, count, categories) {
@@ -295,7 +296,7 @@ class BudgetDefaultsEditor {
         const groups = Array.isArray(cur?.groups) ? cur.groups : [];
         const target = index + direction;
         if (target < 0 || target >= groups.length) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.groups) ? fm.groups.slice() : [];
             const t = target;
             const tmp = next[index];
@@ -303,7 +304,6 @@ class BudgetDefaultsEditor {
             next[t] = tmp;
             fm.groups = next;
         });
-        await this._rerender(dv);
     }
 
     // -------------------------- Categories pane (grouped) --------------------
@@ -506,14 +506,11 @@ class BudgetDefaultsEditor {
         }
         const result = await this._promptForCategory(null, groups);
         if (!result) return;
-        let captured = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
             next.push(result);
             fm.categories = next;
-            captured = next.slice();
         });
-        await this._rerender(dv, captured);
     }
 
     async _editCategoryFlow(file, dv, index, current) {
@@ -521,34 +518,28 @@ class BudgetDefaultsEditor {
         const groups = Array.isArray(cur?.groups) ? cur.groups : [];
         const result = await this._promptForCategory(current, groups);
         if (!result) return;
-        let captured = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
             // Merge onto the render-authoritative row so fields added after the
             // dialog opened survive; `current` is only a missing-row fallback.
             next[index] = Object.assign({}, next[index] || current, result);
             fm.categories = next;
-            captured = next.slice();
         });
-        await this._rerender(dv, captured);
     }
 
     async _deleteCategoryFlow(file, dv, index, current) {
         if (!window.confirm(`Delete category "${current?.name || ""}"?`)) return;
-        let captured = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
             next.splice(index, 1);
             fm.categories = next;
-            captured = next.slice();
         });
-        await this._rerender(dv, captured);
     }
 
     // ------------------------------ Mutate helpers --------------------------
 
     _mutateRead(file) {
-        return app.metadataCache.getFileCache(file)?.frontmatter || null;
+        return customJS.FinanceFrontmatter.read?.(file) || null;
     }
 
     async _rerender(dv, authoritative) {
@@ -556,7 +547,34 @@ class BudgetDefaultsEditor {
         return await this.render(dv, authoritative);
     }
 
+    async _mutateRender(file, dv, mutator) {
+        const current = this._mutateRead(file) || this._page(dv) || {};
+        const preview = Object.assign({}, current, {
+            groups: Array.isArray(current.groups) ? current.groups.slice() : [],
+            categories: Array.isArray(current.categories)
+                ? current.categories.map((row) => row && typeof row === "object" ? Object.assign({}, row) : row)
+                : [],
+        });
+        mutator(preview);
+        const authoritative = {
+            groups: preview.groups.slice(),
+            categories: preview.categories.slice(),
+        };
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .bde-root",
+            failureMessage: "Could not update budget defaults",
+            render: () => this._rerender(dv, authoritative),
+            write: () => this._mutate(file, mutator),
+        });
+    }
+
     async _mutate(file, mutator) {
         return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

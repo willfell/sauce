@@ -338,6 +338,55 @@ function loadPeopleRenderingClass(app, customJS, Notice) {
 
 function makeFinanceCustomJsStub(overrides) {
   const noop = { render: async () => {} };
+  const renderSafe = {
+    page: (dv) => {
+      try { return dv && typeof dv.current === 'function' ? (dv.current() || null) : null; }
+      catch (_e) { return null; }
+    },
+    captureScroll() {},
+    async mutateStructure(opts) {
+      let receipt;
+      try {
+        receipt = await opts.apply();
+        return { ok: true, value: await opts.write() };
+      } catch (error) {
+        if (typeof opts.rollback === 'function') await opts.rollback(receipt, error);
+        return { ok: false, error };
+      }
+    },
+    async mutate(opts) {
+      try {
+        if (typeof opts.optimistic === 'function') await opts.optimistic();
+        return { ok: true, value: await opts.write() };
+      } catch (error) {
+        if (typeof opts.revert === 'function') await opts.revert(error);
+        return { ok: false, error };
+      }
+    },
+  };
+  const financeFrontmatter = {
+    page: renderSafe.page,
+    update: async () => {},
+    read: () => null,
+    isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true'),
+    async mutateRendered(file, opts) {
+      const container = opts && opts.dv && opts.dv.container;
+      const selector = String(opts && opts.selector || '');
+      return await renderSafe.mutateStructure({
+        apply: async () => {
+          const oldRoot = container && container.querySelector ? container.querySelector(selector) : null;
+          await opts.render();
+          const optimisticRoot = container && container.querySelector ? container.querySelector(selector) : null;
+          return { oldRoot, optimisticRoot };
+        },
+        rollback: ({ oldRoot, optimisticRoot } = {}) => {
+          optimisticRoot && optimisticRoot.remove && optimisticRoot.remove();
+          if (oldRoot && container && container.appendChild) container.appendChild(oldRoot);
+        },
+        write: () => typeof opts.write === 'function' ? opts.write() : financeFrontmatter.update(file, opts.mutator),
+      });
+    },
+  };
   const base = {
     NewBudgetButton: noop,
     NewPaycheckButton: noop,
@@ -345,7 +394,8 @@ function makeFinanceCustomJsStub(overrides) {
     BudgetsCards: noop,
     PaychecksCards: noop,
     InvoicesCards: noop,
-    FinanceFrontmatter: { update: async () => {}, read: () => null, isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true') },
+    FinanceFrontmatter: financeFrontmatter,
+    RenderSafe: renderSafe,
     AccentButton: {
       render: (parent, opts) => {
         const btn = parent.createEl('button');
@@ -356,7 +406,10 @@ function makeFinanceCustomJsStub(overrides) {
       },
     },
   };
-  return Object.assign(base, overrides || {});
+  const supplied = overrides || {};
+  if (supplied.FinanceFrontmatter) Object.assign(financeFrontmatter, supplied.FinanceFrontmatter);
+  if (supplied.RenderSafe) Object.assign(renderSafe, supplied.RenderSafe);
+  return Object.assign(base, supplied, { FinanceFrontmatter: financeFrontmatter, RenderSafe: renderSafe });
 }
 
 function loadFinanceClass(className, app, customJsOverrides) {
@@ -2706,7 +2759,7 @@ async function testFF16BudgetAllocationsEditMaterializesOverride() {
   cjs.FinanceMath = { budgetAllocations: () => makeStaleView(), fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
   // Capture the frontmatter write (durable), but DO NOT reflect it into the view —
   // the view stays stale, exactly like Dataview before it reindexes.
-  cjs.FinanceFrontmatter = {
+  Object.assign(cjs.FinanceFrontmatter, {
     update: async (file, mut) => {
       const fm = { debt_allocations: capturedDebtAlloc.slice(), savings_allocations: [] };
       await mut(fm);
@@ -2714,7 +2767,7 @@ async function testFF16BudgetAllocationsEditMaterializesOverride() {
     },
     read: () => null,
     isTruthy: (v) => v === true,
-  };
+  });
   const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn BudgetAllocationsEditor;`)(app, cjs, FakeNotice);
   const inst = new Cls();
   // Stub the row-edit modal to return the user's new planned amount.
@@ -2839,6 +2892,27 @@ async function testFinanceColdLoadRenderGuards() {
     console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${cls} cold-load early-return`);
     if (!ok) allPass = false;
   }
+  // PERF-3 editors must also survive a genuinely missing/throwing current page
+  // outside an embed. These helpers now route their page access through the
+  // never-throw FinanceFrontmatter/RenderSafe seam before any query or write.
+  const perf3ColdLoadWidgets = [
+    'BudgetAllocationsEditor', 'BudgetCategoriesEditor', 'BudgetDefaultsEditor',
+    'PaycheckDefaultsEditor', 'PaycheckExpensesEditor', 'DebtDefaultsEditor',
+    'FinancePlanDashboard', 'InvoiceControls', 'InvoiceTimeLogEditor',
+  ];
+  for (const cls of perf3ColdLoadWidgets) {
+    let ok = false;
+    try {
+      const Cls = load(cls);
+      const dv = makeDvWithCurrent(null);
+      dv.current = () => { throw new Error('cold Dataview index'); };
+      dv.container.closest = () => null;
+      await new Cls().render(dv);
+      ok = dv.container.children.length === 0;
+    } catch (e) { console.log(`  [throw] PERF-3 ${cls}: ${e && e.message}`); ok = false; }
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — PERF-3 ${cls} missing-page guard`);
+    if (!ok) allPass = false;
+  }
   // DebtConfigEditor: modal editor, render(file, opts) with `if (!file) return`.
   {
     let ok = false;
@@ -2849,6 +2923,122 @@ async function testFinanceColdLoadRenderGuards() {
   }
   console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
   return allPass;
+}
+
+// PERF-3 — the shared Finance structural seam must render before persistence,
+// capture scroll first, and restore the exact prior root/focus/selection when
+// persistence rejects. This behavioral fixture fails on the pre-PERF-3 helper,
+// which has no mutateRendered lifecycle at all.
+async function testFF35FinanceStructuralRollback() {
+  console.log('\n=== FF35 / PERF-3 — Finance structural mutation rolls back exact DOM + focus ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const helpersDir = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers');
+  const renderSafeSrc = fs.readFileSync(path.join(WORKSHOP, 'platform', 'mechanisms', 'render-safe', 'render-safe.js'), 'utf8');
+  const ffSrc = fs.readFileSync(path.join(helpersDir, 'finance-frontmatter.js'), 'utf8');
+  const RenderSafe = new Function('app', 'Notice', `${renderSafeSrc}\nreturn RenderSafe;`)(app, FakeNotice);
+  const renderSafe = new RenderSafe();
+  const events = [];
+  renderSafe.captureScroll = () => { events.push('capture'); };
+  const customJS = { RenderSafe: renderSafe };
+  const FinanceFrontmatter = new Function('app', 'customJS', 'Notice', `${ffSrc}\nreturn FinanceFrontmatter;`)(app, customJS, FakeNotice);
+  const ff = new FinanceFrontmatter();
+
+  const parent = {
+    children: [],
+    insertBefore(node, before) {
+      const oldIndex = this.children.indexOf(node);
+      if (oldIndex >= 0) this.children.splice(oldIndex, 1);
+      const at = before ? this.children.indexOf(before) : -1;
+      this.children.splice(at >= 0 ? at : this.children.length, 0, node);
+      node.parentNode = this;
+    },
+  };
+  const makeRoot = (name, input) => ({
+    cls: 'perf3-root', name, parentNode: parent, nextSibling: null,
+    contains: (target) => target === input,
+    querySelector: () => input,
+    remove() {
+      const at = parent.children.indexOf(this);
+      if (at >= 0) parent.children.splice(at, 1);
+      this.parentNode = null;
+    },
+  });
+  const focusState = [];
+  const oldInput = {
+    dataset: { financeFocusKey: 'amount' }, selectionStart: 2, selectionEnd: 4,
+    selectionDirection: 'forward',
+    focus: () => focusState.push('old-focus'),
+    setSelectionRange: (start, end, direction) => focusState.push(`old-selection:${start}:${end}:${direction}`),
+  };
+  const newInput = {
+    dataset: { financeFocusKey: 'amount' },
+    focus: () => focusState.push('new-focus'),
+    setSelectionRange: (start, end, direction) => focusState.push(`new-selection:${start}:${end}:${direction}`),
+  };
+  const oldRoot = makeRoot('old', oldInput);
+  const optimisticRoot = makeRoot('optimistic', newInput);
+  parent.children = [oldRoot];
+  const container = {
+    querySelector: (selector) => selector === ':scope > .perf3-root'
+      ? (parent.children.find((node) => node.cls === 'perf3-root') || null) : null,
+  };
+  const priorDocument = global.document;
+  global.document = { activeElement: oldInput };
+  let result;
+  try {
+    result = await ff.mutateRendered({ path: 'spice/finance/Test.md' }, {
+      dv: { container }, selector: ':scope > .perf3-root',
+      render: async () => {
+        events.push('render');
+        oldRoot.remove();
+        parent.insertBefore(optimisticRoot, null);
+      },
+      write: async () => { events.push('write'); throw new Error('synthetic persistence rejection'); },
+    });
+  } finally {
+    global.document = priorDocument;
+  }
+  const exactOrder = events.join(',') === 'capture,render,write';
+  const exactRoot = parent.children.length === 1 && parent.children[0] === oldRoot;
+  const optimisticGone = !parent.children.includes(optimisticRoot);
+  const focusRestored = focusState.includes('new-focus') && focusState.includes('old-focus')
+    && focusState.includes('old-selection:2:4:forward');
+  const pass = result && result.ok === false && exactOrder && exactRoot && optimisticGone && focusRestored;
+  console.log(`  capture→render→write: ${exactOrder} ; exact old root restored: ${exactRoot} ; optimistic removed: ${optimisticGone} ; focus/selection restored: ${focusRestored}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// PERF-3 source matrix: every Finance editor structural surface consumes the
+// shared seam and centralizes its authoritative self-render behind scroll
+// capture; the Plan surface uses the field mutation seam and the same rerender.
+async function testFF36FinanceLifecycleCoverageMatrix() {
+  console.log('\n=== FF36 / PERF-3 — every Finance editor routes through the shared lifecycle ===');
+  const helpersDir = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers');
+  const structural = [
+    'budget-allocations-editor.js', 'budget-categories-editor.js',
+    'budget-defaults-editor.js', 'debt-defaults-editor.js',
+    'invoice-controls.js', 'invoice-time-log-editor.js',
+    'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js',
+  ];
+  let pass = true;
+  for (const file of structural) {
+    const src = fs.readFileSync(path.join(helpersDir, file), 'utf8');
+    const ok = src.includes('FinanceFrontmatter.mutateRendered')
+      && src.includes('RenderSafe?.captureScroll?.()')
+      && src.includes('render: () => this._rerender')
+      && !src.includes('dataview-force-refresh-views');
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${file}`);
+    pass = pass && ok;
+  }
+  const plan = fs.readFileSync(path.join(helpersDir, 'finance-plan-dashboard.js'), 'utf8');
+  const planOk = plan.includes('RenderSafe.mutate({')
+    && plan.includes('RenderSafe?.captureScroll?.()')
+    && !plan.includes('dataview-force-refresh-views');
+  console.log(`  ${planOk ? 'PASS' : 'FAIL'} — finance-plan-dashboard.js`);
+  pass = pass && planOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
 }
 
 async function testFF3HubAreaRowIcons() {
@@ -3809,6 +3999,8 @@ async function testRendHasNotes() {
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
       results.push(['FF-COLD finance-widget-cold-load-render-guards', await testFinanceColdLoadRenderGuards()]);
+      results.push(['FF35 finance-structural-rollback', await testFF35FinanceStructuralRollback()]);
+      results.push(['FF36 finance-lifecycle-coverage-matrix', await testFF36FinanceLifecycleCoverageMatrix()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;

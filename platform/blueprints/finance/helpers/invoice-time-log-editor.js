@@ -8,13 +8,13 @@
  * v0.16.0 lesson.
  */
 class InvoiceTimeLogEditor {
-    async render(dv) {
+    async render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .itle-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
 
         const m = page.file.path.match(/^spice\/finance\/invoices\/(\d{4}-\d{2})\/Time-Log-/);
@@ -24,7 +24,9 @@ class InvoiceTimeLogEditor {
 
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
-        const entries = Array.isArray(page.entries) ? page.entries : [];
+        const entries = Array.isArray(override)
+            ? override
+            : (Array.isArray(page.entries) ? page.entries : []);
 
         const root = dv.container.createEl("div", { cls: "itle-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -257,6 +259,9 @@ class InvoiceTimeLogEditor {
 
     async _propagateAfterMutation(file, dv, newEntries, siblingInvoicePath) {
         const total_hours = Math.round(newEntries.reduce((s, e) => s + (Number(e?.hours) || 0), 0) * 100) / 100;
+        const priorTimeLog = customJS.FinanceFrontmatter.read?.(file) || {};
+        const priorEntries = Array.isArray(priorTimeLog.entries) ? priorTimeLog.entries.slice() : [];
+        const priorTotal = priorTimeLog.total_hours;
         await customJS.FinanceFrontmatter.update(file, (fm) => {
             fm.entries = newEntries;
             fm.total_hours = total_hours;
@@ -273,7 +278,19 @@ class InvoiceTimeLogEditor {
                 fm.amount = Math.round(rate * total_hours * 100) / 100;
             });
         } catch (err) {
-            new Notice(`InvoiceTimeLogEditor: sibling Invoice write failed for ${siblingInvoicePath}: ${err.message || err}`);
+            // The gesture owns both writes. If the dependent Invoice update
+            // rejects, compensate the already-written Time-Log before surfacing
+            // failure so the structural root can roll back truthfully.
+            try {
+                await customJS.FinanceFrontmatter.update(file, (fm) => {
+                    fm.entries = priorEntries;
+                    if (priorTotal === undefined) delete fm.total_hours;
+                    else fm.total_hours = priorTotal;
+                });
+            } catch (_rollbackError) {
+                throw new Error(`Invoice write failed and Time-Log compensation failed: ${_rollbackError.message || _rollbackError}`);
+            }
+            throw err;
         }
     }
 
@@ -281,8 +298,7 @@ class InvoiceTimeLogEditor {
         const result = await this._promptForEntry(null);
         if (!result) return;
         const newEntries = entries.concat([result]);
-        await this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath);
-        await this.render(dv);
+        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
     }
 
     async _editFlow(file, dv, entries, siblingInvoicePath, index, current) {
@@ -290,15 +306,33 @@ class InvoiceTimeLogEditor {
         if (!result) return;
         const newEntries = entries.slice();
         newEntries[index] = result;
-        await this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath);
-        await this.render(dv);
+        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
     }
 
     async _deleteFlow(file, dv, entries, siblingInvoicePath, index, current) {
         if (!window.confirm(`Delete entry from '${current?.date || ""}'?`)) return;
         const newEntries = entries.slice();
         newEntries.splice(index, 1);
-        await this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath);
-        await this.render(dv);
+        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv, authoritative);
+    }
+
+    async _mutateEntries(file, dv, newEntries, siblingInvoicePath) {
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .itle-root",
+            failureMessage: "Could not update invoice time entry",
+            render: () => this._rerender(dv, newEntries),
+            write: () => this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath),
+        });
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

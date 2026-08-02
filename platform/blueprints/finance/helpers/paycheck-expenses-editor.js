@@ -22,7 +22,7 @@ class PaycheckExpensesEditor {
         const previous = dv.container.querySelector(":scope > .pee-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
@@ -232,7 +232,7 @@ class PaycheckExpensesEditor {
             });
             delBtn.onclick = (e) => {
                 e.stopPropagation();
-                this._deleteFlow(file, dv, index, exp);
+                return this._deleteFlow(file, dv, index, exp);
             };
 
             row.onclick = () => this._editFlow(file, dv, index, exp);
@@ -294,7 +294,7 @@ class PaycheckExpensesEditor {
         this._materializing = true;
         let deposits = [];
         try {
-            const pd = customJS.FinanceFrontmatter.read("spice/finance/Paycheck Defaults.md");
+            const pd = customJS.FinanceFrontmatter.read?.("spice/finance/Paycheck Defaults.md");
             const sched = (pd && Array.isArray(pd.deposit_schedule) && pd.deposit_schedule.length)
                 ? pd.deposit_schedule
                 : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
@@ -303,22 +303,16 @@ class PaycheckExpensesEditor {
                 date: `${monthKey}-${String(Number(s && s.day) || 1).padStart(2, "0")}`,
                 amount: Number(s && s.amount) || 0
             }));
-            await this._mutate(file, (fm) => { fm.deposits = deposits; });
+            const nextPage = Object.assign({}, page, { deposits });
+            await customJS.FinanceFrontmatter.mutateRendered(file, {
+                dv,
+                selector: ":scope > .pee-root",
+                failureMessage: "Could not initialize paycheck deposits",
+                render: () => this._rerender(dv, undefined, nextPage),
+                write: () => this._mutate(file, (fm) => { fm.deposits = deposits; }),
+            });
         } finally {
             this._materializing = false;
-        }
-        // Re-render from the freshly-materialized deposits. dv.current() lags the
-        // just-written frontmatter (in tests it's frozen to deposits: []), which
-        // would re-enter this path and loop — so point dv.current() at the
-        // authoritative page for the re-render (mirrors the post-write cache
-        // refresh in production).
-        const nextPage = Object.assign({}, page, { deposits });
-        const prevCurrent = dv.current;
-        dv.current = () => nextPage;
-        try {
-            await this.render(dv);
-        } finally {
-            dv.current = prevCurrent;
         }
     }
 
@@ -374,29 +368,24 @@ class PaycheckExpensesEditor {
         if (raw === null) return;
         const amount = Number(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const page = dv.current();
+        const page = this._page(dv);
         const base = (page && Array.isArray(page.deposits)) ? page.deposits : [];
-        let newDeposits = base.map((d) => Object.assign({}, d));
-        await this._mutate(file, (fm) => {
-            const list = Array.isArray(fm.deposits) ? fm.deposits.slice() : [];
-            if (i >= 0 && i < list.length) {
-                list[i] = Object.assign({}, list[i], { amount });
-                fm.deposits = list;
-            }
-            newDeposits = list;
-        });
-        // Render-from-authoritative: dv.current() lags the just-written deposits
-        // (in tests it's frozen to the OLD amount), so the new amount + recomputed
-        // Assigned/Leftover would not show. Repoint dv.current() at the updated
-        // page for the re-render, then restore (mirrors _materializeDeposits).
+        const newDeposits = base.map((d) => Object.assign({}, d));
+        if (i >= 0 && i < newDeposits.length) newDeposits[i] = Object.assign({}, newDeposits[i], { amount });
         const nextPage = Object.assign({}, page, { deposits: newDeposits });
-        const prevCurrent = dv.current;
-        dv.current = () => nextPage;
-        try {
-            await this.render(dv);
-        } finally {
-            dv.current = prevCurrent;
-        }
+        await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .pee-root",
+            failureMessage: "Could not update paycheck deposit",
+            render: () => this._rerender(dv, undefined, nextPage),
+            write: () => this._mutate(file, (fm) => {
+                const list = Array.isArray(fm.deposits) ? fm.deposits.slice() : [];
+                if (i >= 0 && i < list.length) {
+                    list[i] = Object.assign({}, list[i], { amount });
+                    fm.deposits = list;
+                }
+            }),
+        });
     }
 
     async _resolveDebt(linkStr) {
@@ -612,63 +601,81 @@ class PaycheckExpensesEditor {
     async _addFlow(file, dv) {
         const result = await this._promptForExpense(null);
         if (!result) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateExpenses(file, dv, (fm) => {
             fm.expenses = (fm.expenses || []).concat([result]);
-            next = fm.expenses.slice();
         });
-        await this.render(dv, next);
     }
 
     async _editFlow(file, dv, index, current) {
         const result = await this._promptForExpense(current);
         if (!result) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateExpenses(file, dv, (fm) => {
             const list = (fm.expenses || []).slice();
             // Merge-on-edit: keep non-dialog fields (e.g. debt links) that the
             // modal doesn't surface, instead of replacing the whole row object.
             // The dialog's resolve preserves `deposit`, so the merge keeps it too.
             list[index] = Object.assign({}, current, result);
             fm.expenses = list;
-            next = list.slice();
         });
-        await this.render(dv, next);
     }
 
     // Move an expense between deposits (checks). Picker returns the chosen
     // 1-based deposit index; merge-write the `deposit` field, then render from
     // the authoritative array (dv.current() lags).
     async _moveFlow(file, dv, index, exp) {
-        const page = dv.current();
+        const page = this._page(dv);
         const deposits = (page && Array.isArray(page.deposits)) ? page.deposits : [];
         const currentIndex = this._depositIndex(exp, deposits.length);
         const chosen = await this._promptForDeposit(deposits, currentIndex);
         if (chosen === null || chosen === undefined) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateExpenses(file, dv, (fm) => {
             const list = (fm.expenses || []).slice();
             const cur = list[index] || exp;
             list[index] = Object.assign({}, cur, { deposit: chosen });
             fm.expenses = list;
-            next = list.slice();
         });
-        await this.render(dv, next);
     }
 
     async _deleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete expense '${current?.item || ""}'?`)) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateExpenses(file, dv, (fm) => {
             const list = (fm.expenses || []).slice();
             list.splice(index, 1);
             fm.expenses = list;
-            next = list.slice();
         });
-        await this.render(dv, next);
+    }
+
+    async _mutateExpenses(file, dv, mutator) {
+        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+        const preview = Object.assign({}, current, {
+            expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
+        });
+        mutator(preview);
+        const next = preview.expenses.slice();
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .pee-root",
+            failureMessage: "Could not update paycheck expense",
+            render: () => this._rerender(dv, next),
+            write: () => this._mutate(file, mutator),
+        });
     }
 
     async _mutate(file, mutator) {
         return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    async _rerender(dv, authoritative, pageOverride) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        if (!pageOverride) return await this.render(dv, authoritative);
+        const previousCurrent = dv.current;
+        dv.current = () => pageOverride;
+        try { return await this.render(dv, authoritative); }
+        finally { dv.current = previousCurrent; }
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

@@ -27,7 +27,7 @@ class BudgetAllocationsEditor {
         const previous = dv.container.querySelector(":scope > .bae-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         if (page.type !== "budget") return;
 
@@ -66,7 +66,7 @@ class BudgetAllocationsEditor {
     }
 
     _monthKeyFor(dv) {
-        const page = dv.current();
+        const page = this._page(dv);
         return page ? this._resolveMonthKey(page) : null;
     }
 
@@ -238,13 +238,11 @@ class BudgetAllocationsEditor {
     async _editFlow(file, dv, kind, row) {
         const amount = await this._promptForAmount((row && (row.name || row.slug)) || "", row && row.planned);
         if (amount == null) return;
-        const written = await this._mutateCapture(file, (fm) => this._upsertOverride(fm, kind, row, amount));
-        await this._rerender(dv, this._authoritativeView(dv, written));
+        await this._mutateCapture(file, dv, (fm) => this._upsertOverride(fm, kind, row, amount));
     }
 
     async _resetFlow(file, dv, kind, row) {
-        const written = await this._mutateCapture(file, (fm) => this._removeOverride(fm, kind, row));
-        await this._rerender(dv, this._authoritativeView(dv, written));
+        await this._mutateCapture(file, dv, (fm) => this._removeOverride(fm, kind, row));
     }
 
     async _rerender(dv, authoritative) {
@@ -255,16 +253,33 @@ class BudgetAllocationsEditor {
     // Run the mutator, then capture the freshly-written override arrays so the
     // re-render's override layer is authoritative — independent of Dataview's
     // lagging page index (which readBudgetForMonth reads via dv.pages).
-    async _mutateCapture(file, mutator) {
-        let written = { debt: [], savings: [] };
-        await this._mutate(file, (fm) => {
-            mutator(fm);
-            written = {
-                debt: Array.isArray(fm.debt_allocations) ? fm.debt_allocations.slice() : [],
-                savings: Array.isArray(fm.savings_allocations) ? fm.savings_allocations.slice() : [],
-            };
+    async _mutateCapture(file, dv, mutator) {
+        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+        const preview = Object.assign({}, current, {
+            debt_allocations: Array.isArray(current.debt_allocations) ? current.debt_allocations.slice() : [],
+            savings_allocations: Array.isArray(current.savings_allocations) ? current.savings_allocations.slice() : [],
         });
-        return written;
+        mutator(preview);
+        const written = {
+            debt: Array.isArray(preview.debt_allocations) ? preview.debt_allocations.slice() : [],
+            savings: Array.isArray(preview.savings_allocations) ? preview.savings_allocations.slice() : [],
+        };
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .bae-root",
+            failureMessage: "Could not update budget allocation",
+            render: () => this._rerender(dv, this._authoritativeView(dv, written)),
+            write: () => this._mutate(file, mutator),
+        });
+    }
+
+    async _mutate(file, mutator) {
+        return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 
     // Recompute the live view, then re-apply the just-written override layer on
@@ -321,10 +336,6 @@ class BudgetAllocationsEditor {
         const idVal = (kind === "debt") ? (row.slug || row.name) : (row.name || row.slug);
         const list = Array.isArray(fm[arrKey]) ? fm[arrKey].slice() : [];
         fm[arrKey] = list.filter((o) => String(o && (o[idKey] != null ? o[idKey] : (o.slug || o.name))) !== String(idVal));
-    }
-
-    async _mutate(file, mutator) {
-        return await customJS.FinanceFrontmatter.update(file, mutator);
     }
 
     // Minimal single-number modal. Returns the new planned amount (>= 0) or null

@@ -24,19 +24,25 @@
  */
 class DebtDefaultsEditor {
     async render(dv) {
+        return await this._render(dv);
+    }
+
+    async _render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .dde-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         if (page.type !== "debt-defaults") return;
 
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
 
-        const debts = Array.isArray(page.debts) ? page.debts.slice() : [];
+        const debts = Array.isArray(override)
+            ? override
+            : (Array.isArray(page.debts) ? page.debts.slice() : []);
 
         const root = dv.container.createEl("div", { cls: "dde-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -117,9 +123,9 @@ class DebtDefaultsEditor {
             delBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 if (!window.confirm(`Delete debt "${d.name || ""}"?`)) return;
-                this._mutate(file, (fm) => {
+                this._mutateDebts(file, dv, (fm) => {
                     fm.debts = (fm.debts || []).filter((_, idx) => idx !== i);
-                }).then(() => this.render(dv));
+                });
             });
 
             row.addEventListener("click", (e) => {
@@ -267,7 +273,7 @@ class DebtDefaultsEditor {
             // Remove undefined fields
             Object.keys(entry).forEach(k => entry[k] === undefined && delete entry[k]);
 
-            await this._mutate(file, (fm) => {
+            const outcome = await this._mutateDebts(file, dv, (fm) => {
                 const list = (fm.debts || []).slice();
                 if (isNew) {
                     list.push(entry);
@@ -276,9 +282,8 @@ class DebtDefaultsEditor {
                 }
                 fm.debts = list;
             });
-
+            if (!outcome.ok) { try { saveBtn.focus(); } catch (_e) {} return; }
             document.body.removeChild(overlay);
-            await this.render(dv);
         };
 
         const onKey = (e) => {
@@ -297,7 +302,33 @@ class DebtDefaultsEditor {
         setTimeout(() => nameInput.focus(), 0);
     }
 
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this._render(dv, authoritative);
+    }
+
+    async _mutateDebts(file, dv, mutator) {
+        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+        const preview = Object.assign({}, current, {
+            debts: Array.isArray(current.debts) ? current.debts.slice() : [],
+        });
+        mutator(preview);
+        const next = preview.debts.slice();
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .dde-root",
+            failureMessage: "Could not update debt defaults",
+            render: () => this._rerender(dv, next),
+            write: () => this._mutate(file, mutator),
+        });
+    }
+
     async _mutate(file, mutator) {
         return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

@@ -10,13 +10,13 @@
  * Time-Log re-edit.
  */
 class InvoiceControls {
-    async render(dv) {
+    async render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .ic-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = override || this._page(dv);
         if (!page || !page.file) return;
 
         const m = page.file.path.match(/^spice\/finance\/invoices\/(\d{4}-\d{2})\/Invoice-/);
@@ -93,12 +93,15 @@ class InvoiceControls {
                     new Notice("Rate must be a non-negative number.");
                     return;
                 }
-                await customJS.FinanceFrontmatter.update(file, (fm) => {
+                const nextPage = Object.assign({}, page, {
+                    rate: value,
+                    amount: Math.round(value * hours * 100) / 100,
+                });
+                await this._mutatePage(file, dv, nextPage, (fm) => {
                     fm.rate = value;
                     const h = Number(fm.hours || 0);
                     fm.amount = Math.round(value * h * 100) / 100;
                 });
-                await this.render(dv);
             }
         });
 
@@ -124,14 +127,34 @@ class InvoiceControls {
             label: submitted ? "Unmark Submitted" : "Mark Submitted",
             icon: submitIcon,
             onClick: async () => {
+                const today = submitted ? "" : window.moment().format("YYYY-MM-DD");
+                const nextPage = Object.assign({}, page, { submitted_date: today });
                 if (submitted) {
-                    await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = ""; });
+                    await this._mutatePage(file, dv, nextPage, (fm) => { fm.submitted_date = ""; });
                 } else {
-                    const today = window.moment().format("YYYY-MM-DD");
-                    await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = today; });
+                    await this._mutatePage(file, dv, nextPage, (fm) => { fm.submitted_date = today; });
                 }
-                await this.render(dv);
             }
         });
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv, authoritative);
+    }
+
+    async _mutatePage(file, dv, authoritative, mutator) {
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .ic-root",
+            failureMessage: "Could not update invoice",
+            render: () => this._rerender(dv, authoritative),
+            mutator,
+        });
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

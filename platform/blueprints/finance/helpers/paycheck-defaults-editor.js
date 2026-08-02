@@ -15,17 +15,23 @@
  */
 class PaycheckDefaultsEditor {
     async render(dv) {
+        return await this._render(dv);
+    }
+
+    async _render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .pde-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
 
-        const expenses = Array.isArray(page.expenses) ? page.expenses.slice() : [];
+        const expenses = override && Array.isArray(override.expenses)
+            ? override.expenses.slice()
+            : (Array.isArray(page.expenses) ? page.expenses.slice() : []);
 
         const root = dv.container.createEl("div", { cls: "pde-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -120,8 +126,10 @@ class PaycheckDefaultsEditor {
         // deposit_schedule[] = { day, amount } — the check calendar new months
         // materialize their deposits[] from. Fall back to a default 2-check
         // schedule when the note lacks the field so the section always renders.
-        const schedule = Array.isArray(page.deposit_schedule) && page.deposit_schedule.length
-            ? page.deposit_schedule.slice()
+        const scheduleSource = override && Array.isArray(override.deposit_schedule)
+            ? override.deposit_schedule : page.deposit_schedule;
+        const schedule = Array.isArray(scheduleSource) && scheduleSource.length
+            ? scheduleSource.slice()
             : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
         this._renderScheduleSection(root, dv, file, schedule, fmt);
     }
@@ -274,32 +282,29 @@ class PaycheckDefaultsEditor {
     async _scheduleAddFlow(file, dv) {
         const result = await this._promptForScheduleRow(null);
         if (!result) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             fm.deposit_schedule = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).concat([result]);
         });
-        await this.render(dv);
     }
 
     async _scheduleEditFlow(file, dv, index, current) {
         const result = await this._promptForScheduleRow(current);
         if (!result) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).slice();
             // Merge onto the current row so no stray fields are dropped.
             list[index] = Object.assign({}, list[index] || current, result);
             fm.deposit_schedule = list;
         });
-        await this.render(dv);
     }
 
     async _scheduleDeleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete deposit on day ${current?.day ?? ""}?`)) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).slice();
             list.splice(index, 1);
             fm.deposit_schedule = list;
         });
-        await this.render(dv);
     }
 
     // Reads Budget Defaults.md's categories[].name list for the modal datalist.
@@ -444,36 +449,63 @@ class PaycheckDefaultsEditor {
     async _addFlow(file, dv) {
         const result = await this._promptForExpense(null);
         if (!result) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             fm.expenses = (fm.expenses || []).concat([result]);
         });
-        await this.render(dv);
     }
 
     async _editFlow(file, dv, index, current) {
         const result = await this._promptForExpense(current);
         if (!result) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (fm.expenses || []).slice();
             // Merge onto the CURRENT row (not a full replace) so installer-added
             // fields the modal doesn't surface (e.g. `debt`) survive the edit.
             list[index] = Object.assign({}, list[index] || current, result);
             fm.expenses = list;
         });
-        await this.render(dv);
     }
 
     async _deleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete expense "${current?.item || ""}"?`)) return;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (fm.expenses || []).slice();
             list.splice(index, 1);
             fm.expenses = list;
         });
-        await this.render(dv);
+    }
+
+    async _rerender(dv, authoritative) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this._render(dv, authoritative);
+    }
+
+    async _mutateRender(file, dv, mutator) {
+        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+        const preview = Object.assign({}, current, {
+            expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
+            deposit_schedule: Array.isArray(current.deposit_schedule) ? current.deposit_schedule.slice() : [],
+        });
+        mutator(preview);
+        const authoritative = {
+            expenses: preview.expenses.slice(),
+            deposit_schedule: preview.deposit_schedule.slice(),
+        };
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .pde-root",
+            failureMessage: "Could not update paycheck defaults",
+            render: () => this._rerender(dv, authoritative),
+            write: () => this._mutate(file, mutator),
+        });
     }
 
     async _mutate(file, mutator) {
         return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

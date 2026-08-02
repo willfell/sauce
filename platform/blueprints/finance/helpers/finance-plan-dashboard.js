@@ -19,7 +19,7 @@ class FinancePlanDashboard {
             const prev = dv.container.querySelector(".fpd-root");
             if (prev) prev.remove();
         }
-        const page = dv.current() || {};
+        const page = this._page(dv) || {};
         if (page.type !== "finance-plan") return;
 
         const fm = customJS.FinanceMath;
@@ -181,29 +181,82 @@ class FinancePlanDashboard {
         const apply = btns.createEl("button", { text: anyChange ? "Apply" : "OK" });
         apply.style.cssText = "cursor: pointer; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
         apply.addEventListener("click", async () => {
-            if (anyChange) await this._writeAll(diffs);
+            if (anyChange) {
+                const page = this._page(dv);
+                const result = await customJS.RenderSafe.mutate({
+                    app,
+                    dv,
+                    path: page?.file?.path || "spice/finance/Finance Plan.md",
+                    mode: "background",
+                    failureMessage: "Could not apply Finance plan",
+                    optimistic: () => { apply.disabled = true; },
+                    revert: () => { apply.disabled = false; try { apply.focus(); } catch (_e) {} },
+                    write: () => this._writeAll(diffs),
+                });
+                if (!result.ok) return;
+            }
             overlay.remove();
             try { new Notice("Finance plan applied to entities."); } catch (_e) {}
-            this.render(dv);
+            await this._rerender(dv);
         });
     }
 
     async _writeAll(diffs) {
+        const applied = [];
         for (const d of diffs) {
             try {
                 if (d.before !== null && Number(d.before) === Number(d.after)) continue;
-                if (d.kind === "debt") {
-                    const file = app.vault.getAbstractFileByPath(`spice/finance/debts/${d.slug}.md`);
-                    if (file) await customJS.FinanceFrontmatter.update(file, (fm) => { fm.planned_monthly_payment = Number(d.after); });
-                } else if (d.kind === "savings") {
-                    const file = app.vault.getAbstractFileByPath("spice/finance/Paycheck Defaults.md");
-                    if (file) await customJS.FinanceFrontmatter.update(file, (fm) => {
-                        if (!Array.isArray(fm.expenses)) return;
-                        const row = fm.expenses.find(x => x && (String(x.category || "").toLowerCase() === "savings" || String(x.item || "").toLowerCase() === "savings"));
-                        if (row) row.amount = Number(d.after);
-                    });
+                await this._writeDiffValue(d, d.after);
+                applied.push(d);
+            } catch (_e) {
+                console.error("FinancePlanDashboard apply failed", d, _e);
+                let rollbackError = null;
+                for (const prior of applied.slice().reverse()) {
+                    try { await this._writeDiffValue(prior, prior.before); }
+                    catch (error) { rollbackError = rollbackError || error; }
                 }
-            } catch (_e) { /* per-write best-effort; failure-loud via console */ console.error("FinancePlanDashboard apply failed", d, _e); }
+                if (rollbackError) {
+                    const combined = new Error(`Finance plan apply failed and compensation failed: ${rollbackError.message || rollbackError}`);
+                    combined.cause = _e;
+                    throw combined;
+                }
+                throw _e;
+            }
         }
+    }
+
+    async _writeDiffValue(diff, value) {
+        if (diff.kind === "debt") {
+            const file = app.vault.getAbstractFileByPath(`spice/finance/debts/${diff.slug}.md`);
+            if (!file) throw new Error(`Debt file missing: ${diff.slug}`);
+            await customJS.FinanceFrontmatter.update(file, (fm) => {
+                if (value === undefined || value === null) delete fm.planned_monthly_payment;
+                else fm.planned_monthly_payment = Number(value);
+            });
+            return;
+        }
+        if (diff.kind === "savings") {
+            const file = app.vault.getAbstractFileByPath("spice/finance/Paycheck Defaults.md");
+            if (!file) throw new Error("Paycheck Defaults file missing");
+            await customJS.FinanceFrontmatter.update(file, (fm) => {
+                if (!Array.isArray(fm.expenses)) throw new Error("Paycheck Defaults expenses are missing");
+                const row = fm.expenses.find(x => x && (String(x.category || "").toLowerCase() === "savings" || String(x.item || "").toLowerCase() === "savings"));
+                if (!row) throw new Error("Paycheck Defaults Savings row is missing");
+                if (value === undefined || value === null) delete row.amount;
+                else row.amount = Number(value);
+            });
+            return;
+        }
+        throw new Error(`Unsupported Finance plan diff: ${diff.kind}`);
+    }
+
+    async _rerender(dv) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

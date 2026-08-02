@@ -141,6 +141,124 @@ async function run() {
     ok("FF-14 update(folder) throws (children-guard)", threw);
   }
 
+  // ── Finance editor structural lifecycle ──────────────────────────────────
+  const makeNode = (name) => {
+    const node = {
+      name, parentNode: null, nextSibling: null, dataset: {}, children: [], focused: 0,
+      focus() { this.focused++; global.document.activeElement = this; },
+      setSelectionRange(start, end, direction) { this.selection = { start, end, direction }; },
+      contains(target) { return target === this || this.children.includes(target); },
+      querySelector(selector) {
+        const match = selector.match(/data-finance-focus-key="([^"]+)"/);
+        return match ? this.children.find((child) => child.dataset.financeFocusKey === match[1]) || null : null;
+      },
+      remove() {
+        if (!this.parentNode) return;
+        this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+        this.parentNode = null;
+      },
+    };
+    return node;
+  };
+  const makeEditorDom = () => {
+    const container = {
+      children: [],
+      querySelector: () => container.children.find((child) => child.name === "editor") || null,
+      appendChild(node) { node.parentNode = container; container.children.push(node); return node; },
+      insertBefore(node, sibling) {
+        node.parentNode = container;
+        const index = sibling ? container.children.indexOf(sibling) : -1;
+        if (index < 0) container.children.push(node); else container.children.splice(index, 0, node);
+        return node;
+      },
+    };
+    const oldRoot = makeNode("editor");
+    const oldInput = makeNode("old-input");
+    oldInput.dataset.financeFocusKey = "rate";
+    oldInput.selectionStart = 2;
+    oldInput.selectionEnd = 4;
+    oldInput.selectionDirection = "forward";
+    oldInput.parentNode = oldRoot;
+    oldRoot.children.push(oldInput);
+    const tail = makeNode("tail");
+    oldRoot.nextSibling = tail;
+    container.appendChild(oldRoot);
+    container.appendChild(tail);
+    return { container, oldRoot, oldInput, tail };
+  };
+  const installLifecycle = () => {
+    global.customJS = {
+      RenderSafe: {
+        async mutateStructure(opts) {
+          let receipt;
+          try {
+            receipt = await opts.apply();
+            return { ok: true, value: await opts.write() };
+          } catch (error) {
+            if (typeof opts.rollback === "function") await opts.rollback(receipt, error);
+            return { ok: false, error };
+          }
+        },
+      },
+    };
+    global.Notice = function () {};
+  };
+
+  {
+    installLifecycle();
+    const { container, oldRoot, oldInput, tail } = makeEditorDom();
+    global.document = { activeElement: oldInput };
+    let optimisticRoot, optimisticInput, sawOptimisticBeforeWrite = false;
+    const rejected = new Error("fixture persistence rejected");
+    const result = await ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor", failureMessage: "fixture",
+      render: async () => {
+        oldRoot.remove();
+        optimisticRoot = makeNode("editor");
+        optimisticInput = makeNode("optimistic-input");
+        optimisticInput.dataset.financeFocusKey = "rate";
+        optimisticInput.parentNode = optimisticRoot;
+        optimisticRoot.children.push(optimisticInput);
+        container.appendChild(optimisticRoot);
+      },
+      write: async () => {
+        sawOptimisticBeforeWrite = container.children.includes(optimisticRoot) && !container.children.includes(oldRoot)
+          && optimisticInput.focused > 0 && optimisticInput.selection
+          && optimisticInput.selection.start === 2 && optimisticInput.selection.end === 4;
+        throw rejected;
+      },
+    });
+    ok("FF-15 mutateRendered applies the authoritative root before persistence",
+      result && result.ok === false && result.error === rejected && sawOptimisticBeforeWrite);
+    ok("FF-16 rejected persistence restores the exact old root identity and position",
+      container.children.length === 2 && container.children[0] === oldRoot
+        && container.children[1] === tail && optimisticRoot.parentNode === null);
+    ok("FF-17 rejected persistence restores exact focus and selection",
+      global.document.activeElement === oldInput && oldInput.focused > 0
+        && oldInput.selection && oldInput.selection.start === 2 && oldInput.selection.end === 4);
+  }
+
+  {
+    installLifecycle();
+    const { container, oldRoot, oldInput, tail } = makeEditorDom();
+    global.document = { activeElement: oldInput };
+    const renderFailure = new Error("fixture render failed");
+    const result = await ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      render: async () => { oldRoot.remove(); throw renderFailure; },
+      write: async () => { throw new Error("write must not run"); },
+    });
+    ok("FF-18 optimistic render failure restores the old root before escaping",
+      result && result.ok === false && result.error === renderFailure
+        && container.children.length === 2 && container.children[0] === oldRoot && container.children[1] === tail);
+  }
+
+  {
+    installLifecycle();
+    ok("FF-19 page returns null for missing or throwing cold-load current",
+      ff.page({}) === null && ff.page({ current() { throw new Error("cold"); } }) === null);
+  }
+
   console.log("");
   if (fail === 0) { console.log(`PASS ${pass}/${pass + fail}`); process.exit(0); }
   console.log(`FAIL ${fail}/${pass + fail}`);
