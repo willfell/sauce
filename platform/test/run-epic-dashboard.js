@@ -300,6 +300,21 @@ async function main() {
     },
   };
   const dashboard = new EpicDashboard({ lifecycleApi });
+  assert.deepStrictEqual(EpicDashboard.STATUS_GLYPHS, {
+    planning: '○', in_progress: '●', parked: '◷', blocked: '!',
+    completed: '✓', discarded: '–', unrecognized: '?',
+  }, 'BL2-SHARED-GLYPHS: EpicDashboard exposes the sole lifecycle status glyph channel');
+  for (const [raw, expected] of [
+    ['planning', '○'], ['in_progress', '●'], ['parked', '◷'],
+    ['blocked', '!'], ['completed', '✓'], ['discarded', '–'],
+  ]) {
+    assert.strictEqual(dashboard._statusPresentation(raw, lifecycleApi).glyph, expected,
+      `BL2-SHARED-GLYPHS: ${raw} presentation carries its shared glyph`);
+  }
+  assert.strictEqual(dashboard._statusPresentation('garbled', lifecycleApi).glyph, '?',
+    'BL2-SHARED-GLYPHS: an unknown status receives the neutral shared glyph');
+  assert.strictEqual(dashboard._statusPresentation(null, lifecycleApi).glyph, '?',
+    'BL2-SHARED-GLYPHS: a missing status receives the neutral shared glyph');
   assert.deepStrictEqual(dashboard._epicPaths(epicPath, epicFolder), {
     epicDir: epicFolder, boardDir: board, contextDir: context,
   }, 'ES2C10-CORE-FOLDER-TRUTH: epic paths are folder-derived');

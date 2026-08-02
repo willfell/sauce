@@ -222,8 +222,40 @@ class GraphView {
       normalized: null,
       label: `unrecognized: ${String(rawStatus == null ? "" : rawStatus).trim() || "(missing)"}`,
       color: "var(--text-muted)",
+      glyph: "",
       className: "status-unrecognized",
     };
+  }
+
+  // Present-status-only legend. Entries are deduped by the shared lifecycle
+  // presentation identity in deterministic draw order; stubs have no status
+  // and therefore never manufacture a legend entry.
+  _renderLegend(root, nodes, api) {
+    const entries = [];
+    const seen = new Set();
+    for (const node of Array.isArray(nodes) ? nodes : []) {
+      if (node?.isStub) continue;
+      const presentation = this._statusPresentation(node?.status, api);
+      const key = presentation.normalized || presentation.label;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(presentation);
+    }
+    if (!entries.length) return;
+    const legend = root.createEl("div");
+    legend.className = "graph-view-legend";
+    legend.setAttribute?.("aria-label", "Graph status legend");
+    legend.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px;font-size:0.7em;";
+    for (const presentation of entries) {
+      const entry = legend.createEl("span");
+      entry.className = `graph-view-legend-entry ${presentation.className}`;
+      entry.style.cssText = `display:inline-flex;align-items:center;gap:4px;color:${presentation.color};`;
+      const glyph = entry.createEl("span", { text: presentation.glyph });
+      glyph.className = "graph-view-legend-glyph";
+      glyph.setAttribute?.("aria-hidden", "true");
+      const label = entry.createEl("span", { text: presentation.label });
+      label.className = "graph-view-legend-label";
+    }
   }
 
   _titleParts(value) {
@@ -313,6 +345,7 @@ class GraphView {
   async _renderGraph(root, result, api, source, extraWarnings) {
     const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
     if (!nodes.length) return;
+    this._renderLegend(root, nodes, api);
     const geometry = {
       rowH: 74, chipH: 56, pad: 12, colGap: 28, chipW: 172,
       charPx: 7, hPad: 18, minCol: 120, maxCol: 260,
@@ -520,11 +553,15 @@ class GraphView {
     title.style.cssText = "min-width:0;font-size:0.78em;font-weight:600;"
       + "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;"
       + "overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;";
-    // Info line: the colored lifecycle status WORD (shared presentation, no
-    // local color table) plus the inline wait reason.
+    // Info line: the shared lifecycle glyph + colored status WORD (no local
+    // presentation table) plus the inline wait reason.
     const info = chip.createEl("div");
     info.className = "graph-view-chip-info";
     info.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;font-size:0.7em;";
+    const glyph = info.createEl("span", { text: presentation.glyph });
+    glyph.className = `graph-view-status-glyph ${presentation.className}`;
+    glyph.setAttribute?.("aria-hidden", "true");
+    glyph.style.cssText = `flex:none;font-weight:700;color:${presentation.color};`;
     const word = info.createEl("span", { text: presentation.label });
     word.className = `graph-view-status-word ${presentation.className}`;
     word.style.cssText = `flex:none;font-weight:600;color:${presentation.color};`;
@@ -670,6 +707,7 @@ class GraphView {
     const height = clusters.length ? cursorY - geometry.clusterGap + geometry.pad : 0;
 
     if (clusters.length) {
+      this._renderLegend(root, clusters.flatMap((cluster) => cluster.nodes), api);
       const scroller = root.createEl("div");
       scroller.className = "graph-view-scroll";
       scroller.style.cssText = "overflow-x:auto;max-width:100%;";

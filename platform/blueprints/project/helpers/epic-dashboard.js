@@ -151,6 +151,21 @@ class EpicDashboard {
     };
   }
 
+  // One shared, mobile-safe glyph channel for every lifecycle presentation.
+  // Consumers receive the glyph through _statusPresentation; widgets must not
+  // carry a second status→glyph table of their own.
+  static get STATUS_GLYPHS() {
+    return {
+      planning: "○",
+      in_progress: "●",
+      parked: "◷",
+      blocked: "!",
+      completed: "✓",
+      discarded: "–",
+      unrecognized: "?",
+    };
+  }
+
   _chip(parent, text, color, className = "") {
     const chip = parent.createEl("span", { text });
     chip.className = className;
@@ -171,6 +186,7 @@ class EpicDashboard {
         normalized: null,
         label: `unrecognized: ${raw || "(missing)"}`,
         color: "var(--color-orange)",
+        glyph: EpicDashboard.STATUS_GLYPHS.unrecognized,
         className: "status-unrecognized",
       };
     }
@@ -178,6 +194,7 @@ class EpicDashboard {
       normalized,
       label,
       color: EpicDashboard.STATUS_COLORS[normalized] || "var(--text-muted)",
+      glyph: EpicDashboard.STATUS_GLYPHS[normalized] || EpicDashboard.STATUS_GLYPHS.unrecognized,
       className: `status-${({
         planning: "planning", in_progress: "in-progress", parked: "waiting",
         blocked: "blocked", completed: "done", discarded: "discarded",
