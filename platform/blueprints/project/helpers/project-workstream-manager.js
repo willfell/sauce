@@ -2,12 +2,70 @@
  * Project Workstream Manager (CustomJS)
  * Renders Add/Remove buttons + workstream cards with progress bars.
  * Reads the kanban board to cross-reference task status per workstream.
- * Routes gesture writes through RenderSafe.mutate for immediate reconciliation.
+ * Routes gesture writes through RenderSafe.mutateStructure for optimistic
+ * structural reconciliation with exact rollback receipts.
  *
  * Usage in DataviewJS (atlas note):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
+    _workstreamRoot(dv) {
+        const container = dv && dv.container;
+        const scopes = [container];
+        try {
+            const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+            if (noteView) scopes.push(noteView);
+        } catch (_e) {}
+        for (const scope of scopes) {
+            try {
+                const root = scope?.querySelector?.(".pwm-root");
+                if (root) return root;
+            } catch (_e) {}
+        }
+        return null;
+    }
+
+    _applyWorkstreamPreview(dv, before, after) {
+        const root = this._workstreamRoot(dv);
+        const cards = root && root.querySelector ? root.querySelector(".pwm-cards") : null;
+        if (!cards) return null;
+        let receipt = null;
+        try {
+        const priorIds = new Set((before || []).map((entry) => entry && entry.id).filter(Boolean));
+        const nextIds = new Set((after || []).map((entry) => entry && entry.id).filter(Boolean));
+        const removed = (before || []).find((entry) => entry && entry.id && !nextIds.has(entry.id));
+        if (removed) {
+            const node = Array.from(cards.children || []).find((child) =>
+                String(child && child.dataset && child.dataset.workstreamId || "") === removed.id);
+            if (!node) return null;
+            const nextSibling = node.nextSibling || null;
+            receipt = { kind: "remove", parent: cards, node, nextSibling };
+            node.remove?.();
+            return receipt;
+        }
+        const added = (after || []).find((entry) => entry && entry.id && !priorIds.has(entry.id));
+        if (!added || typeof cards.createEl !== "function") return null;
+        const node = cards.createEl("div", { cls: "pwm-card pwm-card-optimistic" });
+        receipt = { kind: "insert", parent: cards, node };
+        if (node.dataset) node.dataset.workstreamId = added.id;
+        node.createEl("div", { text: added.name || added.id });
+        if (added.description) node.createEl("div", { text: added.description });
+        try { node.focus?.(); } catch (_e) {}
+        return receipt;
+        } catch (error) {
+            this._rollbackWorkstreamPreview(receipt);
+            throw error;
+        }
+    }
+
+    _rollbackWorkstreamPreview(receipt) {
+        if (!receipt) return;
+        if (receipt.kind === "insert") receipt.node?.remove?.();
+        if (receipt.kind === "remove" && receipt.parent && receipt.node) {
+            receipt.parent.insertBefore?.(receipt.node, receipt.nextSibling || null);
+        }
+    }
+
     // ── extracted per-call context (v0.190.x button-nav refactor) ──────────────
     // addWorkstream / removeWorkstream were CLOSURES inside render(); the chrome
     // bar's ⋯ menu needs to invoke the same Add / Remove flows without a render
@@ -42,33 +100,56 @@ class ProjectWorkstreamManager {
             );
         };
 
-        const updateWorkstreams = async (newWs) => {
+        const updateWorkstreams = async (newWs, ui = {}) => {
             const atlasFile = findProjectNote("project");
             const mapFile = findProjectNote("map");
             const targets = [atlasFile, mapFile].filter((file, index, all) =>
                 file && all.findIndex((candidate) => candidate && candidate.path === file.path) === index
             );
             const renderSafe = globalThis.customJS?.RenderSafe;
-            if (!renderSafe || typeof renderSafe.mutate !== "function") {
+            if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
                 new Notice("Could not update workstreams: RenderSafe is unavailable.", 6000);
                 return false;
             }
-            const expected = JSON.stringify(newWs);
-            const result = await renderSafe.mutate({
+            const result = await renderSafe.mutateStructure({
                 app,
                 dv,
                 path: filePath,
                 failureMessage: "Could not update workstreams",
+                apply: () => {
+                    const hadValue = Object.prototype.hasOwnProperty.call(current, "workstreams");
+                    const priorValue = current.workstreams;
+                    const priorList = getWorkstreams();
+                    const focusTarget = ui.focusTarget
+                        || ((typeof document !== "undefined") ? document.activeElement : null);
+                    current.workstreams = newWs;
+                    let dom = null;
+                    try {
+                        dom = this._applyWorkstreamPreview(dv, priorList, newWs);
+                        if (!dom) throw new Error("Workstream surface is unavailable");
+                    } catch (error) {
+                        if (hadValue) current.workstreams = priorValue;
+                        else delete current.workstreams;
+                        throw error;
+                    }
+                    return {
+                        current, hadValue, priorValue, focusTarget, dom,
+                        modal: ui.modal || null,
+                        triggerFocus: ui.triggerFocus || null,
+                    };
+                },
+                rollback: (receipt) => {
+                    this._rollbackWorkstreamPreview(receipt && receipt.dom);
+                    if (receipt && receipt.current) {
+                        if (receipt.hadValue) receipt.current.workstreams = receipt.priorValue;
+                        else delete receipt.current.workstreams;
+                    }
+                    try { receipt && receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+                },
                 write: async () => {
                     for (const target of targets) {
                         await app.fileManager.processFrontMatter(target, fm => { fm.workstreams = newWs; });
                     }
-                },
-                isCurrent: (page) => {
-                    const value = page && page.workstreams;
-                    if (!value || typeof value[Symbol.iterator] !== "function") return false;
-                    try { return JSON.stringify(Array.from(value)) === expected; }
-                    catch (_e) { return false; }
                 },
             });
             return result.ok === true;
@@ -84,14 +165,26 @@ class ProjectWorkstreamManager {
     // Shared overlay-modal shell (moved out of render() verbatim so the extracted
     // Add / Remove methods reuse it). Instance method — customJS stores instances.
     _showModal(content) {
+        const triggerFocus = (typeof document !== "undefined") ? document.activeElement : null;
         const overlay = document.createElement("div");
         overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
         const dialog = document.createElement("div");
         dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-        content(dialog, () => document.body.removeChild(overlay));
+        let closed = false;
+        const close = () => {
+            if (closed) return;
+            closed = true;
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            else overlay.remove?.();
+        };
+        close.overlay = overlay;
+        close.dialog = dialog;
+        close.triggerFocus = triggerFocus;
+        content(dialog, close);
         overlay.appendChild(dialog);
-        overlay.addEventListener("click", e => { if (e.target === overlay) document.body.removeChild(overlay); });
+        overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
         document.body.appendChild(overlay);
+        return { overlay, dialog, close, triggerFocus };
     }
 
     // Add a workstream — opens the name/description modal, writes the new
@@ -115,17 +208,27 @@ class ProjectWorkstreamManager {
             cancelBtn.onclick = close;
             const okBtn = btnRow.createEl("button", { text: "Add" });
             okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
+            let submitting = false;
             const submit = async () => {
+                if (submitting) return false;
                 const name = nameInput.value.trim();
-                if (!name) return;
+                if (!name) { try { nameInput.focus?.(); } catch (_e) {} return false; }
                 const id = slugify(name);
-                if (!id) return;
+                if (!id) { try { nameInput.focus?.(); } catch (_e) {} return false; }
                 const cur = getWorkstreams();
                 if (cur.some(w => w.id === id)) { new Notice(`"${id}" already exists.`); close(); return; }
-                close();
-                if (await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }])) {
+                submitting = true;
+                const saved = await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }], {
+                    modal: { overlay: close.overlay, dialog: close.dialog },
+                    triggerFocus: close.triggerFocus,
+                    focusTarget: okBtn,
+                });
+                submitting = false;
+                if (saved) {
+                    close();
                     new Notice(`Added workstream: ${name}`);
-                }
+                } else { try { okBtn.focus?.(); } catch (_e) {} }
+                return saved;
             };
             okBtn.onclick = submit;
             nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); descInput.focus(); } });
@@ -155,10 +258,16 @@ class ProjectWorkstreamManager {
                 item.createEl("span", { text: w.name }).style.cssText = "font-weight: 500;";
                 item.createEl("code", { text: w.id }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: 4px;";
                 item.onclick = async () => {
-                    close();
-                    if (await updateWorkstreams(cur.filter(x => x.id !== w.id))) {
+                    const saved = await updateWorkstreams(cur.filter(x => x.id !== w.id), {
+                        modal: { overlay: close.overlay, dialog: close.dialog },
+                        triggerFocus: close.triggerFocus,
+                        focusTarget: item,
+                    });
+                    if (saved) {
+                        close();
                         new Notice(`Removed: ${w.name}`);
-                    }
+                    } else { try { item.focus?.(); } catch (_e) {} }
+                    return saved;
                 };
             }
             const cancelBtn = dialog.createEl("button", { text: "Cancel" });
@@ -262,7 +371,7 @@ class ProjectWorkstreamManager {
         // alongside ProjectMeetingsPanel's "Meetings" SectionLabel.
         customJS.SectionLabel.render(dv, { text: "Workstreams" });
 
-        const root = dv.container.createEl("div");
+        const root = dv.container.createEl("div", { cls: "pwm-root" });
 
         // Action row (Add / Remove) — suppressed in contentOnly mode: the chrome
         // bar owns these affordances. In legacy (non-chrome-bar) callers the row
@@ -298,9 +407,9 @@ class ProjectWorkstreamManager {
             `;
         }
 
+        const cards = root.createEl("div", { cls: "pwm-cards" });
+        cards.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
         if (ws.length > 0) {
-            const cards = root.createEl("div");
-            cards.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
 
             for (const w of ws) {
                 const tasks = wsTaskMap[w.id] || [];
@@ -309,7 +418,8 @@ class ProjectWorkstreamManager {
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                 const blocked = tasks.filter(t => t.lane === "Blocked").length;
 
-                const card = cards.createEl("div");
+                const card = cards.createEl("div", { cls: "pwm-card" });
+                if (card.dataset) card.dataset.workstreamId = w.id;
                 card.style.cssText = "padding: 10px 14px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px;";
 
                 const hdr = card.createEl("div");

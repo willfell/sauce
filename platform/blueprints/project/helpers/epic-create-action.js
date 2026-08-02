@@ -16,14 +16,18 @@ class EpicCreateAction {
     if (!container?.createEl) return;
     const row = container.createEl("div", { cls: "sauce-action-row" });
 
-    for (let i = 0; i < 40 && !globalThis.customJS?.EntityCreate; i++) {
+    for (let i = 0; i < 40 && (!globalThis.customJS?.EntityCreate || !globalThis.customJS?.SectionExplorer); i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const creator = globalThis.customJS?.EntityCreate;
-    if (!creator?.render) return;
+    const explorer = globalThis.customJS?.SectionExplorer;
+    if (!creator?.render || !explorer?.entityCreateLifecycle) return;
 
     const before = new Set(Array.from(row.children || []));
-    await creator.render(this._proxyDv(dv, row), { instance: "epic" });
+    await creator.render(this._proxyDv(dv, row), {
+      instance: "epic",
+      structuralLifecycle: explorer.entityCreateLifecycle(dv),
+    });
     for (const child of Array.from(row.children || [])) {
       if (before.has(child) || !child.style) continue;
       child.style.cssText += "flex:1 1 100%;min-width:0;width:100%;";

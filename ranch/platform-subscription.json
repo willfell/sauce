@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.276.2",
+  "workshop_version": "0.276.3",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -88,7 +88,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.9.1"
+      "version": "0.9.2"
     },
     {
       "name": "backlink-panel",
@@ -124,7 +124,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.6.1"
+      "version": "0.6.2"
     },
     {
       "name": "chrome-bar",
@@ -134,7 +134,7 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.62.1"
+      "version": "1.62.2"
     },
     {
       "name": "daily",
