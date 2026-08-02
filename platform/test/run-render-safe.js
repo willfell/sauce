@@ -1717,6 +1717,8 @@ function makeRuntimeEl(text) {
     value: '',
     checked: false,
     disabled: false,
+    dataset: {},
+    parentNode: null,
     _children: [],
     _listeners: {},
     createEl(tag, opts) {
@@ -1724,19 +1726,35 @@ function makeRuntimeEl(text) {
       child._tag = tag;
       child.type = opts && opts.type || '';
       child.placeholder = opts && opts.placeholder || '';
+      child.parentNode = this;
       this._children.push(child);
       return child;
     },
     addEventListener(event, handler) { this._listeners[event] = handler; },
-    appendChild(child) { this._children.push(child); return child; },
-    focus() {},
-    remove() { this.removed = true; },
+    appendChild(child) { child.parentNode = this; this._children.push(child); return child; },
+    insertBefore(child, nextSibling) {
+      child.parentNode = this;
+      const index = nextSibling ? this._children.indexOf(nextSibling) : -1;
+      if (index < 0) this._children.push(child); else this._children.splice(index, 0, child);
+      return child;
+    },
+    focus() { this.focused = true; },
+    remove() { this.removed = true; if (this.parentNode) this.parentNode.removeChild(this); },
     querySelector() { return null; },
     closest() { return null; },
     removeChild(child) {
       this._children = this._children.filter((candidate) => candidate !== child);
+      child.parentNode = null;
     },
   };
+  Object.defineProperty(el, 'children', { get() { return this._children; } });
+  Object.defineProperty(el, 'nextSibling', {
+    get() {
+      if (!this.parentNode) return null;
+      const siblings = this.parentNode._children || [];
+      return siblings[siblings.indexOf(this) + 1] || null;
+    },
+  });
   Object.defineProperty(el, 'firstChild', {
     get() { return this._children[0] || null; },
   });
@@ -1848,7 +1866,12 @@ okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root at
   };
   await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
     let indexed = [];
-    const dv = { current: () => ({ file: { path: map.path }, workstreams: indexed }) };
+    const cards = makeRuntimeEl();
+    const root = { querySelector: (selector) => selector === '.pwm-cards' ? cards : null };
+    const noteView = { querySelector: (selector) => selector === '.pwm-root' ? root : null };
+    const chromeContainer = { querySelector: () => null, closest: () => noteView };
+    const current = { file: { path: map.path }, workstreams: indexed };
+    const dv = { current: () => current, container: chromeContainer };
     const inst = new Klass();
     let pending = null;
     inst._showModal = (build) => {
@@ -1878,6 +1901,7 @@ okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root at
       'workstream add supplies structural apply and exact-receipt rollback');
 
     indexed = [{ id: 'api', name: 'API', description: '' }];
+    current.workstreams = indexed;
     inst._showModal = (build) => {
       const dialog = makeRuntimeEl();
       build(dialog, () => {});
@@ -1900,6 +1924,49 @@ okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root at
     assert(JSON.stringify(docsAtlas.fm) === docsBefore, 'remove also keeps the complete nested docs atlas unchanged');
     assert(typeof calls[1].apply === 'function' && typeof calls[1].rollback === 'function',
       'workstream remove supplies structural apply and exact-receipt rollback');
+  });
+});
+
+okAsync('PERF-2B-WORKSTREAM-MODAL-ROLLBACK keeps cross-container modal and exact rows on rejection', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-workstream-manager.js', 'ProjectWorkstreamManager');
+  const atlas = { path: 'spice/projects/x/X.md', fm: { type: 'project', workstreams: [] } };
+  const map = { path: 'spice/projects/x/Project Map.md', fm: { type: 'map', workstreams: [] } };
+  const calls = [];
+  const appRef = {
+    vault: { getFiles: () => [atlas, map] },
+    metadataCache: { getFileCache: (file) => ({ frontmatter: file.fm }) },
+    fileManager: { processFrontMatter: async () => { throw new Error('fixture write rejected'); } },
+  };
+  await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
+    const body = makeRuntimeEl();
+    const trigger = makeRuntimeEl();
+    const cards = makeRuntimeEl();
+    const root = { querySelector: (selector) => selector === '.pwm-cards' ? cards : null };
+    const noteView = { querySelector: (selector) => selector === '.pwm-root' ? root : null };
+    const chromeContainer = { querySelector: () => null, closest: () => noteView };
+    global.document = {
+      body, activeElement: trigger,
+      createElement: () => makeRuntimeEl(),
+      querySelector: () => noteView,
+    };
+    const current = { file: { path: map.path }, workstreams: [] };
+    const dv = { current: () => current, container: chromeContainer };
+    const inst = new Klass();
+    inst.addWorkstream(dv);
+    const overlay = body.children[0];
+    const nodes = [];
+    const walk = (node) => { nodes.push(node); for (const child of node.children || []) walk(child); };
+    walk(overlay);
+    const name = nodes.find((node) => node.placeholder === 'Name (e.g. Terraform)');
+    const add = nodes.find((node) => node.textContent === 'Add');
+    name.value = 'API';
+    await add.onclick();
+    assert(calls.length === 1, 'rejected cross-container add delegates once');
+    assert(body.children.length === 1 && body.children[0] === overlay,
+      'rejected add keeps the exact original modal mounted');
+    assert(add.focused === true, 'rejected add focuses its retry control');
+    assert(cards.children.length === 0, 'rejected add removes the exact optimistic card');
+    assert(current.workstreams.length === 0, 'rejected add restores the exact current model');
   });
 });
 

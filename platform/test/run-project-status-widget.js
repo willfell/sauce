@@ -62,7 +62,63 @@ async function structuralMutationCases() {
   }
 }
 
-structuralMutationCases().then(() => {
+async function pickerRecoveryCase() {
+  const widget = new ProjectStatusWidget();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorDocument = global.document;
+  const priorNotice = global.Notice;
+  const makeEl = () => {
+    const el = {
+      children: [], parentNode: null, style: {}, textContent: "", innerHTML: "", focused: false,
+      appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
+      removeChild(child) { this.children = this.children.filter((candidate) => candidate !== child); child.parentNode = null; },
+      remove() { this.parentNode?.removeChild(this); },
+      addEventListener() {}, focus() { this.focused = true; },
+    };
+    return el;
+  };
+  const body = makeEl();
+  const trigger = { focus() {} };
+  let rejectWrite = true;
+  const history = [];
+  global.document = {
+    body, activeElement: trigger,
+    createElement: () => makeEl(),
+    addEventListener() {}, removeEventListener() {},
+  };
+  global.Notice = function Notice() {};
+  global.app = { fileManager: { processFrontMatter: async () => {
+    if (rejectWrite) throw new Error("fixture persistence failure");
+  } } };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    const receipt = await opts.apply();
+    try { return { ok: true, value: await opts.write(), receipt }; }
+    catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+  } } };
+  try {
+    widget._openPicker({}, { path: "Project.md" }, "idea", ["idea", "planning"],
+      ProjectStatusWidget.COLORS, (status) => history.push(status));
+    const overlay = body.children[0];
+    const dialog = overlay.children[0];
+    const planning = dialog.children.find((child) => /planning/.test(child.innerHTML || ""));
+    await planning.onclick();
+    ok("PSW-9 rejected picker write keeps the exact modal mounted",
+      body.children.length === 1 && body.children[0] === overlay);
+    ok("PSW-10 rejected picker write restores chip and focuses the retry control",
+      history.join(",") === "planning,idea" && planning.focused);
+    rejectWrite = false;
+    await planning.onclick();
+    ok("PSW-11 retry success closes the original modal", body.children.length === 0);
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCustomJS;
+    global.document = priorDocument;
+    global.Notice = priorNotice;
+  }
+}
+
+structuralMutationCases().then(() => pickerRecoveryCase()).then(() => {
   if(fails.length){console.log(`\n${fails.length} FAILED`);process.exit(1);}
   console.log("\nAll project-status-widget tests passed.");
 }).catch((error) => { console.error(error && error.stack || error); process.exit(1); });

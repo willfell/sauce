@@ -9,11 +9,33 @@
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
+    _workstreamRoot(dv) {
+        const container = dv && dv.container;
+        const scopes = [container];
+        try {
+            const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+            if (noteView) scopes.push(noteView);
+        } catch (_e) {}
+        try {
+            const activeLeaf = (typeof document !== "undefined")
+                ? document.querySelector?.(".workspace-leaf.mod-active .workspace-leaf-content") : null;
+            if (activeLeaf) scopes.push(activeLeaf);
+        } catch (_e) {}
+        for (const scope of scopes) {
+            try {
+                const root = scope?.querySelector?.(".pwm-root");
+                if (root) return root;
+            } catch (_e) {}
+        }
+        return null;
+    }
+
     _applyWorkstreamPreview(dv, before, after) {
-        const root = dv && dv.container && dv.container.querySelector
-            ? dv.container.querySelector(".pwm-root") : null;
+        const root = this._workstreamRoot(dv);
         const cards = root && root.querySelector ? root.querySelector(".pwm-cards") : null;
         if (!cards) return null;
+        let receipt = null;
+        try {
         const priorIds = new Set((before || []).map((entry) => entry && entry.id).filter(Boolean));
         const nextIds = new Set((after || []).map((entry) => entry && entry.id).filter(Boolean));
         const removed = (before || []).find((entry) => entry && entry.id && !nextIds.has(entry.id));
@@ -22,17 +44,23 @@ class ProjectWorkstreamManager {
                 String(child && child.dataset && child.dataset.workstreamId || "") === removed.id);
             if (!node) return null;
             const nextSibling = node.nextSibling || null;
+            receipt = { kind: "remove", parent: cards, node, nextSibling };
             node.remove?.();
-            return { kind: "remove", parent: cards, node, nextSibling };
+            return receipt;
         }
         const added = (after || []).find((entry) => entry && entry.id && !priorIds.has(entry.id));
         if (!added || typeof cards.createEl !== "function") return null;
         const node = cards.createEl("div", { cls: "pwm-card pwm-card-optimistic" });
+        receipt = { kind: "insert", parent: cards, node };
         if (node.dataset) node.dataset.workstreamId = added.id;
         node.createEl("div", { text: added.name || added.id });
         if (added.description) node.createEl("div", { text: added.description });
         try { node.focus?.(); } catch (_e) {}
-        return { kind: "insert", parent: cards, node };
+        return receipt;
+        } catch (error) {
+            this._rollbackWorkstreamPreview(receipt);
+            throw error;
+        }
     }
 
     _rollbackWorkstreamPreview(receipt) {
@@ -77,7 +105,7 @@ class ProjectWorkstreamManager {
             );
         };
 
-        const updateWorkstreams = async (newWs) => {
+        const updateWorkstreams = async (newWs, ui = {}) => {
             const atlasFile = findProjectNote("project");
             const mapFile = findProjectNote("map");
             const targets = [atlasFile, mapFile].filter((file, index, all) =>
@@ -97,10 +125,23 @@ class ProjectWorkstreamManager {
                     const hadValue = Object.prototype.hasOwnProperty.call(current, "workstreams");
                     const priorValue = current.workstreams;
                     const priorList = getWorkstreams();
-                    const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+                    const focusTarget = ui.focusTarget
+                        || ((typeof document !== "undefined") ? document.activeElement : null);
                     current.workstreams = newWs;
-                    const dom = this._applyWorkstreamPreview(dv, priorList, newWs);
-                    return { current, hadValue, priorValue, focusTarget, dom };
+                    let dom = null;
+                    try {
+                        dom = this._applyWorkstreamPreview(dv, priorList, newWs);
+                        if (!dom) throw new Error("Workstream surface is unavailable");
+                    } catch (error) {
+                        if (hadValue) current.workstreams = priorValue;
+                        else delete current.workstreams;
+                        throw error;
+                    }
+                    return {
+                        current, hadValue, priorValue, focusTarget, dom,
+                        modal: ui.modal || null,
+                        triggerFocus: ui.triggerFocus || null,
+                    };
                 },
                 rollback: (receipt) => {
                     this._rollbackWorkstreamPreview(receipt && receipt.dom);
@@ -129,14 +170,26 @@ class ProjectWorkstreamManager {
     // Shared overlay-modal shell (moved out of render() verbatim so the extracted
     // Add / Remove methods reuse it). Instance method — customJS stores instances.
     _showModal(content) {
+        const triggerFocus = (typeof document !== "undefined") ? document.activeElement : null;
         const overlay = document.createElement("div");
         overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
         const dialog = document.createElement("div");
         dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-        content(dialog, () => document.body.removeChild(overlay));
+        let closed = false;
+        const close = () => {
+            if (closed) return;
+            closed = true;
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            else overlay.remove?.();
+        };
+        close.overlay = overlay;
+        close.dialog = dialog;
+        close.triggerFocus = triggerFocus;
+        content(dialog, close);
         overlay.appendChild(dialog);
-        overlay.addEventListener("click", e => { if (e.target === overlay) document.body.removeChild(overlay); });
+        overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
         document.body.appendChild(overlay);
+        return { overlay, dialog, close, triggerFocus };
     }
 
     // Add a workstream — opens the name/description modal, writes the new
@@ -160,17 +213,27 @@ class ProjectWorkstreamManager {
             cancelBtn.onclick = close;
             const okBtn = btnRow.createEl("button", { text: "Add" });
             okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
+            let submitting = false;
             const submit = async () => {
+                if (submitting) return false;
                 const name = nameInput.value.trim();
-                if (!name) return;
+                if (!name) { try { nameInput.focus?.(); } catch (_e) {} return false; }
                 const id = slugify(name);
-                if (!id) return;
+                if (!id) { try { nameInput.focus?.(); } catch (_e) {} return false; }
                 const cur = getWorkstreams();
                 if (cur.some(w => w.id === id)) { new Notice(`"${id}" already exists.`); close(); return; }
-                close();
-                if (await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }])) {
+                submitting = true;
+                const saved = await updateWorkstreams([...cur, { id, name, description: descInput.value.trim() }], {
+                    modal: { overlay: close.overlay, dialog: close.dialog },
+                    triggerFocus: close.triggerFocus,
+                    focusTarget: okBtn,
+                });
+                submitting = false;
+                if (saved) {
+                    close();
                     new Notice(`Added workstream: ${name}`);
-                }
+                } else { try { okBtn.focus?.(); } catch (_e) {} }
+                return saved;
             };
             okBtn.onclick = submit;
             nameInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); descInput.focus(); } });
@@ -200,10 +263,16 @@ class ProjectWorkstreamManager {
                 item.createEl("span", { text: w.name }).style.cssText = "font-weight: 500;";
                 item.createEl("code", { text: w.id }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: 4px;";
                 item.onclick = async () => {
-                    close();
-                    if (await updateWorkstreams(cur.filter(x => x.id !== w.id))) {
+                    const saved = await updateWorkstreams(cur.filter(x => x.id !== w.id), {
+                        modal: { overlay: close.overlay, dialog: close.dialog },
+                        triggerFocus: close.triggerFocus,
+                        focusTarget: item,
+                    });
+                    if (saved) {
+                        close();
                         new Notice(`Removed: ${w.name}`);
-                    }
+                    } else { try { item.focus?.(); } catch (_e) {} }
+                    return saved;
                 };
             }
             const cancelBtn = dialog.createEl("button", { text: "Cancel" });

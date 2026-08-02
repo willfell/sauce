@@ -441,45 +441,16 @@ class ProjectDashboard {
       `color:var(--text-on-accent); background:${color}; cursor:pointer;`;
 
     pill.addEventListener("click", () => {
-      const entries = ProjectDashboard.STATUSES.map(s => ({
-        label: s,
-        onSelect: async () => {
-          const renderSafe = globalThis.customJS?.RenderSafe;
-          if (!renderSafe || typeof renderSafe.mutateStructure !== "function") return false;
-          const hadStatus = Object.prototype.hasOwnProperty.call(currentPage, "status");
-          const priorStatus = currentPage.status;
-          const priorText = pill.textContent;
-          const priorStyle = pill.style.cssText;
-          const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
-          const result = await renderSafe.mutateStructure({
-            app: realApp,
-            dv: ctx.dv,
-            path: file && file.path,
-            failureMessage: "Failed to update project status",
-            apply: () => {
-              currentPage.status = s;
-              pill.textContent = s;
-              pill.style.background = ProjectDashboard.STATUS_COLORS[s] || "var(--text-muted)";
-              return { hadStatus, priorStatus, priorText, priorStyle, focusTarget };
-            },
-            rollback: (receipt) => {
-              if (receipt.hadStatus) currentPage.status = receipt.priorStatus;
-              else delete currentPage.status;
-              pill.textContent = receipt.priorText;
-              pill.style.cssText = receipt.priorStyle;
-              try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
-            },
-            write: () => realApp.fileManager.processFrontMatter(file, fm => {
-              ProjectDashboard._applyStatusChange(fm, s, new Date().toISOString().split("T")[0]);
-            }),
-          });
-          return result.ok === true;
-        },
-      }));
       try {
-        if (typeof customJS !== "undefined" && customJS.MenuPopover && customJS.MenuPopover.open) {
-          customJS.MenuPopover.open(entries, { anchor: pill, title: "Set status" });
-        }
+        const widget = (typeof customJS !== "undefined") && customJS.ProjectStatusWidget;
+        if (!widget || typeof widget._openPicker !== "function") return;
+        const applyPillStatus = (nextStatus) => {
+          currentPage.status = nextStatus;
+          pill.textContent = nextStatus;
+          pill.style.background = ProjectDashboard.STATUS_COLORS[nextStatus] || "var(--text-muted)";
+        };
+        widget._openPicker(ctx.dv, file, status, ProjectDashboard.STATUSES,
+          ProjectDashboard.STATUS_COLORS, applyPillStatus);
       } catch (_e) {}
     });
   }
