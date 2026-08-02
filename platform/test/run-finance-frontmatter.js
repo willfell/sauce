@@ -445,8 +445,8 @@ async function run() {
     };
     const failedLookupFf = new FinanceFrontmatter();
     await failedLookupFf.update(file, (fm) => { fm.amount = 1; });
-    const failedClosed = failedLookupFf.read(file) === null
-      && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    const releasedByUpdate = failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    const failedClosed = releasedByUpdate && failedLookupFf.read(file) === null;
     lookupThrows = false;
     metadataCache.emit(file);
     ok("FF-12J throwing current-file lookup fails closed with bounded idempotent cleanup",
