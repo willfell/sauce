@@ -79,14 +79,30 @@ class GraphView {
     catch (_e) { return {}; }
   }
 
-  _slicePages(currentPath, currentFolder = "") {
+  // Honest gather (GV-R1): a slice whose status maps to an archived/discarded
+  // (excluded) lifecycle bucket is dead lineage — it must contribute neither a
+  // chip nor a warning, so it is dropped from the gather BEFORE layout at BOTH
+  // scopes. The delivery lifecycle API is authoritative for aliased discarded
+  // statuses; `archived` is not a registry status (it normalizes to null like
+  // any unknown token) so it is treated as excluded explicitly.
+  _isExcludedStatus(rawStatus, api) {
+    const raw = String(rawStatus == null ? "" : rawStatus).trim().toLowerCase().replace(/^['"]|['"]$/g, "");
+    if (raw === "archived" || raw === "discarded") return true;
+    try {
+      if (api?.normalizeStatus && api.normalizeStatus(rawStatus) === "discarded") return true;
+    } catch (_e) {}
+    return false;
+  }
+
+  _slicePages(currentPath, currentFolder = "", api = null) {
     const { boardDir } = this._epicPaths(currentPath, currentFolder);
     const prefix = boardDir + "/";
     try {
       return (this._app()?.vault?.getMarkdownFiles?.() || [])
         .filter((file) => file.path.startsWith(prefix)
           && !file.path.slice(prefix.length).includes("/")
-          && this._frontmatter(file).type === "slice")
+          && this._frontmatter(file).type === "slice"
+          && !this._isExcludedStatus(this._frontmatter(file).status, api))
         .map((file) => ({
           ...this._frontmatter(file),
           card: file.basename,
@@ -95,6 +111,75 @@ class GraphView {
         }))
         .sort((left, right) => String(left.file.name).localeCompare(String(right.file.name)));
     } catch (_e) { return []; }
+  }
+
+  // Cross-epic dangling → linkable ghost stub (GV-R1, epic scope). The layout
+  // core only sees the current epic's slices, so a depends_on onto a slice
+  // owned by ANOTHER epic surfaces as a dangling_dependency warning. Mirror the
+  // project-scope precedent — but resolve the target across cards_root (the
+  // other epic's slices are not in this gather): if the target card NAME
+  // resolves to a type:slice under cards_root in a DIFFERENT epic, replace the
+  // warning with one small ghost external-stub node + a depends edge into it;
+  // a target that resolves nowhere stays exactly one dangling warning.
+  _applyCrossEpicStubs(result, currentPath, currentFolder) {
+    try {
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      const nodes = Array.isArray(result?.nodes) ? result.nodes.slice() : [];
+      const edges = Array.isArray(result?.edges) ? result.edges.slice() : [];
+      const { epicDir, boardDir } = this._epicPaths(currentPath, currentFolder);
+      const cardsRoot = epicDir.includes("/") ? epicDir.slice(0, epicDir.lastIndexOf("/")) : "";
+      const stubRank = nodes.length ? Math.max(...nodes.map((node) => node.rank || 0)) + 1 : 0;
+      const stubbed = new Map();
+      const kept = [];
+      for (const warning of warnings) {
+        if (warning?.code === "dangling_dependency") {
+          const resolved = this._resolveCrossEpicStub(warning.detail, boardDir, cardsRoot);
+          if (resolved) {
+            if (!stubbed.has(warning.detail)) {
+              const parts = this._titleParts(warning.detail);
+              nodes.push({
+                card: warning.detail,
+                path: resolved.path,
+                status: null,
+                rank: stubRank,
+                row: stubbed.size,
+                isStub: true,
+                stubLabel: `${resolved.epicName} · ${parts.id || warning.detail}`,
+              });
+              stubbed.set(warning.detail, true);
+            }
+            edges.push({ from: warning.detail, to: warning.card, kind: "depends", cross: true });
+            continue;
+          }
+        }
+        kept.push(warning);
+      }
+      return { nodes, edges, warnings: kept };
+    } catch (_e) {
+      return result;
+    }
+  }
+
+  _resolveCrossEpicStub(target, currentBoardDir, cardsRoot) {
+    try {
+      const name = String(target == null ? "" : target).trim();
+      if (!name || !cardsRoot) return null;
+      const prefix = cardsRoot + "/";
+      const marker = "/board/";
+      for (const file of this._app()?.vault?.getMarkdownFiles?.() || []) {
+        if (file.basename !== name) continue;
+        const path = String(file.path || "").replace(/\\/g, "/");
+        if (!path.startsWith(prefix)) continue;
+        const at = path.indexOf(marker);
+        if (at < 0) continue;
+        if (path.slice(at + marker.length).includes("/")) continue; // direct board child only
+        const fileBoardDir = path.slice(0, at + marker.length - 1);
+        if (fileBoardDir === currentBoardDir) continue; // must be a DIFFERENT epic
+        if (this._frontmatter(file).type !== "slice") continue;
+        return { epicName: path.slice(0, at).split("/").pop() || "", path: file.path };
+      }
+      return null;
+    } catch (_e) { return null; }
   }
 
   async _laneOrder(currentPath, currentFolder = "") {
@@ -232,8 +317,28 @@ class GraphView {
       + this._edgeMarkup(result?.edges, positions, geometry)
       + "</svg>";
     for (const node of nodes) {
-      this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings, null);
+      if (node.isStub) this._renderStub(canvas, node, positions.get(node.card), geometry, source);
+      else this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings, null);
     }
+  }
+
+  // Ghost external stub (GV-R1): a muted, dashed, clickable chip standing in
+  // for a cross-epic prerequisite. Read-only — clicking opens the owning card.
+  // It is not a slice, so it never routes through status presentation and never
+  // emits an unreadable-slice warning.
+  _renderStub(canvas, node, at, geometry, source) {
+    const chip = canvas.createEl("div");
+    chip.className = "graph-view-chip graph-view-stub";
+    chip.style.cssText =
+      `position:absolute;left:${at.x}px;top:${at.y}px;width:${geometry.chipW}px;min-height:${geometry.chipH}px;`
+      + "display:flex;flex-direction:column;gap:3px;justify-content:center;padding:7px 9px;border-radius:9px;"
+      + "cursor:pointer;box-sizing:border-box;color:var(--text-muted);opacity:0.75;"
+      + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
+      + "background:color-mix(in srgb, var(--text-muted) 6%, var(--background-primary));";
+    chip.addEventListener?.("click", () => this._open(node.path || node.card, source));
+    const label = chip.createEl("div", { text: node.stubLabel || String(node.card || "") });
+    label.className = "graph-view-stub-label";
+    label.style.cssText = "min-width:0;font-size:0.72em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
   }
 
   _renderChip(canvas, node, at, geometry, api, source, extraWarnings, activeCard) {
@@ -347,7 +452,7 @@ class GraphView {
         warnings.push({ code: "missing_epic", card: epic, detail: known.has(atlasPath) ? epicBoardPath : atlasPath });
         if (!known.has(atlasPath)) continue;
       }
-      const result = layout.layoutGraph(this._slicePages(atlasPath, epicDir), {
+      const result = layout.layoutGraph(this._slicePages(atlasPath, epicDir, api), {
         laneOrder: await this._laneOrder(atlasPath, epicDir),
       });
       clusters.push({
@@ -487,7 +592,8 @@ class GraphView {
       let api = null;
       try {
         const currentFolder = current.file.folder || "";
-        const slices = this._slicePages(current.file.path, currentFolder);
+        api = await this._lifecycleApi();
+        const slices = this._slicePages(current.file.path, currentFolder, api);
         const laneOrder = await this._laneOrder(current.file.path, currentFolder);
         const layout = this._graphLayout();
         if (typeof layout?.layoutGraph !== "function") {
@@ -495,8 +601,8 @@ class GraphView {
         } else {
           const laidOut = layout.layoutGraph(slices, { laneOrder });
           if (laidOut && typeof laidOut === "object") result = laidOut;
+          result = this._applyCrossEpicStubs(result, current.file.path, currentFolder);
         }
-        api = await this._lifecycleApi();
       } catch (error) {
         extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
       }

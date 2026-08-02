@@ -109,6 +109,10 @@ async function main() {
     file(`${board}/GV-C Parked.md`, 30), file(`${board}/GV-D Blocked.md`, 40),
     file(`${board}/GV-E Stale.md`, 50), file(`${board}/GV-F Malformed.md`, 60),
     file(`${board}/GV-G LongPark.md`, 70),
+    // GV-R1 honest-gather fixtures: an archived-status and a discarded-status
+    // slice — dead lineage the widget must drop from the gather BEFORE layout
+    // (no chip, no warning at either scope).
+    file(`${board}/GV-H Archived.md`, 75), file(`${board}/GV-I Discarded.md`, 76),
     file(`${board}/nested/Hidden.md`, 80), file(`${board}/Not a Slice.md`, 90),
   ];
   const frontmatter = new Map([
@@ -118,10 +122,16 @@ async function main() {
     [`${board}/GV-C Parked.md`, { type: 'slice', status: 'parked', depends_on: [], resume_condition: 'Waiting for Director sign-off' }],
     [`${board}/GV-D Blocked.md`, { type: 'slice', status: 'blocked', depends_on: ['GV-B Widget'] }],
     [`${board}/GV-E Stale.md`, { type: 'slice', status: 'planning', depends_on: [`[[${staleTarget}]]`] }],
-    [`${board}/GV-F Malformed.md`, { type: 'slice', status: 'archived', depends_on: [] }],
+    // GV-F carries a genuinely unrecognized status (NOT archived/discarded,
+    // which now have honest-gather exclusion semantics) so it still exercises
+    // the malformed-status chip + unreadable_slice warning path.
+    [`${board}/GV-F Malformed.md`, { type: 'slice', status: 'garbled', depends_on: [] }],
     // GV-G depends on GV-A so depends (3) vs order (2) edge counts stay
     // ASYMMETRIC — a kind→style swap can never hide behind matching totals.
     [`${board}/GV-G LongPark.md`, { type: 'slice', status: 'parked', depends_on: ['[[GV-A Base]]'], resume_condition: longReason }],
+    // GV-R1: archived + discarded lineage — excluded from the gather entirely.
+    [`${board}/GV-H Archived.md`, { type: 'slice', status: 'archived', depends_on: ['[[GV-A Base]]'] }],
+    [`${board}/GV-I Discarded.md`, { type: 'slice', status: 'discarded', depends_on: ['[[GV-B Widget]]'] }],
     [`${board}/nested/Hidden.md`, { type: 'slice', status: 'planning' }],
     [`${board}/Not a Slice.md`, { type: 'task', status: 'planning' }],
   ]);
@@ -336,10 +346,26 @@ async function main() {
     'case 8: a malformed status renders the unknown-style chip');
   const unreadableRows = byClass(root, 'warning-unreadable-slice');
   assert.strictEqual(unreadableRows.length, 1, 'case 8: malformed frontmatter adds one warning row');
-  assert.strictEqual(unreadableRows[0].textContent, "GV-F Malformed: slice state unreadable: 'archived'",
+  assert.strictEqual(unreadableRows[0].textContent, "GV-F Malformed: slice state unreadable: 'garbled'",
     'case 8: the warning names the card and the unreadable state');
   assert.strictEqual(byClass(root, 'graph-view-warnings').length, 1,
     'warning strip renders as one compact block');
+
+  // GV-R1 Behavior A — honest gather: a slice whose status maps to the
+  // archived/discarded (excluded) lifecycle bucket contributes NO chip and NO
+  // warning row. The gather drops it BEFORE layout, so case 1 above (exactly
+  // the seven live slices reach layoutGraph, GV-H/GV-I absent) already pins
+  // the pre-layout exclusion; here we confirm nothing leaks into the render.
+  // MUTATION GUARD: remove the archived/discarded gather filter and GV-H
+  // (archived→unrecognized) renders an eighth chip + an unreadable_slice
+  // warning while GV-I (discarded) renders a ninth chip — both counts above
+  // (case 3 chips === 7, case 8 unreadableRows === 1) turn RED.
+  assert(!chipFor('GV-H') && !chipFor('GV-I'),
+    'behavior A: archived and discarded slices render no chip');
+  assert(!textOf(root).includes('GV-H') && !textOf(root).includes('GV-I'),
+    'behavior A: archived and discarded slices contribute no warning row or any text');
+  assert(!layoutCalls[0].slices.some((slice) => ['GV-H Archived', 'GV-I Discarded'].includes(slice.card)),
+    'behavior A: the excluded slices never reach layoutGraph — the gather filters them out');
 
   // Delegated status colors on the real chain (EpicDashboard.STATUS_COLORS via
   // _statusPresentation — never a local table).
@@ -419,6 +445,117 @@ async function main() {
   assert(faultContainer.children.length === 1,
     'fail-soft: a gather fault still mounts the root');
   global.app.vault.getMarkdownFiles = priorGetMarkdownFiles;
+
+  // ---- GV-R1 Behavior B: cross-epic dangling → linkable ghost stub ----
+  // At epic scope, a dangling depends_on whose target resolves by card name to
+  // a type:slice under cards_root in a DIFFERENT epic renders one small ghost
+  // external stub (labeled 'Owning Epic · Card-id', a clickable internal link
+  // to that card) instead of a warning; a target that resolves NOWHERE keeps
+  // its single dangling_dependency warning row.
+  const savedAppB = global.app;
+  const savedCustomJSB = global.customJS;
+  const bCardsRoot = 'spice/projects/beta/tasks';
+  const bEpicDir = `${bCardsRoot}/Home Epic`;
+  const bEpicPath = `${bEpicDir}/Home Epic.md`;
+  const bBoard = `${bEpicDir}/board`;
+  const bBoardNote = `${bBoard}/Home Epic-board.md`;
+  const opsEpicDir = `${bCardsRoot}/Loop Ops`;
+  const opsSlicePath = `${opsEpicDir}/board/GA-OPS21a4 Ops Slice.md`;
+  const bFiles = [
+    file(bBoardNote, 1),
+    file(`${bBoard}/HB-1 Consumer.md`, 10),
+    file(`${bBoard}/HB-2 Ghost.md`, 20),
+    // The owning-epic slice lives under the SAME cards_root, a DIFFERENT epic.
+    file(`${opsEpicDir}/Loop Ops.md`, 30),
+    file(`${opsEpicDir}/board/Loop Ops-board.md`, 31),
+    file(opsSlicePath, 32),
+  ];
+  const bFrontmatter = new Map([
+    [bBoardNote, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    // HB-1 depends on a slice owned by Loop Ops → resolves cross-epic → stub.
+    [`${bBoard}/HB-1 Consumer.md`, { type: 'slice', status: 'in_progress', depends_on: ['[[GA-OPS21a4 Ops Slice]]'] }],
+    // HB-2 depends on a name that resolves NOWHERE under cards_root → warning.
+    [`${bBoard}/HB-2 Ghost.md`, { type: 'slice', status: 'planning', depends_on: ['[[Totally Missing Card]]'] }],
+    [`${opsEpicDir}/Loop Ops.md`, { type: 'epic' }],
+    [`${opsEpicDir}/board/Loop Ops-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    [opsSlicePath, { type: 'slice', status: 'in_progress', depends_on: [] }],
+  ]);
+  const bBoardBody = [
+    '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic', '---', '',
+    '## In Planning', '', '- [ ] [[HB-2 Ghost]]', '',
+    '## In Progress', '', '- [ ] [[HB-1 Consumer]]', '',
+  ].join('\n');
+  const bOpened = [];
+  const bMutations = [];
+  const bMutator = (name) => () => { bMutations.push(name); throw new Error(`read-only fixture invoked ${name}`); };
+  global.app = {
+    vault: {
+      getMarkdownFiles: () => bFiles,
+      cachedRead: async (entry) => {
+        if (entry.path === bBoardNote) return bBoardBody;
+        throw new Error(`unexpected read ${entry.path}`);
+      },
+      create: bMutator('vault.create'), modify: bMutator('vault.modify'),
+      delete: bMutator('vault.delete'), rename: bMutator('vault.rename'), trash: bMutator('vault.trash'),
+      adapter: {
+        write: bMutator('adapter.write'), append: bMutator('adapter.append'),
+        process: bMutator('adapter.process'), remove: bMutator('adapter.remove'),
+        rename: bMutator('adapter.rename'), mkdir: bMutator('adapter.mkdir'), rmdir: bMutator('adapter.rmdir'),
+      },
+    },
+    metadataCache: {
+      getFileCache: (entry) => ({ frontmatter: bFrontmatter.get(entry.path) || {} }),
+      trigger: bMutator('metadataCache.trigger'),
+    },
+    fileManager: { processFrontMatter: bMutator('fileManager.processFrontMatter') },
+    workspace: { openLinkText: (...args) => bOpened.push(args) },
+  };
+  const bPage = { file: { path: bEpicPath, folder: bEpicDir } };
+  global.customJS = {
+    RenderSafe: { page: () => bPage },
+    GraphLayout: new GraphLayout(),
+    EpicDashboard: new EpicDashboard({ lifecycleApi }),
+  };
+  const bContainer = element();
+  await new GraphView().render({ container: bContainer });
+  const bRoot = bContainer.children.find((child) => child.className === 'graph-view-root');
+  assert(bRoot, 'B: epic scope mounts one graph-view-root');
+
+  // B1: exactly one ghost stub node renders for the cross-epic dependency,
+  // labeled with the owning epic name and the target card id.
+  const stubNodes = byClass(bRoot, 'graph-view-stub');
+  assert.strictEqual(stubNodes.length, 1,
+    'B1: exactly one cross-epic ghost stub node renders');
+  const stubText = textOf(stubNodes[0]);
+  assert(stubText.includes('Loop Ops') && stubText.includes('GA-OPS21a4'),
+    'B1: the stub is labeled with the owning epic name and the target card id');
+  // B2: the stub is a clickable internal link that opens the owning card.
+  assert(stubNodes[0].style.cssText.includes('cursor:pointer')
+    && typeof stubNodes[0].listeners.click === 'function',
+  'B2: the stub is a clickable internal link');
+  stubNodes[0].listeners.click();
+  assert.deepStrictEqual(bOpened.at(-1), [`${opsEpicDir}/board/GA-OPS21a4 Ops Slice`, bEpicPath, false],
+    'B2: clicking the stub opens the owning cross-epic card');
+  // B3: a depends edge is drawn into the stub node.
+  const bDepends = svgPaths(bRoot, 'edge-depends');
+  assert(bDepends.some((chunk) => chunk.includes('edge-cross-epic')),
+    'B3: a cross-epic depends edge connects to the stub');
+  // B4 (MUTATION GUARD): the resolves-nowhere dependency still warns and is NOT
+  // converted to a stub. Drop the resolves-under-cards_root guard so every
+  // dangling becomes a stub unconditionally and this assertion turns RED.
+  const bDangling = byClass(bRoot, 'warning-dangling-dependency');
+  assert.strictEqual(bDangling.length, 1,
+    'B4: a target resolvable nowhere under cards_root stays exactly one dangling warning');
+  assert.strictEqual(bDangling[0].textContent,
+    "HB-2 Ghost: depends on a card that doesn't exist: 'Totally Missing Card'",
+    'B4: the surviving warning names the dependent card and the unresolvable target');
+  assert.strictEqual(byClass(bRoot, 'graph-view-stub').length, 1,
+    'B4: the unresolvable dangling did NOT become a second stub');
+  // B5: the widget performed zero write calls across the behavior-B render.
+  assert.deepStrictEqual(bMutations, [],
+    'B5: cross-epic stub resolution invokes no vault, adapter, frontmatter, or metadata mutator');
+  global.app = savedAppB;
+  global.customJS = savedCustomJSB;
 
   // ---- Project scope (GV-3b): the whole-plan graph on Loop Station ----
   // Live epics (In Planning + In Progress + Blocked) as labeled clusters,
