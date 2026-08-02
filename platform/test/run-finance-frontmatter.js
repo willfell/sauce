@@ -85,7 +85,7 @@ async function run() {
     installApp({ files: { "spice/finance/Budget.md": { frontmatter: { type: "budget" } } } });
     const tfile = { path: "spice/finance/Budget.md" };
     const got = ff && ff.read(tfile);
-    ok("FF-8 read(TFile) resolves without vault lookup", got && got.type === "budget");
+    ok("FF-8 read(TFile) canonicalizes its path through the vault", got && got.type === "budget");
   }
   {
     installApp({ files: {} });
@@ -320,9 +320,13 @@ async function run() {
     const stale = { amount: 0 };
     const external = { amount: 99 };
     let currentFile = original;
+    const cacheReads = [];
     const listeners = new Set();
     const metadataCache = {
-      getFileCache: (file) => ({ frontmatter: file === replacement ? external : stale }),
+      getFileCache(file) {
+        cacheReads.push(file);
+        return { frontmatter: file === replacement ? external : stale };
+      },
       on(event, listener) {
         const ref = { event, listener };
         listeners.add(ref);
@@ -345,8 +349,10 @@ async function run() {
     metadataCache.emit(replacement);
     const releasedByEvent = replacementFf._writtenFrontmatter.size === 0 && listeners.size === 0;
     const externalReadThrough = replacementFf.read(replacement) === external;
+    const capturedOriginalReadThrough = replacementFf.read(original) === external;
     ok("FF-12G replacement TFile events settle against changed identity and newer mtime",
-      retainedBeforeReplacement && releasedByEvent && externalReadThrough);
+      retainedBeforeReplacement && releasedByEvent && externalReadThrough && capturedOriginalReadThrough
+        && cacheReads.includes(replacement));
   }
   {
     const original = { path: "spice/finance/Invoices/Replaced-Early.md", stat: { mtime: 10 } };
@@ -385,6 +391,67 @@ async function run() {
     const externalReadThrough = earlyReplacementFf.read(original.path) === external;
     ok("FF-12H pre-registration replacement events reconcile through the current TFile",
       releasedAfterRegistration && externalReadThrough);
+  }
+  {
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: { amount: 0 } }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: () => null },
+      metadataCache,
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
+    };
+    const deletedFf = new FinanceFrontmatter();
+    for (let i = 0; i < 65; i++) {
+      const file = { path: `spice/finance/Invoices/Deleted-${i}.md`, stat: { mtime: i + 1 } };
+      await deletedFf.update(file, (fm) => { fm.amount = 1; });
+    }
+    ok("FF-12I repeated pre-registration deletions release snapshots and listeners",
+      deletedFf._writtenFrontmatter.size === 0 && listeners.size === 0
+        && deletedFf.read("spice/finance/Invoices/Deleted-0.md") === null);
+  }
+  {
+    const file = { path: "spice/finance/Invoices/Lookup-Failure.md", stat: { mtime: 10 } };
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: { amount: 0 } }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    let lookupThrows = true;
+    global.app = {
+      vault: {
+        getAbstractFileByPath() {
+          if (lookupThrows) throw new Error("fixture lookup failed");
+          return null;
+        },
+      },
+      metadataCache,
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
+    };
+    const failedLookupFf = new FinanceFrontmatter();
+    await failedLookupFf.update(file, (fm) => { fm.amount = 1; });
+    const failedClosed = failedLookupFf.read(file) === null
+      && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    lookupThrows = false;
+    metadataCache.emit(file);
+    ok("FF-12J throwing current-file lookup fails closed with bounded idempotent cleanup",
+      failedClosed && failedLookupFf.read(file.path) === null
+        && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0);
   }
   {
     installApp({ files: {} });

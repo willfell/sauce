@@ -249,10 +249,18 @@ class FinanceFrontmatter {
      */
     read(fileOrPath) {
         let file = fileOrPath;
-        if (typeof fileOrPath === "string") {
-            file = app.vault.getAbstractFileByPath(fileOrPath);
+        const path = typeof fileOrPath === "string" ? fileOrPath : fileOrPath?.path;
+        if (!path) {
+            return null;
+        }
+        try {
+            file = app.vault.getAbstractFileByPath(path);
+        } catch (_e) {
+            this._releaseWrittenSnapshot(path, this._writtenFrontmatter?.get?.(path));
+            return null;
         }
         if (!file || !file.path || file.children !== undefined) {
+            this._releaseWrittenSnapshot(path, this._writtenFrontmatter?.get?.(path));
             return null;
         }
         const cached = app.metadataCache.getFileCache(file)?.frontmatter ?? null;
@@ -284,11 +292,17 @@ class FinanceFrontmatter {
             // was still settling, before this listener existed. Close that
             // registration window immediately; identity-guarded release keeps
             // this idempotent with the event callback and read().
-            let currentFile = file;
+            let currentFile = null;
             try {
-                const resolved = app.vault?.getAbstractFileByPath?.(file.path);
-                if (resolved && resolved.path === file.path && resolved.children === undefined) currentFile = resolved;
-            } catch (_e) {}
+                currentFile = app.vault?.getAbstractFileByPath?.(file.path) || null;
+            } catch (_e) {
+                this._releaseWrittenSnapshot(file.path, written);
+                return;
+            }
+            if (!currentFile || currentFile.path !== file.path || currentFile.children !== undefined) {
+                this._releaseWrittenSnapshot(file.path, written);
+                return;
+            }
             const cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null;
             this._writtenSnapshotSettled(currentFile, written, cached);
         } catch (_e) {
