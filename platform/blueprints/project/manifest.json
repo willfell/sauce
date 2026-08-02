@@ -98,6 +98,7 @@
     "ProjectDashboard",
     "EpicDashboard",
     "GraphLayout",
+    "GraphInsights",
     "GraphView",
     "OperatorStation",
     "EpicCreateAction"
@@ -268,6 +269,10 @@
     {
       "source": "helpers/graph-layout.js",
       "dest": "{{scripts_path}}/project/graph-layout.js"
+    },
+    {
+      "source": "helpers/graph-insights.js",
+      "dest": "{{scripts_path}}/project/graph-insights.js"
     },
     {
       "source": "helpers/graph-view.js",
