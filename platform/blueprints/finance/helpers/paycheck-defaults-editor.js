@@ -15,7 +15,8 @@
  */
 class PaycheckDefaultsEditor {
     async render(dv) {
-        return await this._render(dv);
+        const override = this._renderOverrides?.get?.(dv);
+        return await this._render(dv, override);
     }
 
     async _render(dv, override) {
@@ -477,7 +478,10 @@ class PaycheckDefaultsEditor {
 
     async _rerender(dv, authoritative) {
         try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
-        return await this._render(dv, authoritative);
+        if (!this._renderOverrides) this._renderOverrides = new WeakMap();
+        this._renderOverrides.set(dv, authoritative);
+        try { return await this.render(dv); }
+        finally { this._renderOverrides.delete(dv); }
     }
 
     async _mutateRender(file, dv, mutator) {
