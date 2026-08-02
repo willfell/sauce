@@ -69,6 +69,38 @@ function isActionableMissingClass(text, className) {
     && /(reopen Obsidian|reload CustomJS|verify .*script.*synced)/i.test(value);
 }
 
+async function runLateNamespace(source) {
+  let calls = 0;
+  let loaderVisibleDuringWait = false;
+  const result = await runGuard(source, {
+    input: { class: 'LateNamespaceClass' },
+    window: {},
+    onDelay({ delayCount, window, dv }) {
+      if (delayCount === 1) {
+        loaderVisibleDuringWait = dv.elements.length === 1 && !dv.elements[0].removed;
+      }
+      if (delayCount === 41) {
+        window.customJS = { LateNamespaceClass: { render() { calls++; } } };
+      }
+    },
+  });
+  return { ...result, calls, loaderVisibleDuringWait };
+}
+
+async function runLateClass(source) {
+  let calls = 0;
+  const result = await runGuard(source, {
+    input: { class: 'LateClass' },
+    window: { customJS: {} },
+    onDelay({ delayCount, window }) {
+      if (delayCount === 41) {
+        window.customJS.LateClass = { render() { calls++; } };
+      }
+    },
+  });
+  return { ...result, calls };
+}
+
 async function main() {
   ok('CJS-GUARD-1 remains a bare inline view script',
     !/\bmodule\.exports\s*=/.test(VIEW_SOURCE));
@@ -101,27 +133,22 @@ async function main() {
       && immediate.dv.elements[0].removed
       && immediateCalls[0].loaderRemovedAtCall);
 
-  let lateCalls = 0;
-  let loaderVisibleDuringWait = false;
-  const lateClass = { render() { lateCalls++; } };
-  const late = await runGuard(VIEW_SOURCE, {
-    input: { class: 'LateClass' },
-    window: {},
-    onDelay({ delayCount, window, dv }) {
-      if (delayCount === 1) {
-        loaderVisibleDuringWait = dv.elements.length === 1 && !dv.elements[0].removed;
-      }
-      if (delayCount === 5) window.customJS = {};
-      if (delayCount === 46) window.customJS.LateClass = lateClass;
-    },
-  });
-  ok('CJS-GUARD-5 namespace then class registering after the old ~2s window still dispatches',
-    late.delayCount === 46
-      && lateCalls === 1
-      && late.dv.paragraphs.length === 0
-      && loaderVisibleDuringWait
-      && late.dv.elements[0].removed,
-    `delays=${late.delayCount}, calls=${lateCalls}, messages=${JSON.stringify(late.dv.paragraphs)}`);
+  const lateNamespace = await runLateNamespace(VIEW_SOURCE);
+  ok('CJS-GUARD-5 namespace registering after the old ~2s window still dispatches',
+    lateNamespace.delayCount === 41
+      && lateNamespace.calls === 1
+      && lateNamespace.dv.paragraphs.length === 0
+      && lateNamespace.loaderVisibleDuringWait
+      && lateNamespace.dv.elements[0].removed,
+    `delays=${lateNamespace.delayCount}, calls=${lateNamespace.calls}, messages=${JSON.stringify(lateNamespace.dv.paragraphs)}`);
+
+  const lateClass = await runLateClass(VIEW_SOURCE);
+  ok('CJS-GUARD-5b class registering after the old ~2s window still dispatches',
+    lateClass.delayCount === 41
+      && lateClass.calls === 1
+      && lateClass.dv.paragraphs.length === 0
+      && lateClass.dv.elements[0].removed,
+    `delays=${lateClass.delayCount}, calls=${lateClass.calls}, messages=${JSON.stringify(lateClass.dv.paragraphs)}`);
 
   const missing = await runGuard(VIEW_SOURCE, {
     input: { class: 'MissingClass' },
@@ -160,33 +187,40 @@ async function main() {
       && immediateCalls.length === 1
       && badArgs.delayCount === 0);
 
-  const shortPollMutant = VIEW_SOURCE.replace(
-    'const MAX_POLL_ATTEMPTS = 200;',
-    'const MAX_POLL_ATTEMPTS = 40;',
+  const namespacePollMutant = VIEW_SOURCE.replace(
+    'i < MAX_POLL_ATTEMPTS && !window.customJS',
+    'i < 40 && !window.customJS',
   );
-  ok('CJS-GUARD-MUT-1 short-poll mutation was applied', shortPollMutant !== VIEW_SOURCE);
-  let mutantLateCalls = 0;
-  const mutantLate = await runGuard(shortPollMutant, {
-    input: { class: 'LateClass' },
-    window: {},
-    onDelay({ delayCount, window }) {
-      if (delayCount === 5) window.customJS = {};
-      if (delayCount === 46) window.customJS.LateClass = { render() { mutantLateCalls++; } };
-    },
-  });
-  ok('CJS-GUARD-MUT-2 late-registration case kills the 40-poll mutant',
-    mutantLateCalls === 0 && mutantLate.dv.paragraphs.length === 1);
+  ok('CJS-GUARD-MUT-1 namespace-loop-only 40-poll mutation was applied',
+    namespacePollMutant !== VIEW_SOURCE);
+  const mutantNamespace = await runLateNamespace(namespacePollMutant);
+  ok('CJS-GUARD-MUT-2 late-namespace case kills the namespace-loop-only 40-poll mutant',
+    mutantNamespace.calls === 0
+      && mutantNamespace.dv.paragraphs.length === 1
+      && /CustomJS.*still loading/i.test(mutantNamespace.dv.paragraphs[0]));
+
+  const classPollMutant = VIEW_SOURCE.replace(
+    'i < MAX_POLL_ATTEMPTS && window.customJS && !window.customJS[className]',
+    'i < 40 && window.customJS && !window.customJS[className]',
+  );
+  ok('CJS-GUARD-MUT-3 class-loop-only 40-poll mutation was applied',
+    classPollMutant !== VIEW_SOURCE);
+  const mutantClass = await runLateClass(classPollMutant);
+  ok('CJS-GUARD-MUT-4 late-class case kills the class-loop-only 40-poll mutant',
+    mutantClass.calls === 0
+      && mutantClass.dv.paragraphs.length === 1
+      && isActionableMissingClass(mutantClass.dv.paragraphs[0], 'LateClass'));
 
   const bareDiagnosticMutant = VIEW_SOURCE.replace(
     'dv.paragraph(`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`);',
     'dv.paragraph(`_${className} unavailable_`);',
   );
-  ok('CJS-GUARD-MUT-3 bare-diagnostic mutation was applied', bareDiagnosticMutant !== VIEW_SOURCE);
+  ok('CJS-GUARD-MUT-5 bare-diagnostic mutation was applied', bareDiagnosticMutant !== VIEW_SOURCE);
   const mutantMissing = await runGuard(bareDiagnosticMutant, {
     input: { class: 'MissingClass' },
     window: { customJS: {} },
   });
-  ok('CJS-GUARD-MUT-4 actionable-diagnostic case kills the bare placeholder mutant',
+  ok('CJS-GUARD-MUT-6 actionable-diagnostic case kills the bare placeholder mutant',
     mutantMissing.dv.paragraphs[0] === '_MissingClass unavailable_'
       && !isActionableMissingClass(mutantMissing.dv.paragraphs[0], 'MissingClass'));
 
