@@ -42,7 +42,7 @@
 - Test: `platform/test/run-codex-autoloop.js`
 
 **Interfaces:**
-- Produces: `resolveSupersessionTail(dep, state)` → `{ tail: string, hops: string[], terminal: boolean, cycle: boolean }`. `tail` is the last name reached by following `state.cards[name].superseded_by`; `hops` is the ordered list of tombstone names traversed (excluding the tail); `terminal` is true when the tail's record is `deployed`/`completed` (dep already satisfied); `cycle` true if a `superseded_by` loop was detected (tail = last safe node before the repeat).
+- Produces: `resolveSupersessionTail(dep, state)` → `{ tail: string, hops: string[], deadEnd: boolean, cycle: boolean }`. `tail` is the first NON-discarded name reached by following `state.cards[name].superseded_by` (or the last name if the walk runs out); `hops` is the ordered list of tombstone names traversed (excluding the tail); `deadEnd` is true when the walk terminated at a discarded record with no successor (the tail is itself still a tombstone → not a valid repoint target); `cycle` true if a `superseded_by` loop was detected. A live tail (`deadEnd:false, cycle:false`) is always a valid repoint target regardless of its phase (deployed/planned/claimed) — `dependencySatisfied` already treats a deployed dep as satisfied, so repointing to it never blocks.
 - Produces: upgraded `discardedDependencyProblem(dep, state)` — message now names the live tail: `depends on discarded card ${dep} (superseded by ${tail})` when a tail differs from the immediate hop.
 
 - [ ] **Step 1: Write the failing tests**
@@ -59,7 +59,7 @@ Add near the other coordinator-unit assertions in `platform/test/run-codex-autol
   const r = coordinator.resolveSupersessionTail('BL-4', state);
   eq(r.tail, 'BL-4c', 'A1 follows BL-4 → BL-4b → BL-4c to the live tail');
   eq(r.hops, ['BL-4', 'BL-4b'], 'A1 records the traversed tombstones');
-  eq(r.terminal, true, 'A1 marks a deployed tail terminal (dep satisfied)');
+  eq(r.deadEnd, false, 'A1 a deployed live tail is a valid repoint target');
   eq(r.cycle, false, 'A1 no cycle on a clean chain');
 
   // single hop, pending tail
@@ -68,7 +68,7 @@ Add near the other coordinator-unit assertions in `platform/test/run-codex-autol
   s2.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'claimed' };
   const r2 = coordinator.resolveSupersessionTail('GA-R1a', s2);
   eq(r2.tail, 'GA-R1a2', 'A1 single hop lands on the pending successor');
-  eq(r2.terminal, false, 'A1 pending tail is not terminal');
+  eq(r2.deadEnd, false, 'A1 pending tail is a valid repoint target');
 
   // cycle guard
   const s3 = emptyState();
@@ -77,12 +77,12 @@ Add near the other coordinator-unit assertions in `platform/test/run-codex-autol
   const r3 = coordinator.resolveSupersessionTail('X', s3);
   eq(r3.cycle, true, 'A1 detects a superseded_by cycle instead of looping');
 
-  // null terminus: a discarded card with no successor
+  // dead end: a discarded card with no successor
   const s4 = emptyState();
   s4.cards['Z'] = { card: 'Z', phase: 'discarded', superseded_by: null };
   const r4 = coordinator.resolveSupersessionTail('Z', s4);
   eq(r4.tail, 'Z', 'A1 a successor-less tombstone is its own tail');
-  eq(r4.terminal, false, 'A1 a discarded-with-no-successor tail is not terminal');
+  eq(r4.deadEnd, true, 'A1 a discarded-with-no-successor tail is a dead end (not repointable)');
 
   // multi-hop message on discardedDependencyProblem
   eq(coordinator.discardedDependencyProblem('BL-4', state),
@@ -107,15 +107,14 @@ function resolveSupersessionTail(dep, state) {
   const seen = new Set();
   let name = normalizeCardLink(dep);
   while (true) {
-    if (seen.has(name)) return { tail: hops[hops.length - 1] || name, hops, terminal: false, cycle: true };
+    if (seen.has(name)) return { tail: hops[hops.length - 1] || name, hops, deadEnd: false, cycle: true };
     const record = cards[name];
     if (!record || record.phase !== 'discarded') {
-      // reached a live/unknown node — it is the tail
-      const terminal = Boolean(record) && (record.phase === 'deployed' || record.phase === 'completed');
-      return { tail: name, hops, terminal, cycle: false };
+      // reached a live/unknown node — it is a valid repoint target
+      return { tail: name, hops, deadEnd: false, cycle: false };
     }
     const next = record.superseded_by ? normalizeCardLink(record.superseded_by) : null;
-    if (!next) return { tail: name, hops, terminal: false, cycle: false };
+    if (!next) return { tail: name, hops, deadEnd: true, cycle: false }; // discarded, no successor
     seen.add(name);
     hops.push(name);
     name = next;
@@ -164,7 +163,6 @@ git commit -m "feat(coordinator): multi-hop supersession-tail resolver for dangl
   const block = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "[[Other]]"', '---', 'body'].join('\n');
   const rp = coordinator.rewriteDependsOn(block, 'BL-4', 'BL-4c');
   ok(rp.changed, 'A2 block-list repoint reports changed');
-  eq(coordinator.parseDependsOnForTest ? null : null, null, 'placeholder'); // no-op guard line
   ok(/\[\[BL-4c\]\]/.test(rp.text) && !/\[\[BL-4\]\]/.test(rp.text.replace(/BL-4c/g, '')),
     'A2 block-list repoint swaps BL-4 → BL-4c and keeps Other');
   ok(/\[\[Other\]\]/.test(rp.text), 'A2 block-list repoint preserves the sibling dep');
@@ -186,8 +184,6 @@ git commit -m "feat(coordinator): multi-hop supersession-tail resolver for dangl
   ok(!absent.changed && absent.text === block, 'A2 absent dep is a no-op');
 }
 ```
-
-(Delete the `placeholder` no-op guard line before committing — it exists only to anchor the diff; it asserts `null === null`.)
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -300,10 +296,10 @@ function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
   const rewrites = [];
   const reports = [];
   const predecessor = normalizeCardLink(card);
-  // The live tail dependents should point at: follow the successor's own chain.
+  // Repoint dependents to the successor's own live tail (always repoint, never clear).
   const resolved = resolveSupersessionTail(supersededBy, state);
-  const tail = resolved.cycle ? null : resolved.tail;
-  const target = resolved.terminal ? null : tail; // deployed tail ⇒ clear (satisfied)
+  const repointable = !resolved.cycle && !resolved.deadEnd;
+  const target = resolved.tail;
   const stack = [cardsRoot];
   while (stack.length) {
     const dir = stack.pop();
@@ -311,13 +307,17 @@ function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) { stack.push(full); continue; }
       if (!ent.name.endsWith('.md')) continue;
+      const depName = ent.name.replace(/\.md$/, '');
+      if (normalizeCardLink(depName) === predecessor) continue; // skip the predecessor's own note
       const raw = fs.readFileSync(full, 'utf8');
       if (!parseDependsOn(raw).includes(predecessor)) continue;
-      const depName = ent.name.replace(/\.md$/, '');
       const record = state.cards[depName];
       const phase = record ? record.phase : null;
       const inFlight = record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked');
-      if (inFlight) { reports.push({ card: depName, from: predecessor, phase }); continue; }
+      if (inFlight || !repointable) {
+        reports.push({ card: depName, from: predecessor, phase }); // active/parked or unrepointable → report only
+        continue;
+      }
       const rewritten = rewriteDependsOn(raw, predecessor, target);
       if (rewritten.changed) {
         d.writeText(full, rewritten.text);
@@ -369,7 +369,7 @@ git commit -m "feat(coordinator): rewrite dangling dependents at discard time"
 
 **Interfaces:**
 - Consumes: `resolveSupersessionTail`, `rewriteDependsOn`, `parseDependsOn`, `discardedDependencyProblem`, `withLock`.
-- Produces: `commandReconcileDependencies(ctx, args, deps={})`. Args: `--card "<exact>"` OR `--all`; `--reason "<audit>"` (required); `--apply` (default dry-run); `--json` (required). Receipt: `{ action, ok, no_op, apply, plan: [{ card, from, to|null, classification }], reports: [{ card, from, phase }], needs_decision: [{ card, from }] }`. Classifications: `clear` (tail terminal), `repoint` (tail pending), `needs-decision` (dead pointer with no tombstone/superseder → not repaired, escalated). Active/parked dependents → `reports`, never planned. Under `--apply`, writes rewrites via the injected writer under the selector lock; dry-run writes nothing.
+- Produces: `commandReconcileDependencies(ctx, args, deps={})`. Args: `--card "<exact>"` OR `--all`; `--reason "<audit>"` (required); `--apply` (default dry-run); `--json` (required); optional `--clear "<exact dead-dep name>"` (Director-authorized explicit clear). Receipt: `{ action, ok, no_op, apply, plan: [{ card, from, to, classification }], reports: [{ card, from, phase }], needs_decision: [{ card, from }] }`. Auto classification is `repoint` (dead pointer whose chain resolves to a live tail → repoint to it). `needs_decision` holds dead pointers with no usable tail (dead-end tombstone, cycle, or never-minted) — never auto-repaired; escalated. When `--clear <name>` is supplied, any scoped dependent carrying that exact dead pointer gets it REMOVED (classification `clear`, `to: null`) instead of repoint/needs-decision — this is the ONLY path that clears, and it exists for the Director-confirmed obsolete case. Active/parked dependents → `reports`, never planned. Under `--apply`, writes rewrites via the injected writer under the selector lock; dry-run writes nothing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -380,15 +380,15 @@ git commit -m "feat(coordinator): rewrite dangling dependents at discard time"
   const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
   fs.mkdirSync(cardsRoot, { recursive: true });
   const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
-  fs.writeFileSync(boardPath, liveBoard({ planning: ['DEP-repoint', 'DEP-clear', 'DEP-orphan'] }));
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['DEP-repoint', 'DEP-deployed', 'DEP-orphan'] }));
   const mk = (name, dep) => {
     const p = path.join(cardsRoot, `${name}.md`);
     fs.writeFileSync(p, ['---', 'type: slice', 'status: in-planning', 'depends_on:', `  - "[[${dep}]]"`, '---', 'x'].join('\n'));
     return p;
   };
-  const pRepoint = mk('DEP-repoint', 'GA-R1a');   // superseded → pending GA-R1a2
-  const pClear = mk('DEP-clear', 'BL-4');          // superseded → deployed BL-4c
-  const pOrphan = mk('DEP-orphan', 'GA-M1');       // never minted
+  const pRepoint = mk('DEP-repoint', 'GA-R1a');    // superseded → pending GA-R1a2
+  const pDeployed = mk('DEP-deployed', 'BL-4');     // superseded → deployed BL-4c (still repoint)
+  const pOrphan = mk('DEP-orphan', 'GA-M1');        // never minted
   const state = emptyState();
   state.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
   state.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'planned' };
@@ -408,8 +408,8 @@ git commit -m "feat(coordinator): rewrite dangling dependents at discard time"
   const byCard = Object.fromEntries(dry.plan.map((p) => [p.card, p]));
   eq(byCard['DEP-repoint'].classification, 'repoint', 'A4 pending tail ⇒ repoint');
   eq(byCard['DEP-repoint'].to, 'GA-R1a2', 'A4 repoint targets the live tail');
-  eq(byCard['DEP-clear'].classification, 'clear', 'A4 deployed tail ⇒ clear');
-  eq(byCard['DEP-clear'].to, null, 'A4 clear has no target');
+  eq(byCard['DEP-deployed'].classification, 'repoint', 'A4 deployed tail ⇒ still repoint');
+  eq(byCard['DEP-deployed'].to, 'BL-4c', 'A4 repoint targets the deployed live tail');
   eq(dry.needs_decision, [{ card: 'DEP-orphan', from: 'GA-M1' }], 'A4 never-minted ⇒ needs-decision');
 
   // apply
@@ -417,9 +417,18 @@ git commit -m "feat(coordinator): rewrite dangling dependents at discard time"
     all: true, reason: 'heal supersession rot', apply: true, json: true,
   }, deps);
   ok(applied.apply === true && applied.no_op === false, 'A4 apply executes');
-  ok(/\[\[GA-R1a2\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 apply repoints on disk');
-  ok(/depends_on: \[\]/.test(fs.readFileSync(pClear, 'utf8')), 'A4 apply clears the satisfied dep');
+  ok(/\[\[GA-R1a2\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 apply repoints the pending tail on disk');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(pDeployed, 'utf8')), 'A4 apply repoints the deployed tail on disk');
   ok(/\[\[GA-M1\]\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 never-minted left untouched for escalation');
+
+  // Director-authorized explicit clear of the never-minted dep
+  const cleared = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-orphan', clear: 'GA-M1', reason: 'director confirms GA-M1 obsolete', apply: true, json: true,
+  }, deps);
+  const clearedPlan = cleared.plan.find((p) => p.card === 'DEP-orphan');
+  eq(clearedPlan.classification, 'clear', 'A4 --clear classifies as clear');
+  eq(clearedPlan.to, null, 'A4 --clear has no target');
+  ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
 }
 ```
 
@@ -440,6 +449,7 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   if (single !== null && all) throw new Error('reconcile-dependencies accepts --card or --all, not both');
   if (!reason) throw new Error('reconcile-dependencies requires a non-empty --reason');
   const apply = args.apply === true;
+  const clearName = args.clear ? normalizeCardLink(String(args.clear)) : null;
   const loadState = deps.readState || readState;
   const writeText = deps.writeText || atomicWriteText;
   const lock = deps.withLock || withLock;
@@ -458,25 +468,26 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
         if (!ent.name.endsWith('.md')) continue;
         const depName = ent.name.replace(/\.md$/, '');
         if (single && depName !== single) continue;
-        const raw = fs.readFileSync(full, 'utf8');
+        let raw = fs.readFileSync(full, 'utf8');
+        const record = state.cards[depName];
+        const phase = record ? record.phase : null;
+        const inFlight = record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked');
         for (const ref of parseDependsOn(raw)) {
+          // Director-authorized explicit clear takes precedence over any auto-classification.
+          if (clearName && ref === clearName) {
+            if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
+            plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
+            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
+            continue;
+          }
           if (state.cards[ref] && state.cards[ref].phase !== 'discarded') continue; // live dep, fine
-          const problem = discardedDependencyProblem(ref, state);
-          if (!problem) { needsDecision.push({ card: depName, from: ref }); continue; }
-          const record = state.cards[depName];
-          const phase = record ? record.phase : null;
-          if (record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked')) {
-            reports.push({ card: depName, from: ref, phase }); continue;
-          }
+          if (!state.cards[ref]) { needsDecision.push({ card: depName, from: ref }); continue; } // never-minted
+          if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
           const resolved = resolveSupersessionTail(ref, state);
-          if (resolved.cycle) { needsDecision.push({ card: depName, from: ref }); continue; }
-          const to = resolved.terminal ? null : resolved.tail;
-          const classification = resolved.terminal ? 'clear' : 'repoint';
-          plan.push({ card: depName, from: ref, to, classification, path: full });
-          if (apply) {
-            const rewritten = rewriteDependsOn(raw, ref, to);
-            if (rewritten.changed) writeText(full, rewritten.text);
-          }
+          if (resolved.cycle || resolved.deadEnd) { needsDecision.push({ card: depName, from: ref }); continue; }
+          const to = resolved.tail;
+          plan.push({ card: depName, from: ref, to, classification: 'repoint', path: full });
+          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); } }
         }
       }
     }
@@ -626,17 +637,17 @@ cards or boards.
 ## Phase 1 — Detect
 
 1. `node <coordinator> status --json` → save to a temp file. Read `board_drift` and `projection_problems`.
-2. `node <coordinator> reconcile-dependencies --all --reason "block-review scan" --json` (dry-run; writes nothing). This returns `plan` (provable repoint/clear), `reports` (active/parked dependents — untouched), and `needs_decision` (never-minted/ambiguous).
+2. `node <coordinator> reconcile-dependencies --all --reason "block-review scan" --json` (dry-run; writes nothing). This returns `plan` (provable repoints to the live tail), `reports` (active/parked dependents — untouched), and `needs_decision` (never-minted/dead-end/cycle).
 3. The honest Director-facing signal is Obsidian GraphView at epic scope: `dangling_dependency` warnings there must reach zero when this is done.
 
 ## Phase 2 — Auto-fix the provable set
 
-1. If `plan` is non-empty, apply: `node <coordinator> reconcile-dependencies --all --reason "<audit>" --apply --json`. Quote each `repoint`/`clear` from the receipt.
+1. If `plan` is non-empty, apply: `node <coordinator> reconcile-dependencies --all --reason "<audit>" --apply --json`. Quote each repoint from the receipt.
 2. Re-`status`; for any epic whose slices are now all resolvable, run `node <coordinator> reconcile --card "<epic>" --json` so its posture flips `blocked_by_dependencies` → claimable and its lane moves through the sanctioned writer. Never hand-edit a kanban column.
 
 ## Phase 3 — Escalate the judgment set (one at a time)
 
-For each `needs_decision` item, ask ONE question, recommendation first: **mint** the missing foundation via `/loop:intake`, or **confirm-clear** (the dep is obsolete/folded elsewhere → run a targeted `reconcile-dependencies --card "<dependent>"` after the Director confirms it is safe to treat as satisfied). Never mint or clear a judgment item without the Director's word.
+For each `needs_decision` item, ask ONE question, recommendation first: **mint** the missing foundation via `/loop:intake`, or **confirm-clear** (the dep is obsolete/folded elsewhere → run `node <coordinator> reconcile-dependencies --card "<dependent>" --clear "<dead dep>" --reason "<director confirmation>" --apply --json`). Never mint or clear a judgment item without the Director's word.
 
 ## Phase 4 — Handoff
 
@@ -760,4 +771,4 @@ git add -A && git commit -m "test: green release preflight for dependency-hygien
 
 **Type consistency:** `resolveSupersessionTail` return shape (`{tail,hops,terminal,cycle}`) is used identically in A3 (`scanDependentsForDiscard`) and A4 (`commandReconcileDependencies`). `rewriteDependsOn` return (`{text,changed}`) used identically in A3 and A4. Receipt keys (`dependency_rewrites`/`dependency_reports` in discard; `plan`/`reports`/`needs_decision` in the verb) are consistent between implementation and tests.
 
-**Deviations from spec, surfaced:** (1) The spec's compare-and-swap `--expected-signature` is realized via the coordinator's existing **selector lock** (planning cards have no worktree HEAD to anchor a SHA-CAS); the dry-run→apply two-step plus the lock provide the concurrency guard. (2) The mint-time guard already existed; B1 strengthens rather than adds it. Both are intentional and noted.
+**Deviations from spec, surfaced:** (1) The spec's compare-and-swap `--expected-signature` is realized via the coordinator's existing **selector lock** (planning cards have no worktree HEAD to anchor a SHA-CAS); the dry-run→apply two-step plus the lock provide the concurrency guard. (2) The mint-time guard already existed; B1 strengthens rather than adds it. (3) Per the Director's ruling, the auto path is **repoint-to-live-tail-always** (deployed tail included) — there is no automatic `clear`; the spec's `clear` classification is realized only as the Director-authorized `--clear` mode. All three are intentional and noted.
