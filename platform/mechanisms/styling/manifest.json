@@ -1,6 +1,6 @@
 {
   "name": "styling",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Vault appearance — Baseline theme + Style Settings canonical config. Vendors Baseline theme files; declares Style Settings community plugin as a prerequisite (not vendored). Three new installer helpers (applyVendoredThemes, applyAppearance, applyStyleSettings) mirror the v0.1.3 plugin-data automation posture: additive merge, backup-on-edit, malformed-JSON guard, failure-loud history. v0.1.1 PATCH (CF-1): all three helpers now no-op when manifest.external_plugins[].required prereqs are absent from .obsidian/community-plugins.json — Smoke A behavior. v0.2.0 MINOR (v0.79.0 S15): NEW vendored snippet sauce-callouts.css restores per-type callout colors (info/warning/tip/example/note/quote — light hues tuned to rose-pine-light, dark to melange-dark) — the Baseline theme renders callouts monochrome by default and sauce's style-settings-default.json sets no callout key, so every callout was inheriting the single accent color. Wired via the existing applySnippets helper (snippets[] entry mirrors convenience's sauce-tasks-icons pattern) + enabledCssSnippets registration.",
   "depends_on": [],
   "external_plugins": [

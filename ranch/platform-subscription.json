@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.275.0",
+  "workshop_version": "0.275.1",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -76,7 +76,7 @@
     },
     {
       "name": "styling",
-      "version": "0.3.0"
+      "version": "0.3.1"
     },
     {
       "name": "convenience",
@@ -128,7 +128,7 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.4.2"
+      "version": "0.4.3"
     }
   ],
   "blueprints": [
