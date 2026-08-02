@@ -371,7 +371,10 @@ function validateCard(card, spec, errors, options = {}) {
   if (!['parent', 'execution'].includes(role)) errors.push(`${card.title}: role must be parent|execution`);
   if (!delivery.normalizeStatus(card.status || 'planning')) errors.push(`${card.title}: invalid normalized status`);
   if (!Array.isArray(card.depends_on)) errors.push(`${card.title}: depends_on must be an array`);
-  else for (const dep of card.depends_on) if (!linkName(dep)) errors.push(`${card.title}: dependencies must be wikilinks`);
+  else for (const dep of card.depends_on) {
+    if (typeof dep === 'string' && /^external:/.test(dep)) continue; // explicit off-board dep, accepted verbatim
+    if (!linkName(dep)) errors.push(`${card.title}: dependencies must be wikilinks or external:<text>`);
+  }
   if (spec.completion_mode === 'docs_only' && card.lane !== 'Docs Only') errors.push(`${card.title}: docs_only card must use Docs Only lane`);
   if (role === 'parent') {
     for (const key of ['model_profile', 'touch_zones', 'deploy_subscriptions']) {
@@ -487,10 +490,14 @@ function validateSpec(spec, boardRaw = '', options = {}) {
     if (!directShape && !parentShape) errors.push('ga_exception requires direct execution or one prepared parent with nested children');
   }
   const order = new Map(cards.map((card, index) => [card.title, index]));
+  const discardedDeps = new Map(Object.entries((options.coordinatorStatus && options.coordinatorStatus.cards) || {})
+    .filter(([, record]) => record && record.phase === 'discarded'));
   for (const card of cards) for (const dep of card.depends_on || []) {
+    if (typeof dep === 'string' && /^external:/.test(dep)) continue; // explicit off-board dep, never resolved
     const name = linkName(dep);
     if (order.has(name) && order.get(name) > order.get(card.title)) errors.push(`${card.title}: dependency appears after dependent`);
-    if (!order.has(name) && !findCard(spec.cards_root, name)) errors.push(`${card.title}: dependency does not resolve: ${name}`);
+    else if (discardedDeps.has(name)) errors.push(`${card.title}: dependency is discarded (superseded by ${discardedDeps.get(name).superseded_by}): ${name}`);
+    else if (!order.has(name) && !findCard(spec.cards_root, name)) errors.push(`${card.title}: dependency does not resolve: ${name}`);
   }
   const lanes = parseBoard(boardRaw);
   const protectedNames = new Set([...(spec.protected_cards || []), ...['In Progress', 'Parked'].flatMap((lane) => (lanes[lane] || []).map((entry) => entry.title))]);
@@ -547,7 +554,9 @@ function renderCard(card, spec, options = {}) {
     lines.push('touch_zones:', ...contract.touch_zones.map((item) => `  - ${quoted(item)}`));
   }
   lines.push('depends_on:');
-  const dependencies = contract ? contract.depends_on.map((item) => `[[${item}]]`) : (card.depends_on || []);
+  const dependencies = contract
+    ? contract.depends_on.map((item) => (/^external:/.test(item) ? item : `[[${item}]]`))
+    : (card.depends_on || []);
   if (dependencies.length) lines.push(...dependencies.map((item) => `  - ${quoted(item)}`));
   else lines.push('  []');
   if (role === 'execution') {
@@ -965,7 +974,7 @@ function run(spec, apply = false, deps = {}) {
   // migration-era switch. Absent both, the legacy flat path is preserved.
   const cutoverEnabled = spec.epic_native === true
     || Boolean(coordinatorStatus && coordinatorStatus.cutover && coordinatorStatus.cutover.enabled === true);
-  const validation = validateSpec(spec, boardRaw, { cutoverEnabled });
+  const validation = validateSpec(spec, boardRaw, { cutoverEnabled, coordinatorStatus });
   if (validation.errors.length) return {
     ok: false, errors: validation.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
   };
