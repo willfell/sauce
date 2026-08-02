@@ -8027,6 +8027,172 @@ eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
 eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
 eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
 
+// A3 discard-time scan rewrites planning dependents to the live tail
+{
+  const root = path.join(tmp, 'a3-discard-scan');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['BL-4'], planning: ['BL-5'] }));
+  const predPath = path.join(cardsRoot, 'BL-4.md');
+  const depPath = path.join(cardsRoot, 'BL-5.md');
+  const activePath = path.join(cardsRoot, 'BL-6.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  fs.writeFileSync(activePath, ['---', 'type: slice', 'status: claimed', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  state.cards['BL-6'] = { card: 'BL-6', phase: 'claimed', card_path: activePath };
+  const deps = {
+    readState: () => state,
+    writeState: () => {},
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-02T00:00:00.000Z',
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  };
+  const receipt = await commandDiscard({ root }, {
+    card: 'BL-4', 'superseded-by': 'BL-4b', reason: 'superseded to BL-4c chain', json: true,
+  }, deps);
+  eq(receipt.dependency_rewrites, [{ card: 'BL-5', from: 'BL-4', to: 'BL-4c', path: depPath }],
+    'A3 planning dependent BL-5 is repointed to the live tail BL-4c');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(depPath, 'utf8')), 'A3 BL-5 note now points at BL-4c on disk');
+  eq(receipt.dependency_reports, [{ card: 'BL-6', from: 'BL-4', phase: 'claimed' }],
+    'A3 active dependent BL-6 is reported, not touched');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
+}
+
+// A4 reconcile-dependencies — classify + apply across mixed fates
+{
+  const root = path.join(tmp, 'a4-reconcile');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['DEP-repoint', 'DEP-deployed', 'DEP-orphan'] }));
+  const mk = (name, dep) => {
+    const p = path.join(cardsRoot, `${name}.md`);
+    fs.writeFileSync(p, ['---', 'type: slice', 'status: in-planning', 'depends_on:', `  - "[[${dep}]]"`, '---', 'x'].join('\n'));
+    return p;
+  };
+  const pRepoint = mk('DEP-repoint', 'GA-R1a');    // superseded → pending GA-R1a2
+  const pDeployed = mk('DEP-deployed', 'BL-4');     // superseded → deployed BL-4c (still repoint)
+  const pOrphan = mk('DEP-orphan', 'GA-M1');        // never minted
+  const state = emptyState();
+  state.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  state.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'planned' };
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const deps = {
+    readState: () => state, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot,
+    now: () => '2026-08-02T00:00:00.000Z',
+  };
+  // dry-run: plan only, no writes
+  const dry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(dry.apply, false, 'A4 dry-run by default');
+  ok(/\[\[GA-R1a\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 dry-run writes nothing');
+  const byCard = Object.fromEntries(dry.plan.map((p) => [p.card, p]));
+  eq(byCard['DEP-repoint'].classification, 'repoint', 'A4 pending tail ⇒ repoint');
+  eq(byCard['DEP-repoint'].to, 'GA-R1a2', 'A4 repoint targets the live tail');
+  eq(byCard['DEP-deployed'].classification, 'repoint', 'A4 deployed tail ⇒ still repoint');
+  eq(byCard['DEP-deployed'].to, 'BL-4c', 'A4 repoint targets the deployed live tail');
+  eq(dry.needs_decision, [{ card: 'DEP-orphan', from: 'GA-M1' }], 'A4 never-minted ⇒ needs-decision');
+
+  // apply
+  const applied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(applied.apply === true && applied.no_op === false, 'A4 apply executes');
+  ok(/\[\[GA-R1a2\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 apply repoints the pending tail on disk');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(pDeployed, 'utf8')), 'A4 apply repoints the deployed tail on disk');
+  ok(/\[\[GA-M1\]\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 never-minted left untouched for escalation');
+
+  // Director-authorized explicit clear of the never-minted dep
+  const cleared = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-orphan', clear: 'GA-M1', reason: 'director confirms GA-M1 obsolete', apply: true, json: true,
+  }, deps);
+  const clearedPlan = cleared.plan.find((p) => p.card === 'DEP-orphan');
+  eq(clearedPlan.classification, 'clear', 'A4 --clear classifies as clear');
+  eq(clearedPlan.to, null, 'A4 --clear has no target');
+  ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
+
+  // Finding #3: --clear must only remove a DANGLING pointer, never a live
+  // (non-discarded) dependency — even when the Director names it explicitly.
+  const pLiveClear = mk('DEP-liveclear', 'BL-4c'); // BL-4c is 'deployed' (live) in state
+  const liveClearBefore = fs.readFileSync(pLiveClear, 'utf8');
+  const liveClearResult = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-liveclear', clear: 'BL-4c', reason: 'attempted clear of a live dep', apply: true, json: true,
+  }, deps);
+  ok(!liveClearResult.plan.some((p) => p.card === 'DEP-liveclear' && p.classification === 'clear'),
+    'A4 --clear of a live (non-discarded) card never enters the plan as clear');
+  eq(fs.readFileSync(pLiveClear, 'utf8'), liveClearBefore,
+    'A4 --clear of a live card leaves the dependent note unchanged on disk');
+
+  // Cycle chain, dead-end tombstone, and in-flight dependent — pin the
+  // remaining classification branches so a refactor can't silently break them.
+  const pCycle = mk('DEP-cycle', 'CYC-X');
+  const pDeadEnd = mk('DEP-deadend', 'DEADEND-Z');
+  const pInflight = mk('DEP-inflight', 'BL-4');
+  state.cards['CYC-X'] = { card: 'CYC-X', phase: 'discarded', superseded_by: 'CYC-Y' };
+  state.cards['CYC-Y'] = { card: 'CYC-Y', phase: 'discarded', superseded_by: 'CYC-X' };
+  state.cards['DEADEND-Z'] = { card: 'DEADEND-Z', phase: 'discarded', superseded_by: null };
+  state.cards['DEP-inflight'] = { card: 'DEP-inflight', phase: 'claimed' };
+
+  const branchDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-cycle'), { card: 'DEP-cycle', from: 'CYC-X' },
+    'A4 cycle chain ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-cycle'), 'A4 cycle chain never enters the repoint plan');
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-deadend'), { card: 'DEP-deadend', from: 'DEADEND-Z' },
+    'A4 dead-end tombstone (superseded_by: null) ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-deadend'), 'A4 dead-end tombstone never enters the repoint plan');
+  eq(branchDry.reports.find((r) => r.card === 'DEP-inflight'), { card: 'DEP-inflight', from: 'BL-4', phase: 'claimed' },
+    'A4 in-flight (claimed) dependent is reported with its phase');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-inflight'), 'A4 in-flight dependent never enters the repoint plan');
+
+  const branchApplied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(!branchApplied.plan.some((p) => p.card === 'DEP-inflight'), 'A4 apply still never plans the in-flight dependent');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(pInflight, 'utf8')), 'A4 apply leaves the in-flight dependent note untouched on disk');
+  ok(/\[\[CYC-X\]\]/.test(fs.readFileSync(pCycle, 'utf8')), 'A4 apply leaves the cycle-chain dependent note untouched on disk');
+  ok(/\[\[DEADEND-Z\]\]/.test(fs.readFileSync(pDeadEnd, 'utf8')), 'A4 apply leaves the dead-end dependent note untouched on disk');
+
+  // Finding #1: external: markers are off-board deps, accepted verbatim and
+  // NEVER resolved — they must not surface as either a repoint/clear plan
+  // entry or a needs_decision escalation.
+  const pExternal = path.join(cardsRoot, 'DEP-external.md');
+  fs.writeFileSync(pExternal, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "external:upstream vendor SDK"', '---', 'x'].join('\n'));
+  const externalDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  ok(!externalDry.plan.some((p) => p.card === 'DEP-external'), 'A4 external: dep never enters the plan');
+  ok(!externalDry.needs_decision.some((d) => d.card === 'DEP-external'), 'A4 external: dep never enters needs_decision');
+
+  // Argument validation — exact operand-shape errors the CLI relies on.
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, reason: 'x' }, deps),
+    /requires --json/, 'A4 missing --json is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { card: 'DEP-cycle', all: true, reason: 'x', json: true }, deps),
+    /not both/, 'A4 --card and --all together is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { reason: 'x', json: true }, deps),
+    /requires --card or --all/, 'A4 neither --card nor --all is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, json: true }, deps),
+    /non-empty --reason/, 'A4 missing --reason is refused',
+  );
+}
+
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
 // residue that reap heals, but performs no mutation while doing so.
 const opx5Root = path.join(tmp, 'opx5-residue');
@@ -8417,6 +8583,80 @@ const depSelection = selectClaimCandidate({
 eq(depSelection.action, 'no-work', 'BGR-DISCARD-DEP-FAILS-LOUD a dependent card is not claimable');
 ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
   'BGR-DISCARD-DEP-FAILS-LOUD claim skip reason is the explicit discarded-dependency error, not the checkbox fallback');
+
+// A1 resolveSupersessionTail — multi-hop chain to the live tail
+{
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4b' };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const r = coordinator.resolveSupersessionTail('BL-4', state);
+  eq(r.tail, 'BL-4c', 'A1 follows BL-4 → BL-4b → BL-4c to the live tail');
+  eq(r.hops, ['BL-4', 'BL-4b'], 'A1 records the traversed tombstones');
+  eq(r.deadEnd, false, 'A1 a deployed live tail is a valid repoint target');
+  eq(r.cycle, false, 'A1 no cycle on a clean chain');
+
+  // single hop, pending tail
+  const s2 = emptyState();
+  s2.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  s2.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'claimed' };
+  const r2 = coordinator.resolveSupersessionTail('GA-R1a', s2);
+  eq(r2.tail, 'GA-R1a2', 'A1 single hop lands on the pending successor');
+  eq(r2.deadEnd, false, 'A1 pending tail is a valid repoint target');
+
+  // cycle guard
+  const s3 = emptyState();
+  s3.cards['X'] = { card: 'X', phase: 'discarded', superseded_by: 'Y' };
+  s3.cards['Y'] = { card: 'Y', phase: 'discarded', superseded_by: 'X' };
+  const r3 = coordinator.resolveSupersessionTail('X', s3);
+  eq(r3.cycle, true, 'A1 detects a superseded_by cycle instead of looping');
+
+  // dead end: a discarded card with no successor
+  const s4 = emptyState();
+  s4.cards['Z'] = { card: 'Z', phase: 'discarded', superseded_by: null };
+  const r4 = coordinator.resolveSupersessionTail('Z', s4);
+  eq(r4.tail, 'Z', 'A1 a successor-less tombstone is its own tail');
+  eq(r4.deadEnd, true, 'A1 a discarded-with-no-successor tail is a dead end (not repointable)');
+
+  // multi-hop message on discardedDependencyProblem
+  eq(coordinator.discardedDependencyProblem('BL-4', state),
+    'depends on discarded card BL-4 (superseded by BL-4c)',
+    'A1 problem message names the live tail, not the immediate hop');
+}
+
+// A2 rewriteDependsOn — repoint and clear, format-preserving
+{
+  const block = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "[[Other]]"', '---', 'body'].join('\n');
+  const rp = coordinator.rewriteDependsOn(block, 'BL-4', 'BL-4c');
+  ok(rp.changed, 'A2 block-list repoint reports changed');
+  ok(/\[\[BL-4c\]\]/.test(rp.text) && !/\[\[BL-4\]\]/.test(rp.text.replace(/BL-4c/g, '')),
+    'A2 block-list repoint swaps BL-4 → BL-4c and keeps Other');
+  ok(/\[\[Other\]\]/.test(rp.text), 'A2 block-list repoint preserves the sibling dep');
+
+  const cleared = coordinator.rewriteDependsOn(block, 'BL-4', null);
+  ok(cleared.changed && !/\[\[BL-4\]\]/.test(cleared.text.replace(/BL-4c/g, '')),
+    'A2 clear removes the BL-4 line');
+  ok(/\[\[Other\]\]/.test(cleared.text), 'A2 clear keeps the sibling dep');
+
+  const inline = ['---', 'depends_on: ["[[BL-4]]","[[Other]]"]', '---', 'body'].join('\n');
+  const inlineRp = coordinator.rewriteDependsOn(inline, 'BL-4', 'BL-4c');
+  ok(inlineRp.changed && /\[\[BL-4c\]\]/.test(inlineRp.text), 'A2 inline-array repoint swaps the name');
+
+  const bare = ['---', 'depends_on:', '  - BL-4', '---', 'body'].join('\n');
+  const bareRp = coordinator.rewriteDependsOn(bare, 'BL-4', 'BL-4c');
+  ok(bareRp.changed, 'A2 bare-name form matches via normalization');
+
+  const absent = coordinator.rewriteDependsOn(block, 'NOT-PRESENT', 'X');
+  ok(!absent.changed && absent.text === block, 'A2 absent dep is a no-op');
+
+  // Finding #2: an external: sibling must survive serialization unwrapped —
+  // not corrupted into a wikilink when another dep on the same card is repointed.
+  const blockWithExternal = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "external:upstream vendor SDK"', '---', 'body'].join('\n');
+  const extRp = coordinator.rewriteDependsOn(blockWithExternal, 'BL-4', 'BL-4c');
+  ok(extRp.changed && /\[\[BL-4c\]\]/.test(extRp.text), 'A2 external-sibling repoint still swaps BL-4 → BL-4c');
+  ok(/external:upstream vendor SDK/.test(extRp.text), 'A2 external-sibling repoint preserves the external: entry verbatim');
+  ok(!/\[\[external:/.test(extRp.text), 'A2 external-sibling repoint leaves external: unwrapped, not [[external:...]]');
+}
 
 // BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
 eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');

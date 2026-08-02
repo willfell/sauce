@@ -5,7 +5,7 @@ load_when: Installing, updating, binding, or debugging the loop plugin surface; 
 
 # Loop plugin — onboarding runbook
 
-The `loop` plugin centralizes the meta-loop skill surface (status, review, brainstorm, plan, execute, run, intake, init) in ONE place — this repo, `plugins/loop/` — and every repo binds itself to a vault/board with a committed `.loop/config.json`. A plugin reload puts every session of every project on the same logic. Design: `Docs/superpowers/specs/2026-07-26-meta-loop-plugin-design.md`.
+The `loop` plugin centralizes the meta-loop skill surface (status, review, brainstorm, plan, execute, run, intake, init, block-review) in ONE place — this repo, `plugins/loop/` — and every repo binds itself to a vault/board with a committed `.loop/config.json`. A plugin reload puts every session of every project on the same logic. Design: `Docs/superpowers/specs/2026-07-26-meta-loop-plugin-design.md`.
 
 ## Architecture in three sentences
 
@@ -74,6 +74,7 @@ Two derived/repair facts:
 | `/loop:execute` | `$loop-execute` | drive the minted epic in-session, sub-agent per slice, full quorum |
 | `/loop:run` | `$loop-run` | one bounded autonomous loop turn (the run-loose engine) |
 | `/loop:intake` | `$loop-intake` | raw requirement → board-ready work (incl. supersede-at-mint) |
+| `/loop:block-review` | `$loop-block-review` | detect + heal dangling depends_on rot; auto-fix provable, escalate never-minted |
 
 Legacy names still answer as deprecation aliases: `/delivery-status` → `/loop:status`, `/delivery-review` → `/loop:review`, `$card-intake` → `$loop-intake`, `$slice-plan` → `$loop-plan`, `$sauce-autoloop` → `$loop-run`. The live cron loop still runs `/sauce-autoloop` (fat command, deliberately untouched) until `/loop:run` is validated — see the design doc's follow-ups.
 

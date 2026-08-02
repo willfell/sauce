@@ -19,7 +19,7 @@ function ok(label, cond, detail) {
   else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; }
 }
 
-const EXPECTED_SKILLS = ['brainstorm', 'execute', 'init', 'intake', 'plan', 'review', 'run', 'status'];
+const EXPECTED_SKILLS = ['block-review', 'brainstorm', 'execute', 'init', 'intake', 'plan', 'review', 'run', 'status'];
 
 // LP-1: marketplace manifest at repo root points at the plugin subdirectory.
 {
