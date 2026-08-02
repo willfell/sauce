@@ -108,6 +108,27 @@ async function run() {
       processed.includes("spice/finance/Budget.md") && global.app.metadataCache.getFileCache({ path: "spice/finance/Budget.md" }).frontmatter.n === 2);
   }
   {
+    const file = { path: "spice/finance/Budget.md", stat: { mtime: 10 } };
+    const persisted = { categories: [{ name: "A" }] };
+    const staleCache = { categories: [{ name: "A" }] };
+    global.app = {
+      vault: { getAbstractFileByPath: () => file },
+      metadataCache: { getFileCache: () => ({ frontmatter: staleCache }) },
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+    };
+    await ff.update(file, (fm) => { fm.categories.push({ name: "B" }); });
+    const secondPreview = ff.read(file);
+    secondPreview.categories.push({ name: "C" });
+    const stillAuthoritative = ff.read(file);
+    await ff.update(file, (fm) => { fm.categories.push({ name: "C" }); });
+    const thirdPreview = ff.read(file);
+    ok("FF-12A completed writes shadow a stale metadata cache for sequential gestures",
+      secondPreview.categories.map((row) => row.name).join(",") === "A,B,C"
+        && stillAuthoritative.categories.map((row) => row.name).join(",") === "A,B"
+        && persisted.categories.map((row) => row.name).join(",") === "A,B,C"
+        && thirdPreview.categories.map((row) => row.name).join(",") === "A,B,C");
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }
