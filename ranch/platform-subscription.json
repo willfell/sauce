@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.275.1",
+  "workshop_version": "0.275.2",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -12,7 +12,7 @@
     },
     {
       "name": "customjs-guard",
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     {
       "name": "validator",

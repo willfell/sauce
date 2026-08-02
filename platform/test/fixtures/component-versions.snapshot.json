@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.275.1",
+  "workshop_version": "0.275.2",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -19,7 +19,7 @@
     "reader": "0.6.2",
     "editor-width": "0.2.0",
     "agent-embed": "0.2.0",
-    "customjs-guard": "1.0.0",
+    "customjs-guard": "1.0.1",
     "validator": "0.3.0",
     "activity-feed": "0.10.1",
     "kanban-status-sync": "0.2.1",
