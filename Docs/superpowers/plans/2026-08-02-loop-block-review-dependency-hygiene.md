@@ -153,7 +153,7 @@ git commit -m "feat(coordinator): multi-hop supersession-tail resolver for dangl
 - Test: `platform/test/run-codex-autoloop.js`
 
 **Interfaces:**
-- Produces: `rewriteDependsOn(raw, fromName, toNameOrNull)` → `{ text: string, changed: boolean }`. Rewrites occurrences of `fromName` inside the note's `depends_on` frontmatter: replaced with `toNameOrNull` when non-null, or removed when null. Preserves the existing block-list vs inline form. Name matching is via `normalizeCardLink` so wikilink/bare both match. No-op (`changed:false`) when `fromName` isn't present.
+- Produces: `rewriteDependsOn(raw, fromName, toNameOrNull)` → `{ text: string, changed: boolean }`. Rewrites occurrences of `fromName` inside the note's `depends_on` frontmatter: replaced with `toNameOrNull` when non-null, or removed when null. Reads any input form via `parseDependsOn` and re-serializes to canonical block-list form (`depends_on:` + `  - "[[Name]]"` lines, or `depends_on: []` when empty) — input inline/bare forms are normalized, not preserved. Name matching is via `normalizeCardLink` so wikilink/bare both match. No-op (`changed:false`, `text === raw` byte-identical) when `fromName` isn't present.
 
 - [ ] **Step 1: Write the failing tests**
 
