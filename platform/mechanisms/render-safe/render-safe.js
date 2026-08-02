@@ -122,6 +122,37 @@ class RenderSafe {
     }
   }
 
+  // Structural companion to mutate(). `apply` performs the optimistic DOM
+  // insert/remove and returns an opaque receipt (for example { parent, node,
+  // nextSibling, focusTarget }). If persistence rejects, `rollback` receives
+  // that exact receipt so the caller can restore identity and position instead
+  // of reconstructing a lookalike row from stale Dataview data.
+  //
+  // This is deliberately a thin adapter: mutate remains the single owner of
+  // scroll capture, failure Notice behavior, and write ordering. Structural UI
+  // is already current locally, so this seam always uses background mode and
+  // leaves authoritative cleanup to Dataview's natural reconciler. Callers
+  // cannot turn a successful structural gesture into a global forced refresh.
+  async mutateStructure(opts) {
+    opts = opts || {};
+    let receipt;
+    const mutation = Object.assign({}, opts, {
+      mode: 'background',
+      isCurrent: undefined,
+      optimistic: async () => {
+        if (typeof opts.apply !== 'function') {
+          throw new Error('RenderSafe.mutateStructure requires apply');
+        }
+        if (typeof opts.rollback !== 'function') {
+          throw new Error('RenderSafe.mutateStructure requires rollback');
+        }
+        receipt = await opts.apply();
+      },
+      revert: async (error) => opts.rollback(receipt, error),
+    });
+    return this.mutate(mutation);
+  }
+
   _runtimeApp() {
     try {
       if (typeof window !== 'undefined' && window.app) return window.app;

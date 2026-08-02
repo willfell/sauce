@@ -1,7 +1,7 @@
 {
   "name": "render-safe",
   "version": "0.3.0",
-  "description": "Cold-load-safe Dataview accessor. customJS.RenderSafe.page(dv) / .filePath(dv) / .fileName(dv) return the live dv.current() page when Dataview has indexed the embedding file, else a shim built from app.workspace.getActiveFile() + cached frontmatter, else null — never the 'Cannot read properties of undefined' throw that flashes on cold vault load (landmines #1-#2). The single home for the dv.current() fallback that the v0.119/v0.132/v0.133 point-fixes each re-implemented. Enforced by scripts/lint-cold-load.js.",
+  "description": "Cold-load-safe Dataview accessor and shared gesture lifecycle. customJS.RenderSafe.page(dv) / .filePath(dv) / .fileName(dv) return the live dv.current() page when indexed, else an active-file shim, else null. mutate owns scroll capture, optimistic writes, failure reversion, and bounded reconciliation; mutateStructure carries an opaque optimistic insert/remove receipt into exact rollback without issuing a global Dataview refresh. Enforced by scripts/lint-cold-load.js and the render-safe behavioral harness.",
   "depends_on": [
     {
       "name": "customjs-guard",
