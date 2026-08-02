@@ -52,14 +52,26 @@ let dispatch8Fn = async () => {};
 // Minimal element supporting createEl (Obsidian) + appendChild/createElement
 // (document.body path) + querySelector (returns null; no prior overlay).
 function makeEl(tag) {
+  const classes = new Set();
   const el = {
     tag,
     textContent: '',
     innerHTML: '',
-    className: '',
     style: { cssText: '', setProperty() {} },
     children: [],
     onclick: null,
+  };
+  Object.defineProperty(el, 'className', {
+    get: () => [...classes].join(' '),
+    set: (value) => {
+      classes.clear();
+      for (const name of String(value || '').split(/\s+/).filter(Boolean)) classes.add(name);
+    },
+  });
+  el.classList = {
+    add: (...names) => { for (const name of names) classes.add(name); },
+    remove: (...names) => { for (const name of names) classes.delete(name); },
+    contains: (name) => classes.has(name),
   };
   el.createEl = (t, opts) => {
     const c = makeEl(t);
@@ -879,8 +891,8 @@ function runRenderCases() {
 
   // PCB-STYLE-1 — the bar's visual redesign: icon-only Go/⋯ (no "Go"/"⋯" text),
   // a header→content gap (≥10px root bottom margin), and the hover-lift +
-  // press-scale micro-motion (transition + mousedown/mouseup wiring) on all 3
-  // controls, mirroring the Home "+" button's animated feel.
+  // press-scale micro-motion (sauce-core classes + handler wiring) on all 3
+  // controls, mirroring the Home "+" button's animated feel without inline CSS.
   const doStyleChecks = () => {
     accentCalls.length = 0; popoverCalls.length = 0;
     const container = makeEl('div');
@@ -900,8 +912,10 @@ function runRenderCases() {
         !!goBtn && !/>Go</.test(goBtn.innerHTML) && !/^Go$/.test(String(goBtn.innerHTML).trim()));
       ok('PCB-STYLE-1c ⋯ control is icon-only — no literal "⋯" glyph in its markup',
         !!dotsBtn && !dotsBtn.innerHTML.includes('⋯'));
-      ok('PCB-STYLE-1d all 3 controls carry a CSS transition (animated, not instant)',
-        [goBtn, dotsBtn, primaryBtn].every((b) => b && /transition:/.test(b.style.cssText)));
+      ok('PCB-STYLE-1d all 3 controls delegate presentation to sauce-core classes',
+        [goBtn, dotsBtn, primaryBtn].every((b) => b
+          && b.classList.contains('sauce-btn') && b.classList.contains('sauce-chrome-btn')
+          && b.style.cssText === ''));
       ok('PCB-STYLE-1e all 3 controls wire hover-lift + press-scale handlers',
         [goBtn, dotsBtn, primaryBtn].every((b) => b
           && typeof b.onmouseenter === 'function' && typeof b.onmousedown === 'function' && typeof b.onmouseup === 'function'));

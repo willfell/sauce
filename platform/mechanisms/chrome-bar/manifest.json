@@ -23,6 +23,10 @@
     {
       "name": "icons",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "styling",
+      "range": ">=0.3.0"
     }
   ],
   "customjs_classes": [
