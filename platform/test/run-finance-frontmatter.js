@@ -267,6 +267,86 @@ async function run() {
       raceFf._writtenFrontmatter.size === 0 && listeners.size === 0 && cached.amount === 1);
   }
   {
+    const ownProto = (marker) => {
+      const value = { amount: 1 };
+      Object.defineProperty(value, "__proto__", {
+        value: { marker }, enumerable: true, writable: true, configurable: true,
+      });
+      return value;
+    };
+    const file = { path: "spice/finance/Invoices/Hostile-Key.md", stat: { mtime: 10 } };
+    const persisted = ownProto("before");
+    let cached = ownProto("stale");
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: cached }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: () => file },
+      metadataCache,
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+    };
+    const hostileFf = new FinanceFrontmatter();
+    await hostileFf.update(file, (fm) => { fm.__proto__ = { marker: "written" }; });
+    const preview = hostileFf.read(file);
+    const sourcePrototypeSafe = Object.getPrototypeOf(persisted) === Object.prototype;
+    const clonePrototypeSafe = Object.getPrototypeOf(preview) === Object.prototype;
+    const exactOwnKey = Object.prototype.hasOwnProperty.call(preview, "__proto__")
+      && Object.keys(preview).includes("__proto__") && preview.__proto__.marker === "written";
+    preview.__proto__.marker = "mutated-preview";
+    const isolatedClone = hostileFf.read(file).__proto__.marker === "written";
+    cached = ownProto("written");
+    Object.defineProperty(cached, "position", {
+      value: { start: { line: 0 } }, enumerable: true, writable: true, configurable: true,
+    });
+    metadataCache.emit(file);
+    ok("FF-12F authoritative snapshots preserve hostile own keys without prototype mutation",
+      sourcePrototypeSafe && clonePrototypeSafe && exactOwnKey && isolatedClone
+        && hostileFf._writtenFrontmatter.size === 0 && listeners.size === 0);
+  }
+  {
+    const original = { path: "spice/finance/Invoices/Replaced.md", stat: { mtime: 10 } };
+    const replacement = { path: original.path, stat: { mtime: 11 } };
+    const persisted = { amount: 0 };
+    const stale = { amount: 0 };
+    const external = { amount: 99 };
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: (file) => ({ frontmatter: file === replacement ? external : stale }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: () => replacement },
+      metadataCache,
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+    };
+    const replacementFf = new FinanceFrontmatter();
+    await replacementFf.update(original, (fm) => { fm.amount = 1; });
+    const retainedBeforeReplacement = replacementFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    metadataCache.emit(replacement);
+    const releasedByEvent = replacementFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    const externalReadThrough = replacementFf.read(replacement) === external;
+    ok("FF-12G replacement TFile events settle against changed identity and newer mtime",
+      retainedBeforeReplacement && releasedByEvent && externalReadThrough);
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

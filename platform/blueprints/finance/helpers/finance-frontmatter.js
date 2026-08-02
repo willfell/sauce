@@ -273,8 +273,8 @@ class FinanceFrontmatter {
         const listener = (changedFile) => {
             if (!changedFile || changedFile.path !== file.path) return;
             if (this._writtenFrontmatter?.get?.(file.path) !== written) return;
-            const cached = metadata.getFileCache?.(file)?.frontmatter ?? null;
-            this._writtenSnapshotSettled(file, written, cached);
+            const cached = metadata.getFileCache?.(changedFile)?.frontmatter ?? null;
+            this._writtenSnapshotSettled(changedFile, written, cached);
         };
         try {
             written.metadata = metadata;
@@ -317,12 +317,16 @@ class FinanceFrontmatter {
 
     _frontmatterData(frontmatter, written) {
         if (!frontmatter || typeof frontmatter !== "object") return frontmatter;
-        const data = {};
+        const data = Array.isArray(frontmatter)
+            ? []
+            : Object.create(Object.getPrototypeOf(frontmatter));
         for (const key of Object.keys(frontmatter)) {
             // Obsidian attaches source-location metadata to cache snapshots;
             // processFrontMatter does not expose it to the write callback.
             if (key !== "position" || Object.prototype.hasOwnProperty.call(written || {}, key)) {
-                data[key] = frontmatter[key];
+                Object.defineProperty(data, key, {
+                    value: frontmatter[key], enumerable: true, writable: true, configurable: true,
+                });
             }
         }
         return data;
@@ -332,9 +336,13 @@ class FinanceFrontmatter {
         if (value === null || typeof value !== "object") return value;
         if (value instanceof Date) return new Date(value.getTime());
         if (seen.has(value)) return seen.get(value);
-        const copy = Array.isArray(value) ? [] : {};
+        const copy = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
         seen.set(value, copy);
-        for (const key of Object.keys(value)) copy[key] = this._clone(value[key], seen);
+        for (const key of Object.keys(value)) {
+            Object.defineProperty(copy, key, {
+                value: this._clone(value[key], seen), enumerable: true, writable: true, configurable: true,
+            });
+        }
         return copy;
     }
 
