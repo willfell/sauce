@@ -63,6 +63,44 @@ function svgPaths(root, className) {
   return svg.split('<path').slice(1).filter((chunk) => chunk.includes(`graph-view-edge ${className}`));
 }
 function dOf(chunk) { return (chunk.match(/\sd="([^"]+)"/) || [])[1] || ''; }
+
+// GV-R2 deterministic geometry — the widget's per-rank auto-width formula,
+// replicated here so every expected width / x-offset / canvas width is COMPUTED
+// from the same math (never a magic literal). A mutation to the widget's
+// charPx / hPad / minCol / maxCol / colGap diverges from this replica → RED.
+const GVR2 = { charPx: 7, hPad: 18, minCol: 120, maxCol: 260, colGap: 28, pad: 12, rowH: 74, chipH: 56 };
+GVR2.maxCharsPerLine = Math.floor((GVR2.maxCol - GVR2.hPad) / GVR2.charPx); // 34
+function wrapLongest(text, maxChars) {
+  const limit = Math.max(1, Number(maxChars) || 1);
+  const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length <= limit || !line) line = candidate;
+    else { lines.push(line); line = word; }
+  }
+  if (line) lines.push(line);
+  const clamped = lines.length > 2;
+  const longest = lines.slice(0, 2).reduce((max, entry) => Math.max(max, entry.length), 0);
+  return { longest, clamped };
+}
+function chipWidth(text) {
+  const { longest, clamped } = wrapLongest(text, GVR2.maxCharsPerLine);
+  const raw = clamped ? GVR2.maxCol : longest * GVR2.charPx + GVR2.hPad;
+  return Math.min(GVR2.maxCol, Math.max(GVR2.minCol, raw));
+}
+// rankMembers[r] = the card names in rank r → per-column widths, x-offsets, and
+// the clip-free canvas width (last column right edge + pad).
+function columnLayout(rankMembers) {
+  const widths = rankMembers.map((members) => members.reduce((max, card) => Math.max(max, chipWidth(card)), GVR2.minCol));
+  const offsets = [];
+  let cursor = GVR2.pad;
+  for (const w of widths) { offsets.push(cursor); cursor += w + GVR2.colGap; }
+  const last = widths.length - 1;
+  const canvasWidth = offsets[last] + widths[last] + GVR2.pad;
+  return { widths, offsets, canvasWidth };
+}
 function memoryAdapter(initial) {
   const store = new Map(Object.entries(initial));
   const dirs = new Set();
@@ -251,32 +289,50 @@ async function main() {
     && !chunk.includes('marker-end')),
   'case 4: order edges are dashed, low-opacity, and arrowless');
 
-  // Case 11: pin the SVG layer to the widget's REAL position math. The
-  // fixture is deterministic, so every value is exact (no tolerances):
-  //   chip x = pad + rank*colW (rank is the HORIZONTAL axis)
-  //   chip y = pad + row*rowH  (row is the VERTICAL axis)
-  // with pad 12, colW 200, rowH 74, chipW 172, chipH 56, and known layout
+  // Case 11: pin the SVG layer to the widget's REAL position math under the
+  // NEW per-rank auto-width geometry. Every value is COMPUTED from the shared
+  // formula (chipWidth/columnLayout), not a literal:
+  //   chip x = its rank column's x-offset (rank is the HORIZONTAL axis)
+  //   chip y = pad + row*rowH        (row is the VERTICAL axis)
+  //   chip w = its rank column's auto-width (widest content in the rank)
+  // Known layout for this fixture:
   //   GV-E Stale (0,0)  GV-F Malformed (0,1)  GV-C Parked (0,2)
   //   GV-A Base (0,3)   GV-B Widget (1,0)     GV-G LongPark (1,1)
   //   GV-D Blocked (2,0)
-  const G = { colW: 200, rowH: 74, chipW: 172, chipH: 56, pad: 12 };
-  const posOf = (rank, row) => ({ x: G.pad + rank * G.colW, y: G.pad + row * G.rowH });
+  // Every card here is short, so each column clamps to minCol (120px), the
+  // columns advance by 120+colGap(28), and the canvas ends at the last column
+  // right edge + pad — no clip.
+  const G = { rowH: GVR2.rowH, chipH: GVR2.chipH, pad: GVR2.pad };
+  const mainRankMembers = [
+    ['GV-E Stale', 'GV-F Malformed', 'GV-C Parked', 'GV-A Base'],
+    ['GV-B Widget', 'GV-G LongPark'],
+    ['GV-D Blocked'],
+  ];
+  const mainCols = columnLayout(mainRankMembers);
+  assert.deepStrictEqual(mainCols.widths, [120, 120, 120],
+    'case 11: every short-title column clamps to the 120px minimum');
+  assert.deepStrictEqual(mainCols.offsets, [12, 160, 308],
+    'case 11: column x-offsets accumulate prior column widths plus the inter-column gap');
+  const posOf = (rank, row) => ({ x: mainCols.offsets[rank], y: G.pad + row * G.rowH, w: mainCols.widths[rank] });
 
-  // 11a — chip geometry: rank must land on the horizontal axis and row on the
-  // vertical axis (a rank↔row transposition moves GV-A Base to 612,12).
+  // 11a — chip geometry: rank must land on the horizontal axis (its column
+  // offset + width) and row on the vertical axis; a rank↔row transposition
+  // moves GV-A Base off (12,234).
   for (const [id, rank, row] of [['GV-A', 0, 3], ['GV-G', 1, 1], ['GV-D', 2, 0]]) {
-    const { x, y } = posOf(rank, row);
-    assert(chipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`),
-      `case 11a: ${id} chip (rank ${rank}, row ${row}) sits at left:${x}px;top:${y}px — rank horizontal, row vertical`);
+    const { x, y, w } = posOf(rank, row);
+    assert(chipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`)
+      && chipFor(id).style.cssText.includes(`width:${w}px`),
+    `case 11a: ${id} chip (rank ${rank}, row ${row}) sits at left:${x}px;top:${y}px;width:${w}px — rank horizontal, row vertical, auto-width column`);
   }
 
   // 11b — kind→endpoint binding + direction for the KNOWN depends edge
   // GV-A Base → GV-B Widget: the path starts at the prerequisite chip's
-  // right-edge midpoint and ends at the dependent chip's left-edge midpoint,
-  // and THIS element carries the solid arrowed depends markup.
+  // right-edge midpoint (chip x + its column width) and ends at the dependent
+  // chip's left-edge midpoint, and THIS element carries the solid arrowed
+  // depends markup.
   const gvA = posOf(0, 3);
   const gvB = posOf(1, 0);
-  const x1 = gvA.x + G.chipW;
+  const x1 = gvA.x + gvA.w;
   const y1 = gvA.y + G.chipH / 2;
   const x2 = gvB.x;
   const y2 = gvB.y + G.chipH / 2;
@@ -284,13 +340,13 @@ async function main() {
   const dependsD = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
   const dependsEdge = dependsPaths.find((chunk) => dOf(chunk) === dependsD);
   assert(dependsEdge,
-    'case 11b: the GV-A Base→GV-B Widget depends path runs prerequisite chip (184,262) → dependent chip (212,40)');
+    `case 11b: the GV-A Base→GV-B Widget depends path runs prerequisite chip right-edge (${x1},${y1}) → dependent chip left-edge (${x2},${y2})`);
   assert(dependsEdge.includes('marker-end="url(#graph-view-arrow)"') && !dependsEdge.includes('stroke-dasharray'),
     'case 11b: the GV-A Base→GV-B Widget element itself carries the solid arrowed depends markup');
 
   // 11c — direction: the reversed drawing (dependent → prerequisite) of that
   // same edge must not exist anywhere in the SVG layer.
-  const rx1 = gvB.x + G.chipW;
+  const rx1 = gvB.x + gvB.w;
   const ry1 = gvB.y + G.chipH / 2;
   const rx2 = gvA.x;
   const ry2 = gvA.y + G.chipH / 2;
@@ -302,33 +358,55 @@ async function main() {
 
   // 11d — the KNOWN order edge GV-E Stale → GV-F Malformed (same rank,
   // vertical drop) leaves the upper chip's bottom edge at the shared column
-  // center and lands on the lower chip's top edge, with dashed markup.
+  // center (chip x + column width / 2) and lands on the lower chip's top edge,
+  // with dashed markup.
   const gvE = posOf(0, 0);
   const gvF = posOf(0, 1);
-  const orderX = gvE.x + G.chipW / 2;
+  const orderX = gvE.x + gvE.w / 2;
   const orderD = `M ${orderX} ${gvE.y + G.chipH} L ${orderX} ${gvF.y}`;
   const orderEdge = orderPaths.find((chunk) => dOf(chunk) === orderD);
   assert(orderEdge,
-    'case 11d: the GV-E Stale→GV-F Malformed order path drops upper chip bottom (98,68) → lower chip top (98,86)');
+    `case 11d: the GV-E Stale→GV-F Malformed order path drops upper chip bottom (${orderX},${gvE.y + G.chipH}) → lower chip top (${orderX},${gvF.y})`);
   assert(orderEdge.includes('stroke-dasharray') && !orderEdge.includes('marker-end'),
     'case 11d: the GV-E Stale→GV-F Malformed element itself carries the dashed arrowless order markup');
 
-  // Case 5: wait badges — parked resume_condition verbatim; blocked unmet dep names;
-  // long reasons truncate to ~60 chars with the full text in the title attribute.
-  const badgeOf = (id) => byClass(chipFor(id), 'graph-view-wait-badge')[0];
-  assert.strictEqual(badgeOf('GV-C')?.textContent, 'Waiting for Director sign-off',
-    'case 5: a parked slice badge carries resume_condition verbatim');
-  assert.strictEqual(badgeOf('GV-D')?.textContent, 'waiting on: GV-B Widget',
-    'case 5: a blocked slice badge names its unmet dependency');
-  const longBadge = badgeOf('GV-G');
-  assert(longBadge && longBadge.textContent.length <= 61 && longBadge.textContent.endsWith('…')
-    && longReason.startsWith(longBadge.textContent.slice(0, -1)),
-  'case 5: long wait reasons truncate to ~60 chars');
-  assert.strictEqual(longBadge.attrs.title, longReason,
-    'case 5: the title attribute carries the full wait reason');
-  assert(!byClass(chipFor('GV-A'), 'graph-view-wait-badge').length
-    && !byClass(widgetChip, 'graph-view-wait-badge').length,
-  'case 5: done and active chips carry no wait badge');
+  // 11e — clip-free canvas: the epic canvas width equals the last column's
+  // right edge plus pad EXACTLY (dropping the auto-width sizing back to the old
+  // pad*2 + maxRank*colW + chipW formula changes this number → RED).
+  const mainCanvas = byClass(root, 'graph-view-canvas')
+    .find((node) => !node.className.split(/\s+/).includes('graph-view-project-canvas'));
+  assert(mainCanvas && mainCanvas.style.cssText.includes(`width:${mainCols.canvasWidth}px`),
+    `case 11e: canvas width == last column right edge + pad (${mainCols.canvasWidth}px) — no clip at rest`);
+
+  // Case 5: the per-chip INFO LINE — a colored lifecycle status word (from the
+  // shared presentation API, not a duplicated table) plus an inline wait reason:
+  // "needs <dep-id>" for a blocked slice, the resume_condition from its start
+  // for a parked slice (long reasons truncate, full text in the wait title
+  // attribute). Done / in-progress chips show the status word with no wait span.
+  const wordOf = (id) => byClass(chipFor(id), 'graph-view-status-word')[0];
+  const waitOf = (id) => byClass(chipFor(id), 'graph-view-wait')[0];
+  assert.strictEqual(waitOf('GV-C')?.textContent, 'Waiting for Director sign-off',
+    'case 5: a parked slice info line shows the resume_condition from its start');
+  assert.strictEqual(waitOf('GV-D')?.textContent, 'needs GV-B',
+    'case 5: a blocked slice info line names its unmet dependency id ("needs <dep-id>")');
+  const longWait = waitOf('GV-G');
+  assert(longWait && longWait.textContent.length <= 48 && longWait.textContent.endsWith('…')
+    && longReason.startsWith(longWait.textContent.slice(0, -1)),
+  'case 5: a long parked resume reason truncates from its start');
+  assert.strictEqual(longWait.attrs.title, longReason,
+    'case 5: the wait span title attribute carries the full resume reason');
+  // Status word colored via the SHARED lifecycle presentation (class + color),
+  // never a local color table.
+  assert.strictEqual(wordOf('GV-D').textContent, 'blocked', 'case 5: the blocked status word reads "blocked"');
+  assert(wordOf('GV-D').style.cssText.includes('color:var(--color-red)')
+    && wordOf('GV-D').className.includes('status-blocked'),
+  'case 5: the blocked status word carries the shared lifecycle color and class');
+  assert.strictEqual(wordOf('GV-C').textContent, 'waiting', 'case 5: the parked status word reads "waiting"');
+  assert(wordOf('GV-C').style.cssText.includes('color:var(--color-orange)'),
+    'case 5: the parked status word carries the shared waiting color');
+  assert.strictEqual(wordOf('GV-A').textContent, 'done', 'case 5: the completed status word reads "done"');
+  assert(!waitOf('GV-A') && !waitOf('GV-B'),
+    'case 5: done and in-progress chips carry a status word but no wait span');
 
   // Case 6: GV2-STALE-DEP-EDGE — depends_on onto a discarded/tombstoned card name
   // renders exactly one warning row naming the card and the unresolvable target.
@@ -556,6 +634,167 @@ async function main() {
     'B5: cross-epic stub resolution invokes no vault, adapter, frontmatter, or metadata mutator');
   global.app = savedAppB;
   global.customJS = savedCustomJSB;
+
+  // ---- GV-R2 presentation fixture (MX): per-rank auto-width columns, two-line
+  // wrapped titles vs beyond-cap ellipsis, the status-word + wait info line, and
+  // the Outcome hover tooltip. Widths / offsets / canvas width are recomputed
+  // from the SAME formula the widget uses (columnLayout above), so a formula
+  // mutation in the widget diverges from these expectations → RED.
+  const savedAppMX = global.app;
+  const savedCustomJSMX = global.customJS;
+  const mxEpicDir = 'spice/projects/mixed/tasks/MX Epic';
+  const mxEpicPath = `${mxEpicDir}/MX Epic.md`;
+  const mxBoard = `${mxEpicDir}/board`;
+  const mxBoardNote = `${mxBoard}/MX Epic-board.md`;
+  const mxShort = 'MX-A Hi';
+  const mxMiddling = 'MX-B This title is of a middling sort length';
+  const mxLong = 'MX-C An exceptionally long slice title that overflows well past two full lines of chip text';
+  const mxParked = 'MX-D Park';
+  const mxParkReason = 'Blocked on the upstream vendor SDK cut before this slice can resume in earnest';
+  const mxOutcome = 'MX-A delivers the short deterministic path.';
+  const mxFiles = [
+    file(mxBoardNote, 1),
+    file(`${mxBoard}/${mxShort}.md`, 10), file(`${mxBoard}/${mxMiddling}.md`, 20),
+    file(`${mxBoard}/${mxLong}.md`, 30), file(`${mxBoard}/${mxParked}.md`, 40),
+  ];
+  const mxFrontmatter = new Map([
+    [mxBoardNote, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    [`${mxBoard}/${mxShort}.md`, { type: 'slice', status: 'planning', depends_on: [] }],
+    [`${mxBoard}/${mxMiddling}.md`, { type: 'slice', status: 'planning', depends_on: [] }],
+    // MX-C blocked on the (incomplete) short slice → unmet dep → "needs MX-A".
+    [`${mxBoard}/${mxLong}.md`, { type: 'slice', status: 'blocked', depends_on: [`[[${mxShort}]]`] }],
+    // MX-D parked with a long resume_condition → info line shows its start.
+    [`${mxBoard}/${mxParked}.md`, { type: 'slice', status: 'parked', depends_on: [`[[${mxMiddling}]]`], resume_condition: mxParkReason }],
+  ]);
+  const mxBoardBody = [
+    '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic', '---', '',
+    '## In Planning', '', `- [ ] [[${mxShort}]]`, `- [ ] [[${mxMiddling}]]`, '',
+    '## In Progress', '', `- [ ] [[${mxLong}]]`, `- [ ] [[${mxParked}]]`, '',
+  ].join('\n');
+  const mxBodies = new Map([
+    [mxBoardNote, mxBoardBody],
+    // MX-A carries an Outcome section → its first sentence is the tooltip.
+    [`${mxBoard}/${mxShort}.md`, `## Outcome\n\n${mxOutcome} Second sentence is ignored.\n`],
+    [`${mxBoard}/${mxMiddling}.md`, '## Outcome\n\nMiddling outcome text.\n'],
+    [`${mxBoard}/${mxLong}.md`, '### Outcome\n\nThe long slice ships at last.\n'],
+    // MX-D has NO Outcome section → the tooltip falls back to the full title.
+    [`${mxBoard}/${mxParked}.md`, 'Body text without any outcome heading.\n'],
+  ]);
+  const mxMutations = [];
+  const mxMutator = (name) => () => { mxMutations.push(name); throw new Error(`read-only fixture invoked ${name}`); };
+  global.app = {
+    vault: {
+      getMarkdownFiles: () => mxFiles,
+      cachedRead: async (entry) => {
+        if (mxBodies.has(entry.path)) return mxBodies.get(entry.path);
+        throw new Error(`unexpected read ${entry.path}`);
+      },
+      create: mxMutator('vault.create'), modify: mxMutator('vault.modify'),
+      delete: mxMutator('vault.delete'), rename: mxMutator('vault.rename'), trash: mxMutator('vault.trash'),
+      adapter: {
+        write: mxMutator('adapter.write'), append: mxMutator('adapter.append'),
+        process: mxMutator('adapter.process'), remove: mxMutator('adapter.remove'),
+        rename: mxMutator('adapter.rename'), mkdir: mxMutator('adapter.mkdir'), rmdir: mxMutator('adapter.rmdir'),
+      },
+    },
+    metadataCache: {
+      getFileCache: (entry) => ({ frontmatter: mxFrontmatter.get(entry.path) || {} }),
+      trigger: mxMutator('metadataCache.trigger'),
+    },
+    fileManager: { processFrontMatter: mxMutator('fileManager.processFrontMatter') },
+    workspace: { openLinkText: () => {} },
+  };
+  const mxPage = { file: { path: mxEpicPath, folder: mxEpicDir } };
+  global.customJS = {
+    RenderSafe: { page: () => mxPage },
+    GraphLayout: new GraphLayout(),
+    EpicDashboard: new EpicDashboard({ lifecycleApi }),
+  };
+  const mxContainer = element();
+  await new GraphView({ lifecycleApi }).render({ container: mxContainer });
+  const mxRoot = mxContainer.children.find((child) => child.className === 'graph-view-root');
+  assert(mxRoot, 'MX: epic scope mounts one graph-view-root');
+  const mxChips = byClass(mxRoot, 'graph-view-chip');
+  const mxChipFor = (id) => mxChips.find((chip) => flatten(chip).some((node) => node.textContent === id));
+
+  // MX-widths — per-rank auto-width: rank 0 = {MX-A short, MX-B middling},
+  // rank 1 = {MX-C beyond-cap, MX-D short}. Rows sort alphabetically within a
+  // rank (no laneOrder tie). Column width = widest content in the rank; the
+  // beyond-cap title caps at the 260px constant.
+  const mxCols = columnLayout([[mxShort, mxMiddling], [mxLong, mxParked]]);
+  assert.strictEqual(mxCols.widths[0], 242,
+    'MX: rank-0 column width equals the widest chip content (MX-B middling → 242px)');
+  assert.strictEqual(mxCols.widths[1], 260,
+    'MX: rank-1 column width caps at the 260px constant (MX-C overflows two lines)');
+  assert.strictEqual(mxCols.canvasWidth, 554, 'MX: the clip-free canvas width is deterministic (554px)');
+  for (const [id, rank, row] of [['MX-A', 0, 0], ['MX-B', 0, 1], ['MX-C', 1, 0], ['MX-D', 1, 1]]) {
+    const x = mxCols.offsets[rank];
+    const y = GVR2.pad + row * GVR2.rowH;
+    const w = mxCols.widths[rank];
+    const chip = mxChipFor(id);
+    assert(chip.style.cssText.includes(`left:${x}px;top:${y}px`) && chip.style.cssText.includes(`width:${w}px`),
+      `MX: ${id} chip sits on its auto-width column (left:${x}px;top:${y}px;width:${w}px)`);
+  }
+
+  // MX-clip: the shared canvas is exactly the last column right edge + pad.
+  const mxCanvas = byClass(mxRoot, 'graph-view-canvas')[0];
+  assert(mxCanvas && mxCanvas.style.cssText.includes(`width:${mxCols.canvasWidth}px`),
+    `MX: canvas width == last column right edge + pad (${mxCols.canvasWidth}px), no clip at rest`);
+
+  // MX-wrap: a beyond-cap title carries the two-line clamp marker and STILL
+  // keeps its full text in the DOM (CSS ellipsizes the second line only, no JS
+  // truncation); an in-cap two-line title carries no marker and renders fully.
+  const mxTitleOf = (chip) => byClass(chip, 'graph-view-chip-name')[0];
+  const mxLongChip = mxChipFor('MX-C');
+  const mxMidChip = mxChipFor('MX-B');
+  assert(mxLongChip.className.split(/\s+/).includes('graph-view-chip-clamped'),
+    'MX: a title overflowing two lines carries the clamp marker (ellipsis on line two)');
+  assert(!mxMidChip.className.split(/\s+/).includes('graph-view-chip-clamped'),
+    'MX: a title fitting two lines carries no clamp marker (renders fully, no ellipsis)');
+  assert(mxTitleOf(mxLongChip).style.cssText.includes('-webkit-line-clamp:2')
+    && mxTitleOf(mxMidChip).style.cssText.includes('-webkit-line-clamp:2'),
+  'MX: the title element uses the two-line clamp box');
+  assert.strictEqual(mxTitleOf(mxMidChip).textContent, 'This title is of a middling sort length',
+    'MX: the in-cap two-line title renders its full text with no ellipsis character');
+  assert(mxTitleOf(mxLongChip).textContent === 'An exceptionally long slice title that overflows well past two full lines of chip text'
+    && !mxTitleOf(mxLongChip).textContent.includes('…'),
+  'MX: even the clamped title keeps its full text in the DOM (CSS, not JS, ellipsizes)');
+
+  // MX-info: blocked → "needs <dep-id>"; parked → resume_condition from its
+  // start (truncated, full text in the wait title); status word shared-colored.
+  const mxWaitOf = (id) => byClass(mxChipFor(id), 'graph-view-wait')[0];
+  const mxWordOf = (id) => byClass(mxChipFor(id), 'graph-view-status-word')[0];
+  assert.strictEqual(mxWaitOf('MX-C')?.textContent, 'needs MX-A',
+    'MX: a blocked slice info line names its unmet dependency id ("needs MX-A")');
+  assert(mxWordOf('MX-C').textContent === 'blocked'
+    && mxWordOf('MX-C').style.cssText.includes('color:var(--color-red)')
+    && mxWordOf('MX-C').className.includes('status-blocked'),
+  'MX: the blocked status word carries the shared lifecycle color and class');
+  const mxParkWait = mxWaitOf('MX-D');
+  assert(mxParkWait && mxParkWait.textContent.length <= 48 && mxParkWait.textContent.endsWith('…')
+    && mxParkReason.startsWith(mxParkWait.textContent.slice(0, -1)),
+  'MX: a parked slice info line shows the verbatim START of resume_condition (truncated)');
+  assert.strictEqual(mxParkWait.attrs.title, mxParkReason,
+    'MX: the parked wait span title carries the full resume_condition');
+  assert(mxWordOf('MX-D').textContent === 'waiting'
+    && mxWordOf('MX-D').style.cssText.includes('color:var(--color-orange)'),
+  'MX: the parked status word carries the shared waiting color');
+
+  // MX-outcome: the chip hover tooltip carries the card's Outcome sentence; a
+  // card with no Outcome section falls back to the full title. The Outcome text
+  // never appears as a visible info line.
+  assert.strictEqual(mxChipFor('MX-A').attrs.title, mxOutcome,
+    'MX: the chip hover tooltip carries the card Outcome sentence');
+  assert.strictEqual(mxChipFor('MX-D').attrs.title, mxParked,
+    'MX: a card with no Outcome section falls back to its full title in the tooltip');
+  assert(!textOf(mxRoot).includes(mxOutcome),
+    'MX: the Outcome sentence lives in the tooltip only, never as visible text');
+
+  // MX-writes: the presentation render (including Outcome reads) mutates nothing.
+  assert.deepStrictEqual(mxMutations, [],
+    'MX: auto-width render invokes no vault, adapter, frontmatter, or metadata mutator');
+  global.app = savedAppMX;
+  global.customJS = savedCustomJSMX;
 
   // ---- Project scope (GV-3b): the whole-plan graph on Loop Station ----
   // Live epics (In Planning + In Progress + Blocked) as labeled clusters,
