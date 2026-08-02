@@ -75,6 +75,21 @@ function element(tag = 'div', options = {}) {
   });
   return node;
 }
+function bubblingClick(target) {
+  const path = [];
+  for (let node = target; node; node = node.parent) path.push(node);
+  let stopped = false;
+  const event = {
+    type: 'click', target, currentTarget: null,
+    stopPropagation() { stopped = true; },
+  };
+  for (const node of path) {
+    event.currentTarget = node;
+    node.listeners?.click?.(event);
+    if (stopped) break;
+  }
+  return { stopped };
+}
 function flatten(root, out = []) {
   out.push(root);
   for (const child of root.children || []) flatten(child, out);
@@ -892,7 +907,10 @@ async function main() {
   assert(stubNodes[0].style.cssText.includes('cursor:pointer')
     && typeof stubNodes[0].listeners.click === 'function',
   'B2: the stub is a clickable internal link');
-  stubNodes[0].listeners.click({ stopPropagation() {} });
+  const stubCanvas = byClass(bRoot, 'graph-view-canvas')[0];
+  const stubFirstTap = bubblingClick(stubNodes[0]);
+  assert(stubFirstTap.stopped && stubNodes[0].parent === stubCanvas,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: stub selection stops before the owning canvas clear handler');
   assert.strictEqual(bOpened.length, 0, 'BL4-STUB-FIRST-TAP: selecting a stub does not open it');
   const stubPanel = byClass(bRoot, 'graph-view-detail-panel')[0];
   assert(stubPanel && textOf(stubPanel).includes('GA-OPS21a4') && textOf(stubPanel).includes('Ops Slice')
@@ -1095,7 +1113,9 @@ async function main() {
   assert.strictEqual(byClass(mxRoot, 'graph-view-detail-panel').length, 0,
     'BL4-MUTANT-PANEL-AT-REST: no panel renders before a chip is selected');
   const mxOpenCount = mxOpened.length;
-  mxChipFor('MX-C').listeners.click({ stopPropagation() {} });
+  const mxFirstTap = bubblingClick(mxChipFor('MX-C'));
+  assert(mxFirstTap.stopped,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: epic chip selection stops before the canvas clear handler');
   assert.strictEqual(mxOpened.length, mxOpenCount,
     'BL4-MUTANT-FIRST-TAP-OPENS: first tap selects MX-C without navigation');
   const mxPanel = byClass(mxRoot, 'graph-view-detail-panel')[0];
@@ -1400,7 +1420,9 @@ async function main() {
   // dependency, while leaving the established at-rest geometry untouched.
   const projectAtRest = domShape(pRoot);
   const projectOpenCount = projectOpened.length;
-  pChipFor('E2-1').listeners.click({ stopPropagation() {} });
+  const projectFirstTap = bubblingClick(pChipFor('E2-1'));
+  assert(projectFirstTap.stopped,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: project chip selection stops before the canvas clear handler');
   assert.strictEqual(projectOpened.length, projectOpenCount,
     'BL4-PROJECT-FIRST-TAP: first tap selects without navigation');
   const projectPanel = byClass(pRoot, 'graph-view-detail-panel')[0];
