@@ -465,6 +465,24 @@ async function main() {
     && root.children.indexOf(legend) < root.children.findIndex((node) => node.className === 'graph-view-scroll'),
   'BL2-LEGEND-GEOMETRY: legend sits above and outside the canvas');
 
+  // BL2-MISSING-STATUS: keep missing distinct from the unknown-token fixture
+  // above. Suppressing unreadable_slice only for nullish status must turn this
+  // executable path red while the neutral shared glyph and legend stay safe.
+  const missingRoot = element();
+  const missingWarnings = [];
+  await new GraphView({ dashboard })._renderGraph(missingRoot, {
+    nodes: [{ card: 'GV-M Missing', path: `${board}/GV-M Missing.md`, status: null, rank: 0, row: 0 }],
+    edges: [],
+  }, lifecycleApi, epicPath, missingWarnings);
+  assert.strictEqual(byClass(missingRoot, 'graph-view-status-glyph')[0]?.textContent, '?',
+    'BL2-MISSING-STATUS: a missing-status chip renders the neutral shared glyph without throwing');
+  assert.strictEqual(byClass(missingRoot, 'graph-view-legend-glyph')[0]?.textContent, '?',
+    'BL2-MISSING-STATUS: the missing-status legend entry renders the neutral shared glyph');
+  assert.strictEqual(byClass(missingRoot, 'graph-view-legend-label')[0]?.textContent, 'unrecognized: (missing)',
+    'BL2-MISSING-STATUS: the legend preserves the existing missing-status presentation');
+  assert.deepStrictEqual(missingWarnings, [{ code: 'unreadable_slice', card: 'GV-M Missing', detail: '(missing)' }],
+    'BL2-MISSING-STATUS: a missing status still emits exactly one unreadable_slice warning');
+
   // GV-R1 Behavior A — honest gather: a slice whose status maps to the
   // archived/discarded (excluded) lifecycle bucket contributes NO chip and NO
   // warning row. The gather drops it BEFORE layout, so case 1 above (exactly
@@ -548,6 +566,12 @@ async function main() {
     assert(!widgetSource.includes(JSON.stringify(glyph)),
       `BL2-GLYPH-SOURCE: graph-view contains no literal ${glyph} glyph`);
   }
+  assert(!/\\(?:u[0-9a-f]{4}|x[0-9a-f]{2})/i.test(widgetSource),
+    'BL2-GLYPH-SOURCE: escaped Unicode/hex literals cannot hide a second glyph source');
+  assert(!/(?:^|[,{]\s*)['"]?(?:planning|in_progress|parked|blocked|completed|discarded)['"]?\s*:/m.test(widgetSource),
+    'BL2-GLYPH-SOURCE: graph-view contains no status-keyed object table under any local name');
+  assert.strictEqual((widgetSource.match(/presentation\.glyph/g) || []).length, 2,
+    'BL2-GLYPH-SOURCE: both rendered glyph sites read directly from the shared presentation result');
   assert(!/--color-(?:blue|green|purple|red)/.test(widgetSource),
     'case 10: the widget hardcodes no lifecycle bucket color');
   assert(widgetSource.includes('_statusPresentation') && widgetSource.includes('_deliveryApi'),
