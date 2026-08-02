@@ -700,7 +700,12 @@ class TaskNoteView {
                         const sequence = ++addSequence;
                         const quickOpts = { title, parent_task: '[[' + thisBasename + ']]' };
                         let plan = null;
-                        try { if (typeof TD.prepareQuick === 'function') plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
+                        const canPrepare = typeof TD.prepareQuick === 'function';
+                        try { if (canPrepare) plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
+                        if (canPrepare && !plan) {
+                            try { addInput.focus(); } catch (_e) {}
+                            return;
+                        }
                         const optimisticTask = (plan && plan.task) || {
                             title, status: 'open', path: '', parent_task: quickOpts.parent_task,
                         };
@@ -717,8 +722,12 @@ class TaskNoteView {
                                         try { addInput.focus(); } catch (_e) {}
                                         return { parent: subList, node, focusTarget: addInput, title, sequence };
                                     },
-                                    write: () => TD.createQuick({ plan: plan || undefined, title,
-                                        parent_task: quickOpts.parent_task, reconcile: false }),
+                                    write: async () => {
+                                        const created = await TD.createQuick({ plan: plan || undefined, title,
+                                            parent_task: quickOpts.parent_task, reconcile: false });
+                                        if (!created || created.ok !== true) throw new Error('subtask create did not commit');
+                                        return created;
+                                    },
                                     rollback: (receipt) => {
                                         try { if (receipt && receipt.node && receipt.node.parentNode) receipt.node.remove(); } catch (_e) {}
                                         if (receipt && receipt.sequence === addSequence && !String(addInput.value || '')) {

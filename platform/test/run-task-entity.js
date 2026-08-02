@@ -2429,6 +2429,72 @@ async function runPerf1StructuralTests() {
     assert(commands.length === 0, 'no dataview force-refresh command on structural success');
   });
 
+  await okAsync('PERF1-PARTIAL-COLD-LOAD-PHANTOM fails closed before apply and succeeds once TaskEntity warms', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const app = makeQuickApp(() => false);
+    app.commands = { executeCommandById() { throw new Error('refresh forbidden'); } };
+    let seamCalls = 0;
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TTL = {
+      renderTaskRow(container, task) {
+        const row = makeTreeNode('div');
+        row._task = task;
+        container.appendChild(row);
+        return row;
+      },
+    };
+    const TE = new TaskEntityClass();
+    const TD = new TaskDialogClass();
+    global.window = {
+      app,
+      moment: () => ({ format: (f) => f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-08-02T06:00:00-06:00' : '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskTodayList: TTL, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: () => ({ array: () => [] }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const input = walk(container, (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…')[0];
+    const keydown = input && input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'partial-load fixture owns the real Enter handler');
+
+    delete global.window.customJS.TaskEntity;
+    input.value = 'Cold child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(seamCalls === 0, 'missing TaskEntity refuses before optimistic apply');
+    assert(app._creates.length === 0, 'missing TaskEntity writes no file');
+    assert(walk(container, (node) => node && node._task).length === 0, 'no phantom optimistic row survives');
+    assert(input.value === 'Cold child' && input._focusCount >= 1, 'typed input stays recoverable and focused');
+
+    global.window.customJS.TaskEntity = TE;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const rows = walk(container, (node) => node && node._task);
+    assert(seamCalls === 1 && app._creates.length === 1, 'warm retry runs one structural mutation and one create');
+    assert(rows.length === 1 && rows[0]._task.title === 'Cold child' && rows[0]._task.path === app._creates[0].path,
+      'warm retry leaves exactly one real path-bound row');
+    assert(input.value === '', 'warm success clears the recovered input');
+  });
+
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {
     let settleDelete;
     let seamCalls = 0;
