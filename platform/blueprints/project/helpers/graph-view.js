@@ -30,8 +30,10 @@
  * "order") under positioned DOM chips (columns = rank, rows = row). At epic
  * scope columns are per-rank auto-width (widest chip content in the rank,
  * clamped to [minCol, maxCol]) and the canvas is sized to the last column's
- * right edge plus pad, so nothing clips at rest. Chips are clickable internal
- * links: the title wraps to two lines before any ellipsis, an info line shows
+ * right edge plus pad, so nothing clips at rest. With GraphInsights available,
+ * a first chip tap selects its full chain and opens inline detail; a second tap
+ * opens the card, while an empty-canvas tap restores the exact at-rest graph.
+ * The title wraps to two lines before any ellipsis, an info line shows
  * the colored lifecycle status word plus the inline wait reason ("needs <dep>"
  * for blocked, resume_condition start for parked), and the hover tooltip
  * carries the card's Outcome sentence. Layout warnings render as one compact
@@ -350,7 +352,7 @@ class GraphView {
   // epic scope). from.w / to.w carry the chip's rendered width; project scope's
   // fixed-geometry positions omit w and fall back to the shared geometry.chipW,
   // so project-scope edge math is byte-identical to before.
-  _edgeMarkup(edges, positions, geometry) {
+  _edgeMarkup(edges, positions, geometry, chain) {
     const paths = [];
     for (const edge of edges || []) {
       const from = positions.get(edge.from);
@@ -370,11 +372,152 @@ class GraphView {
         const bend = Math.max(24, (x2 - x1) / 2);
         d = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
       }
+      const emphasized = edge.kind === "depends" && chain?.has(edge.from) && chain?.has(edge.to);
       paths.push(edge.kind === "depends"
-        ? `<path class="graph-view-edge edge-depends${edge.cross ? " edge-cross-epic" : ""}" d="${d}" fill="none" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#graph-view-arrow)"/>`
+        ? `<path class="graph-view-edge edge-depends${edge.cross ? " edge-cross-epic" : ""}${emphasized ? " graph-view-chain-edge" : ""}" d="${d}" fill="none" stroke="var(--text-muted)" stroke-width="${emphasized ? "2.5" : "1.5"}" marker-end="url(#graph-view-arrow)"/>`
         : `<path class="graph-view-edge edge-order" d="${d}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.55"/>`);
     }
     return paths.join("");
+  }
+
+  _edgeSvg(width, height, edges, positions, geometry, chain) {
+    return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
+      + '<defs><marker id="graph-view-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+      + '<path d="M 0 0 L 8 4 L 0 8 z" fill="var(--text-muted)"/></marker></defs>'
+      + this._edgeMarkup(edges, positions, geometry, chain)
+      + "</svg>";
+  }
+
+  _setClass(element, name, enabled) {
+    if (!element) return;
+    const names = String(element.className || "").split(/\s+/).filter(Boolean);
+    const next = names.filter((entry) => entry !== name);
+    if (enabled) next.push(name);
+    element.className = next.join(" ");
+  }
+
+  _panelLink(parent, node, api, source, className) {
+    const link = parent.createEl("button");
+    link.className = className;
+    link.style.cssText = "border:0;background:transparent;padding:0;color:var(--link-color);cursor:pointer;text-align:left;";
+    const parts = this._titleParts(node.card);
+    const presentation = this._statusPresentation(node.status, api);
+    link.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-link-id";
+    link.createEl("span", { text: ` · ${presentation.glyph} ${presentation.label}` }).className = "graph-view-detail-link-status";
+    link.addEventListener?.("click", (event) => {
+      event?.stopPropagation?.();
+      this._open(node.path || node.card, source);
+    });
+    return link;
+  }
+
+  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes) {
+    const panel = root.createEl("div");
+    panel.className = "graph-view-detail-panel";
+    panel.style.cssText = "display:grid;gap:7px;padding:10px 12px;border:1px solid var(--background-modifier-border);"
+      + "border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);";
+    root.insertBefore?.(panel, scroller?.nextSibling || null);
+
+    const parts = this._titleParts(node.card);
+    const heading = panel.createEl("div");
+    heading.className = "graph-view-detail-heading";
+    heading.style.cssText = "display:flex;align-items:baseline;gap:7px;font-weight:700;";
+    heading.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-id";
+    if (parts.id) heading.createEl("span", { text: parts.title }).className = "graph-view-detail-title";
+
+    const open = panel.createEl("button", { text: "Open card" });
+    open.className = "graph-view-detail-open";
+    open.style.cssText = "justify-self:start;cursor:pointer;";
+    open.addEventListener?.("click", (event) => {
+      event?.stopPropagation?.();
+      this._open(node.path || node.card, source);
+    });
+    if (node.isStub) return panel;
+
+    const presentation = this._statusPresentation(node.status, api);
+    const status = panel.createEl("div", { text: `${presentation.glyph} ${presentation.label}` });
+    status.className = `graph-view-detail-status ${presentation.className}`;
+    status.style.cssText = `color:${presentation.color};font-weight:650;`;
+
+    if (node.waitReason) {
+      const waiting = panel.createEl("div", { text: String(node.waitReason) });
+      waiting.className = "graph-view-detail-wait";
+    }
+
+    const byCard = new Map((nodes || []).map((entry) => [entry.card, entry]));
+    const unmet = (edges || [])
+      .filter((edge) => edge.kind === "depends" && edge.to === node.card)
+      .map((edge) => byCard.get(edge.from))
+      .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
+    if (unmet.length) {
+      const needs = panel.createEl("div");
+      needs.className = "graph-view-detail-needs";
+      needs.createEl("div", { text: "Unmet prerequisites" }).className = "graph-view-detail-label";
+      for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite");
+    }
+
+    const outcome = outcomes?.get?.(node.card);
+    if (outcome) {
+      const result = panel.createEl("div", { text: `Outcome: ${outcome}` });
+      result.className = "graph-view-detail-outcome";
+    }
+
+    const insight = this._nodeInsight(analysis, node.card);
+    const gated = (Array.isArray(insight?.downstream) ? insight.downstream : [])
+      .map((card) => byCard.get(card))
+      .filter((entry) => entry && !entry.isStub && entry.status !== null
+        && String(entry.status).trim().toLowerCase() !== "completed");
+    const gatedCount = Number.isFinite(Number(insight?.gates)) ? Number(insight.gates) : 0;
+    const gates = panel.createEl("div");
+    gates.className = "graph-view-detail-gates";
+    gates.createEl("div", { text: `Gates ${gatedCount} slice${gatedCount === 1 ? "" : "s"}` })
+      .className = "graph-view-detail-label";
+    for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
+    return panel;
+  }
+
+  // Selection lives only in this render's closure. GraphInsights owns every
+  // transitive membership answer; GraphView performs set arithmetic over that
+  // answer and never walks the graph itself.
+  _selectionController({ root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges }) {
+    const chips = new Map();
+    let selected = null;
+    let panel = null;
+    const clear = () => {
+      selected = null;
+      panel?.remove?.();
+      panel = null;
+      for (const record of chips.values()) {
+        this._setClass(record.chip, "graph-view-dimmed", false);
+        record.chip.style.cssText = record.cssText;
+      }
+      renderEdges(null);
+    };
+    const select = (node, event) => {
+      event?.stopPropagation?.();
+      if (selected === node.card) {
+        this._open(node.path || node.card, source);
+        return;
+      }
+      selected = node.card;
+      panel?.remove?.();
+      const insight = this._nodeInsight(analysis, node.card);
+      const chain = new Set([node.card, ...(insight?.upstream || []), ...(insight?.downstream || [])]);
+      for (const [card, record] of chips) {
+        const dimmed = !chain.has(card);
+        this._setClass(record.chip, "graph-view-dimmed", dimmed);
+        record.chip.style.cssText = record.cssText
+          + (dimmed ? "opacity:0.28;filter:saturate(0.45);" : "");
+      }
+      renderEdges(chain);
+      panel = this._renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes);
+    };
+    canvas.addEventListener?.("click", clear);
+    return {
+      register(node, chip) { chips.set(node.card, { chip, cssText: chip?.style?.cssText || "" }); },
+      select,
+      clear,
+    };
   }
 
   // GV-R2 epic-scope geometry: per-rank auto-width columns. Each rank's column
@@ -429,16 +572,17 @@ class GraphView {
     const edgeLayer = canvas.createEl("div");
     edgeLayer.className = "graph-view-edges";
     edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
-    edgeLayer.innerHTML =
-      `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
-      + '<defs><marker id="graph-view-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-      + '<path d="M 0 0 L 8 4 L 0 8 z" fill="var(--text-muted)"/></marker></defs>'
-      + this._edgeMarkup(edges, positions, geometry)
-      + "</svg>";
+    const renderEdges = (chain) => { edgeLayer.innerHTML = this._edgeSvg(width, height, edges, positions, geometry, chain); };
+    renderEdges(null);
+    const interaction = analysis && this._selectionController({
+      root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges,
+    });
     for (const node of nodes) {
-      if (node.isStub) this._renderStub(canvas, node, positions.get(node.card), geometry, source);
-      else this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings,
-        null, outcomes, this._nodeInsight(analysis, node.card));
+      const chip = node.isStub
+        ? this._renderStub(canvas, node, positions.get(node.card), geometry, source, interaction?.select)
+        : this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings,
+          null, outcomes, this._nodeInsight(analysis, node.card), interaction?.select);
+      interaction?.register(node, chip);
     }
   }
 
@@ -537,11 +681,11 @@ class GraphView {
     return (sentence ? sentence[1] : text).trim() || null;
   }
 
-  // Ghost external stub (GV-R1): a muted, dashed, clickable chip standing in
-  // for a cross-epic prerequisite. Read-only — clicking opens the owning card.
+  // Ghost external stub (GV-R1): a muted, dashed, selectable chip standing in
+  // for a cross-epic prerequisite. Its detail panel degrades to Open card only.
   // It is not a slice, so it never routes through status presentation and never
   // emits an unreadable-slice warning.
-  _renderStub(canvas, node, at, geometry, source) {
+  _renderStub(canvas, node, at, geometry, source, onSelect) {
     const chipW = at && at.w != null ? at.w : geometry.chipW;
     const chip = canvas.createEl("div");
     chip.className = "graph-view-chip graph-view-stub";
@@ -551,13 +695,16 @@ class GraphView {
       + "cursor:pointer;box-sizing:border-box;color:var(--text-muted);opacity:0.75;"
       + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
       + "background:color-mix(in srgb, var(--text-muted) 6%, var(--background-primary));";
-    chip.addEventListener?.("click", () => this._open(node.path || node.card, source));
+    chip.addEventListener?.("click", (event) => onSelect
+      ? onSelect(node, event)
+      : this._open(node.path || node.card, source));
     const label = chip.createEl("div", { text: node.stubLabel || String(node.card || "") });
     label.className = "graph-view-stub-label";
     label.style.cssText = "min-width:0;font-size:0.72em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    return chip;
   }
 
-  _renderChip(canvas, node, at, geometry, api, source, extraWarnings, activeCard, outcomes, insight) {
+  _renderChip(canvas, node, at, geometry, api, source, extraWarnings, activeCard, outcomes, insight, onSelect) {
     const presentation = this._statusPresentation(node.status, api);
     if (!presentation.normalized) {
       extraWarnings.push({
@@ -584,7 +731,9 @@ class GraphView {
     // Outcome sentence in the hover tooltip; fall back to the full card title.
     const outcome = outcomes && typeof outcomes.get === "function" ? outcomes.get(node.card) : null;
     chip.setAttribute?.("title", String(outcome || node.card || ""));
-    chip.addEventListener?.("click", () => this._open(node.path || node.card, source));
+    chip.addEventListener?.("click", (event) => onSelect
+      ? onSelect(node, event)
+      : this._open(node.path || node.card, source));
     const titleRow = chip.createEl("div");
     titleRow.className = "graph-view-chip-title";
     titleRow.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;";
@@ -629,6 +778,7 @@ class GraphView {
         + "border:1px solid color-mix(in srgb, var(--text-error) 45%, transparent);"
         + "background:color-mix(in srgb, var(--text-error) 10%, var(--background-primary));";
     }
+    return chip;
   }
 
   _activeCard(current) {
@@ -765,6 +915,10 @@ class GraphView {
     const allNodes = clusters.flatMap((cluster) => cluster.nodes);
     const allEdges = [...clusters.flatMap((cluster) => cluster.edges), ...crossEdges];
     const analysis = this._analyzeGraph(allNodes, allEdges);
+    // Outcome bodies are panel-only at project scope. Keep the pre-BL-4
+    // fail-soft path cold when GraphInsights is absent or malformed: without
+    // analysis there is no selection controller and therefore no panel reader.
+    const outcomes = analysis ? await this._loadOutcomes(allNodes) : null;
 
     if (clusters.length) {
       this._renderStuckSummary(root, analysis);
@@ -778,12 +932,13 @@ class GraphView {
       const edgeLayer = canvas.createEl("div");
       edgeLayer.className = "graph-view-edges";
       edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
-      edgeLayer.innerHTML =
-        `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
-        + '<defs><marker id="graph-view-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        + '<path d="M 0 0 L 8 4 L 0 8 z" fill="var(--text-muted)"/></marker></defs>'
-        + this._edgeMarkup(allEdges, positions, geometry)
-        + "</svg>";
+      const renderEdges = (chain) => {
+        edgeLayer.innerHTML = this._edgeSvg(width, height, allEdges, positions, geometry, chain);
+      };
+      renderEdges(null);
+      const interaction = analysis && this._selectionController({
+        root, scroller, canvas, nodes: allNodes, edges: allEdges, analysis, api, source, outcomes, renderEdges,
+      });
       for (const cluster of clusters) {
         const header = canvas.createEl("div", { text: cluster.epic });
         header.className = "graph-view-cluster-header";
@@ -793,8 +948,9 @@ class GraphView {
           + "text-transform:uppercase;color:var(--text-muted);cursor:pointer;";
         header.addEventListener?.("click", () => this._open(cluster.atlasPath, source));
         for (const node of cluster.nodes) {
-          this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings,
-            activeCard, null, this._nodeInsight(analysis, node.card));
+          const chip = this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings,
+            activeCard, null, this._nodeInsight(analysis, node.card), interaction?.select);
+          interaction?.register(node, chip);
         }
       }
     }

@@ -34,19 +34,61 @@ const GraphInsights = eval(`(${fs.readFileSync(INSIGHTS, 'utf8')})`); // eslint-
 const EpicDashboard = eval(`(${fs.readFileSync(DASHBOARD, 'utf8')})`); // eslint-disable-line no-eval
 
 function element(tag = 'div', options = {}) {
-  return {
+  const node = {
     tag, className: options.cls || '', textContent: options.text || '', style: { cssText: '' },
-    innerHTML: '', attrs: {}, children: [], listeners: {}, removed: false,
+    innerHTML: '', attrs: {}, children: [], listeners: {}, removed: false, parent: null,
     createEl(childTag, childOptions = {}) {
       const child = element(childTag, childOptions);
+      child.parent = this;
       this.children.push(child);
+      return child;
+    },
+    insertBefore(child, before) {
+      if (child.parent) {
+        const prior = child.parent.children.indexOf(child);
+        if (prior >= 0) child.parent.children.splice(prior, 1);
+      }
+      child.parent = this;
+      const index = before ? this.children.indexOf(before) : -1;
+      this.children.splice(index >= 0 ? index : this.children.length, 0, child);
       return child;
     },
     addEventListener(name, fn) { this.listeners[name] = fn; },
     setAttribute(name, value) { this.attrs[name] = value; },
     querySelector() { return null; },
-    remove() { this.removed = true; },
+    remove() {
+      this.removed = true;
+      if (this.parent) {
+        const index = this.parent.children.indexOf(this);
+        if (index >= 0) this.parent.children.splice(index, 1);
+      }
+      this.parent = null;
+    },
   };
+  Object.defineProperty(node, 'nextSibling', {
+    enumerable: false,
+    get() {
+      if (!this.parent) return null;
+      const index = this.parent.children.indexOf(this);
+      return index >= 0 ? this.parent.children[index + 1] || null : null;
+    },
+  });
+  return node;
+}
+function bubblingClick(target) {
+  const path = [];
+  for (let node = target; node; node = node.parent) path.push(node);
+  let stopped = false;
+  const event = {
+    type: 'click', target, currentTarget: null,
+    stopPropagation() { stopped = true; },
+  };
+  for (const node of path) {
+    event.currentTarget = node;
+    node.listeners?.click?.(event);
+    if (stopped) break;
+  }
+  return { stopped };
 }
 function flatten(root, out = []) {
   out.push(root);
@@ -197,6 +239,27 @@ async function main() {
 
   const opened = [];
   const mutations = [];
+  const persistenceMutations = [];
+  const savedLocalStorageDescriptor = Object.getOwnPropertyDescriptor(global, 'localStorage');
+  const savedCoordinator = global.coordinator;
+  const savedDeliveryCoordinator = global.DeliveryCoordinator;
+  const coordinatorSentinel = new Proxy({}, {
+    get(_target, name) {
+      return (...args) => persistenceMutations.push({ surface: `coordinator.${String(name)}`, args });
+    },
+  });
+  Object.defineProperty(global, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem() { return null; },
+      setItem(...args) { persistenceMutations.push({ surface: 'localStorage.setItem', args }); },
+      removeItem(...args) { persistenceMutations.push({ surface: 'localStorage.removeItem', args }); },
+      clear(...args) { persistenceMutations.push({ surface: 'localStorage.clear', args }); },
+    },
+  });
+  global.coordinator = coordinatorSentinel;
+  global.DeliveryCoordinator = coordinatorSentinel;
   const mutator = (name) => () => {
     mutations.push(name);
     throw new Error(`read-only fixture invoked ${name}`);
@@ -244,6 +307,8 @@ async function main() {
     RenderSafe: { page: () => currentPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: dashboard,
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
 
   // Case 1 + 2: gather mirrors _slicePages semantics; laneOrder comes from the
@@ -583,8 +648,8 @@ async function main() {
     'BL2-GLYPH-SOURCE: escaped Unicode/hex literals cannot hide a second glyph source');
   assert(!/(?:^|[,{]\s*)['"]?(?:planning|in_progress|parked|blocked|completed|discarded)['"]?\s*:/m.test(widgetSource),
     'BL2-GLYPH-SOURCE: graph-view contains no status-keyed object table under any local name');
-  assert.strictEqual((widgetSource.match(/presentation\.glyph/g) || []).length, 2,
-    'BL2-GLYPH-SOURCE: both rendered glyph sites read directly from the shared presentation result');
+  assert.strictEqual((widgetSource.match(/presentation\.glyph/g) || []).length, 4,
+    'BL2-GLYPH-SOURCE: all chip, legend, panel, and panel-link glyph sites read from shared presentation');
   assert(!/--color-(?:blue|green|purple|red)/.test(widgetSource),
     'case 10: the widget hardcodes no lifecycle bucket color');
   assert(widgetSource.includes('_statusPresentation') && widgetSource.includes('_deliveryApi'),
@@ -651,6 +716,50 @@ async function main() {
     && bl3ChipFor('BLB-1').style.cssText.includes('top:12px'),
   'BL3-GEOMETRY: summary and inside-chip badge leave the established chip coordinates unchanged');
   assert.deepStrictEqual(bl3Warnings, [], 'BL3: successful insights add no warning spam');
+
+  // BL-4 healthy dependent trace: BLC is not itself stuck, but its upstream
+  // GraphInsights closure reaches the BLA root blocker through BLB. Selection
+  // must use that supplied closure verbatim, never stop at the immediate edge.
+  const bl3OpenCount = opened.length;
+  bl3ChipFor('BLC-1').listeners.click({ stopPropagation() {} });
+  assert.strictEqual(opened.length, bl3OpenCount,
+    'BL4-HEALTHY-FIRST-TAP: selecting a healthy dependent does not open it');
+  assert(!bl3ChipFor('BLA-1').className.includes('graph-view-dimmed')
+    && !bl3ChipFor('BLB-1').className.includes('graph-view-dimmed')
+    && !bl3ChipFor('BLC-1').className.includes('graph-view-dimmed')
+    && bl3ChipFor('BLD-1').className.includes('graph-view-dimmed'),
+  'BL4-HEALTHY-TRACE: a healthy chip selection keeps its full upstream path through the root blocker');
+  assert.strictEqual(svgPaths(bl3Root, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 2,
+    'BL4-HEALTHY-TRACE: both depends edges from the healthy chip to its root blocker are emphasized');
+
+  // BL4-NULL-PROPAGATION: GraphInsights keeps a null-status node in the chain
+  // for reachability but excludes it from gates. The panel must consume that
+  // authoritative answer rather than locally recounting the closure.
+  const nullGateNodes = [
+    { card: 'BLN-A Root', path: `${board}/BLN-A Root.md`, status: 'blocked', rank: 0, row: 0 },
+    { card: 'BLN-U Unknown', path: `${board}/BLN-U Unknown.md`, status: null, rank: 1, row: 0 },
+    { card: 'BLN-B Live', path: `${board}/BLN-B Live.md`, status: 'planning', rank: 2, row: 0 },
+  ];
+  const nullGateEdges = [
+    { from: 'BLN-A Root', to: 'BLN-U Unknown', kind: 'depends' },
+    { from: 'BLN-U Unknown', to: 'BLN-B Live', kind: 'depends' },
+  ];
+  const nullGateRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    nullGateRoot, { nodes: nullGateNodes, edges: nullGateEdges }, lifecycleApi, epicPath, [],
+  );
+  const nullGateChip = byClass(nullGateRoot, 'graph-view-chip').find((chip) => textOf(chip).includes('BLN-A'));
+  nullGateChip.listeners.click({ stopPropagation() {} });
+  const nullGatePanel = byClass(nullGateRoot, 'graph-view-detail-panel')[0];
+  assert(textOf(nullGatePanel).includes('Gates 1 slice')
+    && byClass(nullGatePanel, 'graph-view-detail-dependent').length === 1
+    && textOf(byClass(nullGatePanel, 'graph-view-detail-dependent')[0]).includes('BLN-B'),
+  'BL4-NULL-PROPAGATION: panel gates count/links exclude null-status propagation nodes exactly like GraphInsights');
+  const nullGateChips = byClass(nullGateRoot, 'graph-view-chip');
+  const nullGateChipFor = (id) => nullGateChips.find((chip) => textOf(chip).includes(id));
+  assert(!nullGateChipFor('BLN-U').className.includes('graph-view-dimmed')
+    && !nullGateChipFor('BLN-B').className.includes('graph-view-dimmed'),
+  'BL4-NULL-PROPAGATION-CHAIN: null-status U remains highlighted in A\'s transitive chain while excluded from gates');
 
   // BL-3 calm/fail-soft posture. With no stuck nodes, real analysis must be
   // structurally byte-identical to GraphInsights missing. A throwing analyzer
@@ -774,7 +883,10 @@ async function main() {
   global.customJS = {
     RenderSafe: { page: () => bPage },
     GraphLayout: new GraphLayout(),
+    GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const bContainer = element();
   await new GraphView().render({ container: bContainer });
@@ -789,13 +901,29 @@ async function main() {
   const stubText = textOf(stubNodes[0]);
   assert(stubText.includes('Loop Ops') && stubText.includes('GA-OPS21a4'),
     'B1: the stub is labeled with the owning epic name and the target card id');
-  // B2: the stub is a clickable internal link that opens the owning card.
+  // B2 / BL4-STUB: a stub participates in select-first, but its detail panel
+  // degrades to identity + explicit Open card only (no invented status,
+  // prerequisites, outcome, or gates content).
   assert(stubNodes[0].style.cssText.includes('cursor:pointer')
     && typeof stubNodes[0].listeners.click === 'function',
   'B2: the stub is a clickable internal link');
-  stubNodes[0].listeners.click();
+  const stubCanvas = byClass(bRoot, 'graph-view-canvas')[0];
+  const stubFirstTap = bubblingClick(stubNodes[0]);
+  assert(stubFirstTap.stopped && stubNodes[0].parent === stubCanvas,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: stub selection stops before the owning canvas clear handler');
+  assert.strictEqual(bOpened.length, 0, 'BL4-STUB-FIRST-TAP: selecting a stub does not open it');
+  const stubPanel = byClass(bRoot, 'graph-view-detail-panel')[0];
+  assert(stubPanel && textOf(stubPanel).includes('GA-OPS21a4') && textOf(stubPanel).includes('Ops Slice')
+    && byClass(stubPanel, 'graph-view-detail-open').length === 1,
+  'BL4-STUB: the stub detail panel identifies the target and offers Open card');
+  assert.strictEqual(byClass(stubPanel, 'graph-view-detail-status').length
+    + byClass(stubPanel, 'graph-view-detail-needs').length
+    + byClass(stubPanel, 'graph-view-detail-outcome').length
+    + byClass(stubPanel, 'graph-view-detail-gates').length, 0,
+  'BL4-STUB: unavailable detail fields are omitted rather than fabricated');
+  byClass(stubPanel, 'graph-view-detail-open')[0].listeners.click({ stopPropagation() {} });
   assert.deepStrictEqual(bOpened.at(-1), [`${opsEpicDir}/board/GA-OPS21a4 Ops Slice`, bEpicPath, false],
-    'B2: clicking the stub opens the owning cross-epic card');
+    'B2: the explicit stub Open card affordance opens the owning cross-epic card');
   // B3: a depends edge is drawn into the stub node.
   const bDepends = svgPaths(bRoot, 'edge-depends');
   assert(bDepends.some((chunk) => chunk.includes('edge-cross-epic')),
@@ -834,6 +962,7 @@ async function main() {
   const mxParked = 'MX-D Park';
   const mxParkReason = 'Blocked on the upstream vendor SDK cut before this slice can resume in earnest';
   const mxOutcome = 'MX-A delivers the short deterministic path.';
+  const mxLongOutcome = 'The long slice ships at last.';
   const mxFiles = [
     file(mxBoardNote, 1),
     file(`${mxBoard}/${mxShort}.md`, 10), file(`${mxBoard}/${mxMiddling}.md`, 20),
@@ -858,7 +987,7 @@ async function main() {
     // MX-A carries an Outcome section → its first sentence is the tooltip.
     [`${mxBoard}/${mxShort}.md`, `## Outcome\n\n${mxOutcome} Second sentence is ignored.\n`],
     [`${mxBoard}/${mxMiddling}.md`, '## Outcome\n\nMiddling outcome text.\n'],
-    [`${mxBoard}/${mxLong}.md`, '### Outcome\n\nThe long slice ships at last.\n'],
+    [`${mxBoard}/${mxLong}.md`, `### Outcome\n\n${mxLongOutcome}\n`],
     // MX-D has NO Outcome section → the tooltip falls back to the full title.
     [`${mxBoard}/${mxParked}.md`, 'Body text without any outcome heading.\n'],
   ]);
@@ -884,16 +1013,19 @@ async function main() {
       trigger: mxMutator('metadataCache.trigger'),
     },
     fileManager: { processFrontMatter: mxMutator('fileManager.processFrontMatter') },
-    workspace: { openLinkText: () => {} },
+    workspace: { openLinkText: (...args) => mxOpened.push(args) },
   };
+  const mxOpened = [];
   const mxPage = { file: { path: mxEpicPath, folder: mxEpicDir } };
   global.customJS = {
     RenderSafe: { page: () => mxPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const mxContainer = element();
-  await new GraphView({ lifecycleApi }).render({ container: mxContainer });
+  await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container: mxContainer });
   const mxRoot = mxContainer.children.find((child) => child.className === 'graph-view-root');
   assert(mxRoot, 'MX: epic scope mounts one graph-view-root');
   const mxChips = byClass(mxRoot, 'graph-view-chip');
@@ -971,6 +1103,89 @@ async function main() {
     'MX: a card with no Outcome section falls back to its full title in the tooltip');
   assert(!textOf(mxRoot).includes(mxOutcome),
     'MX: the Outcome sentence lives in the tooltip only, never as visible text');
+
+  // BL-4 epic scope. Named mutation guards:
+  // - BL4-MUTANT-FIRST-TAP-OPENS turns RED if the first tap navigates.
+  // - BL4-MUTANT-DIM-CLOSURE turns RED if the selected closure, rather than
+  //   its complement, receives graph-view-dimmed.
+  // - BL4-MUTANT-PANEL-AT-REST turns RED if a detail panel exists unselected.
+  const mxAtRest = domShape(mxRoot);
+  assert.strictEqual(byClass(mxRoot, 'graph-view-detail-panel').length, 0,
+    'BL4-MUTANT-PANEL-AT-REST: no panel renders before a chip is selected');
+  const mxOpenCount = mxOpened.length;
+  const mxFirstTap = bubblingClick(mxChipFor('MX-C'));
+  assert(mxFirstTap.stopped,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: epic chip selection stops before the canvas clear handler');
+  assert.strictEqual(mxOpened.length, mxOpenCount,
+    'BL4-MUTANT-FIRST-TAP-OPENS: first tap selects MX-C without navigation');
+  const mxPanel = byClass(mxRoot, 'graph-view-detail-panel')[0];
+  assert(mxPanel && textOf(mxPanel).includes('MX-C')
+    && textOf(mxPanel).includes('An exceptionally long slice title')
+    && textOf(mxPanel).includes('blocked')
+    && textOf(mxPanel).includes('waiting on: MX-A Hi')
+    && textOf(mxPanel).includes(`Outcome: ${mxLongOutcome}`)
+    && textOf(mxPanel).includes('Gates 0 slices'),
+  'BL4-PANEL: selected card identity, shared status, wait reason, Outcome, and gated count render inline');
+  const mxPrereq = byClass(mxPanel, 'graph-view-detail-prerequisite');
+  assert.strictEqual(mxPrereq.length, 1, 'BL4-PANEL: each immediate unmet prerequisite gets one jump link');
+  assert(textOf(mxPrereq[0]).includes('MX-A') && textOf(mxPrereq[0]).includes('planning'),
+    'BL4-PANEL: the prerequisite jump link carries its own shared status');
+  const selectedGlyph = byClass(mxChipFor('MX-C'), 'graph-view-status-glyph')[0].textContent;
+  assert(textOf(byClass(mxPanel, 'graph-view-detail-status')[0]).startsWith(selectedGlyph),
+    'BL4-PANEL: the panel status uses the same shared glyph as the selected chip');
+  assert.strictEqual(byClass(mxPanel, 'graph-view-detail-open').length, 1,
+    'BL4-PANEL: the selected card exposes an explicit Open card affordance');
+  for (const id of ['MX-A', 'MX-C']) {
+    assert(!mxChipFor(id).className.includes('graph-view-dimmed'),
+      `BL4-MUTANT-DIM-CLOSURE: chain member ${id} remains full strength`);
+  }
+  for (const id of ['MX-B', 'MX-D']) {
+    assert(mxChipFor(id).className.includes('graph-view-dimmed'),
+      `BL4-MUTANT-DIM-CLOSURE: non-chain chip ${id} is dimmed`);
+  }
+  assert.strictEqual(svgPaths(mxRoot, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 1,
+    'BL4-CHAIN: only the depends edge whose endpoints are both in the selected closure is emphasized');
+  mxPrereq[0].listeners.click({ stopPropagation() {} });
+  assert.deepStrictEqual(mxOpened.at(-1), [`${mxBoard}/${mxShort}`, mxEpicPath, false],
+    'BL4-PREREQUISITE: the unmet-prerequisite jump link opens that dependency');
+  mxChipFor('MX-C').listeners.click({ stopPropagation() {} });
+  assert.deepStrictEqual(mxOpened.at(-1), [`${mxBoard}/${mxLong}`, mxEpicPath, false],
+    'BL4-SECOND-TAP: tapping the already-selected chip opens it');
+
+  const beforeDifferentCard = mxOpened.length;
+  mxChipFor('MX-A').listeners.click({ stopPropagation() {} });
+  assert.strictEqual(mxOpened.length, beforeDifferentCard,
+    'BL4-DIFFERENT-TAP: tapping a different chip reselects without opening');
+  const mxRootPanel = byClass(mxRoot, 'graph-view-detail-panel')[0];
+  assert(textOf(mxRootPanel).includes('Gates 1 slice')
+    && byClass(mxRootPanel, 'graph-view-detail-dependent').length === 1,
+  'BL4-GATES: downstream gated count and jump link are rendered from GraphInsights membership');
+  byClass(mxRootPanel, 'graph-view-detail-dependent')[0].listeners.click({ stopPropagation() {} });
+  assert.deepStrictEqual(mxOpened.at(-1), [`${mxBoard}/${mxLong}`, mxEpicPath, false],
+    'BL4-GATES: a gated-card jump link opens that dependent');
+
+  const beforeParked = mxOpened.length;
+  mxChipFor('MX-D').listeners.click({ stopPropagation() {} });
+  assert.strictEqual(mxOpened.length, beforeParked,
+    'BL4-PARKED-FIRST-TAP: selecting a different parked chip does not open it');
+  assert.strictEqual(byClass(byClass(mxRoot, 'graph-view-detail-panel')[0], 'graph-view-detail-wait')[0].textContent,
+    mxParkReason,
+  'BL4-RESUME: the inline panel shows the full parked resume condition');
+
+  mxCanvas.listeners.click();
+  assert.strictEqual(byClass(mxRoot, 'graph-view-detail-panel').length, 0,
+    'BL4-DESELECT: tapping empty canvas removes the inline panel');
+  assert(mxChips.every((chip) => !chip.className.includes('graph-view-dimmed'))
+    && !byClass(mxRoot, 'graph-view-edges')[0].innerHTML.includes('graph-view-chain-edge'),
+  'BL4-DESELECT: empty canvas restores all chips and edges to at-rest presentation');
+  assert.deepStrictEqual(domShape(mxRoot), mxAtRest,
+    'BL4-EPHEMERAL: selecting and clearing returns the DOM exactly to its original at-rest shape');
+
+  const mxFreshContainer = element();
+  await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container: mxFreshContainer });
+  const mxFreshRoot = mxFreshContainer.children.find((child) => child.className === 'graph-view-root');
+  assert.deepStrictEqual(domShape(mxFreshRoot), mxAtRest,
+    'BL4-MUTANT-PANEL-AT-REST: a fresh render has no selection artifact and is byte-identical at rest');
 
   // MX-writes: the presentation render (including Outcome reads) mutates nothing.
   assert.deepStrictEqual(mxMutations, [],
@@ -1069,8 +1284,10 @@ async function main() {
       '---', 'kanban-plugin: board', '---', '',
       '## In Planning', '', '- [ ] [[EB-1 Gate]]', '',
     ].join('\n')],
+    [`${epicTwoDir}/board/E2-1 Gamma.md`, '## Outcome\n\nGamma exposes the cross-epic plan path.\n'],
   ]);
   const projectOpened = [];
+  const projectOutcomeReads = [];
   const projectMutations = [];
   const projectMutator = (name) => () => {
     projectMutations.push(name);
@@ -1080,6 +1297,7 @@ async function main() {
     vault: {
       getMarkdownFiles: () => projectFiles,
       cachedRead: async (entry) => {
+        if (projectFrontmatter.get(entry.path)?.type === 'slice') projectOutcomeReads.push(entry.path);
         if (projectBodies.has(entry.path)) return projectBodies.get(entry.path);
         throw new Error(`unexpected read ${entry.path}`);
       },
@@ -1109,11 +1327,39 @@ async function main() {
     GraphLayout: new GraphLayout(),
     GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const projectContainer = element();
   await new GraphView({ scope: 'project' }).render({ container: projectContainer });
   const pRoot = projectContainer.children.find((child) => child.className === 'graph-view-root');
   assert(pRoot, 'P: project scope mounts one graph-view-root');
+
+  // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
+  // the selection panel. Missing/throwing GraphInsights disables that panel,
+  // so the fail-soft path must not add one slice-body read or at-rest artifact.
+  assert(projectOutcomeReads.includes(`${epicTwoDir}/board/E2-1 Gamma.md`),
+    'BL4-OUTCOMES-VALID-ANALYSIS: valid project analysis loads slice Outcomes for selection detail');
+  const projectAtRestWithAnalysis = domShape(pRoot);
+  const outcomeReadsAfterAnalysis = projectOutcomeReads.length;
+  const missingProjectContainer = element();
+  const throwingProjectContainer = element();
+  await new GraphView({ scope: 'project', insights: {} }).render({ container: missingProjectContainer });
+  await new GraphView({
+    scope: 'project',
+    insights: { analyzeGraph() { throw new Error('project insights unavailable'); } },
+  }).render({ container: throwingProjectContainer });
+  const missingProjectRoot = missingProjectContainer.children[0];
+  const throwingProjectRoot = throwingProjectContainer.children[0];
+  assert.strictEqual(projectOutcomeReads.length, outcomeReadsAfterAnalysis,
+    'BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: missing and throwing analysis perform zero slice Outcome reads');
+  assert.deepStrictEqual(domShape(missingProjectRoot), projectAtRestWithAnalysis,
+    'BL4-MISSING-INSIGHTS-AT-REST: missing analysis retains the exact project at-rest DOM');
+  assert.deepStrictEqual(domShape(throwingProjectRoot), projectAtRestWithAnalysis,
+    'BL4-THROWING-INSIGHTS-AT-REST: throwing analysis retains the exact project at-rest DOM');
+  assert.strictEqual(byClass(missingProjectRoot, 'graph-view-detail-panel').length
+    + byClass(throwingProjectRoot, 'graph-view-detail-panel').length, 0,
+  'BL4-MUTANT-LOAD-OUTCOMES-WITHOUT-ANALYSIS: unavailable analysis creates no panel artifact');
 
   // P1: two live-epic clusters render as labeled headers, stacked in board
   // order (In Planning first), each header linking to its atlas.
@@ -1169,6 +1415,38 @@ async function main() {
     'BL3-PROJECT-HEALTHY: the established healthy project fixture stays calm');
   assert.strictEqual(byClass(pRoot, 'graph-view-gates-badge').length, 0,
     'BL3-PROJECT-HEALTHY: the established healthy project fixture gains no badges');
+
+  // BL-4 project scope uses the one merged graph, including the cross-epic
+  // dependency, while leaving the established at-rest geometry untouched.
+  const projectAtRest = domShape(pRoot);
+  const projectOpenCount = projectOpened.length;
+  const projectFirstTap = bubblingClick(pChipFor('E2-1'));
+  assert(projectFirstTap.stopped,
+    'BL4-CHIP-CLICK-BUBBLE-GUARD: project chip selection stops before the canvas clear handler');
+  assert.strictEqual(projectOpened.length, projectOpenCount,
+    'BL4-PROJECT-FIRST-TAP: first tap selects without navigation');
+  const projectPanel = byClass(pRoot, 'graph-view-detail-panel')[0];
+  const projectScrollerIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-scroll');
+  assert(projectPanel && pRoot.children.indexOf(projectPanel) === projectScrollerIndex + 1,
+    'BL4-PROJECT-PANEL: the panel sits immediately between the canvas scroller and lower strips');
+  assert(textOf(projectPanel).includes('E2-1')
+    && textOf(projectPanel).includes('Gamma')
+    && textOf(projectPanel).includes('Gamma exposes the cross-epic plan path.')
+    && textOf(projectPanel).includes('E1-2')
+    && textOf(projectPanel).includes('in progress'),
+  'BL4-PROJECT-PANEL: project selection shows identity, Outcome, and cross-epic prerequisite status/link');
+  assert(pChipFor('E1-1').className.includes('graph-view-dimmed') === false
+    && pChipFor('E1-2').className.includes('graph-view-dimmed') === false
+    && pChipFor('E2-1').className.includes('graph-view-dimmed') === false
+    && pChipFor('E2-2').className.includes('graph-view-dimmed'),
+  'BL4-PROJECT-CHAIN: the merged transitive chain stays full strength and its complement dims');
+  assert.strictEqual(svgPaths(pRoot, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 2,
+    'BL4-PROJECT-CHAIN: intra- and cross-epic depends edges inside the selected chain are emphasized');
+  pCanvas.listeners.click();
+  assert.strictEqual(byClass(pRoot, 'graph-view-detail-panel').length, 0,
+    'BL4-PROJECT-DESELECT: empty project canvas clears selection');
+  assert.deepStrictEqual(domShape(pRoot), projectAtRest,
+    'BL4-PROJECT-EPHEMERAL: deselection restores legend, geometry, badges, and warning strips byte-for-byte');
 
   // P2: the cross-epic depends_on (E2-1 Gamma → depends on E1-2 Beta) renders
   // as a real depends edge between chips in DIFFERENT clusters, endpoints
@@ -1304,6 +1582,14 @@ async function main() {
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
   global.customJS.RenderSafe = priorRenderSafe;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
+  assert.deepStrictEqual(persistenceMutations, [],
+    'BL4-ZERO-PERSISTENCE-SURFACES: selection invokes no localStorage or coordinator mutation surface');
+  if (savedLocalStorageDescriptor) Object.defineProperty(global, 'localStorage', savedLocalStorageDescriptor);
+  else delete global.localStorage;
+  if (savedCoordinator === undefined) delete global.coordinator;
+  else global.coordinator = savedCoordinator;
+  if (savedDeliveryCoordinator === undefined) delete global.DeliveryCoordinator;
+  else global.DeliveryCoordinator = savedDeliveryCoordinator;
 
   // Widget grammar: RenderSafe-only current access, bare loadable class.
   assert(!widgetSource.includes('dv.current('), 'widget uses RenderSafe instead of raw dv.current');
