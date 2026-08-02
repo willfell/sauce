@@ -2646,6 +2646,67 @@ async function runPerf1StructuralTests() {
       'thrown fallback failure releases ownership to zero');
     assert(notices.length === 1 && notices[0].includes('Could not create subtask: create exploded'),
       'thrown fallback failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    const pendingFallbacks = [];
+    TD.createQuick = ({ plan }) => new Promise((resolve, reject) => {
+      pendingFallbacks.push({
+        path: plan.path,
+        resolve(value) { TD.releaseQuickPlan(plan); resolve(value); },
+        reject(error) { TD.releaseQuickPlan(plan); reject(error); },
+      });
+    });
+    notices.length = 0;
+    input.value = 'Older receipt';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Newer receipt';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks.length === 2
+      && pendingFallbacks[0].path === 'spice/tasks/Older receipt.md'
+      && pendingFallbacks[1].path === 'spice/tasks/Newer receipt.md',
+    'overlapping receipt fallbacks reserve distinct exact paths');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 2,
+      'both overlapping receipt fallbacks retain path ownership while pending');
+
+    pendingFallbacks[0].resolve({ ok: true, path: pendingFallbacks[0].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer receipt', 'older success cannot clear the newer pending title');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 1,
+      'older success releases only its own reservation');
+    pendingFallbacks[1].resolve({ ok: false, reason: 'newer receipt rejected' });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer receipt', 'newer result-level failure stays available for retry');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'overlapping result-level outcomes release all reservations');
+    assert(notices.filter((message) => message.includes('Could not create subtask')).length === 1,
+      'overlapping result-level failure emits exactly one failure notice: ' + JSON.stringify(notices));
+
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[2].path === 'spice/tasks/Newer receipt.md',
+      'retry reuses the released newer base path without suffix drift');
+    pendingFallbacks[2].resolve({ ok: true, path: pendingFallbacks[2].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'successful retry clears its owned title and releases ownership to zero');
+
+    notices.length = 0;
+    input.value = 'Older throw';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Newer throw';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[3].path !== pendingFallbacks[4].path && TD._quickCreateReservations.size === 2,
+      'overlapping throw fallbacks reserve distinct paths while pending');
+    pendingFallbacks[3].resolve({ ok: true, path: pendingFallbacks[3].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer throw', 'older success cannot clear the newer throw-bound title');
+    pendingFallbacks[4].reject(new Error('newer fallback exploded'));
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer throw' && TD._quickCreateReservations.size === 0,
+      'newer thrown failure stays retryable and releases all reservations');
+    assert(notices.filter((message) => message.includes('Could not create subtask')).length === 1,
+      'overlapping thrown failure emits exactly one failure notice: ' + JSON.stringify(notices));
     global.Notice = function () {};
   });
 

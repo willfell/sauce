@@ -790,7 +790,9 @@ class TaskNoteView {
                                     try { new Notice('Could not create subtask' + (reason ? ': ' + reason : ''), 6000); } catch (_e) {}
                                     return;
                                 }
-                                addInput.value = '';
+                                if (sequence === addSequence && String(addInput.value || '').trim() === title) {
+                                    addInput.value = '';
+                                }
                             } catch (_e) {
                                 try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
                                 try { new Notice('Could not create subtask: ' + (_e && (_e.message || _e)), 6000); } catch (_e2) {}
