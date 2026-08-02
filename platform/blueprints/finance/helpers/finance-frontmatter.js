@@ -66,6 +66,28 @@ class FinanceFrontmatter {
         }
         const container = opts.container || (opts.dv && opts.dv.container) || null;
         const selector = String(opts.selector || "");
+        return await this._serializeRendered(file.path, selector, async () => {
+            const prepared = typeof opts.prepare === "function" ? await opts.prepare() : null;
+            const lifecycle = prepared && typeof prepared === "object"
+                ? Object.assign({}, opts, prepared)
+                : opts;
+            return await this._mutateRenderedNow(file, lifecycle, renderSafe, container, selector);
+        });
+    }
+
+    async _serializeRendered(path, selector, task) {
+        if (!this._renderQueues) this._renderQueues = new Map();
+        const key = `${path}\u0000${selector}`;
+        const prior = this._renderQueues.get(key) || Promise.resolve();
+        const current = prior.catch(() => {}).then(task);
+        this._renderQueues.set(key, current);
+        try { return await current; }
+        finally {
+            if (this._renderQueues.get(key) === current) this._renderQueues.delete(key);
+        }
+    }
+
+    async _mutateRenderedNow(file, opts, renderSafe, container, selector) {
         let token = null;
         const outcome = await renderSafe.mutateStructure({
             app,

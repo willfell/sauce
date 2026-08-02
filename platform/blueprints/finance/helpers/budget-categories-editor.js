@@ -359,18 +359,22 @@ class BudgetCategoriesEditor {
     }
 
     async _mutateRender(file, dv, mutator) {
-        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            categories: Array.isArray(current.categories) ? current.categories.slice() : [],
-        });
-        mutator(preview);
-        const next = preview.categories.slice();
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .bce-root",
             failureMessage: "Could not update budget category",
-            render: () => this._rerender(dv, next),
-            write: () => this._mutate(file, mutator),
+            prepare: () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    categories: Array.isArray(current.categories) ? current.categories.slice() : [],
+                });
+                mutator(preview);
+                const next = preview.categories.slice();
+                return {
+                    render: () => this._rerender(dv, next),
+                    write: () => this._mutate(file, mutator),
+                };
+            },
         });
     }
 

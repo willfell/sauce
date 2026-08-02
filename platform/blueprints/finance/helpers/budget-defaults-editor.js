@@ -548,24 +548,28 @@ class BudgetDefaultsEditor {
     }
 
     async _mutateRender(file, dv, mutator) {
-        const current = this._mutateRead(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            groups: Array.isArray(current.groups) ? current.groups.slice() : [],
-            categories: Array.isArray(current.categories)
-                ? current.categories.map((row) => row && typeof row === "object" ? Object.assign({}, row) : row)
-                : [],
-        });
-        mutator(preview);
-        const authoritative = {
-            groups: preview.groups.slice(),
-            categories: preview.categories.slice(),
-        };
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .bde-root",
             failureMessage: "Could not update budget defaults",
-            render: () => this._rerender(dv, authoritative),
-            write: () => this._mutate(file, mutator),
+            prepare: () => {
+                const current = this._mutateRead(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    groups: Array.isArray(current.groups) ? current.groups.slice() : [],
+                    categories: Array.isArray(current.categories)
+                        ? current.categories.map((row) => row && typeof row === "object" ? Object.assign({}, row) : row)
+                        : [],
+                });
+                mutator(preview);
+                const authoritative = {
+                    groups: preview.groups.slice(),
+                    categories: preview.categories.slice(),
+                };
+                return {
+                    render: () => this._rerender(dv, authoritative),
+                    write: () => this._mutate(file, mutator),
+                };
+            },
         });
     }
 

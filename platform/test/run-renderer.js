@@ -366,6 +366,7 @@ function makeFinanceCustomJsStub(overrides) {
       }
     },
   };
+  const financeRenderQueues = new Map();
   const financeFrontmatter = {
     page: renderSafe.page,
     update: async () => {},
@@ -374,19 +375,28 @@ function makeFinanceCustomJsStub(overrides) {
     async mutateRendered(file, opts) {
       const container = opts && opts.dv && opts.dv.container;
       const selector = String(opts && opts.selector || '');
-      return await renderSafe.mutateStructure({
-        apply: async () => {
-          const oldRoot = container && container.querySelector ? container.querySelector(selector) : null;
-          await opts.render();
-          const optimisticRoot = container && container.querySelector ? container.querySelector(selector) : null;
-          return { oldRoot, optimisticRoot };
-        },
-        rollback: ({ oldRoot, optimisticRoot } = {}) => {
-          optimisticRoot && optimisticRoot.remove && optimisticRoot.remove();
-          if (oldRoot && container && container.appendChild) container.appendChild(oldRoot);
-        },
-        write: () => typeof opts.write === 'function' ? opts.write() : financeFrontmatter.update(file, opts.mutator),
+      const key = `${file && file.path || ''}\u0000${selector}`;
+      const prior = financeRenderQueues.get(key) || Promise.resolve();
+      const current = prior.catch(() => {}).then(async () => {
+        const prepared = typeof opts.prepare === 'function' ? await opts.prepare() : null;
+        const active = prepared && typeof prepared === 'object' ? Object.assign({}, opts, prepared) : opts;
+        return await renderSafe.mutateStructure({
+          apply: async () => {
+            const oldRoot = container && container.querySelector ? container.querySelector(selector) : null;
+            await active.render();
+            const optimisticRoot = container && container.querySelector ? container.querySelector(selector) : null;
+            return { oldRoot, optimisticRoot };
+          },
+          rollback: ({ oldRoot, optimisticRoot } = {}) => {
+            optimisticRoot && optimisticRoot.remove && optimisticRoot.remove();
+            if (oldRoot && container && container.appendChild) container.appendChild(oldRoot);
+          },
+          write: () => typeof active.write === 'function' ? active.write() : financeFrontmatter.update(file, active.mutator),
+        });
       });
+      financeRenderQueues.set(key, current);
+      try { return await current; }
+      finally { if (financeRenderQueues.get(key) === current) financeRenderQueues.delete(key); }
     },
   };
   const base = {
@@ -2055,11 +2065,26 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
     deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 3000 }],
     expenses: [],
   };
+  let concurrentWrites = 0;
+  let maxConcurrentWrites = 0;
+  let writeCount = 0;
+  let releaseFirstWrite;
+  let firstWriteStarted;
+  const firstWriteReady = new Promise((resolve) => { firstWriteStarted = resolve; });
+  const firstWriteGate = new Promise((resolve) => { releaseFirstWrite = resolve; });
   inst._mutate = async (file, mutator) => {
+    concurrentWrites++;
+    maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+    const sequence = ++writeCount;
     const fm = { month: store.month, deposits: store.deposits.map(d => ({ ...d })), expenses: store.expenses.slice() };
     await mutator(fm);
+    if (sequence === 1) {
+      firstWriteStarted();
+      await firstWriteGate;
+    }
     store.deposits = fm.deposits;
     store.expenses = fm.expenses;
+    concurrentWrites--;
   };
   // Two gestures complete while dv.current() remains frozen. The second must
   // retain deposit[0]=6000 while applying deposit[1]=3500.
@@ -2080,8 +2105,12 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
     renderedDeposits.push((args[2]?.deposits || []).map((deposit) => deposit.amount));
     return await rerender(...args);
   };
-  await inst._editDepositAmount(file, dv, 0);
-  await inst._editDepositAmount(file, dv, 1);
+  const first = inst._editDepositAmount(file, dv, 0);
+  await firstWriteReady;
+  const second = inst._editDepositAmount(file, dv, 1);
+  await Promise.resolve();
+  releaseFirstWrite();
+  await Promise.all([first, second]);
   restoreWin();
   const wroteAmounts = store.deposits[0].amount === 6000 && store.deposits[1].amount === 3500;
   const root = findClass(dv.container, 'pee-root');
@@ -2091,8 +2120,9 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   const rootCount = dv.container.children.filter((child) => child.cls === 'pee-root').length;
   const resurrectsStale = joined.includes('4500.00') || joined.includes('3000.00');
   const exactSequence = JSON.stringify(renderedDeposits) === JSON.stringify([[6000, 3000], [6000, 3500]]);
-  console.log(`  persisted both edits: ${wroteAmounts} ; exact optimistic sequence: ${exactSequence} ; roots: ${rootCount} ; second repaint shows both: ${showsBoth} ; stale amount resurrected: ${resurrectsStale}`);
-  const pass = wroteAmounts && exactSequence && rootCount === 1 && showsBoth && !resurrectsStale;
+  console.log(`  persisted both edits: ${wroteAmounts} ; exact optimistic sequence: ${exactSequence} ; max concurrent writes: ${maxConcurrentWrites} ; roots: ${rootCount} ; second repaint shows both: ${showsBoth} ; stale amount resurrected: ${resurrectsStale}`);
+  const pass = wroteAmounts && exactSequence && maxConcurrentWrites === 1
+    && rootCount === 1 && showsBoth && !resurrectsStale;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }

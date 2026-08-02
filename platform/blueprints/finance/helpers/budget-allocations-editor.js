@@ -254,22 +254,26 @@ class BudgetAllocationsEditor {
     // re-render's override layer is authoritative — independent of Dataview's
     // lagging page index (which readBudgetForMonth reads via dv.pages).
     async _mutateCapture(file, dv, mutator) {
-        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            debt_allocations: Array.isArray(current.debt_allocations) ? current.debt_allocations.slice() : [],
-            savings_allocations: Array.isArray(current.savings_allocations) ? current.savings_allocations.slice() : [],
-        });
-        mutator(preview);
-        const written = {
-            debt: Array.isArray(preview.debt_allocations) ? preview.debt_allocations.slice() : [],
-            savings: Array.isArray(preview.savings_allocations) ? preview.savings_allocations.slice() : [],
-        };
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .bae-root",
             failureMessage: "Could not update budget allocation",
-            render: () => this._rerender(dv, this._authoritativeView(dv, written)),
-            write: () => this._mutate(file, mutator),
+            prepare: () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    debt_allocations: Array.isArray(current.debt_allocations) ? current.debt_allocations.slice() : [],
+                    savings_allocations: Array.isArray(current.savings_allocations) ? current.savings_allocations.slice() : [],
+                });
+                mutator(preview);
+                const written = {
+                    debt: Array.isArray(preview.debt_allocations) ? preview.debt_allocations.slice() : [],
+                    savings: Array.isArray(preview.savings_allocations) ? preview.savings_allocations.slice() : [],
+                };
+                return {
+                    render: () => this._rerender(dv, this._authoritativeView(dv, written)),
+                    write: () => this._mutate(file, mutator),
+                };
+            },
         });
     }
 

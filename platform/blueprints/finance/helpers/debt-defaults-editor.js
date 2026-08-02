@@ -312,18 +312,22 @@ class DebtDefaultsEditor {
     }
 
     async _mutateDebts(file, dv, mutator) {
-        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            debts: Array.isArray(current.debts) ? current.debts.slice() : [],
-        });
-        mutator(preview);
-        const next = preview.debts.slice();
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .dde-root",
             failureMessage: "Could not update debt defaults",
-            render: () => this._rerender(dv, next),
-            write: () => this._mutate(file, mutator),
+            prepare: () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    debts: Array.isArray(current.debts) ? current.debts.slice() : [],
+                });
+                mutator(preview);
+                const next = preview.debts.slice();
+                return {
+                    render: () => this._rerender(dv, next),
+                    write: () => this._mutate(file, mutator),
+                };
+            },
         });
     }
 

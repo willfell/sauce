@@ -139,15 +139,17 @@ class InvoiceControls {
     }
 
     async _mutatePage(file, dv, mutator) {
-        const page = this._page(dv) || {};
-        const current = customJS.FinanceFrontmatter.read?.(file) || page;
-        const authoritative = Object.assign({}, page, current);
-        mutator(authoritative);
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .ic-root",
             failureMessage: "Could not update invoice",
-            render: () => this._rerender(dv, authoritative),
+            prepare: async () => {
+                const page = this._page(dv) || {};
+                const current = customJS.FinanceFrontmatter.read?.(file) || page;
+                const authoritative = Object.assign({}, page, current);
+                mutator(authoritative);
+                return { render: () => this._rerender(dv, authoritative) };
+            },
             mutator,
         });
     }

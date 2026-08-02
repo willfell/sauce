@@ -292,29 +292,34 @@ class PaycheckExpensesEditor {
     // deposits present) never re-enters this path.
     async _materializeDeposits(file, dv, page) {
         this._materializing = true;
-        let deposits = [];
         try {
-            page = this._authoritativePage(file, dv, page);
-            if (Array.isArray(page && page.deposits) && page.deposits.length > 0) {
-                await this._rerender(dv, undefined, page);
-                return;
-            }
-            const pd = customJS.FinanceFrontmatter.read?.("spice/finance/Paycheck Defaults.md");
-            const sched = (pd && Array.isArray(pd.deposit_schedule) && pd.deposit_schedule.length)
-                ? pd.deposit_schedule
-                : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
-            const monthKey = this._monthKey(page);
-            deposits = sched.map((s) => ({
-                date: `${monthKey}-${String(Number(s && s.day) || 1).padStart(2, "0")}`,
-                amount: Number(s && s.amount) || 0
-            }));
-            const nextPage = Object.assign({}, page, { deposits });
             await customJS.FinanceFrontmatter.mutateRendered(file, {
                 dv,
                 selector: ":scope > .pee-root",
                 failureMessage: "Could not initialize paycheck deposits",
-                render: () => this._rerender(dv, undefined, nextPage),
-                write: () => this._mutate(file, (fm) => { fm.deposits = deposits; }),
+                prepare: () => {
+                    const current = this._authoritativePage(file, dv, page) || {};
+                    if (Array.isArray(current.deposits) && current.deposits.length > 0) {
+                        return {
+                            render: () => this._rerender(dv, undefined, current),
+                            write: async () => current,
+                        };
+                    }
+                    const pd = customJS.FinanceFrontmatter.read?.("spice/finance/Paycheck Defaults.md");
+                    const sched = (pd && Array.isArray(pd.deposit_schedule) && pd.deposit_schedule.length)
+                        ? pd.deposit_schedule
+                        : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
+                    const monthKey = this._monthKey(current);
+                    const deposits = sched.map((s) => ({
+                        date: `${monthKey}-${String(Number(s && s.day) || 1).padStart(2, "0")}`,
+                        amount: Number(s && s.amount) || 0
+                    }));
+                    const nextPage = Object.assign({}, current, { deposits });
+                    return {
+                        render: () => this._rerender(dv, undefined, nextPage),
+                        write: () => this._mutate(file, (fm) => { fm.deposits = deposits; }),
+                    };
+                },
             });
         } finally {
             this._materializing = false;
@@ -382,16 +387,18 @@ class PaycheckExpensesEditor {
         if (raw === null) return;
         const amount = Number(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const page = this._authoritativePage(file, dv) || {};
-        const base = Array.isArray(page.deposits) ? page.deposits : [];
-        const newDeposits = base.map((d) => Object.assign({}, d));
-        if (i >= 0 && i < newDeposits.length) newDeposits[i] = Object.assign({}, newDeposits[i], { amount });
-        const nextPage = Object.assign({}, page, { deposits: newDeposits });
         await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .pee-root",
             failureMessage: "Could not update paycheck deposit",
-            render: () => this._rerender(dv, undefined, nextPage),
+            prepare: async () => {
+                const page = this._authoritativePage(file, dv) || {};
+                const base = Array.isArray(page.deposits) ? page.deposits : [];
+                const newDeposits = base.map((d) => Object.assign({}, d));
+                if (i >= 0 && i < newDeposits.length) newDeposits[i] = Object.assign({}, newDeposits[i], { amount });
+                const nextPage = Object.assign({}, page, { deposits: newDeposits });
+                return { render: () => this._rerender(dv, undefined, nextPage) };
+            },
             write: () => this._mutate(file, (fm) => {
                 const list = Array.isArray(fm.deposits) ? fm.deposits.slice() : [];
                 if (i >= 0 && i < list.length) {
@@ -660,17 +667,19 @@ class PaycheckExpensesEditor {
     }
 
     async _mutateExpenses(file, dv, mutator) {
-        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
-        });
-        mutator(preview);
-        const next = preview.expenses.slice();
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .pee-root",
             failureMessage: "Could not update paycheck expense",
-            render: () => this._rerender(dv, next),
+            prepare: async () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
+                });
+                mutator(preview);
+                const next = preview.expenses.slice();
+                return { render: () => this._rerender(dv, next) };
+            },
             write: () => this._mutate(file, mutator),
         });
     }

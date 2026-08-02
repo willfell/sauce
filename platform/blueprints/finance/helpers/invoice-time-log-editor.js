@@ -321,23 +321,26 @@ class InvoiceTimeLogEditor {
     async _addFlow(file, dv, entries, siblingInvoicePath) {
         const result = await this._promptForEntry(null);
         if (!result) return;
-        const newEntries = entries.concat([result]);
-        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
+        await this._mutateEntries(file, dv, siblingInvoicePath, (current) => current.concat([result]));
     }
 
     async _editFlow(file, dv, entries, siblingInvoicePath, index, current) {
         const result = await this._promptForEntry(current);
         if (!result) return;
-        const newEntries = entries.slice();
-        newEntries[index] = result;
-        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
+        await this._mutateEntries(file, dv, siblingInvoicePath, (currentEntries) => {
+            const next = currentEntries.slice();
+            if (index >= 0 && index < next.length) next[index] = result;
+            return next;
+        });
     }
 
     async _deleteFlow(file, dv, entries, siblingInvoicePath, index, current) {
         if (!window.confirm(`Delete entry from '${current?.date || ""}'?`)) return;
-        const newEntries = entries.slice();
-        newEntries.splice(index, 1);
-        await this._mutateEntries(file, dv, newEntries, siblingInvoicePath);
+        await this._mutateEntries(file, dv, siblingInvoicePath, (currentEntries) => {
+            const next = currentEntries.slice();
+            if (index >= 0 && index < next.length) next.splice(index, 1);
+            return next;
+        });
     }
 
     async _rerender(dv, authoritative) {
@@ -345,13 +348,22 @@ class InvoiceTimeLogEditor {
         return await this.render(dv, authoritative);
     }
 
-    async _mutateEntries(file, dv, newEntries, siblingInvoicePath) {
+    async _mutateEntries(file, dv, siblingInvoicePath, deriveEntries) {
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .itle-root",
             failureMessage: "Could not update invoice time entry",
-            render: () => this._rerender(dv, newEntries),
-            write: () => this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath),
+            prepare: async () => {
+                const page = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const currentEntries = Array.isArray(page.entries)
+                    ? page.entries.map((row) => row && typeof row === "object" ? Object.assign({}, row) : row)
+                    : [];
+                const newEntries = deriveEntries(currentEntries);
+                return {
+                    render: () => this._rerender(dv, newEntries),
+                    write: () => this._propagateAfterMutation(file, dv, newEntries, siblingInvoicePath),
+                };
+            },
         });
     }
 

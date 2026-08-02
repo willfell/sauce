@@ -485,21 +485,23 @@ class PaycheckDefaultsEditor {
     }
 
     async _mutateRender(file, dv, mutator) {
-        const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
-        const preview = Object.assign({}, current, {
-            expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
-            deposit_schedule: Array.isArray(current.deposit_schedule) ? current.deposit_schedule.slice() : [],
-        });
-        mutator(preview);
-        const authoritative = {
-            expenses: preview.expenses.slice(),
-            deposit_schedule: preview.deposit_schedule.slice(),
-        };
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .pde-root",
             failureMessage: "Could not update paycheck defaults",
-            render: () => this._rerender(dv, authoritative),
+            prepare: async () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    expenses: Array.isArray(current.expenses) ? current.expenses.slice() : [],
+                    deposit_schedule: Array.isArray(current.deposit_schedule) ? current.deposit_schedule.slice() : [],
+                });
+                mutator(preview);
+                const authoritative = {
+                    expenses: preview.expenses.slice(),
+                    deposit_schedule: preview.deposit_schedule.slice(),
+                };
+                return { render: () => this._rerender(dv, authoritative) };
+            },
             write: () => this._mutate(file, mutator),
         });
     }

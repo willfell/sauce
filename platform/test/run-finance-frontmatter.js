@@ -240,38 +240,70 @@ async function run() {
 
   {
     installLifecycle();
-    const { container, oldRoot } = makeEditorDom();
-    global.document = { activeElement: null };
+    const { container, oldRoot, oldInput, tail } = makeEditorDom();
+    global.document = { activeElement: oldInput };
     let rejectFirst;
     let firstStarted;
     const firstReady = new Promise((resolve) => { firstStarted = resolve; });
     const firstWrite = new Promise((_resolve, reject) => { rejectFirst = reject; });
-    let firstOptimistic, newerRoot;
+    let firstOptimistic, firstInput, newerRoot, newerInput;
+    let newerPrepared = false;
+    let activeWrites = 0;
+    let maxConcurrentWrites = 0;
     const first = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
       dv: { container }, selector: ".editor",
       render: async () => {
         oldRoot.remove();
         firstOptimistic = makeNode("editor");
-        container.appendChild(firstOptimistic);
+        firstInput = makeNode("first-input");
+        firstInput.dataset.financeFocusKey = "rate";
+        firstInput.parentNode = firstOptimistic;
+        firstOptimistic.children.push(firstInput);
+        container.insertBefore(firstOptimistic, tail);
       },
-      write: async () => { firstStarted(); return await firstWrite; },
+      write: async () => {
+        activeWrites++;
+        maxConcurrentWrites = Math.max(maxConcurrentWrites, activeWrites);
+        firstStarted();
+        try { return await firstWrite; }
+        finally { activeWrites--; }
+      },
     });
     await firstReady;
-    const newer = await ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+    const newer = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
       dv: { container }, selector: ".editor",
-      render: async () => {
-        firstOptimistic.remove();
-        newerRoot = makeNode("editor");
-        container.appendChild(newerRoot);
+      prepare: async () => {
+        newerPrepared = true;
+        return { render: async () => {
+          container.querySelector(".editor")?.remove();
+          newerRoot = makeNode("editor");
+          newerInput = makeNode("newer-input");
+          newerInput.dataset.financeFocusKey = "rate";
+          newerInput.parentNode = newerRoot;
+          newerRoot.children.push(newerInput);
+          container.insertBefore(newerRoot, tail);
+        } };
       },
-      write: async () => true,
+      render: async () => { throw new Error("prepared render must replace this"); },
+      write: async () => {
+        activeWrites++;
+        maxConcurrentWrites = Math.max(maxConcurrentWrites, activeWrites);
+        activeWrites--;
+        return "newer persisted";
+      },
     });
+    await Promise.resolve();
+    const queued = !newerPrepared && container.querySelector(".editor") === firstOptimistic;
     rejectFirst(new Error("older write rejected"));
     const older = await first;
-    ok("FF-18 overlapping older rejection cannot resurrect its obsolete root",
-      newer.ok === true && older.ok === false
-        && container.querySelector(".editor") === newerRoot
-        && !container.children.includes(oldRoot));
+    const newerResult = await newer;
+    ok("FF-18 overlapping mutations serialize; older rejection cannot replace the latest root/focus",
+      queued && newerPrepared && newerResult.ok === true && newerResult.value === "newer persisted"
+        && older.ok === false && maxConcurrentWrites === 1
+        && container.children.length === 2 && container.children[0] === newerRoot && container.children[1] === tail
+        && container.children.filter((child) => child.name === "editor").length === 1
+        && global.document.activeElement === newerInput
+        && newerInput.selection && newerInput.selection.start === 2 && newerInput.selection.end === 4);
   }
 
   {
@@ -298,20 +330,62 @@ async function run() {
     const second = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
       dv: { container }, selector: ".editor",
       render: async () => {
-        firstOptimistic.remove();
+        container.querySelector(".editor")?.remove();
         secondOptimistic = makeNode("editor");
         container.appendChild(secondOptimistic);
       },
       write: async () => { secondStarted(); return await secondWrite; },
     });
-    await secondReady;
     rejectFirst(new Error("older write rejected first"));
     await first;
+    await secondReady;
     rejectSecond(new Error("newer write rejected second"));
     await second;
-    ok("FF-19 overlapping double rejection unwinds through failed receipts",
+    ok("FF-19 serialized double rejection unwinds through exact receipts",
       container.children[0] === oldRoot && container.children[1] === tail
         && firstOptimistic.parentNode === null && secondOptimistic.parentNode === null);
+  }
+
+  {
+    installLifecycle();
+    const { container, oldRoot } = makeEditorDom();
+    global.document = { activeElement: null };
+    const events = [];
+    let concurrentWrites = 0;
+    let maxConcurrentWrites = 0;
+    let releaseFirst;
+    let firstStarted;
+    const firstReady = new Promise((resolve) => { firstStarted = resolve; });
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const run = (id) => ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      prepare: async () => {
+        events.push(`prepare${id}`);
+        const prior = container.querySelector(".editor");
+        const next = makeNode("editor");
+        return {
+          render: async () => { events.push(`render${id}`); prior?.remove(); container.appendChild(next); },
+          write: async () => {
+            events.push(`write${id}`);
+            concurrentWrites++;
+            maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+            if (id === 1) { firstStarted(); await firstGate; }
+            concurrentWrites--;
+          },
+        };
+      },
+    });
+    const first = run(1);
+    await firstReady;
+    const second = run(2);
+    await Promise.resolve();
+    const secondStayedQueued = events.join(",") === "prepare1,render1,write1";
+    releaseFirst();
+    const outcomes = await Promise.all([first, second]);
+    ok("FF-20 mutateRendered serializes prepare, preview, and persistence per surface",
+      secondStayedQueued && outcomes.every((outcome) => outcome.ok === true)
+        && events.join(",") === "prepare1,render1,write1,prepare2,render2,write2"
+        && maxConcurrentWrites === 1 && !container.children.includes(oldRoot));
   }
 
   {
@@ -324,14 +398,14 @@ async function run() {
       render: async () => { oldRoot.remove(); throw renderFailure; },
       write: async () => { throw new Error("write must not run"); },
     });
-    ok("FF-20 optimistic render failure restores the old root before escaping",
+    ok("FF-21 optimistic render failure restores the old root before escaping",
       result && result.ok === false && result.error === renderFailure
         && container.children.length === 2 && container.children[0] === oldRoot && container.children[1] === tail);
   }
 
   {
     installLifecycle();
-    ok("FF-21 page returns null for missing or throwing cold-load current",
+    ok("FF-22 page returns null for missing or throwing cold-load current",
       ff.page({}) === null && ff.page({ current() { throw new Error("cold"); } }) === null);
   }
 
