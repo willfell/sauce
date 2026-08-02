@@ -8119,6 +8119,55 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(clearedPlan.classification, 'clear', 'A4 --clear classifies as clear');
   eq(clearedPlan.to, null, 'A4 --clear has no target');
   ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
+
+  // Cycle chain, dead-end tombstone, and in-flight dependent — pin the
+  // remaining classification branches so a refactor can't silently break them.
+  const pCycle = mk('DEP-cycle', 'CYC-X');
+  const pDeadEnd = mk('DEP-deadend', 'DEADEND-Z');
+  const pInflight = mk('DEP-inflight', 'BL-4');
+  state.cards['CYC-X'] = { card: 'CYC-X', phase: 'discarded', superseded_by: 'CYC-Y' };
+  state.cards['CYC-Y'] = { card: 'CYC-Y', phase: 'discarded', superseded_by: 'CYC-X' };
+  state.cards['DEADEND-Z'] = { card: 'DEADEND-Z', phase: 'discarded', superseded_by: null };
+  state.cards['DEP-inflight'] = { card: 'DEP-inflight', phase: 'claimed' };
+
+  const branchDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-cycle'), { card: 'DEP-cycle', from: 'CYC-X' },
+    'A4 cycle chain ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-cycle'), 'A4 cycle chain never enters the repoint plan');
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-deadend'), { card: 'DEP-deadend', from: 'DEADEND-Z' },
+    'A4 dead-end tombstone (superseded_by: null) ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-deadend'), 'A4 dead-end tombstone never enters the repoint plan');
+  eq(branchDry.reports.find((r) => r.card === 'DEP-inflight'), { card: 'DEP-inflight', from: 'BL-4', phase: 'claimed' },
+    'A4 in-flight (claimed) dependent is reported with its phase');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-inflight'), 'A4 in-flight dependent never enters the repoint plan');
+
+  const branchApplied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(!branchApplied.plan.some((p) => p.card === 'DEP-inflight'), 'A4 apply still never plans the in-flight dependent');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(pInflight, 'utf8')), 'A4 apply leaves the in-flight dependent note untouched on disk');
+  ok(/\[\[CYC-X\]\]/.test(fs.readFileSync(pCycle, 'utf8')), 'A4 apply leaves the cycle-chain dependent note untouched on disk');
+  ok(/\[\[DEADEND-Z\]\]/.test(fs.readFileSync(pDeadEnd, 'utf8')), 'A4 apply leaves the dead-end dependent note untouched on disk');
+
+  // Argument validation — exact operand-shape errors the CLI relies on.
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, reason: 'x' }, deps),
+    /requires --json/, 'A4 missing --json is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { card: 'DEP-cycle', all: true, reason: 'x', json: true }, deps),
+    /not both/, 'A4 --card and --all together is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { reason: 'x', json: true }, deps),
+    /requires --card or --all/, 'A4 neither --card nor --all is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, json: true }, deps),
+    /non-empty --reason/, 'A4 missing --reason is refused',
+  );
 }
 
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
