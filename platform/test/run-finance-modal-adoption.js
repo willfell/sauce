@@ -209,10 +209,14 @@ function installPersistenceBoundary(harness, state) {
             return true;
         },
         mutateRendered: async (_file, opts) => {
-            await opts.render();
+            const prepared = typeof opts.prepare === "function" ? await opts.prepare() : null;
+            const active = prepared && typeof prepared === "object"
+                ? Object.assign({}, opts, prepared)
+                : opts;
+            await active.render();
             try {
-                if (typeof opts.write === "function") await opts.write();
-                else await boundary.update(_file, opts.mutator);
+                if (typeof active.write === "function") await active.write();
+                else await boundary.update(_file, active.mutator);
                 return { ok: true };
             } catch (error) {
                 return { ok: false, error };
