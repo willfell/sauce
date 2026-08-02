@@ -48,7 +48,7 @@ class ProjectDashboard {
       try {
         const RS = (typeof customJS !== "undefined" && customJS.RenderSafe) ? customJS.RenderSafe : null;
         cur = (RS && RS.page) ? RS.page(dv) : dv.current();
-      } catch (_e) { cur = dv.current(); }
+      } catch (_e) { cur = null; }
       if (!cur || !cur.file) return;
 
       const currentPath = String(cur.file.path || "");
@@ -441,22 +441,16 @@ class ProjectDashboard {
       `color:var(--text-on-accent); background:${color}; cursor:pointer;`;
 
     pill.addEventListener("click", () => {
-      const entries = ProjectDashboard.STATUSES.map(s => ({
-        label: s,
-        onSelect: async () => {
-          try {
-            if (realApp && realApp.fileManager && realApp.fileManager.processFrontMatter) {
-              await realApp.fileManager.processFrontMatter(file, fm => {
-                ProjectDashboard._applyStatusChange(fm, s, new Date().toISOString().split("T")[0]);
-              });
-            }
-          } catch (_e) {}
-        },
-      }));
       try {
-        if (typeof customJS !== "undefined" && customJS.MenuPopover && customJS.MenuPopover.open) {
-          customJS.MenuPopover.open(entries, { anchor: pill, title: "Set status" });
-        }
+        const widget = (typeof customJS !== "undefined") && customJS.ProjectStatusWidget;
+        if (!widget || typeof widget._openPicker !== "function") return;
+        const applyPillStatus = (nextStatus) => {
+          currentPage.status = nextStatus;
+          pill.textContent = nextStatus;
+          pill.style.background = ProjectDashboard.STATUS_COLORS[nextStatus] || "var(--text-muted)";
+        };
+        widget._openPicker(ctx.dv, file, status, ProjectDashboard.STATUSES,
+          ProjectDashboard.STATUS_COLORS, applyPillStatus);
       } catch (_e) {}
     });
   }

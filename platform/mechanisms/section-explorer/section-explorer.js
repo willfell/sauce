@@ -73,6 +73,7 @@ class SectionExplorer {
           if (!entityCreate || typeof entityCreate.render !== "function" || !action.instance) continue;
           const options = { instance: action.instance };
           if (action.presetPrompts !== undefined) options.presetPrompts = action.presetPrompts;
+          options.structuralLifecycle = this.entityCreateLifecycle(dv);
           await entityCreate.render(proxyDv, options);
         } else if (action.kind === "custom" && typeof action.render === "function") {
           await action.render(row, dv);
@@ -89,6 +90,33 @@ class SectionExplorer {
       }
       return row;
     } catch (_e) { return null; }
+  }
+
+  // Receipt-bound optimistic preview for project document/section creation.
+  // EntityCreate owns persistence and calls these hooks only when a genuinely
+  // new target is about to be created (existing-file navigation stays inert).
+  entityCreateLifecycle(dv) {
+    return {
+      apply: (ctx) => {
+        const root = (dv && dv.container) ? dv.container : dv;
+        if (!root || typeof root.createEl !== "function") return { focusTarget: null };
+        const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+        const parent = (root.querySelector && (
+          root.querySelector(".se-doc-grid") || root.querySelector(".se-rail-cards")
+        )) || root;
+        const node = parent.createEl("div", { cls: "se-entity-preview is-optimistic" });
+        const targetPath = String(ctx && ctx.targetPath || "");
+        const basename = targetPath.slice(targetPath.lastIndexOf("/") + 1).replace(/\.md$/i, "") || "New item";
+        node.textContent = `Creating ${basename}…`;
+        try { node.setAttr?.("tabindex", "-1"); node.focus?.(); } catch (_e) {}
+        return { parent, node, nextSibling: node.nextSibling || null, focusTarget };
+      },
+      rollback: (receipt) => {
+        if (receipt?.node?.remove) receipt.node.remove();
+        else receipt?.parent?.removeChild?.(receipt.node);
+        try { receipt?.focusTarget?.focus?.(); } catch (_e) {}
+      },
+    };
   }
 
   // ── Shared move/bulk/delete pure logic (Task C) ───────────────────────────
@@ -641,11 +669,22 @@ class SectionExplorer {
   _openAddLinkForm(dv, adapter, section) {
     this._openModal("se-link-modal-overlay", (panel, close, doc) => {
       this._modalTitle(doc, panel, "Add link");
-      const submit = () => {
+      let submitting = false;
+      const submit = async () => {
+        if (submitting) return false;
         const current = adapter.getLinks(section) || [];
         const result = this._addLinkPure(current, { url: urlInput.value, text: textInput.value });
-        if (result.changed) { try { adapter.writeLinks(section, result.links); } catch (_e) { /* never-throw */ } }
-        close();
+        if (!result.changed) { try { urlInput.focus?.(); } catch (_e) {} return false; }
+        submitting = true;
+        try {
+          const persisted = await adapter.writeLinks(section, result.links);
+          if (persisted && persisted.ok === false) { try { urlInput.focus?.(); } catch (_e) {} return false; }
+          close();
+          return true;
+        } catch (_e) {
+          try { urlInput.focus?.(); } catch (_err) {}
+          return false;
+        } finally { submitting = false; }
       };
       const urlInput = this._modalInput(doc, panel, { placeholder: "https://…", onEnter: () => submit() });
       const textInput = this._modalInput(doc, panel, { placeholder: "Label (optional)", onEnter: () => submit() });
@@ -658,12 +697,21 @@ class SectionExplorer {
   _openRenameDialog(dv, adapter, section) {
     this._openModal("se-rename-modal-overlay", (panel, close, doc) => {
       this._modalTitle(doc, panel, "Rename section");
-      const submit = () => {
+      let submitting = false;
+      const submit = async () => {
+        if (submitting) return false;
         const newTitle = String(nameInput.value || "").trim();
-        if (newTitle && newTitle !== section.title) {
-          try { adapter.renameSection(section, newTitle); } catch (_e) { /* never-throw */ }
-        }
-        close();
+        if (!newTitle || newTitle === section.title) { try { nameInput.focus?.(); } catch (_e) {} return false; }
+        submitting = true;
+        try {
+          const persisted = await adapter.renameSection(section, newTitle);
+          if (persisted && persisted.ok === false) { try { nameInput.focus?.(); } catch (_e) {} return false; }
+          close();
+          return true;
+        } catch (_e) {
+          try { nameInput.focus?.(); } catch (_err) {}
+          return false;
+        } finally { submitting = false; }
       };
       const nameInput = this._modalInput(doc, panel, { value: section.title || "", onEnter: () => submit() });
       this._modalButtons(doc, panel, close, "Rename", submit);
@@ -689,9 +737,19 @@ class SectionExplorer {
       body.textContent = msg;
       body.style.cssText = "margin-bottom:12px;color:var(--text-muted);font-size:0.92em;line-height:1.4;";
       panel.appendChild(body);
-      const onConfirm = () => {
-        try { adapter.deleteSection(section); } catch (_e) { /* never-throw */ }
-        close();
+      let submitting = false;
+      const onConfirm = async () => {
+        if (submitting) return false;
+        submitting = true;
+        try {
+          const persisted = await adapter.deleteSection(section);
+          if (persisted && persisted.ok === false) { try { btns?.primary?.focus?.(); } catch (_e) {} return false; }
+          close();
+          return true;
+        } catch (_e) {
+          try { btns?.primary?.focus?.(); } catch (_err) {}
+          return false;
+        } finally { submitting = false; }
       };
       const btns = this._modalButtons(doc, panel, close, "Delete", onConfirm);
       // Style the primary as danger (red) — this is a destructive confirm.

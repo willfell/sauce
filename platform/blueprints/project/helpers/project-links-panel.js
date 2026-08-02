@@ -91,6 +91,39 @@ class ProjectLinksPanel {
     });
   }
 
+  // Repaint only the owned card grid. ProjectLinksManager uses this during a
+  // structural mutation so adding/editing/removing a link is visible before
+  // the frontmatter write settles, without refreshing unrelated Dataview blocks.
+  _renderCardsInto(grid, links) {
+    if (!grid || typeof grid.createEl !== "function") return;
+    if (typeof grid.replaceChildren === "function") grid.replaceChildren();
+    else if (typeof grid.empty === "function") grid.empty();
+    for (const card of this._linkCards(links)) {
+      const a = grid.createEl("a", { href: card.url });
+      if (a && typeof a.setAttr === "function") {
+        a.setAttr("target", "_blank");
+        a.setAttr("rel", "noopener");
+      }
+      if (a && a.style) {
+        a.style.cssText =
+          "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
+          "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
+          "background: var(--background-primary); color: var(--text-normal); " +
+          "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
+      }
+      if (a && typeof a.addEventListener === "function") {
+        a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
+        a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
+      }
+      const title = a.createEl("div", { text: card.text });
+      if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      if (card.host) {
+        const host = a.createEl("div", { text: card.host });
+        if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      }
+    }
+  }
+
   // Resolve the links to display for the current note. On the Link Hub note
   // (type: links-hub) that's the note's own `links`; on a PROJECT hub it's the
   // sibling `Links Hub.md`'s links (PR2 read-only mirror — Option B, no `links`
@@ -117,6 +150,19 @@ class ProjectLinksPanel {
     const c = (dv && dv.container) ? dv.container : dv;
     if (!c || typeof c.createEl !== "function") return;
 
+    // Chrome actions and this panel live in separate Dataview blocks on the
+    // canonical Links Hub. Mark the content-block owner even when the empty-
+    // state renders no children, so ProjectLinksManager can bind an optimistic
+    // insert to this exact surface instead of fabricating a grid in chrome.
+    if (page.type === "links-hub") {
+      const ownerPath = String(page.file.path || "");
+      if (c.dataset) c.dataset.projectLinksOwnerPath = ownerPath;
+      if (c.classList?.add) c.classList.add("project-links-panel-owner");
+      else if (!String(c.className || "").split(/\s+/).includes("project-links-panel-owner")) {
+        c.className = `${c.className || ""} project-links-panel-owner`.trim();
+      }
+    }
+
     // Sibling-mirror mode activates ONLY on an actual project hub (type:project);
     // the Link Hub note and any other note read their own `links` (backward-compat).
     const onProjectHub = page.type === "project";
@@ -138,31 +184,9 @@ class ProjectLinksPanel {
       if (lbl.style) lbl.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
     }
 
-    const grid = c.createEl("div");
+    const grid = c.createEl("div", { cls: "project-links-grid" });
+    if (grid.dataset) grid.dataset.sourcePath = String(page.file.path || "");
     if (grid.style) grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px;";
-    for (const card of cards) {
-      const a = grid.createEl("a", { href: card.url });
-      if (a && typeof a.setAttr === "function") {
-        a.setAttr("target", "_blank");
-        a.setAttr("rel", "noopener");
-      }
-      if (a && a.style) {
-        a.style.cssText =
-          "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
-          "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
-          "background: var(--background-primary); color: var(--text-normal); " +
-          "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
-      }
-      if (a && typeof a.addEventListener === "function") {
-        a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
-        a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
-      }
-      const title = a.createEl("div", { text: card.text });
-      if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-      if (card.host) {
-        const host = a.createEl("div", { text: card.host });
-        if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-      }
-    }
+    this._renderCardsInto(grid, cards);
   }
 }

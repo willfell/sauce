@@ -883,17 +883,23 @@ async function main() {
   const actionContainer = element();
   let entityCall = null;
   const priorEntityCreate = global.customJS.EntityCreate;
+  const priorSectionExplorer = global.customJS.SectionExplorer;
+  const lifecycle = { apply: () => ({}), rollback: () => {} };
   global.customJS.EntityCreate = {
     async render(proxy, options) {
       const button = proxy.container.createEl('button', { text: 'New Epic' });
       entityCall = { proxy, options, button };
     },
   };
+  global.customJS.SectionExplorer = { entityCreateLifecycle: () => lifecycle };
   await new EpicCreateAction().render({ container: actionContainer });
   global.customJS.EntityCreate = priorEntityCreate;
+  global.customJS.SectionExplorer = priorSectionExplorer;
   const actionRow = actionContainer.children.find((child) => child.className === 'sauce-action-row');
   assert(actionRow && entityCall && entityCall.options.instance === 'epic',
     'ES2D-ENTITY-SCAFFOLD: production helper dispatches the epic EntityCreate entry');
+  assert.strictEqual(entityCall.options.structuralLifecycle, lifecycle,
+    'ES2D-ENTITY-SCAFFOLD: project-board epic creation uses the shared structural lifecycle');
   assert.match(entityCall.button.style.cssText, /flex:\s*1 1 100%/,
     'ES2D-ENTITY-SCAFFOLD: New Epic remains full width at desktop and 390px');
 

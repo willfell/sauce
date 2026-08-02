@@ -2,7 +2,7 @@
 //
 // Add / edit / delete link dialogs on the per-project Link Hub note. Renders an
 // "Add link" + "Manage links" button row; the modals write the note's `links`
-// frontmatter via RenderSafe.mutate. The read-only list stays
+// frontmatter via RenderSafe.mutateStructure. The read-only list stays
 // owned by ProjectLinksPanel (rendered below this in the Link Hub template).
 //
 // Option B (PR1 decision): NO project->`links` mechanism dependency. The link
@@ -92,40 +92,101 @@ class ProjectLinksManager {
 
   // ── data + write ─────────────────────────────────────────────────────────
   _file(dv) {
-    const cur = dv.current && dv.current();
+    const cur = globalThis.customJS?.RenderSafe?.page?.(dv);
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
   }
   _currentLinks(dv) {
-    const cur = dv.current && dv.current();
+    const cur = globalThis.customJS?.RenderSafe?.page?.(dv);
     return this._parse(cur ? cur.links : []);
+  }
+  _panelOwner(dv, filePath) {
+    const container = dv && dv.container;
+    const scopes = [container];
+    try {
+      const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+      if (noteView) scopes.push(noteView);
+    } catch (_e) {}
+    for (const scope of scopes) {
+      try {
+        const candidates = [];
+        if (scope?.dataset?.projectLinksOwnerPath != null) candidates.push(scope);
+        if (typeof scope?.querySelectorAll === "function") {
+          candidates.push(...scope.querySelectorAll(".project-links-panel-owner"));
+        } else {
+          const owner = scope?.querySelector?.(".project-links-panel-owner");
+          if (owner) candidates.push(owner);
+        }
+        const match = candidates.find((owner) =>
+          String(owner?.dataset?.projectLinksOwnerPath || "") === String(filePath || ""));
+        if (match) return match;
+      } catch (_e) {}
+    }
+    return null;
+  }
+  _rollbackPreview(receipt) {
+    if (!receipt) return;
+    if (receipt.createdGrid) receipt.createdGrid.remove?.();
+    else if (receipt.grid) {
+      if (typeof receipt.grid.replaceChildren === "function") receipt.grid.replaceChildren(...receipt.priorNodes);
+      else {
+        receipt.grid.empty?.();
+        for (const node of receipt.priorNodes || []) receipt.grid.appendChild?.(node);
+      }
+    }
+    if (receipt.page) {
+      if (receipt.hadValue) receipt.page.links = receipt.priorValue;
+      else delete receipt.page.links;
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
   }
   async _write(dv, links) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the Link Hub note."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
-    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
       new Notice("Could not save links: RenderSafe is unavailable.", 6000);
       return false;
     }
     const next = links.map((l) => ({ url: l.url, text: l.text }));
-    const expected = JSON.stringify(next);
-    const result = await renderSafe.mutate({
+    const page = renderSafe.page?.(dv);
+    if (!page) { new Notice("Could not save links: page metadata is unavailable.", 6000); return false; }
+    const result = await renderSafe.mutateStructure({
       app,
       dv,
       path: file.path,
       failureMessage: "Could not save links",
-      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
-      isCurrent: (page) => {
-        const value = page && page.links;
-        if (!value || typeof value[Symbol.iterator] !== "function") return false;
+      apply: () => {
+        const hadValue = Object.prototype.hasOwnProperty.call(page, "links");
+        const priorValue = page.links;
+        const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+        const owner = this._panelOwner(dv, file.path);
+        const panel = globalThis.customJS?.ProjectLinksPanel;
+        if (!owner || !panel || typeof panel._renderCardsInto !== "function") {
+          throw new Error("Project links panel is unavailable");
+        }
+        let grid = owner.querySelector?.(".project-links-grid") || null;
+        let createdGrid = null;
+        if (!grid && typeof owner.createEl === "function") {
+          grid = owner.createEl("div", { cls: "project-links-grid project-links-grid-optimistic" });
+          if (grid.dataset) grid.dataset.sourcePath = String(file.path || "");
+          if (grid.style) grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:4px;";
+          createdGrid = grid;
+        }
+        if (!grid) throw new Error("Project links grid is unavailable");
+        const priorNodes = grid ? Array.from(grid.childNodes || grid.children || []) : [];
+        const receipt = { page, hadValue, priorValue, focusTarget, owner, grid, createdGrid, priorNodes };
         try {
-          return JSON.stringify(Array.from(value).map((link) => ({
-            url: String(link && link.url || ""),
-            text: String(link && (link.text || link.url) || ""),
-          }))) === expected;
-        } catch (_e) { return false; }
+          page.links = next;
+          panel._renderCardsInto(grid, next);
+          return receipt;
+        } catch (error) {
+          this._rollbackPreview(receipt);
+          throw error;
+        }
       },
+      rollback: (receipt) => this._rollbackPreview(receipt),
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
     });
     return result.ok === true;
   }
@@ -171,9 +232,14 @@ class ProjectLinksManager {
           if (acted) return false;
           acted = true;
           const res = ProjectLinksManager.deleteLink(this._currentLinks(dv), index);
-          if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
-          close();
-          return res.changed;
+          if (res.changed && await this._write(dv, res.links)) {
+            new Notice("Link deleted.");
+            close();
+            return true;
+          }
+          acted = false;
+          try { delBtn.focus(); } catch (_e) {}
+          return false;
         };
       });
     }});

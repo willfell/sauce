@@ -1,7 +1,7 @@
 /**
  * Project Status Widget (CustomJS)
  * Renders a colored status chip on the project hub; click → 7-option
- * popup → writes back status + status_changed_at via RenderSafe.mutate.
+ * popup → writes back status + status_changed_at via RenderSafe.mutateStructure.
  *
  * Usage in DataviewJS (atlas note):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
@@ -27,7 +27,7 @@ class ProjectStatusWidget {
         const STATUSES = ProjectStatusWidget.STATUSES;
         const COLORS = ProjectStatusWidget.COLORS;
 
-        const current = dv.current();
+        const current = globalThis.customJS?.RenderSafe?.page?.(dv);
         if (!current || !current.file) return;
         const filePath = current.file.path;
         const file = app.vault.getAbstractFileByPath(filePath);
@@ -89,6 +89,7 @@ class ProjectStatusWidget {
     }
 
     _openPicker(dv, file, currentStatus, STATUSES, COLORS, applyChipStatus) {
+        const triggerFocus = (typeof document !== "undefined") ? document.activeElement : null;
         const overlay = document.createElement("div");
         overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
 
@@ -99,6 +100,15 @@ class ProjectStatusWidget {
         heading.textContent = "Set project status";
         heading.style.cssText = "font-size: 1em; font-weight: 600; margin-bottom: 6px;";
         dialog.appendChild(heading);
+
+        let closed = false;
+        let escHandler = null;
+        const close = () => {
+            if (closed) return;
+            closed = true;
+            overlay.remove();
+            if (escHandler) document.removeEventListener("keydown", escHandler);
+        };
 
         for (const s of STATUSES) {
             const c = COLORS[s] || "var(--text-muted)";
@@ -120,12 +130,21 @@ class ProjectStatusWidget {
             if (s !== currentStatus) {
                 btn.onmouseenter = () => { btn.style.background = `${c}33`; };
                 btn.onmouseleave = () => { btn.style.background = `${c}1A`; };
+                let submitting = false;
                 btn.onclick = async () => {
-                    overlay.remove();
-                    await this._writeStatus(dv, file, s, {
+                    if (submitting) return false;
+                    submitting = true;
+                    const saved = await this._writeStatus(dv, file, s, {
                         optimistic: () => applyChipStatus(s),
                         revert: () => applyChipStatus(currentStatus),
+                        focusTarget: btn,
+                        triggerFocus,
+                        modal: { overlay, dialog },
                     });
+                    submitting = false;
+                    if (saved) close();
+                    else { try { btn.focus?.(); } catch (_e) {} }
+                    return saved;
                 };
             }
             dialog.appendChild(btn);
@@ -136,13 +155,13 @@ class ProjectStatusWidget {
         const cancelBtn = document.createElement("button");
         cancelBtn.textContent = "Cancel";
         cancelBtn.style.cssText = "cursor: pointer; background: transparent; color: var(--text-muted); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 6px 12px; font-size: 0.85em;";
-        cancelBtn.onclick = () => overlay.remove();
+        cancelBtn.onclick = close;
         cancelRow.appendChild(cancelBtn);
         dialog.appendChild(cancelRow);
 
         overlay.appendChild(dialog);
-        overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-        const escHandler = (e) => { if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", escHandler); } };
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+        escHandler = (e) => { if (e.key === "Escape") close(); };
         document.addEventListener("keydown", escHandler);
 
         document.body.appendChild(overlay);
@@ -167,24 +186,36 @@ class ProjectStatusWidget {
     async _writeStatus(dv, file, newStatus, ui) {
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
         const renderSafe = globalThis.customJS?.RenderSafe;
-        if (!renderSafe || typeof renderSafe.mutate !== "function") {
+        if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
             if (ui && typeof ui.revert === "function") {
                 try { await ui.revert(); } catch (_e) {}
             }
             new Notice("Failed to update project status: RenderSafe is unavailable.", 8000);
             return false;
         }
-        const result = await renderSafe.mutate({
+        const focusTarget = ui && ui.focusTarget
+            ? ui.focusTarget
+            : ((typeof document !== "undefined") ? document.activeElement : null);
+        const result = await renderSafe.mutateStructure({
             app,
             dv,
             path: file.path,
-            optimistic: ui && ui.optimistic,
-            revert: ui && ui.revert,
             failureMessage: "Failed to update project status",
+            apply: async () => {
+                if (ui && typeof ui.optimistic === "function") await ui.optimistic();
+                return {
+                    focusTarget,
+                    triggerFocus: ui && ui.triggerFocus,
+                    modal: ui && ui.modal,
+                };
+            },
+            rollback: async (receipt) => {
+                if (ui && typeof ui.revert === "function") await ui.revert();
+                try { receipt && receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+            },
             write: () => app.fileManager.processFrontMatter(file, fm => {
                 ProjectStatusWidget._applyStatusChange(fm, newStatus, today);
             }),
-            isCurrent: (page) => String(page && page.status || "").trim() === newStatus,
         });
         return result.ok === true;
     }

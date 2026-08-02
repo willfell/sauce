@@ -132,6 +132,7 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
     EntityCreate: { render: async (proxy, options) => {
       rendered.push({
         instance: options.instance, presetPrompts: options.presetPrompts, container: proxy.container,
+        structuralLifecycle: options.structuralLifecycle,
         current: proxy.current(), pages: proxy.pages(), el: proxy.el(),
         header: proxy.header(), paragraph: proxy.paragraph(),
       });
@@ -153,6 +154,7 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
       { kind: "entity", instance: "section-hub" },
     ]);
     assert.ok(row && row.className === "sauce-action-row", "shared semantic row is returned");
+    assert.ok(rendered[0].structuralLifecycle, "entity actions receive the shared structural lifecycle");
     assert.strictEqual(container.children.length, 2, "caller container has exactly one divider and one action row");
     assert.strictEqual(container.children[0].className, "fixture-divider", "divider precedes the row");
     assert.strictEqual(container.children[1], row, "action row is the only node after the divider");
@@ -177,6 +179,34 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
     if (previousCustomJS === undefined) delete global.customJS;
     else global.customJS = previousCustomJS;
   }
+}});
+
+ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node receipt and restores focus on rollback", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  let restored = false;
+  const previousDocument = global.document;
+  global.document = { activeElement: { focus: () => { restored = true; } } };
+  const parent = {
+    children: [],
+    createEl(_tag, options) {
+      const node = { className: options.cls, textContent: "", nextSibling: null };
+      this.children.push(node);
+      return node;
+    },
+    removeChild(node) { this.children = this.children.filter((candidate) => candidate !== node); },
+  };
+  const root = { querySelector: () => parent, createEl: parent.createEl.bind(parent) };
+  try {
+    const lifecycle = se.entityCreateLifecycle({ container: root });
+    const receipt = lifecycle.apply({ targetPath: "spice/projects/demo/docs/knowledge/New Doc.md" });
+    assert.strictEqual(parent.children.length, 1, "optimistic preview is inserted once");
+    assert.strictEqual(receipt.node, parent.children[0], "receipt owns the exact inserted node");
+    assert.strictEqual(receipt.node.textContent, "Creating New Doc…");
+    lifecycle.rollback(receipt);
+    assert.strictEqual(parent.children.length, 0, "rollback removes only the receipt node");
+    assert.strictEqual(restored, true, "rollback restores the captured focus target");
+  } finally { global.document = previousDocument; }
 }});
 
 ASYNC_TESTS.push({ name: "renderActionRow polls exactly 40 x 50 ms, recovers warm dependencies, and fails closed", fn: async () => {
@@ -727,7 +757,18 @@ failures += !run("project adapter: renameSection on a depth-1 hub updates sectio
     },
     vault: { getAbstractFileByPath: (p) => ({ path: p }) },
   };
-  global.customJS = { DocSearch: { matches: () => true }, SectionLabel: { render: () => {}, divider: () => {} } };
+  global.customJS = {
+    DocSearch: { matches: () => true },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    RenderSafe: {
+      page: (dv) => (dv && typeof dv.current === "function" ? dv.current() : null),
+      mutateStructure: async (opts) => {
+        let receipt;
+        try { receipt = opts.apply(); return { ok: true, value: await opts.write(), receipt }; }
+        catch (error) { if (receipt !== undefined) await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+      },
+    },
+  };
   factory(mod, mod.exports);
   const SectionHub = mod.exports;
   const sh = new SectionHub();
@@ -1581,7 +1622,7 @@ failures += !run("already-SAVED schemeless links get an https:// href at render 
   }
 });
 
-failures += !run("add-link modal: title + styled inputs + Cancel/primary buttons; Cancel closes without write; primary writes normalized", () => {
+ASYNC_TESTS.push({ name: "add-link modal: title + styled inputs + Cancel/primary buttons; Cancel closes without write; primary writes normalized", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const doc = makeDocStub();
@@ -1617,7 +1658,7 @@ failures += !run("add-link modal: title + styled inputs + Cancel/primary buttons
   inputs[1].value = "Google";
   const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
   assert.ok(primary, "expected a primary button");
-  primary.onclick();
+  await primary.onclick();
   assert.deepStrictEqual(writes, [[{ url: "https://google.com", text: "Google" }]], "primary writes the normalized link");
   assert.strictEqual(doc.body.children.length, 0, "primary closes the modal");
 
@@ -1627,12 +1668,12 @@ failures += !run("add-link modal: title + styled inputs + Cancel/primary buttons
   inputs = findDeep(overlay, (e) => e.className === "se-modal-input");
   inputs[0].value = "https://b.com";
   assert.strictEqual(typeof inputs[0].onkeydown, "function", "url input listens for Enter");
-  inputs[0].onkeydown({ key: "Enter" });
+  await inputs[0].onkeydown({ key: "Enter" });
   assert.strictEqual(writes.length, 2, "Enter submits");
   delete global.document;
-});
+}});
 
-failures += !run("rename modal gets the same chrome (title + input + Cancel/primary)", () => {
+ASYNC_TESTS.push({ name: "rename modal gets the same chrome (title + input + Cancel/primary)", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const doc = makeDocStub();
@@ -1653,11 +1694,68 @@ failures += !run("rename modal gets the same chrome (title + input + Cancel/prim
   assert.ok(cancel && cancel.textContent === "Cancel");
   input.value = "Networking";
   const primary = findDeep(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
-  primary.onclick();
+  await primary.onclick();
   assert.deepStrictEqual(renames, ["Networking"]);
   assert.strictEqual(doc.body.children.length, 0);
   delete global.document;
-});
+}});
+
+ASYNC_TESTS.push({ name: "section mutation modals await persistence and remain focused/retryable on explicit failure", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const find = (el, pred, out = []) => {
+    if (pred(el)) out.push(el);
+    for (const child of el.children || []) find(child, pred, out);
+    return out;
+  };
+
+  {
+    const doc = makeDocStub();
+    let calls = 0; let focused = false;
+    const adapter = { getLinks: () => [], writeLinks: async () => { calls += 1; return { ok: false }; } };
+    se._openAddLinkForm(null, adapter, { title: "EMS" });
+    const overlay = doc.body.children[0];
+    const inputs = find(overlay, (e) => e.className === "se-modal-input");
+    inputs[0].value = "https://example.com";
+    inputs[0].focus = () => { focused = true; };
+    const primary = find(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+    await Promise.all([primary.onclick(), primary.onclick()]);
+    assert.strictEqual(calls, 1, "double click issues one awaited write");
+    assert.strictEqual(doc.body.children.length, 1, "failed link write keeps modal mounted");
+    assert.strictEqual(focused, true, "failed link write restores input focus");
+    delete global.document;
+  }
+
+  {
+    const doc = makeDocStub();
+    let focused = false;
+    const adapter = { renameSection: async () => ({ ok: false }) };
+    se._openRenameDialog(null, adapter, { title: "EMS" });
+    const overlay = doc.body.children[0];
+    const input = find(overlay, (e) => e.className === "se-modal-input")[0];
+    input.value = "Networking";
+    input.focus = () => { focused = true; };
+    const primary = find(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+    await primary.onclick();
+    assert.strictEqual(doc.body.children.length, 1, "failed rename keeps modal mounted");
+    assert.strictEqual(focused, true, "failed rename restores input focus");
+    delete global.document;
+  }
+
+  {
+    const doc = makeDocStub();
+    let focused = false;
+    const adapter = { canDelete: () => true, emptySubsectionCount: () => 0, deleteSection: async () => ({ ok: false }) };
+    se._openDeleteConfirm(null, adapter, { title: "EMS" });
+    const overlay = doc.body.children[0];
+    const primary = find(overlay, (e) => e.className === "se-modal-btn se-modal-btn-primary")[0];
+    primary.focus = () => { focused = true; };
+    await primary.onclick();
+    assert.strictEqual(doc.body.children.length, 1, "failed delete keeps modal mounted");
+    assert.strictEqual(focused, true, "failed delete restores confirm focus");
+    delete global.document;
+  }
+}});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared move-management surface (collapsible picker, doc/section move,
@@ -2027,7 +2125,7 @@ failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) rename
   delete global.app;
 });
 
-failures += !run("recursive delete confirm: confirm invokes deleteSection; cancel does not; wording reflects emptySubsectionCount", () => {
+ASYNC_TESTS.push({ name: "recursive delete confirm: confirm invokes deleteSection; cancel does not; wording reflects emptySubsectionCount", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
 
@@ -2048,7 +2146,7 @@ failures += !run("recursive delete confirm: confirm invokes deleteSection; cance
     assert.ok(bodyTexts.some((t) => t.includes("3 empty sub-section")), "wording mentions 3 empty sub-sections: " + JSON.stringify(bodyTexts));
     const del = findDeepAll(overlay, (e) => e.textContent === "Delete")[0];
     assert.ok(del, "expected a Delete button");
-    del.onclick();
+    await del.onclick();
     assert.strictEqual(deletes.length, 1, "confirm invokes deleteSection");
     assert.strictEqual(doc.body.children.length, 0, "confirm closes");
     delete global.document;
@@ -2078,7 +2176,7 @@ failures += !run("recursive delete confirm: confirm invokes deleteSection; cance
     assert.strictEqual(doc.body.children.length, 0, "no modal when canDelete is false");
     delete global.document;
   }
-});
+}});
 
 failures += !run("rail row ⋯ gains a Move entry (before Delete); _openMovePickerForSection wired", () => {
   const SectionExplorer = loadClass();
