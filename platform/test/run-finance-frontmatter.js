@@ -319,6 +319,7 @@ async function run() {
     const persisted = { amount: 0 };
     const stale = { amount: 0 };
     const external = { amount: 99 };
+    let currentFile = original;
     const listeners = new Set();
     const metadataCache = {
       getFileCache: (file) => ({ frontmatter: file === replacement ? external : stale }),
@@ -333,18 +334,57 @@ async function run() {
       },
     };
     global.app = {
-      vault: { getAbstractFileByPath: () => replacement },
+      vault: { getAbstractFileByPath: () => currentFile },
       metadataCache,
       fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
     };
     const replacementFf = new FinanceFrontmatter();
     await replacementFf.update(original, (fm) => { fm.amount = 1; });
     const retainedBeforeReplacement = replacementFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    currentFile = replacement;
     metadataCache.emit(replacement);
     const releasedByEvent = replacementFf._writtenFrontmatter.size === 0 && listeners.size === 0;
     const externalReadThrough = replacementFf.read(replacement) === external;
     ok("FF-12G replacement TFile events settle against changed identity and newer mtime",
       retainedBeforeReplacement && releasedByEvent && externalReadThrough);
+  }
+  {
+    const original = { path: "spice/finance/Invoices/Replaced-Early.md", stat: { mtime: 10 } };
+    const replacement = { path: original.path, stat: { mtime: 11 } };
+    const persisted = { amount: 0 };
+    const stale = { amount: 0 };
+    const external = { amount: 99 };
+    let currentFile = original;
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: (file) => ({ frontmatter: file === replacement ? external : stale }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: () => currentFile },
+      metadataCache,
+      fileManager: {
+        async processFrontMatter(_file, mutator) {
+          await mutator(persisted);
+          currentFile = replacement;
+          metadataCache.emit(replacement);
+        },
+      },
+    };
+    const earlyReplacementFf = new FinanceFrontmatter();
+    await earlyReplacementFf.update(original, (fm) => { fm.amount = 1; });
+    const releasedAfterRegistration = earlyReplacementFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    const externalReadThrough = earlyReplacementFf.read(original.path) === external;
+    ok("FF-12H pre-registration replacement events reconcile through the current TFile",
+      releasedAfterRegistration && externalReadThrough);
   }
   {
     installApp({ files: {} });

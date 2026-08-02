@@ -284,8 +284,13 @@ class FinanceFrontmatter {
             // was still settling, before this listener existed. Close that
             // registration window immediately; identity-guarded release keeps
             // this idempotent with the event callback and read().
-            const cached = metadata.getFileCache?.(file)?.frontmatter ?? null;
-            this._writtenSnapshotSettled(file, written, cached);
+            let currentFile = file;
+            try {
+                const resolved = app.vault?.getAbstractFileByPath?.(file.path);
+                if (resolved && resolved.path === file.path && resolved.children === undefined) currentFile = resolved;
+            } catch (_e) {}
+            const cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null;
+            this._writtenSnapshotSettled(currentFile, written, cached);
         } catch (_e) {
             written.metadata = null;
             written.listener = null;
