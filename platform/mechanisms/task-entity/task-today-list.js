@@ -771,7 +771,17 @@ class TaskTodayList {
             const TD = getTD();
             if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
             try {
-                const deferred = typeof TD.markDeleted === 'function';
+                // markDeleted predates deferred confirmation, so its presence
+                // cannot prove that confirmDelete understands deferWrite. Bind
+                // the two-call protocol to an explicit capability owned by the
+                // same TaskDialog version; legacy dialogs keep their atomic
+                // confirm-and-write behavior and are never written twice.
+                let deferred = false;
+                try {
+                    deferred = typeof TD.markDeleted === 'function'
+                        && typeof TD.supportsDeferredDelete === 'function'
+                        && TD.supportsDeferredDelete() === true;
+                } catch (_e) { deferred = false; }
                 const res = await TD.confirmDelete(path, deferred ? { deferWrite: true } : undefined);
                 if (!res || !res.ok) return;
                 const RS = window.customJS && window.customJS.RenderSafe;

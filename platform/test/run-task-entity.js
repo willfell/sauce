@@ -2572,6 +2572,7 @@ async function runPerf1StructuralTests() {
     };
     const TD = {
       open() {},
+      supportsDeferredDelete: () => true,
       confirmDelete: async (_path, opts) => ({ ok: !!(opts && opts.deferWrite), confirmed: true }),
       markDeleted: () => new Promise((resolve) => { settleDelete = resolve; }),
     };
@@ -2590,6 +2591,41 @@ async function runPerf1StructuralTests() {
       'rollback restores the exact row identity at its exact ordinal');
     assert(deleteButton._focusCount === 1, 'rollback restores focus to the delete control');
     assert(seamCalls === 1, 'delete uses mutateStructure exactly once');
+  });
+
+  await okAsync('PERF1-LEGACY-CONFIRM-DELETE-NO-DOUBLE-WRITE keeps legacy confirm-and-write atomic', async () => {
+    let seamCalls = 0;
+    let confirmWrites = 0;
+    let duplicateWrites = 0;
+    const RS = {
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const legacyTD = {
+      open() {},
+      confirmDelete: async () => { confirmWrites++; return { ok: true }; },
+      markDeleted: async () => { duplicateWrites++; return { ok: false, reason: 'task file not found' }; },
+    };
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: { RenderSafe: RS },
+    };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container,
+      { title: 'legacy child', path: 'spice/tasks/legacy child.md', status: 'open' }, legacyTD);
+    const after = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(confirmWrites === 1 && duplicateWrites === 0,
+      'legacy confirmation owns exactly one write and markDeleted is not called again');
+    assert(seamCalls === 1 && childIndex(container, row) === -1,
+      'confirmed legacy delete removes the row through the shared seam without stale rollback');
+    assert(container.children[0] === before && container.children[1] === after,
+      'legacy delete preserves sibling identity and order');
   });
 
   global.window = prevWindow;
@@ -3475,6 +3511,7 @@ async function runConfirmDeleteTests() {
     global.window = { app: global.app };
     global.customJS = { SauceModal: new SauceModalClass() };
     const dialog = new TaskDialogClass();
+    assert(dialog.supportsDeferredDelete() === true, 'TaskDialog explicitly advertises deferred-delete support');
     dialog.markDeleted = async (path) => { deleted.push(path); return { ok: true }; };
     const pending = dialog.confirmDelete('spice/tasks/child.md', { deferWrite: true });
     const danger = findByCls(doc.body, 'sauce-task-confirm-delete');

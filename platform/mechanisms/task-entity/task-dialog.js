@@ -490,6 +490,10 @@ class TaskDialog {
      * recoverable. Fully guarded — never throws (resolves a reason instead). Reuses
      * the recoverable-delete so nothing is hard-deleted.
      */
+    supportsDeferredDelete() {
+        return true;
+    }
+
     async confirmDelete(path, opts) {
         const deferWrite = !!(opts && opts.deferWrite);
         return new Promise((resolve) => {
