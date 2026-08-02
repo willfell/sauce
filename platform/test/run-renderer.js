@@ -3030,6 +3030,42 @@ async function testFF35FinanceStructuralRollback() {
   return pass;
 }
 
+// PERF-3 compensation: the Time-Log and its sibling Invoice are one gesture.
+// A missing Invoice must reject and restore the authoritative Time-Log state,
+// not commit a partial success that leaves the optimistic editor root visible.
+async function testFF37InvoiceTimeLogMissingSiblingCompensation() {
+  console.log('\n=== FF37 / PERF-3 — missing sibling Invoice compensates the Time-Log write ===');
+  const app = makeApp();
+  app.vault.getAbstractFileByPath = () => null;
+  const file = { path: 'spice/finance/invoices/2026-08/Time-Log-2026-08.md' };
+  const priorEntries = [{ date: '2026-08-01', hours: 1, description: 'Prior' }];
+  const state = { entries: priorEntries.map((row) => ({ ...row })), server_only: 'keep' };
+  const Cls = loadFinanceClass('InvoiceTimeLogEditor', app, {
+    FinanceFrontmatter: {
+      read: () => ({ ...state, entries: state.entries.map((row) => ({ ...row })) }),
+      update: async (_file, mutator) => { await mutator(state); },
+    },
+  });
+  let rejected = false;
+  try {
+    await new Cls()._propagateAfterMutation(
+      file,
+      {},
+      priorEntries.concat([{ date: '2026-08-02', hours: 2, description: 'New' }]),
+      'spice/finance/invoices/2026-08/Invoice-2026-08.md',
+    );
+  } catch (error) {
+    rejected = /Sibling Invoice file is missing/.test(String(error && error.message));
+  }
+  const restored = JSON.stringify(state.entries) === JSON.stringify(priorEntries)
+    && !Object.prototype.hasOwnProperty.call(state, 'total_hours')
+    && state.server_only === 'keep';
+  const pass = rejected && restored;
+  console.log(`  rejected: ${rejected} ; exact Time-Log fields restored: ${restored}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // PERF-3 source matrix: every Finance editor structural surface consumes the
 // shared seam and centralizes its authoritative self-render behind scroll
 // capture; the Plan surface uses the field mutation seam and the same rerender.
@@ -4022,6 +4058,7 @@ async function testRendHasNotes() {
       results.push(['FF-COLD finance-widget-cold-load-render-guards', await testFinanceColdLoadRenderGuards()]);
       results.push(['FF35 finance-structural-rollback', await testFF35FinanceStructuralRollback()]);
       results.push(['FF36 finance-lifecycle-coverage-matrix', await testFF36FinanceLifecycleCoverageMatrix()]);
+      results.push(['FF37 invoice-time-log-missing-sibling-compensation', await testFF37InvoiceTimeLogMissingSiblingCompensation()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;

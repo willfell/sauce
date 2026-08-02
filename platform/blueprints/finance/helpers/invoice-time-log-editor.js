@@ -269,8 +269,7 @@ class InvoiceTimeLogEditor {
         try {
             const invoiceFile = app.vault.getAbstractFileByPath(siblingInvoicePath);
             if (!invoiceFile) {
-                new Notice(`InvoiceTimeLogEditor: sibling Invoice file ${siblingInvoicePath} missing; total_hours saved on Time-Log only.`);
-                return;
+                throw new Error(`Sibling Invoice file is missing: ${siblingInvoicePath}`);
             }
             await customJS.FinanceFrontmatter.update(invoiceFile, (fm) => {
                 const rate = Number(fm.rate || 0);
