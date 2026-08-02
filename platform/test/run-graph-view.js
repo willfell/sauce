@@ -1235,6 +1235,7 @@ async function main() {
     [`${epicTwoDir}/board/E2-1 Gamma.md`, '## Outcome\n\nGamma exposes the cross-epic plan path.\n'],
   ]);
   const projectOpened = [];
+  const projectOutcomeReads = [];
   const projectMutations = [];
   const projectMutator = (name) => () => {
     projectMutations.push(name);
@@ -1244,6 +1245,7 @@ async function main() {
     vault: {
       getMarkdownFiles: () => projectFiles,
       cachedRead: async (entry) => {
+        if (projectFrontmatter.get(entry.path)?.type === 'slice') projectOutcomeReads.push(entry.path);
         if (projectBodies.has(entry.path)) return projectBodies.get(entry.path);
         throw new Error(`unexpected read ${entry.path}`);
       },
@@ -1278,6 +1280,32 @@ async function main() {
   await new GraphView({ scope: 'project' }).render({ container: projectContainer });
   const pRoot = projectContainer.children.find((child) => child.className === 'graph-view-root');
   assert(pRoot, 'P: project scope mounts one graph-view-root');
+
+  // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
+  // the selection panel. Missing/throwing GraphInsights disables that panel,
+  // so the fail-soft path must not add one slice-body read or at-rest artifact.
+  assert(projectOutcomeReads.includes(`${epicTwoDir}/board/E2-1 Gamma.md`),
+    'BL4-OUTCOMES-VALID-ANALYSIS: valid project analysis loads slice Outcomes for selection detail');
+  const projectAtRestWithAnalysis = domShape(pRoot);
+  const outcomeReadsAfterAnalysis = projectOutcomeReads.length;
+  const missingProjectContainer = element();
+  const throwingProjectContainer = element();
+  await new GraphView({ scope: 'project', insights: {} }).render({ container: missingProjectContainer });
+  await new GraphView({
+    scope: 'project',
+    insights: { analyzeGraph() { throw new Error('project insights unavailable'); } },
+  }).render({ container: throwingProjectContainer });
+  const missingProjectRoot = missingProjectContainer.children[0];
+  const throwingProjectRoot = throwingProjectContainer.children[0];
+  assert.strictEqual(projectOutcomeReads.length, outcomeReadsAfterAnalysis,
+    'BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: missing and throwing analysis perform zero slice Outcome reads');
+  assert.deepStrictEqual(domShape(missingProjectRoot), projectAtRestWithAnalysis,
+    'BL4-MISSING-INSIGHTS-AT-REST: missing analysis retains the exact project at-rest DOM');
+  assert.deepStrictEqual(domShape(throwingProjectRoot), projectAtRestWithAnalysis,
+    'BL4-THROWING-INSIGHTS-AT-REST: throwing analysis retains the exact project at-rest DOM');
+  assert.strictEqual(byClass(missingProjectRoot, 'graph-view-detail-panel').length
+    + byClass(throwingProjectRoot, 'graph-view-detail-panel').length, 0,
+  'BL4-MUTANT-LOAD-OUTCOMES-WITHOUT-ANALYSIS: unavailable analysis creates no panel artifact');
 
   // P1: two live-epic clusters render as labeled headers, stacked in board
   // order (In Planning first), each header linking to its atlas.

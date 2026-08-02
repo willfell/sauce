@@ -915,7 +915,10 @@ class GraphView {
     const allNodes = clusters.flatMap((cluster) => cluster.nodes);
     const allEdges = [...clusters.flatMap((cluster) => cluster.edges), ...crossEdges];
     const analysis = this._analyzeGraph(allNodes, allEdges);
-    const outcomes = await this._loadOutcomes(allNodes);
+    // Outcome bodies are panel-only at project scope. Keep the pre-BL-4
+    // fail-soft path cold when GraphInsights is absent or malformed: without
+    // analysis there is no selection controller and therefore no panel reader.
+    const outcomes = analysis ? await this._loadOutcomes(allNodes) : null;
 
     if (clusters.length) {
       this._renderStuckSummary(root, analysis);
