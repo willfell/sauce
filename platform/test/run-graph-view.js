@@ -21,6 +21,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const WIDGET = path.join(ROOT, 'platform/blueprints/project/helpers/graph-view.js');
 const LAYOUT = path.join(ROOT, 'platform/blueprints/project/helpers/graph-layout.js');
+const INSIGHTS = path.join(ROOT, 'platform/blueprints/project/helpers/graph-insights.js');
 const DASHBOARD = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboard.js');
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
 const installer = require(path.join(ROOT, 'platform/install.js'));
@@ -29,6 +30,7 @@ const widgetSource = fs.readFileSync(WIDGET, 'utf8');
 // Replicate the customJS loader exactly: whole file wrapped in ( ... ) as one expression.
 const GraphView = eval(`(${widgetSource})`); // eslint-disable-line no-eval
 const GraphLayout = eval(`(${fs.readFileSync(LAYOUT, 'utf8')})`); // eslint-disable-line no-eval
+const GraphInsights = eval(`(${fs.readFileSync(INSIGHTS, 'utf8')})`); // eslint-disable-line no-eval
 const EpicDashboard = eval(`(${fs.readFileSync(DASHBOARD, 'utf8')})`); // eslint-disable-line no-eval
 
 function element(tag = 'div', options = {}) {
@@ -55,6 +57,17 @@ function byClass(root, className) {
   return flatten(root).filter((node) => node.className.split(/\s+/).includes(className));
 }
 function textOf(root) { return flatten(root).map((node) => node.textContent).filter(Boolean).join('\n'); }
+function domShape(root) {
+  return {
+    tag: root.tag,
+    className: root.className,
+    textContent: root.textContent,
+    cssText: root.style?.cssText || '',
+    innerHTML: root.innerHTML,
+    attrs: root.attrs,
+    children: (root.children || []).map(domShape),
+  };
+}
 function file(filePath, mtime = 0) {
   return { path: filePath, basename: path.posix.basename(filePath, '.md'), stat: { mtime } };
 }
@@ -578,6 +591,103 @@ async function main() {
     'case 10: presentation and lifecycle resolution delegate to EpicDashboard');
   frontmatter.set(`${board}/GV-A Base.md`, { type: 'slice', status: 'completed', depends_on: [] });
 
+  // BL-3 epic scope: analysis is delegated to GraphInsights over the exact
+  // drawn nodes/edges. A is the sole root blocker; downstream stuck B is not a
+  // root; completed D is reachable but excluded from A's gates count.
+  const bl3Nodes = [
+    { card: 'BLA-1 Root blocker', path: `${board}/BLA-1 Root blocker.md`, status: 'blocked', rank: 0, row: 0 },
+    { card: 'BLB-1 Downstream stuck', path: `${board}/BLB-1 Downstream stuck.md`, status: 'blocked', rank: 1, row: 0 },
+    { card: 'BLC-1 Live dependent', path: `${board}/BLC-1 Live dependent.md`, status: 'planning', rank: 2, row: 0 },
+    { card: 'BLD-1 Completed dependent', path: `${board}/BLD-1 Completed dependent.md`, status: 'completed', rank: 1, row: 1 },
+  ];
+  const bl3Edges = [
+    { from: 'BLA-1 Root blocker', to: 'BLB-1 Downstream stuck', kind: 'depends' },
+    { from: 'BLB-1 Downstream stuck', to: 'BLC-1 Live dependent', kind: 'depends' },
+    { from: 'BLA-1 Root blocker', to: 'BLD-1 Completed dependent', kind: 'depends' },
+  ];
+  const insightCalls = [];
+  const realInsights = new GraphInsights();
+  const delegatedInsights = {
+    analyzeGraph(nodes, edges) {
+      insightCalls.push({ nodes, edges });
+      return realInsights.analyzeGraph(nodes, edges);
+    },
+  };
+  const bl3Root = element();
+  const bl3Warnings = [];
+  await new GraphView({ dashboard, lifecycleApi, insights: delegatedInsights })._renderGraph(
+    bl3Root, { nodes: bl3Nodes, edges: bl3Edges, warnings: [] }, lifecycleApi, epicPath, bl3Warnings,
+  );
+  assert.strictEqual(insightCalls.length, 1, 'BL3-DELEGATE: epic render delegates analysis exactly once');
+  assert.strictEqual(insightCalls[0].nodes, bl3Nodes,
+    'BL3-DELEGATE: GraphInsights receives the exact drawn epic nodes array');
+  assert.strictEqual(insightCalls[0].edges, bl3Edges,
+    'BL3-DELEGATE: GraphInsights receives the exact drawn epic edges array');
+  assert.strictEqual((widgetSource.match(/\.analyzeGraph\(/g) || []).length, 1,
+    'BL3-DELEGATE: GraphView has one delegation call and no second analysis path');
+  assert(!/_closure\s*\(|_hasPath\s*\(/.test(widgetSource),
+    'BL3-DELEGATE: GraphView reimplements no closure or reachability helper');
+
+  const bl3Summary = byClass(bl3Root, 'graph-view-stuck-summary');
+  assert.strictEqual(bl3Summary.length, 1, 'BL3-SUMMARY: a stuck graph renders one summary row');
+  assert.strictEqual(bl3Summary[0].textContent, '1 root blocker · gating 2 slices',
+    'BL3-SUMMARY: summary text deterministically names the root count and unique live gated total');
+  const bl3Canvas = byClass(bl3Root, 'graph-view-canvas')[0];
+  assert(!flatten(bl3Canvas).includes(bl3Summary[0])
+    && bl3Root.children.indexOf(bl3Summary[0]) < bl3Root.children.findIndex((node) => node.className === 'graph-view-scroll'),
+  'BL3-SUMMARY: summary sits above and outside the canvas, so chip coordinates cannot shift');
+  const bl3Chips = byClass(bl3Root, 'graph-view-chip');
+  const bl3ChipFor = (id) => bl3Chips.find((chip) => flatten(chip).some((node) => node.textContent === id));
+  const bl3Badges = byClass(bl3Root, 'graph-view-gates-badge');
+  assert.strictEqual(bl3Badges.length, 1,
+    'BL3-MUTANT-BADGE-EVERY-STUCK: only the root blocker receives a badge');
+  assert.strictEqual(bl3Badges[0].textContent, 'gates 2',
+    'BL3-MUTANT-COUNT-COMPLETED: the completed reachable dependent is excluded from the badge count');
+  assert(flatten(bl3ChipFor('BLA-1')).includes(bl3Badges[0]),
+    'BL3-BADGE: the gates badge renders inside the root-blocker chip');
+  assert.strictEqual(byClass(bl3ChipFor('BLB-1'), 'graph-view-gates-badge').length, 0,
+    'BL3-MUTANT-BADGE-EVERY-STUCK: a downstream stuck chip is not a root blocker');
+  assert(bl3ChipFor('BLA-1').style.cssText.includes('left:12px;top:12px')
+    && bl3ChipFor('BLB-1').style.cssText.includes('top:12px'),
+  'BL3-GEOMETRY: summary and inside-chip badge leave the established chip coordinates unchanged');
+  assert.deepStrictEqual(bl3Warnings, [], 'BL3: successful insights add no warning spam');
+
+  // BL-3 calm/fail-soft posture. With no stuck nodes, real analysis must be
+  // structurally byte-identical to GraphInsights missing. A throwing analyzer
+  // follows that same legacy rendering path with no warning row.
+  const healthyNodes = bl3Nodes.map((node, index) => ({
+    ...node,
+    status: index === 2 ? 'completed' : index === 1 ? 'in_progress' : 'planning',
+  }));
+  const healthyResult = { nodes: healthyNodes, edges: bl3Edges, warnings: [] };
+  const healthyRoot = element();
+  const missingInsightsRoot = element();
+  const throwingInsightsRoot = element();
+  const bl3HealthyWarnings = [];
+  const bl3MissingWarnings = [];
+  const bl3ThrowingWarnings = [];
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    healthyRoot, healthyResult, lifecycleApi, epicPath, bl3HealthyWarnings,
+  );
+  await new GraphView({ dashboard, lifecycleApi, insights: {} })._renderGraph(
+    missingInsightsRoot, healthyResult, lifecycleApi, epicPath, bl3MissingWarnings,
+  );
+  await new GraphView({
+    dashboard,
+    lifecycleApi,
+    insights: { analyzeGraph() { throw new Error('insights unavailable'); } },
+  })._renderGraph(throwingInsightsRoot, healthyResult, lifecycleApi, epicPath, bl3ThrowingWarnings);
+  assert.strictEqual(byClass(healthyRoot, 'graph-view-stuck-summary').length, 0,
+    'BL3-MUTANT-HEALTHY-SUMMARY: a healthy graph renders no summary');
+  assert.strictEqual(byClass(healthyRoot, 'graph-view-gates-badge').length, 0,
+    'BL3-HEALTHY: a healthy graph renders no gates badges');
+  assert.deepStrictEqual(domShape(healthyRoot), domShape(missingInsightsRoot),
+    'BL3-FAIL-SOFT: missing GraphInsights is structurally byte-identical to the healthy legacy render');
+  assert.deepStrictEqual(domShape(missingInsightsRoot), domShape(throwingInsightsRoot),
+    'BL3-FAIL-SOFT: throwing GraphInsights is structurally byte-identical to the missing-analysis render');
+  assert.deepStrictEqual([...bl3HealthyWarnings, ...bl3MissingWarnings, ...bl3ThrowingWarnings], [],
+    'BL3-FAIL-SOFT: unavailable analysis emits no warning spam');
+
   // Fail-soft: a missing GraphLayout never blanks the note.
   const priorLayout = global.customJS.GraphLayout;
   delete global.customJS.GraphLayout;
@@ -904,7 +1014,9 @@ async function main() {
     [`${epicOneDir}/Epic One.md`, { type: 'epic' }],
     [`${epicOneDir}/board/Epic One-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     [`${epicOneDir}/board/E1-1 Alpha.md`, { type: 'slice', status: 'completed', depends_on: [] }],
-    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'in_progress', depends_on: ['[[E1-1 Alpha]]'] }],
+    // BL-3: this root blocker gates E2-1 across the epic boundary; its completed
+    // E1-1 prerequisite remains upstream and never inflates the gates count.
+    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'blocked', depends_on: ['[[E1-1 Alpha]]'] }],
     [`${epicTwoDir}/Epic Two.md`, { type: 'epic' }],
     [`${epicTwoDir}/board/Epic Two-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     // E2-1's depends_on crosses INTO Epic One — a real edge, never a warning.
@@ -997,6 +1109,7 @@ async function main() {
   global.customJS = {
     RenderSafe: { page: () => projectPage },
     GraphLayout: new GraphLayout(),
+    GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
   };
   const projectContainer = element();
@@ -1029,7 +1142,7 @@ async function main() {
   const pChipFor = (id) => pChips.find((chip) => flatten(chip)
     .some((node) => node.textContent && node.textContent.startsWith(id)));
   for (const [id, expected] of [
-    ['E2-1', '○'], ['E2-2', '○'], ['E1-1', '✓'], ['E1-2', '●'], ['EB-1', '○'], ['EX-1', '○'],
+    ['E2-1', '○'], ['E2-2', '○'], ['E1-1', '✓'], ['E1-2', '!'], ['EB-1', '○'], ['EX-1', '○'],
   ]) {
     const info = byClass(pChipFor(id), 'graph-view-chip-info')[0];
     const glyph = byClass(info, 'graph-view-status-glyph')[0];
@@ -1049,11 +1162,23 @@ async function main() {
     'P1: one shared canvas spans all clusters');
   const pLegend = byClass(pRoot, 'graph-view-legend')[0];
   assert.deepStrictEqual(byClass(pLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
-    ['done', 'in progress', 'planning'],
+    ['blocked', 'done', 'planning'],
     'BL2-PROJECT-LEGEND: project legend contains exactly the statuses present across live clusters');
   assert(!flatten(pCanvas).includes(pLegend)
     && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-scroll'),
   'BL2-PROJECT-LEGEND: project legend is above and outside the shared canvas');
+  const pSummary = byClass(pRoot, 'graph-view-stuck-summary');
+  assert.strictEqual(pSummary.length, 1,
+    'BL3-PROJECT-SUMMARY: the merged project graph renders one stuck summary');
+  assert.strictEqual(pSummary[0].textContent, '1 root blocker · gating 1 slice',
+    'BL3-PROJECT-SUMMARY: the project summary counts the cross-epic dependent once');
+  const pBadges = byClass(pRoot, 'graph-view-gates-badge');
+  assert.strictEqual(pBadges.length, 1,
+    'BL3-PROJECT-BADGE: exactly the project-wide root blocker receives a badge');
+  assert.strictEqual(pBadges[0].textContent, 'gates 1',
+    'BL3-PROJECT-BADGE: the Epic One blocker counts its live dependent in Epic Two');
+  assert(flatten(pChipFor('E1-2')).includes(pBadges[0]),
+    'BL3-PROJECT-BADGE: the cross-epic blast-radius badge lives on E1-2 only');
 
   // P2: the cross-epic depends_on (E2-1 Gamma → depends on E1-2 Beta) renders
   // as a real depends edge between chips in DIFFERENT clusters, endpoints
