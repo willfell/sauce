@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
+const chromeBarSource = fs.readFileSync(path.join(ROOT, 'platform/mechanisms/chrome-bar/chrome-bar.js'), 'utf8');
 function loadClass(relPath, className) {
   const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
   return new Function(`${src}\nreturn ${className};`)();
@@ -22,7 +23,19 @@ const inst = new ChromeBar();
 // querySelector/getBoundingClientRect. Mirrors run-project-chrome-bar.js makeEl.
 function makeEl(tag) {
   const classes = new Set();
-  const el = { tag, textContent: '', innerHTML: '', style: { cssText: '', setProperty() {} }, children: [], onclick: null, disabled: false };
+  const styleWrites = [];
+  const style = new Proxy({
+    cssText: '',
+    __writes: styleWrites,
+    setProperty(name, value) { styleWrites.push([String(name), value]); },
+  }, {
+    set(target, property, value) {
+      if (property !== 'cssText' && property !== '__writes') styleWrites.push([String(property), value]);
+      target[property] = value;
+      return true;
+    },
+  });
+  const el = { tag, textContent: '', innerHTML: '', style, children: [], onclick: null, disabled: false };
   Object.defineProperty(el, 'className', {
     get: () => [...classes].join(' '),
     set: (value) => {
@@ -208,12 +221,15 @@ async function cbVaultEmpty() {
   ok('CB-BTN-4 wires class-owned hover/press handlers with no inline presentation',
     typeof btn.onmouseenter === 'function' && typeof btn.onmouseleave === 'function' &&
     typeof btn.onmousedown === 'function' && typeof btn.onmouseup === 'function' &&
-    btn.style.cssText === '');
+    btn.style.cssText === '' && btn.style.__writes.length === 0);
   btn.onmouseenter(); btn.onmousedown();
   const entered = btn.classList.contains('is-hovered') && btn.classList.contains('is-pressed');
   btn.onmouseup(); btn.onmouseleave();
   ok('CB-BTN-4b interaction handlers toggle only sauce-core state classes', entered &&
-    !btn.classList.contains('is-hovered') && !btn.classList.contains('is-pressed') && btn.style.cssText === '');
+    !btn.classList.contains('is-hovered') && !btn.classList.contains('is-pressed') &&
+    btn.style.cssText === '' && btn.style.__writes.length === 0);
+  ok('CB-BTN-4c production interaction handlers contain no direct style writes',
+    !/\bbtn\.style(?:\.|\[)/.test(chromeBarSource));
 }
 {
   const parent = makeEl('div');

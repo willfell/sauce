@@ -110,6 +110,36 @@ function assertChromeModifierOutranksBase(source) {
   );
 }
 
+function assertChromeInteractionPresentation(source) {
+  const parsed = rules(source);
+  const chrome = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn")
+    && rule.declarations.includes("height: 32px")
+  ));
+  const hover = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn:hover")
+    && rule.selector.includes(".sauce-chrome-btn.is-hovered")
+  ));
+  const pressed = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn:active")
+    && rule.selector.includes(".sauce-chrome-btn.is-pressed")
+  ));
+  assert.ok(chrome, "missing ChromeBar presentation rule");
+  for (const transition of ["background 0.15s", "color 0.15s", "border-color 0.15s", "box-shadow 0.15s", "transform 0.15s"]) {
+    assert.ok(chrome.declarations.includes(transition), "ChromeBar transition lost " + transition);
+  }
+  assert.ok(hover, "missing ChromeBar hover and is-hovered presentation rule");
+  for (const declaration of [
+    "border-color: var(--interactive-accent)",
+    "background: var(--interactive-accent)",
+    "color: var(--text-on-accent)",
+    "box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14)",
+  ]) {
+    assert.ok(hover.declarations.includes(declaration), "ChromeBar hover lost " + declaration);
+  }
+  assert.ok(pressed && pressed.declarations.includes("transform: scale(0.94)"), "ChromeBar pressed presentation is missing");
+}
+
 function blockAfter(source, marker) {
   const markerIndex = source.indexOf(marker);
   assert.ok(markerIndex >= 0, "missing block " + marker);
@@ -204,6 +234,7 @@ test("CSS1 chrome button modifiers preserve the legacy 32px visual contract", ()
   assert.match(icon, /padding:\s*0 12px/);
   assert.match(icon, /min-width:\s*38px/);
   assert.match(body(".sauce-chrome-btn:active"), /transform:\s*scale\(0\.94\)/);
+  assertChromeInteractionPresentation(css);
 });
 
 test("CSS1-CHROME-MODIFIER-SPECIFICITY binds ChromeBar geometry above the triple-class base", () => {
