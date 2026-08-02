@@ -1979,9 +1979,27 @@ okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutateStructure for link persistenc
     fileManager: { processFrontMatter: async (target, fn) => fn(target.fm) },
   };
   await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
-    const saved = await new Klass()._write({ current: () => ({ file: { path: file.path } }) }, [{ url: 'https://x', text: 'X' }]);
+    const grid = makeRuntimeEl();
+    const owner = {
+      dataset: { projectLinksOwnerPath: file.path },
+      querySelector: (selector) => selector === '.project-links-grid' ? grid : null,
+    };
+    const noteView = { querySelector: (selector) => selector === '.project-links-panel-owner' ? owner : null };
+    const chromeContainer = { querySelector: () => null, closest: () => noteView };
+    global.customJS.ProjectLinksPanel = {
+      _renderCardsInto: (target, links) => {
+        target._children = [];
+        for (const link of links) target.createEl('a', { text: link.text });
+      },
+    };
+    const saved = await new Klass()._write({
+      current: () => ({ file: { path: file.path } }),
+      container: chromeContainer,
+    }, [{ url: 'https://x', text: 'X' }]);
     assert(saved && calls.length === 1, 'links delegate exactly once');
     assert(file.fm.links[0].text === 'X', 'links persist through the delegated write');
+    assert(grid.children.length === 1 && chromeContainer.querySelector('.project-links-grid') === null,
+      'links optimistically mutate the separate content block only');
     assert(typeof calls[0].apply === 'function' && typeof calls[0].rollback === 'function',
       'links supply structural apply and exact-receipt rollback');
   });

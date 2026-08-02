@@ -63,6 +63,7 @@ class FakeElement {
         this.parentElement = null;
         this.style = { cssText: "" };
         this.attributes = {};
+        this.dataset = {};
         this.listeners = new Map();
         this.textContent = "";
         this.innerHTML = "";
@@ -418,7 +419,18 @@ async function modalContract() {
             renameFile: async (file, target) => { renames.push([file.path, target]); file.path = target; },
         },
     };
-    const dv = { container: new FakeElement("div"), current: () => ({ type: "links-hub", file: { path: "spice/projects/sauce/Links Hub.md" }, links: currentLinks }) };
+    const noteView = new FakeElement("div");
+    const chromeContainer = noteView.createEl("div");
+    const panelOwner = noteView.createEl("div", { cls: "project-links-panel-owner" });
+    panelOwner.dataset.projectLinksOwnerPath = "spice/projects/sauce/Links Hub.md";
+    chromeContainer.closest = (selector) => selector === ".markdown-embed" ? null : noteView;
+    h.sandbox.customJS.ProjectLinksPanel = {
+        _renderCardsInto(grid, links) {
+            grid.empty();
+            for (const link of links) grid.createEl("a", { text: link.text });
+        },
+    };
+    const dv = { container: chromeContainer, current: () => ({ type: "links-hub", file: { path: "spice/projects/sauce/Links Hub.md" }, links: currentLinks }) };
     await h.links.render(dv);
     const actionRow = dv.container.querySelector(".sauce-action-row");
     assert(actionRow && buttons(actionRow).every((button) => classTokens(button).includes("sauce-btn")), "link actions use shared classes");

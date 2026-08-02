@@ -100,6 +100,46 @@ class ProjectLinksManager {
     const cur = globalThis.customJS?.RenderSafe?.page?.(dv);
     return this._parse(cur ? cur.links : []);
   }
+  _panelOwner(dv, filePath) {
+    const container = dv && dv.container;
+    const scopes = [container];
+    try {
+      const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+      if (noteView) scopes.push(noteView);
+    } catch (_e) {}
+    for (const scope of scopes) {
+      try {
+        const candidates = [];
+        if (scope?.dataset?.projectLinksOwnerPath != null) candidates.push(scope);
+        if (typeof scope?.querySelectorAll === "function") {
+          candidates.push(...scope.querySelectorAll(".project-links-panel-owner"));
+        } else {
+          const owner = scope?.querySelector?.(".project-links-panel-owner");
+          if (owner) candidates.push(owner);
+        }
+        const match = candidates.find((owner) =>
+          String(owner?.dataset?.projectLinksOwnerPath || "") === String(filePath || ""));
+        if (match) return match;
+      } catch (_e) {}
+    }
+    return null;
+  }
+  _rollbackPreview(receipt) {
+    if (!receipt) return;
+    if (receipt.createdGrid) receipt.createdGrid.remove?.();
+    else if (receipt.grid) {
+      if (typeof receipt.grid.replaceChildren === "function") receipt.grid.replaceChildren(...receipt.priorNodes);
+      else {
+        receipt.grid.empty?.();
+        for (const node of receipt.priorNodes || []) receipt.grid.appendChild?.(node);
+      }
+    }
+    if (receipt.page) {
+      if (receipt.hadValue) receipt.page.links = receipt.priorValue;
+      else delete receipt.page.links;
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+  }
   async _write(dv, links) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the Link Hub note."); return false; }
@@ -120,37 +160,32 @@ class ProjectLinksManager {
         const hadValue = Object.prototype.hasOwnProperty.call(page, "links");
         const priorValue = page.links;
         const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
-        const root = dv && dv.container;
-        let grid = root && root.querySelector ? root.querySelector(".project-links-grid") : null;
-        let createdGrid = null;
+        const owner = this._panelOwner(dv, file.path);
         const panel = globalThis.customJS?.ProjectLinksPanel;
-        if (!grid && root && typeof root.createEl === "function"
-          && panel && typeof panel._renderCardsInto === "function") {
-          grid = root.createEl("div", { cls: "project-links-grid project-links-grid-optimistic" });
-          if (grid.style) grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:10px;";
+        if (!owner || !panel || typeof panel._renderCardsInto !== "function") {
+          throw new Error("Project links panel is unavailable");
+        }
+        let grid = owner.querySelector?.(".project-links-grid") || null;
+        let createdGrid = null;
+        if (!grid && typeof owner.createEl === "function") {
+          grid = owner.createEl("div", { cls: "project-links-grid project-links-grid-optimistic" });
+          if (grid.dataset) grid.dataset.sourcePath = String(file.path || "");
+          if (grid.style) grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:4px;";
           createdGrid = grid;
         }
+        if (!grid) throw new Error("Project links grid is unavailable");
         const priorNodes = grid ? Array.from(grid.childNodes || grid.children || []) : [];
-        page.links = next;
-        if (grid && panel && typeof panel._renderCardsInto === "function") panel._renderCardsInto(grid, next);
-        return { page, hadValue, priorValue, focusTarget, grid, createdGrid, priorNodes };
-      },
-      rollback: (receipt) => {
-        if (receipt && receipt.createdGrid) {
-          receipt.createdGrid.remove?.();
-        } else if (receipt && receipt.grid) {
-          if (typeof receipt.grid.replaceChildren === "function") receipt.grid.replaceChildren(...receipt.priorNodes);
-          else {
-            receipt.grid.empty?.();
-            for (const node of receipt.priorNodes || []) receipt.grid.appendChild?.(node);
-          }
+        const receipt = { page, hadValue, priorValue, focusTarget, owner, grid, createdGrid, priorNodes };
+        try {
+          page.links = next;
+          panel._renderCardsInto(grid, next);
+          return receipt;
+        } catch (error) {
+          this._rollbackPreview(receipt);
+          throw error;
         }
-        if (receipt && receipt.page) {
-          if (receipt.hadValue) receipt.page.links = receipt.priorValue;
-          else delete receipt.page.links;
-        }
-        try { receipt && receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
       },
+      rollback: (receipt) => this._rollbackPreview(receipt),
       write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
     });
     return result.ok === true;

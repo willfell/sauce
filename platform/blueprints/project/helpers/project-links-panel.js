@@ -150,6 +150,19 @@ class ProjectLinksPanel {
     const c = (dv && dv.container) ? dv.container : dv;
     if (!c || typeof c.createEl !== "function") return;
 
+    // Chrome actions and this panel live in separate Dataview blocks on the
+    // canonical Links Hub. Mark the content-block owner even when the empty-
+    // state renders no children, so ProjectLinksManager can bind an optimistic
+    // insert to this exact surface instead of fabricating a grid in chrome.
+    if (page.type === "links-hub") {
+      const ownerPath = String(page.file.path || "");
+      if (c.dataset) c.dataset.projectLinksOwnerPath = ownerPath;
+      if (c.classList?.add) c.classList.add("project-links-panel-owner");
+      else if (!String(c.className || "").split(/\s+/).includes("project-links-panel-owner")) {
+        c.className = `${c.className || ""} project-links-panel-owner`.trim();
+      }
+    }
+
     // Sibling-mirror mode activates ONLY on an actual project hub (type:project);
     // the Link Hub note and any other note read their own `links` (backward-compat).
     const onProjectHub = page.type === "project";

@@ -276,14 +276,18 @@ const dvFor = (name, p) => ({ current: () => ({ file: { name, path: p } }) });
 async function structuralRollbackCase() {
   const PLM = loadClass('platform/blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
   const manager = new PLM();
-  const originalLinks = [{ url: 'https://old.example', text: 'Old' }];
+  const originalLinks = [];
   const page = { type: 'links-hub', file: { name: 'Links Hub', path: 'spice/projects/x/Links Hub.md' }, links: originalLinks };
-  const container = makeEl('div');
-  const dv = { container, current: () => page };
-  panel.render(dv);
-  const grid = container.querySelector('.project-links-grid');
-  const originalNodes = [...grid.children];
-  let sawOptimistic = false;
+  const noteView = makeEl('div');
+  const chromeContainer = makeEl('div');
+  const panelContainer = makeEl('div');
+  noteView.appendChild(chromeContainer);
+  noteView.appendChild(panelContainer);
+  chromeContainer.closest = () => noteView;
+  panel.render({ container: panelContainer, current: () => page });
+  const dv = { container: chromeContainer, current: () => page };
+  let rejectWrite = false;
+  const optimistic = [];
   let focusRestored = false;
   const priorDocument = global.document;
   const priorRenderSafe = global.customJS.RenderSafe;
@@ -294,26 +298,48 @@ async function structuralRollbackCase() {
     page: () => page,
     mutateStructure: async (opts) => {
       const receipt = opts.apply();
-      sawOptimistic = page.links[0].url === 'https://new.example'
-        && grid.children[0] !== originalNodes[0];
+      const visibleGrid = panelContainer.querySelector('.project-links-grid');
+      optimistic.push({
+        links: page.links.slice(),
+        visibleGrid,
+        nodes: visibleGrid ? [...visibleGrid.children] : [],
+        chromeGrid: chromeContainer.querySelector('.project-links-grid'),
+      });
       try { await opts.write(); return { ok: true, receipt }; }
       catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
     },
   };
   global.customJS.ProjectLinksPanel = panel;
+  const file = { path: page.file.path, fm: { links: [] } };
   global.app = {
-    vault: { getAbstractFileByPath: (path) => ({ path }) },
-    fileManager: { processFrontMatter: async () => { throw new Error('fixture write failure'); } },
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async (target, mutate) => {
+      if (rejectWrite) throw new Error('fixture write failure');
+      mutate(target.fm);
+    } },
     commands: { executeCommandById: () => { throw new Error('global refresh forbidden'); } },
   };
   try {
-    const saved = await manager._write(dv, [{ url: 'https://new.example', text: 'New' }]);
-    ok('PLM-13 structural write applies before persistence', sawOptimistic);
-    ok('PLM-14 failed write restores exact links value + card node identities',
-      saved === false && page.links === originalLinks
-        && grid.children.length === originalNodes.length
-        && grid.children.every((node, index) => node === originalNodes[index]));
-    ok('PLM-15 failed structural write restores focus without global refresh', focusRestored);
+    const added = await manager._write(dv, [{ url: 'https://new.example', text: 'New' }]);
+    const grid = panelContainer.querySelector('.project-links-grid');
+    const committedLinks = page.links;
+    const committedNodes = [...grid.children];
+    ok('PLM-13 split-block add applies to the visible panel before persistence',
+      added === true && optimistic[0].links[0].url === 'https://new.example'
+        && optimistic[0].visibleGrid === grid && optimistic[0].nodes.length === 1);
+    ok('PLM-14 split-block add never fabricates a chrome-local grid',
+      optimistic[0].chromeGrid === null && chromeContainer.querySelector('.project-links-grid') === null
+        && grid.parentNode === panelContainer);
+    rejectWrite = true;
+    const deleted = await manager._write(dv, []);
+    ok('PLM-15 split-block delete is optimistic before rejected persistence',
+      optimistic[1].links.length === 0 && optimistic[1].visibleGrid === grid
+        && optimistic[1].nodes.length === 0 && optimistic[1].chromeGrid === null);
+    ok('PLM-16 rejected split-block write restores exact links value + card node identities',
+      deleted === false && page.links === committedLinks
+        && grid.children.length === committedNodes.length
+        && grid.children.every((node, index) => node === committedNodes[index]));
+    ok('PLM-17 rejected split-block write restores focus without global refresh', focusRestored);
   } finally {
     global.document = priorDocument;
     global.customJS.RenderSafe = priorRenderSafe;
