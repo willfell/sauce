@@ -8418,6 +8418,46 @@ eq(depSelection.action, 'no-work', 'BGR-DISCARD-DEP-FAILS-LOUD a dependent card 
 ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
   'BGR-DISCARD-DEP-FAILS-LOUD claim skip reason is the explicit discarded-dependency error, not the checkbox fallback');
 
+// A1 resolveSupersessionTail — multi-hop chain to the live tail
+{
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4b' };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const r = coordinator.resolveSupersessionTail('BL-4', state);
+  eq(r.tail, 'BL-4c', 'A1 follows BL-4 → BL-4b → BL-4c to the live tail');
+  eq(r.hops, ['BL-4', 'BL-4b'], 'A1 records the traversed tombstones');
+  eq(r.deadEnd, false, 'A1 a deployed live tail is a valid repoint target');
+  eq(r.cycle, false, 'A1 no cycle on a clean chain');
+
+  // single hop, pending tail
+  const s2 = emptyState();
+  s2.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  s2.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'claimed' };
+  const r2 = coordinator.resolveSupersessionTail('GA-R1a', s2);
+  eq(r2.tail, 'GA-R1a2', 'A1 single hop lands on the pending successor');
+  eq(r2.deadEnd, false, 'A1 pending tail is a valid repoint target');
+
+  // cycle guard
+  const s3 = emptyState();
+  s3.cards['X'] = { card: 'X', phase: 'discarded', superseded_by: 'Y' };
+  s3.cards['Y'] = { card: 'Y', phase: 'discarded', superseded_by: 'X' };
+  const r3 = coordinator.resolveSupersessionTail('X', s3);
+  eq(r3.cycle, true, 'A1 detects a superseded_by cycle instead of looping');
+
+  // dead end: a discarded card with no successor
+  const s4 = emptyState();
+  s4.cards['Z'] = { card: 'Z', phase: 'discarded', superseded_by: null };
+  const r4 = coordinator.resolveSupersessionTail('Z', s4);
+  eq(r4.tail, 'Z', 'A1 a successor-less tombstone is its own tail');
+  eq(r4.deadEnd, true, 'A1 a discarded-with-no-successor tail is a dead end (not repointable)');
+
+  // multi-hop message on discardedDependencyProblem
+  eq(coordinator.discardedDependencyProblem('BL-4', state),
+    'depends on discarded card BL-4 (superseded by BL-4c)',
+    'A1 problem message names the live tail, not the immediate hop');
+}
+
 // BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
 eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');
 const tombstoneReconcileWritesBefore = discardWrites;

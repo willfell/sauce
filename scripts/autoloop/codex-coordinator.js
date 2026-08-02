@@ -1379,10 +1379,31 @@ function dependencySatisfied(dep, board, state, boardMd) {
   return completed.has(dep);
 }
 
+function resolveSupersessionTail(dep, state) {
+  const cards = (state && state.cards) || {};
+  const hops = [];
+  const seen = new Set();
+  let name = normalizeCardLink(dep);
+  while (true) {
+    if (seen.has(name)) return { tail: hops[hops.length - 1] || name, hops, deadEnd: false, cycle: true };
+    const record = cards[name];
+    if (!record || record.phase !== 'discarded') {
+      // reached a live/unknown node — it is a valid repoint target
+      return { tail: name, hops, deadEnd: false, cycle: false };
+    }
+    const next = record.superseded_by ? normalizeCardLink(record.superseded_by) : null;
+    if (!next) return { tail: name, hops, deadEnd: true, cycle: false }; // discarded, no successor
+    seen.add(name);
+    hops.push(name);
+    name = next;
+  }
+}
+
 function discardedDependencyProblem(dep, state) {
   const record = state.cards && state.cards[dep];
   if (!record || record.phase !== 'discarded') return null;
-  const successor = record.superseded_by ? ` (superseded by ${record.superseded_by})` : '';
+  const resolved = resolveSupersessionTail(dep, state);
+  const successor = resolved.tail && resolved.tail !== dep ? ` (superseded by ${resolved.tail})` : '';
   return `depends on discarded card ${dep}${successor}`;
 }
 
@@ -6823,7 +6844,7 @@ module.exports = {
   EXIT_CODES, parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap, conflictsWithActive,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
-  discardedDependencyProblem,
+  discardedDependencyProblem, resolveSupersessionTail,
   resolveEpicBoardSet, loadCanonicalEpicSlice, selectEpicCandidate, selectEpicShadowCandidate, selectClaimCandidate, selectCoordinatorCandidate,
   summarizeClaimSelection, commandStatus, commandStatusLocked, commandClaim, commandReconcile, commandCutover, commandRecover,
   buildLoopStationPayload, validateLoopStationPayload, projectLoopStation, attemptLoopStationProjection,
