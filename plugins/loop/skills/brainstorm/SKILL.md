@@ -38,3 +38,4 @@ Write to `<config.project_root_abs>/docs/proposals/YYYY-MM-DD-<topic>-proposal.m
 ## Close
 
 Present the proposal, get explicit approval on the design, then hand off: "Run `/loop:plan` against this proposal to mint the epic — it will ask for the id prefix and board priority position." Offer to run it in the same session.
+Once minted, the epic's atlas renders this dependency sketch as a live GraphView graph — the depends_on edges you sketch here become the visual graph reviewers read on /loop:plan and /loop:status.

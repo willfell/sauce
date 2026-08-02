@@ -24,5 +24,6 @@ The read-only glance at whatever board this repo is bound to. Answers "is it wor
    - **Needs you** — actionable cards (bucket + card), or "Nothing needs you — walk away."
    - **Active** — the active claim (card + phase), or "idle".
    - **Recent releases** — the tag list.
+   - **Map** — the bound project's Loop Station carries a GraphView project-scope map (epics as clusters, cross-epic dependency edges, status-colored chips); open it to see how active claims and blocks connect at a glance.
    - Pointer: "Run /loop:review to walk the digest."
 5. Never write, never ratify, never touch a card/board/FID/coordinator state. The last-seen marker is this skill's only write.

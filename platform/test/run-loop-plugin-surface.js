@@ -112,5 +112,24 @@ const EXPECTED_SKILLS = ['brainstorm', 'execute', 'init', 'intake', 'plan', 'rev
   }
 }
 
+// LP-GRAPH: the loop skill surface teaches the GraphView graph — status points
+// at the Loop Station project-scope map, plan reviews the minted atlas graph,
+// brainstorm notes the sketch renders as a live graph. Behavioral: RED if any
+// one of the three mentions is removed.
+{
+  const statusBody = fs.readFileSync(path.join(PLUGIN, 'skills', 'status', 'SKILL.md'), 'utf8');
+  const planBody = fs.readFileSync(path.join(PLUGIN, 'skills', 'plan', 'SKILL.md'), 'utf8');
+  const brainstormBody = fs.readFileSync(path.join(PLUGIN, 'skills', 'brainstorm', 'SKILL.md'), 'utf8');
+  ok('LP-GRAPH status points at the Loop Station map',
+    /graphview|loop station/i.test(statusBody) && /\bmap\b/i.test(statusBody),
+    'status body must point at the Loop Station GraphView project-scope map');
+  ok('LP-GRAPH plan reviews the minted atlas graph',
+    /review the graph/i.test(planBody) && /graphview/i.test(planBody),
+    'plan body must add a step to review the minted epic atlas GraphView graph');
+  ok('LP-GRAPH brainstorm notes the live graph',
+    /live graphview graph/i.test(brainstormBody),
+    'brainstorm body must note the sketch renders as a live GraphView graph');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
