@@ -112,6 +112,69 @@ class TaskTodayList {
         return row;
     }
 
+    static _removeRowReceipt(row, task, focusTarget) {
+        TaskTodayList.markTaskRow(row, task);
+        const parent = row && row.parentNode;
+        const children = (() => {
+            try { return Array.from((parent && (parent.childNodes || parent.children)) || []); }
+            catch (_e) { return []; }
+        })();
+        const index = children.indexOf(row);
+        const receipt = {
+            parent, node: row, path: String((task && task.path) || ''),
+            index, following: index >= 0 ? children.slice(index + 1) : [],
+            preceding: index >= 0 ? children.slice(0, index).reverse() : [],
+            order: Number(row && row.dataset && row.dataset.sauceTaskOrder),
+            focusTarget,
+        };
+        try { if (row && typeof row.remove === 'function') row.remove(); } catch (_e) {}
+        return receipt;
+    }
+
+    static _restoreRowReceipt(receipt) {
+        const r = receipt || {};
+        const parent = r.parent;
+        const row = r.node;
+        if (!parent || !row || row.parentNode) return false;
+        if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+        const childList = () => {
+            try { return Array.from((parent.childNodes || parent.children) || []); }
+            catch (_e) { return []; }
+        };
+        const current = childList();
+        if (r.path && current.some((node) => node !== row && node && node.dataset
+            && String(node.dataset.sauceTaskPath || '') === r.path)) return true;
+        const insert = (anchor) => {
+            if (anchor != null && anchor.parentNode !== parent) return false;
+            try { parent.insertBefore(row, anchor || null); return row.parentNode === parent; }
+            catch (_e) { return false; }
+        };
+        const next = (r.following || []).find((node) => node && node.parentNode === parent);
+        if (!(next && insert(next)) && Number.isFinite(r.order)) {
+            const ordered = childList().filter((node) => node && node.dataset
+                && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+            const later = ordered.find((node) => Number(node.dataset.sauceTaskOrder) > r.order);
+            if (later) insert(later);
+            else {
+                const earlier = ordered.filter((node) => Number(node.dataset.sauceTaskOrder) < r.order).pop();
+                if (earlier) insert(earlier.nextSibling || null);
+            }
+        }
+        if (!row.parentNode) {
+            const previous = (r.preceding || []).find((node) => node && node.parentNode === parent);
+            if (previous) insert(previous.nextSibling || null);
+        }
+        if (!row.parentNode) {
+            const now = childList();
+            const index = Number.isFinite(r.index) ? Math.max(0, Math.min(r.index, now.length)) : now.length;
+            if (!insert(now[index] || null)) {
+                try { parent.appendChild(row); } catch (_e) {}
+            }
+        }
+        try { if (r.focusTarget && typeof r.focusTarget.focus === 'function') r.focusTarget.focus(); } catch (_e) {}
+        return row.parentNode === parent;
+    }
+
     /**
      * Reschedule one OPEN task to the day after `viewedDay`, using the canonical
      * Obsidian processFrontMatter rail. This is shared by TaskTodayList's own
@@ -708,10 +771,34 @@ class TaskTodayList {
             const TD = getTD();
             if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
             try {
-                const res = await TD.confirmDelete(path);
-                if (res && res.ok) {
+                const deferred = typeof TD.markDeleted === 'function';
+                const res = await TD.confirmDelete(path, deferred ? { deferWrite: true } : undefined);
+                if (!res || !res.ok) return;
+                const RS = window.customJS && window.customJS.RenderSafe;
+                if (RS && typeof RS.mutateStructure === 'function') {
+                    await RS.mutateStructure({
+                        path,
+                        failureMessage: 'Could not delete task',
+                        apply: () => TaskTodayList._removeRowReceipt(row, task, delBtn),
+                        write: async () => {
+                            if (!deferred) return res;
+                            const deleted = await TD.markDeleted(path);
+                            if (!deleted || deleted.ok !== true) {
+                                throw new Error((deleted && deleted.reason) || 'delete failed');
+                            }
+                            return deleted;
+                        },
+                        rollback: (receipt) => { TaskTodayList._restoreRowReceipt(receipt); },
+                    });
+                } else if (!deferred) {
                     try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
                     try { row.remove(); } catch (_e) {}
+                } else {
+                    const deleted = await TD.markDeleted(path);
+                    if (deleted && deleted.ok) {
+                        try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                        try { row.remove(); } catch (_e) {}
+                    }
                 }
             } catch (e) {
                 try { new Notice('Could not delete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}

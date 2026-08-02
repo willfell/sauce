@@ -644,7 +644,14 @@ class TaskNoteView {
                         });
                         const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
                         const TEsub = window.customJS && window.customJS.TaskEntity;
-                        allSubtasks = (TEsub && typeof TEsub.parseNote === 'function') ? arr.map(p => TEsub.parseNote(p)) : [];
+                        if (TEsub && typeof TEsub.parseNote === 'function') {
+                            for (const child of arr) {
+                                try {
+                                    const parsedChild = TEsub.parseNote(child);
+                                    if (parsedChild) allSubtasks.push(parsedChild);
+                                } catch (_e) { /* one malformed child must not brick the task note */ }
+                            }
+                        }
                     } catch (_e) { allSubtasks = []; }
                     // FIX: only OPEN subtasks are rendered as rows. Without this
                     // filter, a just-completed subtask (moved to _done/, but still
@@ -653,7 +660,11 @@ class TaskNoteView {
                     // markDone on the now-stale path — "task file not found" error.
                     // allSubtasks (open + done) still feeds the N/M progress count
                     // below, which is correct as-is.
-                    const openSubtasks = allSubtasks.filter(t => t && t.status === 'open');
+                    const openSubtasks = allSubtasks.filter(t => {
+                        if (!t || t.status !== 'open') return false;
+                        const childPath = String(t.path || '');
+                        return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
+                    });
 
                     drawDivider();
                     const subHeadRow = card.createEl('div');
@@ -680,17 +691,50 @@ class TaskNoteView {
                     const addInput = addRow.createEl('input', { type: 'text' });
                     addInput.placeholder = '+ Add subtask…';
                     addInput.style.cssText = 'flex:1 1 auto; min-width:0; box-sizing:border-box; padding:6px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px;';
+                    let addSequence = 0;
                     const doAdd = async () => {
                         const title = String(addInput.value || '').trim();
                         if (!title) return;
                         const TD = window.customJS && window.customJS.TaskDialog;
                         if (!TD || typeof TD.createQuick !== 'function') return;
-                        try {
-                            await TD.createQuick({ title, parent_task: '[[' + thisBasename + ']]' });
-                            addInput.value = '';
-                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                            try { window.app && window.app.commands && window.app.commands.executeCommandById && window.app.commands.executeCommandById('dataview:dataview-force-refresh-views'); } catch (_e) {}
-                        } catch (_e) { /* best-effort */ }
+                        const sequence = ++addSequence;
+                        const quickOpts = { title, parent_task: '[[' + thisBasename + ']]' };
+                        let plan = null;
+                        try { if (typeof TD.prepareQuick === 'function') plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
+                        const optimisticTask = (plan && plan.task) || {
+                            title, status: 'open', path: '', parent_task: quickOpts.parent_task,
+                        };
+                        const RS = window.customJS && window.customJS.RenderSafe;
+                        if (RS && typeof RS.mutateStructure === 'function'
+                            && TTL && typeof TTL.renderTaskRow === 'function') {
+                            try {
+                                await RS.mutateStructure({
+                                    path: filePath,
+                                    failureMessage: 'Could not create subtask',
+                                    apply: () => {
+                                        const node = TTL.renderTaskRow(subList, optimisticTask, null);
+                                        addInput.value = '';
+                                        try { addInput.focus(); } catch (_e) {}
+                                        return { parent: subList, node, focusTarget: addInput, title, sequence };
+                                    },
+                                    write: () => TD.createQuick({ plan: plan || undefined, title,
+                                        parent_task: quickOpts.parent_task, reconcile: false }),
+                                    rollback: (receipt) => {
+                                        try { if (receipt && receipt.node && receipt.node.parentNode) receipt.node.remove(); } catch (_e) {}
+                                        if (receipt && receipt.sequence === addSequence && !String(addInput.value || '')) {
+                                            addInput.value = receipt.title;
+                                        }
+                                        try { addInput.focus(); } catch (_e) {}
+                                    },
+                                });
+                            } catch (_e) { try { addInput.focus(); } catch (_e2) {} }
+                        } else {
+                            try {
+                                await TD.createQuick({ title, parent_task: quickOpts.parent_task, reconcile: false });
+                                addInput.value = '';
+                            } catch (_e) { /* cold-load fallback stays quiet */ }
+                            try { addInput.focus(); } catch (_e) {}
+                        }
                     };
                     addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
 

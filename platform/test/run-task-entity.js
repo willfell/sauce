@@ -2057,6 +2057,21 @@ async function runCreateQuickTests() {
     await TD.createQuick({ title: 'orphan', today: '2026-07-02', source: 'daily' });
   });
 
+  await okAsync('PERF-1-QUICK-PLAN prepares the exact deduped row path and suppresses create reconciliation', async () => {
+    const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    let reconciles = 0;
+    TD._reconcileAfterCreate = () => { reconciles++; };
+    const plan = TD.prepareQuick({ title: 'call dentist', parent_task: '[[Parent]]' });
+    assert(plan && plan.path === 'spice/tasks/call dentist 2.md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
+    assert(plan.task && plan.task.path === plan.path && plan.task.parent_task === '[[Parent]]',
+      'optimistic task is a real row payload: ' + JSON.stringify(plan && plan.task));
+    const result = await TD.createQuick({ plan, reconcile: false });
+    assert(result && result.ok && result.path === plan.path, 'commit returns exact created path');
+    assert(reconciles === 0, 'structural quick-create never schedules a global reconcile');
+  });
+
   // Restore globals so nothing leaks into later modules.
   if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
@@ -2274,6 +2289,153 @@ function makeTreeNode(tag) {
     },
   };
   return n;
+}
+
+async function runPerf1StructuralTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('PERF-1-ADD shared seam inserts concurrent real rows, rolls back rejection, and never force-refreshes', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const childPages = [
+      { type: 'task', title: 'Existing', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/Existing.md' } },
+      { type: 'task', malformed: true, parent_task: 'Parent', file: { path: 'spice/tasks/Broken.md' } },
+      { type: 'task', title: 'Stale done', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/_done/Stale done.md' } },
+    ];
+    const commands = [];
+    const pendingWrites = [];
+    let seamCalls = 0;
+    const TTL = {
+      renderTaskRow(container, task) {
+        const row = makeTreeNode('div');
+        row.className = 'test-subtask-row';
+        row._task = task;
+        container.appendChild(row);
+        return row;
+      },
+    };
+    const TD = {
+      prepareQuick(opts) {
+        return { path: 'spice/tasks/' + opts.title + '.md', task: {
+          title: opts.title, status: 'open', parent_task: opts.parent_task,
+          path: 'spice/tasks/' + opts.title + '.md',
+        } };
+      },
+      createQuick() {
+        return new Promise((resolve, reject) => pendingWrites.push({ resolve, reject }));
+      },
+      markDone: async () => ({ ok: true }),
+      confirmDelete: async () => ({ ok: false, cancelled: true }),
+      open() {},
+    };
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TE = {
+      parseNote(page) {
+        if (page && page.malformed) throw new Error('malformed child');
+        return {
+          title: String((page && page.title) || ''), status: String((page && page.status) || 'open'),
+          parent_task: String((page && page.parent_task) || ''), path: page && page.file && page.file.path,
+          due: '', priority: '', project: '', source_note: '', created_at: '', links: [],
+        };
+      },
+      _linkText: (value) => String(value || ''),
+    };
+    global.window = {
+      app: { commands: { executeCommandById: (id) => commands.push(id) } },
+      moment: () => ({ format: () => '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskTodayList: TTL, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: (predicate) => ({ array: () => childPages.filter(predicate) }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const inputs = walk(container, (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…');
+    assert(inputs.length === 1, 'subtask input rendered despite malformed child');
+    const input = inputs[0];
+    const keydown = input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'Enter handler is wired');
+    const submit = (title) => {
+      input.value = title;
+      keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    };
+    submit('First');
+    await Promise.resolve();
+    submit('Second');
+    await Promise.resolve();
+    let rows = walk(container, (node) => !!(node && node._task));
+    assert(rows.map((row) => row._task.title).join(',') === 'Existing,First,Second',
+      'malformed and stale _done child are absent while both pending rows are unique: ' + rows.map((row) => row._task.title));
+    assert(input.value === '' && input._focusCount >= 2, 'every optimistic submit clears and refocuses immediately');
+    pendingWrites[0].resolve({ ok: true });
+    pendingWrites[1].resolve({ ok: true });
+    await Promise.resolve(); await Promise.resolve();
+    submit('Rejected');
+    await Promise.resolve();
+    assert(walk(container, (node) => node && node._task && node._task.title === 'Rejected').length === 1,
+      'rejected row is visible before persistence settles');
+    pendingWrites[2].reject(new Error('create failed'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    rows = walk(container, (node) => node && node._task && node._task.title === 'Rejected');
+    assert(rows.length === 0, 'rejected create removes the exact optimistic row');
+    assert(input.value === 'Rejected' && input._focusCount >= 3, 'latest rejected title and focus are restored');
+    assert(seamCalls === 3, 'every create uses mutateStructure: ' + seamCalls);
+    assert(commands.length === 0, 'no dataview force-refresh command on structural success');
+  });
+
+  await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {
+    let settleDelete;
+    let seamCalls = 0;
+    const RS = {
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TD = {
+      open() {},
+      confirmDelete: async (_path, opts) => ({ ok: !!(opts && opts.deferWrite), confirmed: true }),
+      markDeleted: () => new Promise((resolve) => { settleDelete = resolve; }),
+    };
+    global.window = { app: { workspace: { openLinkText() {} }, commands: { executeCommandById() { throw new Error('refresh forbidden'); } } }, customJS: { RenderSafe: RS } };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container, { title: 'child', path: 'spice/tasks/child.md', status: 'open' }, TD);
+    const after = container.createEl('div');
+    const deleteButton = findByCls(row, 'sauce-task-action-delete');
+    const pending = fireClick(deleteButton);
+    await Promise.resolve(); await Promise.resolve();
+    assert(childIndex(container, row) === -1, 'row detaches before markDeleted settles');
+    settleDelete({ ok: false, reason: 'write rejected' });
+    await pending;
+    assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
+      'rollback restores the exact row identity at its exact ordinal');
+    assert(deleteButton._focusCount === 1, 'rollback restores focus to the delete control');
+    assert(seamCalls === 1, 'delete uses mutateStructure exactly once');
+  });
+
+  global.window = prevWindow;
+  global.Notice = prevNotice;
 }
 function findInput(node) {
   if (!node || !node.children) return null;
@@ -3147,6 +3309,24 @@ async function runConfirmDeleteTests() {
       'Escape is owned by SauceModal teardown');
   });
 
+  await okAsync('PERF-1-TDCD deferred confirmation resolves before persistence so the shared seam owns delete', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    const deleted = [];
+    global.app = { vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'child' }) } };
+    global.window = { app: global.app };
+    global.customJS = { SauceModal: new SauceModalClass() };
+    const dialog = new TaskDialogClass();
+    dialog.markDeleted = async (path) => { deleted.push(path); return { ok: true }; };
+    const pending = dialog.confirmDelete('spice/tasks/child.md', { deferWrite: true });
+    const danger = findByCls(doc.body, 'sauce-task-confirm-delete');
+    assert(danger, 'deferred confirmation renders the real danger control');
+    await fireClick(danger);
+    const result = await pending;
+    assert(result && result.ok && result.deferred === true, 'deferred confirmation receipt: ' + JSON.stringify(result));
+    assert(deleted.length === 0, 'markDeleted is deferred to RenderSafe.mutateStructure.write');
+  });
+
   global.window = prevWindow;
   if (prevApp === undefined) delete global.app; else global.app = prevApp;
   if (prevCustomJS === undefined) delete global.customJS; else global.customJS = prevCustomJS;
@@ -3679,6 +3859,7 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
+  await runPerf1StructuralTests();
   await runRowActionTests();
   await runTomorrowActionTests();
   await runDotsMenuTests();

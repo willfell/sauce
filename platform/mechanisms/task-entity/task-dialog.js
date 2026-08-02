@@ -490,7 +490,8 @@ class TaskDialog {
      * recoverable. Fully guarded — never throws (resolves a reason instead). Reuses
      * the recoverable-delete so nothing is hard-deleted.
      */
-    async confirmDelete(path) {
+    async confirmDelete(path, opts) {
+        const deferWrite = !!(opts && opts.deferWrite);
         return new Promise((resolve) => {
             let settled = false;
             const done = (r) => { if (settled) return; settled = true; resolve(r); };
@@ -543,6 +544,11 @@ class TaskDialog {
                             onClick: async (api, event) => {
                                 const button = event && (event.currentTarget || event.target);
                                 try { if (button) button.disabled = true; } catch (_e) {}
+                                if (deferWrite) {
+                                    done({ ok: true, confirmed: true, deferred: true });
+                                    api.close('delete');
+                                    return;
+                                }
                                 let res;
                                 try { res = await this.markDeleted(path); }
                                 catch (e) { res = { ok: false, reason: (e && (e.message || String(e))) || 'unknown' }; }
@@ -1201,7 +1207,7 @@ class TaskDialog {
      * base against the vault (" 2", " 3", …) so we never clobber an existing task.
      * Never touches any other note.
      */
-    async _create(app, payload, notes) {
+    _prepareCreate(app, payload, notes) {
         const TE = TaskDialog._taskEntity();
         if (!TE) { try { new Notice('task-entity mechanism not loaded'); } catch (_e) {} return; }
         // Stamp a moment so composeNote can derive created_at.
@@ -1221,10 +1227,24 @@ class TaskDialog {
         const userNotes = String(notes == null ? '' : notes);
         const finalBody = userNotes ? chromeBody + userNotes + '\n' : chromeBody;
         const content = TaskDialog.renderNote(frontmatter, finalBody);
+        return { path, content, frontmatter };
+    }
+
+    async _commitCreate(app, plan, opts) {
+        if (!app || !plan || !plan.path) return;
         await this._ensureFolder(app, 'spice/tasks');
-        await app.vault.create(path, content);
+        const file = await app.vault.create(plan.path, plan.content);
         try { new Notice('Task created'); } catch (_e) {}
-        try { this._reconcileAfterCreate(app, path); } catch (_e) {}
+        if (!opts || opts.reconcile !== false) {
+            try { this._reconcileAfterCreate(app, plan.path); } catch (_e) {}
+        }
+        return { ok: true, path: plan.path, file };
+    }
+
+    async _create(app, payload, notes, opts) {
+        const plan = this._prepareCreate(app, payload, notes);
+        if (!plan) return;
+        return this._commitCreate(app, plan, opts);
     }
 
     /**
@@ -1302,7 +1322,7 @@ class TaskDialog {
      * app, is a silent no-op. Returns a Promise (the caller awaits before it
      * re-renders). Never touches any surface note.
      */
-    async createQuick(opts) {
+    prepareQuick(opts) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
         const title = String((opts && opts.title) || '').trim();
         if (!app || !title) return;
@@ -1313,7 +1333,28 @@ class TaskDialog {
             parent_task: (opts && opts.parent_task) || '',
             links: [],
         };
-        await this._create(app, payload, '');
+        const plan = this._prepareCreate(app, payload, '');
+        if (!plan) return;
+        const fm = plan.frontmatter || {};
+        plan.task = {
+            title: String(fm.title || title),
+            status: String(fm.status || 'open'),
+            due: String(fm.due || ''),
+            priority: String(fm.priority || ''),
+            recurrence: String(fm.recurrence || ''),
+            project: String(fm.project || ''),
+            parent_task: String(fm.parent_task || payload.parent_task || ''),
+            path: plan.path,
+        };
+        return plan;
+    }
+
+    async createQuick(opts) {
+        const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
+        if (!app) return;
+        const plan = opts && opts.plan ? opts.plan : this.prepareQuick(opts);
+        if (!plan) return;
+        return this._commitCreate(app, plan, { reconcile: !(opts && opts.reconcile === false) });
     }
 
     /**
