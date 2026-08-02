@@ -1579,11 +1579,9 @@ ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited 
   assert(/mutateStructure[\s\S]*apply\(\)[\s\S]*rollback\(receipt, error\)/.test(guide), 'structural receipt protocol is canonical');
   assert(/Structural instant update[\s\S]*Scroll \/ focus[\s\S]*Cold-load[\s\S]*Query efficiency/.test(guide), 'four-dimension ledger headings');
   const roots = [
-    'blueprints/to-do', 'blueprints/project', 'blueprints/finance', 'blueprints/trips',
-    'blueprints/meetings', 'blueprints/reader', 'blueprints/sticky-notes',
-    'blueprints/journal', 'blueprints/wiki', 'blueprints/home', 'blueprints/daily',
-    'mechanisms/task-entity',
-  ].map((rel) => path.join(__dirname, '..', rel));
+    path.join(__dirname, '..', 'blueprints'),
+    path.join(__dirname, '..', 'mechanisms', 'task-entity'),
+  ];
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -1601,7 +1599,7 @@ ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited 
       while ((match = invocation.exec(source))) surfaces.add(match[1]);
     }
   }
-  assert(surfaces.size === 90, 'baseline inventory contains all 90 production Dataview entry classes');
+  assert(surfaces.size === 112, 'baseline inventory contains all 112 production Dataview entry classes');
   for (const surface of surfaces) {
     assert(guide.includes('`' + surface + '`'), 'ledger enumerates ' + surface);
   }
