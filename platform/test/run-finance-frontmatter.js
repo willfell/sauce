@@ -234,6 +234,39 @@ async function run() {
       replacedOwnership && eventFf._writtenFrontmatter.size === 0 && listeners.size === 0);
   }
   {
+    const file = { path: "spice/finance/Invoices/Early-Event.md", stat: { mtime: 10 } };
+    const persisted = { amount: 0 };
+    let cached = { amount: 0 };
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: cached }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: () => file },
+      metadataCache,
+      fileManager: {
+        async processFrontMatter(_file, mutator) {
+          await mutator(persisted);
+          cached = { amount: persisted.amount, position: { start: { line: 0 } } };
+          metadataCache.emit(file);
+        },
+      },
+    };
+    const raceFf = new FinanceFrontmatter();
+    await raceFf.update(file, (fm) => { fm.amount = 1; });
+    ok("FF-12E convergence published before listener registration releases immediately after subscribe",
+      raceFf._writtenFrontmatter.size === 0 && listeners.size === 0 && cached.amount === 1);
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

@@ -280,6 +280,12 @@ class FinanceFrontmatter {
             written.metadata = metadata;
             written.listener = listener;
             written.eventRef = metadata.on("changed", listener) || null;
+            // Metadata may have converged (and emitted) while the write promise
+            // was still settling, before this listener existed. Close that
+            // registration window immediately; identity-guarded release keeps
+            // this idempotent with the event callback and read().
+            const cached = metadata.getFileCache?.(file)?.frontmatter ?? null;
+            this._writtenSnapshotSettled(file, written, cached);
         } catch (_e) {
             written.metadata = null;
             written.listener = null;
