@@ -6875,6 +6875,50 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   return lock(ctx, 'selector', async () => {
     const state = loadState(ctx);
+    // A dangling dependency is one that resolves to NO live card. "Live" must be
+    // judged against the board — the same honest gather GraphView uses — not just
+    // the coordinator ledger: the ledger only holds cards it has TRACKED
+    // (claimed/parked/discarded/deployed), while the vast majority of In-Planning
+    // slices exist only as notes on disk. Pre-walk cardsRoot once to build the set
+    // of every card note that exists, plus a `(supersedes <id>)` naming map so a
+    // dangling pointer whose successor was renamed can be repointed even when the
+    // old tombstone is no longer in state.
+    const diskCards = new Set();
+    const supByPredId = new Map(); // predecessor id token -> successor full card name
+    {
+      const st = [cardsRoot];
+      while (st.length) {
+        const dir = st.pop();
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) { st.push(full); continue; }
+          if (!ent.name.endsWith('.md')) continue;
+          const name = ent.name.replace(/\.md$/, '');
+          diskCards.add(name);
+          const m = name.match(/\(supersedes ([^)]+)\)/);
+          if (m) { const predId = cardIdToken(m[1].trim()); if (predId && !supByPredId.has(predId)) supByPredId.set(predId, name); }
+        }
+      }
+    }
+    const isLive = (name) => (state.cards[name] && state.cards[name].phase !== 'discarded') || diskCards.has(name);
+    // Resolve a dangling ref to a live successor, or null when genuinely orphaned.
+    const resolveTarget = (ref) => {
+      const rec = state.cards[ref];
+      if (rec && rec.phase === 'discarded') {
+        const r = resolveSupersessionTail(ref, state);
+        if (!r.cycle && !r.deadEnd && isLive(r.tail)) return r.tail;
+      }
+      const seen = new Set();
+      let cur = ref;
+      for (let i = 0; i < 50; i += 1) {
+        const succ = supByPredId.get(cardIdToken(cur));
+        if (!succ || seen.has(succ)) break;
+        seen.add(succ);
+        if (isLive(succ)) return succ;
+        cur = succ; // successor itself missing → keep chasing the rename chain
+      }
+      return null;
+    };
     const plan = [];
     const reports = [];
     const needsDecision = [];
@@ -6895,18 +6939,16 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
           if (typeof ref === 'string' && /^external:/.test(ref)) continue; // off-board dep, never resolved
           // Director-authorized explicit clear takes precedence over any auto-classification.
           if (clearName && ref === clearName) {
-            if (state.cards[ref] && state.cards[ref].phase !== 'discarded') continue; // live dep — refuse to clear
+            if (isLive(ref)) continue; // live card (tracked or on disk) — refuse to clear
             if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
             plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
             if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
             continue;
           }
-          if (state.cards[ref] && state.cards[ref].phase !== 'discarded') continue; // live dep, fine
-          if (!state.cards[ref]) { needsDecision.push({ card: depName, from: ref }); continue; } // never-minted
+          if (isLive(ref)) continue; // resolves to a real card (tracked or on-disk planning note) — not dangling
           if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
-          const resolved = resolveSupersessionTail(ref, state);
-          if (resolved.cycle || resolved.deadEnd) { needsDecision.push({ card: depName, from: ref }); continue; }
-          const to = resolved.tail;
+          const to = resolveTarget(ref);
+          if (!to) { needsDecision.push({ card: depName, from: ref }); continue; } // genuinely never-minted / orphaned
           plan.push({ card: depName, from: ref, to, classification: 'repoint', path: full });
           if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); } }
         }
