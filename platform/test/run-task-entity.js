@@ -2504,6 +2504,28 @@ async function runPerf1StructuralTests() {
       'fallback releases the committed plan reservation');
     assert(input.value === '', 'fallback success clears input after persistence');
     global.window.customJS.RenderSafe = RS;
+
+    let legacyWrites = 0;
+    global.window.customJS.TaskDialog = {
+      createQuick: async () => { legacyWrites++; return undefined; },
+      markDone: async () => ({ ok: true }),
+      confirmDelete: async () => ({ ok: false, cancelled: true }),
+      open() {},
+    };
+    input.value = 'Legacy child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(legacyWrites === 0 && seamCalls === 1, 'dialog without prepareQuick fails before write or optimistic mutation');
+    assert(walk(container, (node) => node && node._task).length === 1, 'legacy version skew leaves no phantom row');
+    assert(input.value === 'Legacy child' && input._focusCount >= 3, 'legacy version skew preserves recoverable input and focus');
+
+    global.window.customJS.TaskDialog = TD;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    const warmRows = walk(container, (node) => node && node._task);
+    assert(app._creates.length === 3 && warmRows.length === 2, 'compatible warm retry performs exactly one write and one optimistic insert');
+    assert(warmRows[1]._task.title === 'Legacy child' && warmRows[1]._task.path === app._creates[2].path,
+      'compatible retry leaves one real path-bound legacy-skew row');
   });
 
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {

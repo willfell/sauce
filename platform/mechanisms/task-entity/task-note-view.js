@@ -696,13 +696,15 @@ class TaskNoteView {
                         const title = String(addInput.value || '').trim();
                         if (!title) return;
                         const TD = window.customJS && window.customJS.TaskDialog;
-                        if (!TD || typeof TD.createQuick !== 'function') return;
+                        if (!TD || typeof TD.createQuick !== 'function' || typeof TD.prepareQuick !== 'function') {
+                            try { addInput.focus(); } catch (_e) {}
+                            return;
+                        }
                         const sequence = ++addSequence;
                         const quickOpts = { title, parent_task: '[[' + thisBasename + ']]' };
                         let plan = null;
-                        const canPrepare = typeof TD.prepareQuick === 'function';
-                        try { if (canPrepare) plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
-                        if (canPrepare && !plan) {
+                        try { plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
+                        if (!plan) {
                             try { addInput.focus(); } catch (_e) {}
                             return;
                         }
