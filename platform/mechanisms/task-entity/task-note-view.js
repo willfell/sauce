@@ -727,7 +727,10 @@ class TaskNoteView {
                                         try { addInput.focus(); } catch (_e) {}
                                     },
                                 });
-                            } catch (_e) { try { addInput.focus(); } catch (_e2) {} }
+                            } catch (_e) {
+                                try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
+                                try { addInput.focus(); } catch (_e2) {}
+                            }
                         } else {
                             try {
                                 await TD.createQuick({ title, parent_task: quickOpts.parent_task, reconcile: false });

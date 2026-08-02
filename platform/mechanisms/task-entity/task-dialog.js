@@ -1207,7 +1207,7 @@ class TaskDialog {
      * base against the vault (" 2", " 3", …) so we never clobber an existing task.
      * Never touches any other note.
      */
-    _prepareCreate(app, payload, notes) {
+    _prepareCreate(app, payload, notes, opts) {
         const TE = TaskDialog._taskEntity();
         if (!TE) { try { new Notice('task-entity mechanism not loaded'); } catch (_e) {} return; }
         // Stamp a moment so composeNote can derive created_at.
@@ -1218,9 +1218,10 @@ class TaskDialog {
         const { frontmatter, body } = TE.composeNote(payloadWithMoment);
         // Human-readable filename, deduped against the vault (title collisions).
         const base = TE.taskFilename(payloadWithMoment);
-        const finalName = TE._uniqueName(base, (pp) => !!(app.vault
-            && typeof app.vault.getAbstractFileByPath === 'function'
-            && app.vault.getAbstractFileByPath(pp)));
+        const reservedPaths = opts && opts.reservedPaths;
+        const finalName = TE._uniqueName(base, (pp) => !!((reservedPaths && reservedPaths.has(pp))
+            || (app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                && app.vault.getAbstractFileByPath(pp))));
         const path = 'spice/tasks/' + finalName;
         // Chrome first (from composeNote), then the typed notes below the marker.
         const chromeBody = body || '';
@@ -1232,13 +1233,17 @@ class TaskDialog {
 
     async _commitCreate(app, plan, opts) {
         if (!app || !plan || !plan.path) return;
-        await this._ensureFolder(app, 'spice/tasks');
-        const file = await app.vault.create(plan.path, plan.content);
-        try { new Notice('Task created'); } catch (_e) {}
-        if (!opts || opts.reconcile !== false) {
-            try { this._reconcileAfterCreate(app, plan.path); } catch (_e) {}
+        try {
+            await this._ensureFolder(app, 'spice/tasks');
+            const file = await app.vault.create(plan.path, plan.content);
+            try { new Notice('Task created'); } catch (_e) {}
+            if (!opts || opts.reconcile !== false) {
+                try { this._reconcileAfterCreate(app, plan.path); } catch (_e) {}
+            }
+            return { ok: true, path: plan.path, file };
+        } finally {
+            this.releaseQuickPlan(plan);
         }
-        return { ok: true, path: plan.path, file };
     }
 
     async _create(app, payload, notes, opts) {
@@ -1333,8 +1338,11 @@ class TaskDialog {
             parent_task: (opts && opts.parent_task) || '',
             links: [],
         };
-        const plan = this._prepareCreate(app, payload, '');
+        const reservations = this._quickCreateReservations || (this._quickCreateReservations = new Set());
+        const plan = this._prepareCreate(app, payload, '', { reservedPaths: reservations });
         if (!plan) return;
+        reservations.add(plan.path);
+        plan._quickReservation = { owner: reservations, path: plan.path };
         const fm = plan.frontmatter || {};
         plan.task = {
             title: String(fm.title || title),
@@ -1347,6 +1355,13 @@ class TaskDialog {
             path: plan.path,
         };
         return plan;
+    }
+
+    releaseQuickPlan(plan) {
+        const reservation = plan && plan._quickReservation;
+        if (!reservation) return;
+        try { reservation.owner.delete(reservation.path); } catch (_e) {}
+        delete plan._quickReservation;
     }
 
     async createQuick(opts) {

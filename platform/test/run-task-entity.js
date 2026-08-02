@@ -2072,6 +2072,34 @@ async function runCreateQuickTests() {
     assert(reconciles === 0, 'structural quick-create never schedules a global reconcile');
   });
 
+  await okAsync('PERF-1-QUICK-COLLISION reserves distinct paths for concurrent sanitized-title collisions', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const first = TD.prepareQuick({ title: 'A/B', parent_task: '[[Parent]]' });
+    const second = TD.prepareQuick({ title: 'AB', parent_task: '[[Parent]]' });
+    assert(first.path === 'spice/tasks/AB.md', 'first sanitized path: ' + first.path);
+    assert(second.path === 'spice/tasks/AB 2.md', 'second in-flight path is deduped: ' + second.path);
+    await Promise.all([
+      TD.createQuick({ plan: first, reconcile: false }),
+      TD.createQuick({ plan: second, reconcile: false }),
+    ]);
+    assert(app._creates.length === 2, 'both rapid submissions persist: ' + app._creates.length);
+    assert(new Set(app._creates.map((entry) => entry.path)).size === 2, 'rapid creates own distinct paths');
+  });
+
+  await okAsync('PERF-1-QUICK-RETRY releases a failed plan reservation', async () => {
+    const app = makeQuickApp(() => false);
+    app.vault.create = async () => { throw new Error('write rejected'); };
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const failed = TD.prepareQuick({ title: 'Retry me' });
+    try { await TD.createQuick({ plan: failed, reconcile: false }); } catch (_e) {}
+    const retry = TD.prepareQuick({ title: 'Retry me' });
+    assert(retry.path === 'spice/tasks/Retry me.md', 'failed reservation released: ' + retry.path);
+    TD.releaseQuickPlan(retry);
+  });
+
   // Restore globals so nothing leaks into later modules.
   if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
