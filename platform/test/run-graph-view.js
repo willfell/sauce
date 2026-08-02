@@ -246,6 +246,8 @@ async function main() {
     },
     lifecycleApi,
   }).render({ container: recordingContainer });
+  assert.strictEqual(byClass(recordingContainer, 'graph-view-legend').length, 0,
+    'BL2-LEGEND-EMPTY: an empty drawn graph renders no legend');
   assert.strictEqual(layoutCalls.length, 1, 'layout is delegated exactly once per render');
   assert.deepStrictEqual(layoutCalls[0].slices.map((slice) => slice.card), [
     'GV-A Base', 'GV-B Widget', 'GV-C Parked', 'GV-D Blocked',
@@ -384,6 +386,7 @@ async function main() {
   // for a parked slice (long reasons truncate, full text in the wait title
   // attribute). Done / in-progress chips show the status word with no wait span.
   const wordOf = (id) => byClass(chipFor(id), 'graph-view-status-word')[0];
+  const glyphOf = (id) => byClass(chipFor(id), 'graph-view-status-glyph')[0];
   const waitOf = (id) => byClass(chipFor(id), 'graph-view-wait')[0];
   assert.strictEqual(waitOf('GV-C')?.textContent, 'Waiting for Director sign-off',
     'case 5: a parked slice info line shows the resume_condition from its start');
@@ -405,6 +408,16 @@ async function main() {
   assert(wordOf('GV-C').style.cssText.includes('color:var(--color-orange)'),
     'case 5: the parked status word carries the shared waiting color');
   assert.strictEqual(wordOf('GV-A').textContent, 'done', 'case 5: the completed status word reads "done"');
+  for (const [id, expected] of [
+    ['GV-A', '✓'], ['GV-B', '●'], ['GV-C', '◷'], ['GV-D', '!'], ['GV-E', '○'], ['GV-F', '?'],
+  ]) {
+    const glyph = glyphOf(id);
+    const info = byClass(chipFor(id), 'graph-view-chip-info')[0];
+    assert.strictEqual(glyph?.textContent, expected,
+      `BL2-CHIP-GLYPH: ${id} receives its glyph through the shared presentation`);
+    assert(info.children.indexOf(glyph) < info.children.indexOf(wordOf(id)),
+      `BL2-CHIP-GLYPH: ${id} places the glyph before the colored status word`);
+  }
   assert(!waitOf('GV-A') && !waitOf('GV-B'),
     'case 5: done and in-progress chips carry a status word but no wait span');
 
@@ -428,6 +441,47 @@ async function main() {
     'case 8: the warning names the card and the unreadable state');
   assert.strictEqual(byClass(root, 'graph-view-warnings').length, 1,
     'warning strip renders as one compact block');
+  const legend = byClass(root, 'graph-view-legend')[0];
+  const legendEntries = byClass(legend, 'graph-view-legend-entry');
+  assert.strictEqual(legendEntries.length, 6,
+    'BL2-LEGEND-PRESENT: epic legend has one entry per distinct drawn status, including unrecognized');
+  assert.deepStrictEqual(byClass(legend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
+    ['blocked', 'done', 'in progress', 'planning', 'unrecognized: garbled', 'waiting'].sort(),
+    'BL2-LEGEND-PRESENT: epic legend names exactly the statuses present in the drawn graph');
+  for (const entry of legendEntries) {
+    const label = byClass(entry, 'graph-view-legend-label')[0]?.textContent;
+    const expected = dashboard._statusPresentation(
+      label === 'done' ? 'completed' : label === 'in progress' ? 'in_progress'
+        : label === 'waiting' ? 'parked' : label === 'unrecognized: garbled' ? 'garbled' : label,
+      lifecycleApi,
+    );
+    assert.strictEqual(byClass(entry, 'graph-view-legend-glyph')[0]?.textContent, expected.glyph,
+      `BL2-LEGEND-SHARED: ${label} legend entry uses the shared glyph`);
+    assert(entry.style.cssText.includes(`color:${expected.color}`),
+      `BL2-LEGEND-SHARED: ${label} legend entry uses the shared color`);
+  }
+  const canvasForLegend = byClass(root, 'graph-view-canvas')[0];
+  assert(!flatten(canvasForLegend).includes(legend)
+    && root.children.indexOf(legend) < root.children.findIndex((node) => node.className === 'graph-view-scroll'),
+  'BL2-LEGEND-GEOMETRY: legend sits above and outside the canvas');
+
+  // BL2-MISSING-STATUS: keep missing distinct from the unknown-token fixture
+  // above. Suppressing unreadable_slice only for nullish status must turn this
+  // executable path red while the neutral shared glyph and legend stay safe.
+  const missingRoot = element();
+  const missingWarnings = [];
+  await new GraphView({ dashboard })._renderGraph(missingRoot, {
+    nodes: [{ card: 'GV-M Missing', path: `${board}/GV-M Missing.md`, status: null, rank: 0, row: 0 }],
+    edges: [],
+  }, lifecycleApi, epicPath, missingWarnings);
+  assert.strictEqual(byClass(missingRoot, 'graph-view-status-glyph')[0]?.textContent, '?',
+    'BL2-MISSING-STATUS: a missing-status chip renders the neutral shared glyph without throwing');
+  assert.strictEqual(byClass(missingRoot, 'graph-view-legend-glyph')[0]?.textContent, '?',
+    'BL2-MISSING-STATUS: the missing-status legend entry renders the neutral shared glyph');
+  assert.strictEqual(byClass(missingRoot, 'graph-view-legend-label')[0]?.textContent, 'unrecognized: (missing)',
+    'BL2-MISSING-STATUS: the legend preserves the existing missing-status presentation');
+  assert.deepStrictEqual(missingWarnings, [{ code: 'unreadable_slice', card: 'GV-M Missing', detail: '(missing)' }],
+    'BL2-MISSING-STATUS: a missing status still emits exactly one unreadable_slice warning');
 
   // GV-R1 Behavior A — honest gather: a slice whose status maps to the
   // archived/discarded (excluded) lifecycle bucket contributes NO chip and NO
@@ -474,6 +528,12 @@ async function main() {
   await new GraphView().render({ container: cleanContainer });
   const cleanRoot = cleanContainer.children[0];
   assert.strictEqual(byClass(cleanRoot, 'graph-view-chip').length, 2, 'case 7: clean board renders its chips');
+  const cleanLegend = byClass(cleanRoot, 'graph-view-legend')[0];
+  assert.strictEqual(byClass(cleanLegend, 'graph-view-legend-entry').length, 2,
+    'BL2-LEGEND-MUTANT: a two-status graph renders two entries, so hardcoding all lifecycle statuses turns red');
+  assert.deepStrictEqual(byClass(cleanLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
+    ['done', 'in progress'],
+    'BL2-LEGEND-MUTANT: absent statuses are omitted from the two-status fixture');
   assert.strictEqual(byClass(cleanRoot, 'graph-view-warnings').length, 0,
     'case 7: empty warnings render no strip element');
   assert.strictEqual(byClass(cleanRoot, 'graph-view-warning').length, 0,
@@ -500,6 +560,18 @@ async function main() {
   assert(stubCalls.includes('weird'), 'case 10: the injected normalizeStatus is consulted');
   assert(!/STATUS_COLORS/.test(widgetSource) && !/STATUS_DISPLAY/.test(widgetSource),
     'case 10: the widget declares no local status color/display table');
+  assert(!/STATUS_GLYPHS/.test(widgetSource),
+    'BL2-GLYPH-SOURCE: the widget declares and reads no local/shared glyph table; glyphs arrive via presentation');
+  for (const glyph of Object.values(EpicDashboard.STATUS_GLYPHS)) {
+    assert(!widgetSource.includes(JSON.stringify(glyph)),
+      `BL2-GLYPH-SOURCE: graph-view contains no literal ${glyph} glyph`);
+  }
+  assert(!/\\(?:u[0-9a-f]{4}|x[0-9a-f]{2})/i.test(widgetSource),
+    'BL2-GLYPH-SOURCE: escaped Unicode/hex literals cannot hide a second glyph source');
+  assert(!/(?:^|[,{]\s*)['"]?(?:planning|in_progress|parked|blocked|completed|discarded)['"]?\s*:/m.test(widgetSource),
+    'BL2-GLYPH-SOURCE: graph-view contains no status-keyed object table under any local name');
+  assert.strictEqual((widgetSource.match(/presentation\.glyph/g) || []).length, 2,
+    'BL2-GLYPH-SOURCE: both rendered glyph sites read directly from the shared presentation result');
   assert(!/--color-(?:blue|green|purple|red)/.test(widgetSource),
     'case 10: the widget hardcodes no lifecycle bucket color');
   assert(widgetSource.includes('_statusPresentation') && widgetSource.includes('_deliveryApi'),
@@ -956,6 +1028,17 @@ async function main() {
   assert.strictEqual(pChips.length, 6, 'P1: every live-epic slice renders exactly one chip');
   const pChipFor = (id) => pChips.find((chip) => flatten(chip)
     .some((node) => node.textContent && node.textContent.startsWith(id)));
+  for (const [id, expected] of [
+    ['E2-1', '○'], ['E2-2', '○'], ['E1-1', '✓'], ['E1-2', '●'], ['EB-1', '○'], ['EX-1', '○'],
+  ]) {
+    const info = byClass(pChipFor(id), 'graph-view-chip-info')[0];
+    const glyph = byClass(info, 'graph-view-status-glyph')[0];
+    const word = byClass(info, 'graph-view-status-word')[0];
+    assert.strictEqual(glyph?.textContent, expected,
+      `BL2-PROJECT-GLYPH: ${id} uses the shared status glyph at project scope`);
+    assert(info.children.indexOf(glyph) < info.children.indexOf(word),
+      `BL2-PROJECT-GLYPH: ${id} glyph precedes its colored status word`);
+  }
   for (const [id, x, y] of [['E2-1', 12, 42], ['E2-2', 12, 116], ['E1-1', 12, 228], ['E1-2', 212, 228],
     ['EB-1', 12, 340], ['EX-1', 12, 452]]) {
     assert(pChipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`),
@@ -964,6 +1047,13 @@ async function main() {
   const pCanvas = byClass(pRoot, 'graph-view-project-canvas')[0];
   assert(pCanvas && pCanvas.style.cssText.includes('width:396px;height:520px'),
     'P1: one shared canvas spans all clusters');
+  const pLegend = byClass(pRoot, 'graph-view-legend')[0];
+  assert.deepStrictEqual(byClass(pLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
+    ['done', 'in progress', 'planning'],
+    'BL2-PROJECT-LEGEND: project legend contains exactly the statuses present across live clusters');
+  assert(!flatten(pCanvas).includes(pLegend)
+    && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-scroll'),
+  'BL2-PROJECT-LEGEND: project legend is above and outside the shared canvas');
 
   // P2: the cross-epic depends_on (E2-1 Gamma → depends on E1-2 Beta) renders
   // as a real depends edge between chips in DIFFERENT clusters, endpoints
