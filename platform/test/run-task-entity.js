@@ -2559,6 +2559,69 @@ async function runPerf1StructuralTests() {
       'retry leaves exactly one real path-bound row');
   });
 
+  await okAsync('PERF1-MISSING-TODAY-LIST-FALLBACK-LOSS commits the reserved plan before clearing input', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const app = makeQuickApp(() => false);
+    let settleCreate = null;
+    app.vault.create = (path, content) => {
+      app._creates.push({ path, content });
+      return new Promise((resolve) => { settleCreate = () => resolve({ path }); });
+    };
+    let seamCalls = 0;
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TE = new TaskEntityClass();
+    const TD = new TaskDialogClass();
+    global.window = {
+      app,
+      moment: () => ({ format: (f) => f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-08-02T06:00:00-06:00' : '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: () => ({ array: () => [] }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const input = walk(container,
+      (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…')[0];
+    const keydown = input && input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'missing-TaskTodayList fixture owns the real Enter handler');
+
+    input.value = 'Fallback child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(seamCalls === 0, 'missing TaskTodayList bypasses optimistic RenderSafe apply');
+    assert(app._creates.length === 1 && app._creates[0].path === 'spice/tasks/Fallback child.md',
+      'fallback persists the already-reserved base path exactly once');
+    assert(input.value === 'Fallback child', 'pending persistence keeps input recoverable');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 1,
+      'pending persistence retains ownership of the reserved path');
+
+    settleCreate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(input.value === '', 'fallback clears input only after persistence succeeds');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'successful missing-TaskTodayList fallback releases ownership to zero');
+    assert(walk(container, (node) => node && node._task).length === 0,
+      'persistence-first fallback does not invent an optimistic row without its renderer');
+  });
+
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {
     let settleDelete;
     let seamCalls = 0;
