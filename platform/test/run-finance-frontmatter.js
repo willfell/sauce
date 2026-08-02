@@ -129,6 +129,39 @@ async function run() {
         && thirdPreview.categories.map((row) => row.name).join(",") === "A,B,C");
   }
   {
+    const file = { path: "spice/finance/Invoices/Settled.md", stat: { mtime: 10 } };
+    const persisted = { amount: 10 };
+    let cached = { amount: 5, position: { start: { line: 0 } } };
+    global.app = {
+      vault: { getAbstractFileByPath: () => file },
+      metadataCache: { getFileCache: () => ({ frontmatter: cached }) },
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+    };
+    await ff.update(file, (fm) => { fm.amount = 15; });
+    const shadowed = ff.read(file);
+    cached = { amount: 15, position: { start: { line: 0 } } };
+    const converged = ff.read(file);
+    ok("FF-12B cache convergence ignores Obsidian position metadata and releases the snapshot",
+      shadowed.amount === 15 && converged === cached && !ff._writtenFrontmatter.has(file.path));
+  }
+  {
+    const files = new Map();
+    for (let i = 0; i < 65; i++) {
+      const file = { path: `spice/finance/Invoices/${i}.md`, stat: { mtime: i + 1 } };
+      files.set(file.path, file);
+    }
+    global.app = {
+      vault: { getAbstractFileByPath: (p) => files.get(p) || null },
+      metadataCache: { getFileCache: () => ({ frontmatter: { amount: 0 } }) },
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
+    };
+    for (const file of files.values()) await ff.update(file, (fm) => { fm.amount = 1; });
+    ok("FF-12C authoritative write snapshots use a bounded newest-first lag bridge",
+      ff._writtenFrontmatter.size === 64
+        && !ff._writtenFrontmatter.has("spice/finance/Invoices/0.md")
+        && ff._writtenFrontmatter.has("spice/finance/Invoices/64.md"));
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

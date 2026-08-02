@@ -42,10 +42,17 @@ class FinanceFrontmatter {
         });
         if (pending) await pending;
         if (!this._writtenFrontmatter) this._writtenFrontmatter = new Map();
+        // Keep this lag bridge bounded. Finance can touch an unbounded sequence
+        // of monthly/invoice files during one CustomJS session, and a file that
+        // is never read again must not leave its full frontmatter retained.
+        this._writtenFrontmatter.delete(file.path);
         this._writtenFrontmatter.set(file.path, {
             frontmatter: snapshot,
             mtime: Number(file.stat?.mtime) || null,
         });
+        while (this._writtenFrontmatter.size > 64) {
+            this._writtenFrontmatter.delete(this._writtenFrontmatter.keys().next().value);
+        }
         return this._clone(snapshot);
     }
 
@@ -262,11 +269,24 @@ class FinanceFrontmatter {
             this._writtenFrontmatter.delete(file.path);
             return cached;
         }
-        if (this._same(cached, written.frontmatter)) {
+        if (this._same(this._frontmatterData(cached, written.frontmatter), written.frontmatter)) {
             this._writtenFrontmatter.delete(file.path);
             return cached;
         }
         return this._clone(written.frontmatter);
+    }
+
+    _frontmatterData(frontmatter, written) {
+        if (!frontmatter || typeof frontmatter !== "object") return frontmatter;
+        const data = {};
+        for (const key of Object.keys(frontmatter)) {
+            // Obsidian attaches source-location metadata to cache snapshots;
+            // processFrontMatter does not expose it to the write callback.
+            if (key !== "position" || Object.prototype.hasOwnProperty.call(written || {}, key)) {
+                data[key] = frontmatter[key];
+            }
+        }
+        return data;
     }
 
     _clone(value, seen = new Map()) {
