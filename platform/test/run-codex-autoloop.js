@@ -8191,6 +8191,32 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
     () => coordinator.commandReconcileDependencies({ root }, { all: true, json: true }, deps),
     /non-empty --reason/, 'A4 missing --reason is refused',
   );
+
+  // Disk-aware classification: existence is judged against the board (notes on
+  // disk), not the ledger alone. An In-Planning prerequisite the coordinator
+  // never tracked is LIVE, not never-minted; a renamed successor discoverable
+  // via a "(supersedes <id>)" note is repointable even with no state tombstone.
+  fs.writeFileSync(path.join(cardsRoot, 'PREREQ-ondisk.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  mk('DEP-ondisk', 'PREREQ-ondisk'); // prerequisite exists on disk, absent from state
+  fs.writeFileSync(path.join(cardsRoot, 'ZZ-1b new core (supersedes ZZ-1).md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  mk('DEP-disksup', 'ZZ-1 old core'); // ref is missing but its on-disk successor supersedes it
+  mk('DEP-ghost', 'GHOST-NEVER');      // no note, no state, no superseder → truly orphaned
+
+  const diskDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'disk-aware classification', json: true,
+  }, deps);
+  ok(!diskDry.needs_decision.some((d) => d.card === 'DEP-ondisk'),
+    'A4 a dependency that exists as an on-disk planning note is NOT flagged never-minted');
+  ok(!diskDry.plan.some((p) => p.card === 'DEP-ondisk'),
+    'A4 an on-disk (live) dependency is not repointed');
+  const diskSup = diskDry.plan.find((p) => p.card === 'DEP-disksup');
+  eq(diskSup && diskSup.classification, 'repoint', 'A4 disk (supersedes) inference ⇒ repoint');
+  eq(diskSup && diskSup.to, 'ZZ-1b new core (supersedes ZZ-1)',
+    'A4 disk repoint targets the on-disk successor');
+  eq(diskDry.needs_decision.find((d) => d.card === 'DEP-ghost'), { card: 'DEP-ghost', from: 'GHOST-NEVER' },
+    'A4 truly orphaned dependency (no note, no state, no superseder) ⇒ needs-decision');
 }
 
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
