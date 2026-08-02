@@ -2057,6 +2057,49 @@ async function runCreateQuickTests() {
     await TD.createQuick({ title: 'orphan', today: '2026-07-02', source: 'daily' });
   });
 
+  await okAsync('PERF-1-QUICK-PLAN prepares the exact deduped row path and suppresses create reconciliation', async () => {
+    const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    let reconciles = 0;
+    TD._reconcileAfterCreate = () => { reconciles++; };
+    const plan = TD.prepareQuick({ title: 'call dentist', parent_task: '[[Parent]]' });
+    assert(plan && plan.path === 'spice/tasks/call dentist 2.md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
+    assert(plan.task && plan.task.path === plan.path && plan.task.parent_task === '[[Parent]]',
+      'optimistic task is a real row payload: ' + JSON.stringify(plan && plan.task));
+    const result = await TD.createQuick({ plan, reconcile: false });
+    assert(result && result.ok && result.path === plan.path, 'commit returns exact created path');
+    assert(reconciles === 0, 'structural quick-create never schedules a global reconcile');
+  });
+
+  await okAsync('PERF-1-QUICK-COLLISION reserves distinct paths for concurrent sanitized-title collisions', async () => {
+    const app = makeQuickApp(() => false);
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const first = TD.prepareQuick({ title: 'A/B', parent_task: '[[Parent]]' });
+    const second = TD.prepareQuick({ title: 'AB', parent_task: '[[Parent]]' });
+    assert(first.path === 'spice/tasks/AB.md', 'first sanitized path: ' + first.path);
+    assert(second.path === 'spice/tasks/AB 2.md', 'second in-flight path is deduped: ' + second.path);
+    await Promise.all([
+      TD.createQuick({ plan: first, reconcile: false }),
+      TD.createQuick({ plan: second, reconcile: false }),
+    ]);
+    assert(app._creates.length === 2, 'both rapid submissions persist: ' + app._creates.length);
+    assert(new Set(app._creates.map((entry) => entry.path)).size === 2, 'rapid creates own distinct paths');
+  });
+
+  await okAsync('PERF-1-QUICK-RETRY releases a failed plan reservation', async () => {
+    const app = makeQuickApp(() => false);
+    app.vault.create = async () => { throw new Error('write rejected'); };
+    global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
+    const TD = new TaskDialogClass();
+    const failed = TD.prepareQuick({ title: 'Retry me' });
+    try { await TD.createQuick({ plan: failed, reconcile: false }); } catch (_e) {}
+    const retry = TD.prepareQuick({ title: 'Retry me' });
+    assert(retry.path === 'spice/tasks/Retry me.md', 'failed reservation released: ' + retry.path);
+    TD.releaseQuickPlan(retry);
+  });
+
   // Restore globals so nothing leaks into later modules.
   if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
   if (prevGlobalApp === undefined) delete global.app; else global.app = prevGlobalApp;
@@ -2274,6 +2317,581 @@ function makeTreeNode(tag) {
     },
   };
   return n;
+}
+
+async function runPerf1StructuralTests() {
+  const prevWindow = global.window;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  await okAsync('PERF-1-ADD shared seam inserts concurrent real rows, rolls back rejection, and never force-refreshes', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const childPages = [
+      { type: 'task', title: 'Existing', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/Existing.md' } },
+      { type: 'task', malformed: true, parent_task: 'Parent', file: { path: 'spice/tasks/Broken.md' } },
+      { type: 'task', title: 'Stale done', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/_done/Stale done.md' } },
+    ];
+    const commands = [];
+    const pendingWrites = [];
+    let seamCalls = 0;
+    const TTL = {
+      renderTaskRow(container, task) {
+        const row = makeTreeNode('div');
+        row.className = 'test-subtask-row';
+        row._task = task;
+        container.appendChild(row);
+        return row;
+      },
+    };
+    const TD = {
+      prepareQuick(opts) {
+        return { path: 'spice/tasks/' + opts.title + '.md', task: {
+          title: opts.title, status: 'open', parent_task: opts.parent_task,
+          path: 'spice/tasks/' + opts.title + '.md',
+        } };
+      },
+      createQuick() {
+        return new Promise((resolve, reject) => pendingWrites.push({ resolve, reject }));
+      },
+      markDone: async () => ({ ok: true }),
+      confirmDelete: async () => ({ ok: false, cancelled: true }),
+      open() {},
+    };
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        try {
+          const receipt = await opts.apply();
+          try { return { ok: true, value: await opts.write() }; }
+          catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+        } catch (error) { return { ok: false, error }; }
+      },
+    };
+    const TE = {
+      parseNote(page) {
+        if (page && page.malformed) throw new Error('malformed child');
+        return {
+          title: String((page && page.title) || ''), status: String((page && page.status) || 'open'),
+          parent_task: String((page && page.parent_task) || ''), path: page && page.file && page.file.path,
+          due: '', priority: '', project: '', source_note: '', created_at: '', links: [],
+        };
+      },
+      _linkText: (value) => String(value || ''),
+    };
+    global.window = {
+      app: { commands: { executeCommandById: (id) => commands.push(id) } },
+      moment: () => ({ format: () => '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskTodayList: TTL, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: (predicate) => ({ array: () => childPages.filter(predicate) }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const inputs = walk(container, (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…');
+    assert(inputs.length === 1, 'subtask input rendered despite malformed child');
+    const input = inputs[0];
+    const keydown = input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'Enter handler is wired');
+    const submit = (title) => {
+      input.value = title;
+      keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    };
+    submit('First');
+    await Promise.resolve();
+    submit('Second');
+    await Promise.resolve();
+    let rows = walk(container, (node) => !!(node && node._task));
+    assert(rows.map((row) => row._task.title).join(',') === 'Existing,First,Second',
+      'malformed and stale _done child are absent while both pending rows are unique: ' + rows.map((row) => row._task.title));
+    assert(input.value === '' && input._focusCount >= 2, 'every optimistic submit clears and refocuses immediately');
+    pendingWrites[0].resolve({ ok: true });
+    pendingWrites[1].resolve({ ok: true });
+    await Promise.resolve(); await Promise.resolve();
+    submit('Rejected');
+    await Promise.resolve();
+    assert(walk(container, (node) => node && node._task && node._task.title === 'Rejected').length === 1,
+      'rejected row is visible before persistence settles');
+    pendingWrites[2].reject(new Error('create failed'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    rows = walk(container, (node) => node && node._task && node._task.title === 'Rejected');
+    assert(rows.length === 0, 'rejected create removes the exact optimistic row');
+    assert(input.value === 'Rejected' && input._focusCount >= 3, 'latest rejected title and focus are restored');
+    assert(seamCalls === 3, 'every create uses mutateStructure: ' + seamCalls);
+    assert(commands.length === 0, 'no dataview force-refresh command on structural success');
+  });
+
+  await okAsync('PERF1-PARTIAL-COLD-LOAD-PHANTOM fails closed before apply and succeeds once TaskEntity warms', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const app = makeQuickApp(() => false);
+    app.commands = { executeCommandById() { throw new Error('refresh forbidden'); } };
+    let seamCalls = 0;
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TTL = {
+      renderTaskRow(container, task) {
+        const row = makeTreeNode('div');
+        row._task = task;
+        container.appendChild(row);
+        return row;
+      },
+    };
+    const TE = new TaskEntityClass();
+    const TD = new TaskDialogClass();
+    global.window = {
+      app,
+      moment: () => ({ format: (f) => f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-08-02T06:00:00-06:00' : '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskTodayList: TTL, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: () => ({ array: () => [] }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const input = walk(container, (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…')[0];
+    const keydown = input && input._listeners.keydown && input._listeners.keydown[0];
+    assert(typeof keydown === 'function', 'partial-load fixture owns the real Enter handler');
+
+    delete global.window.customJS.TaskEntity;
+    input.value = 'Cold child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(seamCalls === 0, 'missing TaskEntity refuses before optimistic apply');
+    assert(app._creates.length === 0, 'missing TaskEntity writes no file');
+    assert(walk(container, (node) => node && node._task).length === 0, 'no phantom optimistic row survives');
+    assert(input.value === 'Cold child' && input._focusCount >= 1, 'typed input stays recoverable and focused');
+
+    global.window.customJS.TaskEntity = TE;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const rows = walk(container, (node) => node && node._task);
+    assert(seamCalls === 1 && app._creates.length === 1, 'warm retry runs one structural mutation and one create');
+    assert(rows.length === 1 && rows[0]._task.title === 'Cold child' && rows[0]._task.path === app._creates[0].path,
+      'warm retry leaves exactly one real path-bound row');
+    assert(input.value === '', 'warm success clears the recovered input');
+
+    delete global.window.customJS.RenderSafe;
+    input.value = 'Cold fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(app._creates.length === 2 && app._creates[1].path === 'spice/tasks/Cold fallback.md',
+      'fallback commits the already-reserved base path without suffix drift');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'fallback releases the committed plan reservation');
+    assert(input.value === '', 'fallback success clears input after persistence');
+    global.window.customJS.RenderSafe = RS;
+
+    let legacyWrites = 0;
+    global.window.customJS.TaskDialog = {
+      createQuick: async () => { legacyWrites++; return undefined; },
+      markDone: async () => ({ ok: true }),
+      confirmDelete: async () => ({ ok: false, cancelled: true }),
+      open() {},
+    };
+    input.value = 'Legacy child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(legacyWrites === 0 && seamCalls === 1, 'dialog without prepareQuick fails before write or optimistic mutation');
+    assert(walk(container, (node) => node && node._task).length === 1, 'legacy version skew leaves no phantom row');
+    assert(input.value === 'Legacy child' && input._focusCount >= 3, 'legacy version skew preserves recoverable input and focus');
+
+    global.window.customJS.TaskDialog = TD;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    const warmRows = walk(container, (node) => node && node._task);
+    assert(app._creates.length === 3 && warmRows.length === 2, 'compatible warm retry performs exactly one write and one optimistic insert');
+    assert(warmRows[1]._task.title === 'Legacy child' && warmRows[1]._task.path === app._creates[2].path,
+      'compatible retry leaves one real path-bound legacy-skew row');
+
+    const realRenderTaskRow = TTL.renderTaskRow;
+    const rowsBeforeApplyFailure = walk(container, (node) => node && node._task);
+    TTL.renderTaskRow = (rowContainer, task) => {
+      const partial = makeTreeNode('div');
+      partial._task = task;
+      rowContainer.appendChild(partial);
+      throw new Error('row render failed after append');
+    };
+    input.value = 'Apply failure';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(seamCalls === 3 && app._creates.length === 3, 'optimistic apply failure performs no write');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'pre-write apply abandonment releases its reserved path');
+    const rowsAfterApplyFailure = walk(container, (node) => node && node._task);
+    assert(input.value === 'Apply failure'
+      && rowsAfterApplyFailure.length === rowsBeforeApplyFailure.length
+      && rowsAfterApplyFailure.every((row, index) => row === rowsBeforeApplyFailure[index]),
+    'post-append apply failure preserves input and exact live row identities');
+
+    TTL.renderTaskRow = realRenderTaskRow;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    const retryRows = walk(container, (node) => node && node._task);
+    assert(seamCalls === 4 && app._creates.length === 4, 'post-abandonment retry writes exactly once');
+    assert(app._creates[3].path === 'spice/tasks/Apply failure.md', 'retry reuses the unwritten base path without suffix drift');
+    assert(retryRows.length === 3 && retryRows[2]._task.path === app._creates[3].path,
+      'retry leaves exactly one real path-bound row');
+  });
+
+  await okAsync('PERF1-MISSING-TODAY-LIST-FALLBACK-LOSS commits the reserved plan before clearing input', async () => {
+    const parentPage = { type: 'task', title: 'Parent', status: 'open', parent_task: '', file: { path: 'spice/tasks/Parent.md' } };
+    const app = makeQuickApp(() => false);
+    let settleCreate = null;
+    app.vault.create = (path, content) => {
+      app._creates.push({ path, content });
+      return new Promise((resolve) => { settleCreate = () => resolve({ path }); });
+    };
+    let seamCalls = 0;
+    const RS = {
+      page: () => parentPage,
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TE = new TaskEntityClass();
+    const TD = new TaskDialogClass();
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
+    global.window = {
+      app,
+      moment: () => ({ format: (f) => f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-08-02T06:00:00-06:00' : '2026-08-02' }),
+      customJS: { RenderSafe: RS, TaskEntity: TE, TaskDialog: TD },
+    };
+    const container = makeTreeNode('div');
+    container.closest = () => null;
+    const dv = {
+      container,
+      current: () => parentPage,
+      pages: () => ({ where: () => ({ array: () => [] }) }),
+    };
+    await new TaskNoteViewClass().render(dv);
+    const walk = (node, predicate, out) => {
+      out = out || [];
+      if (predicate(node)) out.push(node);
+      for (const child of (node && node.children) || []) walk(child, predicate, out);
+      return out;
+    };
+    const input = walk(container,
+      (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…')[0];
+    const keydown = input && input._listeners.keydown && input._listeners.keydown[0];
+    const inputEvent = input && input._listeners.input && input._listeners.input[0];
+    assert(typeof keydown === 'function', 'missing-TaskTodayList fixture owns the real Enter handler');
+    assert(typeof inputEvent === 'function', 'missing-TaskTodayList fixture owns the real input revision handler');
+
+    input.value = 'Fallback child';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(seamCalls === 0, 'missing TaskTodayList bypasses optimistic RenderSafe apply');
+    assert(app._creates.length === 1 && app._creates[0].path === 'spice/tasks/Fallback child.md',
+      'fallback persists the already-reserved base path exactly once');
+    assert(input.value === 'Fallback child', 'pending persistence keeps input recoverable');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 1,
+      'pending persistence retains ownership of the reserved path');
+
+    settleCreate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(input.value === '', 'fallback clears input only after persistence succeeds');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'successful missing-TaskTodayList fallback releases ownership to zero');
+    assert(walk(container, (node) => node && node._task).length === 0,
+      'persistence-first fallback does not invent an optimistic row without its renderer');
+
+    notices.length = 0;
+    TD.createQuick = async () => ({ ok: false, reason: 'write rejected' });
+    input.value = 'Rejected fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Rejected fallback' && input._focusCount >= 1,
+      'result-level fallback failure preserves recoverable input and focus');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'result-level fallback failure releases ownership to zero');
+    assert(notices.length === 1 && notices[0].includes('Could not create subtask: write rejected'),
+      'result-level fallback failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    notices.length = 0;
+    TD.createQuick = async () => { throw new Error('create exploded'); };
+    input.value = 'Throwing fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Throwing fallback' && input._focusCount >= 2,
+      'thrown fallback failure preserves recoverable input and focus');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'thrown fallback failure releases ownership to zero');
+    assert(notices.length === 1 && notices[0].includes('Could not create subtask: create exploded'),
+      'thrown fallback failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    const pendingFallbacks = [];
+    TD.createQuick = ({ plan }) => new Promise((resolve, reject) => {
+      pendingFallbacks.push({
+        path: plan.path,
+        resolve(value) { TD.releaseQuickPlan(plan); resolve(value); },
+        reject(error) { TD.releaseQuickPlan(plan); reject(error); },
+      });
+    });
+    notices.length = 0;
+    input.value = 'Older receipt';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Newer receipt';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks.length === 2
+      && pendingFallbacks[0].path === 'spice/tasks/Older receipt.md'
+      && pendingFallbacks[1].path === 'spice/tasks/Newer receipt.md',
+    'overlapping receipt fallbacks reserve distinct exact paths');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 2,
+      'both overlapping receipt fallbacks retain path ownership while pending');
+
+    pendingFallbacks[0].resolve({ ok: true, path: pendingFallbacks[0].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer receipt', 'older success cannot clear the newer pending title');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 1,
+      'older success releases only its own reservation');
+    pendingFallbacks[1].resolve({ ok: false, reason: 'newer receipt rejected' });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer receipt', 'newer result-level failure stays available for retry');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'overlapping result-level outcomes release all reservations');
+    assert(notices.filter((message) => message.includes('Could not create subtask')).length === 1,
+      'overlapping result-level failure emits exactly one failure notice: ' + JSON.stringify(notices));
+
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[2].path === 'spice/tasks/Newer receipt.md',
+      'retry reuses the released newer base path without suffix drift');
+    pendingFallbacks[2].resolve({ ok: true, path: pendingFallbacks[2].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'successful retry clears its owned title and releases ownership to zero');
+
+    notices.length = 0;
+    input.value = 'Older throw';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Newer throw';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[3].path !== pendingFallbacks[4].path && TD._quickCreateReservations.size === 2,
+      'overlapping throw fallbacks reserve distinct paths while pending');
+    pendingFallbacks[3].resolve({ ok: true, path: pendingFallbacks[3].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer throw', 'older success cannot clear the newer throw-bound title');
+    pendingFallbacks[4].reject(new Error('newer fallback exploded'));
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Newer throw' && TD._quickCreateReservations.size === 0,
+      'newer thrown failure stays retryable and releases all reservations');
+    assert(notices.filter((message) => message.includes('Could not create subtask')).length === 1,
+      'overlapping thrown failure emits exactly one failure notice: ' + JSON.stringify(notices));
+
+    input.value = 'Same-title overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Same-title overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[5].path === 'spice/tasks/Same-title overlap.md'
+      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap 2.md',
+    'same-title overlap reserves distinct base and suffixed paths');
+    pendingFallbacks[5].resolve({ ok: true, path: pendingFallbacks[5].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Same-title overlap', 'older same-title success cannot clear newer ownership');
+    pendingFallbacks[6].resolve({ ok: true, path: pendingFallbacks[6].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'latest same-title success clears only its revision and releases ownership to zero');
+
+    input.value = 'Identical draft';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    input.value = 'Identical draft';
+    inputEvent({ target: input });
+    pendingFallbacks[7].resolve({ ok: true, path: pendingFallbacks[7].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Identical draft' && TD._quickCreateReservations.size === 0,
+      'post-submit identical input event retains the newer user-owned draft');
+
+    input.value = 'Trailing draft';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    input.value = 'Trailing draft ';
+    inputEvent({ target: input });
+    pendingFallbacks[8].resolve({ ok: true, path: pendingFallbacks[8].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Trailing draft ' && TD._quickCreateReservations.size === 0,
+      'post-submit trailing-space edit survives normalized-title equality');
+
+    input.value = 'Sequence-only overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[9].path === 'spice/tasks/Sequence-only overlap.md'
+      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap 2.md',
+    'same-title double-submit without an input event reserves distinct paths');
+    pendingFallbacks[9].resolve({ ok: true, path: pendingFallbacks[9].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Sequence-only overlap',
+      'sequence guard alone prevents older same-revision same-value success from clearing');
+    pendingFallbacks[10].resolve({ ok: true, path: pendingFallbacks[10].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'latest same-revision same-value success clears and releases ownership to zero');
+    global.Notice = function () {};
+  });
+
+  await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {
+    let settleDelete;
+    let seamCalls = 0;
+    const RS = {
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const TD = {
+      open() {},
+      supportsDeferredDelete: () => true,
+      confirmDelete: async (_path, opts) => ({ ok: !!(opts && opts.deferWrite), confirmed: true }),
+      markDeleted: () => new Promise((resolve) => { settleDelete = resolve; }),
+    };
+    global.window = { app: { workspace: { openLinkText() {} }, commands: { executeCommandById() { throw new Error('refresh forbidden'); } } }, customJS: { RenderSafe: RS } };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container, { title: 'child', path: 'spice/tasks/child.md', status: 'open' }, TD);
+    const after = container.createEl('div');
+    const deleteButton = findByCls(row, 'sauce-task-action-delete');
+    const pending = fireClick(deleteButton);
+    await Promise.resolve(); await Promise.resolve();
+    assert(childIndex(container, row) === -1, 'row detaches before markDeleted settles');
+    settleDelete({ ok: false, reason: 'write rejected' });
+    await pending;
+    assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
+      'rollback restores the exact row identity at its exact ordinal');
+    assert(deleteButton._focusCount === 1, 'rollback restores focus to the delete control');
+    assert(seamCalls === 1, 'delete uses mutateStructure exactly once');
+  });
+
+  await okAsync('PERF1-LEGACY-CONFIRM-DELETE-NO-DOUBLE-WRITE keeps legacy confirm-and-write atomic', async () => {
+    let seamCalls = 0;
+    let confirmWrites = 0;
+    let duplicateWrites = 0;
+    const RS = {
+      async mutateStructure(opts) {
+        seamCalls++;
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    const legacyTD = {
+      open() {},
+      confirmDelete: async () => { confirmWrites++; return { ok: true }; },
+      markDeleted: async () => { duplicateWrites++; return { ok: false, reason: 'task file not found' }; },
+    };
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: { RenderSafe: RS },
+    };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container,
+      { title: 'legacy child', path: 'spice/tasks/legacy child.md', status: 'open' }, legacyTD);
+    const after = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(confirmWrites === 1 && duplicateWrites === 0,
+      'legacy confirmation owns exactly one write and markDeleted is not called again');
+    assert(seamCalls === 1 && childIndex(container, row) === -1,
+      'confirmed legacy delete removes the row through the shared seam without stale rollback');
+    assert(container.children[0] === before && container.children[1] === after,
+      'legacy delete preserves sibling identity and order');
+  });
+
+  await okAsync('PERF1-NO-RENDERSAFE-DELETE-FAILURE-SILENCE reports result-level delete failure', async () => {
+    const notices = [];
+    let markCalls = 0;
+    global.Notice = function (message) { notices.push(String(message)); };
+    const currentTD = {
+      open() {},
+      supportsDeferredDelete: () => true,
+      confirmDelete: async (_path, opts) => ({ ok: !!(opts && opts.deferWrite), confirmed: true, deferred: true }),
+      markDeleted: async () => { markCalls++; return { ok: false, reason: 'write rejected' }; },
+    };
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: {},
+    };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container,
+      { title: 'current child', path: 'spice/tasks/current child.md', status: 'open' }, currentTD);
+    const after = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(markCalls === 1, 'no-RenderSafe fallback calls markDeleted exactly once');
+    assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
+      'result-level delete failure leaves the exact row and sibling order intact');
+    assert(notices.length === 1 && notices[0].includes('Could not delete task: write rejected'),
+      'result-level delete failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    currentTD.markDeleted = async () => { markCalls++; return { ok: true }; };
+    const successRow = TaskTodayList.renderTaskRow(container,
+      { title: 'successful child', path: 'spice/tasks/successful child.md', status: 'open' }, currentTD);
+    const successAfter = container.createEl('div');
+    await fireClick(findByCls(successRow, 'sauce-task-action-delete'));
+    assert(markCalls === 2 && childIndex(container, successRow) === -1,
+      'no-RenderSafe ok:true calls markDeleted once and removes its exact row');
+    assert(childIndex(container, row) >= 0 && childIndex(container, successAfter) >= 0 && notices.length === 1,
+      'successful fallback preserves other rows/siblings and emits no failure notice');
+
+    currentTD.markDeleted = async () => { markCalls++; throw new Error('delete exploded'); };
+    const throwBefore = container.createEl('div');
+    const throwRow = TaskTodayList.renderTaskRow(container,
+      { title: 'throwing child', path: 'spice/tasks/throwing child.md', status: 'open' }, currentTD);
+    const throwAfter = container.createEl('div');
+    await fireClick(findByCls(throwRow, 'sauce-task-action-delete'));
+    assert(markCalls === 3 && childIndex(container, throwRow) >= 0,
+      'no-RenderSafe throw calls markDeleted once and leaves its exact row intact');
+    assert(childIndex(container, throwBefore) < childIndex(container, throwRow)
+      && childIndex(container, throwRow) < childIndex(container, throwAfter),
+    'thrown delete preserves exact sibling order');
+    assert(notices.length === 2 && notices[1].includes('Could not delete task: delete exploded'),
+      'thrown delete emits exactly one additional reason-bound notice: ' + JSON.stringify(notices));
+    global.Notice = function () {};
+  });
+
+  global.window = prevWindow;
+  global.Notice = prevNotice;
 }
 function findInput(node) {
   if (!node || !node.children) return null;
@@ -3147,6 +3765,25 @@ async function runConfirmDeleteTests() {
       'Escape is owned by SauceModal teardown');
   });
 
+  await okAsync('PERF-1-TDCD deferred confirmation resolves before persistence so the shared seam owns delete', async () => {
+    const doc = makeDocumentStub();
+    global.document = doc;
+    const deleted = [];
+    global.app = { vault: { getAbstractFileByPath: (p) => ({ path: p, basename: 'child' }) } };
+    global.window = { app: global.app };
+    global.customJS = { SauceModal: new SauceModalClass() };
+    const dialog = new TaskDialogClass();
+    assert(dialog.supportsDeferredDelete() === true, 'TaskDialog explicitly advertises deferred-delete support');
+    dialog.markDeleted = async (path) => { deleted.push(path); return { ok: true }; };
+    const pending = dialog.confirmDelete('spice/tasks/child.md', { deferWrite: true });
+    const danger = findByCls(doc.body, 'sauce-task-confirm-delete');
+    assert(danger, 'deferred confirmation renders the real danger control');
+    await fireClick(danger);
+    const result = await pending;
+    assert(result && result.ok && result.deferred === true, 'deferred confirmation receipt: ' + JSON.stringify(result));
+    assert(deleted.length === 0, 'markDeleted is deferred to RenderSafe.mutateStructure.write');
+  });
+
   global.window = prevWindow;
   if (prevApp === undefined) delete global.app; else global.app = prevApp;
   if (prevCustomJS === undefined) delete global.customJS; else global.customJS = prevCustomJS;
@@ -3679,6 +4316,7 @@ ok('TRL-2 filterRecurring tolerates null/non-array input', () => {
   await runCreateQuickTests();
   await runMarkDoneDeletedTests();
   await runOptimisticRemovalTests();
+  await runPerf1StructuralTests();
   await runRowActionTests();
   await runTomorrowActionTests();
   await runDotsMenuTests();

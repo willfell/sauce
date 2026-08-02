@@ -644,7 +644,14 @@ class TaskNoteView {
                         });
                         const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
                         const TEsub = window.customJS && window.customJS.TaskEntity;
-                        allSubtasks = (TEsub && typeof TEsub.parseNote === 'function') ? arr.map(p => TEsub.parseNote(p)) : [];
+                        if (TEsub && typeof TEsub.parseNote === 'function') {
+                            for (const child of arr) {
+                                try {
+                                    const parsedChild = TEsub.parseNote(child);
+                                    if (parsedChild) allSubtasks.push(parsedChild);
+                                } catch (_e) { /* one malformed child must not brick the task note */ }
+                            }
+                        }
                     } catch (_e) { allSubtasks = []; }
                     // FIX: only OPEN subtasks are rendered as rows. Without this
                     // filter, a just-completed subtask (moved to _done/, but still
@@ -653,7 +660,11 @@ class TaskNoteView {
                     // markDone on the now-stale path — "task file not found" error.
                     // allSubtasks (open + done) still feeds the N/M progress count
                     // below, which is correct as-is.
-                    const openSubtasks = allSubtasks.filter(t => t && t.status === 'open');
+                    const openSubtasks = allSubtasks.filter(t => {
+                        if (!t || t.status !== 'open') return false;
+                        const childPath = String(t.path || '');
+                        return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
+                    });
 
                     drawDivider();
                     const subHeadRow = card.createEl('div');
@@ -680,17 +691,118 @@ class TaskNoteView {
                     const addInput = addRow.createEl('input', { type: 'text' });
                     addInput.placeholder = '+ Add subtask…';
                     addInput.style.cssText = 'flex:1 1 auto; min-width:0; box-sizing:border-box; padding:6px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px;';
+                    let addSequence = 0;
+                    let addInputRevision = 0;
+                    addInput.addEventListener('input', () => { addInputRevision++; });
                     const doAdd = async () => {
                         const title = String(addInput.value || '').trim();
                         if (!title) return;
                         const TD = window.customJS && window.customJS.TaskDialog;
-                        if (!TD || typeof TD.createQuick !== 'function') return;
-                        try {
-                            await TD.createQuick({ title, parent_task: '[[' + thisBasename + ']]' });
-                            addInput.value = '';
-                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                            try { window.app && window.app.commands && window.app.commands.executeCommandById && window.app.commands.executeCommandById('dataview:dataview-force-refresh-views'); } catch (_e) {}
-                        } catch (_e) { /* best-effort */ }
+                        if (!TD || typeof TD.createQuick !== 'function' || typeof TD.prepareQuick !== 'function') {
+                            try { addInput.focus(); } catch (_e) {}
+                            return;
+                        }
+                        const sequence = ++addSequence;
+                        const inputRevision = addInputRevision;
+                        const quickOpts = { title, parent_task: '[[' + thisBasename + ']]' };
+                        let plan = null;
+                        try { plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
+                        if (!plan) {
+                            try { addInput.focus(); } catch (_e) {}
+                            return;
+                        }
+                        const optimisticTask = (plan && plan.task) || {
+                            title, status: 'open', path: '', parent_task: quickOpts.parent_task,
+                        };
+                        const RS = window.customJS && window.customJS.RenderSafe;
+                        if (RS && typeof RS.mutateStructure === 'function'
+                            && TTL && typeof TTL.renderTaskRow === 'function') {
+                            try {
+                                const mutation = await RS.mutateStructure({
+                                    path: filePath,
+                                    failureMessage: 'Could not create subtask',
+                                    apply: () => {
+                                        // A cross-class renderer can fail after appending but before it
+                                        // returns the row receipt. Snapshot the live child identities so
+                                        // that no receipt still means exact, local rollback rather than a
+                                        // phantom optimistic row that duplicates on warm retry.
+                                        const beforeChildren = Array.from(subList.children || []);
+                                        const restoreChildren = () => {
+                                            const owned = new Set(beforeChildren);
+                                            for (const child of Array.from(subList.children || [])) {
+                                                if (!owned.has(child)) {
+                                                    try { child.remove(); } catch (_e) {
+                                                        try { subList.removeChild(child); } catch (_e2) {}
+                                                    }
+                                                }
+                                            }
+                                            for (let index = 0; index < beforeChildren.length; index++) {
+                                                const child = beforeChildren[index];
+                                                if ((subList.children || [])[index] === child) continue;
+                                                try {
+                                                    if (child.parentNode === subList) subList.removeChild(child);
+                                                    subList.insertBefore(child, (subList.children || [])[index] || null);
+                                                } catch (_e) {}
+                                            }
+                                        };
+                                        let node = null;
+                                        try {
+                                            node = TTL.renderTaskRow(subList, optimisticTask, null);
+                                            if (!node || node.parentNode !== subList) {
+                                                throw new Error('subtask row render did not return an attached row');
+                                            }
+                                        } catch (error) {
+                                            restoreChildren();
+                                            throw error;
+                                        }
+                                        addInput.value = '';
+                                        try { addInput.focus(); } catch (_e) {}
+                                        return { parent: subList, node, focusTarget: addInput, title, sequence };
+                                    },
+                                    write: async () => {
+                                        const created = await TD.createQuick({ plan: plan || undefined, title,
+                                            parent_task: quickOpts.parent_task, reconcile: false });
+                                        if (!created || created.ok !== true) {
+                                            try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                            throw new Error('subtask create did not commit');
+                                        }
+                                        return created;
+                                    },
+                                    rollback: (receipt) => {
+                                        try { if (receipt && receipt.node && receipt.node.parentNode) receipt.node.remove(); } catch (_e) {}
+                                        if (receipt && receipt.sequence === addSequence && !String(addInput.value || '')) {
+                                            addInput.value = receipt.title;
+                                        }
+                                        try { addInput.focus(); } catch (_e) {}
+                                    },
+                                });
+                                if (!mutation || mutation.ok !== true) {
+                                    try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                }
+                            } catch (_e) {
+                                try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
+                                try { addInput.focus(); } catch (_e2) {}
+                            }
+                        } else {
+                            try {
+                                const created = await TD.createQuick({ plan: plan || undefined, title,
+                                    parent_task: quickOpts.parent_task, reconcile: false });
+                                if (!created || created.ok !== true) {
+                                    try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                    const reason = created && (created.reason || (created.error && created.error.message));
+                                    try { new Notice('Could not create subtask' + (reason ? ': ' + reason : ''), 6000); } catch (_e) {}
+                                    return;
+                                }
+                                if (sequence === addSequence && inputRevision === addInputRevision
+                                    && String(addInput.value || '').trim() === title) {
+                                    addInput.value = '';
+                                }
+                            } catch (_e) {
+                                try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
+                                try { new Notice('Could not create subtask: ' + (_e && (_e.message || _e)), 6000); } catch (_e2) {}
+                            }
+                            try { addInput.focus(); } catch (_e) {}
+                        }
                     };
                     addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
 
