@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.275.2",
+  "workshop_version": "0.275.3",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -169,7 +169,7 @@
     },
     {
       "name": "render-safe",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "path": "mechanisms/render-safe"
     },
     {
