@@ -2493,6 +2493,17 @@ async function runPerf1StructuralTests() {
     assert(rows.length === 1 && rows[0]._task.title === 'Cold child' && rows[0]._task.path === app._creates[0].path,
       'warm retry leaves exactly one real path-bound row');
     assert(input.value === '', 'warm success clears the recovered input');
+
+    delete global.window.customJS.RenderSafe;
+    input.value = 'Cold fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(app._creates.length === 2 && app._creates[1].path === 'spice/tasks/Cold fallback.md',
+      'fallback commits the already-reserved base path without suffix drift');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'fallback releases the committed plan reservation');
+    assert(input.value === '', 'fallback success clears input after persistence');
+    global.window.customJS.RenderSafe = RS;
   });
 
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {

@@ -725,7 +725,10 @@ class TaskNoteView {
                                     write: async () => {
                                         const created = await TD.createQuick({ plan: plan || undefined, title,
                                             parent_task: quickOpts.parent_task, reconcile: false });
-                                        if (!created || created.ok !== true) throw new Error('subtask create did not commit');
+                                        if (!created || created.ok !== true) {
+                                            try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                            throw new Error('subtask create did not commit');
+                                        }
                                         return created;
                                     },
                                     rollback: (receipt) => {
@@ -742,9 +745,16 @@ class TaskNoteView {
                             }
                         } else {
                             try {
-                                await TD.createQuick({ title, parent_task: quickOpts.parent_task, reconcile: false });
+                                const created = await TD.createQuick({ plan: plan || undefined, title,
+                                    parent_task: quickOpts.parent_task, reconcile: false });
+                                if (!created || created.ok !== true) {
+                                    try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                    return;
+                                }
                                 addInput.value = '';
-                            } catch (_e) { /* cold-load fallback stays quiet */ }
+                            } catch (_e) {
+                                try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
+                            }
                             try { addInput.focus(); } catch (_e) {}
                         }
                     };
