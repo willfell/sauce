@@ -1014,9 +1014,7 @@ async function main() {
     [`${epicOneDir}/Epic One.md`, { type: 'epic' }],
     [`${epicOneDir}/board/Epic One-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     [`${epicOneDir}/board/E1-1 Alpha.md`, { type: 'slice', status: 'completed', depends_on: [] }],
-    // BL-3: this root blocker gates E2-1 across the epic boundary; its completed
-    // E1-1 prerequisite remains upstream and never inflates the gates count.
-    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'blocked', depends_on: ['[[E1-1 Alpha]]'] }],
+    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'in_progress', depends_on: ['[[E1-1 Alpha]]'] }],
     [`${epicTwoDir}/Epic Two.md`, { type: 'epic' }],
     [`${epicTwoDir}/board/Epic Two-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     // E2-1's depends_on crosses INTO Epic One — a real edge, never a warning.
@@ -1142,7 +1140,7 @@ async function main() {
   const pChipFor = (id) => pChips.find((chip) => flatten(chip)
     .some((node) => node.textContent && node.textContent.startsWith(id)));
   for (const [id, expected] of [
-    ['E2-1', '○'], ['E2-2', '○'], ['E1-1', '✓'], ['E1-2', '!'], ['EB-1', '○'], ['EX-1', '○'],
+    ['E2-1', '○'], ['E2-2', '○'], ['E1-1', '✓'], ['E1-2', '●'], ['EB-1', '○'], ['EX-1', '○'],
   ]) {
     const info = byClass(pChipFor(id), 'graph-view-chip-info')[0];
     const glyph = byClass(info, 'graph-view-status-glyph')[0];
@@ -1162,23 +1160,15 @@ async function main() {
     'P1: one shared canvas spans all clusters');
   const pLegend = byClass(pRoot, 'graph-view-legend')[0];
   assert.deepStrictEqual(byClass(pLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
-    ['blocked', 'done', 'planning'],
+    ['done', 'in progress', 'planning'],
     'BL2-PROJECT-LEGEND: project legend contains exactly the statuses present across live clusters');
   assert(!flatten(pCanvas).includes(pLegend)
     && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-scroll'),
   'BL2-PROJECT-LEGEND: project legend is above and outside the shared canvas');
-  const pSummary = byClass(pRoot, 'graph-view-stuck-summary');
-  assert.strictEqual(pSummary.length, 1,
-    'BL3-PROJECT-SUMMARY: the merged project graph renders one stuck summary');
-  assert.strictEqual(pSummary[0].textContent, '1 root blocker · gating 1 slice',
-    'BL3-PROJECT-SUMMARY: the project summary counts the cross-epic dependent once');
-  const pBadges = byClass(pRoot, 'graph-view-gates-badge');
-  assert.strictEqual(pBadges.length, 1,
-    'BL3-PROJECT-BADGE: exactly the project-wide root blocker receives a badge');
-  assert.strictEqual(pBadges[0].textContent, 'gates 1',
-    'BL3-PROJECT-BADGE: the Epic One blocker counts its live dependent in Epic Two');
-  assert(flatten(pChipFor('E1-2')).includes(pBadges[0]),
-    'BL3-PROJECT-BADGE: the cross-epic blast-radius badge lives on E1-2 only');
+  assert.strictEqual(byClass(pRoot, 'graph-view-stuck-summary').length, 0,
+    'BL3-PROJECT-HEALTHY: the established healthy project fixture stays calm');
+  assert.strictEqual(byClass(pRoot, 'graph-view-gates-badge').length, 0,
+    'BL3-PROJECT-HEALTHY: the established healthy project fixture gains no badges');
 
   // P2: the cross-epic depends_on (E2-1 Gamma → depends on E1-2 Beta) renders
   // as a real depends edge between chips in DIFFERENT clusters, endpoints
@@ -1251,6 +1241,35 @@ async function main() {
   assert.strictEqual(pDangling[0].textContent,
     "E2-2 Delta: depends on a card that doesn't exist: 'Ghost Card'",
     'P: a target resolvable in no cluster is a dangling warning, not a cross edge');
+
+  // BL-3 project scope extends (never repurposes) the established project
+  // fixture: render it a second time with E1-2 blocked. The already-real cross
+  // edge E1-2 → E2-1 must be present in the ONE merged insights input, so the
+  // Epic One badge counts its live dependent in Epic Two.
+  const e12Path = `${epicOneDir}/board/E1-2 Beta.md`;
+  const healthyE12 = projectFrontmatter.get(e12Path);
+  projectFrontmatter.set(e12Path, { ...healthyE12, status: 'blocked' });
+  const crossInsightContainer = element();
+  await new GraphView({ scope: 'project' }).render({ container: crossInsightContainer });
+  projectFrontmatter.set(e12Path, healthyE12);
+  const crossInsightRoot = crossInsightContainer.children[0];
+  const crossSummary = byClass(crossInsightRoot, 'graph-view-stuck-summary');
+  assert.strictEqual(crossSummary.length, 1,
+    'BL3-PROJECT-SUMMARY: the separate blocker render produces one stuck summary');
+  assert.strictEqual(crossSummary[0].textContent, '1 root blocker · gating 1 slice',
+    'BL3-PROJECT-SUMMARY: the merged project graph counts the cross-epic dependent once');
+  const crossBadges = byClass(crossInsightRoot, 'graph-view-gates-badge');
+  assert.strictEqual(crossBadges.length, 1,
+    'BL3-PROJECT-BADGE: exactly the project-wide root blocker receives a badge');
+  assert.strictEqual(crossBadges[0].textContent, 'gates 1',
+    'BL3-PROJECT-BADGE: the Epic One blocker counts its live dependent in Epic Two');
+  const crossChips = byClass(crossInsightRoot, 'graph-view-chip');
+  const crossE12 = crossChips.find((chip) => flatten(chip)
+    .some((node) => node.textContent && node.textContent.startsWith('E1-2')));
+  assert(flatten(crossE12).includes(crossBadges[0]),
+    'BL3-PROJECT-BADGE: the cross-epic blast-radius badge lives on E1-2 only');
+  assert(crossE12.style.cssText.includes('left:212px;top:228px'),
+    'BL3-PROJECT-GEOMETRY: the separate blocker render preserves E1-2 coordinates');
 
   // Mount contract: the Loop Station guard block passes { scope: "project" }
   // as a render-time arg to the epic-default singleton.
