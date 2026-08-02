@@ -2361,9 +2361,11 @@ async function runPerf1StructuralTests() {
       page: () => parentPage,
       async mutateStructure(opts) {
         seamCalls++;
-        const receipt = await opts.apply();
-        try { return { ok: true, value: await opts.write() }; }
-        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+        try {
+          const receipt = await opts.apply();
+          try { return { ok: true, value: await opts.write() }; }
+          catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+        } catch (error) { return { ok: false, error }; }
       },
     };
     const TE = {
@@ -2526,6 +2528,25 @@ async function runPerf1StructuralTests() {
     assert(app._creates.length === 3 && warmRows.length === 2, 'compatible warm retry performs exactly one write and one optimistic insert');
     assert(warmRows[1]._task.title === 'Legacy child' && warmRows[1]._task.path === app._creates[2].path,
       'compatible retry leaves one real path-bound legacy-skew row');
+
+    const realRenderTaskRow = TTL.renderTaskRow;
+    TTL.renderTaskRow = () => { throw new Error('row render failed'); };
+    input.value = 'Apply failure';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert(seamCalls === 3 && app._creates.length === 3, 'optimistic apply failure performs no write');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'pre-write apply abandonment releases its reserved path');
+    assert(input.value === 'Apply failure' && warmRows.length === 2, 'apply failure preserves input and existing rows');
+
+    TTL.renderTaskRow = realRenderTaskRow;
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    const retryRows = walk(container, (node) => node && node._task);
+    assert(seamCalls === 4 && app._creates.length === 4, 'post-abandonment retry writes exactly once');
+    assert(app._creates[3].path === 'spice/tasks/Apply failure.md', 'retry reuses the unwritten base path without suffix drift');
+    assert(retryRows.length === 3 && retryRows[2]._task.path === app._creates[3].path,
+      'retry leaves exactly one real path-bound row');
   });
 
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {

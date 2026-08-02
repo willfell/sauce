@@ -715,7 +715,7 @@ class TaskNoteView {
                         if (RS && typeof RS.mutateStructure === 'function'
                             && TTL && typeof TTL.renderTaskRow === 'function') {
                             try {
-                                await RS.mutateStructure({
+                                const mutation = await RS.mutateStructure({
                                     path: filePath,
                                     failureMessage: 'Could not create subtask',
                                     apply: () => {
@@ -741,6 +741,9 @@ class TaskNoteView {
                                         try { addInput.focus(); } catch (_e) {}
                                     },
                                 });
+                                if (!mutation || mutation.ok !== true) {
+                                    try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                }
                             } catch (_e) {
                                 try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
                                 try { addInput.focus(); } catch (_e2) {}
