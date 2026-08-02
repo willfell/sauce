@@ -8458,6 +8458,32 @@ ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
     'A1 problem message names the live tail, not the immediate hop');
 }
 
+// A2 rewriteDependsOn — repoint and clear, format-preserving
+{
+  const block = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "[[Other]]"', '---', 'body'].join('\n');
+  const rp = coordinator.rewriteDependsOn(block, 'BL-4', 'BL-4c');
+  ok(rp.changed, 'A2 block-list repoint reports changed');
+  ok(/\[\[BL-4c\]\]/.test(rp.text) && !/\[\[BL-4\]\]/.test(rp.text.replace(/BL-4c/g, '')),
+    'A2 block-list repoint swaps BL-4 → BL-4c and keeps Other');
+  ok(/\[\[Other\]\]/.test(rp.text), 'A2 block-list repoint preserves the sibling dep');
+
+  const cleared = coordinator.rewriteDependsOn(block, 'BL-4', null);
+  ok(cleared.changed && !/\[\[BL-4\]\]/.test(cleared.text.replace(/BL-4c/g, '')),
+    'A2 clear removes the BL-4 line');
+  ok(/\[\[Other\]\]/.test(cleared.text), 'A2 clear keeps the sibling dep');
+
+  const inline = ['---', 'depends_on: ["[[BL-4]]","[[Other]]"]', '---', 'body'].join('\n');
+  const inlineRp = coordinator.rewriteDependsOn(inline, 'BL-4', 'BL-4c');
+  ok(inlineRp.changed && /\[\[BL-4c\]\]/.test(inlineRp.text), 'A2 inline-array repoint swaps the name');
+
+  const bare = ['---', 'depends_on:', '  - BL-4', '---', 'body'].join('\n');
+  const bareRp = coordinator.rewriteDependsOn(bare, 'BL-4', 'BL-4c');
+  ok(bareRp.changed, 'A2 bare-name form matches via normalization');
+
+  const absent = coordinator.rewriteDependsOn(block, 'NOT-PRESENT', 'X');
+  ok(!absent.changed && absent.text === block, 'A2 absent dep is a no-op');
+}
+
 // BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
 eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');
 const tombstoneReconcileWritesBefore = discardWrites;

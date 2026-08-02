@@ -1262,6 +1262,23 @@ function patchFrontmatterBlocks(raw, fields) {
   });
 }
 
+function rewriteDependsOn(raw, fromName, toNameOrNull) {
+  const from = normalizeCardLink(fromName);
+  const to = toNameOrNull == null ? null : normalizeCardLink(toNameOrNull);
+  const current = parseDependsOn(raw); // normalized names
+  if (!current.includes(from)) return { text: raw, changed: false };
+  const next = [];
+  for (const name of current) {
+    if (name !== from) { if (!next.includes(name)) next.push(name); continue; }
+    if (to && !next.includes(to)) next.push(to);
+  }
+  const serialized = next.length
+    ? ['depends_on:', ...next.map((n) => `  - "[[${n}]]"`)]
+    : ['depends_on: []'];
+  const text = patchFrontmatterBlocks(raw, { depends_on: serialized });
+  return { text, changed: true };
+}
+
 function ownsAmendedContract(record) {
   return Boolean(record && Array.isArray(record.contract_amendments) && record.contract_amendments.length);
 }
@@ -6865,7 +6882,7 @@ module.exports = {
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
-  normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, projectionMapping, projectCard, attemptProjection,
+  normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
