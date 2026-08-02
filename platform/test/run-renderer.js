@@ -3179,14 +3179,50 @@ async function testFF36FinanceLifecycleCoverageMatrix() {
     'invoice-controls.js', 'invoice-time-log-editor.js',
     'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js',
   ];
+  const authoritativeReadMarkers = [
+    'FinanceFrontmatter.read', '_mutateRead(', '_authoritativePage(',
+  ];
+  const prepareBodies = (src) => {
+    const bodies = [];
+    const pattern = /prepare\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/g;
+    let match;
+    while ((match = pattern.exec(src))) {
+      const start = pattern.lastIndex;
+      let depth = 1;
+      let quote = null;
+      let escaped = false;
+      let index = start;
+      for (; index < src.length && depth > 0; index++) {
+        const char = src[index];
+        if (quote) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === quote) quote = null;
+          continue;
+        }
+        if (char === '"' || char === "'" || char === '`') quote = char;
+        else if (char === '{') depth++;
+        else if (char === '}') depth--;
+      }
+      bodies.push(src.slice(start, index - 1));
+      pattern.lastIndex = index;
+    }
+    return bodies;
+  };
   let pass = true;
   for (const file of structural) {
     const src = fs.readFileSync(path.join(helpersDir, file), 'utf8');
+    const mutationCount = (src.match(/FinanceFrontmatter\.mutateRendered\s*\(/g) || []).length;
+    const prepared = prepareBodies(src);
+    const allPreparedReadsAreAuthoritative = mutationCount > 0
+      && prepared.length === mutationCount
+      && prepared.every((body) => authoritativeReadMarkers.some((marker) => body.includes(marker)));
     const ok = src.includes('FinanceFrontmatter.mutateRendered')
       && src.includes('RenderSafe?.captureScroll?.()')
       && src.includes('render: () => this._rerender')
+      && allPreparedReadsAreAuthoritative
       && !src.includes('dataview-force-refresh-views');
-    console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${file}`);
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${file} (${prepared.length}/${mutationCount} queued authoritative prepares)`);
     pass = pass && ok;
   }
   const plan = fs.readFileSync(path.join(helpersDir, 'finance-plan-dashboard.js'), 'utf8');

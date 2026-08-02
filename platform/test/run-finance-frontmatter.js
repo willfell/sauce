@@ -337,6 +337,8 @@ async function run() {
         && container.children.filter((child) => child.name === "editor").length === 1
         && global.document.activeElement === newerInput
         && newerInput.selection && newerInput.selection.start === 2 && newerInput.selection.end === 4);
+    ok("FF-18A rejected-then-successful serialization releases the per-surface queue",
+      ff._renderQueues instanceof Map && ff._renderQueues.size === 0);
   }
 
   {
@@ -377,6 +379,8 @@ async function run() {
     ok("FF-19 serialized double rejection unwinds through exact receipts",
       container.children[0] === oldRoot && container.children[1] === tail
         && firstOptimistic.parentNode === null && secondOptimistic.parentNode === null);
+    ok("FF-19A double rejection releases the per-surface queue",
+      ff._renderQueues instanceof Map && ff._renderQueues.size === 0);
   }
 
   {
@@ -419,6 +423,8 @@ async function run() {
       secondStayedQueued && outcomes.every((outcome) => outcome.ok === true)
         && events.join(",") === "prepare1,render1,write1,prepare2,render2,write2"
         && maxConcurrentWrites === 1 && !container.children.includes(oldRoot));
+    ok("FF-20A successful serialization releases the per-surface queue",
+      ff._renderQueues instanceof Map && ff._renderQueues.size === 0);
   }
 
   {
