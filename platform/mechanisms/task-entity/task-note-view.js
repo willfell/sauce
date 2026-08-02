@@ -719,7 +719,39 @@ class TaskNoteView {
                                     path: filePath,
                                     failureMessage: 'Could not create subtask',
                                     apply: () => {
-                                        const node = TTL.renderTaskRow(subList, optimisticTask, null);
+                                        // A cross-class renderer can fail after appending but before it
+                                        // returns the row receipt. Snapshot the live child identities so
+                                        // that no receipt still means exact, local rollback rather than a
+                                        // phantom optimistic row that duplicates on warm retry.
+                                        const beforeChildren = Array.from(subList.children || []);
+                                        const restoreChildren = () => {
+                                            const owned = new Set(beforeChildren);
+                                            for (const child of Array.from(subList.children || [])) {
+                                                if (!owned.has(child)) {
+                                                    try { child.remove(); } catch (_e) {
+                                                        try { subList.removeChild(child); } catch (_e2) {}
+                                                    }
+                                                }
+                                            }
+                                            for (let index = 0; index < beforeChildren.length; index++) {
+                                                const child = beforeChildren[index];
+                                                if ((subList.children || [])[index] === child) continue;
+                                                try {
+                                                    if (child.parentNode === subList) subList.removeChild(child);
+                                                    subList.insertBefore(child, (subList.children || [])[index] || null);
+                                                } catch (_e) {}
+                                            }
+                                        };
+                                        let node = null;
+                                        try {
+                                            node = TTL.renderTaskRow(subList, optimisticTask, null);
+                                            if (!node || node.parentNode !== subList) {
+                                                throw new Error('subtask row render did not return an attached row');
+                                            }
+                                        } catch (error) {
+                                            restoreChildren();
+                                            throw error;
+                                        }
                                         addInput.value = '';
                                         try { addInput.focus(); } catch (_e) {}
                                         return { parent: subList, node, focusTarget: addInput, title, sequence };

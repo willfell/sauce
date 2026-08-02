@@ -2530,14 +2530,24 @@ async function runPerf1StructuralTests() {
       'compatible retry leaves one real path-bound legacy-skew row');
 
     const realRenderTaskRow = TTL.renderTaskRow;
-    TTL.renderTaskRow = () => { throw new Error('row render failed'); };
+    const rowsBeforeApplyFailure = walk(container, (node) => node && node._task);
+    TTL.renderTaskRow = (rowContainer, task) => {
+      const partial = makeTreeNode('div');
+      partial._task = task;
+      rowContainer.appendChild(partial);
+      throw new Error('row render failed after append');
+    };
     input.value = 'Apply failure';
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await new Promise((resolve) => setImmediate(resolve));
     assert(seamCalls === 3 && app._creates.length === 3, 'optimistic apply failure performs no write');
     assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
       'pre-write apply abandonment releases its reserved path');
-    assert(input.value === 'Apply failure' && warmRows.length === 2, 'apply failure preserves input and existing rows');
+    const rowsAfterApplyFailure = walk(container, (node) => node && node._task);
+    assert(input.value === 'Apply failure'
+      && rowsAfterApplyFailure.length === rowsBeforeApplyFailure.length
+      && rowsAfterApplyFailure.every((row, index) => row === rowsBeforeApplyFailure[index]),
+    'post-append apply failure preserves input and exact live row identities');
 
     TTL.renderTaskRow = realRenderTaskRow;
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
